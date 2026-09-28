@@ -504,7 +504,7 @@ db_io:
   db_tables:
     - name: omn17292_replay_projection
       database_ref: application
-      schema: tenant
+      schema: public
       migration: 0001_create_omn17292_replay_projection.sql
       access: write
       role: instruction_eval_aggregate

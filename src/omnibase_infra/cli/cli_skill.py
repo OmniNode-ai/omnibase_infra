@@ -51,6 +51,10 @@ from omnibase_infra.cli.receipt_mode import (
     default_emit_socket_path,
     run_receipt_mode,
 )
+from omnibase_infra.cli.skill_terminal_publish import (
+    publish_skill_terminal_event,
+    resolve_skill_terminal_target,
+)
 from omnibase_infra.cli.task_class_registry import (
     TaskClassContractError,
     load_task_class_authority,
@@ -317,7 +321,7 @@ def run_skill_by_name(
     \b
     Examples:
         onex skill compliance_sweep --repos omnibase_core,omnibase_infra
-        onex skill dod_verify OMN-1234
+        onex skill dod_verify OMN-1234 --execution-audience hosted
         onex skill delegate "summarize this paragraph" --task-type document
     """
     try:
@@ -349,6 +353,11 @@ def run_skill_by_name(
     contract_path = _resolve_packaged_contract(mapping.node_name)
     payload_path = _write_payload(state_root, skill_name, payload)
 
+    # OMN-19152: the dispatch stays on the mapping's bus (in-memory for every
+    # skill today); a mapping that names a lane has its node's RETURNED result
+    # published there afterwards. The callback only keeps the receipt -- it
+    # runs inside receipt mode, where a raise would change the exit code.
+    receipts: list[object] = []
     exit_code = run_receipt_mode(
         node_name=mapping.node_name,
         contract_path=contract_path,
@@ -358,5 +367,19 @@ def run_skill_by_name(
         timeout=timeout if timeout is not None else mapping.timeout,
         verbose=verbose,
         emit_socket=emit_socket or default_emit_socket_path(),
+        receipt_callback=(
+            receipts.append if mapping.publish_terminal_to_lane is not None else None
+        ),
     )
+    if mapping.publish_terminal_to_lane is not None and receipts:
+        report = publish_skill_terminal_event(
+            receipt=receipts[-1],
+            result_model=mapping.result_model,
+            contract_path=contract_path,
+            lane=mapping.publish_terminal_to_lane,
+            resolve_target=lambda lane: resolve_skill_terminal_target(
+                lane, omni_home=omnibase_path
+            ),
+        )
+        click.echo(report.render(), err=True)
     raise SystemExit(exit_code)

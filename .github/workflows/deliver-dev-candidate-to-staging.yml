@@ -111,6 +111,22 @@ on:
         required: false
         default: "dev"
         type: string
+      # OMN-19311 AC5 -- the planted-red drill. Both empty by default, which
+      # is byte-identical to today's behaviour: the D11 step below only adds
+      # the drill flags to its command line when drill_ticket is non-empty.
+      # Self-expiring (lab_pass_receipt.py DRILL_MAX_WINDOW_HOURS bounds how
+      # far in the future drill_red_until may be) and one-directional (there
+      # is no input that can force a PASS -- only red).
+      drill_red_until:
+        description: "OMN-19311 AC5 planted-red drill: UTC timestamp (YYYY-MM-DDTHH:MM:SSZ) to force the D11 verdict red until. Requires drill_ticket. Leave empty for an ordinary dispatch."
+        required: false
+        default: ""
+        type: string
+      drill_ticket:
+        description: "OMN-19311 AC5 planted-red drill: the OMN-<n> ticket authorizing it. Requires drill_red_until."
+        required: false
+        default: ""
+        type: string
   # OMN-17057: a SIBLING repository's merge, announcing its own revision.
   #
   # Until this existed, an omnimarket (or omnibase_core, or omnibase_compat)
@@ -285,6 +301,12 @@ jobs:
       # ~7.2s each. 1800s keeps the measured 20m55s inside the budget with
       # margin for that lane-only cost, rather than landing on top of it.
       BOOT_WAIT_SECONDS: "1800"
+      # OMN-18264. The provisioner Job caps itself at
+      # activeDeadlineSeconds 600; this is the step's own patience for the
+      # Job reaching a terminal state, kept above that so a Job that hits
+      # its own deadline is read as FAILED here rather than as this wait
+      # expiring -- two different findings.
+      TOPIC_PROVISION_WAIT_SECONDS: "660"
     steps:
       - name: Checkout omnibase_infra (this repo, at the candidate's own commit)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -772,6 +794,103 @@ jobs:
               || true
           done
 
+      # OMN-18264, and the lab half of it. Topics are provisioned when the
+      # deployment happens, exactly the way migrations are -- and until now that
+      # was true of onex-dev and NOT of this ephemeral lane.
+      #
+      # WHY THE LAB NEEDED THIS ONLY AFTER omnimarket#3024
+      #
+      # This lane's Redpanda runs `--mode=dev-container`, which leaves
+      # auto-create ON, so a missing topic was invisible here -- the note on
+      # OMN-18264 says exactly that, and it was true when it was written.
+      # `SnapshotCache` used `subscribe()`, and a metadata request that NAMES
+      # topics is the request shape that auto-creates on a permissive broker
+      # (see the header of `omninode_infra/scripts/probe_kafka_topic_presence.py`,
+      # which avoids that shape deliberately for the same reason). So the
+      # consumer itself created the topics it then read.
+      #
+      # omnimarket#3024 swapped `subscribe()` for manual `assign()`, and #3034
+      # bounded the resulting wait with `await consumer.topics()` -- which asks
+      # for the whole universe and names nothing, so it never auto-creates.
+      # Nothing else fills the gap: `onex.snapshot.projection.consumer-flow.v1`
+      # has no writer Deployment on this lane, so no producer brings it into
+      # existence either. Measured on delivery run 36365404894: every other
+      # runtime Deployment Ready, `omnimarket-projection-api` 0/1 in
+      # CrashLoopBackOff at `Exit Code: 137` with its log stopping at "Waiting
+      # for application startup.", and the topic reported ABSENT.
+      #
+      # Provisioning here removes the dependence on that side effect entirely,
+      # on a broker where auto-create is on and on one where it is off.
+      #
+      # The Job is omninode_infra's OWN committed manifest, not a copy: the same
+      # file the staging deploy applies, so the two lanes cannot drift. Its
+      # broker comes from `onex-runtime-config` via `envFrom`, which on this lane
+      # resolves to `onex-lab-redpanda...:9092` / `PLAINTEXT`, so no lab-specific
+      # override is needed. The name is made run-unique because a Job's pod
+      # template is immutable -- the same rule that keeps this manifest out of
+      # the runtime kustomization's `resources`.
+      - name: Provision the contract-declared topics on the lane (OMN-18264)
+        id: topic-provision
+        env:
+          IMAGE_REF: ${{ needs.build-runtime-candidate.outputs.image-ref }}
+          IMAGE_DIGEST: ${{ needs.build-runtime-candidate.outputs.digest }}
+        run: |
+          set -euo pipefail
+          MANIFEST="omninode_infra/k8s/onex-dev/runtime/job-onex-topic-provision.yaml"
+          if [ ! -f "${MANIFEST}" ]; then
+            echo "::error::${MANIFEST} is missing. OMN-18264's provisioner Job is" \
+              "the single source for topic provisioning on both lanes; this gate" \
+              "will not substitute a second implementation for it."
+            exit 1
+          fi
+          JOB_NAME="onex-topic-provision-${GITHUB_RUN_ID}"
+          python3 omnibase_infra/scripts/ci/boot_gate.py render-topic-provision-job \
+            --manifest "${MANIFEST}" \
+            --name "${JOB_NAME}" \
+            --namespace "${LAB_NAMESPACE}" \
+            --image "${IMAGE_REF%@*}@${IMAGE_DIGEST}" \
+            --out /tmp/onex-topic-provision.yaml
+          kubectl apply -n "${LAB_NAMESPACE}" -f /tmp/onex-topic-provision.yaml
+
+          # Read BOTH terminal conditions, the way the migration wait above does.
+          # A provisioner that never completes must not read as provisioned.
+          DEADLINE=$(( $(date +%s) + TOPIC_PROVISION_WAIT_SECONDS ))
+          while true; do
+            SUCCEEDED="$(kubectl get job "${JOB_NAME}" -n "${LAB_NAMESPACE}" \
+              -o jsonpath='{.status.succeeded}' 2>/dev/null || true)"
+            if [ -n "${SUCCEEDED:-}" ] && [ "${SUCCEEDED:-0}" != "0" ]; then
+              echo "topic provisioning complete."
+              break
+            fi
+            FAILED="$(kubectl get job "${JOB_NAME}" -n "${LAB_NAMESPACE}" \
+              -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)"
+            if [ "${FAILED}" = "True" ]; then
+              echo "::error::the ${JOB_NAME} Job FAILED. The candidate was never" \
+                "booted against a provisioned broker, so the projection topic" \
+                "wait below would fail for a reason this step already knows."
+              kubectl describe "job/${JOB_NAME}" -n "${LAB_NAMESPACE}" || true
+              for POD in $(kubectl get pods -n "${LAB_NAMESPACE}" \
+                  -l "job-name=${JOB_NAME}" \
+                  -o jsonpath='{.items[*].metadata.name}'); do
+                kubectl logs -n "${LAB_NAMESPACE}" "${POD}" --all-containers --timestamps || true
+              done
+              exit 1
+            fi
+            if [ "$(date +%s)" -ge "${DEADLINE}" ]; then
+              echo "::error::the ${JOB_NAME} Job neither succeeded nor failed" \
+                "within ${TOPIC_PROVISION_WAIT_SECONDS}s."
+              kubectl describe "job/${JOB_NAME}" -n "${LAB_NAMESPACE}" || true
+              exit 1
+            fi
+            sleep 5
+          done
+
+          for POD in $(kubectl get pods -n "${LAB_NAMESPACE}" \
+              -l "job-name=${JOB_NAME}" \
+              -o jsonpath='{.items[*].metadata.name}'); do
+            kubectl logs -n "${LAB_NAMESPACE}" "${POD}" --all-containers || true
+          done
+
       - name: Wait for every runtime-family Deployment and the projection topic
         id: boot-wait
         run: |
@@ -1106,8 +1225,17 @@ jobs:
       - name: Require a fresh green D11 delegation regression verdict (OMN-19311)
         env:
           GH_TOKEN: ${{ steps.d11-token.outputs.token }}
+          DRILL_RED_UNTIL: ${{ github.event.inputs.drill_red_until }}
+          DRILL_TICKET: ${{ github.event.inputs.drill_ticket }}
         run: |
           set -euo pipefail
+          # OMN-19311 AC5: the planted-red drill. Both empty on every path
+          # except an explicit workflow_dispatch that set drill_ticket, so
+          # this is a no-op append on the push and repository_dispatch paths.
+          DRILL_ARGS=()
+          if [ -n "${DRILL_TICKET:-}" ]; then
+            DRILL_ARGS+=(--drill-red-until "${DRILL_RED_UNTIL:-}" --drill-ticket "${DRILL_TICKET}")
+          fi
           uv run --no-project --with pydantic \
             python3 scripts/ci/lab_pass_receipt.py workflow-verdict \
             --repo OmniNode-ai/omnimarket \
@@ -1117,6 +1245,7 @@ jobs:
             --event schedule \
             --event workflow_dispatch \
             --dispatch-title-contains "lane=stability-test" \
+            "${DRILL_ARGS[@]}" \
             | tee /tmp/lab-pass-gate-d11.txt
 
       # OMN-19233, operator ruling 2026-09-23 (decision S of the unified
@@ -1221,11 +1350,22 @@ jobs:
           # is the one that IS proven to vendor the sibling revision, by
           # check_lane_sibling_revision.py, immediately before the receipt is
           # written.
-          uv run --no-project --with pydantic \
+          #
+          # OMN-19508, OMN-19543: a sibling revision may instead be proven on
+          # the receipt lane of a deploy-agent instance whose row in
+          # config/deploy_lane_routing.yaml proves that repo (today omnimarket
+          # only: compose-dev-202 on .202 and compose-dev-200 on .200, operator
+          # rulings 2026-09-25T00:56:45Z and 2026-09-25T10:22:22Z). The gate
+          # reads those lanes itself (--instance-lanes-for) and the list is
+          # ANY-OF, so a PASS on any admits it and a revision with none is
+          # refused. A repo no instance proves stays on compose-dev alone, an
+          # unreadable table refuses, and the own-sha read above is unchanged.
+          SIBLING_LANES=(--lane compose-dev --instance-lanes-for "${PINNED_REPO}")
+          uv run --no-project --with pydantic --with pyyaml \
             python3 scripts/ci/lab_pass_receipt.py gate \
             --sha "${PINNED_REVISION}" \
             --repo "OmniNode-ai/${PINNED_REPO}" \
-            --lane compose-dev \
+            "${SIBLING_LANES[@]}" \
             | tee /tmp/lab-pass-gate-sibling.txt
 
       # OMN-18866, operator ruling 2026-09-23T17:12:15Z (ledger RULING, amending

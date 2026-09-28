@@ -193,6 +193,9 @@ class ModelCiBusLaneBrokerTopology(BaseModel):
 
     external_bootstrap_servers: str
     internal_bootstrap_servers: str
+    # OMN-18933. The environment the lane's runtime bus reports (the .201 dev
+    # lane reports ``local``, not ``dev``). Shape only here, like the rest.
+    runtime_environment: str | None = None
 
 
 class ModelCiBusLaneDelegationRoute(BaseModel):
@@ -801,6 +804,7 @@ load_runtime_path_classifier = (
 classify_runtime_paths = _runtime_change_classifier.classify_runtime_paths  # type: ignore[attr-defined]
 inert_version_bump_paths = _runtime_change_classifier.inert_version_bump_paths  # type: ignore[attr-defined]
 git_manifest_reader = _runtime_change_classifier.git_manifest_reader  # type: ignore[attr-defined]
+is_not_runtime_path = _runtime_change_classifier.is_not_runtime_path  # type: ignore[attr-defined]
 
 
 #: OMN-19318: the trigger's decision IS the shared runtime-affecting predicate
@@ -1205,10 +1209,21 @@ def main(
                 f"{', '.join(inert)}"
             )
 
+    # OMN-19597: name what the merge changed that no rebuilt lane runs, so a
+    # decline reads as a decision with its grounds rather than as a silence.
+    not_runtime = [f for f in files if is_not_runtime_path(f, source_repo.strip())]
+    if not_runtime:
+        click.echo(
+            f"Not runtime, never a rebuild (OMN-19597): {', '.join(not_runtime)}"
+        )
+
     try:
         classifier = load_runtime_path_classifier(runtime_path_validator)
         runtime_paths = classify_runtime_paths(
-            files, classifier, manifest_reader=manifest_reader
+            files,
+            classifier,
+            manifest_reader=manifest_reader,
+            source_repo=source_repo.strip(),
         )
     except ValueError as exc:
         click.echo(f"ERROR: {exc}", err=True)

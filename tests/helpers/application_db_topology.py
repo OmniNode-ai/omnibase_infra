@@ -53,13 +53,14 @@ def _shipped_table_grant_exists(
 
     Compares against the PHYSICAL grant schema
     (``physical_grant_schema_for_table``), not the caller-supplied logical
-    schema: the shipped generator already applies the tenant/omninode_internal
+    schema: the shipped generator already applies the omninode_internal
     physical bridge when it writes TABLE grants, so a table pending its
     family's copy migration is checked-in with ``schema: public`` even though
-    its logical domain is ``tenant``/``omninode_internal``. Comparing against
-    the raw logical schema here would silently stop detecting an
-    already-shipped grant for every bridged table -- exactly the false
-    negative this helper exists to prevent.
+    its logical domain is ``omninode_internal``. Comparing against the raw
+    logical schema here would silently stop detecting an already-shipped grant
+    for every bridged table -- exactly the false negative this helper exists
+    to prevent. (Tenant-domain relations need no bridge: their declared schema
+    is ``public`` itself, OMN-17887.)
     """
     database = topology.databases["application"]
     physical_schema = physical_grant_schema_for_table(schema, table)
@@ -129,7 +130,8 @@ def _topology_with_unshipped_grants(
 
 def projection_database_target(
     *table_names: str,
-    schema: str = "tenant",
+    # OMN-17887: `public` IS the TENANT domain; the `tenant` schema is retired.
+    schema: str = "public",
     physical_database: str = "omnidash_analytics",
     access: ProjectionAccess = "read_write",
     catalog_read_binding: str | None = None,

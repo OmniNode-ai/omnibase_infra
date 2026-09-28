@@ -1,0 +1,104 @@
+{
+  "allowed_undeclared": [],
+  "broker": {
+    "cluster_config": {
+      "log_segment_ms": "3600000",
+      "retention_bytes": "1073741824",
+      "segment_fallocation_step": "16384"
+    },
+    "memory": "2G",
+    "service": "omnibase-infra-stability-test-redpanda"
+  },
+  "containers": [
+    {
+      "config_hash": "c80d1e515bfd9e84731867c98f33a58fc0a541e210e56a5a8c9615790867cea2",
+      "health_required": true,
+      "name": "omnibase-infra-stability-test-migration-gate",
+      "packages": {
+        "omnibase-compat": "0.0.0-fixture",
+        "omnibase-core": "0.0.0-fixture",
+        "omnibase-infra": "0.0.0-fixture",
+        "omnibase-spi": "0.0.0-fixture",
+        "omnimarket": "0.0.0-fixture"
+      },
+      "revision": "21c4fa3bd7c842513b7e5b2934b0a190d2b883e7"
+    },
+    {
+      "config_hash": "a942b37ccfaf5a813b1432caa209a43b9d144e47ad0de1549c289c253e556cd5",
+      "health_required": true,
+      "name": "omnibase-infra-stability-test-postgres",
+      "packages": {},
+      "revision": null
+    },
+    {
+      "config_hash": "ffbbd938ea941b7dc2c8f3235d60dafb05da4acec05bd855d630dfb048a1b9e4",
+      "health_required": true,
+      "name": "omnibase-infra-stability-test-redpanda",
+      "packages": {},
+      "revision": null
+    },
+    {
+      "config_hash": "100375fe46735619e01308e78d6b89cf9d374467a9b6ab69b67fe0b53621153a",
+      "health_required": false,
+      "name": "omnimarket-stability-test-projection-api",
+      "packages": {
+        "omnibase-compat": "0.0.0-fixture",
+        "omnibase-core": "0.0.0-fixture",
+        "omnibase-infra": "0.0.0-fixture",
+        "omnibase-spi": "0.0.0-fixture",
+        "omnimarket": "0.0.0-fixture"
+      },
+      "revision": "2f6d47d7bace75e2b94640254d89170addd43721"
+    },
+    {
+      "config_hash": "d92c6a81b2ff50096bcda80885427d1f59a25b5f483f7055523504925d16ab23",
+      "health_required": true,
+      "name": "omninode-stability-test-runtime",
+      "packages": {
+        "omnibase-compat": "0.0.0-fixture",
+        "omnibase-core": "0.0.0-fixture",
+        "omnibase-infra": "0.0.0-fixture",
+        "omnibase-spi": "0.0.0-fixture",
+        "omnimarket": "0.0.0-fixture"
+      },
+      "revision": "21c4fa3bd7c842513b7e5b2934b0a190d2b883e7"
+    },
+    {
+      "config_hash": "d52e7dd431232b1aab092230d7f17fa62f0e5b4ca84ab8f7070f70d34c237da4",
+      "health_required": true,
+      "name": "omninode-stability-test-runtime-effects",
+      "packages": {
+        "omnibase-compat": "0.0.0-fixture",
+        "omnibase-core": "0.0.0-fixture",
+        "omnibase-infra": "0.0.0-fixture",
+        "omnibase-spi": "0.0.0-fixture",
+        "omnimarket": "0.0.0-fixture"
+      },
+      "revision": "21c4fa3bd7c842513b7e5b2934b0a190d2b883e7"
+    }
+  ],
+  "desired_state_sha256": "9700d5561e4db8c8a05f33305e4deceb16fab647cf866ca624dca12aa7376389",
+  "generated_at": "2026-09-24T17:00:00Z",
+  "runners": null,
+  "schema_version": "lab-desired-state.v1",
+  "surface": {
+    "compose_project": "omnibase-infra-stability-test",
+    "host": "lab-201",
+    "id": "lab-201/omnibase-infra-stability-test",
+    "kind": "compose_lane",
+    "mode": "reconcile"
+  },
+  "target_ref": {
+    "commit": "21c4fa3bd7c842513b7e5b2934b0a190d2b883e7",
+    "composition": [
+      {
+        "commit": "2f6d47d7bace75e2b94640254d89170addd43721",
+        "ref": "v0.0.0-fixture",
+        "repo": "OmniNode-ai/omnimarket"
+      }
+    ],
+    "kind": "release",
+    "ref": "v0.0.0-fixture",
+    "repo": "OmniNode-ai/omnibase_infra"
+  }
+}

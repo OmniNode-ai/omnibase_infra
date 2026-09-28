@@ -177,6 +177,12 @@ _REPO_ROOT: Final = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scripts.ci.deploy_lane_verify_route import (
+    load_table,
+    targets_for_receipt_lane,
+    write_lane_env,
+    write_route_outputs,
+)
 from scripts.ci.lab_pass_receipt import (
     ModelLaneGeneration,
     read_agent_loaded_code_sha,
@@ -193,6 +199,39 @@ DEFAULT_BRANCH = "dev"
 # if a container were renamed onto the same daemon.
 DEV_LANE_CONTAINER = "omninode-runtime"
 DEV_LANE_COMPOSE_PROJECT = "omnibase-infra"
+
+
+def resolve_lane_target(
+    lane: str, container: str | None, compose_project: str | None
+) -> tuple[str, str]:
+    """The (container, compose project) this guard reads, for a lab-pass lane.
+
+    OMN-19507 AC2. With no lane, the .201 dev lane above, or whatever the caller
+    names explicitly -- exactly as before. With a lane, the runtime container
+    and compose project of the one deploy-agent instance that emits that
+    receipt lane (``config/deploy_lane_routing.yaml``, ``verify:``), so the
+    dev-202 lane is read as ``compose-dev-202`` and never through the .201
+    names. An explicit value that contradicts the lane refuses rather than
+    silently winning: a guard reading one lane and receipting another is the
+    OMN-18420 shape.
+    """
+    if not lane:
+        return (
+            container or DEV_LANE_CONTAINER,
+            compose_project or DEV_LANE_COMPOSE_PROJECT,
+        )
+    targets = targets_for_receipt_lane(load_table(), lane)
+    for given, declared, flag in (
+        (container, targets.runtime_container, "--container"),
+        (compose_project, targets.compose_project, "--compose-project"),
+    ):
+        if given is not None and given != declared:
+            raise ValueError(
+                f"{flag}={given!r} contradicts lane {lane!r}, whose declared "
+                f"value is {declared!r}"
+            )
+    return targets.runtime_container, targets.compose_project
+
 
 REVISION_LABEL = "org.opencontainers.image.revision"
 COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
@@ -1829,8 +1868,36 @@ def main(argv: list[str] | None = None) -> int:
         "--repo", default=os.environ.get("GITHUB_REPOSITORY", DEFAULT_REPO)
     )
     parser.add_argument("--branch", default=DEFAULT_BRANCH)
-    parser.add_argument("--container", default=DEV_LANE_CONTAINER)
-    parser.add_argument("--compose-project", default=DEV_LANE_COMPOSE_PROJECT)
+    parser.add_argument(
+        "--lane",
+        default="",
+        help=(
+            "OMN-19507: the lab-pass lane whose lane this guard reads (for "
+            "example compose-dev-202). Sets --container and --compose-project "
+            "from the routing table; empty keeps the .201 dev lane."
+        ),
+    )
+    parser.add_argument("--container", default=None)
+    parser.add_argument("--compose-project", default=None)
+    # OMN-19507 AC2. Before this guard reads a lane, the workflow asks it WHICH
+    # lane: the trigger job routes the command it published
+    # (--write-route-outputs), and the verify job loads the routed lane's
+    # targets into its environment (--write-lane-env with --lane). Both read
+    # config/deploy_lane_routing.yaml through
+    # scripts/ci/deploy_lane_verify_route.py and write nothing on a refusal.
+    route_mode = parser.add_mutually_exclusive_group()
+    route_mode.add_argument(
+        "--write-route-outputs",
+        action="store_true",
+        help="route --runtime-lane/--requested-by and write the job outputs",
+    )
+    route_mode.add_argument(
+        "--write-lane-env",
+        action="store_true",
+        help="write --lane's verify targets to the job environment",
+    )
+    parser.add_argument("--runtime-lane", default="dev")
+    parser.add_argument("--requested-by", default="")
     parser.add_argument(
         "--max-commits-behind",
         type=int,
@@ -1906,13 +1973,86 @@ def main(argv: list[str] | None = None) -> int:
             "--deployed-revision is reported STALE. Proves the guard fires."
         ),
     )
+    # OMN-18976, the durable floor. The re-emission window's lower bound is
+    # read from the receipts, which needs the job's history and the trigger's
+    # own runtime classifier; without the validator nothing is widened.
+    parser.add_argument(
+        "--runtime-path-validator",
+        default="",
+        help=(
+            "omniclaude's deploy-gate validator, the canonical runtime path "
+            "classifier. Empty disables the durable floor (live window only)."
+        ),
+    )
+    parser.add_argument(
+        "--clone",
+        default=".",
+        help="a checkout carrying the first-parent history below the lane",
+    )
+    parser.add_argument(
+        "--reemission-lookback",
+        type=int,
+        default=REEMISSION_LOOKBACK_COMMITS,
+        help="how many first-parent commits below the lane the floor walk reads",
+    )
+    parser.add_argument(
+        "--observe",
+        action="store_true",
+        help=(
+            "OMN-18976: a merge that published no rebuild. Skip the wait, read "
+            "the lane as it is, and answer for its receipt-less merges when the "
+            "deploy agent is idle."
+        ),
+    )
+    parser.add_argument(
+        "--observed-merge",
+        default="",
+        help="--observe: the non-runtime merge sha this observation runs for",
+    )
+    parser.add_argument(
+        "--plan-reemission",
+        action="store_true",
+        help=(
+            "READ-ONLY: print the live window and durable backfill for "
+            "--previous-revision..--converged-revision, and write nothing"
+        ),
+    )
+    parser.add_argument("--previous-revision", default="")
+    parser.add_argument("--converged-revision", default="")
     args = parser.parse_args(argv)
+
+    if args.reemission_lookback < 1:
+        print("::error::--reemission-lookback must be at least 1")
+        return 1
+    if args.plan_reemission:
+        if not args.converged_revision:
+            print("::error::--plan-reemission requires --converged-revision")
+            return 1
+        return _run_plan_mode(args)
 
     if args.positive_control and not args.deployed_revision:
         print("::error::--positive-control requires --deployed-revision")
         return 1
 
+    if args.write_route_outputs:
+        if not args.requested_by:
+            print("::error::--write-route-outputs requires --requested-by")
+            return 1
+        return write_route_outputs(
+            runtime_lane=args.runtime_lane, requested_by=args.requested_by
+        )
+    if args.write_lane_env:
+        if not args.lane:
+            print("::error::--write-lane-env requires --lane")
+            return 1
+        return write_lane_env(receipt_lane=args.lane)
+
     try:
+        args.container, args.compose_project = resolve_lane_target(
+            args.lane, args.container, args.compose_project
+        )
+        if args.observe:
+            return _run_observation_mode(args)
         if args.expect_revision:
             return _run_convergence_mode(args)
         return _run_staleness_mode(args)
@@ -2136,7 +2276,23 @@ def read_agent_supersession(
     )
 
 
-def supersession_check_outcome(probe: ModelSupersessionProbe) -> str:
+def _is_same_ref_fold(probe: ModelSupersessionProbe, sha: str) -> bool:
+    """Whether the agent folded this command into THIS SAME commit (OMN-19499).
+
+    The OMN-19270 lineage fence records a command as superseded by the running
+    build when that build already carries the ref, and names the running sha.
+    When the running sha IS the receipt sha, the lane runs exactly this
+    commit's tree, which is the claim the check exists to protect. Exact
+    full-sha equality only: rule 24(b) gates on the exact sha, so an
+    abbreviation is not a match.
+    """
+    if probe.superseded_by_sha is None:
+        return False
+    receipt = sha.strip().lower()
+    return bool(_EXACT_SHA_RE.match(receipt)) and probe.superseded_by_sha == receipt
+
+
+def supersession_check_outcome(probe: ModelSupersessionProbe, sha: str) -> str:
     """The receipt verdict for the ``superseded_by_newer_rebuild`` check.
 
     Three values, and which one a superseded sha gets is the decision this
@@ -2156,8 +2312,11 @@ def supersession_check_outcome(probe: ModelSupersessionProbe) -> str:
 
     ``ok`` when the record exists and names no superseding command, or when
     there is no record at all -- a command the agent never dequeued cannot
-    have been folded.
+    have been folded. Also ``ok`` when the command was folded into ``sha``
+    itself (OMN-19499): a same-ref coalesce built this exact tree.
     """
+    if _is_same_ref_fold(probe, sha):
+        return "ok"
     if probe.superseded:
         return "fail"
     if probe.readable:
@@ -2178,6 +2337,13 @@ def supersession_evidence(probe: ModelSupersessionProbe, sha: str) -> str:
 
 
 def _supersession_evidence(probe: ModelSupersessionProbe, sha: str) -> str:
+    if _is_same_ref_fold(probe, sha):
+        runner = probe.superseded_by_correlation_id or "an unnamed correlation"
+        return (
+            f"the deploy agent folded this rebuild command into the same commit "
+            f"{sha}, run under {runner}, so the lane runs this sha's own tree "
+            "(a same-ref coalesce, not a newer rebuild)"
+        )
     if probe.superseded:
         runner = probe.superseded_by_correlation_id or "an unnamed correlation"
         return (
@@ -2242,6 +2408,303 @@ def reemission_window(
             continue
         window.append(sha)
     return tuple(window)
+
+
+#: OMN-18976 durable floor. How many first-parent commits below the lane's
+#: revision the backfill walk reads, and so the most it can ever widen past the
+#: live window. The walk exists for the gap between a queued merge and the next
+#: run that executes, which is a handful of merges; forty covers a busy day and
+#: is well under GitHub's 250-commit compare cap and the 200-commit ancestor
+#: walk the release train uses. It is the BOUND: nothing older is ever read.
+REEMISSION_LOOKBACK_COMMITS: Final[int] = 40
+
+
+class EnumReceiptPresence(StrEnum):
+    """Whether a commit has a compose-dev receipt artifact, as read."""
+
+    PRESENT = "present"
+    ABSENT = "absent"
+    UNREADABLE = "unreadable"
+
+
+@dataclass(frozen=True)
+class ModelDurableBackfill:
+    """The receipt-less runtime-affecting merges a convergence may answer for.
+
+    ``floor`` is the newest compose-dev receipt, of any verdict, at or below the
+    oldest merge answered for. Empty when there is nothing to answer for, or
+    when no floor exists inside the lookback, and then ``reason`` says which.
+    """
+
+    backfill: tuple[str, ...]
+    floor: str
+    examined: int
+    reason: str
+    unclassified: tuple[str, ...] = ()
+
+    def evidence_clause(self) -> str:
+        head = f"durable floor {self.floor[:12]}" if self.floor else "no durable floor"
+        parts = [f"{head} over {self.examined} first-parent commit(s)"]
+        if self.backfill:
+            parts.append("backfilling " + ", ".join(sha[:12] for sha in self.backfill))
+        if self.reason:
+            parts.append(self.reason)
+        if self.unclassified:
+            parts.append(
+                "left unclassified, so not answered for: "
+                + ", ".join(sha[:12] for sha in self.unclassified)
+            )
+        return "; ".join(parts)
+
+
+def durable_backfill(
+    *,
+    converged_revision: str,
+    already_answered: Sequence[str],
+    first_parent_below: Callable[[str, int], Sequence[str]],
+    receipt_presence: Callable[[str], EnumReceiptPresence],
+    runtime_affecting: Callable[[str], bool],
+    include_converged: bool = False,
+    lookback: int = REEMISSION_LOOKBACK_COMMITS,
+) -> ModelDurableBackfill:
+    """The merges no run ever answered for, bounded by a DURABLE floor.
+
+    OMN-18976, the residual gap. :func:`reemission_window` bounds a run's answer
+    by the lane revision it read when it STARTED. That floor is a live
+    observation, so when the lane moves past a queued merge without any verify
+    run watching (the following merges were NON_RUNTIME, or another
+    repository's push rebuilt the lane), every later run starts above the
+    queued merge and nothing ever answers for it. Measured 2026-09-26:
+    ``84a1e7c3ec`` (#4160) sampled QUEUED, was built at 16:32Z, was followed by
+    two NON_RUNTIME merges and a cross-repository rebuild, and at 19:11Z run
+    36264092148 re-emitted for the three merges above its live floor and left
+    ``84a1e7c3ec`` with no receipt and no path back to one.
+
+    THE FLOOR IS READ FROM THE RECEIPTS THEMSELVES. It is the newest compose-dev
+    receipt, of any verdict, at or below the oldest receipt-less merge -- the
+    last point a lab pass is on record for. A receipt ABOVE the orphan is not a
+    floor for it: the run of 19:11Z wrote receipts for three merges newer than
+    ``84a1e7c3ec`` and none for it, so "the newest receipt anywhere" is a floor
+    that later receipts leapfrog. That is the same defect one layer down.
+
+    WHAT IS ANSWERED FOR: every RUNTIME-AFFECTING commit strictly above the
+    floor and at or below the lane's revision that has NO receipt artifact at
+    all. Runtime-affecting because those are the merges whose own run was meant
+    to emit a receipt and the only ones the delivery gate and the release train
+    ask for; a non-runtime merge inherits its nearest runtime-affecting
+    ancestor's receipt and needs none of its own. Absent only, because a merge
+    that has a receipt was already judged -- its re-emission, if any, is the
+    live window's binding-failure path, not this one.
+
+    EVERY UNRESOLVED CASE ANSWERS FOR NOTHING, which leaves the delivery gate
+    refusing exactly as it does today:
+
+    * an unreadable history, or an unreadable receipt listing for ANY commit
+      examined (a listing that fails and reads as absent would manufacture a
+      receipt over one that exists);
+    * no receipt of any verdict inside the lookback -- no durable floor, so
+      nothing below the lane's revision is on record and nothing is widened;
+    * a commit whose runtime classification cannot be read (named, and left).
+
+    ``include_converged`` answers for the lane's own revision too. A convergence
+    run excludes it because its own receipt is being written in the same job;
+    an observation run, which publishes no rebuild, has no such receipt.
+
+    The walk reads at most ``lookback`` commits below the lane's revision, and
+    that is the bound: a merge older than that is never answered for here.
+    """
+    answered = set(already_answered)
+    if not converged_revision:
+        return ModelDurableBackfill(
+            (), "", 0, "the lane's revision is unknown, so there is nothing to walk"
+        )
+    try:
+        below = [
+            sha
+            for sha in first_parent_below(converged_revision, lookback)
+            if sha != converged_revision
+        ][:lookback]
+    except Exception as exc:  # noqa: BLE001 - an unread history answers nothing
+        return ModelDurableBackfill(
+            (), "", 0, f"the first-parent history below the lane was unreadable: {exc}"
+        )
+    walk = ([converged_revision] if include_converged else []) + below
+
+    presence: dict[str, EnumReceiptPresence] = {}
+    for sha in walk:
+        try:
+            state = receipt_presence(sha)
+        except Exception as exc:  # noqa: BLE001 - unread is not absent
+            state = EnumReceiptPresence.UNREADABLE
+            print(f"::warning::receipt listing for {sha[:12]} raised: {exc}")
+        if state is EnumReceiptPresence.UNREADABLE:
+            return ModelDurableBackfill(
+                (),
+                "",
+                len(below),
+                f"the receipt listing for {sha[:12]} was unreadable, and an "
+                "unread listing is not an absent receipt",
+            )
+        presence[sha] = state
+
+    # Newest first. A receipt-less commit is ANCHORED once a receipt is found
+    # below it; the floor is the receipt that anchors the oldest of them, which
+    # is the newest receipt at or below the oldest orphan.
+    anchored: list[str] = []
+    floor = ""
+    pending: list[str] = []
+    for sha in walk:
+        if presence[sha] is EnumReceiptPresence.PRESENT:
+            if pending:
+                anchored.extend(pending)
+                floor = sha
+                pending = []
+            continue
+        if sha not in answered:
+            pending.append(sha)
+    unanchored = (
+        f"{len(pending)} receipt-less commit(s) below the oldest receipt in the "
+        "lookback have nothing on record beneath them and are not answered for"
+        if pending
+        else ""
+    )
+    if not anchored:
+        if pending:
+            return ModelDurableBackfill(
+                (),
+                "",
+                len(below),
+                f"no compose-dev receipt of any verdict in the {len(below)} "
+                f"commit(s) below {converged_revision[:12]} anchors the "
+                f"{len(pending)} receipt-less commit(s) there, so nothing below "
+                "the lane is on record and nothing is widened",
+            )
+        return ModelDurableBackfill((), "", len(below), "")
+    orphans_above_a_floor = anchored
+
+    backfill: list[str] = []
+    unclassified: list[str] = []
+    for sha in orphans_above_a_floor:
+        try:
+            affecting = runtime_affecting(sha)
+        except Exception as exc:  # noqa: BLE001 - unclassified answers nothing
+            print(f"::warning::runtime classification of {sha[:12]} failed: {exc}")
+            unclassified.append(sha)
+            continue
+        if affecting:
+            backfill.append(sha)
+    backfill.reverse()
+    unclassified.reverse()
+    reasons = [unanchored] if unanchored else []
+    if not backfill:
+        reasons.insert(0, "no receipt-less commit above the floor is runtime-affecting")
+    return ModelDurableBackfill(
+        tuple(backfill),
+        floor if backfill else "",
+        len(below),
+        "; ".join(reasons),
+        tuple(unclassified),
+    )
+
+
+def read_first_parent_below(clone: Path, revision: str, limit: int) -> tuple[str, ...]:
+    """First-parent commits strictly below ``revision``, newest first.
+
+    Read from the job's own checkout, which must carry the history. A revision
+    the clone does not have RAISES, and the caller answers for nothing.
+    """
+    raw = _run(
+        [
+            "git",
+            "-C",
+            str(clone),
+            "rev-list",
+            "--first-parent",
+            f"--max-count={limit}",
+            f"{revision}^",
+        ]
+    )
+    return tuple(line.strip() for line in raw.splitlines() if line.strip())
+
+
+def read_receipt_presence(repo: str, lane: str, sha: str) -> EnumReceiptPresence:
+    """Does ``sha`` have a receipt artifact on ``lane``? Never raises.
+
+    Presence of the NAME is enough: an artifact the gate would read as
+    UNREADABLE is still not an absence, and answering over it is not this
+    walk's decision to make.
+    """
+    from scripts.ci.lab_pass_receipt import EnumLabLane, artifact_name, list_artifacts
+
+    try:
+        name = artifact_name(EnumLabLane(lane), sha)
+        artifacts = list_artifacts(repo, name)
+    except Exception as exc:  # noqa: BLE001 - unread is its own answer
+        print(f"::warning::receipt listing for {sha[:12]} unreadable: {exc}")
+        return EnumReceiptPresence.UNREADABLE
+    return EnumReceiptPresence.PRESENT if artifacts else EnumReceiptPresence.ABSENT
+
+
+def load_runtime_affecting_predicate(
+    clone: Path, validator: Path, repo: str
+) -> Callable[[str], bool]:
+    """The trigger's own runtime-affecting predicate (OMN-19318), for ``clone``.
+
+    Reused, never restated: the release train's loader over the shared
+    classifier, with the merged pull request's labels read live. Raises when
+    either cannot be loaded, and the caller then answers for nothing.
+    """
+    from scripts.ci.lab_pass_receipt import _load_release_train
+
+    train = _load_release_train()
+    predicate: Callable[[str], bool] = train.load_runtime_affecting(
+        clone,
+        validator,
+        labels_for=lambda commit: train.default_merged_pr_labels(repo, commit),
+    )
+    return predicate
+
+
+def plan_durable_backfill(
+    args: argparse.Namespace,
+    *,
+    converged_revision: str,
+    already_answered: Sequence[str],
+    include_converged: bool,
+) -> ModelDurableBackfill:
+    """Wire :func:`durable_backfill` to the job's clone and the artifacts API.
+
+    A caller namespace without the validator (a hand-built one) disables the
+    floor, which is the live-window-only behaviour and never a widening.
+    """
+    validator = getattr(args, "runtime_path_validator", "")
+    if not validator:
+        return ModelDurableBackfill(
+            (),
+            "",
+            0,
+            "no --runtime-path-validator was supplied, so no commit can be "
+            "classified and nothing is widened past the live window",
+        )
+    clone = Path(getattr(args, "clone", "."))
+    try:
+        predicate = load_runtime_affecting_predicate(clone, Path(validator), args.repo)
+    except Exception as exc:  # noqa: BLE001 - no predicate answers nothing
+        return ModelDurableBackfill(
+            (), "", 0, f"the runtime-change classifier could not load: {exc}"
+        )
+    lane = args.lane or "compose-dev"
+    return durable_backfill(
+        converged_revision=converged_revision,
+        already_answered=already_answered,
+        first_parent_below=lambda revision, limit: read_first_parent_below(
+            clone, revision, limit
+        ),
+        receipt_presence=lambda sha: read_receipt_presence(args.repo, lane, sha),
+        runtime_affecting=predicate,
+        include_converged=include_converged,
+        lookback=getattr(args, "reemission_lookback", REEMISSION_LOOKBACK_COMMITS),
+    )
 
 
 #: The job statuses after which the agent performs no further compose mutation
@@ -2471,6 +2934,212 @@ def _write_output(name: str, value: str) -> None:
         handle.write(f"{name}={value}\n")
 
 
+def bind_reemission_candidates(
+    args: argparse.Namespace,
+    lane_revision: str,
+    pending: Sequence[tuple[str, bool]],
+) -> list[dict[str, object]]:
+    """Bind each pending sha to the live lane, and drop the ones that will not bind.
+
+    The binding is resolved HERE, in the job that holds the lane (OMN-18988).
+    A candidate that cannot be bound is omitted and named in the log: no
+    binding means no receipt, and the delivery gate keeps refusing that sha
+    exactly as it does today.
+    """
+    candidates: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for sha, endpoint in pending:
+        if sha in seen:
+            continue
+        seen.add(sha)
+        binding = resolve_lane_binding(
+            sha=sha,
+            container_revision=lane_revision or None,
+            agent_loaded_code_sha=read_agent_loaded_code_sha(args.agent_url) or None,
+            ready_version_revision=None,
+            contains=lambda candidate, observed: _contains_on_branch(
+                args.repo, args.branch, candidate, observed
+            ),
+        )
+        if binding is None:
+            print(
+                f"::notice::re-emission candidate {sha[:12]} omitted: no "
+                "surface established that the lane runs code containing "
+                "it, so no receipt will be written and the delivery gate "
+                "keeps refusing it"
+            )
+            continue
+        candidates.append(
+            {
+                "sha": sha,
+                "endpoint": endpoint,
+                "converged_via": binding.converged_via,
+            }
+        )
+    return candidates
+
+
+def agent_is_idle(queue: ModelQueueFacts) -> bool:
+    """Nothing queued and nothing in flight, as READ. Unread is not idle."""
+    return queue.commands_ahead == 0 and queue.in_flight_correlation_id is None
+
+
+def _run_observation_mode(args: argparse.Namespace) -> int:
+    """A merge that published no rebuild still answers for the lane's orphans.
+
+    OMN-18976, the residual gap's second half. A NON_RUNTIME merge publishes
+    no command, so there is no rebuild to WAIT for -- and until now the whole
+    verify job was skipped with it, including the only step that answers for
+    merges queued behind an earlier one. When the lane converged in the
+    meantime by a route this repository's classifier never sees (another
+    repository's push naming a newer ref), the queued merge was then orphaned
+    for good. Only the wait is skippable; the answer is not.
+
+    So this reads the lane as it IS, with no wait: its revision, and the deploy
+    agent's queue. It answers only when the agent is IDLE -- nothing queued and
+    nothing in flight -- because a lane mid-rebuild would be probed in flux,
+    and a FAIL re-emitted from flux is terminal for every sha it is keyed onto
+    while an absence stays recoverable. Then it walks the durable floor from
+    the lane's revision, INCLUDING that revision (no run in this job writes a
+    receipt for it), binds each orphan to the live lane, and tells the probe
+    and emit steps whether there is anything to probe for.
+
+    The receipt the emit step writes here is an OBSERVATION keyed by this
+    merge's sha and uploaded under a name no gate reads; it exists only as the
+    source the re-emission job re-keys, exactly as a converged run's own
+    receipt is. Nothing is written when there is nothing to answer for.
+    """
+    merge = normalize_revision(args.observed_merge) if args.observed_merge else ""
+    lane = _read_lane(args)
+    queue = read_agent_queue(
+        args.agent_url, request_timeout_seconds=args.agent_timeout_seconds
+    )
+    _write_output("mode", "observe")
+    _write_output("superseded_by", "")
+    _write_output("superseded_outcome", "ok")
+    _write_output(
+        "superseded_evidence",
+        f"observation for non-runtime merge {merge[:12] or '(unknown)'}: no "
+        "rebuild command was published, so no rebuild was superseded; the lane "
+        f"was read at {lane.revision[:12] or '(unreadable)'}",
+    )
+
+    def _nothing(reason: str) -> int:
+        _write_output("verdict", "observed-nothing")
+        _write_output("emit_receipt", "false")
+        _write_output("probe_lane", "false")
+        _write_output("reemit_candidates", "[]")
+        _write_output("evidence", " ".join(reason.translate(_EVIDENCE_UNSAFE).split()))
+        print(f"::notice::{reason}")
+        _summary(
+            [
+                "## Dev-lane observation (OMN-18976)",
+                "",
+                f"- non-runtime merge: `{merge or '(unknown)'}`",
+                f"- lane revision: `{lane.revision or '(unreadable)'}`",
+                f"- nothing answered for: {reason}",
+            ]
+        )
+        return 0
+
+    if not lane.revision:
+        return _nothing(
+            "the lane's revision could not be read, so nothing is answered for"
+        )
+    if not agent_is_idle(queue):
+        state = (
+            queue.unread_reason
+            or f"{queue.commands_ahead} command(s) queued, in flight "
+            f"{queue.in_flight_correlation_id or 'none'}"
+        )
+        return _nothing(
+            f"the deploy agent is not idle ({state}), so the lane may be probed "
+            "mid-rebuild; a later run answers instead"
+        )
+    backfill = plan_durable_backfill(
+        args,
+        converged_revision=lane.revision,
+        already_answered=(),
+        include_converged=True,
+    )
+    print(f"::notice::re-emission durable floor: {backfill.evidence_clause()}")
+    candidates = bind_reemission_candidates(
+        args, lane.revision, [(sha, False) for sha in backfill.backfill]
+    )
+    if not candidates:
+        return _nothing(
+            f"no bound receipt-less runtime-affecting merge: {backfill.evidence_clause()}"
+        )
+    generation = _read_generation_or_warn(args.container)
+    if generation is not None:
+        _write_output("generation", generation.to_json())
+    evidence = (
+        f"OBSERVATION for non-runtime merge {merge[:12] or '(unknown)'}, which "
+        f"published no rebuild: lane at {lane.revision[:12]} with the deploy "
+        f"agent idle; answering for {len(candidates)} receipt-less "
+        f"runtime-affecting merge(s) the lane contains; {backfill.evidence_clause()}"
+    )
+    _write_output("verdict", "pass")
+    _write_output("emit_receipt", "true")
+    _write_output("probe_lane", "true")
+    _write_output("reemit_candidates", json.dumps(candidates))
+    _write_output("evidence", " ".join(evidence.translate(_EVIDENCE_UNSAFE).split()))
+    _summary(
+        [
+            "## Dev-lane observation (OMN-18976)",
+            "",
+            f"- non-runtime merge: `{merge or '(unknown)'}`",
+            f"- lane revision: `{lane.revision}`",
+            f"- {backfill.evidence_clause()}",
+            f"- answering for: {', '.join(str(c['sha'])[:12] for c in candidates)}",
+        ]
+    )
+    print(f"[ok] {evidence}")
+    return 0
+
+
+def _run_plan_mode(args: argparse.Namespace) -> int:
+    """READ-ONLY: print which shas a convergence from P to X would answer for.
+
+    Runs the same window and durable-floor code the convergence and observation
+    paths run, against the live artifacts API and this clone, with no lane read,
+    no binding and no output written. For proof and for diagnosis.
+    """
+    converged = normalize_revision(args.converged_revision)
+    previous = (
+        normalize_revision(args.previous_revision) if args.previous_revision else ""
+    )
+    window: tuple[str, ...] = ()
+    if previous:
+        window = reemission_window(
+            previous_revision=previous,
+            converged_revision=converged,
+            resolve_contained=lambda p, c: read_contained_commits(args.repo, p, c),
+        )
+    backfill = plan_durable_backfill(
+        args,
+        converged_revision=converged,
+        already_answered=window,
+        include_converged=not previous,
+    )
+    print(
+        json.dumps(
+            {
+                "previous_revision": previous,
+                "converged_revision": converged,
+                "live_window": list(window),
+                "durable_floor": backfill.floor,
+                "durable_backfill": list(backfill.backfill),
+                "examined": backfill.examined,
+                "reason": backfill.reason,
+                "unclassified": list(backfill.unclassified),
+            },
+            indent=2,
+        )
+    )
+    return 0
+
+
 def _run_convergence_mode(args: argparse.Namespace) -> int:
     """Wait for the lane on the LANE's clock, and report one of three verdicts.
 
@@ -2633,6 +3302,18 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
                 f"this one between {result.initial_revision[:12]} and "
                 f"{lane.revision[:12]}"
             )
+    # OMN-18976, the residual gap: the live floor above is only what THIS run
+    # saw when it started. Anything the lane moved past unwatched is answered
+    # for from the durable floor instead. See durable_backfill.
+    backfill = ModelDurableBackfill((), "", 0, "not a convergence")
+    if result.outcome is EnumConvergenceOutcome.OK:
+        backfill = plan_durable_backfill(
+            args,
+            converged_revision=lane.revision,
+            already_answered=reemit,
+            include_converged=False,
+        )
+        print(f"::notice::re-emission durable floor: {backfill.evidence_clause()}")
     # JSON array of OBJECTS, because the consumer is a matrix job and the legs
     # are not interchangeable: `strategy.matrix` takes `fromJSON(...)`, an
     # EMPTY array skips the job entirely, and a dynamic number of artifact
@@ -2666,35 +3347,17 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
     # as it does today.
     candidates: list[dict[str, object]] = []
     if result.outcome is EnumConvergenceOutcome.OK:
-        pending: list[tuple[str, bool]] = [(sha, False) for sha in reemit]
-        if result.initial_revision:
+        # A runtime-affecting lower endpoint with no receipt is a durable
+        # orphan like any other, so the backfill answers for it and the
+        # endpoint leg's delivery-waiting condition (OMN-19563) is kept for
+        # the endpoint it was written for: a non-runtime or receipted one.
+        pending: list[tuple[str, bool]] = [
+            *((sha, False) for sha in backfill.backfill),
+            *((sha, False) for sha in reemit),
+        ]
+        if result.initial_revision and result.initial_revision not in backfill.backfill:
             pending.append((result.initial_revision, True))
-        for sha, endpoint in pending:
-            binding = resolve_lane_binding(
-                sha=sha,
-                container_revision=lane.revision or None,
-                agent_loaded_code_sha=read_agent_loaded_code_sha(args.agent_url)
-                or None,
-                ready_version_revision=None,
-                contains=lambda candidate, observed: _contains_on_branch(
-                    args.repo, args.branch, candidate, observed
-                ),
-            )
-            if binding is None:
-                print(
-                    f"::notice::re-emission candidate {sha[:12]} omitted: no "
-                    "surface established that the lane runs code containing "
-                    "it, so no receipt will be written and the delivery gate "
-                    "keeps refusing it"
-                )
-                continue
-            candidates.append(
-                {
-                    "sha": sha,
-                    "endpoint": endpoint,
-                    "converged_via": binding.converged_via,
-                }
-            )
+        candidates = bind_reemission_candidates(args, lane.revision, pending)
     _write_output("reemit_candidates", json.dumps(candidates))
 
     # OMN-18143. Read AFTER the wait, because the agent folds a command when it
@@ -2708,7 +3371,8 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
         agent_url=args.agent_url, correlation_id=args.correlation_id
     )
     _write_output("superseded_by", supersession.superseded_by_sha or "")
-    _write_output("superseded_outcome", supersession_check_outcome(supersession))
+    outcome = supersession_check_outcome(supersession, expected)
+    _write_output("superseded_outcome", outcome)
     _write_output("superseded_evidence", supersession_evidence(supersession, expected))
 
     # OMN-18436: publish the identity of the container this guard actually read,

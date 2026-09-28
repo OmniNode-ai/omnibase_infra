@@ -22,17 +22,30 @@ missing.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
-from omnibase_infra.cli.cli_delegate import delegate_command
+from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
+from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
+from omnibase_infra.cli import cli_delegate
+from omnibase_infra.cli.cli_delegate import delegate_command, run_delegate
+from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
+from omnibase_infra.runtime_identity import collect_runtime_identity
 
 pytestmark = pytest.mark.integration
 
+_RESULT_MODEL = (
+    "omnimarket.models.delegation.wire."
+    "model_delegate_skill_response.ModelDelegateSkillCompleted"
+)
+_GLM_BACKEND = "cloud-glm"
 
-def _invoke(args: list[str]) -> object:
+
+def _invoke(args: list[str]) -> Result:
     """Run the real command with option parsing, stopping before dispatch.
 
     Dispatch needs a co-installed omnimarket and a live model endpoint,
@@ -111,3 +124,202 @@ class TestTheRungPinIsReachableFromACommandLine:
         )
         assert "No such option" not in result.output
         assert "--backend-id was given an empty value" not in result.output
+
+
+def _attempt(
+    *,
+    backend_id: str,
+    model_id: str,
+    substituted_from_backend_id: str | None = None,
+) -> dict[str, object]:
+    return {
+        "tier": "cheap_cloud",
+        "backend_id": backend_id,
+        "model_id": model_id,
+        "quality_gate_passed": True,
+        "quality_score": 1.0,
+        "cost_usd": 0.0,
+        "failure_class": None,
+        "error_message": "",
+        "acceptance_decision": "accept",
+        "acceptance_reason": "quality_bar_met",
+        "substituted_from_backend_id": substituted_from_backend_id,
+    }
+
+
+def _receipt(
+    *,
+    backend_id: str,
+    model_id: str,
+    substituted_from_backend_id: str | None = None,
+) -> ModelSkillResult[dict[str, object]]:
+    return ModelSkillResult(
+        skill_name="node_delegate_skill_orchestrator",
+        node_name="node_delegate_skill_orchestrator",
+        status=EnumSkillResultStatus.SUCCESS,
+        correlation_id=uuid4(),
+        run_id=uuid4(),
+        exit_code=0,
+        duration_ms=1200,
+        result={
+            "status": "completed",
+            "task_type": "research",
+            "model_name": model_id,
+            "provider": "cheap_cloud",
+            "response": "OK",
+            "attempts": [
+                _attempt(
+                    backend_id=backend_id,
+                    model_id=model_id,
+                    substituted_from_backend_id=substituted_from_backend_id,
+                )
+            ],
+            "terminal_failure_cause": None,
+        },
+        result_model=_RESULT_MODEL,
+        runtime_identity=collect_runtime_identity(config_source="test"),
+    )
+
+
+def _run_pinned_delegate(
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    receipt: ModelSkillResult[dict[str, object]],
+) -> tuple[int, str | None]:
+    """Run the CLI entry with receipt mode reduced to its validator/writer seam."""
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(
+        """\
+name: node_delegate_skill_orchestrator
+terminal_event: onex.evt.omnimarket.delegate-skill-completed.v1
+event_bus:
+  publish_topics:
+    - onex.evt.omnimarket.delegate-skill-completed.v1
+  subscribe_topics:
+    - onex.cmd.omnimarket.delegate-skill.v1
+""",
+        encoding="utf-8",
+    )
+    validator_verdicts: list[str | None] = []
+    receipt_mode_calls: list[dict[str, object]] = []
+
+    def _no_drift(**_: object) -> None:
+        return None
+
+    def _resolve_contract(_: str) -> Path:
+        return contract
+
+    def _fake_receipt_mode(**kwargs: object) -> int:
+        """Call the real validator, then the real writer, as receipt mode does.
+
+        On a refusal the real receipt mode replaces the receipt with its own
+        FAILED runtime-summary envelope before the writer runs; that envelope
+        is receipt mode's concern, not this ticket's, so the writer is only
+        handed the delegation receipt on the accepted path. The refused
+        receipt's ``backend_pin_honoured: false`` is pinned by the unit module.
+        """
+        receipt_mode_calls.append(kwargs)
+        receipt_validator = kwargs["receipt_validator"]
+        receipt_callback = kwargs["receipt_callback"]
+        assert callable(receipt_validator)
+        assert callable(receipt_callback)
+        verdict = receipt_validator(receipt)
+        assert verdict is None or isinstance(verdict, str)
+        validator_verdicts.append(verdict)
+        if verdict is not None:
+            return 1
+        receipt_callback(receipt)
+        return 0
+
+    monkeypatch.delenv("OMNI_HOME", raising=False)
+    monkeypatch.setattr(cli_delegate, "check_omnimarket_drift", _no_drift)
+    monkeypatch.setattr(cli_delegate, "_resolve_packaged_contract", _resolve_contract)
+    monkeypatch.setattr(cli_delegate, "run_receipt_mode", _fake_receipt_mode)
+
+    exit_code = run_delegate(
+        prompt="probe",
+        task_type="research",
+        backend_id=_GLM_BACKEND,
+        max_tokens=None,
+        bus="inmemory",
+        locus=EnumDelegateLocus.IN_PROCESS,
+        state_root=tmp_path / "state",
+        timeout=5,
+        verbose=False,
+        emit_socket=tmp_path / "emit.sock",
+    )
+
+    assert len(receipt_mode_calls) == 1
+    assert validator_verdicts
+    return exit_code, validator_verdicts[0]
+
+
+def _written_receipt(
+    state_root: Path, receipt: ModelSkillResult[dict[str, object]]
+) -> dict[str, object]:
+    written = json.loads(
+        (state_root / "runs" / str(receipt.run_id) / "receipt.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert isinstance(written, dict)
+    return written
+
+
+class TestAc2PinHonoursTheLocalByokSubstitutionViaRunDelegate:
+    """Go through ``run_delegate`` to prove request-to-validator-to-writer wiring, not only the helper."""
+
+    def test_a_pin_answered_via_byok_substitution_is_honoured(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        receipt = _receipt(
+            backend_id="byok-glm",
+            model_id="glm-5.3-flash",
+            substituted_from_backend_id=_GLM_BACKEND,
+        )
+
+        exit_code, defect = _run_pinned_delegate(
+            tmp_path=tmp_path, monkeypatch=monkeypatch, receipt=receipt
+        )
+
+        assert exit_code == 0
+        assert defect is None
+        written = _written_receipt(tmp_path / "state", receipt)
+        assert written["requested_backend_id"] == _GLM_BACKEND
+        assert written["backend_selection"] == "pinned"
+        assert written["backend_pin_honoured"] is True
+
+    def test_a_completed_run_on_another_backend_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        receipt = _receipt(backend_id="claude-sonnet", model_id="sonnet")
+
+        exit_code, defect = _run_pinned_delegate(
+            tmp_path=tmp_path, monkeypatch=monkeypatch, receipt=receipt
+        )
+
+        assert exit_code != 0
+        assert defect is not None
+        assert _GLM_BACKEND in defect
+        assert "claude-sonnet" in defect
+        assert not (tmp_path / "state" / "runs" / str(receipt.run_id)).exists()
+
+    def test_a_substitution_of_a_different_backend_is_refused(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        receipt = _receipt(
+            backend_id="byok-openrouter",
+            model_id="house/model:free",
+            substituted_from_backend_id="openrouter-qwen3-coder-480b",
+        )
+
+        exit_code, defect = _run_pinned_delegate(
+            tmp_path=tmp_path, monkeypatch=monkeypatch, receipt=receipt
+        )
+
+        assert exit_code != 0
+        assert defect is not None
+        assert _GLM_BACKEND in defect
+        assert "byok-openrouter" in defect
+        assert not (tmp_path / "state" / "runs" / str(receipt.run_id)).exists()

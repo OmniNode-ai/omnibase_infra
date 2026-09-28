@@ -28,6 +28,41 @@ from typing import Any
 
 DRIFT_TOPIC = "onex.evt.infra.lane-census-drift.v1"
 
+#: OMN-19411. 1.1.0 widens the finding ``kind`` vocabulary with the eleven
+#: lab-sync kinds (``lane_census_plan.LAB_SYNC_FINDING_KINDS``) and changes
+#: nothing else: every 1.0.0 key is present with its 1.0.0 type, and no key is
+#: added. A consumer that reads the 1.0.0 key set parses a 1.1.0 event
+#: unchanged; one that switches on ``kind`` must treat an unknown kind as drift.
+EVENT_SCHEMA_VERSION = "1.1.0"
+
+#: The versions ``validate_event`` accepts. 1.0.0 stays readable because
+#: snapshots written before this bump (and by a .201 clone that has not yet
+#: pulled it) carry it.
+SUPPORTED_EVENT_SCHEMA_VERSIONS = frozenset({"1.0.0", EVENT_SCHEMA_VERSION})
+
+#: The 1.0.0 drift-event key set and the JSON type of each value. 1.1.0 keeps
+#: it byte-for-byte, which is what makes the bump minor.
+DRIFT_EVENT_FIELDS: dict[str, type | tuple[type, ...]] = {
+    "schema_version": str,
+    "event_type": str,
+    "topic": str,
+    "host": str,
+    "host_id": (str, type(None)),
+    "emitted_at": str,
+    "severity": str,
+    "lanes_checked": list,
+    "lanes_not_applicable": list,
+    "lanes_skipped_optional_down": list,
+    "drift_count": int,
+    "findings": list,
+    "alert_key": str,
+    "ticket_title": str,
+    "ticket_body": str,
+}
+
+#: The five keys of every finding, all strings.
+FINDING_FIELDS: tuple[str, ...] = ("lane", "kind", "container", "detail", "severity")
+
 #: OMN-18769. The census-OBSERVED topic, published on EVERY run rather than
 #: only on drift.
 #:
@@ -135,7 +170,7 @@ def build_event(
         "critical" if any(f["severity"] == "critical" for f in findings) else "warning"
     )
     return {
-        "schema_version": "1.0.0",
+        "schema_version": EVENT_SCHEMA_VERSION,
         "event_type": "lane-census-drift",
         "topic": topic,
         "host": host,
@@ -177,7 +212,7 @@ def build_observed_event(
     now = now or datetime.now(UTC)
     findings = _findings(plan)
     return {
-        "schema_version": "1.0.0",
+        "schema_version": EVENT_SCHEMA_VERSION,
         "event_type": "lane-census-observed",
         "topic": topic,
         "host": host,
@@ -196,6 +231,59 @@ def build_observed_event(
         "drift_count": len(findings),
         "findings": findings,
     }
+
+
+def validate_event(
+    event: dict[str, Any], *, kind_severity: dict[str, str]
+) -> list[str]:
+    """Return every way ``event`` breaks the drift-event contract; empty is valid.
+
+    ``kind_severity`` is ``lane_census_plan.FINDING_KIND_SEVERITY``, passed in
+    rather than imported so this module keeps no dependency on the planner (the
+    planner needs PyYAML; this module needs nothing outside the standard
+    library). A finding whose kind the table does not declare, or whose
+    severity is not its kind's, is an error: the kind table is the contract.
+    """
+    errors: list[str] = []
+    version = event.get("schema_version")
+    if version not in SUPPORTED_EVENT_SCHEMA_VERSIONS:
+        errors.append(
+            f"schema_version {version!r} is not one of "
+            f"{sorted(SUPPORTED_EVENT_SCHEMA_VERSIONS)}"
+        )
+    for key, expected in DRIFT_EVENT_FIELDS.items():
+        if key not in event:
+            errors.append(f"missing key {key!r}")
+        elif not isinstance(event[key], expected) or isinstance(event[key], bool):
+            errors.append(
+                f"key {key!r} has type {type(event[key]).__name__}, expected {expected}"
+            )
+    extra = sorted(set(event) - set(DRIFT_EVENT_FIELDS))
+    if extra:
+        errors.append(f"keys outside the contract: {extra}")
+    findings = event.get("findings")
+    if not isinstance(findings, list):
+        return errors
+    if event.get("drift_count") != len(findings):
+        errors.append(
+            f"drift_count {event.get('drift_count')!r} != {len(findings)} findings"
+        )
+    for index, finding in enumerate(findings):
+        if not isinstance(finding, dict):
+            errors.append(f"findings[{index}] is not an object")
+            continue
+        for key in FINDING_FIELDS:
+            if not isinstance(finding.get(key), str):
+                errors.append(f"findings[{index}].{key} is not a string")
+        kind = finding.get("kind")
+        if kind not in kind_severity:
+            errors.append(f"findings[{index}].kind {kind!r} is not a declared kind")
+        elif finding.get("severity") != kind_severity[kind]:
+            errors.append(
+                f"findings[{index}] kind {kind!r} has severity "
+                f"{finding.get('severity')!r}, declared {kind_severity[kind]!r}"
+            )
+    return errors
 
 
 def main() -> int:

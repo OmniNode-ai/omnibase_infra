@@ -106,9 +106,35 @@ def _minimal_fixture(tmp_path: Path) -> tuple[Path, Path]:
     return migrations_dir, ledger_dir
 
 
+def _non_empty_tsv_row_count(path: Path) -> int:
+    """Row count derived live from a checked-in TSV, never a hand-maintained literal.
+
+    OMN-19899: a hardcoded count in this file had to be bumped, with a fresh
+    comment paragraph appended, on every single migration-adding PR -- the
+    identical PR set that also appends a row to ``application-migrations.tsv``,
+    so the two collided as a matched pair of hot files. Deriving every count in
+    this test from the checked-in tree removes this file from that set without
+    weakening the assertion: ``validate_manifests`` already proves
+    ``declared|blocked == filesystem`` file-for-file, and the counts below just
+    read the same checked-in tree the validator read.
+    """
+    return sum(
+        1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    )
+
+
 def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     result = _validate()
 
+    # FROZEN HISTORY (OMN-19899): the paragraphs below record why each migration
+    # up to and including OMN-17886 was added. Landing a new migration no longer
+    # requires appending a new paragraph here -- the counts this test asserts are
+    # now derived live from the checked-in tree (see _non_empty_tsv_row_count and
+    # the glob below), so do not add a new dated entry for a migration landed
+    # after OMN-19899. This removed a second, adjacent hot file from every
+    # migration-adding PR: this comment block used to be edited on the exact
+    # same PRs that also appended a row to application-migrations.tsv.
+    #
     # 98 as of OMN-15819 (rebased onto OMN-15717): 97 from OMN-15717 (94 from
     # the OMN-14894 vendor-parity repair -- the manifest mirrors the vendored
     # node migration tree after restoring the nine house-tenant RLS
@@ -803,9 +829,59 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # correction must be a first-class vendored application migration. Its
     # exact source bytes and manifest binding are pinned separately by
     # test_omn19013_terminal_construction_vendor.py.
-    assert len(result.declarations) == 212
+    #
+    # 212 -> 213 for OMN-18930: node_projection_delegation/0046 adds the three
+    # nullable delegation_events cohort-key columns (additive, expand-only).
+    # Vendored FIRST, ahead of the omnimarket source, per the vendor-parity
+    # ordering.
+    # 213 -> 214 for OMN-19438: one node-owned migration,
+    # nodes/node_projection_savings/091_savings_estimates_house_tenant_uuid_backfill.sql,
+    # vendored here FIRST per the node-migration vendor-parity ordering. It moves
+    # savings_estimates rows stored under the house slug to the house tenant's
+    # UUID and makes the UUID the column default, after the writer fix is live.
+    # 214 -> 216 for OMN-19514: node_projection_delegation/0047 adds the
+    # nullable delegation_events.ticket_id column, and
+    # node_projection_dod_verdict/0002 adds the nullable
+    # dod_verify_runs.delegation_correlation_id column, so a delegation run
+    # joins to its ticket and to the DoD verdict that judged it. Both additive
+    # (expand-only), vendored FIRST per the vendor-parity ordering.
+    # 216 -> 217 for OMN-19721: node_projection_runtime_error_fingerprints/0002
+    # adds the nullable runtime_error_fingerprints.last_applied_event_id column,
+    # so a broker redelivery of one runtime-error event is counted once.
+    # 217 -> 218 for OMN-19550: node_projection_session_content/0001 creates
+    # omninode_internal.session_content and grants the projection writer role.
+    # Additive (expand-only), vendored FIRST per the vendor-parity ordering.
+    # 217 -> 219 for OMN-19716: node_projection_topic_activity/0000 creates the
+    # topic_activity table and 0001 grants the runtime role SELECT, INSERT and
+    # UPDATE on it. Vendored FIRST per the vendor-parity ordering.
+    # 219 -> 220 for OMN-19860: node_projection_delegation/0048 adds the
+    # nullable delegation_events.caller_lane column, so a delegation row names
+    # the ledger lane that issued it. Additive (expand-only), vendored FIRST
+    # per the vendor-parity ordering.
+    # 220 -> 222 for OMN-19833: node_projection_pr_landing/0000 creates the
+    # pr_landing_state and pr_landing_transitions read models and 0001 grants
+    # the runtime role on both. Vendored FIRST per the vendor-parity ordering,
+    # ahead of omnimarket#3000.
+    # 222 -> 223 for OMN-19550: node_projection_session_content/0001 creates
+    # omninode_internal.session_content and grants the projection writer role.
+    # Additive (expand-only), vendored FIRST per the vendor-parity ordering.
+    # 223 -> 224 for OMN-17886: node_gateway_link_health_write_effect/0002
+    # revokes the runtime role's privileges on the gateway_link_health_status
+    # view. The node lives in omnibase_infra, so nothing is vendored.
+    # OMN-19899: counts below are derived live from the checked-in tree, not a
+    # hardcoded literal -- see _non_empty_tsv_row_count. The comment block above
+    # is frozen history and no longer needs a new paragraph per migration; a
+    # drift between the declaration count and the actual node .sql files is
+    # already caught inside validate_manifests() itself (filesystem_paths ==
+    # manifest_paths), so this is a second, independent read of the same tree.
+    # OMN-17887 (node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql)
+    # is covered by this live derivation and needs no paragraph or literal here.
+    live_node_sql_count = len(list((MIGRATIONS_DIR / "nodes").glob("*/*.sql")))
+    assert len(result.declarations) + len(result.blocked) == live_node_sql_count
     assert result.blocked == ()
-    assert len(result.legacy_node_declarations) == 2
+    assert len(result.legacy_node_declarations) == _non_empty_tsv_row_count(
+        LEDGER_DIR / "legacy-node-migrations.tsv"
+    )
     #
     # cloud_aliases 30 -> 43 for OMN-18553. These 13 are not new migrations; they
     # are names omninode_infra's corpus had ALREADY written into omninode_cloud's
@@ -814,7 +890,9 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # OMN-18544 let it apply in full on the .201 dev lane, all 13 surfaced at once
     # and aborted the forward-migration one-shot at exit 3. Measured on the lane:
     # 42 distinct log names, 29 declared, 13 not.
-    assert len(result.cloud_aliases) == 43
+    assert len(result.cloud_aliases) == _non_empty_tsv_row_count(
+        LEDGER_DIR / "cloud-migration-aliases.tsv"
+    )
 
 
 def test_completion_gate_is_green_after_domain_classification_is_complete() -> None:

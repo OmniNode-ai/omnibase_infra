@@ -1,0 +1,43 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-17886 AC4: the findings a from-empty build of the forward-migration corpus
+# still produces against the declared omninode_internal topology, and the step
+# that removes each one.
+#
+# SHRINK-ONLY. tests/integration/migrations/test_omninode_internal_live_acl_gate_omn17886.py
+# builds omnidash_analytics from empty with scripts/run-forward-migrations.sh, runs
+# scripts/validation/check_omninode_internal_live_acl.py against it, and fails in
+# both directions:
+#   * a finding that is not listed here fails the gate (a migration conferred or
+#     omitted a grant the topology does not declare);
+#   * an entry here that no longer reproduces fails the gate too, so the entry is
+#     deleted in the same change that fixes it and this list only ever shrinks.
+#
+# Nothing may be added to this list to make the gate pass. A new finding is fixed
+# by migration or by a declaration, never by listing it.
+#
+# Measured 2026-09-24 on a fresh PostgreSQL 16 cluster, profile onex-dev: 20 findings.
+# AC2 step 1 (2026-09-25) declared the three savings_* tables in
+# table_grant_derivation.py, removing their 9 entries: 11 remain.
+# AC2 revoke removed omninode_runtime's privileges on the gateway_link_health_status
+# view, removing its 3 entries: 8 remain.
+# AC2 step 2 declared gateway_link_health with the migration that grants it,
+# removing its 3 entries: 5 remain.
+entries:
+  # AC2 step 1: node_projection_runner_fleet deletes; `access: read_write` cannot say so yet.
+  - finding: UNDECLARED_GRANT omninode_runtime DELETE ON omninode_internal.runner_fleet_liveness
+    removed_by: OMN-17886 AC2 step 1 (a DELETE declaration for runner_fleet_liveness)
+  # AC2 step 2, second half: no migration may create validator_ro until OMN-17923
+  # lands (the retirement record for 104_create_validator_ro_role.sql in
+  # _ledger/retired-flat-migrations.tsv), so on a from-empty build the role does
+  # not exist and nothing can deliver its declared schema USAGE yet.
+  - finding: MISSING_DECLARED_SCHEMA_GRANT validator_ro USAGE ON SCHEMA omninode_internal
+    removed_by: OMN-17886 AC2 step 2 (validator_ro schema USAGE, re-issued with the validator_ro role migration once OMN-17923 lands)
+  # AC2 step 4: the default-privilege rules go last, after steps 1-3 (Jonah, 2026-09-24).
+  - finding: UNDECLARED_DEFAULT_PRIVILEGE owner=postgres objtype=r omninode_runtime INSERT IN SCHEMA omninode_internal
+    removed_by: OMN-17886 AC2 step 4 (drop the default-privilege rules)
+  - finding: UNDECLARED_DEFAULT_PRIVILEGE owner=postgres objtype=r omninode_runtime SELECT IN SCHEMA omninode_internal
+    removed_by: OMN-17886 AC2 step 4 (drop the default-privilege rules)
+  - finding: UNDECLARED_DEFAULT_PRIVILEGE owner=postgres objtype=r omninode_runtime UPDATE IN SCHEMA omninode_internal
+    removed_by: OMN-17886 AC2 step 4 (drop the default-privilege rules)

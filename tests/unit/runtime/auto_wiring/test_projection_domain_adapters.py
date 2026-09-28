@@ -29,6 +29,7 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 from omnibase_infra.runtime.projection_tenant_authority import (
     VerifiedProjectionTenantAuthority,
     assert_projection_tenant_authority_matches_event,
+    parse_canonical_tenant_uuid,
     verify_signed_projection_tenant_authority,
 )
 from tests.helpers.application_db_topology import (
@@ -135,7 +136,7 @@ def test_verified_authority_cannot_authorize_a_different_dispatch_event() -> Non
         payload={"value": "different"},
         correlation_id=authority.trace_id,
     )
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
 
     with patch("psycopg2.connect") as connect:
         adapter = _adapter(
@@ -240,7 +241,7 @@ def test_red_control_untrusted_tenant_selection() -> None:
             security_labels={"tenant_id": str(tenant_id)},
         ),
     )
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -286,7 +287,7 @@ def test_capability_constructor_is_sealed() -> None:
 
 def test_red_control_nonlocal_tenant_guc() -> None:
     tenant_id = uuid4()
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -301,9 +302,10 @@ def test_red_control_nonlocal_tenant_guc() -> None:
         "SELECT set_config(%s, %s, true)",
         ("app.tenant_id", str(tenant_id)),
     )
-    # OMN-16239: qualified with the PHYSICAL schema. delegation_events is still
-    # under the OMN-15359 bridge and lives in public; the pre-fix assertion here
-    # named "tenant", a schema the analytics database does not even have.
+    # OMN-16239/OMN-17887: qualified with the PHYSICAL schema. delegation_events
+    # is a TENANT-domain relation declared `public` (the TENANT domain's schema
+    # for good); the retired `tenant` schema never existed on the analytics
+    # database, and must never be emitted.
     assert 'INSERT INTO "public"."delegation_events"' in calls[2].args[0]
     assert calls[2].args[1]["tenant_id"] == tenant_id
     assert isinstance(calls[2].args[1]["tenant_id"], UUID)
@@ -313,7 +315,7 @@ def test_red_control_nonlocal_tenant_guc() -> None:
 
 def test_red_control_leaked_tenant_guc() -> None:
     tenant_id = uuid4()
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
     cursor.execute.side_effect = (None, None, RuntimeError("write failed"))
 
@@ -331,7 +333,7 @@ def test_red_control_leaked_tenant_guc() -> None:
 
 def test_equal_canonical_row_string_is_assertion_not_authority() -> None:
     tenant_id = uuid4()
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -347,10 +349,87 @@ def test_equal_canonical_row_string_is_assertion_not_authority() -> None:
     assert isinstance(insert.args[1]["tenant_id"], UUID)
 
 
+#: Spellings ``UUID()`` ACCEPTS and silently normalises. Each one parses, so
+#: none of them is caught by the malformed-input cases below, and each names a
+#: real producer: a hand-written replay fixture (uppercase), a .NET or Windows
+#: emitter (braces), an RFC 4122 URN form (urn:), and the nil sentinel that a
+#: partially-populated row carries when nothing supplied a tenant at all.
+_NON_CANONICAL_TENANT_SPELLINGS = (
+    "00000000-0000-0000-0000-000000000000",
+    "0FC1B2A3-4D5E-6F70-8192-A3B4C5D6E7F8",
+    "{0fc1b2a3-4d5e-6f70-8192-a3b4c5d6e7f8}",
+    "urn:uuid:0fc1b2a3-4d5e-6f70-8192-a3b4c5d6e7f8",
+    "0fc1b2a34d5e6f708192a3b4c5d6e7f8",
+    " 0fc1b2a3-4d5e-6f70-8192-a3b4c5d6e7f8",
+)
+
+
+@pytest.mark.parametrize("supplied", _NON_CANONICAL_TENANT_SPELLINGS)
+def test_sentinel_and_non_canonical_tenant_spellings_are_refused(
+    supplied: str,
+) -> None:
+    """OMN-15425 AC2 names SENTINEL writes apart from malformed ones.
+
+    The distinction is load-bearing and was untested. ``UUID()`` accepts every
+    string above and normalises it, so the malformed-input proof below steps
+    straight over all of them, and the adapter's own
+    ``supplied_uuid != context.tenant_id`` check only catches the ones that
+    round-trip to a DIFFERENT tenant. What refuses these is
+    ``parse_canonical_tenant_uuid``'s ``str(tenant_id) != value or int == 0``
+    guard, and nothing exercised that branch: neuter it and the suite stayed
+    green, which is the whole reason this test exists.
+
+    The nil UUID is the case with teeth. It parses, it is not another tenant's
+    id, and a row carrying it would be written under a tenant that cannot
+    exist — the "landed under the house tenant" shape this ticket is about.
+    """
+    with pytest.raises(ProjectionTenantContextError):
+        parse_canonical_tenant_uuid(supplied, authority="unit proof")
+
+
+def test_the_canonical_spelling_is_accepted() -> None:
+    """Green control: the guard above refuses spellings, not all input.
+
+    Without this, an implementation that raised unconditionally would satisfy
+    every case in the parametrization.
+    """
+    tenant_id = uuid4()
+    assert (
+        parse_canonical_tenant_uuid(str(tenant_id), authority="unit proof") == tenant_id
+    )
+
+
+def test_row_tenant_in_a_non_canonical_spelling_of_the_verified_id_fails_closed() -> (
+    None
+):
+    """The one adapter path the mismatch check cannot reach.
+
+    Every other rejected row tenant round-trips to a different UUID, so
+    ``supplied_uuid != context.tenant_id`` catches it whether or not the
+    canonical guard exists. An UPPERCASE spelling of the verified tenant's own
+    id round-trips to exactly that tenant — so here, and only here, the
+    canonical guard is the only thing standing between a non-canonical write
+    and the table.
+    """
+    tenant_id = uuid4()
+    target = projection_database_target("delegation_events", schema="public")
+
+    with patch("psycopg2.connect") as connect:
+        adapter = _verified_adapter(target, tenant_id)
+        with pytest.raises(ProjectionTenantContextError):
+            adapter.upsert(
+                "delegation_events",
+                "event_id",
+                {"event_id": uuid4(), "tenant_id": str(tenant_id).upper()},
+            )
+
+    connect.assert_not_called()
+
+
 @pytest.mark.parametrize("supplied", [uuid4(), "not-a-uuid", "", 7])
 def test_wrong_or_malformed_row_tenant_fails_before_connect(supplied: object) -> None:
     tenant_id = uuid4()
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
 
     with patch("psycopg2.connect") as connect:
         adapter = _verified_adapter(target, tenant_id)
@@ -382,7 +461,7 @@ def test_mixed_target_uses_distinct_domain_bindings_and_connections() -> None:
         ModelDbTableDeclaration(
             name="delegation_events",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration="proof/tenant.sql",
             access="read_write",
             role="delegation_events",
@@ -460,7 +539,7 @@ def test_red_control_internal_resolver_call() -> None:
 
 @pytest.mark.parametrize(
     ("schema", "table"),
-    [("tenant", "delegation_events"), ("omninode_internal", "generation_events")],
+    [("public", "delegation_events"), ("omninode_internal", "generation_events")],
 )
 def test_write_only_declaration_rejects_query_for_every_domain(
     schema: str, table: str
@@ -662,7 +741,7 @@ def test_unbound_authority_writes_the_events_own_tenant_unmodified() -> None:
     The event carries a real verified slug. Nothing invents, defaults, or
     overwrites it: what the producer recorded is what lands.
     """
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -693,7 +772,7 @@ def test_unbound_authority_scopes_the_write_to_the_recorded_tenant() -> None:
     The scope value is the row's own ``tenant_id``, so this is a confinement,
     not a grant: the statement cannot write outside the identity it declares.
     """
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -747,7 +826,7 @@ def _tenant_relations_with_guc_policies() -> list[str]:
 def test_every_tenant_guc_relation_uses_the_recorded_write_scope(table: str) -> None:
     """AC4: contract-derived tenant targets all use the shared GUC write seam."""
     recorded_tenant = "beta-outside-every-compiled-map"
-    target = projection_database_target(table, schema="tenant", access="write")
+    target = projection_database_target(table, schema="public", access="write")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -775,7 +854,7 @@ def test_unbound_write_opens_no_scope_for_a_tenantless_row() -> None:
     re-imported into this seam as a Python raise. An unset GUC compares
     against NULL, so a tenant-less row cannot pass ``WITH CHECK``.
     """
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -791,7 +870,7 @@ def test_unbound_write_opens_no_scope_for_a_tenantless_row() -> None:
 @pytest.mark.parametrize("blank", ["", "   ", None])
 def test_unbound_write_opens_no_scope_for_a_blank_tenant(blank: object) -> None:
     """A blank or null tenant is not a tenant; it opens no scope either."""
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -817,7 +896,7 @@ def test_unbound_read_is_scoped_only_when_the_caller_named_a_tenant() -> None:
     stays blind.
     """
     target = projection_database_target(
-        "delegation_events", schema="tenant", access="read_write"
+        "delegation_events", schema="public", access="read_write"
     )
     conn, cursor = _connection("tenant_projection_writer")
 
@@ -844,7 +923,7 @@ def test_unbound_read_is_scoped_only_when_the_caller_named_a_tenant() -> None:
 
 def test_unbound_scope_is_rolled_back_and_never_leaks_on_failure() -> None:
     """The unbound scope obeys the same leak control as the bound one."""
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
     cursor.execute.side_effect = (None, None, RuntimeError("write failed"))
 
@@ -889,7 +968,7 @@ def test_unbound_authority_never_invents_a_tenant() -> None:
     row is allowed to reach here tenant-less is the PRODUCER's obligation
     (ruling item 4); this seam's obligation is only that it invents nothing.
     """
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -907,7 +986,7 @@ def test_unbound_authority_query_is_not_refused_and_is_not_narrowed() -> None:
     upsert, so a refusal here alone was enough to DLQ the whole event.
     """
     target = projection_database_target(
-        "delegation_events", schema="tenant", access="read_write"
+        "delegation_events", schema="public", access="read_write"
     )
     conn, cursor = _connection("tenant_projection_writer")
 
@@ -927,7 +1006,7 @@ def test_bound_authority_still_overrides_nothing_but_verifies_everything() -> No
     tenant, but it gets there by verification rather than by substitution.
     """
     tenant_id = uuid4()
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, cursor = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):
@@ -944,7 +1023,7 @@ def test_bound_authority_still_overrides_nothing_but_verifies_everything() -> No
 
 def test_bound_authority_still_fails_closed_on_a_mismatched_tenant() -> None:
     """Regression guard: decoupling must not weaken the bound-authority path."""
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
 
     with patch("psycopg2.connect") as connect:
         adapter = _verified_adapter(target, uuid4())
@@ -960,7 +1039,7 @@ def test_bound_authority_still_fails_closed_on_a_mismatched_tenant() -> None:
 
 def test_unbound_tenant_operation_still_honours_the_closed_adapter_guard() -> None:
     """Dropping the authority precondition must not drop the lifecycle one."""
-    target = projection_database_target("delegation_events", schema="tenant")
+    target = projection_database_target("delegation_events", schema="public")
     conn, _ = _connection("tenant_projection_writer")
 
     with patch("psycopg2.connect", return_value=conn):

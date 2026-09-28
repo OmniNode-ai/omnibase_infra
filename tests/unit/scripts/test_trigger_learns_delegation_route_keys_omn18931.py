@@ -165,3 +165,27 @@ def test_a_genuinely_unknown_lane_key_is_still_refused(tmp_path: Path) -> None:
 
     with pytest.raises(Exception, match=r"delegation_fault_route|Extra inputs"):
         mod.load_ci_bus_overlay(_overlay(tmp_path, {"dogfood": lane}))
+
+
+@pytest.mark.unit
+def test_topology_runtime_environment_is_learned_before_it_lands(
+    tmp_path: Path,
+) -> None:
+    """OMN-18933: the dev lane's topology names ``runtime_environment: local``.
+
+    Learned here first for the same reason as the three keys above: omnimarket
+    declares it only after this model accepts it.
+    """
+    dev = _dev_lane()
+    dev["broker_topology"] = {
+        "external_bootstrap_servers": "example.invalid:19092",
+        "internal_bootstrap_servers": "redpanda:9092",
+        "runtime_environment": "local",
+    }
+    mod = _import_trigger_module()
+
+    model = mod.load_ci_bus_overlay(_overlay(tmp_path, {"dev": dev}))
+
+    topology = model.lanes["dev"].broker_topology
+    assert topology is not None
+    assert topology.runtime_environment == "local"

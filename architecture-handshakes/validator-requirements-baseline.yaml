@@ -69,9 +69,6 @@ classification:
     pre_commit: backlog
     ci_workflow: backlog
     tracking: OMN-9048
-  spdx-headers:
-    ci_workflow: backlog
-    tracking: OMN-9048
   stub-implementations:
     ci_workflow: backlog
     tracking: OMN-9048
@@ -136,9 +133,6 @@ gaps:
   - repo: omnibase_infra
     validator: single-class-per-file
     kind: MISSING_PRE_COMMIT
-  - repo: omnibase_infra
-    validator: spdx-headers
-    kind: MISSING_CI_WORKFLOW
   - repo: omnibase_infra
     validator: stub-implementations
     kind: MISSING_CI_WORKFLOW

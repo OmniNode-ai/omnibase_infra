@@ -30,7 +30,9 @@ class ModelStandInDelegateRequest(BaseModel):
     source: Literal["claude-code", "stand-in-source"]
     correlation_id: UUID = Field(default_factory=uuid4)
     max_tokens: int | None = Field(default=None, gt=0)
-    quality_contract_mode: Literal["probe_extend", "probe_replace"] = "probe_extend"
+    quality_contract_mode: Literal["extend_task_class", "replace_task_class"] = (
+        "extend_task_class"
+    )
     acceptance_criteria: tuple[str, ...] = ()
     response_contract: dict[str, object] | None = None
     system_prompt: str | None = None

@@ -151,17 +151,16 @@ _TOPOLOGY_PROFILE_LINE = re.compile(
     re.MULTILINE,
 )
 
+# OMN-17887: no `tenant` schema -- the TENANT domain's schema is `public`.
 _EXPECTED_SCHEMAS = {
     "action_authorization_claim": EnumDatabaseSchemaDomain.OMNINODE_INTERNAL,
     "public": EnumDatabaseSchemaDomain.TENANT,
-    "tenant": EnumDatabaseSchemaDomain.TENANT,
     "omninode_internal": EnumDatabaseSchemaDomain.OMNINODE_INTERNAL,
     "platform_catalog": EnumDatabaseSchemaDomain.PLATFORM_CATALOG,
 }
 _EXPECTED_SCHEMA_OWNERS = {
     "action_authorization_claim": "owner_omninode_internal",
     "public": "owner_onex_tenant",
-    "tenant": "owner_onex_tenant",
     "omninode_internal": "owner_omninode_internal",
     "platform_catalog": "owner_platform_catalog",
 }

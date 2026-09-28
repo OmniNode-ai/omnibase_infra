@@ -26,22 +26,22 @@
 #   this one proves the chain is alive in the lane. Both are needed and
 #   neither substitutes for the other.
 #
-# WHY SELF-HOSTED omnibase-deploy
-#   Same reasoning as dev-lane-liveness.yml (OMN-15190), and the same fate
-#   boundary: the watched thing is compose project `omnibase-infra`; the
-#   watcher is a runner in a different project on the same host. The lane's
-#   ingress (8085) and broker (19092) are host-published ports on the
-#   tailnet, unreachable from GitHub-hosted compute, so an ubuntu-latest job
-#   could only ever assert "I cannot see it."
+# WHERE IT RUNS, AND WHICH LANE IT GRADES (OMN-19894)
+#   The lane's ingress, gateway, broker and deploy agent are lab-network ports,
+#   unreachable from GitHub-hosted compute, so the job is self-hosted. It runs
+#   on any runner of the pool the deployment overlay names
+#   (vars.LAB_PROBE_RUNS_ON_JSON) and grades the first lane of the overlay's
+#   ordered list (vars.LAB_LANES_JSON) whose ingress and gateway both answer,
+#   at the addresses the overlay declares; the deploy agent it reads is that
+#   lane's own declared one. No host label or address is written here
+#   (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check must not
+#   rely on one machine, and resolves its target through the chain of
+#   responders). No lane answering is RED naming each lane tried, never a skip.
 #
-#   `omnibase-deploy` is the ONE runner carrying the host-gateway alias
-#   (docker/docker-compose.runners.yml `extra_hosts`), which is what makes
-#   `host.docker.internal` resolve to the lane's published ports. Inside any
-#   runner container `localhost` is the container itself.
-#
-#   Residual, stated rather than hidden: if the whole .201 host dies this
-#   job is never scheduled and reports nothing. runner-fleet-canary.yml runs
-#   on GitHub-hosted compute and covers that case.
+#   Until OMN-19894 the job was pinned to the .201 verify runner and reached
+#   the lane through that host's docker gateway alias, so if .201 was down it
+#   queued and reported nothing. It never read the lane's docker daemon: every
+#   leg is a network read (HTTP, the declared broker, the declared DSNs).
 #
 # EXPECTED RED AT LANDING TIME
 #   OMN-16767's fix (omnibase_infra#2937) had NOT landed and the dev lane
@@ -82,7 +82,7 @@
 #   summary now makes that reading impossible.
 #
 # WHAT OMN-17926 CHANGED — THE BROKER ADDRESS IS DECLARED, NOT LITERAL
-#   Both broker legs defaulted to the literal `host.docker.internal:19092`.
+#   Both broker legs defaulted to a literal Docker host-gateway alias on 19092.
 #   From 2026-09-07T17:44Z that took 25 consecutive runs red with
 #   `quarantine_probe_failed`, every one of which had ALREADY fired its
 #   delegation successfully — a live chain reported unreadable.
@@ -93,9 +93,9 @@
 #   between, at ~16:40Z, OMN-18012 Phase B enabled SASL/SCRAM-SHA-256 on the
 #   .201 dev-lane Redpanda EXTERNAL listener — SASL over PLAINTEXT, no TLS. A
 #   plaintext client is disconnected during that handshake, which aiokafka
-#   reports as `Unable to bootstrap from [('host.docker.internal', 19092, ...)]`.
+#   reports as `Unable to bootstrap from [(<the gateway alias>, 19092, ...)]`.
 #
-#   An address literal was the wrong shape twice over. `host.docker.internal`
+#   An address literal was the wrong shape twice over. The gateway alias
 #   resolves only through this runner's `extra_hosts: host-gateway` mapping,
 #   so two runners reading the same string reach different machines; and an
 #   address carries no TRANSPORT, so nothing told the client the listener had
@@ -126,13 +126,13 @@ on:
   workflow_dispatch:
     inputs:
       probe_url:
-        description: 'Runtime ingress base URL. Used only when gateway_url is empty; that route carries no tenant (OMN-18421).'
+        description: 'Runtime ingress base URL override. Empty uses the resolved lane''s ingress_url.'
         required: false
-        default: 'http://host.docker.internal:8085'
+        default: ''
       gateway_url:
-        description: 'Tenant-bearing submission route (onex-api on the lane). Empty falls back to the tenant-less /skill ingress — see OMN-18421.'
+        description: 'Tenant-bearing submission route override. Empty uses the resolved lane''s gateway_url.'
         required: false
-        default: 'http://host.docker.internal:8090'
+        default: ''
       task_type:
         description: 'Delegation class to fire (see omnidash shared/contracts/delegation-task-types.json).'
         required: false
@@ -153,6 +153,10 @@ on:
         description: 'Override the declared broker for the TERMINAL readback (OMN-16025 link 4). Leave empty to use the lane declaration; a Docker-Desktop host alias is refused (OMN-17926).'
         required: false
         default: ''
+      deploy_wait_seconds:
+        description: 'Total seconds the run may wait for a dev-lane deploy to converge, shared by the pre-fire wait and the wait before the single retry (OMN-19811).'
+        required: false
+        default: '2400'
 
 concurrency:
   # A canary must never race itself: two overlapping probes make the
@@ -170,28 +174,19 @@ env:
 jobs:
   chain-canary:
     name: Chain Canary (dev lane)
-    # See "WHY SELF-HOSTED" above before changing this.
-    # OMN-18408: `omnibase-verify`, not `omnibase-deploy`. Same lab host,
-    # same docker socket and same `host.docker.internal` gateway -- the
-    # reason the job is self-hosted at all is unchanged. What changed is
-    # WHICH container serves it: `omnibase-deploy` has exactly one member,
-    # which also runs the release-train deploy, so every scheduled probe
-    # queued behind it (12 queued + 1 in progress at 2026-09-15T20:00Z).
-    # This job writes nothing and needs no private OMNI_HOME clone, so it
-    # belongs on the read-only verify runner. Do not move it back.
-    # OMN-18408: `host-201` is REQUIRED alongside `omnibase-verify`, and is not
-    # decoration. `omnibase-verify` names a runner CLASS (read-only probe
-    # runner); it does not name a HOST. On 2026-09-16 a second verify-class
-    # runner, omninode-mini-runner-1, came online on another lab host carrying
-    # `self-hosted,omnibase-verify,arch-arm64` -- which makes it a legal match
-    # for a bare `[self-hosted, omnibase-verify]`. This job probes the .201
-    # lane's own docker daemon through that host's gateway alias, so a run
-    # placed anywhere else cannot see the lane and reports it unreachable: a
-    # permanently-red check is a disabled check. `host-201` is carried only by
-    # the .201 verify runner, so the pair fails SAFE -- if that runner is down
-    # the job queues rather than running somewhere it cannot observe anything.
-    runs-on: [self-hosted, omnibase-verify, host-201]
-    timeout-minutes: 25
+    # See "WHERE IT RUNS" above before changing this. OMN-18408 moved the job
+    # off the single deploy runner; OMN-19894 moved it off the one host.
+    runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
+    # OMN-19811: 25 -> 65. The probe itself still fits the old 25 (setup, a
+    # 120 s budget and its readbacks, at most twice). The added 40 minutes is
+    # the deploy_wait_seconds default of 2400 s, spent only when the deploy
+    # agent reports a deploy around the probe. 2400 s, not one mean job
+    # (~937 s): the lab run of this change (36279784915, 2026-09-26T23:33Z)
+    # met two deploys back to back (278ab2e2 settling, then 3d3f4b1a) and a
+    # 1200 s budget ran out mid-rebuild. config/lab_probe_windows.yaml carries
+    # the same number and scripts/ci/check_lab_probe_windows.py refuses a
+    # disagreement.
+    timeout-minutes: 65
 
     steps:
       - name: Checkout omnibase_infra
@@ -344,15 +339,47 @@ jobs:
                   handle.write(f'{key}={value}\n')
           "
 
+      # OMN-19894: the lane this run grades is the first lane of the
+      # overlay's ordered list (vars.LAB_LANES_JSON) whose ingress AND gateway
+      # both answer. Every lane address below is that lane's own declaration.
+      - name: Resolve the lab lane through the overlay's chain of responders
+        uses: ./.github/actions/resolve-lab-lane
+        with:
+          lanes-json: ${{ vars.LAB_LANES_JSON }}
+          require: ingress_url gateway_url
+
+      # OMN-19811. Run 36202173467 (2026-09-25T23:44Z) went RED with
+      # terminal_missing because deploy-agent job 193cfeda recreated
+      # omninode-runtime inside the probe's 120 s budget, and nothing here
+      # knew a deploy was in progress. The probe now reads the deploy agent
+      # before it fires and again when an attempt ends terminal_missing.
+      #
+      # OMN-19894: the agent is the one the resolved lane declares
+      # (deploy_agent_url in its overlay entry), so a run on any runner reads
+      # the agent of the lane it grades, never the agent of the host it sits on.
+      #
+      # Deliberately NOT fail-loud, with the same asymmetry as the DSN steps
+      # above: an undeclared agent means the probe has no deploy evidence,
+      # which the node reports as deploy_window.status=not_configured and
+      # which can never retry. Killing the job instead would throw away the
+      # chain verdict itself.
+      - name: Resolve the lane's deploy agent surface
+        run: |
+          set -euo pipefail
+          if [ -z "${LANE_DEPLOY_AGENT_URL:-}" ]; then
+            echo "::warning::lane ${LANE_NAME} declares no deploy_agent_url; deploy_window will report not_configured and no deploy retry is available."
+            exit 0
+          fi
+          echo "lane ${LANE_NAME} deploy agent: ${LANE_DEPLOY_AGENT_URL}"
+          echo "DEPLOY_AGENT_URL=${LANE_DEPLOY_AGENT_URL}" >> "${GITHUB_ENV}"
+
       - name: Fire one live delegation through the dev-lane ingress
         env:
-          # Inside the deploy-runner container `localhost` is the container
-          # itself, so a localhost probe would hit the wrong network
-          # namespace and manufacture a false RED. Set explicitly here
-          # rather than inheriting the live container's compose env, which
-          # is only refreshed on recreate (OMN-14958 / OMN-14900) — same
-          # precedent as dev-lane-liveness.yml.
-          PROBE_URL: ${{ github.event.inputs.probe_url || 'http://host.docker.internal:8085' }}
+          # The resolved lane's declared addresses (LANE_INGRESS_URL and
+          # LANE_GATEWAY_URL, exported by the resolve step) unless a dispatch
+          # overrides them; combined in the run script below. Never localhost:
+          # inside a runner container that is the container itself (OMN-14958).
+          PROBE_URL_OVERRIDE: ${{ github.event.inputs.probe_url }}
           # OMN-18421: THE TENANT-BEARING SUBMISSION ROUTE.
           #
           # Why this probe moved off `/skill`. That ingress reads
@@ -369,14 +396,13 @@ jobs:
           # reported PROBE-GREEN on a chain that projected nothing while the
           # DLQ Depth Monitor went red on every run.
           #
-          # 8090 and not 8085: the lane's onex-api publishes its host port
-          # there (docker/docker-compose.dev-lane.yml), reachable from this
-          # runner by the same `host.docker.internal` host-gateway alias the
-          # 8085 probe already uses. No new network exposure was created for
-          # this and none is needed.
-          GATEWAY_URL: ${{ github.event.inputs.gateway_url || 'http://host.docker.internal:8090' }}
+          # The gateway is the lane's onex-api, at the address its overlay
+          # entry declares as gateway_url.
+          GATEWAY_URL_OVERRIDE: ${{ github.event.inputs.gateway_url }}
           TASK_TYPE: ${{ github.event.inputs.task_type || 'test' }}
           BUDGET_MS: ${{ github.event.inputs.budget_ms || '120000' }}
+          # OMN-19811: bounded by timeout-minutes above; see that comment.
+          DEPLOY_WAIT_SECONDS: ${{ github.event.inputs.deploy_wait_seconds || '2400' }}
           # Empty means "use the lane declaration", resolved into
           # KAFKA_BOOTSTRAP_SERVERS by the step above. An explicit override is
           # still honoured, and the request model refuses it if it names a
@@ -487,6 +513,9 @@ jobs:
           # KAFKA_BOOTSTRAP_SERVERS means the declaration step did not run, and
           # an empty broker makes both legs report NOT_CONFIGURED rather than
           # silently probing a guess.
+          PROBE_URL="${PROBE_URL_OVERRIDE:-${LANE_INGRESS_URL:-}}"
+          GATEWAY_URL="${GATEWAY_URL_OVERRIDE:-${LANE_GATEWAY_URL:-}}"
+          echo "lane:               ${LANE_NAME:-<unresolved>}"
           QUARANTINE_BOOTSTRAP="${QUARANTINE_BOOTSTRAP_OVERRIDE:-${KAFKA_BOOTSTRAP_SERVERS:-}}"
           TERMINAL_BOOTSTRAP="${TERMINAL_BOOTSTRAP_OVERRIDE:-${KAFKA_BOOTSTRAP_SERVERS:-}}"
           echo "quarantine broker: ${QUARANTINE_BOOTSTRAP:-<unset>}"
@@ -503,6 +532,7 @@ jobs:
           echo "gateway key var:    CHAIN_CANARY_GATEWAY_API_KEY"
           echo "projection dsn var: ${CHAIN_CANARY_PROJECTION_DSN_ENV:-<undeclared>}"
           echo "ledger dsn var:     ${CHAIN_CANARY_LEDGER_DSN_ENV:-<undeclared>}"
+          echo "deploy agent:       ${DEPLOY_AGENT_URL:-<unresolved>} (wait ${DEPLOY_WAIT_SECONDS}s)"
           uv run onex skill chain_canary \
             --probe-url "${PROBE_URL}" \
             --gateway-url "${GATEWAY_URL}" \
@@ -514,6 +544,8 @@ jobs:
             --projection-dsn-env "${CHAIN_CANARY_PROJECTION_DSN_ENV:-}" \
             --ledger-dsn-env "${CHAIN_CANARY_LEDGER_DSN_ENV:-}" \
             --expected-ledger-hops "${EXPECTED_LEDGER_HOPS}" \
+            --deploy-agent-url "${DEPLOY_AGENT_URL:-}" \
+            --deploy-wait-seconds "${DEPLOY_WAIT_SECONDS}" \
             > chain-canary-receipt.json
 
       - name: Publish receipt and set the verdict
@@ -604,6 +636,35 @@ jobs:
                       )
                   )
               lines.append("")
+
+          # OMN-19811: what the deploy agent said around the probe. A retried
+          # run's verdict is the RETRY's; the first attempt and the deploy job
+          # that separated the two are named here so neither is hidden.
+          deploy = result.get("deploy_window") or {}
+          if deploy:
+              ids = ", ".join(deploy.get("deploy_correlation_ids") or []) or "none"
+              block = [
+                  f"- status: `{deploy.get('status', '?')}` — {deploy.get('detail', '')}",
+                  f"- deploy agent: {deploy.get('agent_url') or 'not configured'}",
+                  f"- deploy job(s) in the first attempt's window: {ids}",
+                  f"- pre-fire deploy: {deploy.get('preflight_deploy_correlation_id') or 'none'}"
+                  f", queued {deploy.get('preflight_queued_commands')}"
+                  f" (waited {deploy.get('preflight_waited_seconds', 0):.0f}s,"
+                  f" converged={deploy.get('preflight_converged')})",
+              ]
+              if deploy.get("retried"):
+                  block.append(
+                      f"- first attempt `{deploy.get('first_attempt_verdict')}` "
+                      f"({deploy.get('first_attempt_probe_correlation_id')}); "
+                      "this receipt's verdict is the single retry's"
+                  )
+              lines += ["### Deploy window (OMN-19811)", "", *block, ""]
+              # Also to the job log: the step summary is not readable from
+              # `gh run view --log`, and the deploy evidence is what a reader
+              # of a red run needs first.
+              print("deploy window (OMN-19811):")
+              for entry in block:
+                  print(f"  {entry}")
 
           lines += [
               "### Receipt",

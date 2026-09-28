@@ -306,7 +306,10 @@ def test_the_workflow_opens_prs_only_behind_the_decision() -> None:
 def test_the_workflow_runs_where_the_census_is_meaningful() -> None:
     """The census describes the lab host's lanes; collecting it elsewhere is a lie."""
     body = _WORKFLOW.read_text(encoding="utf-8")
-    assert "runs-on: [self-hosted, omnibase-verify, host-201]" in body
+    # OMN-19894: beside the one host whose lanes it describes, named only by the
+    # overlay variable, never by a host label written in the workflow.
+    assert "runs-on: ${{ fromJSON(vars.LANE_CENSUS_RUNS_ON_JSON) }}" in body
+    assert "host-201" not in body
 
 
 def test_the_workflow_fails_rather_than_opening_a_pr_on_a_bad_collection() -> None:

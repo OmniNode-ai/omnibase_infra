@@ -1,0 +1,6 @@
+{
+  "schema_version": "runtime_lane.v1",
+  "lane_id": "local",
+  "roles": [],
+  "description": "Single-machine install"
+}

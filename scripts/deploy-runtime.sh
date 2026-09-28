@@ -2007,6 +2007,28 @@ restore_migration_tree_after_revert() {
 
 prune_old_deployments() {
     # Remove old deployment directories that exceed the retention limit.
+    #
+    # OMN-19910: a deployed/<version>/ directory can be bind-mounted by a
+    # DIFFERENT lane's running containers than the one invoking this prune.
+    # Each lane (dev, stability-test, prepr-1, prepr-2, lakshman, ...) writes
+    # its own registry.<compose_project>.json, and the judge lane has none at
+    # all. Checking only this invocation's own REGISTRY_FILE let a routine
+    # redeploy on one lane prune a version another lane's containers were
+    # still serving out of (observed: a stability-test redeploy pruned the
+    # keycloak bundle a judge-lane container still mounted); Docker then
+    # recreated the missing bind-mount source as an empty root-owned
+    # directory on the next container restart, and the affected lane's
+    # containers crash-looped or served out of an empty tree.
+    #
+    # Fix, two layers:
+    #   1. Union every lane's registered active_path (cheap, covers the
+    #      common "still the active version somewhere" case).
+    #   2. Before any delete, ask docker directly whether a live container
+    #      still bind-mounts the directory (containers_bound_to_deploy_dir,
+    #      OMN-17287) -- this is the check that also protects a lane with NO
+    #      registry file (the judge lane), and the one that protects a
+    #      version a lane's OWN registry has already moved past but whose
+    #      containers have not yet been recreated against the new one.
     local deployed_root="${DEPLOY_ROOT}/deployed"
 
     if [[ ! -d "${deployed_root}" ]]; then
@@ -2015,10 +2037,19 @@ prune_old_deployments() {
 
     log_step "Prune Old Deployments"
 
-    # Determine active deployment path from registry
-    local active_path=""
+    # Union of every lane's registered active deployment path.
+    local active_paths=()
+    local registry_file registry_active
+    for registry_file in "${DEPLOY_ROOT}"/registry.*.json; do
+        [[ -f "${registry_file}" ]] || continue
+        registry_active="$(jq -r '.deploy_path // empty' "${registry_file}" 2>/dev/null || true)"
+        [[ -n "${registry_active}" ]] && active_paths+=("${registry_active}")
+    done
+    # This invocation's own REGISTRY_FILE may not match the glob above (e.g. a
+    # caller override in tests) -- always include it explicitly too.
     if [[ -f "${REGISTRY_FILE}" ]]; then
-        active_path="$(jq -r '.deploy_path // empty' "${REGISTRY_FILE}" 2>/dev/null || true)"
+        registry_active="$(jq -r '.deploy_path // empty' "${REGISTRY_FILE}" 2>/dev/null || true)"
+        [[ -n "${registry_active}" ]] && active_paths+=("${registry_active}")
     fi
 
     # Collect all deployment directories sorted by modification time,
@@ -2072,9 +2103,31 @@ prune_old_deployments() {
             continue
         fi
 
-        # Never remove the currently active deployment
-        if [[ "${deploy_dir}" == "${active_path}" ]]; then
-            log_info "  Skipping active deployment: ${deploy_dir}"
+        # Never remove a deployment any lane's registry still names active.
+        # (Guarded expansion: `active_paths` can legitimately be empty -- no
+        # registry files yet, or none with a deploy_path -- and under
+        # `set -u` an unguarded "${active_paths[@]}" is an unbound-variable
+        # error on bash < 4.4.)
+        local is_registered_active=false
+        local p
+        for p in "${active_paths[@]+"${active_paths[@]}"}"; do
+            if [[ "${deploy_dir}" == "${p}" ]]; then
+                is_registered_active=true
+                break
+            fi
+        done
+        if [[ "${is_registered_active}" == true ]]; then
+            log_info "  Skipping deployment registered active by a lane: ${deploy_dir}"
+            continue
+        fi
+
+        # Never remove a deployment a live container still bind-mounts,
+        # regardless of what any registry says (OMN-17287 helper; this is
+        # also the ONLY guard for a lane with no registry file at all).
+        local mounted_by
+        mounted_by="$(containers_bound_to_deploy_dir "${deploy_dir}")"
+        if [[ -n "${mounted_by}" ]]; then
+            log_warn "  Skipping deployment still bind-mounted by live container(s) [$(tr '\n' ' ' <<<"${mounted_by}")]: ${deploy_dir}"
             continue
         fi
 

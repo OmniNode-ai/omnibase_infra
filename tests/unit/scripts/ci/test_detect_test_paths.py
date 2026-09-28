@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from scripts.ci.detect_test_paths import (
     CI_CONTRACT_TEST_ROOT,
     COLLOCATED_TEST_ROOTS,
+    PRE_COMMIT_CONFIG_PATH,
     TEST_FILE_PATTERNS,
     compute_selection,
     is_collectable_test_file_name,
@@ -100,6 +101,14 @@ def test_workflow_only_change_selects_ci_tests_alone() -> None:
         adjacency_path=ADJ,
     )
     assert paths == ["tests/ci/"]
+
+
+def test_precommit_config_change_resolves_to_ci_and_unit_tests() -> None:
+    paths = resolve_test_paths(
+        [PRE_COMMIT_CONFIG_PATH],
+        adjacency_path=ADJ,
+    )
+    assert paths == ["tests/ci/", "tests/unit/"]
 
 
 def test_ci_test_change_selects_ci_tests() -> None:
@@ -226,6 +235,36 @@ def test_small_change_returns_smart_selection_no_reason() -> None:
     # tests/unit/scripts/ci/test_split_count_sizing_omn18542.py.
     assert 1 <= selection.split_count <= 15
     assert selection.matrix == list(range(1, selection.split_count + 1))
+
+
+def test_precommit_config_change_selects_ci_and_unit_tests() -> None:
+    selection = compute_selection(
+        changed_files=[PRE_COMMIT_CONFIG_PATH],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+        event_name="pull_request",
+        feature_flag_enabled=True,
+    )
+    assert selection.is_full_suite is False
+    assert CI_CONTRACT_TEST_ROOT in selection.selected_paths
+    assert "tests/unit/" in selection.selected_paths
+
+
+def test_precommit_config_plus_source_keeps_both_test_mappings() -> None:
+    selection = compute_selection(
+        changed_files=[
+            PRE_COMMIT_CONFIG_PATH,
+            "src/omnibase_infra/cli/foo.py",
+        ],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+        event_name="pull_request",
+        feature_flag_enabled=True,
+    )
+    assert selection.is_full_suite is False
+    assert CI_CONTRACT_TEST_ROOT in selection.selected_paths
+    assert "tests/unit/" in selection.selected_paths
+    assert "tests/unit/cli/" in selection.selected_paths
 
 
 def test_no_matching_non_doc_files_falls_back_to_unit_root() -> None:

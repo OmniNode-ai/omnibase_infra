@@ -10,9 +10,24 @@ from pathlib import Path
 # Compose YAML values are heterogeneous dicts. We use dict[str, object]
 # instead of dict[str, Any] to satisfy the ONEX Any-type ban.
 from omnibase_infra.docker.catalog.enum_infra_layer import EnumInfraLayer
-from omnibase_infra.docker.catalog.resolver import ResolvedStack
+from omnibase_infra.docker.catalog.resolver import DEFAULT_PROJECT, ResolvedStack
 
 _RUNTIME_IMAGE_BUILD_SERVICE = "omninode-runtime"
+_RUNTIME_IMAGE = "runtime:latest"
+_DEFAULT_NETWORK = "omnibase-infra-network"
+
+
+def _scoped(project: str, name: str) -> str:
+    """Project-scope one Docker object name (OMN-19496).
+
+    The default project keeps every historical name byte-for-byte, so no
+    existing render changes. Any other project prefixes the name, which is what
+    lets a laptop profile run beside another compose project on one Docker host
+    without sharing a container, network, volume or image tag with it.
+    """
+    if project == DEFAULT_PROJECT:
+        return name
+    return f"{project}-{name}"
 
 
 # OMN-18478. The PostToolUse secret redactor rewrites Bash tool OUTPUT, replacing
@@ -101,7 +116,7 @@ def _render_optional_directory_bind_mount(
     return f"${{{source_env}:-{_ABSENT_OPTIONAL_BIND_SOURCE}}}:{container_path}{mode}"
 
 
-def _runtime_image_build() -> dict[str, object]:
+def _runtime_image_build(project: str = DEFAULT_PROJECT) -> dict[str, object]:
     """Return the canonical build stanza for the shared runtime image.
 
     ``OMNI_HOME`` is deliberately absent (OMN-16852). It is an internal build
@@ -122,7 +137,7 @@ def _runtime_image_build() -> dict[str, object]:
             "VCS_REF": "${VCS_REF:-}",
             "GIT_SHA": "${GIT_SHA:-unknown}",
             "RUNTIME_SOURCE_HASH": "${RUNTIME_SOURCE_HASH:-unknown}",
-            "COMPOSE_PROJECT": "${COMPOSE_PROJECT:-omnibase-infra}",
+            "COMPOSE_PROJECT": f"${{COMPOSE_PROJECT:-{project}}}",
         },
     }
 
@@ -132,6 +147,7 @@ def generate_compose(
 ) -> dict[str, object]:
     """Generate a docker-compose dict from a resolved stack."""
     configured_environment = environment or {}
+    project = resolved.project
     services: dict[str, dict[str, object]] = {}
     all_volumes: set[str] = set()
     all_extra_networks: set[str] = set()
@@ -139,14 +155,25 @@ def generate_compose(
     for name, manifest in resolved.manifests.items():
         svc: dict[str, object] = {}
 
-        # Image
-        svc["image"] = manifest.image
-        if name == _RUNTIME_IMAGE_BUILD_SERVICE and manifest.image == "runtime:latest":
-            svc["build"] = _runtime_image_build()
+        # Image. The locally built runtime image is project-scoped so a second
+        # project's build never retags the image another project runs.
+        if manifest.image == _RUNTIME_IMAGE:
+            svc["image"] = _scoped(project, manifest.image)
+        else:
+            svc["image"] = manifest.image
+        if name == _RUNTIME_IMAGE_BUILD_SERVICE and manifest.image == _RUNTIME_IMAGE:
+            svc["build"] = _runtime_image_build(project)
 
-        # Container name
-        if manifest.container_name:
+        # Container name. A non-default project names every container after
+        # the project and the service, never after the historical name.
+        if project != DEFAULT_PROJECT:
+            svc["container_name"] = _scoped(project, name)
+        elif manifest.container_name:
             svc["container_name"] = manifest.container_name
+
+        # Entrypoint
+        if manifest.entrypoint is not None:
+            svc["entrypoint"] = list(manifest.entrypoint)
 
         # Command
         if manifest.command:
@@ -176,6 +203,8 @@ def generate_compose(
 
         # Volumes
         volumes = list(manifest.volumes)
+        if manifest.layer == EnumInfraLayer.RUNTIME:
+            volumes.extend(resolved.injected_volumes)
         for mount in manifest.optional_directory_bind_mounts:
             volumes.append(
                 _render_optional_directory_bind_mount(
@@ -209,7 +238,7 @@ def generate_compose(
             svc["tmpfs"] = list(manifest.tmpfs)
 
         # Networks
-        networks: list[str] = ["omnibase-infra-network"]
+        networks: list[str] = [_DEFAULT_NETWORK]
         if manifest.extra_networks:
             networks.extend(manifest.extra_networks)
             all_extra_networks.update(manifest.extra_networks)
@@ -273,25 +302,30 @@ def generate_compose(
 
     # Build top-level networks block
     top_networks: dict[str, object] = {
-        "omnibase-infra-network": {
-            "name": "omnibase-infra-network",
+        _DEFAULT_NETWORK: {
+            "name": _scoped(project, "network")
+            if project != DEFAULT_PROJECT
+            else _DEFAULT_NETWORK,
             "driver": "bridge",
         }
     }
     for net in sorted(all_extra_networks):
-        if net == "omnibase-infra-network":
+        if net == _DEFAULT_NETWORK:
             continue  # never overwrite the default bridge network as external
         top_networks[net] = {"name": net, "external": True}
 
     # Build top-level compose dict
     compose: dict[str, object] = {
-        "name": "omnibase-infra",
+        "name": project,
         "services": services,
         "networks": top_networks,
     }
 
-    # Volumes
+    # Volumes. Declared names are global to the Docker host, so a non-default
+    # project scopes them; the keys services reference stay unchanged.
     if all_volumes:
-        compose["volumes"] = {v: {"name": v} for v in sorted(all_volumes)}
+        compose["volumes"] = {
+            v: {"name": _scoped(project, v)} for v in sorted(all_volumes)
+        }
 
     return compose

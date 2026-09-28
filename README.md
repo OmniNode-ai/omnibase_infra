@@ -120,6 +120,40 @@ error before doing anything destructive. They also detect a missing
 `~/.omnibase/.env` and point at remediation rather than failing with a stack
 trace. The full first-time bootstrap sequence is not part of this repository.
 
+### Laptop profile: the stack plus your own runtime
+
+The `local` catalog bundle runs postgres, redpanda, valkey, the migrations and
+your own ONEX runtime (main and effects, with omnimarket installed) in
+containers, under the compose project `omnibase-infra-local`. It needs Docker
+with Compose v2, `uv`, `make`, `openssl` and `git`, and no credentials beyond
+two passwords it generates. It publishes host ports 5436, 19092, 16379, 8085
+and 8086.
+
+```bash
+git clone https://github.com/OmniNode-ai/omnibase_infra.git
+cd omnibase_infra
+
+# Writes ~/.omnibase/local.env (two generated passwords) and
+# ~/.omnibase/local.bifrost.yaml (the model your runtime delegates to).
+make local-env
+# Edit the ONE line marked model_endpoint in ~/.omnibase/local.bifrost.yaml:
+# the /v1/chat/completions URL of an OpenAI-compatible server that serves the
+# model id omnimarket's routing contract declares (Qwen3.8-27B today).
+
+make up-local        # builds the runtime image and boots everything
+make status-local    # migration gate, both runtime /health bodies, delegate consumer
+make delegate-local PROMPT="Reply with exactly one word: hello"
+make down-local      # stop (keeps data); make down-local-volumes deletes it
+```
+
+A cold boot provisions the broker's topics before the main runtime reports
+`healthy`; allow several minutes. `make delegate-local` prints one JSON result
+and the path of the run's `receipt.json` inside the effects container
+(`docker exec omnibase-infra-local-runtime-effects cat <path>`). The delegation
+is projected to `delegation_events` in the local `omnidash_analytics` database.
+Every service connects as the postgres superuser, so row-level security is not
+exercised by this profile.
+
 ### Development and testing
 
 ```bash

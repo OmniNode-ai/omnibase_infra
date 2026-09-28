@@ -47,6 +47,7 @@ from omnibase_infra.runtime.health import runtime_lane_identity
 from omnibase_infra.runtime.health.runtime_lane_identity import (
     ENV_RUNTIME_LANE,
     KNOWN_LANES,
+    resolve_declared_runtime_lane,
     resolve_runtime_lane,
 )
 
@@ -96,15 +97,21 @@ DEV_LANE_VALUE = "compose-dev"
 #: belongs to the parent ticket, not to this repair.
 LANE_SPEAKING_SERVICE = "omninode-runtime"
 
-#: Overlays for lanes the lab lane-health vocabulary deliberately excludes. A
-#: runtime on a read-only surface publishing a lab-lane-keyed verdict is what
-#: ``runtime_lane_identity``'s closed value set exists to refuse, so these must
-#: declare nothing at all.
-EXCLUDED_LANE_OVERLAYS = (
-    DOCKER_DIR / "docker-compose.stability-test.yml",
-    DOCKER_DIR / "docker-compose.judge.yml",
-    DOCKER_DIR / "docker-compose.lakshman.yml",
-)
+#: Overlays for lanes the lab lane-health vocabulary deliberately excludes
+#: (OMN-18769 AC6), mapped to the ONE lane each may declare, if any.
+#:
+#: Until OMN-19408 these had to declare nothing at all. That left the
+#: stability-test runtime unable to say what it was, so a lab-only node could
+#: not be kept off it, attached there, and held the lane unhealthy. A lane may
+#: now name ITSELF -- a registered, non-lab lane -- because the health emitter
+#: keys only a lab lane: the declaration controls what may attach, never which
+#: lab row a verdict lands on. Naming a LAB lane from one of these overlays is
+#: still refused, and so is naming another lane.
+EXCLUDED_LANE_OVERLAYS = {
+    DOCKER_DIR / "docker-compose.stability-test.yml": "stability-test",
+    DOCKER_DIR / "docker-compose.judge.yml": "judge",
+    DOCKER_DIR / "docker-compose.lakshman.yml": "lakshman",
+}
 
 
 class _TolerantLoader(yaml.SafeLoader):
@@ -246,21 +253,57 @@ def test_exactly_one_dev_lane_service_speaks_for_the_lane() -> None:
     )
 
 
-@pytest.mark.parametrize("overlay", EXCLUDED_LANE_OVERLAYS, ids=lambda path: path.stem)
-def test_excluded_lanes_declare_no_runtime_lane(overlay: Path) -> None:
-    """A read-only surface may not publish a lab-lane-keyed verdict."""
+@pytest.mark.parametrize(
+    ("overlay", "own_lane"),
+    sorted(EXCLUDED_LANE_OVERLAYS.items()),
+    ids=lambda value: value.stem if isinstance(value, Path) else value,
+)
+def test_excluded_lanes_declare_only_their_own_non_lab_lane(
+    overlay: Path, own_lane: str
+) -> None:
+    """A read-only surface may name itself, and may never publish a lab-keyed verdict."""
     assert overlay.exists(), (
         f"{overlay.name} is gone, so this arm of the gate proves nothing -- "
         "re-point it at the lane overlays that exist"
     )
     declared = _lane_declarations(overlay)
 
-    assert not declared, (
-        f"{overlay.name} declares {ENV_RUNTIME_LANE} on {sorted(declared)}. "
-        "stability-test, judge and the collaborator lane are read-only "
-        "surfaces and are outside the lab lane-health vocabulary on purpose; a "
-        "runtime there publishing a lane-keyed health fact puts a row on a "
-        "dashboard that invites someone to act on a lane nobody may mutate."
+    for service, lane in declared.items():
+        assert lane == own_lane, (
+            f"{overlay.name} service {service} declares {ENV_RUNTIME_LANE}="
+            f"{lane!r}; this overlay may declare only its own lane {own_lane!r}"
+        )
+        assert resolve_runtime_lane({ENV_RUNTIME_LANE: lane}) is None, (
+            f"{overlay.name} declares {lane!r}, which the health emitter keys "
+            "onto a lab lane-health row. stability-test, judge and the "
+            "collaborator lane are outside that vocabulary on purpose "
+            "(OMN-18769 AC6)."
+        )
+
+
+def test_the_stability_test_main_runtime_names_its_lane() -> None:
+    """OMN-19408: the lane a lab-only node is kept off must be able to say so.
+
+    The auto-wiring ownership filter fails closed on a runtime that owns a
+    lane-scoped contract and declares no lane -- so without this declaration
+    the lab lane-health projection would stop attaching here only by turning
+    the runtime DEGRADED with a discovery error.
+    """
+    overlay = DOCKER_DIR / "docker-compose.stability-test.yml"
+    environments = _service_environments(overlay)
+    assert len(environments.get(LANE_SPEAKING_SERVICE, {})) > 1, (
+        "positive control: the stability-test main runtime's environment did "
+        "not parse, so an absence below would be a parse artifact"
+    )
+
+    declared = _lane_declarations(overlay)
+
+    assert declared == {LANE_SPEAKING_SERVICE: "stability-test"}, (
+        f"{overlay.name} declares {declared!r}; the main runtime must declare "
+        f"{ENV_RUNTIME_LANE}=stability-test (OMN-19408)"
+    )
+    assert resolve_declared_runtime_lane({ENV_RUNTIME_LANE: "stability-test"}) == (
+        "stability-test"
     )
 
 

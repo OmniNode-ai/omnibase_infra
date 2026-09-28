@@ -140,6 +140,10 @@ from omnibase_infra.cli.contract_registry import (
     field_vocabulary,
     node_input_model,
 )
+from omnibase_infra.cli.delegate_caller import (
+    DELEGATE_CALLER_LANE_METADATA_KEY,
+    resolve_delegate_caller,
+)
 from omnibase_infra.cli.delegate_lane import (
     DelegateLaneSelectionError,
     resolve_lane_target,
@@ -153,6 +157,12 @@ from omnibase_infra.cli.delegate_locus import (
     contract_terminal_topic,
     resolve_delegate_locus,
 )
+from omnibase_infra.cli.delegate_pre_publish_failure import (
+    DelegatePrePublishFailureError,
+    describe_pre_publish_failure,
+    pre_publish_failure_error,
+    pre_publish_failure_from_receipt,
+)
 from omnibase_infra.cli.delegate_queue_depth import (
     observe_delegate_queue_depth,
 )
@@ -160,6 +170,7 @@ from omnibase_infra.cli.delegate_terminal_resolver import (
     DelegateTerminalUnresolvedError,
     resolve_delegate_terminal,
 )
+from omnibase_infra.cli.model_delegate_caller import ModelDelegateCaller
 from omnibase_infra.cli.model_delegate_default_bus import ModelDelegateDefaultBus
 from omnibase_infra.cli.model_delegate_locus_decision import (
     ModelDelegateLocusDecision,
@@ -187,6 +198,7 @@ from omnibase_infra.cli.protocol_drift_guard_verdict import (
 )
 from omnibase_infra.cli.protocol_execution_budget import ProtocolExecutionBudget
 from omnibase_infra.cli.receipt_mode import (
+    capture_log_path,
     default_emit_socket_path,
     run_receipt_mode,
 )
@@ -224,6 +236,7 @@ __all__ = [
     "DelegateTimeoutExceededError",
     "build_backend_overrides",
     "resolve_default_bus",
+    "load_supported_criteria",
     "run_delegate",
     "validate_request_against_contract",
 ]
@@ -370,7 +383,15 @@ def _delegation_result(envelope: dict[str, object]) -> ModelDelegateTerminal | N
     ``onex node``/``onex skill`` and a failed proof run of an unrelated node
     must be ignored, not raised on.
 
+    OMN-19131: a run that never published has no terminal because none was
+    ever requested, and the sentence below would send the reader to the bus.
+    That run raises :class:`DelegatePrePublishFailureError` instead, which
+    says what it was. It subclasses the unresolved-terminal error, so every
+    catch site keeps catching it.
+
     Raises:
+        DelegatePrePublishFailureError: the delegation failed before its
+            command was published.
         DelegateTerminalUnresolvedError: the receipt IS a delegation and its
             terminal could not be resolved from any carrier field.
     """
@@ -385,6 +406,8 @@ def _delegation_result(envelope: dict[str, object]) -> ModelDelegateTerminal | N
         return None
     if DELEGATE_NODE_NAME not in str(result.get("workflow") or ""):
         return None
+    if pre_publish_failure_from_receipt(envelope) is not None:
+        raise DelegatePrePublishFailureError(pre_publish_failure_error(envelope))
 
     refusals: list[str] = []
     for field in _TERMINAL_CARRIER_FIELDS:
@@ -565,6 +588,21 @@ def _backend_pin_defect(
     escalation spend. It makes that spend impossible to mistake for the pinned
     run. Refusing to escalate off a pin at all is a change to the routing port
     in ``omnimarket`` and is not in this layer's gift.
+
+    OMN-19765: on a machine with a locally registered BYOK key, the local
+    path's ``substitute_local_byok_route`` (``omnimarket/routing/
+    local_byok_route.py``) replaces a HOUSE rung this CLI's pin named (e.g.
+    ``cloud-glm``) with the declared customer-paid rung (``byok-glm``) BEFORE
+    dispatch — a routing decision, not an escalation, and the FIRST and only
+    attempt still answers. Comparing ``served`` to the raw pin string alone
+    made that indistinguishable from a real escalation off the pin (run
+    ``86538bdd-0a35-47c6-98e1-b4d13ad39e55``, first-attempt success, exited 1
+    anyway). The attempt's own ``substituted_from_backend_id`` — set by the
+    routing layer that performed the substitution, never inferred here — names
+    which backend, if any, was substituted TO produce ``served``; the pin is
+    honoured when that equals the requested id, and still refused when no
+    substitution occurred or it substituted a DIFFERENT backend, which is what
+    keeps a real escalation refused.
     """
     if requested_backend_id is None:
         return None
@@ -572,7 +610,12 @@ def _backend_pin_defect(
         return None
     accepted = result.accepted_attempt
     served = (accepted.backend_id or "").strip() if accepted is not None else ""
-    if served == requested_backend_id:
+    substituted_from = (
+        (accepted.substituted_from_backend_id or "").strip()
+        if accepted is not None
+        else ""
+    )
+    if served == requested_backend_id or substituted_from == requested_backend_id:
         return None
     return (
         f"delegation was pinned to backend {requested_backend_id!r} but the "
@@ -644,21 +687,64 @@ def _receipt_evidence_requirements(
     return (False, response_contract is not None)
 
 
+def _pre_publish_failure_message(
+    exc: DelegatePrePublishFailureError,
+    envelope: dict[str, object],
+    *,
+    contract_path: Path | None,
+    payload_path: Path | None,
+    state_root: Path | None,
+) -> str:
+    """Name the refused field, the refusing model and the capture log (OMN-19131).
+
+    Falls back to the error's own sentence when the caller did not supply the
+    run's contract, payload and state root, so a caller without them still
+    never sees the unresolved-terminal sentence for a run that never published.
+    """
+    if contract_path is None or payload_path is None or state_root is None:
+        return str(exc)
+    return describe_pre_publish_failure(
+        envelope=envelope,
+        contract_path=contract_path,
+        payload_path=payload_path,
+        capture_log_path=capture_log_path(
+            state_root, DELEGATE_NODE_NAME, str(envelope.get("run_id"))
+        ),
+    )
+
+
 def _delegate_receipt_evidence_error(
     receipt: object,
     *,
     require_budget_evidence: bool = False,
     require_contract_evidence: bool = False,
     requested_backend_id: str | None = None,
+    contract_path: Path | None = None,
+    payload_path: Path | None = None,
+    state_root: Path | None = None,
 ) -> str | None:
-    """Return the evidence defect that must turn a delegate receipt into failure."""
+    """Return the evidence defect that must turn a delegate receipt into failure.
+
+    A run that failed before publish (OMN-19131) returns its cause here, so the
+    receipt on stdout is rewritten as FAILED with that cause rather than the
+    validator raising and erasing it.
+    """
     receipt_dump = getattr(receipt, "model_dump", None)
     if not callable(receipt_dump):
         return "delegate receipt is not a serializable typed result"
     envelope = receipt_dump(mode="json")
     if not isinstance(envelope, dict):
         return "delegate receipt did not serialize to an object"
-    result = _delegation_result(envelope)
+    try:
+        result = _delegation_result(envelope)
+    except DelegatePrePublishFailureError as exc:
+        return _pre_publish_failure_message(
+            exc,
+            envelope,
+            contract_path=contract_path,
+            payload_path=payload_path,
+            state_root=state_root,
+        )
     if result is None:
         return "delegate receipt carries no delegation terminal"
     try:
@@ -961,6 +1047,8 @@ def _write_local_run_files(
     requested_backend_id: str | None = None,
     broker: str = "",
     command_topic: str = "",
+    contract_path: Path | None = None,
+    payload_path: Path | None = None,
 ) -> None:
     """Persist local delegation output and the accepted route evidence.
 
@@ -1032,7 +1120,24 @@ def _write_local_run_files(
     # treating a generic fixture (or another node's result) as a malformed
     # delegation. A genuine delegation still fails closed below when route
     # evidence is absent.
-    result = _delegation_result(envelope)
+    try:
+        result = _delegation_result(envelope)
+    except DelegatePrePublishFailureError as exc:
+        # OMN-19131: the run never published, so there are no route files to
+        # write and no terminal was lost. Still RAISED, never returned quietly
+        # (the OMN-18569 guarantee), but carrying what refused the run: the
+        # field, the model and the capture log. ``run_receipt_mode`` puts it on
+        # stderr where the unresolved-terminal sentence used to be, the receipt
+        # on stdout already carries the same cause, and the exit is non-zero.
+        raise DelegatePrePublishFailureError(
+            _pre_publish_failure_message(
+                exc,
+                envelope,
+                contract_path=contract_path,
+                payload_path=payload_path,
+                state_root=state_root,
+            )
+        ) from exc
     if result is None:
         return
     _require_completed_terminal_evidence(
@@ -1327,6 +1432,67 @@ def validate_request_against_contract(payload: dict[str, object]) -> None:
         ) from exc
 
 
+def load_supported_criteria() -> frozenset[str] | None:
+    """Return the closed acceptance-criterion vocabulary, or ``None`` if unreadable.
+
+    ``acceptance_criteria`` is NOT free text: the wire model refuses an entry
+    outside its closed slug set and the ``max_words_per_sentence_<N>`` pattern.
+    ``None`` means omnimarket is unresolvable, in which case this command cannot
+    dispatch at all and the criteria are validated where they always were.
+    """
+    try:
+        module = importlib.import_module(
+            "omnimarket.models.delegation.wire.model_delegation_request"
+        )
+        supported = module.SUPPORTED_ACCEPTANCE_CRITERIA
+    except (ImportError, AttributeError):
+        return None
+    return frozenset(str(item) for item in supported)
+
+
+def load_acceptance_capable_criteria() -> frozenset[str] | None:
+    """Return the criterion slugs that can ACCEPT an answer alone, or ``None``.
+
+    OMN-13370 split the declared criteria into two kinds. Most are reject-only:
+    ``concise``, ``task_completed``, ``plain_text_only``, ``no_refusal`` and the
+    rest can fail an answer but never promote one to accepted. A few hold
+    adequacy authority. Under ``--criteria-mode replace-task-class`` the
+    caller's criteria are the whole bar, so a set holding no authority is
+    refused by the quality gate on every rung, whatever the answer
+    (OMN-19557).
+
+    The split is resolved HERE from the installed omnimarket's quality gate,
+    by asking the gate's own two functions about each declared slug in replace
+    mode (no task-class rules declared), so this CLI never carries a copy that
+    can drift from the gate. ``None`` means omnimarket or those functions are
+    unresolvable; the caller then refuses nothing, exactly as
+    :func:`load_supported_criteria` does, because this command cannot dispatch
+    without the co-install and its next guard reports the real cause.
+    """
+    supported = load_supported_criteria()
+    if supported is None:
+        return None
+    try:
+        gate = importlib.import_module(
+            "omnimarket.nodes.node_delegation_quality_gate_reducer.handlers."
+            "handler_quality_gate"
+        )
+        merge_rule_sets = gate._merge_rule_sets
+        has_adequacy_authority = gate._has_adequacy_authority
+    except (ImportError, AttributeError):
+        return None
+    capable: set[str] = set()
+    for slug in supported:
+        deterministic, heuristic = merge_rule_sets(
+            declared_deterministic=(),
+            declared_heuristic=(),
+            caller_criteria=(slug,),
+        )
+        if has_adequacy_authority(deterministic, heuristic):
+            capable.add(slug)
+    return frozenset(capable)
+
+
 def _validate_backend_pin(backend_id: str | None) -> str | None:
     """Normalise ``--backend-id`` and refuse an empty one (OMN-19124).
 
@@ -1353,6 +1519,85 @@ def _validate_backend_pin(backend_id: str | None) -> str | None:
             "cheapest-first tier_order walk."
         )
     return pinned
+
+
+#: The request ``metadata`` key that names the ticket a delegation works
+#: (OMN-19514). omnimarket's delegate-skill handler reads the same key.
+DELEGATE_TICKET_METADATA_KEY = "ticket_id"
+
+#: A Linear issue identifier: a team key, a hyphen, a positive number.
+_TICKET_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9]+-[1-9][0-9]*$")
+
+#: The ticket segment of a per-ticket worktree path,
+#: ``.../omni_worktrees/<TICKET>/<repo>/...`` (Operating Rule 9).
+_WORKTREE_TICKET_PATTERN = re.compile(
+    r"(?:^|/)omni_worktrees/([A-Z][A-Z0-9]+-[1-9][0-9]*)(?:/|$)"
+)
+
+
+def resolve_delegate_ticket(ticket: str | None, *, cwd: Path) -> tuple[str | None, str]:
+    """Resolve the ticket a delegation works, and say how (OMN-19514).
+
+    Order: the explicit ``--ticket`` flag; otherwise the ticket segment of an
+    ``omni_worktrees/<TICKET>/`` working directory; otherwise nothing. The
+    second element names which rule decided, so the stderr line and a reader
+    of the run can tell a stated ticket from a derived one.
+
+    A malformed flag is refused rather than dropped: a ticket the caller
+    believes they named, silently lost, is a run that joins to nothing. A
+    directory that is not a ticket worktree names nothing; no ticket is ever
+    guessed.
+    """
+    if ticket is not None:
+        named = ticket.strip()
+        if not _TICKET_ID_PATTERN.fullmatch(named):
+            raise ValueError(
+                f"--ticket {ticket!r} is not a ticket identifier: expected a "
+                "team key, a hyphen and a positive number, such as OMN-1234."
+            )
+        return named, "explicit"
+    found = _WORKTREE_TICKET_PATTERN.search(cwd.as_posix())
+    if found is not None:
+        return found.group(1), "worktree path"
+    return None, "none"
+
+
+def _validate_replace_mode_authority(
+    criteria: tuple[str, ...],
+    criteria_mode: str | None,
+    *,
+    response_contract: dict[str, object] | None,
+) -> None:
+    """Refuse a replacing criteria set that can never accept an answer (OMN-19557).
+
+    ``replace-task-class`` drops the task class's definition of done and with it
+    the class's acceptance authority (for prose classes, the judge). If none of
+    the caller's criteria holds authority of its own, the quality gate refuses
+    every answer ``TASK_MISMATCH: no deterministic acceptance or judge adequacy
+    authority``: measured on 2026-09-25, local rungs scoring 1.0 were refused and
+    the whole ladder, cloud rungs included, was climbed to a failed terminal.
+    The outcome is fixed before the first call, so it is refused before the
+    first call.
+
+    A declared ``--response-contract`` is its own authority (the gate validates
+    against it instead of the criteria), so it is never refused here.
+    """
+    if criteria_mode != "replace-task-class" or response_contract is not None:
+        return
+    capable = load_acceptance_capable_criteria()
+    if capable is None or set(criteria) & capable:
+        return
+    stated = ", ".join(criteria) if criteria else "none"
+    raise ValueError(
+        "--criteria-mode replace-task-class with these criteria can never be "
+        f"accepted (criteria: {stated}). Replacing drops the task class's own "
+        "acceptance authority, and each of these criteria is reject-only: it "
+        "can fail an answer but never accept one (OMN-13370). Every rung would "
+        "be refused however good its answer, and the whole ladder climbed "
+        "(OMN-19557). Do one of: drop --criteria-mode so your criteria are "
+        "ADDED to the task class's bar; add one criterion that can accept "
+        f"({', '.join(sorted(capable))}); or declare --response-contract."
+    )
 
 
 def _resolve_task_class_flag(
@@ -1429,6 +1674,8 @@ def _request_payload(
     system_prompt: str | None = None,
     requested_timeout_seconds: int | None = None,
     backend_id: str | None = None,
+    ticket_id: str | None = None,
+    caller: ModelDelegateCaller | None = None,
 ) -> dict[str, object]:
     """Build the delegate request, setting only the fields the caller supplied."""
     payload: dict[str, object] = {
@@ -1456,6 +1703,21 @@ def _request_payload(
     # existing caller's payload.
     if backend_id is not None:
         payload["backend_id"] = backend_id
+    # OMN-19514: the ticket this delegation works, in the request's metadata
+    # map, which every released request consumer already accepts. Omitted
+    # entirely when no ticket was named.
+    metadata: dict[str, str] = {}
+    if ticket_id is not None:
+        metadata[DELEGATE_TICKET_METADATA_KEY] = ticket_id
+    # OMN-19860: who issued the run. The lane rides in the same metadata map;
+    # the session rides in the declared ``session_id`` field, only ever as a
+    # UUID. Each is omitted entirely when unresolved.
+    if caller is not None and caller.lane is not None:
+        metadata[DELEGATE_CALLER_LANE_METADATA_KEY] = caller.lane
+    if metadata:
+        payload["metadata"] = metadata
+    if caller is not None and caller.session_id is not None:
+        payload["session_id"] = caller.session_id
     return payload
 
 
@@ -1474,6 +1736,8 @@ def _write_payload(
     system_prompt: str | None = None,
     requested_timeout_seconds: int | None = None,
     backend_id: str | None = None,
+    ticket_id: str | None = None,
+    caller: ModelDelegateCaller | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -1526,6 +1790,8 @@ def _write_payload(
         system_prompt=system_prompt,
         requested_timeout_seconds=requested_timeout_seconds,
         backend_id=backend_id,
+        ticket_id=ticket_id,
+        caller=caller,
     )
     payload_path.write_text(
         json.dumps(payload),
@@ -1726,12 +1992,14 @@ def _timeout_receipt(
     type=str,
     multiple=True,
     help=(
-        "An acceptance criterion this answer must meet, repeatable. Stating "
-        "your own criteria is how you stop being graded against a rubric you "
-        "did not ask for: on 2026-09-15 a drafting prompt was refused on every "
-        "rung for missing source citations, because the task class it landed "
-        "on grades research. With --criteria-mode replace-task-class these "
-        "criteria BECOME the bar; by default they are added to it."
+        "A declared criterion slug this answer must meet, such as concise or "
+        "final_artifact_only; repeatable. It is not free text: an unknown value "
+        "is refused with the full list of slugs. Stating your own criteria is "
+        "how you stop being graded against a rubric you did not ask for: on "
+        "2026-09-15 a drafting prompt was refused on every rung for missing "
+        "source citations, because the task class it landed on grades "
+        "research. With --criteria-mode replace-task-class these criteria "
+        "BECOME the bar; by default they are added to it."
     ),
 )
 @click.option(
@@ -1745,7 +2013,10 @@ def _timeout_receipt(
         "Whether --criteria are added to the task class's own definition of "
         "done (the default) or REPLACE it. Only meaningful with --criteria. "
         "'replace-task-class' is the escape hatch from a shape floor that does "
-        "not apply to your task."
+        "not apply to your task. Most slugs are reject-only (they can fail an "
+        "answer, never accept one), so a replacing set must hold at least one "
+        "slug that can accept, or a --response-contract; otherwise it is "
+        "refused before dispatch, because no answer could pass it (OMN-19557)."
     ),
 )
 @click.option(
@@ -1890,6 +2161,34 @@ def _timeout_receipt(
     ),
 )
 @click.option(
+    "--ticket",
+    "ticket",
+    default=None,
+    help=(
+        "The ticket this delegation works, such as OMN-1234 (OMN-19514). It "
+        "rides in the request metadata onto the delegation's terminal and its "
+        "delegation_events row, so the run joins to its ticket and to the DoD "
+        "verdict that judged it. Omitted, it is read from an "
+        "omni_worktrees/<TICKET>/ working directory; otherwise none is "
+        "recorded. A malformed value is a usage error, never dropped."
+    ),
+)
+@click.option(
+    "--caller-lane",
+    "caller_lane",
+    default=None,
+    help=(
+        "The ledger lane issuing this delegation (OMN-19860). It rides in the "
+        "request metadata onto the delegation's terminal and its "
+        "delegation_events row, beside the Claude Code session id, so per-lane "
+        "delegation use is queryable from the event stream. Omitted, it is read "
+        "from ONEX_LANE, ONEX_LANE_ID, ONEX_AGENT_NAME, CLAUDE_AGENT_NAME or "
+        "CLAUDE_SUBAGENT_NAME, then from the lane registered for the "
+        "omni_worktrees/<ticket>/<dir> worktree; otherwise none is recorded. A "
+        "malformed value is a usage error, never dropped."
+    ),
+)
+@click.option(
     "--omnibase-path",
     "omnibase_path",
     type=click.Path(path_type=Path),
@@ -1939,6 +2238,8 @@ def delegate_command(
     emit_socket: Path | None,
     omnibase_path: Path | None,
     allow_omnimarket_drift: bool,
+    ticket: str | None,
+    caller_lane: str | None,
 ) -> None:
     """Delegate PROMPT to a local LLM and print exactly one typed result.
 
@@ -1962,13 +2263,22 @@ def delegate_command(
         onex delegate "document the router" --bus kafka --lane dev --locus in-process
     """
     try:
+        ticket_id, ticket_resolution = resolve_delegate_ticket(ticket, cwd=Path.cwd())
+        caller = resolve_delegate_caller(
+            caller_lane, cwd=Path.cwd(), environ=os.environ
+        )
+        acceptance_criteria = tuple(criteria)
+        declared_contract = _load_response_contract(response_contract)
+        _validate_replace_mode_authority(
+            acceptance_criteria, criteria_mode, response_contract=declared_contract
+        )
         exit_code = run_delegate(
             prompt=prompt,
             task_type=_resolve_task_class_flag(task_type, task_class_alias),
             backend_id=_validate_backend_pin(backend_id),
-            acceptance_criteria=tuple(criteria),
+            acceptance_criteria=acceptance_criteria,
             criteria_mode=criteria_mode,
-            response_contract=_load_response_contract(response_contract),
+            response_contract=declared_contract,
             system_prompt=system_prompt,
             max_tokens=max_tokens,
             source=source,
@@ -1982,6 +2292,9 @@ def delegate_command(
             emit_socket=emit_socket,
             omni_home=omnibase_path,
             allow_drift=allow_omnimarket_drift,
+            ticket_id=ticket_id,
+            ticket_resolution=ticket_resolution,
+            caller=caller,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -2009,6 +2322,9 @@ def run_delegate(
     emit_socket: Path | None,
     omni_home: Path | None = None,
     allow_drift: bool = False,
+    ticket_id: str | None = None,
+    ticket_resolution: str = "none",
+    caller: ModelDelegateCaller | None = None,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -2265,7 +2581,14 @@ def run_delegate(
             state_root=state_root,
             run_id=run_id,
             correlation_id=correlation_id,
+            ticket_id=ticket_id,
+            caller=caller,
         )
+        # OMN-19514: say which ticket the run carries and how it was chosen,
+        # beside the task-class line, so a derived ticket is never silent.
+        click.echo(f"ticket: {ticket_id or 'none'} ({ticket_resolution})", err=True)
+        # OMN-19860: and who issued it, the same way.
+        click.echo((caller or ModelDelegateCaller.unattributed()).describe(), err=True)
         contract_path = _resolve_packaged_contract(DELEGATE_NODE_NAME)
         # OMN-17295 / OMN-17304: decide WHERE the orchestrator runs, and — for a
         # dispatched run — prove a deployed one is actually consuming the command
@@ -2409,6 +2732,11 @@ def run_delegate(
                         # request value the payload was built from, so the
                         # two cannot disagree about what was asked for.
                         requested_backend_id=backend_id,
+                        # OMN-19131: what a pre-publish failure needs to name
+                        # the refused field, the model and the capture log.
+                        contract_path=contract_path,
+                        payload_path=payload_path,
+                        state_root=state_root,
                     ),
                     receipt_callback=lambda receipt: _write_local_run_files(
                         receipt=receipt,
@@ -2439,6 +2767,8 @@ def run_delegate(
                         # rather than the flag as typed.
                         broker=locus_decision.broker,
                         command_topic=locus_decision.command_topic,
+                        contract_path=contract_path,
+                        payload_path=payload_path,
                     ),
                 )
         except DelegateTimeoutExceededError as exc:

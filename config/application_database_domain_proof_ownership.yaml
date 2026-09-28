@@ -8,13 +8,13 @@ db_io:
   db_tables:
     - name: tenants
       database_ref: application
-      schema: tenant
+      schema: public
       migration: docker/application-domain-enforcement/seed.sql
       access: read_write
       role: tenant_identity_root
     - name: events
       database_ref: application
-      schema: tenant
+      schema: public
       migration: docker/application-domain-enforcement/seed.sql
       access: read_write
       role: tenant_event_proof
@@ -34,7 +34,7 @@ relation_evidence:
   - name: tenants
     kind: table
     database_ref: application
-    schema: tenant
+    schema: public
     domain: TENANT
     owner_declaration: service:application_domain_proof
     tenant_identity_column: id
@@ -50,7 +50,7 @@ relation_evidence:
   - name: events
     kind: table
     database_ref: application
-    schema: tenant
+    schema: public
     domain: TENANT
     owner_declaration: service:application_domain_proof
     tenant_identity_column: tenant_id
@@ -80,7 +80,7 @@ relation_evidence:
   - name: events_view
     kind: view
     database_ref: application
-    schema: tenant
+    schema: public
     domain: TENANT
     owner_declaration: service:application_domain_proof
     readers: [app_dashboard]
@@ -88,10 +88,10 @@ database_objects:
   - name: safe_report
     kind: function
     database_ref: application
-    schema: tenant
+    schema: public
     domain: TENANT
     owner_declaration: service:application_domain_proof
     readers: [app_dashboard]
     function_signature: "()"
-    audit_id: OMN-15361:tenant.safe_report:58b47971e3234c0117f153a4d3d7c7d0efdfb611804ba729153dfac19e503cfe
-    definition_sha256: 58b47971e3234c0117f153a4d3d7c7d0efdfb611804ba729153dfac19e503cfe
+    audit_id: OMN-17887:public.safe_report:0d04ab584434cb569795cbcaf50d4b91c907c93500199dd6de1148d7ab033ea6
+    definition_sha256: 0d04ab584434cb569795cbcaf50d4b91c907c93500199dd6de1148d7ab033ea6

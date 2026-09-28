@@ -48,7 +48,7 @@ databases:
             objects: []
             privileges:
               - USAGE
-            schema: tenant
+            schema: public
           - object_type: SCHEMA
             objects: []
             privileges:
@@ -76,17 +76,27 @@ databases:
           - object_type: TABLE
             objects:
               - ci_attempt_outcome
+              - claude_agent_spans
+              - claude_hook_events
               - consumer_flow_windows
               - delegate_skill_command_claims
               - dod_verify_runs
+              - gateway_link_health
               - lab_lane_health
               - live_events
               - log_entries
               - open_obligations
+              - pr_landing_state
+              - pr_landing_transitions
               - prod_promotion_gate_decisions
               - projection_watermarks
               - runner_fleet_liveness
               - runtime_error_fingerprints
+              - savings_correlation_finalizations
+              - savings_injection_signals
+              - savings_validator_catch_signals
+              - session_content
+              - topic_activity
               - topic_produce_windows
               - work_events
             privileges:
@@ -160,7 +170,7 @@ databases:
             objects: []
             privileges:
               - USAGE
-            schema: tenant
+            schema: public
           - object_type: SCHEMA
             objects: []
             privileges:
@@ -175,11 +185,6 @@ databases:
             privileges:
               - CONNECT
             schema: null
-          - object_type: SCHEMA
-            objects: []
-            privileges:
-              - USAGE
-            schema: tenant
           - object_type: SCHEMA
             objects: []
             privileges:
@@ -244,11 +249,6 @@ databases:
             privileges:
               - USAGE
             schema: public
-          - object_type: SCHEMA
-            objects: []
-            privileges:
-              - USAGE
-            schema: tenant
         login: true
     schemas:
       action_authorization_claim:
@@ -261,9 +261,6 @@ databases:
         domain: PLATFORM_CATALOG
         owner: owner_platform_catalog
       public:
-        domain: TENANT
-        owner: owner_onex_tenant
-      tenant:
         domain: TENANT
         owner: owner_onex_tenant
   omnibase_infra:
@@ -303,6 +300,7 @@ databases:
           - object_type: TABLE
             objects:
               - delegation_workflow_state
+              - pr_landing_workflow_state
               - session_phase_state
             privileges:
               - INSERT
@@ -368,5 +366,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 39199cdf87f28f9015c864e30515f36acec4fbf148d9d90a7cea066098b745f7
+  sha256: 595cb86f88aa5c0ad41e93955e39c927dc14f823a11816234a99cff53c019544
 topology_instance: onex-dev

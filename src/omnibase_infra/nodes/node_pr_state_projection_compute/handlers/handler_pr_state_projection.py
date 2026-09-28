@@ -159,9 +159,8 @@ class HandlerPrStateProjection:
         it mirrors ModelOpenPrSummary.is_draft (omnimarket reader), a
         non-nullable bool, so a missing key here must resolve to a concrete
         value rather than propagate None (OMN-14394). The CI/review/merge-
-        queue columns remain reserved for a richer producer (see migration
-        091_pr_state.sql) and default to None here since the current poller
-        payload does not carry them.
+        queue columns come from the webhook ingress (OMN-19492) and stay None
+        for a poller payload, which does not carry them.
         """
         headers = message.headers
         header_correlation_id = headers.correlation_id if headers else None
@@ -202,14 +201,25 @@ class HandlerPrStateProjection:
 
         repo = _require_str(body, "repo", header_correlation_id)
         pr_number = _require_int(body, "pr_number", header_correlation_id)
-        triage_state = self._first_str(body, ("triage_state",)) or "needs_review"
-        title = self._first_str(body, ("title",)) or ""
+        # OMN-19492: a webhook observation is partial -- a field it does not
+        # carry stays None so the writer keeps the stored column. A poller
+        # event (no source, or source="poller") keeps the OMN-14394 defaults.
+        source = self._first_str(body, ("source",)) or "poller"
+        partial = source == "webhook"
+        triage_state = self._first_str(body, ("triage_state",)) or (
+            None if partial else "needs_review"
+        )
+        title = self._first_str(body, ("title",)) or (None if partial else "")
         # Inlined rather than a _first_bool sibling to _first_str: this class
         # is already at the god-class method-count ratchet (ONEX Pattern
         # Validation, >10 sync methods fails), so is_draft's bool coercion
         # stays a two-line inline check instead of a new static method.
         is_draft_raw = body.get("is_draft")
-        is_draft = is_draft_raw if isinstance(is_draft_raw, bool) else False
+        is_draft = (
+            is_draft_raw
+            if isinstance(is_draft_raw, bool)
+            else (None if partial else False)
+        )
         as_of = self._extract_timestamp(body)
         correlation_id = self._extract_correlation_id(body, header_correlation_id)
 
@@ -219,6 +229,14 @@ class HandlerPrStateProjection:
             triage_state=triage_state,
             title=title,
             is_draft=is_draft,
+            ci_status=self._first_str(body, ("ci_status",)),
+            review_decision=self._first_str(body, ("review_decision",)),
+            mergeable=self._first_str(body, ("mergeable",)),
+            merge_state_status=self._first_str(body, ("merge_state_status",)),
+            merge_queue_state=self._first_str(body, ("merge_queue_state",)),
+            base_ref=self._first_str(body, ("base_ref",)),
+            head_ref=self._first_str(body, ("head_ref",)),
+            source=source,
             correlation_id=correlation_id,
             as_of=as_of,
         )

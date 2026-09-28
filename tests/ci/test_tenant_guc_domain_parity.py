@@ -22,6 +22,12 @@ because the shape was theorised:
 * ``test_bridge_parse_raises_when_the_literal_is_gone`` -- a regex read of the
   two bridge frozensets silently undercounted them 6/24 and 39/43, which
   misclassified ``hook_events``. Parsing must raise, never match nothing.
+
+OMN-17887 (operator ruling 2026-09-24) retired the ``tenant`` Postgres schema:
+the TENANT domain's schema is ``public``, and the tenant bridge frozenset is
+gone. A relation is tenant-domain because the database it is granted in
+declares that schema ``domain: TENANT`` in its own ``schemas`` block, so the
+synthetic topologies below carry that block, per database.
 """
 
 from __future__ import annotations
@@ -31,6 +37,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -62,15 +69,67 @@ def gate() -> object:
     return _load()
 
 
+# The application database's real schema -> domain map (OMN-17887): `public`
+# IS the TENANT domain's schema.
+_APPLICATION_SCHEMAS = {
+    "action_authorization_claim": "OMNINODE_INTERNAL",
+    "omninode_internal": "OMNINODE_INTERNAL",
+    "platform_catalog": "PLATFORM_CATALOG",
+    "public": "TENANT",
+}
+
+
+def _database(
+    topology: dict[str, list[str]], schemas: dict[str, str] | None
+) -> dict[str, object]:
+    """One topology database: its TABLE grants and, if given, its `schemas`."""
+    database: dict[str, object] = {
+        "principals": {
+            "p": {
+                "grants": [
+                    {"object_type": "TABLE", "schema": schema, "objects": list(rels)}
+                    for schema, rels in topology.items()
+                ]
+            }
+        }
+    }
+    if schemas is not None:
+        database["schemas"] = {
+            name: {"domain": domain, "owner": f"owner_{name}"}
+            for name, domain in schemas.items()
+        }
+    return database
+
+
+def _instance_yaml(
+    topology: dict[str, list[str]],
+    schemas: dict[str, str] | None,
+    extra_databases: dict[str, tuple[dict[str, list[str]], dict[str, str] | None]]
+    | None = None,
+) -> str:
+    databases = {"application": _database(topology, schemas)}
+    for name, (extra_topology, extra_schemas) in (extra_databases or {}).items():
+        databases[name] = _database(extra_topology, extra_schemas)
+    return yaml.safe_dump({"databases": databases}, sort_keys=True)
+
+
 def _root(
     tmp_path: Path,
     *,
     migrations: dict[str, str],
     topology: dict[str, list[str]],
-    tenant_bridge: tuple[str, ...] = (),
+    schemas: dict[str, str] | None = None,
+    extra_databases: dict[str, tuple[dict[str, list[str]], dict[str, str] | None]]
+    | None = None,
     internal_bridge: tuple[str, ...] = (),
 ) -> Path:
-    """Build a throwaway repo root: corpus, topology and the physical map."""
+    """Build a throwaway repo root: corpus, topology and the physical map.
+
+    ``topology`` is the ``application`` database's TABLE grants (schema ->
+    relations); ``schemas`` is that database's declared schema -> domain map
+    (omitted entirely when ``None``, so nothing states a domain);
+    ``extra_databases`` adds further databases, each with its own pair.
+    """
     forward = tmp_path / "docker" / "migrations" / "forward" / "nodes" / "n"
     forward.mkdir(parents=True)
     for name, sql in migrations.items():
@@ -78,22 +137,13 @@ def _root(
 
     instances = tmp_path / "src" / "omnibase_infra" / "topology" / "instances"
     instances.mkdir(parents=True)
-    blocks = "\n".join(
-        "          - object_type: TABLE\n"
-        f"            schema: {schema}\n"
-        "            objects:\n" + "".join(f"              - {r}\n" for r in rels)
-        for schema, rels in topology.items()
-    )
     (instances / "local.yaml").write_text(
-        "databases:\n  application:\n    principals:\n      p:\n        grants:\n"
-        + blocks,
-        encoding="utf-8",
+        _instance_yaml(topology, schemas, extra_databases), encoding="utf-8"
     )
 
+    # OMN-17887: the physical map carries only the INTERNAL bridge now.
     mapping = tmp_path / "src" / "omnibase_infra" / "topology"
     (mapping / "physical_schema_mapping.py").write_text(
-        "TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(\n"
-        f"    {list(tenant_bridge)!r}\n)\n"
         "INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359: frozenset[str] = frozenset(\n"
         f"    {list(internal_bridge)!r}\n)\n",
         encoding="utf-8",
@@ -142,28 +192,80 @@ def test_internal_declared_relation_with_a_guc_policy_is_a_violation(
 def test_tenant_declared_relation_with_the_same_policy_passes(
     gate: object, tmp_path: Path
 ) -> None:
-    """The control without which the test above proves nothing."""
+    """The control without which the test above proves nothing.
+
+    OMN-17887: tenant-declared means ``schema: public`` in a database whose
+    ``schemas`` block declares ``public: {domain: TENANT}``. The relation must
+    resolve to ``tenant`` -- not merely pass as ``unresolved``, which would
+    also exit 0 and prove nothing.
+    """
     root = _root(
         tmp_path,
         migrations={
             "0001_x.sql": _RLS_ON.format(rel="d") + _GUC_POLICY.format(rel="d")
         },
-        topology={"tenant": ["d"]},
+        topology={"public": ["d"]},
+        schemas=_APPLICATION_SCHEMAS,
     )
     assert gate.main(["--root", str(root)]) == 0  # type: ignore[attr-defined]
+    assert gate.logical_domains(root)["d"] == "tenant"  # type: ignore[attr-defined]
+    assert gate.violations(root) == ([], [])  # type: ignore[attr-defined]
+
+
+def test_public_resolves_to_tenant_only_where_its_database_declares_it(
+    gate: object, tmp_path: Path
+) -> None:
+    """The domain map is per database. ``public`` is TENANT in ``application``
+    but OMNINODE_INTERNAL in a service-owned database; a relation granted in
+    the latter's ``public`` must be ``unresolved``, never ``tenant``."""
+    root = _root(
+        tmp_path,
+        migrations={
+            "0001_x.sql": _GUC_POLICY.format(rel="d") + _GUC_POLICY.format(rel="svc")
+        },
+        topology={"public": ["d"]},
+        schemas=_APPLICATION_SCHEMAS,
+        extra_databases={
+            "omnibase_infra": ({"public": ["svc"]}, {"public": "OMNINODE_INTERNAL"})
+        },
+    )
+    domains = gate.logical_domains(root)  # type: ignore[attr-defined]
+    assert domains["d"] == "tenant"
+    assert domains["svc"] == "unresolved"
+    assert gate.main(["--root", str(root)]) == 0  # type: ignore[attr-defined]
+    assert gate.violations(root) == ([], ["svc"])  # type: ignore[attr-defined]
+
+
+def test_a_retired_tenant_schema_grant_no_longer_resolves_to_tenant(
+    gate: object, tmp_path: Path
+) -> None:
+    """OMN-17887: ``schema: tenant`` is no longer special-cased. A database that
+    does not declare it cannot make it TENANT, so it is reported unresolved."""
+    root = _root(
+        tmp_path,
+        migrations={"0001_x.sql": _GUC_POLICY.format(rel="d")},
+        topology={"tenant": ["d"]},
+        schemas=_APPLICATION_SCHEMAS,
+    )
+    assert gate.logical_domains(root)["d"] == "unresolved"  # type: ignore[attr-defined]
+    assert gate.main(["--root", str(root)]) == 0  # type: ignore[attr-defined]
+    assert gate.violations(root) == ([], ["d"])  # type: ignore[attr-defined]
 
 
 def test_the_internal_bridge_classifies_a_public_declared_relation(
     gate: object, tmp_path: Path
 ) -> None:
     """`generation_events` reads `schema: public` in the topology; the bridge is
-    the only checked-in thing that says it is internal."""
+    the only checked-in thing that says it is internal. It must win over the
+    database's `public: {domain: TENANT}` declaration (OMN-17887)."""
     root = _root(
         tmp_path,
         migrations={"0001_x.sql": _GUC_POLICY.format(rel="gen")},
         topology={"public": ["gen"]},
+        schemas=_APPLICATION_SCHEMAS,
         internal_bridge=("gen",),
     )
+    assert gate.logical_domains(root)["gen"] == "omninode_internal"  # type: ignore[attr-defined]
     assert gate.main(["--root", str(root)]) == 1  # type: ignore[attr-defined]
 
 
@@ -225,13 +327,17 @@ def test_a_restatement_without_the_guc_retires_the_earlier_policy(
 def test_a_relation_in_neither_bridge_is_unresolved_not_a_violation(
     gate: object, tmp_path: Path
 ) -> None:
-    """`hook_events` declares `public` as a PHYSICAL value. Guessing its domain
-    either way is how this class keeps recurring, so it is reported, not failed."""
+    """A `public` relation outside the internal bridge, in a database whose
+    `schemas` block states no domain for `public`. Guessing its domain either
+    way is how this class keeps recurring, so it is reported, not failed.
+    (OMN-17887: with no tenant bridge, only the database's own declaration can
+    make `public` TENANT; here nothing states it.)"""
     root = _root(
         tmp_path,
         migrations={"0001_x.sql": _GUC_POLICY.format(rel="hook")},
         topology={"public": ["hook"]},
     )
+    assert gate.logical_domains(root)["hook"] == "unresolved"  # type: ignore[attr-defined]
     assert gate.main(["--root", str(root)]) == 0  # type: ignore[attr-defined]
     assert gate.violations(root)[1] == ["hook"]  # type: ignore[attr-defined]
 
@@ -324,10 +430,10 @@ def test_instances_disagreeing_on_a_domain_is_reported_not_tie_broken(
         topology={"omninode_internal": ["gen"]},
     )
     instances = root / "src" / "omnibase_infra" / "topology" / "instances"
+    # OMN-17887: onex-dev states `gen` tenant-domain the new way -- `public`
+    # in a database declaring `public: {domain: TENANT}`.
     (instances / "onex-dev.yaml").write_text(
-        "databases:\n  application:\n    principals:\n      p:\n        grants:\n"
-        "          - object_type: TABLE\n            schema: tenant\n"
-        "            objects:\n              - gen\n",
+        _instance_yaml({"public": ["gen"]}, _APPLICATION_SCHEMAS),
         encoding="utf-8",
     )
     assert gate.main(["--root", str(root)]) == 1  # type: ignore[attr-defined]
@@ -354,7 +460,9 @@ def test_bridge_parse_raises_when_the_literal_is_gone(
     stub = tmp_path / "physical_schema_mapping.py"
     stub.write_text("SOMETHING_ELSE = frozenset()\n", encoding="utf-8")
     with pytest.raises(ValueError):
-        gate._bridge(stub, gate._TENANT_BRIDGE)  # type: ignore[attr-defined]
+        gate._bridge(stub, gate._INTERNAL_BRIDGE)  # type: ignore[attr-defined]
+    # OMN-17887: the tenant bridge is gone, not merely unused.
+    assert not hasattr(gate, "_TENANT_BRIDGE")
 
 
 def test_an_empty_topology_refuses_a_vacuous_pass(gate: object, tmp_path: Path) -> None:

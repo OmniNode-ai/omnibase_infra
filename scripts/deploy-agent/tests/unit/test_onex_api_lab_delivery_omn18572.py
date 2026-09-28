@@ -179,7 +179,19 @@ class _FakeApplier:
         self.kwargs = kwargs
         self.manifest_sha: str | None = None
 
-    def apply(self, *, sha: str, stamp: str, correlation_id: str) -> Path:
+    def capture_compose_inputs(self, *, sha: str, stamp: str) -> dict[str, str]:
+        # OMN-19501: the compose-lane half, taken under the lane lock. Opaque
+        # to the agent, which only hands it back to ``apply``.
+        return {"sha": sha, "stamp": stamp}
+
+    def apply(
+        self,
+        *,
+        sha: str,
+        stamp: str,
+        correlation_id: str,
+        capture: object = None,
+    ) -> Path:
         _FakeApplier.calls.append({"entry": "apply", "sha": sha})
         # OMN-18572: the overlay's OWN lineage, which is what the four image
         # tags carry. Deliberately different from `sha` (the merged

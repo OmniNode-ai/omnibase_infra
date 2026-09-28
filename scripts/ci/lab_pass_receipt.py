@@ -143,12 +143,13 @@ could not be proven to.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import io
 import json
 import os
 import re
-import subprocess  # fixed argv, no shell, trusted gh binary
+import subprocess  # fixed argv, no shell, trusted git/gh binaries
 import sys
 import time
 import urllib.error
@@ -184,6 +185,11 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 #: lowercase hex, no prefix. Refused rather than normalised -- two contracts
 #: can share a prefix, and a reader that normalises can match the wrong one.
 _CONTENT_HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+
+#: The digest of the exact PR diff bytes the proof covers. The algorithm is
+#: part of the value so a later contract can add another digest without a
+#: reader silently interpreting it as SHA-256.
+_PR_DIFF_DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 #: The runtime's own introspection surface, served by the health server on the
 #: SAME port as ``/ready`` and ``/health`` (``ServiceHealth`` route table). It
@@ -343,6 +349,30 @@ class EnumLabLane(StrEnum):
     ``ANY_OF_DEFAULT_LANES``, so its PASS never satisfies the any-of lab-pass
     premise on its own.
 
+    ``COMPOSE_DEV_202`` (OMN-19507) is the SECOND deployed dev lane, ``dev-202``
+    on the ``.202`` host (compose project ``omnibase-infra-dev-202``, ports
+    61085/61086), run by a second deploy-agent instance (OMN-19506). It is a
+    separate value for the ``ONEX_LAB_K3S`` reasons: one emitter per name, and a
+    different host proving a different lane. The operator ruled on
+    2026-09-25T00:56:45Z that its PASS proves omnimarket changes only, and
+    omnibase_infra stays proven on ``.201``. So it is NOT in
+    ``ANY_OF_DEFAULT_LANES``: an unqualified gate never reads it, and only the
+    reads OMN-19508 names (omnimarket's sibling read and its release-cut premise)
+    may admit it.
+
+    ``COMPOSE_DEV_200`` (OMN-19543) is the third deployed dev lane, ``dev-200``
+    on the ``.200`` host (compose project ``omnibase-infra-dev-200``, ports
+    42085/42086), on exactly ``COMPOSE_DEV_202``'s terms: one emitter, omnimarket
+    changes only (operator ruling 2026-09-25T10:22:22Z, one deploy slot per lab
+    host), NOT in ``ANY_OF_DEFAULT_LANES``. Which repositories an instance lane
+    may prove is read from ``config/deploy_lane_routing.yaml``
+    (``scripts/ci/instance_receipt_lanes.py``), not from this enum.
+
+    ``PR_HEAD`` (OMN-19566) is the pre-merge proof lane. Its one emitter is the
+    PR-head verifier, which mints a proof for one exact pull-request head and
+    profile. It is NOT in ``ANY_OF_DEFAULT_LANES``: a PR-head proof is not a
+    post-merge lab pass and must never satisfy the rule 24(b) delivery gate.
+
     No other value is admissible, and in particular no governed lane
     (``prod``, ``stability-test``, ``judge``, or a collaborator lane) can name
     itself in a receipt. A lab pass is a statement about a lab. A governed
@@ -354,12 +384,18 @@ class EnumLabLane(StrEnum):
     ONEX_LAB_K3S = "onex-lab-k3s"
     COMPOSE_DEV_CHAIN = "compose-dev-chain"
     COMPOSE_DEV_CORPUS = "compose-dev-corpus"
+    COMPOSE_DEV_202 = "compose-dev-202"
+    COMPOSE_DEV_200 = "compose-dev-200"
+    PR_HEAD = "pr-head"
 
 
 #: The lanes an unqualified ``gate`` reads with ANY-OF semantics: the three lab
 #: surfaces rule 24(b) means by "a passing lab receipt". The OMN-19312 verdict
 #: lanes are deliberately absent -- a chain canary PASS is not evidence that the
 #: candidate booted, and must never be able to stand in for that premise.
+#: ``COMPOSE_DEV_202`` is absent too (OMN-19507), and ``COMPOSE_DEV_200``
+#: (OMN-19543): they prove omnimarket changes only, so no unqualified read may
+#: take either for the any-of premise.
 ANY_OF_DEFAULT_LANES: Final[tuple[EnumLabLane, ...]] = (
     EnumLabLane.COMPOSE_DEV,
     EnumLabLane.ONEX_LAB,
@@ -404,6 +440,163 @@ class EnumLabPassCheckOutcome(StrEnum):
     PASS = "pass"
     FAIL = "fail"
     INDETERMINATE = "indeterminate"
+
+
+class EnumLabProofHandlerKind(StrEnum):
+    """The execution shape used to prove one PR head."""
+
+    RUNTIME_IMAGE = "runtime_image"
+    FOUNDATION_OVERRIDE = "foundation_override"
+    PYPI_SIBLING_OVERRIDE = "pypi_sibling_override"
+    PLUGIN_SESSION = "plugin_session"
+    WEB_RENDER = "web_render"
+    K8S_NAMESPACE = "k8s_namespace"
+    SCRIPT_REPLAY = "script_replay"
+    EXEMPT = "exempt"
+
+
+@dataclass(frozen=True)
+class ModelLabProofSubject:
+    """The exact pull request, profile, and identities a PR-head proof binds."""
+
+    repo: str
+    pr_number: int
+    base_sha: str
+    merge_base_sha: str
+    profile_id: str
+    profile_version: str
+    handler_kind: EnumLabProofHandlerKind
+    host: str
+    slot: str
+    runner_identity: str
+    verifier_identity: str
+    pr_diff_digest: str
+    carried_from: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.repo, str) or not re.fullmatch(
+            r"OmniNode-ai/[A-Za-z0-9._-]+", self.repo
+        ):
+            msg = (
+                f"repo={self.repo!r} must name an OmniNode-ai repository as "
+                "'OmniNode-ai/<name>'"
+            )
+            raise ValueError(msg)
+        if (
+            not isinstance(self.pr_number, int)
+            or isinstance(self.pr_number, bool)
+            or self.pr_number <= 0
+        ):
+            msg = f"pr_number={self.pr_number!r} must be an integer greater than zero"
+            raise ValueError(msg)
+        for field_name, value in (
+            ("base_sha", self.base_sha),
+            ("merge_base_sha", self.merge_base_sha),
+        ):
+            if not isinstance(value, str) or not _SHA_RE.match(value):
+                msg = f"{field_name}={value!r} must be a 40-character lowercase sha"
+                raise ValueError(msg)
+        for field_name, value in (
+            ("profile_id", self.profile_id),
+            ("profile_version", self.profile_version),
+            ("host", self.host),
+            ("slot", self.slot),
+            ("runner_identity", self.runner_identity),
+            ("verifier_identity", self.verifier_identity),
+        ):
+            if not isinstance(value, str) or not value:
+                msg = f"{field_name} is required and must be a non-empty string"
+                raise ValueError(msg)
+        if not isinstance(self.handler_kind, EnumLabProofHandlerKind):
+            msg = (
+                f"handler_kind={self.handler_kind!r} is not an EnumLabProofHandlerKind"
+            )
+            raise ValueError(msg)
+        if not isinstance(self.pr_diff_digest, str) or not _PR_DIFF_DIGEST_RE.match(
+            self.pr_diff_digest
+        ):
+            msg = (
+                f"pr_diff_digest={self.pr_diff_digest!r} must be 'sha256:' "
+                "followed by 64 lowercase hex characters"
+            )
+            raise ValueError(msg)
+        if not isinstance(self.carried_from, str) or (
+            self.carried_from and not _SHA_RE.match(self.carried_from)
+        ):
+            msg = (
+                f"carried_from={self.carried_from!r} must be empty or a "
+                "40-character lowercase sha"
+            )
+            raise ValueError(msg)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "repo": self.repo,
+            "pr_number": self.pr_number,
+            "base_sha": self.base_sha,
+            "merge_base_sha": self.merge_base_sha,
+            "profile_id": self.profile_id,
+            "profile_version": self.profile_version,
+            "handler_kind": self.handler_kind.value,
+            "host": self.host,
+            "slot": self.slot,
+            "runner_identity": self.runner_identity,
+            "verifier_identity": self.verifier_identity,
+            "pr_diff_digest": self.pr_diff_digest,
+            "carried_from": self.carried_from,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Any) -> ModelLabProofSubject:
+        if not isinstance(payload, dict):
+            msg = f"a PR-head subject must be an object, got {type(payload).__name__}"
+            raise ValueError(msg)
+        required = {
+            "repo",
+            "pr_number",
+            "base_sha",
+            "merge_base_sha",
+            "profile_id",
+            "profile_version",
+            "handler_kind",
+            "host",
+            "slot",
+            "runner_identity",
+            "verifier_identity",
+            "pr_diff_digest",
+        }
+        optional = {"carried_from"}
+        unknown = sorted(set(payload) - required - optional)
+        if unknown:
+            msg = f"unknown PR-head subject field(s) {unknown}"
+            raise ValueError(msg)
+        missing = sorted(required - set(payload))
+        if missing:
+            msg = f"PR-head subject is missing required field(s) {missing}"
+            raise ValueError(msg)
+        try:
+            handler_kind = EnumLabProofHandlerKind(payload["handler_kind"])
+        except ValueError as exc:
+            msg = (
+                f"handler_kind={payload['handler_kind']!r} is not one of "
+                f"{[kind.value for kind in EnumLabProofHandlerKind]}"
+            )
+            raise ValueError(msg) from exc
+        return cls(
+            repo=payload["repo"],
+            pr_number=payload["pr_number"],
+            base_sha=payload["base_sha"],
+            merge_base_sha=payload["merge_base_sha"],
+            profile_id=payload["profile_id"],
+            profile_version=payload["profile_version"],
+            handler_kind=handler_kind,
+            host=payload["host"],
+            slot=payload["slot"],
+            runner_identity=payload["runner_identity"],
+            verifier_identity=payload["verifier_identity"],
+            pr_diff_digest=payload["pr_diff_digest"],
+            carried_from=payload.get("carried_from", ""),
+        )
 
 
 @dataclass(frozen=True)
@@ -592,6 +785,10 @@ class ModelLabPassReceipt:
     #: receipt already in flight still parses byte-identically.
     converged_via: str = ""
     receipt_version: str = RECEIPT_VERSION
+    #: OMN-19566. Present only for the pre-merge ``pr-head`` lane. Like
+    #: ``node_inventory`` and ``converged_via``, absence preserves the exact
+    #: wire form of every receipt written before this field existed.
+    subject: ModelLabProofSubject | None = None
 
     def __post_init__(self) -> None:
         self._validate_version()
@@ -600,6 +797,7 @@ class ModelLabPassReceipt:
         self._validate_result_matches_checks()
         self._validate_window()
         self._validate_node_inventory()
+        self._validate_subject()
 
     def _validate_version(self) -> None:
         if self.receipt_version != RECEIPT_VERSION:
@@ -709,6 +907,20 @@ class ModelLabPassReceipt:
             )
             raise ValueError(msg)
 
+    def _validate_subject(self) -> None:
+        if self.lane is EnumLabLane.PR_HEAD and self.subject is None:
+            msg = "lane='pr-head' requires a PR-head subject"
+            raise ValueError(msg)
+        if self.lane is not EnumLabLane.PR_HEAD and self.subject is not None:
+            msg = f"lane={self.lane.value!r} refuses a PR-head subject"
+            raise ValueError(msg)
+        if self.subject is not None and self.subject.carried_from == self.sha:
+            msg = (
+                "subject.carried_from must differ from the receipt sha; carrying "
+                "a proof from the same head is not carry-over"
+            )
+            raise ValueError(msg)
+
     # -- serialisation ------------------------------------------------------
     def to_json(self, *, indent: int | None = None) -> str:
         return json.dumps(
@@ -730,6 +942,7 @@ class ModelLabPassReceipt:
                     else {}
                 ),
                 **({"converged_via": self.converged_via} if self.converged_via else {}),
+                **({"subject": self.subject.to_dict()} if self.subject else {}),
             },
             indent=indent,
         )
@@ -760,7 +973,7 @@ class ModelLabPassReceipt:
         # OMN-18708: present only on receipts whose emitter probed the lane's
         # introspection manifest, so it is known-but-optional rather than
         # required. Absent means "not probed", which is a real answer.
-        optional = {"node_inventory", "converged_via"}
+        optional = {"node_inventory", "converged_via", "subject"}
         unknown = sorted(set(payload) - known - optional)
         if unknown:
             msg = f"unknown receipt field(s) {unknown}"
@@ -792,6 +1005,11 @@ class ModelLabPassReceipt:
                 else ()
             ),
             converged_via=str(payload.get("converged_via", "")),
+            subject=(
+                ModelLabProofSubject.from_dict(payload["subject"])
+                if "subject" in payload
+                else None
+            ),
         )
 
 
@@ -2539,7 +2757,7 @@ def probe_compose_dev(
     budget: ModelSettleBudget | None = None,
     expected_generation: ModelLaneGeneration | None = None,
     generation_container: str | None = None,
-    node_inventory_probe: ModelNodeInventoryProbe | None = None,
+    read_node_inventory: Callable[[], ModelNodeInventoryProbe] | None = None,
     health_observe_budget_seconds: float | None = None,
     declared_migrations: Sequence[str] | None = None,
     migration_ledger: ModelMigrationLedger | None = None,
@@ -2565,11 +2783,18 @@ def probe_compose_dev(
     ``expected_generation=None`` is the job saying convergence produced no
     record, which is a failure and not an absence.
 
-    ``node_inventory_probe`` follows the same rule (OMN-18708): it is passed in
-    already read, rather than read here, so the check and the triples the
-    receipt carries come from ONE read of the manifest. A caller that did not
-    probe the manifest passes nothing and makes no claim about the lane's
-    inventory -- it does not emit an empty one.
+    ``read_node_inventory`` follows the same rule (OMN-18708): a caller that did
+    not name a manifest passes nothing and makes no claim about the lane's
+    inventory -- it does not emit an empty one. It is a READER, called once and
+    only after the readiness wait returns (OMN-19802), and the caller keeps the
+    probe it returns, so the check here and the triples the receipt carries
+    still come from ONE read of the manifest. It used to be passed in already
+    read, which meant the manifest was fetched BEFORE the wait: on a lane the
+    deploy agent had just recreated that GET hit a closed port, and the
+    receipt then stamped the refusal with the settle phrase as if it had been
+    read after the lane came up (omnimarket compose-dev receipt artifact
+    10909257483, 2026-09-26: ``node_inventory`` ``Errno 111`` beside a 200 from
+    ``ready_main`` on the same port).
     """
     # BOTH readiness endpoints, not just main. Measured on the .201 lane
     # 2026-09-10: at 12:36:29Z omninode-runtime read "Up 3 minutes (health:
@@ -2624,10 +2849,10 @@ def probe_compose_dev(
         )
         for check in checks
     ]
-    if node_inventory_probe is not None:
-        # Annotated with the same settle phrase as the four HTTP checks above:
-        # an inventory read before the lane reported itself up is a different
-        # fact from one read after, and the receipt should not hide that.
+    if read_node_inventory is not None:
+        # Read HERE, after the wait, and annotated with the same settle phrase
+        # as the four HTTP checks above, which is now true of it (OMN-19802).
+        node_inventory_probe = read_node_inventory()
         annotated.append(
             ModelLabPassCheck(
                 name=node_inventory_probe.check.name,
@@ -2811,6 +3036,7 @@ def build_receipt(
     agent_command_id: str | None,
     node_inventory: Sequence[ModelNodeInventoryTriple] = (),
     converged_via: str = "",
+    subject: ModelLabProofSubject | None = None,
 ) -> ModelLabPassReceipt:
     """Build a receipt whose verdict is DERIVED from its checks.
 
@@ -2832,6 +3058,7 @@ def build_receipt(
         agent_command_id=agent_command_id,
         node_inventory=tuple(node_inventory),
         converged_via=converged_via,
+        subject=subject,
     )
 
 
@@ -3129,6 +3356,507 @@ def parse_receipt(body: str) -> ModelLabPassReceipt:
     except (ValueError, TypeError, KeyError) as exc:
         msg = f"receipt is malformed and cannot be trusted: {exc}"
         raise ReceiptLookupError(msg) from exc
+
+
+def pr_head_receipt_key(
+    receipt: ModelLabPassReceipt,
+) -> tuple[str, int, str, str, str]:
+    """Return the exact identity of a pre-merge proof receipt."""
+    if receipt.lane is not EnumLabLane.PR_HEAD or receipt.subject is None:
+        msg = "only a pr-head receipt has a PR-head receipt key"
+        raise ValueError(msg)
+    return (
+        receipt.subject.repo,
+        receipt.subject.pr_number,
+        receipt.sha,
+        receipt.subject.profile_id,
+        receipt.subject.profile_version,
+    )
+
+
+def compute_pr_diff_digest(diff_bytes: bytes) -> str:
+    """Hash the exact bytes emitted by ``git diff`` for a PR proof."""
+    if not isinstance(diff_bytes, bytes):
+        msg = f"diff_bytes must be bytes, got {type(diff_bytes).__name__}"
+        raise TypeError(msg)
+    return f"sha256:{hashlib.sha256(diff_bytes).hexdigest()}"
+
+
+def compute_pr_diff_digest_from_repo(
+    repo_path: Path, merge_base: str, head: str
+) -> str:
+    """Hash ``git diff merge_base..head`` without color or external drivers."""
+    for label, value in (("merge_base", merge_base), ("head", head)):
+        if not isinstance(value, str) or not _SHA_RE.match(value):
+            msg = f"{label}={value!r} must be a 40-character lowercase sha"
+            raise ValueError(msg)
+    completed = subprocess.run(
+        [
+            "git",
+            "diff",
+            "--no-color",
+            "--no-ext-diff",
+            f"{merge_base}..{head}",
+        ],
+        cwd=repo_path,
+        check=True,
+        capture_output=True,
+    )
+    return compute_pr_diff_digest(completed.stdout)
+
+
+class EnumPrHeadVerdict(StrEnum):
+    """Stable outcome tokens from the offline PR-head verifier."""
+
+    ACCEPTED = "ACCEPTED"
+    NOT_PR_HEAD = "NOT_PR_HEAD"
+    HEAD_MISMATCH = "HEAD_MISMATCH"
+    RESULT_NOT_PASS = "RESULT_NOT_PASS"
+    MISSING_MANDATORY_CHECK = "MISSING_MANDATORY_CHECK"
+    RUNNER_IS_VERIFIER = "RUNNER_IS_VERIFIER"
+    CARRY_OVER_RUNTIME_PROFILE = "CARRY_OVER_RUNTIME_PROFILE"
+    CARRY_OVER_DIGEST_MISMATCH = "CARRY_OVER_DIGEST_MISMATCH"
+    PROFILE_MISMATCH = "PROFILE_MISMATCH"
+
+
+_RUNTIME_PROOF_HANDLER_KINDS: Final[frozenset[EnumLabProofHandlerKind]] = frozenset(
+    {
+        EnumLabProofHandlerKind.RUNTIME_IMAGE,
+        EnumLabProofHandlerKind.FOUNDATION_OVERRIDE,
+        EnumLabProofHandlerKind.PYPI_SIBLING_OVERRIDE,
+        EnumLabProofHandlerKind.K8S_NAMESPACE,
+    }
+)
+
+
+def verify_pr_head_receipt(
+    receipt: ModelLabPassReceipt,
+    *,
+    expected_repo: str,
+    expected_pr_number: int,
+    expected_head_sha: str,
+    expected_profile_id: str,
+    expected_profile_version: str,
+    mandatory_checks: frozenset[str],
+    current_pr_diff_digest: str,
+) -> tuple[EnumPrHeadVerdict, str]:
+    """Verify one PR-head receipt against the current pull-request identity."""
+    if receipt.lane is not EnumLabLane.PR_HEAD:
+        return (
+            EnumPrHeadVerdict.NOT_PR_HEAD,
+            f"receipt lane {receipt.lane.value!r} is not 'pr-head'",
+        )
+    if receipt.sha != expected_head_sha:
+        return (
+            EnumPrHeadVerdict.HEAD_MISMATCH,
+            f"receipt head {receipt.sha} does not match expected head {expected_head_sha}",
+        )
+    if receipt.result is not EnumLabPassResult.PASS:
+        return (
+            EnumPrHeadVerdict.RESULT_NOT_PASS,
+            f"receipt result is {receipt.result.value}, not PASS",
+        )
+
+    # ModelLabPassReceipt refuses a pr-head receipt without this subject. Keep
+    # the assertion local so type narrowing does not depend on that invariant.
+    subject = receipt.subject
+    if subject is None:  # pragma: no cover - construction already refuses it
+        raise AssertionError("validated pr-head receipt has no subject")
+
+    mismatches: list[str] = []
+    if subject.repo != expected_repo:
+        mismatches.append(f"repo={subject.repo!r}, expected {expected_repo!r}")
+    if subject.pr_number != expected_pr_number:
+        mismatches.append(
+            f"pr_number={subject.pr_number}, expected {expected_pr_number}"
+        )
+    if subject.profile_id != expected_profile_id:
+        mismatches.append(
+            f"profile_id={subject.profile_id!r}, expected {expected_profile_id!r}"
+        )
+    if subject.profile_version != expected_profile_version:
+        mismatches.append(
+            "profile_version="
+            f"{subject.profile_version!r}, expected {expected_profile_version!r}"
+        )
+    if mismatches:
+        return (
+            EnumPrHeadVerdict.PROFILE_MISMATCH,
+            "receipt profile binding does not match: " + "; ".join(mismatches),
+        )
+
+    if not mandatory_checks:
+        return (
+            EnumPrHeadVerdict.MISSING_MANDATORY_CHECK,
+            "no mandatory checks were supplied; a PR-head proof is judged against "
+            "its profile's mandatory checks and an empty set would accept any PASS",
+        )
+    passing_names = {
+        check.name
+        for check in receipt.checks
+        if check.outcome is EnumLabPassCheckOutcome.PASS
+    }
+    missing = sorted(mandatory_checks - passing_names)
+    if missing:
+        return (
+            EnumPrHeadVerdict.MISSING_MANDATORY_CHECK,
+            f"mandatory passing check(s) missing: {missing}",
+        )
+
+    if (
+        subject.runner_identity.strip().casefold()
+        == subject.verifier_identity.strip().casefold()
+    ):
+        return (
+            EnumPrHeadVerdict.RUNNER_IS_VERIFIER,
+            "runner_identity and verifier_identity name the same identity",
+        )
+
+    if subject.carried_from:
+        if subject.handler_kind in _RUNTIME_PROOF_HANDLER_KINDS:
+            return (
+                EnumPrHeadVerdict.CARRY_OVER_RUNTIME_PROFILE,
+                f"handler {subject.handler_kind.value!r} must re-prove at every head",
+            )
+        if subject.pr_diff_digest != current_pr_diff_digest:
+            return (
+                EnumPrHeadVerdict.CARRY_OVER_DIGEST_MISMATCH,
+                "carried proof diff digest "
+                f"{subject.pr_diff_digest} does not match current digest "
+                f"{current_pr_diff_digest}",
+            )
+
+    return (
+        EnumPrHeadVerdict.ACCEPTED,
+        "PR-head receipt accepted for the exact head, profile, and required checks",
+    )
+
+
+# ---------------------------------------------------------------------------
+# OMN-19566 T2 slices 2 and 3: the pr-head receipt on the bus, and the
+# informational check run on the proven head
+# ---------------------------------------------------------------------------
+
+#: The topic a pr-head receipt is published on (plan section 3). The
+#: ``lab_proof_receipts`` projection folds it; landers, the scheduler and the
+#: D1 bar counter read that projection. It is published for a FAIL exactly as
+#: for a PASS: a record that exists only on success cannot tell a failed proof
+#: from one nobody ran, and the bar counts the negative control's FAIL.
+LAB_PROOF_RECEIPT_EVENT_TOPIC: Final[str] = (
+    "onex.evt.omnibase-infra.lab-proof-receipt.v1"
+)
+
+#: The check run the verifier posts on the proven head. It is INFORMATIONAL and
+#: never a required context: a check run posted on the PR head sha never appears
+#: on a ``merge_group`` build, so a required context of this name would hold
+#: every queued PR until timeout (plan section 11, the T20 split). The required
+#: context is the separate ``lab-proof`` workflow job, which reads the
+#: projection.
+LAB_PROOF_RECEIPT_CHECK_NAME: Final[str] = "lab-proof-receipt"
+
+#: GitHub refuses a check-run output text longer than this.
+_CHECK_RUN_TEXT_LIMIT: Final[int] = 65535
+
+
+def pr_head_receipt_key_text(receipt: ModelLabPassReceipt) -> str:
+    """The receipt key as one string: ``<repo>#<pr>@<head>:<profile>@<version>``.
+
+    The same shape ``ModelLabProofResult`` keys a node-run proof by, so a reader
+    can join the two without a translation table.
+    """
+    repo, pr_number, head, profile_id, profile_version = pr_head_receipt_key(receipt)
+    return f"{repo}#{pr_number}@{head}:{profile_id}@{profile_version}"
+
+
+def verify_pr_head_receipt_at_live_head(
+    receipt: ModelLabPassReceipt,
+    *,
+    live_head_sha: str,
+    mandatory_checks: frozenset[str],
+    current_pr_diff_digest: str,
+) -> tuple[EnumPrHeadVerdict, str]:
+    """Verify a receipt against the PR's LIVE head and its profile's checks.
+
+    The repository, PR and profile binding are taken from the receipt's own
+    subject, because this is the question a poster or a projection asks about a
+    receipt it was handed: is it still the proof of this PR's current head,
+    under the checks its profile demands? A caller that must pin a DIFFERENT
+    profile calls :func:`verify_pr_head_receipt` directly. The head is never
+    taken from the receipt: a head that moved after its proof is
+    ``HEAD_MISMATCH``, which is the whole point of reading it live.
+    """
+    subject = receipt.subject
+    if receipt.lane is not EnumLabLane.PR_HEAD or subject is None:
+        return (
+            EnumPrHeadVerdict.NOT_PR_HEAD,
+            f"receipt lane {receipt.lane.value!r} is not 'pr-head'",
+        )
+    return verify_pr_head_receipt(
+        receipt,
+        expected_repo=subject.repo,
+        expected_pr_number=subject.pr_number,
+        expected_head_sha=live_head_sha,
+        expected_profile_id=subject.profile_id,
+        expected_profile_version=subject.profile_version,
+        mandatory_checks=mandatory_checks,
+        current_pr_diff_digest=current_pr_diff_digest,
+    )
+
+
+@dataclass(frozen=True)
+class RegistryProfilePin:
+    """What the profile registry says a receipt's subject must be judged against."""
+
+    repo: str
+    proof_kind: str
+    profile_key: str
+    profile_version: str
+    mandatory_checks: frozenset[str]
+
+
+def read_profile_pin(path: Path) -> RegistryProfilePin:
+    """Read the pin ``validate_lab_proof_profiles.py --pin`` printed.
+
+    The registry (``config/lab_proof_profiles.yaml``, OMN-19565) is the one
+    reviewed declaration of what a profile demands. A publisher that took the
+    checks from its caller could be handed a shorter list; reading the pin the
+    typed registry produced means the only way to weaken a verdict is a reviewed
+    registry change. The profile id and version come from the pin too, so a
+    receipt minted under an older profile version is ``PROFILE_MISMATCH``.
+
+    The registry parse needs the package; this module must stay stdlib-only for
+    the bare runners, so it reads the resolved pin, not the YAML.
+    """
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(doc, dict):
+        msg = f"{path}: a profile pin is a JSON object"
+        raise ValueError(msg)
+    checks = doc.get("mandatory_checks")
+    fields = {
+        name: doc.get(name)
+        for name in ("repo", "proof_kind", "profile_key", "profile_version")
+    }
+    if not all(isinstance(v, str) and v for v in fields.values()):
+        msg = (
+            f"{path}: a profile pin needs repo, proof_kind, profile_id, profile_version"
+        )
+        raise ValueError(msg)
+    if (
+        not isinstance(checks, list)
+        or not checks
+        or not all(isinstance(c, str) and c for c in checks)
+    ):
+        msg = f"{path}: a profile pin needs a non-empty mandatory_checks list"
+        raise ValueError(msg)
+    return RegistryProfilePin(
+        repo=str(fields["repo"]),
+        proof_kind=str(fields["proof_kind"]),
+        profile_key=str(fields["profile_key"]),
+        profile_version=str(fields["profile_version"]),
+        mandatory_checks=frozenset(checks),
+    )
+
+
+def _missing_mandatory(
+    receipt: ModelLabPassReceipt, mandatory_checks: frozenset[str]
+) -> list[str]:
+    passing = {
+        c.name for c in receipt.checks if c.outcome is EnumLabPassCheckOutcome.PASS
+    }
+    return sorted(mandatory_checks - passing)
+
+
+def build_pr_head_bus_event(
+    receipt: ModelLabPassReceipt,
+    *,
+    verdict: EnumPrHeadVerdict,
+    reason: str,
+    mandatory_checks: frozenset[str],
+) -> dict[str, Any]:
+    """Render a pr-head receipt as the event the ``lab_proof_receipts`` fold reads.
+
+    A PROJECTION of the receipt, like :func:`build_bus_event`: every field is
+    copied from the receipt or from the verifier's answer, and ``result`` is the
+    receipt's own (derived from its checks), never re-derived here. The whole
+    receipt travels as ``receipt`` so a consumer can re-run the offline verifier
+    on exactly what was minted rather than on a summary of it.
+
+    ``verifier_token`` is the verifier's answer AT MINT TIME, against the head
+    the proof ran on. It is a statement about the receipt, not a merge decision:
+    the required ``lab-proof`` job (T20) re-verifies against the live head.
+    """
+    subject = receipt.subject
+    if receipt.lane is not EnumLabLane.PR_HEAD or subject is None:
+        msg = "only a pr-head receipt is published on the lab-proof-receipt topic"
+        raise ValueError(msg)
+    if not isinstance(verdict, EnumPrHeadVerdict):
+        msg = f"verdict={verdict!r} is not an EnumPrHeadVerdict"
+        raise ValueError(msg)
+    if not isinstance(reason, str) or not reason:
+        msg = "the verifier's reason is required and must be a non-empty string"
+        raise ValueError(msg)
+    return {
+        "schema_version": "1.0.0",
+        "event_type": "lab-proof-receipt",
+        "topic": LAB_PROOF_RECEIPT_EVENT_TOPIC,
+        # The partition key publish_lab_fact_event.py reads, as for every lab
+        # fact: one lane value, so every pr-head receipt keeps its order.
+        "lane": receipt.lane.value,
+        "receipt_key": pr_head_receipt_key_text(receipt),
+        "repo": subject.repo,
+        "pr_number": subject.pr_number,
+        "head_sha": receipt.sha,
+        "profile_id": subject.profile_id,
+        "profile_version": subject.profile_version,
+        "handler_kind": subject.handler_kind.value,
+        "result": receipt.result.value,
+        "verifier_token": verdict.value,
+        "verifier_reason": reason,
+        "mandatory_checks": sorted(mandatory_checks),
+        "missing_mandatory_checks": _missing_mandatory(receipt, mandatory_checks),
+        "failing_checks": [check.name for check in receipt.checks if not check.ok],
+        "started_at": receipt.started_at.isoformat(),
+        "finished_at": receipt.finished_at.isoformat(),
+        "runner_identity": subject.runner_identity,
+        "verifier_identity": subject.verifier_identity,
+        "host": subject.host,
+        "slot": subject.slot,
+        "carried_from": subject.carried_from,
+        "receipt": json.loads(receipt.to_json()),
+    }
+
+
+def render_pr_head_check_run(
+    receipt: ModelLabPassReceipt,
+    *,
+    verdict: EnumPrHeadVerdict,
+    reason: str,
+    mandatory_checks: frozenset[str],
+    details_url: str = "",
+) -> dict[str, Any]:
+    """The body of ``POST /repos/{repo}/check-runs`` for one pr-head receipt.
+
+    Pure, so every conclusion is falsifiable without a network. The check run
+    is posted on the PROVEN head (``receipt.sha``), never on a head the proof
+    did not run on: a proof of an older head is not evidence about a newer one,
+    and posting it there is how a check goes green on code nobody ran. A moved
+    head is reported on the proven sha as ``HEAD_MISMATCH``.
+
+    ``success`` means exactly one thing, the verifier's ``ACCEPTED``. Every other
+    token, a FAIL receipt included, is ``failure``, with the token in the title
+    so a reader never has to open the check to learn why.
+    """
+    subject = receipt.subject
+    if receipt.lane is not EnumLabLane.PR_HEAD or subject is None:
+        msg = "only a pr-head receipt has a lab-proof-receipt check run"
+        raise ValueError(msg)
+    accepted = verdict is EnumPrHeadVerdict.ACCEPTED
+    missing = _missing_mandatory(receipt, mandatory_checks)
+    title = (
+        f"{receipt.result.value} {verdict.value}: {subject.profile_id}"
+        f"@{subject.profile_version} on {subject.host}"
+    )
+    summary_lines = [
+        f"Lab proof receipt for {subject.repo}#{subject.pr_number} at `{receipt.sha}`.",
+        "",
+        f"- result: **{receipt.result.value}**",
+        f"- verifier: **{verdict.value}** ({reason})",
+        f"- profile: `{subject.profile_id}@{subject.profile_version}` "
+        f"({subject.handler_kind.value})",
+        f"- ran on: {subject.host}, {subject.slot}, by `{subject.runner_identity}`",
+        f"- minted by: `{subject.verifier_identity}`",
+        f"- window: {_utc_stamp(receipt.started_at)} to {_utc_stamp(receipt.finished_at)}",
+    ]
+    if missing:
+        summary_lines.append(f"- mandatory checks not passing: {', '.join(missing)}")
+    if subject.carried_from:
+        summary_lines.append(f"- carried from: `{subject.carried_from}`")
+    summary_lines += [
+        "",
+        "Informational only. The required context is the `lab-proof` job, "
+        "which re-verifies the receipt against the live head (OMN-19584).",
+    ]
+    text_lines = ["| check | outcome | evidence |", "| -- | -- | -- |"]
+    for check in receipt.checks:
+        evidence = check.evidence.replace("|", "\\|").replace("\n", " ")
+        text_lines.append(f"| {check.name} | {check.outcome.value} | {evidence} |")
+    text = "\n".join(text_lines)
+    if len(text) > _CHECK_RUN_TEXT_LIMIT:
+        text = text[: _CHECK_RUN_TEXT_LIMIT - 20] + "\n\n(truncated)"
+    body: dict[str, Any] = {
+        "name": LAB_PROOF_RECEIPT_CHECK_NAME,
+        "head_sha": receipt.sha,
+        "status": "completed",
+        "conclusion": "success" if accepted else "failure",
+        "started_at": _utc_stamp(receipt.started_at),
+        "completed_at": _utc_stamp(receipt.finished_at),
+        "external_id": pr_head_receipt_key_text(receipt),
+        "output": {
+            "title": title[:255],
+            "summary": "\n".join(summary_lines),
+            "text": text,
+        },
+    }
+    if details_url:
+        body["details_url"] = details_url
+    return body
+
+
+class CheckRunPostError(RuntimeError):
+    """The check-run POST did not succeed. Carries the HTTP status when known."""
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+def post_check_run(
+    body: Mapping[str, Any],
+    *,
+    repo: str,
+    token: str,
+    api_base: str = "https://api.github.com",  # url-authority-ok: canonical public GitHub REST base, the one origin a check run is created at; post_check_run pins the repo to OmniNode-ai before any request
+    urlopen: Callable[..., Any] = urllib.request.urlopen,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    """POST one check run and return GitHub's answer.
+
+    Check runs can be created only by a GitHub App, so ``token`` must be an App
+    installation token with ``checks: write`` on ``repo`` (the workflow mints
+    one); a personal token is refused by GitHub with 403, and that refusal is
+    raised here rather than swallowed. The token never reaches argv or a log.
+    """
+    if not token:
+        msg = "a GitHub App installation token is required to post a check run"
+        raise CheckRunPostError(msg)
+    if not re.fullmatch(r"OmniNode-ai/[A-Za-z0-9._-]+", repo):
+        msg = f"repo={repo!r} must name an OmniNode-ai repository"
+        raise CheckRunPostError(msg)
+    request = urllib.request.Request(  # noqa: S310 - fixed https API base
+        f"{api_base.rstrip('/')}/repos/{repo}/check-runs",
+        data=json.dumps(dict(body)).encode("utf-8"),
+        method="POST",
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:300]
+        msg = f"check-run POST to {repo} refused with HTTP {exc.code}: {detail}"
+        raise CheckRunPostError(msg, status=exc.code) from exc
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        msg = f"check-run POST to {repo} failed: {exc}"
+        raise CheckRunPostError(msg) from exc
+    if not isinstance(payload, dict):
+        msg = f"check-run POST to {repo} returned a non-object body"
+        raise CheckRunPostError(msg)
+    return payload
 
 
 #: How each outcome is badged in a rendered receipt. INDETERMINATE is spelled
@@ -4081,6 +4809,47 @@ def read_delivery_runs(
     return runs
 
 
+def endpoint_reemit_eligibility(
+    subject: str,
+    *,
+    repo: str,
+    workflow: str,
+    branch: str,
+    bound_seconds: float,
+    now: datetime,
+    read_runs: Callable[[str, str, str], list[ModelDeliveryRun]] = read_delivery_runs,
+) -> str:
+    """Decide whether an absent lower-endpoint receipt may be recovered.
+
+    OMN-19563. A queued verify run emits no receipt. When its command deploys
+    after that run ends, the next convergence observes the queued sha as its
+    exact initial revision -- the bounded lower endpoint -- rather than inside
+    the open re-emission window. The caller has already re-established live
+    containment for that endpoint; this second predicate proves the newest
+    staging delivery is waiting for the same exact subject inside its bound.
+
+    Any unreadable delivery surface stays closed. This function only admits an
+    absent receipt; unreadable or health-failing receipts are rejected by the
+    existing eligibility path before this function is called.
+    """
+    if not _SHA_RE.match(subject):
+        return "skip:endpoint-subject-invalid"
+    try:
+        runs = read_runs(repo, workflow, branch)
+    except Exception as exc:  # noqa: BLE001 - refusal is the fail-closed result
+        detail = " ".join(str(exc).split()) or type(exc).__name__
+        return f"skip:endpoint-delivery-unreadable {detail}"
+    selected, _reasons = select_refused_deliveries(
+        subject,
+        runs,
+        now=now,
+        bound_seconds=bound_seconds,
+    )
+    if selected:
+        return "reemit:absent-endpoint-delivery-waiting"
+    return "skip:endpoint-has-no-waiting-delivery"
+
+
 def rerun_refused_deliveries(
     repo: str,
     subjects: Sequence[str],
@@ -4179,6 +4948,14 @@ WORKFLOW_VERDICT_MAX_AGE_CEILING_HOURS: Final[float] = 72.0
 #: of an older run supersede a newer-created one, in both directions.
 WORKFLOW_VERDICT_PAGE: Final[int] = 50
 
+#: OMN-19311 AC5 -- the planted-red drill's blast-radius ceiling. `until` may
+#: not be set more than this many hours in the future, so a mistyped date
+#: cannot leave staging delivery closed for days with nobody watching. The
+#: drill exists to PROVE a refusal happens, not to hold one open.
+DRILL_MAX_WINDOW_HOURS: Final[float] = 2.0
+
+_TICKET_RE = re.compile(r"^OMN-\d+$")
+
 
 def _run_started(run: Mapping[str, Any]) -> datetime | None:
     """The start of a run's LATEST attempt, which is when it last measured."""
@@ -4201,8 +4978,25 @@ def evaluate_workflow_verdict(
     *,
     now: datetime | None = None,
     dispatch_title_contains: str = "",
+    drill_red_until: str = "",
+    drill_ticket: str = "",
 ) -> int:
     """Fail closed unless the NEWEST completed measurement of a workflow is green.
+
+    ``drill_red_until`` / ``drill_ticket`` (OMN-19311 AC5) are the
+    planted-red drill: a self-expiring switch that makes THIS reader return a
+    red, so staging delivery's refusal path can be proven live without
+    depending on a real defect existing at proof time (the real D11 red this
+    binding was written against, 2026-09-23, is not guaranteed to stay red --
+    it turned green at 2026-09-24T05:33:57Z). Both must be set together or
+    neither is (a lone flag is a misconfiguration, refused); ``drill_ticket``
+    must be an ``OMN-<n>`` id and ``drill_red_until`` a parseable UTC
+    timestamp no more than :data:`DRILL_MAX_WINDOW_HOURS` in the future. Past
+    its own expiry the drill has NO effect at all -- nobody has to turn it
+    off. There is deliberately no symmetric flag that forces a PASS: the drill
+    can only make delivery more conservative, never less. When active it does
+    not call the GitHub API at all -- it is a synthetic, clearly-labelled red,
+    not a spoofed real one.
 
     Operator ruling 2026-09-23T17:12:15Z (ledger RULING, amending the
     16:10:08Z every-check-blocks ruling) binds four chronically red checks to a
@@ -4257,6 +5051,58 @@ def evaluate_workflow_verdict(
             file=out,
         )
         return 1
+
+    # OMN-19311 AC5 -- the planted-red drill. Checked before anything else,
+    # including the GitHub API read: an active drill never depends on network
+    # access, so it is a reliable, fast, unambiguously-synthetic red.
+    if drill_red_until or drill_ticket:
+        if not drill_red_until or not drill_ticket:
+            return refuse(
+                "DRILL misconfigured (OMN-19311 AC5): drill_red_until and "
+                "drill_ticket must both be set together, or neither is set "
+                f"(drill_red_until={drill_red_until!r}, "
+                f"drill_ticket={drill_ticket!r})."
+            )
+        if not _TICKET_RE.match(drill_ticket):
+            return refuse(
+                f"DRILL misconfigured (OMN-19311 AC5): drill_ticket "
+                f"{drill_ticket!r} is not an OMN-<n> id."
+            )
+        try:
+            drill_until = _parse_ts(drill_red_until)
+        except ValueError:
+            return refuse(
+                f"DRILL misconfigured (OMN-19311 AC5): drill_red_until "
+                f"{drill_red_until!r} is not a parseable UTC timestamp."
+            )
+        window_hours = (drill_until - moment).total_seconds() / 3600.0
+        if window_hours > DRILL_MAX_WINDOW_HOURS:
+            return refuse(
+                "DRILL misconfigured (OMN-19311 AC5): drill_red_until is "
+                f"{window_hours:.2f}h in the future, past the "
+                f"{DRILL_MAX_WINDOW_HOURS:g}h ceiling ({drill_ticket})."
+            )
+        if window_hours > 0:
+            print(
+                f"::warning::workflow verdict DRILL (OMN-19311 AC5) active for "
+                f"{label}: a self-expiring switch forcing this reader to return "
+                f"red until {drill_red_until} ({window_hours:.2f}h "
+                f"remaining), ticket {drill_ticket}. This proves staging "
+                "delivery's refusal path live; it is not a real defect and no "
+                "GitHub API call was made to produce it.",
+                file=out,
+            )
+            return refuse(
+                f"DRILL (OMN-19311 AC5, ticket {drill_ticket}) forcing red "
+                f"until {drill_red_until}; this is a synthetic "
+                "measurement, not a real one."
+            )
+        print(
+            f"workflow verdict DRILL (OMN-19311 AC5) for {label}: window "
+            f"expired at {drill_red_until} ({drill_ticket}); resuming "
+            "ordinary evaluation with no further action needed.",
+            file=out,
+        )
 
     print(f"workflow verdict (OMN-18866) for {label}", file=out)
     if not (0 < max_age_hours <= WORKFLOW_VERDICT_MAX_AGE_CEILING_HOURS):
@@ -4718,10 +5564,26 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "this candidate is the window's LOWER endpoint, the revision the "
-            "lane was already on. An endpoint with no receipt is skipped: it "
-            "may not be a merge this lane ever watched."
+            "lane was already on. An endpoint with no receipt is eligible only "
+            "when the newest staging delivery is waiting for its exact sha."
         ),
     )
+    elig.add_argument(
+        "--endpoint-subject",
+        default="",
+        help=(
+            "OMN-19563: exact lower-endpoint sha. When its receipt is absent, "
+            "re-emission is allowed only while the newest staging delivery is "
+            "waiting for this subject."
+        ),
+    )
+    elig.add_argument("--repo", default=DEFAULT_REPO)
+    elig.add_argument(
+        "--delivery-workflow",
+        default="deliver-dev-candidate-to-staging.yml",
+    )
+    elig.add_argument("--delivery-branch", default="dev")
+    elig.add_argument("--overall-bound-seconds", type=float, default=14_400)
 
     gate = sub.add_parser("gate", help="fail closed unless a PASS receipt exists")
     gate.add_argument("--sha", required=True)
@@ -4734,6 +5596,17 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "repeatable, ANY-OF: one PASS among these satisfies the rule 24(b) "
             "premise. Defaults to compose-dev, onex-lab and onex-lab-k3s"
+        ),
+    )
+    gate.add_argument(
+        "--instance-lanes-for",
+        default="",
+        metavar="REPO",
+        help=(
+            "OMN-19543: also read, ANY-OF, the receipt lane of every deploy-agent "
+            "instance whose row in config/deploy_lane_routing.yaml proves REPO "
+            "(omnimarket today: compose-dev-202, compose-dev-200). Needs --lane. "
+            "An unreadable table or a lane this enum does not declare refuses"
         ),
     )
     gate.add_argument(
@@ -4844,6 +5717,23 @@ def build_parser() -> argparse.ArgumentParser:
             "when its run title carries this token (the lane it measured)"
         ),
     )
+    verdict.add_argument(
+        "--drill-red-until",
+        default="",
+        help=(
+            "OMN-19311 AC5: the planted-red drill. A UTC timestamp "
+            "(YYYY-MM-DDTHH:MM:SSZ), no more than DRILL_MAX_WINDOW_HOURS in "
+            "the future, past which this flag has no effect at all. Requires "
+            "--drill-ticket. Forces this reader to return red until then, "
+            "proving staging delivery's refusal path live without depending "
+            "on a real red existing."
+        ),
+    )
+    verdict.add_argument(
+        "--drill-ticket",
+        default="",
+        help="OMN-19311 AC5: the OMN-<n> ticket authorizing the drill. Required with --drill-red-until.",
+    )
 
     verify = sub.add_parser(
         "verify",
@@ -4853,7 +5743,243 @@ def build_parser() -> argparse.ArgumentParser:
     verify.add_argument("--sha", required=True)
     verify.add_argument("--lane", required=True, choices=[e.value for e in EnumLabLane])
 
+    verify_pr_head = sub.add_parser(
+        "verify-pr-head",
+        help="verify an exact-head PR lab-proof receipt offline",
+    )
+    verify_pr_head.add_argument("--receipt", required=True, type=Path)
+    verify_pr_head.add_argument("--repo", required=True)
+    verify_pr_head.add_argument("--pr", required=True, type=int)
+    verify_pr_head.add_argument("--head-sha", required=True)
+    verify_pr_head.add_argument("--profile-id", required=True)
+    verify_pr_head.add_argument("--profile-version", required=True)
+    verify_pr_head.add_argument(
+        "--mandatory-check",
+        action="append",
+        default=[],
+        help="repeatable check name that must be present with a pass outcome",
+    )
+    verify_pr_head.add_argument("--current-pr-diff-digest", required=True)
+
+    # OMN-19566 slice 2: the bus event a pr-head receipt is published as.
+    pr_event = sub.add_parser(
+        "pr-head-event",
+        help="verify a pr-head receipt at a head and write its lab-proof-receipt bus event",
+    )
+    pr_event.add_argument("--receipt", required=True, type=Path)
+    pr_event.add_argument(
+        "--head-sha",
+        required=True,
+        help="the PR's head as read now; a receipt for another head is HEAD_MISMATCH",
+    )
+    _add_profile_source(pr_event)
+    pr_event.add_argument("--current-pr-diff-digest", required=True)
+    pr_event.add_argument("--out", required=True, type=Path)
+
+    # OMN-19566 slice 3: the informational check run on the proven head.
+    pr_check = sub.add_parser(
+        "post-pr-head-check",
+        help=(
+            "verify a pr-head receipt against the live head and post the "
+            "informational lab-proof-receipt check run on the proven head"
+        ),
+    )
+    pr_check.add_argument("--receipt", required=True, type=Path)
+    pr_check.add_argument("--head-sha", required=True, help="the PR's live head")
+    _add_profile_source(pr_check)
+    pr_check.add_argument("--current-pr-diff-digest", required=True)
+    pr_check.add_argument("--details-url", default="")
+    pr_check.add_argument(
+        "--token-env",
+        default="LAB_PROOF_CHECK_TOKEN",
+        help=(
+            "the environment variable holding a GitHub App installation token "
+            "with checks: write; read from the environment so it never reaches argv"
+        ),
+    )
+    pr_check.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print the check-run body and post nothing",
+    )
+
+    # The digest a pr-head receipt binds, computed the one way the verifier
+    # computes it, so a workflow never re-implements it in shell.
+    digest = sub.add_parser(
+        "pr-diff-digest",
+        help="print sha256 of `git diff --no-color --no-ext-diff <merge-base>..<head>`",
+    )
+    digest.add_argument("--repo-dir", required=True, type=Path)
+    digest.add_argument("--merge-base", required=True)
+    digest.add_argument("--head", required=True)
+
     return parser
+
+
+def _add_profile_source(parser: argparse.ArgumentParser) -> None:
+    """Exactly one source of the profile a pr-head receipt is judged against."""
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--profile-pin",
+        type=Path,
+        help=(
+            "the JSON `validate_lab_proof_profiles.py --pin` printed: pin the "
+            "profile id, version and mandatory checks from the reviewed registry "
+            "(the workflow path)"
+        ),
+    )
+    source.add_argument(
+        "--mandatory-check",
+        action="append",
+        help=(
+            "repeatable: the profile's mandatory check names, with the profile "
+            "taken from the receipt's own subject (the pool driver's path, which "
+            "has already read them from the registry)"
+        ),
+    )
+
+
+def _run_pr_head_publication(args: argparse.Namespace) -> int:
+    """``pr-head-event`` and ``post-pr-head-check``: one verification, one output.
+
+    Exit 0 when the event was written or the check run was posted (whatever
+    its conclusion: a FAIL receipt's check run is as much a record as a
+    PASS's), 1 when the receipt is unreadable or is not a pr-head receipt,
+    2 when the POST failed.
+    """
+    try:
+        receipt = parse_receipt(args.receipt.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ReceiptLookupError) as exc:
+        print(json.dumps({"token": "UNREADABLE", "reason": str(exc)}, sort_keys=True))
+        return 1
+    if receipt.lane is not EnumLabLane.PR_HEAD:
+        print(
+            json.dumps(
+                {"token": EnumPrHeadVerdict.NOT_PR_HEAD.value, "reason": "not pr-head"},
+                sort_keys=True,
+            )
+        )
+        return 1
+    subject = receipt.subject
+    if subject is None:  # pragma: no cover - a pr-head receipt always has one
+        raise AssertionError("validated pr-head receipt has no subject")
+    if args.profile_pin is not None:
+        try:
+            pin = read_profile_pin(args.profile_pin)
+        except (OSError, UnicodeError, ValueError) as exc:
+            print(
+                json.dumps(
+                    {"token": "PROFILE_UNRESOLVED", "reason": str(exc)}, sort_keys=True
+                )
+            )
+            return 1
+        if (pin.repo, pin.proof_kind) != (subject.repo, subject.handler_kind.value):
+            reason = (
+                f"the pin is for {pin.repo} {pin.proof_kind}, the receipt for "
+                f"{subject.repo} {subject.handler_kind.value}"
+            )
+            print(json.dumps({"token": "PROFILE_UNRESOLVED", "reason": reason}))
+            return 1
+        mandatory = pin.mandatory_checks
+        verdict, reason = verify_pr_head_receipt(
+            receipt,
+            expected_repo=subject.repo,
+            expected_pr_number=subject.pr_number,
+            expected_head_sha=args.head_sha,
+            expected_profile_id=pin.profile_key,
+            expected_profile_version=pin.profile_version,
+            mandatory_checks=mandatory,
+            current_pr_diff_digest=args.current_pr_diff_digest,
+        )
+    else:
+        mandatory = frozenset(args.mandatory_check)
+        verdict, reason = verify_pr_head_receipt_at_live_head(
+            receipt,
+            live_head_sha=args.head_sha,
+            mandatory_checks=mandatory,
+            current_pr_diff_digest=args.current_pr_diff_digest,
+        )
+    if args.command == "pr-head-event":
+        event = build_pr_head_bus_event(
+            receipt, verdict=verdict, reason=reason, mandatory_checks=mandatory
+        )
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(json.dumps(event, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps({"token": verdict.value, "reason": reason}, sort_keys=True))
+        return 0
+    body = render_pr_head_check_run(
+        receipt,
+        verdict=verdict,
+        reason=reason,
+        mandatory_checks=mandatory,
+        details_url=args.details_url,
+    )
+    if args.dry_run:
+        print(json.dumps(body, indent=2, sort_keys=True))
+        return 0
+    try:
+        posted = post_check_run(
+            body, repo=subject.repo, token=os.environ.get(args.token_env, "")
+        )
+    except CheckRunPostError as exc:
+        print(
+            json.dumps(
+                {"token": verdict.value, "posted": False, "error": str(exc)},
+                sort_keys=True,
+            )
+        )
+        return 2
+    print(
+        json.dumps(
+            {
+                "token": verdict.value,
+                "posted": True,
+                "conclusion": body["conclusion"],
+                "head_sha": body["head_sha"],
+                "check_run_id": posted.get("id"),
+                "html_url": posted.get("html_url"),
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _instance_receipt_lanes() -> Any:
+    """``scripts/ci/instance_receipt_lanes.py``, loaded by path (OMN-19543).
+
+    Lazily, and only by ``gate --instance-lanes-for``: that module needs PyYAML,
+    and every other path through this file stays stdlib-only, as with
+    ``_release_train_module``.
+    """
+    name = "_lab_pass_instance_receipt_lanes"
+    if name in sys.modules:
+        return sys.modules[name]
+    path = Path(__file__).resolve().parent / "instance_receipt_lanes.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        msg = f"cannot load the instance receipt lanes from {path}"
+        raise RuntimeError(msg)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
+    return module
+
+
+def instance_lanes_for(repo: str) -> list[EnumLabLane]:
+    """The receipt lanes of the instances that prove ``repo``, as enum values.
+
+    Raises ``ValueError`` for a table lane this enum does not declare, and the
+    reader's own error for an unreadable table; ``gate`` refuses on both.
+    """
+    return [
+        EnumLabLane(value)
+        for value in _instance_receipt_lanes().receipt_lanes_for(repo)
+    ]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -4923,12 +6049,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                     file=sys.stderr,
                 )
 
-        inventory_probe: ModelNodeInventoryProbe | None = None
+        # OMN-19802. The manifest is read by probe_compose_dev AFTER its
+        # readiness wait, never here: read here it was fetched from a lane
+        # still being recreated. The reader keeps the one probe it produced so
+        # the triples written below are the same read the check reports.
+        inventory_reads: list[ModelNodeInventoryProbe] = []
+        read_node_inventory: Callable[[], ModelNodeInventoryProbe] | None = None
         if args.manifest_url.strip():
-            inventory_probe = check_node_inventory(
-                f"{args.manifest_url.rstrip('/')}{INTROSPECTION_MANIFEST_PATH}",
-                args.timeout_seconds,
+            manifest_url = (
+                f"{args.manifest_url.rstrip('/')}{INTROSPECTION_MANIFEST_PATH}"
             )
+            probe_timeout = args.timeout_seconds
+
+            def _read_and_keep() -> ModelNodeInventoryProbe:
+                probe = check_node_inventory(manifest_url, probe_timeout)
+                inventory_reads.append(probe)
+                return probe
+
+            read_node_inventory = _read_and_keep
 
         # OMN-18866. Each subject is assembled only when the caller named it,
         # and a caller that names it PARTLY is refused rather than quietly
@@ -4988,7 +6126,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             budget=budget,
             expected_generation=expected_generation,
             generation_container=args.generation_container,
-            node_inventory_probe=inventory_probe,
+            read_node_inventory=read_node_inventory,
             health_observe_budget_seconds=args.health_observe_budget_seconds,
             declared_migrations=declared_migrations,
             migration_ledger=migration_ledger,
@@ -4999,6 +6137,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             first_lag_sample=first_lag_sample,
             chain_canary_receipt=args.chain_canary_receipt,
         )
+        inventory_probe = inventory_reads[-1] if inventory_reads else None
         if args.node_inventory_out is not None:
             # Written even when the probe found nothing usable, as an empty
             # array: a downstream `emit` that pointed here must get a file, so
@@ -5063,13 +6202,67 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "verify":
         return verify_emitted(args.path, args.sha, EnumLabLane(args.lane), sys.stdout)
 
+    if args.command == "verify-pr-head":
+        try:
+            receipt = parse_receipt(args.receipt.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ReceiptLookupError) as exc:
+            print(
+                json.dumps(
+                    {
+                        "token": "UNREADABLE",
+                        "reason": f"receipt input is unreadable: {exc}",
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 2
+        verdict, reason = verify_pr_head_receipt(
+            receipt,
+            expected_repo=args.repo,
+            expected_pr_number=args.pr,
+            expected_head_sha=args.head_sha,
+            expected_profile_id=args.profile_id,
+            expected_profile_version=args.profile_version,
+            mandatory_checks=frozenset(args.mandatory_check),
+            current_pr_diff_digest=args.current_pr_diff_digest,
+        )
+        print(json.dumps({"token": verdict.value, "reason": reason}, sort_keys=True))
+        return 0 if verdict is EnumPrHeadVerdict.ACCEPTED else 1
+
+    if args.command in ("pr-head-event", "post-pr-head-check"):
+        return _run_pr_head_publication(args)
+
+    if args.command == "pr-diff-digest":
+        try:
+            print(
+                compute_pr_diff_digest_from_repo(
+                    args.repo_dir, args.merge_base, args.head
+                )
+            )
+        except (ValueError, OSError, subprocess.CalledProcessError) as exc:
+            print(f"pr-diff-digest: {exc}", file=sys.stderr)
+            return 1
+        return 0
+
     if args.command == "reemit-eligible":
         # Prints one word, because the workflow branches on it and a decision
         # a shell has to parse out of prose is a decision nothing tests.
         existing = args.existing
         if existing is None or not existing.is_file():
             if args.endpoint:
-                print("skip:endpoint-has-no-receipt")
+                if not args.endpoint_subject:
+                    print("skip:endpoint-has-no-receipt")
+                    return 0
+                print(
+                    endpoint_reemit_eligibility(
+                        args.endpoint_subject,
+                        repo=args.repo,
+                        workflow=args.delivery_workflow,
+                        branch=args.delivery_branch,
+                        bound_seconds=args.overall_bound_seconds,
+                        now=datetime.now(UTC),
+                    )
+                )
                 return 0
             print("reemit:absent")
             return 0
@@ -5114,6 +6307,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.lane
             else list(ANY_OF_DEFAULT_LANES)
         )
+        if args.instance_lanes_for:
+            if not args.lane:
+                print(
+                    f"::error::lab-pass gate FAILED for {args.sha}: "
+                    "--instance-lanes-for needs --lane; refusing rather than "
+                    "adding instance lanes to the any-of default.",
+                    file=sys.stdout,
+                )
+                return 1
+            try:
+                extra = instance_lanes_for(args.instance_lanes_for)
+            except Exception as exc:  # noqa: BLE001 - an unread table refuses
+                print(
+                    f"::error::lab-pass gate FAILED for {args.sha}: the instance "
+                    f"receipt lanes for {args.instance_lanes_for} could not be read "
+                    f"({exc}); refusing rather than reading fewer lanes.",
+                    file=sys.stdout,
+                )
+                return 1
+            lanes.extend(lane for lane in extra if lane not in lanes)
         required = list(dict.fromkeys(EnumLabLane(v) for v in args.require_lane))
         required_sha: str | None = None
         required_note = ""
@@ -5212,6 +6425,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.event,
             sys.stdout,
             dispatch_title_contains=args.dispatch_title_contains,
+            drill_red_until=args.drill_red_until,
+            drill_ticket=args.drill_ticket,
         )
 
     raise AssertionError(f"unreachable subcommand {args.command!r}")  # pragma: no cover

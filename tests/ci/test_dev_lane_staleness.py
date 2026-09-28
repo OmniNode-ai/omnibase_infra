@@ -305,7 +305,8 @@ class TestTheWiring:
         report 'I cannot look', which this guard treats as a failure."""
         document = yaml.safe_load(STALENESS_WORKFLOW.read_text(encoding="utf-8"))
         runs_on = document["jobs"]["dev-lane-staleness"]["runs-on"]
-        assert "self-hosted" in runs_on
+        # OMN-19894: beside the lane the overlay resolves, never a host label.
+        assert runs_on == "${{ fromJSON(needs.resolve-lane.outputs.docker_runs_on) }}"
 
     def test_the_hourly_workflow_invokes_the_real_guard(self) -> None:
         body = STALENESS_WORKFLOW.read_text(encoding="utf-8")
@@ -328,13 +329,21 @@ class TestTheWiring:
         assert "scripts/ci/check_dev_lane_staleness.py" in yaml.dump(job)
         assert "--expect-revision" in yaml.dump(job)
 
-    def test_the_convergence_job_only_runs_when_a_command_was_published(self) -> None:
+    def test_the_convergence_wait_only_runs_when_a_command_was_published(
+        self,
+    ) -> None:
+        # OMN-18976: the JOB runs for every dev merge, because a NON_RUNTIME
+        # merge must still answer for merges queued behind an earlier one. The
+        # WAIT is what a no-op trigger run has no use for, so the gate on the
+        # publisher's own output moved from the job onto the wait.
         document = yaml.safe_load(TRIGGER_WORKFLOW.read_text(encoding="utf-8"))
-        condition = document["jobs"]["verify-lane-converged"]["if"]
-        assert "published" in condition, (
-            "a no-op trigger run has no redeploy to wait for; gating on the "
-            "publisher's own output keeps the signal about delivery"
-        )
+        job = document["jobs"]["verify-lane-converged"]
+        assert "runtime_lane == 'dev'" in job["if"]
+        converge = next(s for s in job["steps"] if s.get("id") == "converge")
+        run = converge["run"]
+        assert run.index('if [[ "$PUBLISHED" != "true" ]]') < run.index(
+            "--expect-revision"
+        ), "an unpublished merge must leave the step before the wait"
 
     def test_the_convergence_job_checks_out_trusted_base_ref_not_fork_code(
         self,

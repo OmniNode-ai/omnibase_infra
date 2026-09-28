@@ -159,6 +159,80 @@ class TestErrorClassification:
         assert mod.is_benign_enqueue_error(msg) is False
 
 
+class TestArmArgs:
+    def test_queue_present_uses_bare_auto(self) -> None:
+        payload = {"data": {"repository": {"mergeQueue": {"id": "MQ_kwDOAA"}}}}
+        assert mod.merge_queue_present(payload) is True
+        assert mod.arm_args(queue_present=True) == ("--auto",)
+
+    def test_null_queue_uses_squash_auto(self) -> None:
+        payload = {"data": {"repository": {"mergeQueue": None}}}
+        assert mod.merge_queue_present(payload) is False
+        assert mod.arm_args(queue_present=False) == ("--squash", "--auto")
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {},
+            {"errors": [{"message": "GraphQL failed"}]},
+            {"data": None},
+            {"data": {}},
+            {"data": {"repository": None}},
+            {"data": {"repository": {}}},
+            {"data": {"repository": {"mergeQueue": "enabled"}}},
+            {"data": {"repository": {"mergeQueue": {}}}},
+            {"data": {"repository": {"mergeQueue": {"id": ""}}}},
+        ],
+    )
+    def test_undetermined_payload_raises(self, payload: dict[str, object]) -> None:
+        with pytest.raises(ValueError):
+            mod.merge_queue_present(payload)
+
+    @pytest.mark.parametrize(
+        ("payload", "expected"),
+        [
+            (
+                {"data": {"repository": {"mergeQueue": {"id": "MQ_kwDOAA"}}}},
+                "--auto",
+            ),
+            (
+                {"data": {"repository": {"mergeQueue": None}}},
+                "--squash --auto",
+            ),
+        ],
+    )
+    def test_cli_prints_arm_args(
+        self,
+        payload: dict[str, object],
+        expected: str,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        rc = mod.main(["arm-args", "--merge-queue-json", json.dumps(payload)])
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert captured.out.strip() == expected
+        assert captured.err == ""
+
+    def test_cli_malformed_json_exits_two(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        rc = mod.main(["arm-args", "--merge-queue-json", "{not-json"])
+        captured = capsys.readouterr()
+        assert rc == 2
+        assert captured.out == ""
+        assert captured.err
+
+    def test_cli_graphql_errors_exit_two(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        payload = {"errors": [{"message": "merge queue query failed"}]}
+        rc = mod.main(["arm-args", "--merge-queue-json", json.dumps(payload)])
+        captured = capsys.readouterr()
+        assert rc == 2
+        assert captured.out == ""
+        assert captured.err
+
+
 class TestCli:
     def test_classify_cli_prints_action(
         self, capsys: pytest.CaptureFixture[str]

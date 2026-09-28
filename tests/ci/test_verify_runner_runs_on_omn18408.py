@@ -28,6 +28,7 @@ comment, and every one of these files carries comments that name both labels.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -52,9 +53,10 @@ DEPLOY_LABEL = ["self-hosted", "omnibase-deploy"]
 # acceptance criteria and in the authorising operator-consent row, plus the
 # five OMN-18602 moved when it took the follow-up decision OMN-18408 deferred.
 MOVED_JOBS = (
-    ("dev-lane-liveness.yml", "dev-lane-liveness", "dev-lane-liveness"),
-    ("dev-lane-staleness.yml", "dev-lane-staleness", "dev-lane-staleness"),
-    ("chain-canary.yml", "chain-canary", "Chain Canary (dev lane)"),
+    # Still host-pinned, knowingly (OMN-19894 residual): its AWS OIDC role trust
+    # is scoped to the dev branch, so no feature-branch run can prove it off
+    # this host, and the bastion's reachability from the other lab hosts is
+    # unmeasured. It moves when both are settled.
     ("msk-bastion-canary.yml", "bastion-canary", "MSK bastion routing canary"),
     (
         "runtime-rebuild-trigger.yml",
@@ -84,96 +86,12 @@ MOVED_JOBS = (
         "verify-onex-api-delivered",
         "Verify the dev lane runs onex-api at this commit",
     ),
-    ("baselines-scheduler.yml", "baselines-compute", "Baselines Batch Compute"),
-    ("dlq-depth-monitor.yml", "dlq-depth-monitor", "DLQ Depth Monitor (read-only)"),
 )
 
-# Jobs that were BORN on the verify label rather than moved onto it. Kept in a
-# separate tuple on purpose: MOVED_JOBS above is the record of two specific
-# decisions (OMN-18408 and its OMN-18602 follow-up), and folding a new job into
-# it would quietly rewrite what those decisions covered.
-#
-# The bar for landing here is the same one OMN-18602 settled the label's meaning
-# on: the job READS the .201 lane and never mutates it. `refresh` collects a
-# docker inventory through the socket the runner already mounts and opens a pull
-# request; the only thing it writes is a branch in this repository.
-#
-# It needs the HOST label for the same reason all ten above do, and more sharply:
-# a census collected against the wrong daemon is not an outage, it is a WRONG
-# ANSWER committed to the repository as the documented lane topology. The
-# `omnibase-ci` pool cannot be used for it at all -- 60 of its runners carry no
-# host label (read live from the org runner census on 2026-09-17), so placement
-# there is unpinned by construction.
-NEW_VERIFY_JOBS = (
-    (
-        "lane-census-refresh.yml",
-        "refresh",
-        "Collect the lab census and open a bump PR when it has moved",
-    ),
-    # OMN-19175: the C11 negative-paths producer. Born on the label, and it
-    # clears the OMN-18602 bar by a wide margin: four HTTP GETs against the
-    # lane's onex-api plus one POST that request validation refuses BEFORE the
-    # endpoint function runs, so the mutating path is structurally unreachable
-    # rather than merely unused. It publishes nothing to the bus, unlike the
-    # chain canary beside it.
-    #
-    # It needs the HOST label for the identical reason every entry above does,
-    # and the failure without it is the bad kind: `omnibase-verify` names a
-    # runner CLASS and a second verify-class runner exists on another lab host,
-    # so a run placed there cannot see this lane at all and would report it
-    # unreachable. A permanently-red probe is a disabled probe. The pair fails
-    # SAFE -- if the .201 verify runner is down the job queues rather than
-    # answering from somewhere blind.
-    (
-        "chain-canary-c11-negative-paths.yml",
-        "c11-negative-paths",
-        "C11 negative paths (dev lane)",
-    ),
-    # OMN-19195: the C12 provider-catalogue producer. Born on the label, and
-    # it clears the OMN-18602 bar the same way `verify-lane-converged` does: it
-    # reads the lane through the docker socket this runner already mounts. Its
-    # one `docker exec` runs a Python process as the container's own
-    # unprivileged user that imports the deployed package and calls pure
-    # functions on in-memory copies. No file is written, no route is called and
-    # nothing is published. It calls no HTTP surface at all.
-    #
-    # It needs the HOST label for the identical reason: on another lab host's
-    # daemon there is no `onex-api` container to exec into, so an unpinned run
-    # would exit 2 on every tick and be read as a lane outage.
-    (
-        "chain-canary-c12-provider-catalogue.yml",
-        "c12-provider-catalogue",
-        "C12 provider catalogue (dev lane)",
-    ),
-    # OMN-16987: the provider-rung liveness canary. Born on the label, and it
-    # clears the OMN-18602 bar the same way C12 does: one `docker exec`, as the
-    # runtime's own user, runs a Python process that reads the deployed
-    # delegation contract and resolves each key in memory. It writes no file,
-    # restarts nothing and publishes nothing on the lane. Its only outbound
-    # effect is one minimal chat completion per distinct cloud rung, and one
-    # wrong-key request per endpoint, to the providers themselves.
-    #
-    # It needs the HOST label for the identical reason: on another lab host's
-    # daemon there is no `omninode-runtime-effects` container to exec into.
-    (
-        "provider-rung-canary.yml",
-        "provider-rung-canary",
-        "Provider-rung liveness canary (dev lane)",
-    ),
-    # OMN-19181: the C16 receipt-identity producer. Born on the label, for the
-    # identical reason as C11 above: the lane's onex-api is reachable only
-    # through THIS host's gateway alias, and a verify-class runner on another
-    # lab host would report the lane unreachable forever. Its lane writes are
-    # two delegations through the tenant-bearing API -- the canary's own
-    # liveness prompt and one with a task class no consumer accepts -- plus a
-    # correlation-scoped read of the orchestrator's terminal off the bus, as chain-canary already does. It publishes nothing to the
-    # bus directly and reconfigures nothing.
-    (
-        "chain-canary-c16-receipt-identity.yml",
-        "c16-receipt-identity",
-        "C16 receipt identity (dev lane)",
-    ),
-)
+# Jobs that were BORN on the host-pinned verify label. OMN-19894 moved every
+# one of them to the overlay (UNPINNED_JOBS below), so none is left; the tuple
+# stays so the moved-set record above keeps its meaning.
+NEW_VERIFY_JOBS: tuple[tuple[str, str, str], ...] = ()
 
 # Every job legally on the label, however it got there.
 VERIFY_JOBS = MOVED_JOBS + NEW_VERIFY_JOBS
@@ -206,11 +124,92 @@ def _jobs(workflow: str) -> dict[str, Any]:
     return jobs
 
 
+# OMN-19894 (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check must
+# not rely on one machine). These jobs left the host label. They run on the
+# overlay's runner pool and grade the first lane of the overlay's ordered list
+# that answers; where a job must sit beside the lane's docker daemon, the
+# runner labels are that lane's overlay entry, never a literal in the workflow.
+POOL_RUNS_ON = "${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}"
+LANE_SIDE_RUNS_ON = "${{ fromJSON(needs.resolve-lane.outputs.docker_runs_on) }}"
+UNPINNED_JOBS = (
+    ("chain-canary.yml", "chain-canary", POOL_RUNS_ON),
+    ("chain-canary-c11-negative-paths.yml", "c11-negative-paths", POOL_RUNS_ON),
+    ("chain-canary-c12-provider-catalogue.yml", "resolve-lane", POOL_RUNS_ON),
+    (
+        "chain-canary-c12-provider-catalogue.yml",
+        "c12-provider-catalogue",
+        LANE_SIDE_RUNS_ON,
+    ),
+    ("chain-canary-c16-receipt-identity.yml", "c16-receipt-identity", POOL_RUNS_ON),
+    ("chain-canary-c28-consumer-flow.yml", "resolve-lane", POOL_RUNS_ON),
+    ("chain-canary-c28-consumer-flow.yml", "c28-consumer-flow", LANE_SIDE_RUNS_ON),
+    ("baselines-scheduler.yml", "baselines-compute", POOL_RUNS_ON),
+    ("dlq-depth-monitor.yml", "dlq-depth-monitor", POOL_RUNS_ON),
+    ("r1-front-door-probe.yml", "r1-front-door-probe", POOL_RUNS_ON),
+    ("dev-lane-liveness.yml", "resolve-lane", POOL_RUNS_ON),
+    ("dev-lane-liveness.yml", "dev-lane-liveness", LANE_SIDE_RUNS_ON),
+    ("dev-lane-staleness.yml", "resolve-lane", POOL_RUNS_ON),
+    ("dev-lane-staleness.yml", "dev-lane-staleness", LANE_SIDE_RUNS_ON),
+    ("provider-rung-canary.yml", "resolve-lane", POOL_RUNS_ON),
+    ("provider-rung-canary.yml", "provider-rung-canary", LANE_SIDE_RUNS_ON),
+    (
+        "lane-census-refresh.yml",
+        "refresh",
+        "${{ fromJSON(vars.LANE_CENSUS_RUNS_ON_JSON) }}",
+    ),
+)
+
+
+@pytest.mark.parametrize(("workflow", "job_key", "runs_on"), UNPINNED_JOBS)
+def test_unpinned_job_runs_on_the_overlay_not_a_host(
+    workflow: str, job_key: str, runs_on: str
+) -> None:
+    assert _jobs(workflow)[job_key]["runs-on"] == runs_on
+    assert HOST_LABEL not in (WORKFLOWS / workflow).read_text(encoding="utf-8")
+
+
+#: OMN-19507 AC2: the two per-merge convergence jobs run where the deploy-agent
+#: route sends the merge. Their ``runs-on`` is this expression, fed by the
+#: trigger job's ``verify_runs_on`` output, which
+#: ``scripts/ci/deploy_lane_verify_route.py`` resolves from
+#: ``config/deploy_lane_routing.yaml``.
+ROUTED_RUNS_ON = "${{ fromJSON(needs.trigger-rebuild.outputs.verify_runs_on) }}"
+ROUTED_JOBS = frozenset(
+    {
+        ("runtime-rebuild-trigger.yml", "verify-lane-converged"),
+        ("runtime-rebuild-trigger-reusable.yml", "verify-sibling-converged"),
+    }
+)
+
+
+def _routed_labels(requester: str = "gha/omnibase_infra/pr-1") -> Any:
+    """What a routed job's ``runs-on`` resolves to for `requester` under the
+    COMMITTED table.
+
+    Every requester but omnimarket still resolves to dev-201/host-201 -- the
+    literal the two jobs carried before OMN-19507 -- so that stays the default
+    here. Task B8 (OMN-19510) landed the real omnimarket -> dev-202 route,
+    moving that one caller's own resolution to its host-scoped runner; see
+    ``test_the_reusable_verify_job_moves_with_omnimarkets_own_route`` below and
+    the full pin in tests/ci/test_deploy_lane_verify_route_omn19507.py.
+    """
+    from scripts.ci.deploy_lane_verify_route import job_outputs, load_table, resolve
+
+    return json.loads(
+        job_outputs(resolve(load_table(), runtime_lane="dev", requested_by=requester))[
+            "verify_runs_on"
+        ]
+    )
+
+
 def _runs_on(workflow: str, job_key: str) -> Any:
     jobs = _jobs(workflow)
     assert job_key in jobs, f"{workflow} has no job {job_key!r} (jobs: {sorted(jobs)})"
     job = jobs[job_key]
     assert "runs-on" in job, f"{workflow}:{job_key} declares no runs-on"
+    if (workflow, job_key) in ROUTED_JOBS:
+        assert job["runs-on"] == ROUTED_RUNS_ON, (workflow, job_key, job["runs-on"])
+        return _routed_labels()
     return job["runs-on"]
 
 
@@ -220,6 +219,22 @@ def test_moved_job_runs_on_the_verify_label(
 ) -> None:
     assert _runs_on(workflow, job_key) == VERIFY_LABEL
     assert _jobs(workflow)[job_key].get("name") == job_name
+
+
+def test_the_reusable_verify_job_moves_with_omnimarkets_own_route() -> None:
+    """Task B8 (OMN-19510): when omnimarket itself calls the reusable
+    workflow, ``verify-sibling-converged`` reads the SAME
+    ``verify_runs_on`` output as every other caller, but that output now
+    resolves to dev-202's own host-scoped runner rather than the dev-201
+    literal every other caller still gets."""
+    assert ("runtime-rebuild-trigger-reusable.yml", "verify-sibling-converged") in (
+        ROUTED_JOBS
+    )
+    assert _routed_labels("gha/omnimarket/pr-1") == [
+        "self-hosted",
+        "omnibase-verify",
+        "host-202",
+    ]
 
 
 @pytest.mark.parametrize(("workflow", "job_key"), STAYED_JOBS)
@@ -250,7 +265,12 @@ def test_no_other_job_in_the_repo_uses_the_verify_label() -> None:
         if not isinstance(jobs, dict):
             continue
         for job_key, job in jobs.items():
-            if isinstance(job, dict) and job.get("runs-on") == VERIFY_LABEL:
+            if not isinstance(job, dict):
+                continue
+            if job.get("runs-on") == VERIFY_LABEL or (
+                job.get("runs-on") == ROUTED_RUNS_ON
+                and _routed_labels() == VERIFY_LABEL
+            ):
                 found.add((path.name, job_key))
 
     assert found == {(wf, key) for wf, key, _ in VERIFY_JOBS}
@@ -267,6 +287,13 @@ def test_every_moved_job_is_host_scoped_not_merely_class_scoped() -> None:
     cannot observe the .201 lane at all, which surfaces as a lane outage rather
     than as a routing mistake. That is the reading this test exists to prevent.
     """
+    from scripts.ci.deploy_lane_verify_route import load_table
+
+    for name, spec in load_table()["instances"].items():
+        labels = spec["verify"]["runner_labels"]
+        assert any(label.startswith("host-") for label in labels), (
+            f"routed instance {name} is scoped to the verify CLASS but not to a HOST"
+        )
     for workflow, job_key, _ in VERIFY_JOBS:
         runs_on = _runs_on(workflow, job_key)
         assert HOST_LABEL in runs_on, (

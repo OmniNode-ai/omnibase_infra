@@ -77,6 +77,9 @@ from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_credential import (
     ModelBifrostLaneBackendCredential,
 )
+from omnibase_infra.runtime.models.model_bifrost_lane_backend_placement import (
+    ModelBifrostLaneBackendPlacement,
+)
 from omnibase_infra.runtime.models.model_component_health import ModelComponentHealth
 from omnibase_infra.runtime.models.model_contract_attach_gate_status import (
     ModelContractAttachGateStatus,
@@ -255,6 +258,11 @@ UNCOVERED_MODELS: dict[str, str] = {
     "ModelRsdLiveDelegationAuthorityEnvelope": "Explicit canonical roundtrip coverage in test_rsd_live_delegation_overlay.py",
     "ModelRsdLiveDelegationPreflightResult": "Explicit canonical roundtrip coverage in test_rsd_live_delegation_overlay.py",
     "ModelRsdLiveDelegationResultAnchor": "Explicit canonical roundtrip coverage in test_rsd_live_delegation_overlay.py",
+    # OMN-18933: the K6 bounded delegation route models, strict JSON roundtrips
+    # beside the pre-dispatch validator's own coverage.
+    "ModelBoundedDelegationRoute": "Explicit JSON roundtrip coverage in test_bounded_delegation_routes.py",
+    "ModelBoundedDelegationRouteDeclaration": "Explicit JSON roundtrip coverage in test_bounded_delegation_routes.py",
+    "ModelBoundedLaneBrokerTopology": "Explicit JSON roundtrip coverage in test_bounded_delegation_routes.py",
 }
 
 
@@ -549,6 +557,14 @@ def _make_bifrost_lane_backend_credential() -> ModelBifrostLaneBackendCredential
     )
 
 
+def _make_bifrost_lane_backend_placement() -> ModelBifrostLaneBackendPlacement:
+    return ModelBifrostLaneBackendPlacement(
+        tier="cheap_cloud",
+        fallback_for=("cloud-primary",),
+        max_context_tokens=16_384,
+    )
+
+
 def _make_bifrost_lane_backend_binding() -> ModelBifrostLaneBackendBinding:
     """A lane-ADDED backend, so the round trip covers every optional field.
 
@@ -570,6 +586,7 @@ def _make_bifrost_lane_backend_binding() -> ModelBifrostLaneBackendBinding:
         tier="cheap_cloud",
         credential=_make_bifrost_lane_backend_credential(),
         capabilities=("code_generation",),
+        placement=_make_bifrost_lane_backend_placement(),
     )
 
 
@@ -604,6 +621,7 @@ MODEL_FACTORIES: dict[type[BaseModel], Any] = {
     ModelBatchPublisherMetrics: _make_batch_publisher_metrics,
     ModelBifrostLaneBackendBinding: _make_bifrost_lane_backend_binding,
     ModelBifrostLaneBackendCredential: _make_bifrost_lane_backend_credential,
+    ModelBifrostLaneBackendPlacement: _make_bifrost_lane_backend_placement,
     ModelComponentHealth: _make_component_health,
     ModelContractAttachGateStatus: _make_contract_attach_gate_status,
     ModelDetailedHealthResponse: _make_detailed_health_response,

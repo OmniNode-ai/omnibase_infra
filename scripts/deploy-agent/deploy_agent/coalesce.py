@@ -78,6 +78,15 @@ bare "not coalesced":
     failure of this module falls back to the behaviour it replaces: run every
     command, in order, exactly as before.
 
+``DUPLICATE_COMMAND``
+    A look-ahead record whose correlation id is already in the group is a
+    redelivered copy, not newer work (OMN-19521). Folding it made the copy the
+    runner and recorded the first copy as superseded by its own id, which the
+    supersession model refuses; on 2026-09-25 that raise, landing before the
+    offset commit, crash-looped the .201 dev agent on every restart. The copy
+    ends the group and stays queued, where the head path's duplicate and busy
+    checks already own it.
+
 WHY THERE IS NO KILL SWITCH
 ----------------------------
 Every failure mode above degrades to the pre-change behaviour by construction,
@@ -159,6 +168,7 @@ class EnumCoalesceRefusal(StrEnum):
     REF_NOT_A_SHA = "ref_not_a_sha"
     ANCESTRY_UNPROVEN = "ancestry_unproven"
     NOT_A_DESCENDANT = "not_a_descendant"
+    DUPLICATE_COMMAND = "duplicate_command"
 
 
 class ModelQueuedCommand(BaseModel):
@@ -321,6 +331,17 @@ def plan_coalesce(
 
     for candidate in queued[1:]:
         examined += 1
+        # OMN-19521. A redelivered copy of a command already in the group is
+        # not newer work and must never become the runner: the earlier copy
+        # would then be recorded as superseded by its own correlation id,
+        # which ModelSupersession refuses, and the raise lands before the
+        # offset commit, so every restart re-reads the pair and dies again.
+        # Checked first, because a copy needs no clone to recognise.
+        if candidate.command.correlation_id in {
+            member.command.correlation_id for member in group
+        }:
+            stop_reason = EnumCoalesceRefusal.DUPLICATE_COMMAND
+            break
         refusal = _refusal_for(head.command, candidate.command)
         if refusal is not None:
             stop_reason = refusal

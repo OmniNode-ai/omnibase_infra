@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import re
 import zipfile
 from datetime import UTC, datetime
 from typing import Any
@@ -703,7 +704,32 @@ class TestComposeDevProbeReachesTheLane:
             for candidate in workflow["jobs"]["verify-lane-converged"]["steps"]
             if candidate.get("id") == "probe"
         )
-        return dict(step["env"])
+        # OMN-19507 AC2: the step binds each address from the job environment,
+        # which the routed instance's verify: block fills; the committed table
+        # routes this workflow's merges to dev-201. So the address a probe
+        # actually uses is that block's, read here through the same resolver.
+        from scripts.ci.deploy_lane_verify_route import (
+            job_env,
+            load_table,
+            targets_for_receipt_lane,
+        )
+
+        routed = job_env(targets_for_receipt_lane(load_table(), "compose-dev"))
+        resolved: dict[str, str] = {}
+        for name, value in dict(step["env"]).items():
+            match = re.fullmatch(r"\$\{\{ env\.(\w+) \}\}", str(value))
+            resolved[name] = routed[match.group(1)] if match else value
+        return resolved
+
+    def test_no_instance_addresses_its_lane_as_localhost(self) -> None:
+        """Every routed instance's probe runs in a runner container too."""
+        from scripts.ci.deploy_lane_verify_route import load_table
+
+        for name, spec in load_table()["instances"].items():
+            for key, url in spec["verify"].items():
+                if isinstance(url, str) and "://" in url:
+                    assert "localhost" not in url, (name, key, url)
+                    assert "127.0.0.1" not in url, (name, key, url)
 
     def test_the_probe_does_not_address_the_lane_as_localhost(self) -> None:
         # Only the address-carrying entries; the step also carries numeric

@@ -1535,3 +1535,160 @@ async def test_degraded_session_recovers_to_active_when_keycloak_returns(
     assert recovered.termination_reason is None
     assert recovered.session.status is EnumGatewaySessionStatus.ACTIVE
     assert recovered.session.last_heartbeat_at > degraded.last_heartbeat_at
+
+
+# --------------------------------------------------------------------------- #
+# OMN-17423 AC3 -- lifecycle traversal is visible in the log, and carries no
+# credential.
+#
+# AC3 asks for a credential-redaction grep of the gateway log surface to return
+# zero. Before this, the three success paths logged nothing at all, so a zero on
+# that surface was unfalsifiable: a clean log and a silent one read identically.
+# These tests pin both halves of what makes the zero mean something -- the
+# session identifier IS present (so a traversal can be located), and the bearer
+# token is NOT (so the located traversal is clean).
+# --------------------------------------------------------------------------- #
+
+
+def _lifecycle_records(caplog: pytest.LogCaptureFixture, event: str) -> list[Any]:
+    return [r for r in caplog.records if getattr(r, "event", None) == event]
+
+
+async def test_attach_logs_session_id_without_the_token(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = StoreGatewaySessionMemory()
+    with caplog.at_level(logging.INFO):
+        response = await _attach(
+            config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+        )
+
+    records = _lifecycle_records(caplog, "gateway.session.attached")
+    assert len(records) == 1
+    assert records[0].session_id == str(response.session.session_id)
+    assert records[0].edge_instance_id == "edge-201"
+    assert str(response.session.session_id) in records[0].getMessage()
+
+
+async def test_heartbeat_and_detach_log_session_id_without_the_token(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    store = StoreGatewaySessionMemory()
+    attach_response = await _attach(
+        config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+    )
+    session_id = attach_response.session.session_id
+
+    with caplog.at_level(logging.INFO):
+        _patch_client(
+            monkeypatch,
+            get_result=jwks_ok,
+            post_result=_introspection_active(),
+        )
+        heartbeat = HandlerGatewayHeartbeat(
+            config=config,
+            session_store=store,
+            secret_resolver=secret_resolver,  # type: ignore[arg-type]
+        )
+        await heartbeat.handle(
+            ModelGatewayHeartbeatRequest(
+                session_id=session_id,
+                access_token=sign_claims(tenant_key, _claims()),
+            )
+        )
+
+        _patch_client(monkeypatch, get_result=jwks_ok)
+        detach = HandlerGatewayDetach(
+            config=config,
+            session_store=store,
+            secret_resolver=secret_resolver,  # type: ignore[arg-type]
+        )
+        await detach.handle(
+            ModelGatewayDetachRequest(
+                session_id=session_id,
+                access_token=sign_claims(tenant_key, _claims()),
+                reason="edge shutdown",
+            )
+        )
+
+    beats = _lifecycle_records(caplog, "gateway.session.heartbeat")
+    detaches = _lifecycle_records(caplog, "gateway.session.detached")
+    assert len(beats) == 1
+    assert len(detaches) == 1
+    assert beats[0].session_id == str(session_id)
+    assert beats[0].session_status == EnumGatewaySessionStatus.ACTIVE.value
+    assert detaches[0].session_id == str(session_id)
+
+
+async def test_full_lifecycle_log_carries_no_credential(
+    config: ModelGatewayAttachConfig,
+    secret_resolver: _FakeSecretResolver,
+    monkeypatch: pytest.MonkeyPatch,
+    tenant_key,
+    jwks_ok: _FakeResponse,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The AC3 assertion itself, run against the records the handlers emit.
+
+    The positive control is the session id: it MUST be locatable, or a zero on
+    the token search proves only that nothing was logged. The token and its
+    three dot-separated segments must not appear anywhere in a record -- not in
+    the message, not in the args, not in an ``extra`` field.
+    """
+    store = StoreGatewaySessionMemory()
+    with caplog.at_level(logging.INFO):
+        attach_response = await _attach(
+            config, secret_resolver, store, monkeypatch, tenant_key, jwks_ok
+        )
+        session_id = attach_response.session.session_id
+
+        _patch_client(
+            monkeypatch, get_result=jwks_ok, post_result=_introspection_active()
+        )
+        hb_token = sign_claims(tenant_key, _claims())
+        await HandlerGatewayHeartbeat(
+            config=config,
+            session_store=store,
+            secret_resolver=secret_resolver,  # type: ignore[arg-type]
+        ).handle(
+            ModelGatewayHeartbeatRequest(session_id=session_id, access_token=hb_token)
+        )
+
+        _patch_client(monkeypatch, get_result=jwks_ok)
+        detach_token = sign_claims(tenant_key, _claims())
+        await HandlerGatewayDetach(
+            config=config,
+            session_store=store,
+            secret_resolver=secret_resolver,  # type: ignore[arg-type]
+        ).handle(
+            ModelGatewayDetachRequest(
+                session_id=session_id,
+                access_token=detach_token,
+                reason="edge shutdown",
+            )
+        )
+
+    rendered = "\n".join(
+        f"{r.getMessage()} {r.args!r} {r.__dict__!r}" for r in caplog.records
+    )
+
+    # Positive control: the traversal is locatable on this surface.
+    assert rendered.count(str(session_id)) >= 3
+
+    # The assertion AC3 makes.
+    for name, token in (("heartbeat", hb_token), ("detach", detach_token)):
+        raw = token.get_secret_value() if hasattr(token, "get_secret_value") else token
+        assert raw not in rendered, f"{name} token leaked into a log record"
+        for segment in raw.split("."):
+            if len(segment) > 16:
+                assert segment not in rendered, f"{name} token segment leaked"

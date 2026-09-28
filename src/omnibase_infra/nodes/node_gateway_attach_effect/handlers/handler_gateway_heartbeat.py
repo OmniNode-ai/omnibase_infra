@@ -314,6 +314,23 @@ class HandlerGatewayHeartbeat:
                 "revalidation"
             )
 
+        # OMN-17423 AC3: one non-secret line per lifecycle transition, so a
+        # credential-redaction grep of this surface can tell a clean log from
+        # a silent one. Identifiers only -- the access token is a ``SecretStr``
+        # and never reaches a log record.
+        logger.info(
+            "gateway session heartbeat: session_id=%s",
+            updated_session.session_id,
+            extra={
+                "event": "gateway.session.heartbeat",
+                "session_id": str(updated_session.session_id),
+                "tenant_id": str(updated_session.tenant_id),
+                "tenant_slug": updated_session.tenant_slug,
+                "edge_instance_id": updated_session.edge_instance_id,
+                "session_status": status.value,
+            },
+        )
+
         event_type = (
             EnumGatewaySessionEventType.HEARTBEAT_DEGRADED
             if status is EnumGatewaySessionStatus.DEGRADED

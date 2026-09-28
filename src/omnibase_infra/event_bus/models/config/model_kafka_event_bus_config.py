@@ -187,6 +187,19 @@ from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationE
 
 logger = logging.getLogger(__name__)
 
+# OMN-19355. The share of max_poll_interval_ms one dispatch may use. A deadline
+# at or past the eviction pre-empts nothing, and the rest is left for the fetch
+# itself and for the records the serial loop ran before this one. At the 300s
+# library default this caps the deadline at 255s, still above the 240s budget
+# node_delegate_skill_orchestrator bounds itself to.
+DISPATCH_DEADLINE_POLL_FRACTION = 0.85
+
+# OMN-19355. The share of max_poll_interval_ms the serial loop may spend on one
+# fetched batch. It does not start a record unless that record's full deadline
+# still fits inside this, so no run of slow or hung records can carry the gap
+# between polls past the eviction.
+SERIAL_BATCH_POLL_BUDGET_FRACTION = 0.95
+
 
 class ModelKafkaEventBusConfig(BaseModel):
     """Configuration model for EventBusKafka.
@@ -442,6 +455,68 @@ class ModelKafkaEventBusConfig(BaseModel):
         ),
         gt=0.0,
         le=86_400.0,
+    )
+
+    # Per-dispatch deadline (OMN-19355). The serial consume loop awaits each
+    # handler before it polls again, so a handler that never returns stops the
+    # group: on the .201 dev lane on 2026-09-23 the lab_lane_health handler
+    # parked a to_thread worker forever at offset 51808, aiokafka evicted the
+    # member at max_poll_interval_ms, and it never rejoined, because a rejoin
+    # happens only inside the next poll. Auto-commit had already committed the
+    # fetch position past the batch, so 51809 to 51832 were lost.
+    #
+    # Contract-config only, like the other consumer bounds above --
+    # deliberately NOT env overrides, so a lane cannot quietly disarm them.
+    consumer_dispatch_deadline_seconds: float = Field(
+        default=600.0,
+        description=(
+            "Seconds one subscriber callback may run before the consume loop "
+            "stops awaiting it, quarantines the record to the DLQ with failure "
+            "class dispatch_deadline_exceeded, and moves on. The handler is "
+            "abandoned, not cancelled: a Python thread cannot be killed. The "
+            "value actually applied is effective_dispatch_deadline_seconds, "
+            "which never exceeds 85 percent of max_poll_interval_ms, because a "
+            "deadline at or past the eviction cannot pre-empt it. 600 is above "
+            "the longest declared legitimate handler on record "
+            "(node_delegate_skill_orchestrator, 240s budget inside a 300s "
+            "wait) and a third of the 1800s poll interval the auto-wired lanes "
+            "run."
+        ),
+        gt=0.0,
+        le=3_600.0,
+    )
+    consumer_dispatch_withhold_after_seconds: float = Field(
+        default=2.0,
+        description=(
+            "Seconds a serial dispatch may run before the consume loop seeks "
+            "its partition back to the in-flight record, and every "
+            "unprocessed partition of the batch back to its first unprocessed "
+            "record. Under enable_auto_commit the client commits the FETCH "
+            "position on its own cadence (5s by default), which after a "
+            "getmany is past the whole batch; seeking is the only action that "
+            "withholds it (OMN-15232). Past this point the next auto-commit "
+            "therefore commits at most the in-flight record's own offset, so a "
+            "hung record is never committed past without a confirmed "
+            "quarantine. A fast dispatch never reaches it, so the common path "
+            "pays nothing."
+        ),
+        gt=0.0,
+        le=60.0,
+    )
+    consumer_dispatch_orphan_limit: int = Field(
+        default=3,
+        description=(
+            "Abandoned dispatches still running at which the bus reports "
+            "itself UNHEALTHY so the supervisor replaces the process. Below "
+            "it, any abandoned dispatch reports DEGRADED. An abandoned "
+            "projection dispatch keeps its slot in the runtime-wide projection "
+            "gate (PROJECTION_HANDLER_MAX_INFLIGHT = 8) and its worker in the "
+            "default executor, so the limit sits well below 8: past it every "
+            "projection would queue behind parked threads and time out in "
+            "turn, which is a quarantine storm rather than a degradation."
+        ),
+        ge=1,
+        le=16,
     )
 
     # Kafka producer settings
@@ -965,6 +1040,26 @@ class ModelKafkaEventBusConfig(BaseModel):
     # NOTE: mypy reports "prop-decorator" error because it doesn't understand that
     # Pydantic's @computed_field transforms the @property into a computed field.
     # This is a known mypy/Pydantic v2 interaction - the code works correctly at runtime.
+    @property
+    def effective_dispatch_deadline_seconds(self) -> float:
+        """The per-dispatch deadline the consume loop applies (OMN-19355).
+
+        ``consumer_dispatch_deadline_seconds``, capped at
+        ``DISPATCH_DEADLINE_POLL_FRACTION`` of ``max_poll_interval_ms``. The
+        cap is applied rather than validated because both defaults must hold
+        together: 600s is right on the 1800s auto-wired lanes and would be
+        refused outright against the 300s library default.
+        """
+        return min(
+            self.consumer_dispatch_deadline_seconds,
+            self.max_poll_interval_ms / 1000.0 * DISPATCH_DEADLINE_POLL_FRACTION,
+        )
+
+    @property
+    def serial_batch_poll_budget_seconds(self) -> float:
+        """Seconds the serial loop may spend on one fetched batch (OMN-19355)."""
+        return self.max_poll_interval_ms / 1000.0 * SERIAL_BATCH_POLL_BUDGET_FRACTION
+
     # Why: Pydantic computed_field stacking is valid at runtime but not modeled by mypy.
     @computed_field  # type: ignore[prop-decorator]
     @property

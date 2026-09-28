@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import json
+import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -379,7 +382,7 @@ def test_image_tag_mismatch_is_drift() -> None:
 
 def test_optional_dev_lane_entirely_down_is_not_drift() -> None:
     """The optional dev lane being fully down must NOT ticket (developer lane)."""
-    envelope = {
+    envelope: dict[str, Any] = {
         "lane": "dev",
         "host": _LAB_HOST,
         "containers": [],
@@ -424,7 +427,7 @@ def test_unknown_lane_raises() -> None:
 
 def test_all_lanes_default_excludes_nothing_required() -> None:
     """With lane=None all manifest lanes are checked."""
-    envelope = {
+    envelope: dict[str, Any] = {
         "lane": None,
         "host": _LAB_HOST,
         "containers": [],
@@ -532,3 +535,331 @@ def test_profile_gated_running_is_not_reported_unexpected() -> None:
     plan = PLAN.build_plan(envelope, MANIFEST)
     unexpected = [f for f in plan["findings"] if f["kind"] == "unexpected_container"]
     assert not unexpected, f"declared profile_gated flagged unexpected: {unexpected}"
+
+
+# ---------------------------------------------------------------------------
+# OMN-19411 — lab release sync, wave 0 task T0.2 (seam L0.2: collector <->
+# planner <-> receipt check and lab alarm).
+#
+# The eleven lab-sync kinds are DECLARED in the planner's kind table and are not
+# evaluated yet. Each has one known-bad inventory fixture under
+# tests/fixtures/lab_sync/, captured read-only from .201 on 2026-09-24 (or
+# reconstructed from a recorded incident row, or synthetic, as each fixture's
+# `capture` and `provenance` say), plus one clean fixture.
+#
+# Fixture contract (lab-sync-inventory-fixture.v1):
+#   source_row        E1-E9 of the lab release sync plan's section 1, or synthetic
+#   capture           live | reconstructed | synthetic
+#   expected_kind     the one kind the fixture must produce (null for clean)
+#   expected_findings every (kind, lane, container) it must produce
+#   desired           an excerpt of the lab-desired-state.v1 document (OMN-19410)
+#                     naming ONLY the fields this fixture exercises; a field it
+#                     omits is not declared and is not compared. null means the
+#                     document could not be read.
+#   envelope          the planner's stdin envelope, with the collector fields
+#                     each kind needs (LAB_SYNC_FINDING_KINDS envelope_fields)
+#
+# The evaluation tests below are strict xfails pinned to T1.2 (OMN-19414) and
+# T1.3 (OMN-19416). Strict means they block both ways: today they must fail,
+# and the change that makes one pass must delete its marker in the same PR.
+# ---------------------------------------------------------------------------
+
+_EVENT_PATH = _REPO / "scripts" / "lane_census_event.py"
+_FIXTURES = _REPO / "tests" / "fixtures" / "lab_sync"
+
+#: Section 4 B of the lab release sync plan, in its order. Restated here rather
+#: than read from the planner so the test is a second, independent copy.
+_PLAN_LAB_SYNC_KINDS = (
+    "revision_mismatch",
+    "config_hash_mismatch",
+    "package_version_mismatch",
+    "container_unhealthy",
+    "container_restart_loop",
+    "undeclared_container",
+    "broker_config_mismatch",
+    "runner_count_mismatch",
+    "runner_workdir_mismatch",
+    "runner_offline",
+    "desired_state_unreadable",
+)
+
+#: The drift event's key set and value types as origin/dev built it at
+#: schema_version 1.0.0 (lane_census_event.build_event before OMN-19411),
+#: frozen here as the 1.0.0 consumer's view.
+_V1_0_0_EVENT_FIELDS: dict[str, tuple[type, ...]] = {
+    "schema_version": (str,),
+    "event_type": (str,),
+    "topic": (str,),
+    "host": (str,),
+    "host_id": (str, type(None)),
+    "emitted_at": (str,),
+    "severity": (str,),
+    "lanes_checked": (list,),
+    "lanes_not_applicable": (list,),
+    "lanes_skipped_optional_down": (list,),
+    "drift_count": (int,),
+    "findings": (list,),
+    "alert_key": (str,),
+    "ticket_title": (str,),
+    "ticket_body": (str,),
+}
+
+
+def _load_event_module() -> Any:
+    spec = importlib.util.spec_from_file_location("lane_census_event", _EVENT_PATH)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _lab_sync_fixtures() -> list[Path]:
+    return sorted(_FIXTURES.glob("inventory_*.json"))
+
+
+def _fixture(path: Path) -> dict[str, Any]:
+    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return data
+
+
+def _bad_fixture_params() -> list[Any]:
+    return [
+        pytest.param(path, id=path.stem.removeprefix("inventory_"))
+        for path in _lab_sync_fixtures()
+        if path.stem != "inventory_clean"
+    ]
+
+
+def _plan_with_desired(fixture: dict[str, Any]) -> dict[str, Any]:
+    envelope = dict(fixture["envelope"])
+    envelope["desired_state"] = fixture["desired"]
+    plan: dict[str, Any] = PLAN.build_plan(envelope, MANIFEST)
+    return plan
+
+
+def test_lab_sync_kind_table_declares_the_eleven_plan_kinds() -> None:
+    """The planner's table is the plan's section 4 B list, in order, once each."""
+    declared = tuple(spec.kind for spec in PLAN.LAB_SYNC_FINDING_KINDS)
+    assert declared == _PLAN_LAB_SYNC_KINDS
+    for spec in PLAN.LAB_SYNC_FINDING_KINDS:
+        assert spec.severity in {"critical", "warning"}, spec
+        assert spec.subject in {"container", "broker", "runner", "desired_state"}, spec
+        assert spec.envelope_fields, f"{spec.kind} names no collector field"
+
+
+def test_lab_sync_kinds_are_new_and_every_kind_has_one_severity() -> None:
+    legacy = [spec.kind for spec in PLAN.CENSUS_FINDING_KINDS]
+    lab_sync = [spec.kind for spec in PLAN.LAB_SYNC_FINDING_KINDS]
+    assert not set(legacy) & set(lab_sync)
+    assert len(set(legacy + lab_sync)) == len(legacy + lab_sync)
+    assert set(PLAN.FINDING_KIND_SEVERITY) == set(legacy + lab_sync)
+
+
+def test_lab_sync_kind_is_not_emitted_without_evaluation() -> None:
+    """Declared is not evaluated: no code path in the planner names a lab-sync kind.
+
+    T1.2 (OMN-19414) and T1.3 (OMN-19416) add the evaluation and delete this test.
+    """
+    source = (_REPO / "scripts" / "lane_census_plan.py").read_text(encoding="utf-8")
+    body = source.split("FINDING_KIND_SEVERITY: dict[str, str] = {", 1)[1]
+    for kind in _PLAN_LAB_SYNC_KINDS:
+        assert f'"{kind}"' not in body, f"{kind} is evaluated before T1.2"
+
+
+def test_finding_severity_comes_from_the_kind_table() -> None:
+    finding = PLAN._finding("dev", "container_absent", "omninode-runtime", "x")
+    assert finding["severity"] == "critical"
+    with pytest.raises(KeyError):
+        PLAN._finding("dev", "not_a_declared_kind", "omninode-runtime", "x")
+
+
+def test_lab_sync_fixture_count_is_kind_table_plus_one() -> None:
+    """AC1: one fixture per lab-sync kind, plus one clean fixture."""
+    fixtures = _lab_sync_fixtures()
+    assert len(fixtures) == len(PLAN.LAB_SYNC_FINDING_KINDS) + 1, [
+        p.name for p in fixtures
+    ]
+    kinds = [_fixture(p)["expected_kind"] for p in fixtures]
+    assert kinds.count(None) == 1
+    assert sorted(k for k in kinds if k) == sorted(_PLAN_LAB_SYNC_KINDS)
+    for path in fixtures:
+        kind = _fixture(path)["expected_kind"]
+        assert path.name == f"inventory_{kind or 'clean'}.json"
+
+
+@pytest.mark.parametrize(
+    "path", [pytest.param(p, id=p.stem) for p in _lab_sync_fixtures()]
+)
+def test_lab_sync_fixture_names_its_source_row(path: Path) -> None:
+    """AC1: every fixture says where it came from."""
+    fixture = _fixture(path)
+    assert fixture["fixture_schema"] == "lab-sync-inventory-fixture.v1"
+    assert re.fullmatch(r"E[1-9]|synthetic", fixture["source_row"]), fixture
+    assert fixture["capture"] in {"live", "reconstructed", "synthetic"}
+    assert (fixture["capture"] == "synthetic") == (fixture["source_row"] == "synthetic")
+    assert fixture["provenance"].strip()
+    for finding in fixture["expected_findings"]:
+        assert finding["kind"] == fixture["expected_kind"]
+
+
+@pytest.mark.parametrize("path", _bad_fixture_params())
+def test_lab_sync_fixture_carries_its_kinds_collector_fields(path: Path) -> None:
+    """The collector side of the seam: each fixture has what its kind grades."""
+    fixture = _fixture(path)
+    spec = next(
+        s for s in PLAN.LAB_SYNC_FINDING_KINDS if s.kind == fixture["expected_kind"]
+    )
+    envelope = fixture["envelope"]
+    for field in spec.envelope_fields:
+        if field == "desired_state":
+            assert fixture["desired"] is None
+            continue
+        on_rows = any(field in row for row in envelope["containers"])
+        assert field in envelope or on_rows, f"{spec.kind} needs {field!r}"
+    if spec.kind != "desired_state_unreadable":
+        assert isinstance(fixture["desired"], dict)
+
+
+@pytest.mark.parametrize(
+    "path", [pytest.param(p, id=p.stem) for p in _lab_sync_fixtures()]
+)
+def test_lab_sync_fixture_raises_no_census_kind_today(path: Path) -> None:
+    """Each fixture is clean on every kind that exists today.
+
+    So when T1.2 evaluates it, the finding it produces is its own kind and
+    nothing else.
+    """
+    plan = _plan_with_desired(_fixture(path))
+    assert plan["findings"] == [], plan["findings"]
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="lab-sync kinds are declared, not evaluated: T1.2 OMN-19414, T1.3 OMN-19416",
+)
+@pytest.mark.parametrize("path", _bad_fixture_params())
+def test_lab_sync_fixture_produces_its_named_kind(path: Path) -> None:
+    """RED until T1.2: every known-bad fixture produces exactly its named finding."""
+    fixture = _fixture(path)
+    plan = _plan_with_desired(fixture)
+    got = {(f["kind"], f["container"]) for f in plan["findings"]}
+    expected = {(f["kind"], f["container"]) for f in fixture["expected_findings"]}
+    assert expected <= got, (fixture["expected_kind"], plan["findings"])
+    other = {k for k, _ in got if k in _PLAN_LAB_SYNC_KINDS} - {
+        fixture["expected_kind"]
+    }
+    assert not other, other
+
+
+def test_lab_sync_clean_fixture_produces_no_finding() -> None:
+    plan = _plan_with_desired(_fixture(_FIXTURES / "inventory_clean.json"))
+    assert plan["has_drift"] is False, plan["findings"]
+
+
+def _event_over(fixture: dict[str, Any]) -> dict[str, Any]:
+    """The drift event a T1.2 planner would publish for this fixture."""
+    events = _load_event_module()
+    plan = {
+        "schema_version": PLAN.SCHEMA_VERSION,
+        "host": "lab-201",
+        "lanes_checked": [fixture["envelope"]["lane"]],
+        "lanes_not_applicable": [],
+        "lanes_skipped_optional_down": [],
+        "findings": [
+            PLAN._finding(f["lane"] or "", f["kind"], f["container"], "fixture")
+            for f in fixture["expected_findings"]
+        ],
+    }
+    event: dict[str, Any] = events.build_event(host="omninode-pc", plan=plan)
+    return event
+
+
+@pytest.mark.parametrize(
+    "path", [pytest.param(p, id=p.stem) for p in _lab_sync_fixtures()]
+)
+def test_schema_version_1_1_0_event_validates(path: Path) -> None:
+    """AC2: the event over every fixture's findings validates at 1.1.0."""
+    events = _load_event_module()
+    event = _event_over(_fixture(path))
+    assert event["schema_version"] == "1.1.0"
+    assert events.validate_event(event, kind_severity=PLAN.FINDING_KIND_SEVERITY) == []
+
+
+@pytest.mark.parametrize(
+    "path", [pytest.param(p, id=p.stem) for p in _lab_sync_fixtures()]
+)
+def test_schema_version_1_0_0_consumer_parses_a_1_1_0_event(path: Path) -> None:
+    """AC2: every key a 1.0.0 consumer reads is present, with its 1.0.0 type."""
+    event = _event_over(_fixture(path))
+    assert set(event) == set(_V1_0_0_EVENT_FIELDS)
+    for key, types in _V1_0_0_EVENT_FIELDS.items():
+        assert isinstance(event[key], types), (key, event[key])
+    for finding in event["findings"]:
+        assert set(finding) == {"lane", "kind", "container", "detail", "severity"}
+        assert all(isinstance(v, str) for v in finding.values())
+
+
+def test_schema_version_1_1_0_passes_the_repo_1_0_0_consumers(tmp_path: Path) -> None:
+    """AC2: the staleness gate and the refresh decision read a 1.1.0 snapshot."""
+    sys.path.insert(0, str(_REPO / "scripts"))
+    try:
+        from check_lane_census_age import check_census_age
+        from lane_census_refresh_decision import validate_candidate
+    finally:
+        sys.path.remove(str(_REPO / "scripts"))
+    event = _event_over(_fixture(_FIXTURES / "inventory_container_unhealthy.json"))
+    snapshot = tmp_path / "census-snapshot.json"
+    snapshot.write_text(json.dumps(event), encoding="utf-8")
+    assert check_census_age(snapshot, 7) == 0
+    validate_candidate(event)
+
+
+def test_schema_version_observed_event_is_1_1_0() -> None:
+    events = _load_event_module()
+    observed = events.build_observed_event(host="omninode-pc", plan={"findings": []})
+    assert observed["schema_version"] == "1.1.0"
+
+
+def test_schema_version_committed_1_0_0_snapshot_still_validates() -> None:
+    events = _load_event_module()
+    snapshot = json.loads(
+        (_REPO / "deploy" / "lane-census" / "census-snapshot.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert (
+        events.validate_event(snapshot, kind_severity=PLAN.FINDING_KIND_SEVERITY) == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutate", "needle"),
+    [
+        pytest.param(
+            lambda e: e.update(schema_version="2.0.0"), "schema_version", id="version"
+        ),
+        pytest.param(lambda e: e.pop("alert_key"), "alert_key", id="missing-key"),
+        pytest.param(
+            lambda e: e["findings"][0].update(kind="container_on_fire"),
+            "not a declared kind",
+            id="undeclared-kind",
+        ),
+        pytest.param(
+            lambda e: e["findings"][0].update(severity="warning"),
+            "declared 'critical'",
+            id="wrong-severity",
+        ),
+        pytest.param(
+            lambda e: e.update(drift_count=0), "drift_count", id="drift-count"
+        ),
+        pytest.param(lambda e: e.update(extra=1), "outside the contract", id="extra"),
+    ],
+)
+def test_schema_version_validator_refuses_a_broken_event(
+    mutate: Any, needle: str
+) -> None:
+    events = _load_event_module()
+    event = _event_over(_fixture(_FIXTURES / "inventory_container_unhealthy.json"))
+    mutate(event)
+    errors = events.validate_event(event, kind_severity=PLAN.FINDING_KIND_SEVERITY)
+    assert any(needle in e for e in errors), errors

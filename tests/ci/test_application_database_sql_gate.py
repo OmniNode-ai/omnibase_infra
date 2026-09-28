@@ -4,12 +4,16 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
 from scripts.ci.check_application_database_sql import (
     changed_sql_paths,
     validate_changed_sql,
@@ -32,6 +36,7 @@ def _git(repository: Path, *arguments: str) -> str:
     result = subprocess.run(
         ["git", *arguments],
         cwd=repository,
+        env=scrub_git_location_env(os.environ),
         capture_output=True,
         text=True,
         check=True,
@@ -70,7 +75,7 @@ db_io:
   db_tables:
     - name: {table_name}
       database_ref: application
-      schema: tenant
+      schema: public
       migration: qualified.sql
       access: read_write
       role: test_relation
@@ -92,7 +97,7 @@ database_objects:
   - name: safe_report
     kind: function
     database_ref: application
-    schema: tenant
+    schema: public
     domain: TENANT
     owner_declaration: service:sql_gate_function_test
     function_signature: "()"
@@ -114,7 +119,7 @@ def test_gate_checks_only_real_changed_sql_files(tmp_path: Path) -> None:
     base_revision = _commit(repository, "baseline")
 
     (repository / "qualified.sql").write_text(
-        "CREATE TABLE tenant.changed_table (id uuid);\n",
+        "CREATE TABLE public.changed_table (id uuid);\n",
         encoding="utf-8",
     )
     manifest = _ownership_manifest(repository, "changed_table")
@@ -248,7 +253,7 @@ def test_qualified_create_requires_an_authoritative_ownership_declaration(
     (repository / "baseline.txt").write_text("baseline\n", encoding="utf-8")
     base_revision = _commit(repository, "baseline")
     (repository / "unclassified.sql").write_text(
-        "CREATE TABLE tenant.unclassified (id uuid);\n",
+        "CREATE TABLE public.unclassified (id uuid);\n",
         encoding="utf-8",
     )
     head_revision = _commit(repository, "unclassified")
@@ -271,7 +276,7 @@ def test_qualified_non_create_target_requires_authoritative_ownership(
     (repository / "baseline.txt").write_text("baseline\n", encoding="utf-8")
     base_revision = _commit(repository, "baseline")
     (repository / "undeclared_alter.sql").write_text(
-        "ALTER TABLE tenant.undeclared ADD COLUMN payload text;\n",
+        "ALTER TABLE public.undeclared ADD COLUMN payload text;\n",
         encoding="utf-8",
     )
     head_revision = _commit(repository, "qualified alter")
@@ -294,7 +299,7 @@ def test_duplicate_or_conflicting_owner_declarations_fail_closed(
     (repository / "baseline.txt").write_text("baseline\n", encoding="utf-8")
     base_revision = _commit(repository, "baseline")
     (repository / "qualified.sql").write_text(
-        "CREATE TABLE tenant.changed_table (id uuid);\n",
+        "CREATE TABLE public.changed_table (id uuid);\n",
         encoding="utf-8",
     )
     first = _ownership_manifest(
@@ -327,7 +332,7 @@ def test_red_control_wrong_routine_overload(tmp_path: Path) -> None:
     (repository / "baseline.txt").write_text("baseline\n", encoding="utf-8")
     base_revision = _commit(repository, "baseline")
     (repository / "wrong-overload.sql").write_text(
-        "ALTER FUNCTION tenant.safe_report(uuid) OWNER TO owner_onex_tenant;\n",
+        "ALTER FUNCTION public.safe_report(uuid) OWNER TO owner_onex_tenant;\n",
         encoding="utf-8",
     )
     manifest = _function_ownership_manifest(repository)
@@ -351,7 +356,7 @@ def test_red_control_wrong_object_kind(
     (repository / "baseline.txt").write_text("baseline\n", encoding="utf-8")
     base_revision = _commit(repository, "baseline")
     (repository / "wrong-kind.sql").write_text(
-        "ALTER TABLE tenant.safe_report ADD COLUMN payload text;\n",
+        "ALTER TABLE public.safe_report ADD COLUMN payload text;\n",
         encoding="utf-8",
     )
     manifest = _function_ownership_manifest(repository)
@@ -487,7 +492,7 @@ def _baseline_repository(tmp_path: Path) -> tuple[Path, str, str, Path]:
     repository.mkdir()
     _git(repository, "init", "--initial-branch=main")
     (repository / "seed.sql").write_text(
-        "CREATE TABLE tenant.seeded (id uuid);\n", encoding="utf-8"
+        "CREATE TABLE public.seeded (id uuid);\n", encoding="utf-8"
     )
     base_revision = _commit(repository, "baseline")
 
@@ -663,11 +668,11 @@ def _two_commit_repository(tmp_path: Path) -> tuple[Path, str, str]:
     repository.mkdir()
     _git(repository, "init", "--initial-branch=main")
     (repository / "seed.sql").write_text(
-        "CREATE TABLE tenant.seed_table (id uuid);\n", encoding="utf-8"
+        "CREATE TABLE public.seed_table (id uuid);\n", encoding="utf-8"
     )
     base = _commit(repository, "baseline")
     (repository / "next.sql").write_text(
-        "CREATE TABLE tenant.next_table (id uuid);\n", encoding="utf-8"
+        "CREATE TABLE public.next_table (id uuid);\n", encoding="utf-8"
     )
     head = _commit(repository, "next")
     return repository, base, head

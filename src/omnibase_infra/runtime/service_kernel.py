@@ -82,6 +82,8 @@ from uuid import UUID
 import yaml
 
 if TYPE_CHECKING:
+    from aiokafka import AIOKafkaProducer
+
     from omnibase_core.models.core.model_deployment_topology import (
         ModelDeploymentTopology,
     )
@@ -123,6 +125,7 @@ from omnibase_infra.errors import (
 # selection in select_event_bus() handles the core→infra fallback.
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.models import ModelNodeIdentity
@@ -251,6 +254,12 @@ ENV_MARKETPLACE_SKILLS_ROOT = "ONEX_MARKETPLACE_SKILLS_ROOT"
 DEFAULT_INPUT_TOPIC = "requests"  # onex-topic-allow: pending contract auto-wiring
 DEFAULT_OUTPUT_TOPIC = "responses"  # onex-topic-allow: pending contract auto-wiring
 DEFAULT_GROUP_ID = "onex-runtime"
+DEFAULT_RUNTIME_LOG_BRIDGE_ALLOWLIST: tuple[str, ...] = (
+    "aiokafka.consumer",
+    "asyncpg",
+    "aiohttp",
+    "omnibase_infra.runtime.auto_wiring",
+)
 
 # OMN-8784: Deprecated topic env vars — hard-fail if set.
 # Topics must be derived from contract subscriptions/publishes, not env vars.
@@ -277,6 +286,29 @@ _KAFKA_BROKER_DENYLIST_PATTERNS: tuple[re.Pattern[str], ...] = (
 # Value: comma-separated host prefixes, e.g. "192.168.86.,10.0.0."
 # When unset, only the built-in denylist is enforced.
 ENV_KAFKA_BROKER_ALLOWLIST = "KAFKA_BROKER_ALLOWLIST"
+
+
+def _runtime_log_bridge_allowlist() -> list[str]:
+    """Resolve the logger namespaces captured by the runtime log bridge."""
+    allowlist_raw = os.environ.get(
+        "RUNTIME_LOG_BRIDGE_ALLOWLIST",
+        ",".join(DEFAULT_RUNTIME_LOG_BRIDGE_ALLOWLIST),
+    )
+    return [name.strip() for name in allowlist_raw.split(",") if name.strip()]
+
+
+async def _create_runtime_log_bridge_producer(
+    bootstrap_servers: str,
+) -> AIOKafkaProducer:
+    """Create the bridge producer with the runtime event bus Kafka transport."""
+    from aiokafka import AIOKafkaProducer
+
+    producer = AIOKafkaProducer(
+        bootstrap_servers=bootstrap_servers,
+        **build_aiokafka_auth_kwargs_from_env(),
+    )
+    await producer.start()
+    return producer
 
 
 def _resolve_marketplace_skills_root() -> str:
@@ -705,6 +737,7 @@ def _build_runtime_handler_dependencies(
     if kafka_bootstrap_servers:
         from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
             DLQConsumer,
+            DlqGroupBacklogProbe,
             DLQProducer,
             DLQQuarantineProducer,
             ModelDlqReplayEngineConfig,
@@ -744,6 +777,11 @@ def _build_runtime_handler_dependencies(
             },
             "producer": DLQProducer(primary_config),
             "quarantine_producer": DLQQuarantineProducer(primary_config),
+            # OMN-19085: lets a trigger whose topics the replay group has
+            # already committed skip the per-topic consumer start (a group
+            # join). The replay group and broker are the same for every
+            # declared topic, so one probe serves all of them.
+            "backlog_probe": DlqGroupBacklogProbe(primary_config),
         }
         # OMN-18111: only when the runtime actually HAS one. An explicit
         # ``"tracking": None`` and an absent key behave identically for the
@@ -832,9 +870,60 @@ def _build_runtime_handler_dependencies(
             }
         )
 
+    # OMN-19492: the GitHub webhook ingress verifies every delivery's HMAC with
+    # the App webhook secret. Like the gateway handlers above it gets a
+    # SecretResolver built from the deploy-rendered resolver config and never
+    # reads the secret from the environment itself. Only a lane whose profile
+    # maps the logical name gets the dependency; on every other lane the
+    # handler is built with no resolver and refuses each delivery, which is
+    # the fail-closed state (dead-lettered, never a silent success).
+    if gateway_secret_resolver_config_path:
+        webhook_dependencies = _github_webhook_ingress_dependencies(
+            gateway_secret_resolver_config_path
+        )
+        if webhook_dependencies is not None:
+            dependencies["HandlerGitHubWebhookIngress"] = webhook_dependencies
+
     if not dependencies:
         return None
     return dependencies
+
+
+def _github_webhook_ingress_dependencies(
+    config_path: Path,
+) -> dict[str, object] | None:
+    """The webhook ingress handler's resolver, or None when the lane maps no secret.
+
+    OMN-19492. Returns ``None`` (the handler then refuses every delivery) when
+    the rendered resolver config does not map the webhook secret's logical
+    name; raises ``ProtocolConfigurationError`` when the config itself cannot
+    be read, the same posture as the gateway block.
+    """
+    from omnibase_infra.nodes.node_github_webhook_ingress_effect.handlers.handler_github_webhook_ingress import (
+        WEBHOOK_SECRET_REF,
+    )
+    from omnibase_infra.runtime.models.model_secret_resolver_config import (
+        ModelSecretResolverConfig,
+    )
+    from omnibase_infra.runtime.secret_resolver import SecretResolver
+
+    try:
+        raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        resolver_config = ModelSecretResolverConfig.model_validate(raw_config)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise ProtocolConfigurationError(
+            "GitHub webhook ingress dependency wiring requires a valid rendered "
+            f"secret-resolver config at {config_path}"
+        ) from exc
+    mapped = {mapping.logical_name for mapping in resolver_config.mappings}
+    if WEBHOOK_SECRET_REF not in mapped:
+        logger.info(
+            "GitHub webhook ingress: no secret-resolver mapping found for the "
+            "configured webhook secret reference on this lane; the ingress "
+            "handler will refuse every delivery"
+        )
+        return None
+    return {"secret_resolver": SecretResolver(config=resolver_config)}
 
 
 def load_runtime_config(
@@ -2015,12 +2104,9 @@ async def bootstrap() -> int:
         # them as structured Kafka events. Requires a dedicated producer.
         if use_kafka and RuntimeLogEventBridge.is_enabled() and kafka_bootstrap_servers:
             try:
-                from aiokafka import AIOKafkaProducer as _BridgeProducer
-
-                _bridge_producer = _BridgeProducer(
-                    bootstrap_servers=kafka_bootstrap_servers,
+                _bridge_producer = await _create_runtime_log_bridge_producer(
+                    kafka_bootstrap_servers
                 )
-                await _bridge_producer.start()
 
                 runtime_log_bridge = RuntimeLogEventBridge(
                     producer=_bridge_producer,
@@ -2029,13 +2115,7 @@ async def bootstrap() -> int:
                 )
 
                 # Parse allowlist from env or use defaults
-                allowlist_raw = os.environ.get(
-                    "RUNTIME_LOG_BRIDGE_ALLOWLIST",
-                    "aiokafka.consumer,asyncpg,aiohttp",
-                )
-                allowlist = [
-                    name.strip() for name in allowlist_raw.split(",") if name.strip()
-                ]
+                allowlist = _runtime_log_bridge_allowlist()
                 runtime_log_bridge.attach_to_loggers(allowlist)
                 await runtime_log_bridge.start()
 
@@ -5132,13 +5212,7 @@ async def bootstrap() -> int:
         # Stop RuntimeLogEventBridge (OMN-5525)
         if runtime_log_bridge is not None:
             try:
-                allowlist_raw = os.environ.get(
-                    "RUNTIME_LOG_BRIDGE_ALLOWLIST",
-                    "aiokafka.consumer,asyncpg,aiohttp",
-                )
-                allowlist = [
-                    name.strip() for name in allowlist_raw.split(",") if name.strip()
-                ]
+                allowlist = _runtime_log_bridge_allowlist()
                 runtime_log_bridge.detach_from_loggers(allowlist)
                 await runtime_log_bridge.stop()
                 # Stop the bridge's producer

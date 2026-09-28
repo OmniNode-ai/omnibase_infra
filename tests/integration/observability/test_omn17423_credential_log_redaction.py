@@ -254,3 +254,14 @@ class TestGateOverTheRealTree:
         )
         assert gate.run_self_test(fixture, 9) == 0
         assert gate.run_self_test(fixture, 8) == 1
+
+    def test_gate_can_scan_only_one_staged_file(self, tmp_path: Path) -> None:
+        gate = _load_gate()
+        staged = tmp_path / "staged.py"
+        staged.write_text("VALUE = 1\n", encoding="utf-8")
+        (tmp_path / "unstaged.py").write_text(
+            "logger.info('token=%s', token)\n",
+            encoding="utf-8",
+        )
+
+        assert gate.run_normal_paths([staged]) == 0

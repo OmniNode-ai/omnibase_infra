@@ -198,18 +198,71 @@ slot_skip_role_seam() {
 # quoted or lower-case `on database`) is refused, since a form that cannot be
 # confined is a form that reaches a database outside the fence.
 #
+# THE PRINCIPALS, TOO (OMN-19404). Confining the database names alone left the
+# GRANTEES pointing at the dev lane: forward 099 then ran `GRANT CONNECT ON
+# DATABASE omnidash_analytics_prepr1 TO omninode_runtime`, which hands the DEV
+# principal the slot's database and the slot's own omninode_runtime_prepr1
+# nothing. The fourth slot boot died on exactly that: `permission denied for
+# database omnidash_analytics_prepr1`. And 096 and 103 ran `ALTER ROLE` on the
+# dev lane's role_omnidash and tenant_projection_writer from a slot's run. So
+# every identifier token that is a principal provision_db_slot.sh mints a slot
+# twin for is rewritten to that twin, wherever it appears in a statement: a
+# grantee, a CREATE/ALTER ROLE target, a policy's role list, a SET ROLE, and
+# the role argument of an assertion, which then asserts on the slot principal
+# instead of passing on the dev lane's state. A whole token only, so a longer
+# identifier that merely starts with a role name is never touched. Roles the
+# provisioner does not mint (app_dashboard, role_omniweb) are left as written;
+# a slot has no principal of that name to point them at.
+#
+# An assertion that names the database as a STRING, `datname = '<db>'` or the
+# database argument of has_database_privilege, is rewritten with it. Leaving it
+# would assert the slot principal's CONNECT on the dev database, which is now
+# false by design and would fail the file. A quoted database name anywhere else
+# is data (`owner_service = 'omnibase_infra'`) and is never touched.
+#
+# SLOT_MANAGED_ROLES mirrors the roles scripts/provision_db_slot.sh derives,
+# SERVICE_DB_MAP's roles and LOGIN_ONLY_ROLES, and is pinned equal to them by
+# tests/unit/infra/test_forward_migration_slot_role_confinement.py.
+SLOT_MANAGED_ROLES="role_omnibase role_omniintelligence role_omniclaude role_omnimemory role_omninode role_omnidash omninode_runtime tenant_projection_writer chain_canary_reader"
+
 # The caller runs this in a command substitution, so a refusal is signalled by
 # exit status and the caller must stop on it; the copy is the caller's to
 # remove.
 slot_migration_file() {
   _smf_src="$1"
+  _smf_roles_ere="$(printf '%s' "$SLOT_MANAGED_ROLES" | tr ' ' '|')"
   if [ "$SLOT_ACTIVE" -ne 1 ] \
-     || ! grep -Eiq '^[[:space:]]*\\(connect|c)([[:space:]]|$)|on[[:space:]]+database[[:space:]]' "$_smf_src"; then
+     || ! grep -Eiq "^[[:space:]]*\\\\(connect|c)([[:space:]]|\$)|on[[:space:]]+database[[:space:]]|datname|has_database_privilege|(^|[^A-Za-z0-9_])(${_smf_roles_ere})([^A-Za-z0-9_]|\$)" "$_smf_src"; then
     printf '%s\n' "$_smf_src"
     return 0
   fi
   _smf_out="$(mktemp "${TMPDIR:-/tmp}/slot-migration.XXXXXX")" || return 1
-  if ! awk -v slot="$ONEX_DB_SLOT" '
+  if ! awk -v slot="$ONEX_DB_SLOT" -v roles="$SLOT_MANAGED_ROLES" -v q="'" '
+      # Every token of s that is a managed role gains the slot suffix. The token
+      # class includes digits and upper case so matching is maximal-munch: a
+      # longer identifier is one token and never compares equal to a role.
+      function suffix_roles(s,    out, tok) {
+        out = ""
+        while (match(s, /[A-Za-z0-9_]+/)) {
+          tok = substr(s, RSTART, RLENGTH)
+          out = out substr(s, 1, RSTART - 1)
+          if (tok in role) tok = tok "_" slot
+          out = out tok
+          s = substr(s, RSTART + RLENGTH)
+        }
+        return out s
+      }
+      # The quoted database name ending each match of re gains the suffix,
+      # inside its quotes.
+      function suffix_quoted_db(s, re,    out) {
+        out = ""
+        while (match(s, re)) {
+          out = out substr(s, 1, RSTART + RLENGTH - 2) "_" slot q
+          s = substr(s, RSTART + RLENGTH)
+        }
+        return out s
+      }
+      BEGIN { n = split(roles, r, " "); for (i = 1; i <= n; i++) role[r[i]] = 1 }
       /^[[:space:]]*\\(connect|c)([[:space:]]|$)/ {
         if (NF != 2 || $2 !~ /^[a-z_][a-z0-9_]*$/) {
           printf "[forward-migration] slot_fence_refusal: %s line %d: `%s` is not a bare database-name \\connect and cannot be confined to the slot\n", FILENAME, FNR, $0 > "/dev/stderr"
@@ -227,14 +280,18 @@ slot_migration_file() {
           out = out substr(line, 1, RSTART + RLENGTH - 1) "_" slot
           line = substr(line, RSTART + RLENGTH)
         }
-        print out line
+        line = out line
+        line = suffix_quoted_db(line, "datname[ \t]*=[ \t]*" q "[a-z_][a-z0-9_]*" q)
+        line = suffix_quoted_db(line, "has_database_privilege[(][^,()]*,[ \t]*" q "[a-z_][a-z0-9_]*" q)
+        print suffix_roles(line)
       }
       END { exit bad }
     ' "$_smf_src" > "$_smf_out"; then
     rm -f "$_smf_out"
     return 4
   fi
-  if ! awk '
+  if ! awk -v q="'" '
+      BEGIN { lit = "(datname[ \t]*=[ \t]*|has_database_privilege[(][^,()]*,[ \t]*)" q "[^" q "]*" q }
       /^[[:space:]]*\\(connect|c)[[:space:]]/ { print $2; next }
       /^[[:space:]]*--/ { next }
       {
@@ -242,6 +299,12 @@ slot_migration_file() {
         while (match(line, /on[ \t]+database[ \t]+[^ \t;]+/)) {
           n = split(substr(line, RSTART, RLENGTH), parts, /[ \t]+/)
           print parts[n]
+          line = substr(line, RSTART + RLENGTH)
+        }
+        line = tolower($0)
+        while (match(line, lit)) {
+          n = split(substr(line, RSTART, RLENGTH), parts, q)
+          print parts[n - 1]
           line = substr(line, RSTART + RLENGTH)
         }
       }
@@ -254,7 +317,7 @@ slot_migration_file() {
   fi
   # printf, not echo: a POSIX sh echo reads the backslash-c in the text as
   # "stop output here" and truncates the line.
-  printf '%s\n' "[forward-migration]   slot '${ONEX_DB_SLOT}': confined the database name(s) in $(basename "$_smf_src") to the slot" >&2
+  printf '%s\n' "[forward-migration]   slot '${ONEX_DB_SLOT}': confined the database and principal name(s) in $(basename "$_smf_src") to the slot" >&2
   printf '%s\n' "$_smf_out"
 }
 # ---- END slot \connect rewrite (OMN-18893) ----
@@ -572,13 +635,14 @@ migration_declares_unclassified_force_rls() {
 # baseline entirely in the same change; they declare no FORCE, so nothing here
 # names them.
 #
-# 0026 IS NOT RELEASED, and that is a measurement, not a hold-over. It was
-# released here in the first revision of this change and applied on the .201
-# dev lane; the resulting ENABLE + FORCE RLS on delegation_judge_verdict_events
-# is a WRITE LOCKOUT for the lane's own writer, so it was reverted on the lane
-# and dropped from this arm. See fenced-node-migrations.yaml's 2026-09-08 block
-# for the two measured refusals and the writer-side condition that has to land
-# before it can be released.
+# 0026 WAS NOT RELEASED on 2026-09-08, and that was a measurement, not a
+# hold-over. It was released in the first revision of that change and applied
+# on the .201 dev lane; the resulting ENABLE + FORCE RLS on
+# delegation_judge_verdict_events was a WRITE LOCKOUT for the lane's own
+# writer, so it was reverted on the lane and dropped from this arm.
+# fenced-node-migrations.yaml's 2026-09-08 block records the two measured
+# refusals and the writer-side release condition. That condition has since
+# been met, and 0026 is released on the dev arm below (OMN-15092, 2026-09-26).
 ONEX_MIGRATION_LANE="${ONEX_MIGRATION_LANE:-}"
 case "${ONEX_MIGRATION_LANE}" in
   dev)
@@ -630,8 +694,38 @@ case "${ONEX_MIGRATION_LANE}" in
     # omni_home docs/tracking/ROLLING_WORK_LEDGER.md, which authorizes resuming
     # tenant row-level security on relations the OMN-15354 classification
     # manifest classifies TENANT, lab first and onex-dev second.
+    #
+    # WIDENED 2026-09-26 (OMN-15092, tranche 5 of OMN-14894). The arm also
+    # releases 0026: ENABLE + FORCE ROW LEVEL SECURITY, a tenant_isolation
+    # policy and the app_dashboard SELECT grant on
+    # delegation_judge_verdict_events, the last relation the OMN-15354
+    # manifest classifies TENANT that had no tenant boundary on this lane.
+    # It was measured on 2026-09-08 to refuse every write the async
+    # judge-verdict writer issued, because that writer passed no `tenant=` and
+    # the GUC fell back to the house slug while the row carried a uuid. The
+    # release condition that block wrote down, "the async judge-verdict writer
+    # must pass the row's own resolved tenant to the adapter", is now met in
+    # the image this lane runs: omnimarket handler_delegation
+    # _project_judge_verdict issues its INSERT with `tenant=tenant_id`
+    # (OMN-17627), and its attribution probe runs under a bound tenant
+    # (OMN-15919). The column stays TEXT and holds the uuid string, so GUC and
+    # column agree by construction, the same way 0041's do.
+    #
+    # Measured 2026-09-26 on a copy of this lane's delegation_events and
+    # delegation_judge_verdict_events (116 rows, one tenant) in a throwaway
+    # database on the .201 dev-lane Postgres, applying 0026 exactly as the node
+    # loop does and probing as the non-superuser tenant_projection_writer and
+    # app_dashboard roles. The writer path, with the GUC set to the row's
+    # tenant, inserts. An unset GUC and the 2026-09-08 slug GUC are both
+    # refused with "new row violates row-level security policy". An unset or
+    # foreign GUC sees 0 of 116 rows. Before 0026 every one of those probes
+    # saw or wrote everything. The runtime worker's omnidash_analytics DSNs
+    # on this lane name tenant_projection_writer and role_omnidash, neither a
+    # superuser nor BYPASSRLS, and the table is owned by postgres, so the
+    # policy binds the writer here rather than being bypassed.
     LANE_RELEASED_NODE_MIGRATION_IDS="\
 node:node_projection_registration:0002_node_service_registry_tenant_rls.sql
+node:node_projection_delegation:0026_delegation_judge_verdict_events_rls_tenant_isolation.sql
 node:node_projection_delegation:0037_delegation_events_uuid_mixed_representation_guard_before_set_role.sql
 node:node_projection_delegation:0041_delegation_budget_state_rls_tenant_isolation.sql"
     ;;

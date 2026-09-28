@@ -61,9 +61,17 @@ _LOCAL_201_MODELS_URL = "http://192.168.86.201:8000/v1/models"  # onex-allow-int
 #: The env hint each backend carries in the base contract. The renderer strips
 #: these -- the overlay owns the real endpoint -- but a base contract without
 #: them is rejected.
+#:
+#: local-embedding (OMN-17099) is declared here, matching the real base
+#: contract (omnimarket's bifrost_delegation.yaml), so the synthetic base this
+#: module writes agrees with the committed dev overlay's added binding. It is
+#: NOT in ``_LOCAL_201_BACKENDS`` above: that set is checked against the
+#: recorded :8000 chat-completions probe, and the embedding endpoint is a
+#: separate port with its own probe fixture entry, not this one.
 _ENDPOINT_URL_ENV = {
     "local-coder": "LLM_CODER_URL",
     "local-heavy-reasoning": "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
+    "local-embedding": "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
 }
 
 

@@ -76,6 +76,9 @@ EXIT_CANNOT_REACH_OWN_DATABASE=7
 EXIT_IDENTIFIER_TOO_LONG=8
 EXIT_USAGE=9
 EXIT_NOT_SUPERUSER=10
+# OMN-19415. Pinned by tests/unit/infra/test_db_slot_connection_budget.py.
+EXIT_SERVER_UNDERSIZED=11
+EXIT_ROLE_WITHOUT_BUDGET=12
 
 # Postgres truncates an identifier longer than 63 bytes SILENTLY. A truncated
 # name can collide with another slot's, which is isolation failing with no error
@@ -125,6 +128,74 @@ omniweb"
 LOGIN_ONLY_ROLES="omninode_runtime
 tenant_projection_writer
 chain_canary_reader"
+
+# ---------------------------------------------------------------------------
+# Connection budget (OMN-19415)
+# ---------------------------------------------------------------------------
+# A slot is a GUEST on the dev lane's Postgres server. Until OMN-19415 nothing
+# bounded how many connections it could open there, and the server ran the
+# stock max_connections of 100 (3 reserved for superusers). Measured on the lab
+# host on 2026-09-24 with a read-only 2-second pg_stat_activity sampler:
+#
+#   * slot prepr-1 boot 5 held 63 connections at 16:27:12Z. role_omnibase_prepr1
+#     peaked at 50 (slot runtime, runtime-worker, runtime-effects and
+#     tenant-projection-writer at 14/14/14/9, most opened by asyncpg pool floors
+#     and never used), omninode_runtime_prepr1 at 9, role_omnidash_prepr1 at 8,
+#     role_omniintelligence_prepr1 at 3. The server sat at 100/100 from
+#     16:27:06Z and the DEV runtime logged 1171 refusals in four minutes.
+#   * the dev lane ALONE, with no slot running, reached 93 at 16:50:07Z, five
+#     minutes after a dev runtime redeploy (16:45:08Z): the same four containers
+#     at 18/13/13/13 as the `postgres` role, before idle pool members aged out
+#     back to about 31. After the next redeploy (17:20:08Z) it SATURATED the
+#     server on its own: 99 at 17:24:40Z with zero slot connections,
+#     omninode-runtime climbing 14 -> 18 -> 27 until refused, and 176 refusals
+#     at 17:24-17:25Z, every one of them in omninode-runtime.
+#
+# So a slot booting next to a fresh dev restart overflows a 100-connection
+# server on either side's demand alone. The fix is two bounds that together make
+# the dev lane's share structural rather than a matter of timing:
+#
+#   1. every slot principal carries an explicit CONNECTION LIMIT from this
+#      table. A slot that wants more than its budget is refused INSIDE the slot
+#      ("too many connections for role"), as the slot's own finding, and never
+#      by starving the dev lane;
+#   2. --apply refuses (EXIT_SERVER_UNDERSIZED) to provision a slot on a server
+#      whose max_connections does not cover the dev lane's budget plus every
+#      pool slot's full budget plus the server's own reservations. The declared
+#      value lives on the dev lane's postgres in docker/docker-compose.dev-lane.yml
+#      (not the base file, which other lanes inherit), and
+#      tests/unit/infra/test_db_slot_connection_budget.py pins it against the
+#      same arithmetic.
+#
+# Each limit is the measured slot peak or the dev-lane equivalent, whichever is
+# higher, with headroom; a principal never seen connected gets a small floor
+# rather than zero, because 0 locks it out and -1 is "unlimited", which is the
+# defect. A base role missing from this table fails closed at scope derivation
+# (EXIT_ROLE_WITHOUT_BUDGET): an unbudgeted principal is exactly the leak this
+# table exists to close.
+CONNECTION_BUDGET_MAP="role_omnibase:64
+role_omniintelligence:6
+role_omniclaude:4
+role_omnimemory:4
+role_omninode:6
+role_omnidash:12
+omninode_runtime:16
+tenant_projection_writer:4
+chain_canary_reader:2"
+
+# The dev lane is not fenced by this tool and carries no per-role limit; this is
+# the share of the server the capacity preflight RESERVES for it. Its
+# unconstrained post-redeploy peak is NOT known: at 17:24:40Z it hit the
+# 97-connection ceiling with the runtime still climbing, so the measurement is a
+# floor. 140 is that saturation point plus about 40%. Re-derive it from a
+# sampler run once the server is recreated with the declared capacity.
+DEV_LANE_CONNECTION_BUDGET=140
+
+# Must equal len(SLOTS) in scripts/runtime_build/prepr_slot_policy.py, pinned by
+# the OMN-19415 test. The preflight sizes the server for every slot of the pool
+# at once, because slots boot independently and the server cannot tell them
+# apart from the dev lane's own demand until it refuses someone.
+PREPR_POOL_SLOT_COUNT=2
 
 # ---------------------------------------------------------------------------
 # Slot token
@@ -178,6 +249,30 @@ assert_in_fence() {
 
 derive() {
     printf '%s_%s' "$1" "$SLOT"
+}
+
+# The CONNECTION LIMIT for one derived slot role, from CONNECTION_BUDGET_MAP.
+# Fails closed on a role the table does not name or a value that is not a
+# positive integer.
+connection_limit_for() {
+    _cl_base="${1%_"${SLOT}"}"
+    for _cl_entry in $CONNECTION_BUDGET_MAP; do
+        if [ "${_cl_entry%%:*}" = "$_cl_base" ]; then
+            _cl_limit="${_cl_entry#*:}"
+            case "$_cl_limit" in
+                ''|*[!0-9]*|0) ;;
+                *) printf '%s' "$_cl_limit"; return 0 ;;
+            esac
+            fail "$EXIT_ROLE_WITHOUT_BUDGET" \
+                "role '${1}' has connection budget '${_cl_limit}' in
+       CONNECTION_BUDGET_MAP; expected a positive integer. 0 locks the principal
+       out and -1 is Postgres for unlimited."
+        fi
+    done
+    fail "$EXIT_ROLE_WITHOUT_BUDGET" \
+        "role '${1}' (base '${_cl_base}') has no entry in CONNECTION_BUDGET_MAP.
+       An unbudgeted slot principal can take the shared server's connections
+       from the dev lane (OMN-19415); add it to the table with a measured bound."
 }
 
 # ---------------------------------------------------------------------------
@@ -297,11 +392,26 @@ for _role in $LOGIN_ONLY_ROLES; do
 "
 done
 
+# Every slot role's budget, resolved before any connection so that a missing
+# entry refuses in --print-scope exactly as it would in --apply.
+SLOT_ROLE_LIMITS=""
+SLOT_CONNECTION_BUDGET=0
+for _role in $SLOT_ROLES; do
+    _limit="$(connection_limit_for "$_role")"
+    SLOT_ROLE_LIMITS="${SLOT_ROLE_LIMITS}${_role}:${_limit}
+"
+    SLOT_CONNECTION_BUDGET=$((SLOT_CONNECTION_BUDGET + _limit))
+done
+
 if [ "$MODE" = "--print-scope" ]; then
     echo "slot=${SLOT}"
     echo "group_role=${GROUP_ROLE}"
     for _n in $SLOT_DATABASES; do echo "database=${_n}"; done
     for _n in $SLOT_ROLES; do echo "role=${_n}"; done
+    for _n in $SLOT_ROLE_LIMITS; do echo "connection_limit=${_n}"; done
+    echo "slot_connection_budget=${SLOT_CONNECTION_BUDGET}"
+    echo "dev_lane_connection_budget=${DEV_LANE_CONNECTION_BUDGET}"
+    echo "pool_slot_count=${PREPR_POOL_SLOT_COUNT}"
     exit 0
 fi
 
@@ -464,6 +574,38 @@ if [ "$MODE" = "--apply" ]; then
         usage
     }
 
+    # --- capacity preflight (OMN-19415) -------------------------------------
+    # Before anything is created: is this server sized for the dev lane plus
+    # every pool slot at full budget? An unreadable answer is a refusal, not a
+    # pass -- a preflight that cannot see the setting has not checked it.
+    _capacity="$(scalar "SELECT current_setting('max_connections') || ' ' || current_setting('superuser_reserved_connections') || ' ' || coalesce(current_setting('reserved_connections', true), '0')")" || _capacity=""
+    # shellcheck disable=SC2086  # deliberate field split of three integers
+    set -- $_capacity
+    _max_conn="${1:-}"
+    _su_reserved="${2:-}"
+    _reserved="${3:-}"
+    for _v in "$_max_conn" "$_su_reserved" "$_reserved"; do
+        case "$_v" in
+            ''|*[!0-9]*)
+                fail "$EXIT_SERVER_UNDERSIZED" \
+                    "could not read the server's connection capacity (got '${_capacity}').
+       Refusing to provision a slot on a shared server whose capacity is
+       unknown (OMN-19415)."
+                ;;
+        esac
+    done
+    _required=$((DEV_LANE_CONNECTION_BUDGET + PREPR_POOL_SLOT_COUNT * SLOT_CONNECTION_BUDGET + _su_reserved + _reserved))
+    echo "[provision-db-slot] capacity: max_connections=${_max_conn}, required=${_required} (dev lane ${DEV_LANE_CONNECTION_BUDGET} + ${PREPR_POOL_SLOT_COUNT} slots x ${SLOT_CONNECTION_BUDGET} + reserved ${_su_reserved}+${_reserved})"
+    if [ "$_max_conn" -lt "$_required" ]; then
+        fail "$EXIT_SERVER_UNDERSIZED" \
+            "the shared server's max_connections is ${_max_conn}; the dev lane
+       plus ${PREPR_POOL_SLOT_COUNT} pool slots need ${_required}. A slot booted here
+       takes its connections from the dev lane (OMN-19415: 100/100 and 1171 dev
+       refusals on 2026-09-24). The server's size is declared on the dev lane's
+       postgres in docker/docker-compose.dev-lane.yml; it takes effect when that
+       container is recreated, which is a dev-lane restart."
+    fi
+
     echo "[provision-db-slot] slot '${SLOT}' — group role ${GROUP_ROLE}"
 
     # The group role is NOLOGIN and holds no privilege. It exists only as the
@@ -501,15 +643,17 @@ EOSQL
             echo "[provision-db-slot]   creating role ${_role}"
         fi
         _pw="$(new_password)"
+        _limit="$(connection_limit_for "$_role")"
         psql_admin <<EOSQL
 DO \$\$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${_role}') THEN
         CREATE ROLE "${_role}" WITH
             LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION
+            CONNECTION LIMIT ${_limit}
             PASSWORD '${_pw}';
     ELSE
-        ALTER ROLE "${_role}" WITH LOGIN PASSWORD '${_pw}';
+        ALTER ROLE "${_role}" WITH LOGIN CONNECTION LIMIT ${_limit} PASSWORD '${_pw}';
     END IF;
 END
 \$\$;
@@ -650,6 +794,20 @@ EOSQL
         fi
     done
     echo "[provision-db-slot]   all ${_controls} service principals + login-only principals report NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB"
+
+    # OMN-19415: the connection budget, read back from pg_roles.rolconnlimit
+    # rather than trusted from the statement that set it.
+    for _pair in $SLOT_ROLE_LIMITS; do
+        _role="${_pair%%:*}"
+        _limit="${_pair#*:}"
+        _actual="$(scalar "SELECT rolconnlimit FROM pg_roles WHERE rolname = '${_role}'")"
+        if [ "$_actual" != "$_limit" ]; then
+            fail 1 "role '${_role}' reports rolconnlimit '${_actual}', expected
+       ${_limit}. An unbounded slot principal can take the shared server's
+       connections from the dev lane (OMN-19415)."
+        fi
+    done
+    echo "[provision-db-slot]   connection budget: ${SLOT_CONNECTION_BUDGET} across the slot's principals, each read back from pg_roles.rolconnlimit"
 
     for _db in $SLOT_DATABASES; do echo "SLOT_DATABASE=${_db}" >> "$ENV_FILE"; done
     echo "[provision-db-slot] slot '${SLOT}' provisioned. Credentials in ${ENV_FILE} (mode 0600)."

@@ -94,6 +94,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 DEPLOY_AGENT_GATE = "Deploy Agent Tests (OMN-15378) / deploy-agent-tests"
 APPLICATION_DB_GATE = "Application Database Domain Enforcement (OMN-15361)"
+CASCADE_REPORT_JOB = "CI cascade reason-graph (report-only)"
 
 # Real, unedited `commits/{sha}/check-runs` rows captured from the 16 dev PRs
 # merged 2026-07-29T23:04Z → 2026-07-30T14:54Z, filtered to merge-time state.
@@ -269,6 +270,16 @@ class TestCiSummaryGate:
     def test_allowlisted_advisory_failure_is_ignored(self) -> None:
         # A failing advisory job (Test-Failure Ratchet Gate) must NOT block.
         jobs = _all_gates("success") + [_job("Test-Failure Ratchet Gate", "failure")]
+        code, _ = evaluate(jobs)
+        assert code == EXIT_SUCCESS
+
+    def test_cascade_report_failure_does_not_change_the_verdict(self) -> None:
+        jobs = _all_gates("success") + [_job(CASCADE_REPORT_JOB, "failure")]
+        code, _ = evaluate(jobs)
+        assert code == EXIT_SUCCESS
+
+    def test_queued_cascade_report_does_not_hold_the_verdict_pending(self) -> None:
+        jobs = _all_gates("success") + [_job(CASCADE_REPORT_JOB, None, status="queued")]
         code, _ = evaluate(jobs)
         assert code == EXIT_SUCCESS
 
@@ -647,6 +658,32 @@ class TestExternalContextAssertion:
         code, _ = evaluate(_all_gates("success"), check_runs=None, external_contexts=())
         assert code == EXIT_SUCCESS
 
+    def test_ci_workflow_trigger_includes_merge_group(self) -> None:
+        """Queue entries must create the dev branch's required CI Summary."""
+        triggers = _load_workflow(CI_WORKFLOW).get(True)
+        assert isinstance(triggers, dict)
+        assert "merge_group" in triggers
+
+    def test_main_merge_group_succeeds_without_check_runs_file(
+        self, tmp_path: Path
+    ) -> None:
+        """A green queue run has no PR-scoped external check-run payload."""
+        from scripts.ci import ci_summary_gate
+
+        jobs_file = tmp_path / "jobs.json"
+        jobs_file.write_text(json.dumps(_all_gates("success")), encoding="utf-8")
+
+        code = ci_summary_gate.main(
+            [
+                "--event-name",
+                "merge_group",
+                "--jobs-file",
+                str(jobs_file),
+            ]
+        )
+
+        assert code == EXIT_SUCCESS
+
     def test_latest_wins_resolution_matches_github(self) -> None:
         """A rerun's green supersedes the earlier red for the same name.
 
@@ -767,6 +804,56 @@ class TestExternalAssertionIsWiredIntoCiYml:
         )
         run = str(poll["run"])
         assert run.count("rm -f check_runs.json") >= 2
+
+
+class TestCascadeReportIsOutsideRequiredContext:
+    """OMN-14909 telemetry must not weaken or delay the CI Summary verdict."""
+
+    def test_ci_summary_has_no_warn_only_step(self) -> None:
+        job = _load_workflow(CI_WORKFLOW)["jobs"]["ci-summary"]
+        assert all("continue-on-error" not in step for step in job["steps"])
+        assert all(
+            "reason-graph" not in str(step.get("name", "")) for step in job["steps"]
+        )
+
+    def test_cascade_report_is_a_separate_advisory_job(self) -> None:
+        jobs = _load_workflow(CI_WORKFLOW)["jobs"]
+        report = jobs["ci-cascade-reason-graph"]
+        assert report["name"] == CASCADE_REPORT_JOB
+        assert report["needs"] == ["ci-summary"]
+        assert report["if"] == "always()"
+        assert report["continue-on-error"] is True
+        assert report["runs-on"] == jobs["ci-summary"]["runs-on"]
+        assert report["timeout-minutes"] == 10
+        assert report["permissions"] == {
+            "actions": "read",
+            "checks": "read",
+            "contents": "read",
+        }
+
+        summary_checkout = next(
+            step
+            for step in jobs["ci-summary"]["steps"]
+            if step.get("name") == "Checkout (gate script)"
+        )
+        report_checkout = next(
+            step
+            for step in report["steps"]
+            if step.get("name") == "Checkout (gate script)"
+        )
+        assert report_checkout == summary_checkout
+        assert CASCADE_REPORT_JOB in SOFT_ALLOWLIST
+
+    def test_advisory_marker_is_directly_above_continue_on_error(self) -> None:
+        lines = CI_WORKFLOW.read_text(encoding="utf-8").splitlines()
+        job_start = lines.index("  ci-cascade-reason-graph:")
+        next_job = next(
+            index
+            for index in range(job_start + 1, len(lines))
+            if re.fullmatch(r"  [a-z0-9][a-z0-9-]*:", lines[index])
+        )
+        continue_line = lines.index("    continue-on-error: true", job_start, next_job)
+        assert re.search(r"#\s*advisory-ok:\s*OMN-\d+\s+\S", lines[continue_line - 1])
 
 
 # --------------------------------------------------------------------------
@@ -2789,3 +2876,60 @@ class TestLoneCancellationOnBothSidesOfTheGrace:
         )
         assert code == EXIT_SUCCESS, report
         assert "cancelled_without_replacement" not in report
+
+
+# ---------------------------------------------------------------------------
+# OMN-19928: the bus ACL boundary job is a strict gate
+# ---------------------------------------------------------------------------
+BUS_ACL_BOUNDARY_GATE = "Bus ACL Boundary (OMN-19928)"
+
+
+class TestBusAclBoundaryGateOmn19928:
+    """Absent, skipped, cancelled and timed out each fail ``CI Summary``.
+
+    ``CI Summary`` counts ``skipped`` as passed for a job it does not register,
+    so a boundary job that is skipped, or deleted from ci.yml, would read green
+    unless it is a strict gate. Each row goes through the real evaluator.
+    """
+
+    def _without_gate(self) -> list[dict[str, object]]:
+        return [j for j in _all_gates("success") if j["name"] != BUS_ACL_BOUNDARY_GATE]
+
+    def test_registered_as_strict(self) -> None:
+        assert BUS_ACL_BOUNDARY_GATE in STRICT_GATE_JOBS
+
+    def test_success_passes(self) -> None:
+        code, _ = evaluate(_all_gates("success"))
+        assert code == EXIT_SUCCESS
+
+    @pytest.mark.parametrize(
+        "conclusion", ["skipped", "cancelled", "timed_out", "failure"]
+    )
+    def test_non_success_conclusion_fails(self, conclusion: str) -> None:
+        jobs = self._without_gate() + [_job(BUS_ACL_BOUNDARY_GATE, conclusion)]
+        code, report = evaluate(jobs)
+        assert code == EXIT_FAILURE, (conclusion, report)
+        assert BUS_ACL_BOUNDARY_GATE in report
+
+    def test_absent_is_never_success(self) -> None:
+        # Absent is PENDING, which the poller converts to FAILURE at its
+        # deadline; what it must never be is a vacuous SUCCESS.
+        code, report = evaluate(self._without_gate())
+        assert code == EXIT_PENDING
+        assert BUS_ACL_BOUNDARY_GATE in report
+
+    def test_job_is_unconditional_and_runs_the_boundary_suite(self) -> None:
+        job = _load_workflow(CI_WORKFLOW)["jobs"]["bus-acl-boundary"]
+        assert job["name"] == BUS_ACL_BOUNDARY_GATE
+        assert "if" not in job
+        assert "needs" not in job
+        run_steps = " ".join(str(step.get("run", "")) for step in job["steps"])
+        assert "tests/integration/bus_acl_boundary/" in run_steps
+        env = next(
+            step["env"]
+            for step in job["steps"]
+            if "bus_acl_boundary" in str(step.get("run", ""))
+        )
+        assert env["OMN18012_REQUIRE_HARNESS"] == "1"
+        # It must never adopt a declared broker: no OMN18012_BROKER_* is passed.
+        assert not any(key.startswith("OMN18012_BROKER_") for key in env)

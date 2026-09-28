@@ -46,7 +46,6 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 )
 from omnibase_infra.topology.physical_schema_mapping import (
     INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
-    TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359,
     physical_grant_schema_for_table,
 )
 
@@ -60,7 +59,6 @@ __all__ = [
     "DOMAIN_PROJECTION_BINDINGS",
     "STATE_IO_TABLE_DECLARATIONS",
     "LEGACY_MIGRATION_TABLE_DECLARATIONS",
-    "TENANT_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359",
     "INTERNAL_TABLES_PHYSICALLY_IN_PUBLIC_UNTIL_OMN15359",
     "physical_grant_schema_for_table",
     "derive_table_grants",
@@ -147,6 +145,27 @@ STATE_IO_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="state",
         ),
     ),
+    # OMN-19829. Same seam, same classification: durable per-PR landing
+    # workflow state for omnimarket's node_pr_landing_orchestrator, keyed on
+    # ``landing_key`` (``owner/repo#<number>``). Its ``tenant_id`` column is
+    # denormalized provenance from the opaque payload, never an authorization
+    # key, so operator ruling R-q's OMNINODE_INTERNAL classification holds.
+    ContractTableDeclaration(
+        node="state_io:pr_landing_workflow_state",
+        contract_path=Path(
+            "docker/migrations/forward/108_create_pr_landing_workflow_state.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="pr_landing_workflow_state",
+            database_ref="omnibase_infra",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/108_create_pr_landing_workflow_state.sql"
+            ),
+            access="read_write",
+            role="state",
+        ),
+    ),
 )
 
 # Some migration-owned projection relations landed before their producing node's
@@ -167,7 +186,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         table=ModelDbTableDeclaration(
             name="tenant_inference_credentials",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration=(
                 "docker/migrations/forward/nodes/node_projection_tenant_credentials/"
                 "0000_create_tenant_inference_credentials.sql"
@@ -198,7 +217,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         table=ModelDbTableDeclaration(
             name="projection_delegation_model_routing",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration=(
                 "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
             ),
@@ -214,7 +233,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         table=ModelDbTableDeclaration(
             name="projection_delegation_quality_gate",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration=(
                 "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
             ),
@@ -230,7 +249,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         table=ModelDbTableDeclaration(
             name="projection_delegation_summary",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration=(
                 "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
             ),
@@ -246,7 +265,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         table=ModelDbTableDeclaration(
             name="projection_delegation_token_usage",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration=(
                 "docker/migrations/forward/nodes/node_projection_delegation/0039_delegation_aggregate_views_per_tenant.sql"
             ),
@@ -254,6 +273,12 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="aggregate_token_usage",
         ),
     ),
+    # OMN-19716: the topic_activity bridge that sat here was DELETED by the pin
+    # advance to 2e7cec7d45ed, which carries omnimarket#2953, the retiring pull
+    # request its own comment named. The expiry module went red on the bot pull
+    # request naming the entry, and the deletion rode the commit that caused
+    # it; the regeneration wrote nothing, which is the proof the contract
+    # derives what the entry used to.
     # OMN-18863: the runtime-error fingerprints entry that used to sit here was
     # DELETED when the pin advanced to ac35d56338b3, which is omnimarket#2664's
     # squash, because the contract declares the relation itself now. That is the
@@ -294,6 +319,131 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # If you add a bridge here for a new infra-first vendoring, add it to that
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
+    #
+    # OMN-19550: the same infra-first window, for session_content -- the full
+    # prompt, tool input, tool result and assistant reply captured for one
+    # session content chunk. This repository vendors the create migration
+    # BEFORE omnimarket lands the node package that declares the relation in
+    # its contract, because omnimarket's node-migration-vendor-parity gate
+    # refuses a node migration with no vendored counterpart here. So for one
+    # window the shipped topology instances declare a relation the PINNED
+    # contracts cannot derive.
+    #
+    # Regenerating against the pin instead of bridging would DELETE that
+    # declaration while the vendored migration still grants the relation,
+    # tripping the OMN-18768 reverse ratchet and refusing the projection
+    # binding at boot. This entry is SELF-EXPIRING: it is registered in
+    # _INTERIM_ENTRIES in
+    # tests/ci/test_supplemental_declaration_expiry_omn18863.py, which goes red
+    # on the pin advance that makes it redundant and says to delete it.
+    #
+    # Retired by: omnimarket#2905 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:session_content",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_session_content/"
+            "0001_create_session_content.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="session_content",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_session_content/"
+                "0001_create_session_content.sql"
+            ),
+            access="write",
+            role="session_content",
+        ),
+    ),
+    # OMN-19833: the two PR landing read models, the same infra-first window as
+    # the retired bridges above. This repo vendors
+    # node_projection_pr_landing/0000 and 0001 ahead of omnimarket#3000, whose
+    # node-migration-vendor-parity gate needs the vendored copy at dev tip
+    # before it can merge; the pin cannot declare either relation until it
+    # does. 0001 grants omninode_runtime SELECT, INSERT, UPDATE on
+    # pr_landing_state and SELECT, INSERT on pr_landing_transitions. Both
+    # entries carry the access and role the source contract declares, so the
+    # derivation reproduces the grants the instances already carry and writes
+    # no generated diff. Inert, then removable, once the pin advances past
+    # omnimarket#3000; the expiry module names both.
+    ContractTableDeclaration(
+        node="legacy_migration:pr_landing_state",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_pr_landing/"
+            "0000_create_pr_landing.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="pr_landing_state",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_pr_landing/"
+                "0000_create_pr_landing.sql"
+            ),
+            access="read_write",
+            role="pr_landing_state",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:pr_landing_transitions",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_pr_landing/"
+            "0000_create_pr_landing.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="pr_landing_transitions",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_pr_landing/"
+                "0000_create_pr_landing.sql"
+            ),
+            access="read_write",
+            role="pr_landing_transitions",
+        ),
+    ),
+    # OMN-19513: infra vendors both Claude hook event projection tables before
+    # omnimarket#2956 lands the node contract. Until the pin advances, these
+    # interim declarations keep the shipped table grants derivable. The expiry
+    # test tracks both entries and requires removal after the contract arrives.
+    # Retired by: omnimarket#2956 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:claude_agent_spans",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
+            "0000_create_claude_hook_events.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="claude_agent_spans",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
+                "0000_create_claude_hook_events.sql"
+            ),
+            access="read_write",
+            role="claude_agent_spans",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:claude_hook_events",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
+            "0000_create_claude_hook_events.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="claude_hook_events",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
+                "0000_create_claude_hook_events.sql"
+            ),
+            access="read_write",
+            role="claude_hook_events",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
@@ -320,7 +470,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         table=ModelDbTableDeclaration(
             name="projection_delegation_savings",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration=(
                 "docker/migrations/forward/nodes/node_projection_savings/"
                 "089_savings_aggregate_views_per_tenant.sql"
@@ -343,13 +493,111 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
         table=ModelDbTableDeclaration(
             name="projection_cost_savings_overview",
             database_ref="application",
-            schema="tenant",
+            schema="public",
             migration=(
                 "docker/migrations/forward/nodes/node_projection_savings/"
                 "089_savings_aggregate_views_per_tenant.sql"
             ),
             access="read",
             role="aggregate_savings_overview",
+        ),
+    ),
+    # OMN-17886 AC2 step 1: three omninode_internal relations whose owner is an
+    # omnibase_infra node that writes with direct SQL rather than through the
+    # runtime's projection wiring, so no db_io.db_tables entry declares them and
+    # no omnimarket contract ever will. Like the savings views above, these are
+    # steady state, not interim bridges: they are not in the OMN-18863 expiry
+    # map, because there is no retiring pull request to name.
+    #
+    # Access is what the handlers do, read from the code rather than from the
+    # grants that happen to exist:
+    #   * savings_injection_signals, savings_validator_catch_signals: INSERT and
+    #     SELECT; savings_correlation_finalizations: SELECT 1 and INSERT ... ON
+    #     CONFLICT DO NOTHING (node_savings_estimation_compute,
+    #     handler_savings_correlation). read_write matches the SELECT, INSERT,
+    #     UPDATE the creating migrations grant.
+    #
+    #   * gateway_link_health (AC2 step 2): HandlerGatewayLinkHealthUpsert
+    #     runs INSERT ... ON CONFLICT (tenant_id) DO UPDATE, which needs SELECT,
+    #     INSERT and UPDATE. Declared together with the migration that GRANTs
+    #     it explicitly (node_gateway_link_health_write_effect/0003), so the
+    #     declaration never runs ahead of a migration that delivers it
+    #     (check_topology_grant_delivery). Before that file, its privileges came
+    #     only from the default-privilege rules, which AC2 step 4 drops.
+    #
+    # The gateway_link_health_status VIEW is not declared at all: no runtime
+    # node reads or writes it, so its privileges are revoked rather than
+    # declared.
+    ContractTableDeclaration(
+        node="infra_direct_sql:node_savings_estimation_compute",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_savings_estimation_compute/"
+            "0001_create_savings_signal_tables.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="savings_injection_signals",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_savings_estimation_compute/"
+                "0001_create_savings_signal_tables.sql"
+            ),
+            access="read_write",
+            role="savings_injection_signals",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="infra_direct_sql:node_savings_estimation_compute",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_savings_estimation_compute/"
+            "0001_create_savings_signal_tables.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="savings_validator_catch_signals",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_savings_estimation_compute/"
+                "0001_create_savings_signal_tables.sql"
+            ),
+            access="read_write",
+            role="savings_validator_catch_signals",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="infra_direct_sql:node_savings_estimation_compute",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_savings_estimation_compute/"
+            "0002_create_savings_correlation_finalizations.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="savings_correlation_finalizations",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_savings_estimation_compute/"
+                "0002_create_savings_correlation_finalizations.sql"
+            ),
+            access="read_write",
+            role="savings_correlation_finalizations",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="infra_direct_sql:node_gateway_link_health_write_effect",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_gateway_link_health_write_effect/"
+            "0001_create_gateway_link_health.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="gateway_link_health",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_gateway_link_health_write_effect/"
+                "0001_create_gateway_link_health.sql"
+            ),
+            access="read_write",
+            role="gateway_link_health",
         ),
     ),
 )

@@ -1,0 +1,202 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+# chain-canary-c28-consumer-flow.yml — OMN-19812
+#
+# WHAT THIS IS
+#   The PRODUCER for beta criterion C28, consumer-flow observability on the
+#   runtime. This job's EXIT CODE is that criterion's verdict — the shape C11,
+#   C12 and C15 already use, so the board reads a conclusion and needs no
+#   second grader anywhere.
+#
+#   Until this existed C28 carried a single hand READBACK, taken on the .201
+#   dev lane at 2026-09-19T12:20Z. Nothing re-took it: an image that stopped
+#   registering a flow counter for one subscription kind, a projection-api
+#   that stopped paging, or a stall-alert seam that went back to discarding
+#   payloads would have left C28 reading green on the board indefinitely.
+#
+# WHAT IT MEASURES
+#   Exactly what that readback measured, clause by clause, on the lane as it
+#   is deployed at run time. scripts/ci/c28_consumer_flow_probe.py's docstring
+#   is the full statement; in one line each:
+#     kinds     both named subscription kinds (the audit-purpose projection
+#               consumer and the publishing reducer) have live, instrumented
+#               rows on the consumer-flow exposure across several windows
+#     negative  the OMN-17214 negative tests pass on this checkout and bite,
+#               branch by branch, when each flow-counter registration is
+#               removed (the source is restored and the restore checked)
+#     cursor    the since-cursor walk terminates and reaches every consumer
+#               group in the live 10-minute window read from the table
+#     boot      an applied event on this boot, zero natural stall-alert
+#               validation errors, and that zero proven live by one malformed
+#               trigger the seam must observe and dead-letter
+#
+# WHY THIS REPOSITORY, WHICH LANE, WHICH RUNNER (OMN-19894)
+#   The subject is a lab lane: its projection-api over the network, and its
+#   runtime containers' logs, broker and analytics database through the docker
+#   daemon that runs them. So the job is two: `resolve-lane` runs on any runner
+#   of the overlay's pool (vars.LAB_PROBE_RUNS_ON_JSON) and picks the first
+#   lane of the overlay's ordered list (vars.LAB_LANES_JSON) whose
+#   projection-api answers and which declares `docker_runs_on`, the runner
+#   labels beside that lane's docker daemon; `c28-consumer-flow` runs there
+#   against that lane's declared projection_url. No host label or address is
+#   written in this file (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z).
+#   No lane answering is RED naming each lane tried. The board already holds a
+#   grant for this repository, so registering this producer needs no new board
+#   credential.
+#
+#   No repository secret is used. The broker credential is read by `rpk`
+#   inside the broker container from that container's own environment and
+#   never reaches this job.
+#
+# THE ONE WRITE
+#   One malformed payload on onex.evt.omnimarket.projection-consumer-flow-applied.v1
+#   per run, exactly as the readback published one, so that the zero it
+#   counts is a measurement and not a dead probe. Its correlation id carries a
+#   fixed prefix so a later run on the same boot excludes it. Nothing is
+#   restarted or reconfigured.
+#
+# WHY THERE IS NO pull_request TRIGGER
+#   The C11 producer found it the hard way: a path-scoped pull-request job sits
+#   in neither `required_status_checks` nor `EXPECTED_EXTERNAL_CONTEXTS`, the
+#   advisory-job gate (OMN-18775) refuses it. The pre-merge evidence is a
+#   `workflow_dispatch` run of the branch on the lab runner, cited in the pull
+#   request.
+#
+# EXIT 2 IS "COULD NOT LOOK", NOT A VERDICT
+#   A lane container not running and healthy after the settle window, a boot
+#   that changed under the run twice, or docker, the broker, the database or
+#   the exposure refusing, exit 2. Both 1 and 2 fail the job; the record says
+#   which happened.
+
+name: Chain Canary — C28 consumer flow
+
+on:
+  # TEMPORARY (OMN-19812): lets this branch run on the lab runner before the
+  # file exists on the default branch, where workflow_dispatch cannot reach
+  # it. Removed in the next commit, before review.
+  push:
+    branches: ['jonah/omn-19812-c28-consumer-flow-probe']
+  schedule:
+    # 4x/day at :13, offset from C11 (:17), C12 (:27), C16 (:29),
+    # chain-canary (:41 odd hours), provider-rung (:47), dev-lane-liveness
+    # (:07/:22/:37/:52) and sync-revert-watchdog (:00 even hours).
+    - cron: '13 0,6,12,18 * * *'
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Projection-api override. Empty uses the resolved lane''s projection_url.'
+        required: false
+        default: ''
+
+concurrency:
+  # One run at a time: two injections racing would still each be attributed,
+  # but two walks and two log reads would contend for nothing useful.
+  group: chain-canary-c28-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.8.3"
+
+jobs:
+  resolve-lane:
+    name: Resolve the lab lane (chain of responders)
+    runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
+    timeout-minutes: 5
+    outputs:
+      lane: ${{ steps.lane.outputs.name }}
+      lane_json: ${{ steps.lane.outputs.lane }}
+      docker_runs_on: ${{ steps.lane.outputs.docker_runs_on }}
+    steps:
+      - name: Checkout the lane resolver
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/actions/resolve-lab-lane
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Resolve the lab lane through the overlay's chain of responders
+        id: lane
+        uses: ./.github/actions/resolve-lab-lane
+        with:
+          lanes-json: ${{ vars.LAB_LANES_JSON }}
+          require: projection_url docker_runs_on
+          match: compose_project=omnibase-infra
+
+  c28-consumer-flow:
+    name: C28 consumer flow (dev lane)
+    needs: resolve-lane
+    # The runner beside the resolved lane's docker daemon, as that lane's
+    # overlay entry declares it. Data, never a literal here.
+    runs-on: ${{ fromJSON(needs.resolve-lane.outputs.docker_runs_on) }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          # No git operations after checkout — do not leave the Actions token
+          # in local git config (zizmor artipacked).
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install dependencies
+        # Clause 2 runs this checkout's own tests; the probe itself imports
+        # the standard library only.
+        run: uv sync --frozen
+
+      - name: Re-measure C28 on the dev lane and grade it
+        env:
+          C28_BASE_URL: ${{ github.event.inputs.base_url || fromJSON(needs.resolve-lane.outputs.lane_json).projection_url }}
+          LANE_NAME: ${{ needs.resolve-lane.outputs.lane }}
+        run: |
+          set -uo pipefail
+          echo "lane: ${LANE_NAME}, projection-api ${C28_BASE_URL}"
+          # NOT `set -e`: a non-zero probe is the verdict and must still write
+          # its record before the job ends.
+          python3 scripts/ci/c28_consumer_flow_probe.py \
+            --base-url "${C28_BASE_URL}" \
+            --pytest-cmd "uv run --frozen pytest" \
+            --scratch "${RUNNER_TEMP}" \
+            --record c28-consumer-flow.json \
+            --summary "${GITHUB_STEP_SUMMARY}"
+          status=$?
+          echo "probe exit status: ${status}"
+          exit "${status}"
+
+      - name: Assert the C28 record is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact c28-consumer-flow \
+            --require c28-consumer-flow.json
+
+      - name: Upload the C28 consumer-flow record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c28-consumer-flow
+          path: c28-consumer-flow.json
+          if-no-files-found: error
+          retention-days: 30

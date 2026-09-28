@@ -155,7 +155,9 @@ _PROVENANCE_REPOS = frozenset(
 # cross-repo citation cannot be read from omnibase_infra CI and is pinned by its
 # quoted text instead -- stated plainly rather than dressed up as an assertion.
 _IN_REPO_PROVENANCE: dict[str, str] = {
-    "omnibase_infra:docker/docker-compose.infra.yml:876": "KC_DB_USERNAME: postgres",
+    # OMN-14375 shifted this six lines down by adding the GITHUB_WEBHOOK_SECRET
+    # runtime-env entry above it (885 -> 891).
+    "omnibase_infra:docker/docker-compose.infra.yml:891": "KC_DB_USERNAME: postgres",
     "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4": (
         "CREATE DATABASE keycloak"
     ),
@@ -187,7 +189,7 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
             "four-column checksum ledger"
         ),
         provenance=(
-            "omnibase_infra:docker/docker-compose.infra.yml:876",
+            "omnibase_infra:docker/docker-compose.infra.yml:891",
             "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4",
             "omninode_infra:k8s/auth/keycloak-values.yaml:32",
             "omninode_infra:scripts/init-databases.sh:603",

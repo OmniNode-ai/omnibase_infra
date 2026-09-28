@@ -175,7 +175,7 @@ def _tenant_domain_target(
             ModelDbTableDeclaration(
                 name="delegation_events",
                 database_ref="application",
-                schema="tenant",
+                schema="public",
                 migration="0007_delegation_events.sql",
                 access="read_write",
                 role="events",

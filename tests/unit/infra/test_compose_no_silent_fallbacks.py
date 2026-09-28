@@ -93,6 +93,24 @@ ALLOWED_EMPTY_DEFAULTS = {
     # loudly at the effect boundary; neither substitutes a default.
     "SLACK_BOT_TOKEN",
     "SLACK_CHANNEL_ID",
+    # OMN-17398: the free OpenRouter rung's key. Present in the lane host's
+    # `.env` on .201 (copied from the secret store's /lab-provider-keys) and
+    # absent on lanes that do not route to OpenRouter, so a `:?` form would
+    # wedge their compose render. Empty is NOT a silent disable: the routing
+    # report shows `llm.openrouter.api_key` as unresolved and the inference
+    # effect's resolver raises on it; nothing substitutes a default.
+    "OPENROUTER_API_KEY",
+    # OMN-19492 / OMN-14375: the onexbot-pr-reader App webhook's HMAC secret,
+    # on the identical contract as the OnexBot App identity above -- minted
+    # onto a specific runtime host by the operator, so every other lane must
+    # render and run without it. Empty is NOT "silently disabled": the
+    # consumer, node_github_webhook_ingress_effect's handler, resolves it
+    # through SecretResolver.get_secret_async(required=False) and treats an
+    # absent or empty value as "no webhook secret configured", refusing
+    # (dead-lettering) every delivery rather than substituting a default. A
+    # `:?` form would wedge compose render on every lane that does not run
+    # the webhook door.
+    "GITHUB_WEBHOOK_SECRET",
 }
 
 

@@ -77,6 +77,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolKafkaAdminLike": "protocols/protocol_kafka_admin_like.py",  # [RUNTIME] OMN-8623 Kafka admin client boundary for health monitor DI
     "ProtocolRejoinableConsumer": "protocols/protocol_rejoinable_consumer.py",  # [RUNTIME] OMN-18640 the consumer surface the coordinator-loss rejoin supervisor measures and rebuilds
     "ProtocolConsumerSyncSource": "protocols/protocol_consumer_sync_source.py",  # [RUNTIME] OMN-18640 the event-bus surface the consumer_sync readiness dimension reads. Infra-local, not spi: the health monitor is handed a ProtocolEventBusLike and must ask a transport whether it can answer at all, rather than isinstance-ing one concrete Kafka class
+    "ProtocolDispatchDeadlineSource": "protocols/protocol_dispatch_deadline_source.py",  # [RUNTIME] OMN-19355 the event-bus surface the dispatch_deadline health dimension reads (abandoned consume-loop dispatches). Infra-local, not spi, for the same reason as ProtocolConsumerSyncSource: the monitor asks a transport whether it can answer rather than isinstance-ing one Kafka class
     "ProtocolConsumeConcurrencyDeclarer": "protocols/protocol_consume_concurrency_declarer.py",  # [RUNTIME] OMN-18852 structural bound-declaration seam a bus exposes before subscribe starts its consume loop. Infra-local: widening ProtocolEventBusSubscriber (omnibase_core) for a transport-local concurrency bound would be a third-repo change, and the distinctive method name keeps isinstance a genuine capability test rather than matching every bus
     "ProtocolDlqAdminTransport": "protocols/protocol_dlq_admin_transport.py",  # [NODE] OMN-16769 read-only DLQ offset surface for the quarantine-sink monitor. Five methods, ALL reads (list_topics/partitions_for_topic/beginning_offsets/end_offsets/offsets_for_times) — the narrowness IS the safety property: no produce/commit/topic-mutation path exists on it, so the scheduled probe is read-only by construction rather than by discipline. Infra-local, not spi: it is a node-internal test seam bound to this monitor, not a cross-repo contract. Same prior art as ProtocolSeekableConsumer above — narrow the client so the logic is testable without a broker
     "ProtocolClusterMetadata": "protocols/protocol_cluster_metadata.py",  # [NODE] OMN-16769 the two ClusterMetadata methods (topics/partitions_for_topic) the DLQ offset reader calls. Declared structurally so the metadata snapshot is not typed as Any (the repo's Any-type gate) — aiokafka ships no stubs for this class
@@ -103,6 +104,15 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "RowLookup": "services/cost_api/handlers.py",  # [DI] OMN-10334 narrow row adapter for asyncpg.Record/test rows
     # [DI] Publisher callable boundary for HandlerBaselinesBatchCompute (OMN-3039)
     "ProtocolPublisher": "nodes/node_baselines_batch_compute/handlers/handler_baselines_batch_compute.py",
+    # [NODE] OMN-19085 one-method read seam (undrained count per topic) the DLQ
+    # replay handler asks before it starts a topic's consumer, so a trigger with
+    # nothing to drain never joins the replay group. Declared beside its only
+    # consumer; DlqGroupBacklogProbe in engine_dlq_replay is the one runtime
+    # implementation and unit tests supply a fake. Infra-local, not spi: bound to
+    # this node's onex-dlq-replay group, not a cross-repo contract. Same prior art
+    # as ProtocolDlqAdminTransport above: narrow the client so the logic is
+    # testable without a broker.
+    "ProtocolDlqBacklogProbe": "nodes/node_dlq_replay_effect/handlers/handler_dlq_replay.py",
     # [DI] OMN-7404 narrow duck-typed classifier interface injected into RoutingGate
     # (predict_proba(features) -> float); no ML-library dependency, no Task 7
     # RoutingClassifier artifact required to exist.
@@ -121,6 +131,12 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolPartialRetryRequest": "nodes/node_registry_effect/handlers/handler_partial_retry.py",
     "ProtocolRegistrationPersistence": "nodes/node_registration_storage_effect/protocols/protocol_registration_persistence.py",
     "ProtocolDiscoveryOperations": "nodes/node_service_discovery_effect/protocols/protocol_discovery_operations.py",
+    # [NODE] OMN-19927 the read port of node_merge_provenance_observe_effect:
+    # merge-group runs for a sha and the jobs of a run's latest attempt.
+    # HandlerMergeGroupRunReadGithub is the one runtime binding and unit tests
+    # supply a fake. Infra-local, not spi: it reads THIS repository's Actions
+    # runs for its own CI test selection, not a cross-repo contract.
+    "ProtocolMergeGroupRunReader": "nodes/node_merge_provenance_observe_effect/protocols/protocol_merge_group_run_reader.py",
     "ProtocolLedgerPersistence": "nodes/node_ledger_write_effect/protocols/protocol_ledger_persistence.py",
     "ProtocolGatewaySessionStore": "nodes/node_gateway_attach_effect/services/protocol_gateway_session_store.py",  # [NODE] OMN-15750 DI seam so the attach session-store backend (in-process for this slice, Valkey follow-on) is swappable without touching handlers
     "ProtocolGatewayTransport": "protocols/protocol_gateway_transport.py",  # [NODE] OMN-15922 POST seam for the onex-auth gateway client; infra-internal (not a cross-repo contract, so not spi) and load-bearing as a seam because it is what lets the whole grant -> attach -> re-attach cycle run against an in-memory fake with no socket. Deliberately separate from ProtocolHttpClient: that one is runtime_checkable and already satisfied structurally by adapters implementing exactly get(), so adding a method would silently un-satisfy every one of them

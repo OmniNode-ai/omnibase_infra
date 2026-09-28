@@ -62,6 +62,11 @@ from omnibase_infra.topics.model_topic_provisioning_policy import (
     resolve_specs_for_creation,
 )
 from omnibase_infra.topics.model_topic_spec import ModelTopicSpec
+from omnibase_infra.topics.topic_namespace import (
+    apply_topic_namespace,
+    resolve_topic_namespace,
+    strip_topic_namespace,
+)
 from omnibase_infra.utils import sanitize_error_message
 
 if TYPE_CHECKING:
@@ -267,8 +272,18 @@ class TopicProvisioner:
         self._existing_topics: frozenset[str] | None = None
         # OMN-15395 (c): resolved specs of topics THIS provisioner created, used
         # as the readiness expectation so a freshly created topic is confirmed
-        # against the spec it was created with.
+        # against the spec it was created with. Keyed by PHYSICAL name.
         self._created_specs: dict[str, ModelTopicSpec] = {}
+        # OMN-19404: the physical topic namespace (OMN-18891), applied at this
+        # provisioner's broker boundary. Every name it creates, looks up in the
+        # broker snapshot or confirms is the physical one; the contract-derived
+        # spec registry stays keyed by the canonical name. Without this a
+        # pre-PR slot's runtime created and confirmed the DEV lane's canonical
+        # topics while its consumers subscribed to the prefixed ones, so no
+        # `prepr1.*` topic existed and the writers died on
+        # UnknownTopicOrPartition. Unset (every declared lane) is "", and
+        # apply_topic_namespace / strip_topic_namespace are then the identity.
+        self._topic_namespace = resolve_topic_namespace()
 
     @property
     def policy(self) -> ModelTopicProvisioningPolicy:
@@ -474,7 +489,9 @@ class TopicProvisioner:
         expected: dict[str, ModelTopicSpec] = {}
         refusals: list[str] = []
         for name in present_topics:
-            declared = self._spec_by_name.get(name)
+            declared = self._spec_by_name.get(
+                strip_topic_namespace(name, namespace=self._topic_namespace)
+            )
             if declared is None:
                 continue
             try:
@@ -687,7 +704,10 @@ class TopicProvisioner:
             return {
                 "created": created,
                 "existing": existing,
-                "failed": [s.suffix for s in self._topic_specs],
+                "failed": [
+                    apply_topic_namespace(s.suffix, namespace=self._topic_namespace)
+                    for s in self._topic_specs
+                ],
                 "drift": drift,
                 "status": "unavailable",
             }
@@ -716,7 +736,11 @@ class TopicProvisioner:
             metadata, existing_names = await self._fetch_broker_topic_metadata(admin)
             self._existing_topics = existing_names
             diff: ModelTopicProvisioningDiff = build_provisioning_diff(
-                (spec.suffix for spec in self._topic_specs), existing_names
+                (
+                    apply_topic_namespace(spec.suffix, namespace=self._topic_namespace)
+                    for spec in self._topic_specs
+                ),
+                existing_names,
             )
             existing.extend(diff.present_topics)
             drift.extend(
@@ -725,7 +749,10 @@ class TopicProvisioner:
 
             missing = set(diff.missing_topics)
             missing_specs = [
-                spec for spec in self._topic_specs if spec.suffix in missing
+                spec
+                for spec in self._topic_specs
+                if apply_topic_namespace(spec.suffix, namespace=self._topic_namespace)
+                in missing
             ]
             logger.info(
                 "Topic provisioning diff: desired=%d present=%d missing=%d "
@@ -757,8 +784,11 @@ class TopicProvisioner:
                     # life of the process and only attached after an unrelated
                     # restart made its topics pre-existing (OMN-16844).
                     creation_spec = self._creation_spec(spec)
+                    physical = apply_topic_namespace(
+                        creation_spec.suffix, namespace=self._topic_namespace
+                    )
                     new_topic = NewTopic(
-                        name=creation_spec.suffix,
+                        name=physical,
                         num_partitions=creation_spec.partitions,
                         replication_factor=creation_spec.replication_factor,
                         topic_configs=dict(creation_spec.kafka_config)
@@ -767,22 +797,32 @@ class TopicProvisioner:
                     )
 
                     await admin.create_topics([new_topic])
-                    created.append(creation_spec.suffix)
-                    self._note_topic_created(creation_spec.suffix, creation_spec)
+                    created.append(physical)
+                    self._note_topic_created(physical, creation_spec)
                     logger.info(
                         "Created topic: %s (partitions=%d, replication_factor=%s)",
-                        creation_spec.suffix,
+                        physical,
                         creation_spec.partitions,
                         creation_spec.replication_factor,
                         extra={"correlation_id": str(correlation_id)},
                     )
 
                 except TopicAlreadyExistsError:
-                    existing.append(spec.suffix)
-                    self._note_topic_created(spec.suffix)
+                    existing.append(
+                        apply_topic_namespace(
+                            spec.suffix, namespace=self._topic_namespace
+                        )
+                    )
+                    self._note_topic_created(
+                        apply_topic_namespace(
+                            spec.suffix, namespace=self._topic_namespace
+                        )
+                    )
                     logger.debug(
                         "Topic already exists: %s",
-                        spec.suffix,
+                        apply_topic_namespace(
+                            spec.suffix, namespace=self._topic_namespace
+                        ),
                         extra={"correlation_id": str(correlation_id)},
                     )
 
@@ -796,15 +836,23 @@ class TopicProvisioner:
                         # status="partial" is the silent-uncreated-topic bug the
                         # capacity measurement was supposed to make impossible.
                         raise unhostable_replication_error(
-                            topic=spec.suffix,
+                            topic=apply_topic_namespace(
+                                spec.suffix, namespace=self._topic_namespace
+                            ),
                             requested_replication_factor=spec.replication_factor,
                             policy=self._policy,
                             cause=e,
                         ) from e
-                    failed.append(spec.suffix)
+                    failed.append(
+                        apply_topic_namespace(
+                            spec.suffix, namespace=self._topic_namespace
+                        )
+                    )
                     logger.warning(
                         "Failed to create topic %s: %s",
-                        spec.suffix,
+                        apply_topic_namespace(
+                            spec.suffix, namespace=self._topic_namespace
+                        ),
                         type(e).__name__,
                         extra={
                             "correlation_id": str(correlation_id),
@@ -829,7 +877,10 @@ class TopicProvisioner:
             )
             # Separate individually-failed topics from those never attempted
             already_resolved = set(created) | set(existing) | set(failed)
-            all_suffixes = {spec.suffix for spec in self._topic_specs}
+            all_suffixes = {
+                apply_topic_namespace(spec.suffix, namespace=self._topic_namespace)
+                for spec in self._topic_specs
+            }
             not_attempted = [s for s in all_suffixes if s not in already_resolved]
             if not_attempted:
                 logger.warning(
@@ -927,6 +978,10 @@ class TopicProvisioner:
                 with ``INVALID_REPLICATION_FACTOR`` (OMN-15395 D5).
         """
         correlation_id = correlation_id or uuid4()
+        # OMN-19404: callers pass the canonical contract name (or an already
+        # physical one; the mapping is idempotent). Everything below talks to
+        # the broker, so it uses the physical name.
+        topic_name = apply_topic_namespace(topic_name, namespace=self._topic_namespace)
 
         # OMN-17372: answer from the memoized state BEFORE opening a connection.
         #
@@ -1039,7 +1094,10 @@ class TopicProvisioner:
                     spec
                     if spec is not None
                     else self._spec_by_name.get(
-                        topic_name, ModelTopicSpec(suffix=topic_name)
+                        strip_topic_namespace(
+                            topic_name, namespace=self._topic_namespace
+                        ),
+                        ModelTopicSpec(suffix=topic_name),
                     )
                 )
                 # Record the exact effective spec handed to the broker. The
@@ -1184,12 +1242,23 @@ class TopicProvisioner:
             A ``ModelTopicSetReadiness`` describing per-topic outcomes.
         """
         correlation_id = correlation_id or uuid4()
-        requested = tuple(dict.fromkeys(topics))
+        # OMN-19404: readiness is a property of the topic this lane actually
+        # consumes, which is the physical one. Confirming the canonical name in
+        # a namespaced lane would confirm another lane's topic.
+        requested = tuple(
+            dict.fromkeys(
+                apply_topic_namespace(t, namespace=self._topic_namespace)
+                for t in topics
+            )
+        )
         if not requested:
             return ModelTopicSetReadiness(status=EnumTopicReadinessStatus.SKIPPED)
         knobs = config or ModelTopicReadinessConfig()
         specs = (
-            dict(expected_specs)
+            {
+                apply_topic_namespace(name, namespace=self._topic_namespace): spec
+                for name, spec in expected_specs.items()
+            }
             if expected_specs is not None
             else {
                 name: spec

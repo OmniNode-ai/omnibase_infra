@@ -45,6 +45,14 @@ class EnumFullSuiteReason(StrEnum):
     # rather than through the diff, so it gets its own reason instead of
     # borrowing one whose name would misreport why the suite escalated.
     SCRIPT_REFERENCE_UNNARROWABLE = "script_reference_unnarrowable"
+    # OMN-19927: a push (or a manual dispatch) whose commit the merge queue did
+    # not validate -- node_merge_provenance_compute returned UNVALIDATED or
+    # UNDECIDABLE. `HEAD~1` of such a commit is not a delta from a proven tree:
+    # omnibase_infra#4111 reached `dev` by a direct REST merge after its merge
+    # group had failed six times, its HEAD~1 diff narrowed to two shards, and
+    # the three tests that failed in the queue never ran. Passed in by CI,
+    # never inferred here: the selector has no GitHub access and must not.
+    UNVALIDATED_PUSH = "unvalidated_push"
 
 
 # A selectable pytest target: a directory under the root-collected `tests/`

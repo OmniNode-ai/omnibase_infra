@@ -79,13 +79,16 @@ def test_all_environment_instances_are_typed_and_target_one_application_db() -> 
         database = topology.databases["application"]
 
         assert database.physical_name == "omnidash_analytics"
+        # OMN-17887: the `tenant` schema is retired; the TENANT domain's
+        # schema is `public`.
         assert set(database.schemas) == {
             "action_authorization_claim",
             "public",
-            "tenant",
             "omninode_internal",
             "platform_catalog",
         }
+        assert "tenant" not in database.schemas
+        assert database.schemas["public"].domain.value == "TENANT"
         assert {binding.principal for binding in database.bindings.values()} == {
             "onex_api",
             "tenant_projection_writer",
@@ -94,6 +97,36 @@ def test_all_environment_instances_are_typed_and_target_one_application_db() -> 
         }
         assert "omninode_runtime_service" in database.bindings
         assert "omninode_runtime" not in database.bindings
+
+
+def test_no_principal_declares_usage_on_the_retired_tenant_schema() -> None:
+    """OMN-17887: the `tenant` schema is retired, so no application principal
+    (app_dashboard, onex_api, tenant_projection_writer, validator_ro or any
+    other) may carry a SCHEMA grant naming it -- in the typed instance or in the
+    rendered projection."""
+    for environment in sorted(SUPPORTED_TOPOLOGY_PROFILES):
+        topology = load_topology_profile(environment)
+        database = topology.databases["application"]
+        offending = sorted(
+            name
+            for name, principal in database.principals.items()
+            for grant in principal.grants
+            if grant.schema == "tenant"
+        )
+        assert offending == [], (environment, offending)
+
+        projection = yaml.safe_load(
+            (PROJECTION_ROOT / f"{environment}.yaml").read_text(encoding="utf-8")
+        )
+        rendered = projection["databases"]["application"]
+        assert "tenant" not in rendered["schemas"]
+        rendered_offending = sorted(
+            name
+            for name, principal in rendered["principals"].items()
+            for grant in principal.get("grants", [])
+            if grant.get("schema") == "tenant"
+        )
+        assert rendered_offending == [], (environment, rendered_offending)
 
 
 def test_checked_in_docker_projections_exactly_match_typed_instances() -> None:
@@ -202,8 +235,13 @@ def test_host_local_topology_cannot_override_checked_in_authority(
             "omnidash_analytics",
         ),
         (
-            ("databases", "application", "schemas", "tenant", "domain"),
+            ("databases", "application", "schemas", "public", "domain"),
             "OMNINODE_INTERNAL",
+            "schema/domain drift",
+        ),
+        (
+            ("databases", "application", "schemas", "tenant"),
+            {"domain": "TENANT", "owner": "owner_onex_tenant"},
             "schema/domain drift",
         ),
         (
@@ -232,6 +270,7 @@ def test_host_local_topology_cannot_override_checked_in_authority(
     ids=(
         "physical-database-drift",
         "schema-domain-drift",
+        "retired-tenant-schema-reintroduced",
         "database-user-drift",
         "binding-dsn-drift",
     ),

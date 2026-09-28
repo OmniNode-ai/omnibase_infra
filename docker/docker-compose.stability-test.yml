@@ -53,6 +53,30 @@ x-omninode-contract-overlay:
 x-stability-test-strict-wiring-env: &stability_test_strict_wiring_env
   ONEX_WIRING_STRICT_MODE: "1"
 # =============================================================================
+# RUNTIME LANE IDENTITY (OMN-19408)
+# =============================================================================
+# The deployment names its own lane, as the dev lane's main runtime does
+# (docker-compose.dev-lane.yml, OMN-19144). Until OMN-19408 this lane declared
+# nothing, so the lab lane-health projection -- a node whose scope holds the
+# three lab lanes only (OMN-18769 AC6) -- attached on this runtime, consumed
+# every health event, keyed none of them and wrote zero rows, and the
+# projection_apply_divergence detector held omninode-stability-test-runtime
+# Docker-unhealthy from about 05:40Z on 2026-09-24. The node's contract now
+# declares `runtime_lanes`, and the auto-wiring ownership filter attaches it
+# only where the declared lane is in scope; a runtime that declares NO lane
+# fails closed with a discovery error.
+#
+# `stability-test` is a registered lane (omnibase_core constants_runtime_lanes)
+# and NOT a lab lane, so declaring it changes nothing about health keying: the
+# health emitter still publishes this runtime's verdict with no lane, which is
+# OMN-18769 AC6 unchanged. It changes only what may attach here.
+#
+# On the main runtime only, the one that owns the lab projection by profile,
+# mirroring the dev lane. Literal, not interpolated: an exported shell value
+# must not be able to rename the lane.
+x-stability-test-lane-identity-env: &stability_test_lane_identity_env
+  ONEX_RUNTIME_LANE: "stability-test"
+# =============================================================================
 # STANDALONE PROJECTION WRITER CONFIG (OMN-17562)
 # =============================================================================
 # YAML anchors do NOT cross compose files, so the writer services at the bottom
@@ -60,26 +84,10 @@ x-stability-test-strict-wiring-env: &stability_test_strict_wiring_env
 # docker-compose.infra.yml. Same values, declared locally -- the same reason
 # docker-compose.dev-lane.yml carries its own pair.
 #
-# ONE DATABASE VARIABLE, AND IT IS THE ONE THIS LANE ALREADY HAS
-# --------------------------------------------------------------
-# `BaseProjectionRunner` resolves its DSN through
-# `ModelProjectionRuntimeBinding.from_legacy_settings()`, which prefers
-# `OMNIDASH_ANALYTICS_DB_URL`. It is never handed the topology-resolved binding:
-# `bind_projection_database_url()` is called only on the in-process dispatch
-# path, and by construction the runtime does not dispatch these. So one variable
-# is the entire credential -- no topology binding, no secret-resolver config.
-#
-# The value is byte-identical to the form this lane already inherits from
-# docker-compose.infra.yml, and it keeps the `${POSTGRES_USER` identity that
-# OMN-15363's `test_no_other_lane_is_repointed` requires of every non-dev
-# overlay. The DEV lane spells the same variable with `ROLE_OMNIDASH_PASSWORD`
-# instead -- its own non-BYPASSRLS application-role identity, deliberately
-# scoped to the one overlay that repoints it and named nowhere else, this file
-# included. That variable does not exist on this lane and introducing it here
-# would be a NEW credential variable on top of repointing a lane this ticket
-# holds no grant for. OMN-17556 is moving this entire surface to a typed
-# `secret_ref` resolved from the store; these services adopt whatever it lands,
-# and until then they must not add a variable it would have to remove.
+# The unsplit writers retain this lane's legacy analytics DSN. The three
+# OMN-17454 split writers additionally receive the two principal-specific
+# carriers below. Both passwords are already required by the base runtime env;
+# an unset value fails Compose rendering, before a consumer starts.
 x-stability-test-logging: &stability_test_logging
   driver: json-file
   options:
@@ -87,6 +95,10 @@ x-stability-test-logging: &stability_test_logging
     max-file: "3"
 x-stability-test-analytics-env: &stability_test_analytics_env
   OMNIDASH_ANALYTICS_DB_URL: "postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
+x-stability-test-tenant-projection-env: &stability_test_tenant_projection_env
+  ONEX_TENANT_DB_URL: "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?TENANT_PROJECTION_WRITER_PASSWORD must be set for the stability-test tenant projection binding}@postgres:5432/omnidash_analytics"
+x-stability-test-internal-projection-env: &stability_test_internal_projection_env
+  OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD must be set for the stability-test internal projection binding}@postgres:5432/omnidash_analytics"
 services:
   postgres:
     container_name: omnibase-infra-stability-test-postgres
@@ -213,7 +225,7 @@ services:
       redpanda-partition-cap:
         condition: service_completed_successfully
     environment:
-      !!merge <<: *stability_test_strict_wiring_env
+      !!merge <<: [*stability_test_strict_wiring_env, *stability_test_lane_identity_env]
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_OMNIMEMORY_MEMGRAPH_HOST}
       ONEX_ENVIRONMENT: stability-test
@@ -650,7 +662,8 @@ services:
       - -m
       - omnimarket.nodes.node_projection_delegation.handlers.handler_delegation
     environment:
-      !!merge <<: *stability_test_analytics_env
+      !!merge <<: [*stability_test_analytics_env, *stability_test_tenant_projection_env, *stability_test_internal_projection_env]
+      ONEX_DATABASE_TOPOLOGY_PROFILE: stability-test
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "stability-test.omnimarket-projections.delegation-writer.consume.v1"
@@ -756,7 +769,8 @@ services:
       - -m
       - omnimarket.nodes.node_projection_savings.handlers.handler_savings
     environment:
-      !!merge <<: *stability_test_analytics_env
+      !!merge <<: [*stability_test_analytics_env, *stability_test_tenant_projection_env, *stability_test_internal_projection_env]
+      ONEX_DATABASE_TOPOLOGY_PROFILE: stability-test
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "stability-test.omnimarket-projections.savings-writer.consume.v1"
@@ -809,7 +823,8 @@ services:
       - -m
       - omnimarket.nodes.node_projection_tenant_credentials.handlers.handler_tenant_credentials_projection
     environment:
-      !!merge <<: *stability_test_analytics_env
+      !!merge <<: [*stability_test_analytics_env, *stability_test_tenant_projection_env, *stability_test_internal_projection_env]
+      ONEX_DATABASE_TOPOLOGY_PROFILE: stability-test
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "stability-test.omnimarket-projections.tenant-credentials-writer.consume.v1"

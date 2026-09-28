@@ -238,7 +238,7 @@ class TestCriteriaAreCheckedByTheContractsInputModel:
     def test_a_mode_the_model_does_not_declare_is_refused(self) -> None:
         with pytest.raises(ValueError, match="quality_contract_mode"):
             cli_delegate.validate_request_against_contract(
-                self._request(quality_contract_mode="replace_task_class")
+                self._request(quality_contract_mode="mode_the_model_lacks")
             )
 
     def test_no_criteria_is_a_valid_request(self) -> None:

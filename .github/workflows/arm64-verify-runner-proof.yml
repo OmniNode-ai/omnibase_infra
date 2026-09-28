@@ -32,6 +32,7 @@ on:
       - 'docker/docker-compose.runners*.yml'
       - 'config/runner_fleet.yaml'
       - '.github/workflows/arm64-verify-runner-proof.yml'
+      - '.github/actions/resolve-arm64-proof-legs/**'
   workflow_dispatch:
   schedule:
     # Once a day. The host is a desk machine, not a datacentre: a frequent poll
@@ -46,38 +47,51 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  arm64-verify-proof:
-    name: arm64-verify-proof (${{ matrix.host }})
-    # ONE LEG PER ARM64 VERIFY HOST. A single job pinned to the class label
-    # would be satisfied by whichever arm64 host happened to be idle, so a
-    # second host could sit broken behind a green check indefinitely -- the
-    # undocumented-but-running failure in its other direction. The host label
-    # is what makes each leg a statement about a machine.
-    #
-    # Read from the declared inventory when you add a host: a row in
-    # config/runner_fleet.yaml with arch arm64 and the verify class needs a leg
-    # here, and tests/integration/observability/
-    # test_runner_fleet_multihost_contract.py is where that correspondence is
-    # asserted rather than remembered.
-    strategy:
-      fail-fast: false
-      matrix:
-        host: [host-101, host-105]
-    # Pinned to the architecture AND the class, in the fleet's own vocabulary.
-    # Both labels are load-bearing: `omnibase-verify` alone would also match an
-    # amd64 verify runner on the primary host, and this job's whole subject is
-    # the arm64 one.
-    # A FORK pull request must never land on a host holding real lab
-    # credentials. Same fork-isolation posture the trusted-CI seam takes, stated
-    # here because this job pins a literal runner set and so cannot inherit it.
+  legs:
+    name: arm64 proof legs match the declared inventory
+    # OMN-19894 / OMN-19895. Operator rulings 2026-09-28T01:58:06Z and
+    # 01:58:17Z: a check definition names no machine. The legs are data, the
+    # repository variable ARM64_VERIFY_PROOF_LEGS_JSON, and this job holds them
+    # to the declared inventory (config/runner_fleet.yaml plus each host's
+    # compose file) before any leg runs: a declared arm64 verify host with no
+    # leg, a leg for a host nothing registers, or an unset variable is RED.
+    # .github/actions/resolve-arm64-proof-legs carries the rules.
     if: >-
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
-    runs-on:
-      - self-hosted
-      - omnibase-verify
-      - arch-arm64
-      - ${{ matrix.host }}
+    runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
+    timeout-minutes: 5
+    outputs:
+      legs: ${{ steps.legs.outputs.legs }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Resolve the legs and check them against the inventory
+        id: legs
+        uses: ./.github/actions/resolve-arm64-proof-legs
+        with:
+          legs-json: ${{ vars.ARM64_VERIFY_PROOF_LEGS_JSON }}
+
+  arm64-verify-proof:
+    name: arm64-verify-proof (${{ matrix.leg.name }})
+    needs: legs
+    # ONE LEG PER ARM64 VERIFY HOST. A single job pinned to the class label
+    # would be satisfied by whichever arm64 host happened to be idle, so a
+    # second host could sit broken behind a green check indefinitely -- the
+    # undocumented-but-running failure in its other direction. Each leg's
+    # runs_on carries one host's label, so each leg is still a statement about
+    # a machine; which machines is data (the legs job above), not code.
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: ${{ fromJSON(needs.legs.outputs.legs) }}
+    # A FORK pull request must never land on a host holding real lab
+    # credentials. Same fork-isolation posture the trusted-CI seam takes.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ matrix.leg.runs_on }}
     timeout-minutes: 10
 
     steps:
@@ -91,7 +105,7 @@ jobs:
             exit 1
           fi
           echo "runner name: ${RUNNER_NAME:-<unset>}"
-          echo "declared host label: ${{ matrix.host }}"
+          echo "proof leg: ${{ matrix.leg.name }}"
 
       # The four binaries a cloud-touching verify job uses. Each is checked for
       # its ARCHITECTURE, not merely its presence: an amd64 binary under
@@ -136,7 +150,15 @@ jobs:
       # The credential half. Named, hashed and length-checked -- never printed.
       # A verify job that cannot read the lab kubeconfig fails at its first
       # cluster call with an error that looks like a cluster problem.
+      #
+      # SKIPPED on a leg whose lab_credentials is false (OMN-19657): a runner
+      # pinned to one lane's per-merge verify job reads that lane's docker
+      # daemon and carries no lab kubeconfig or operator-env mount by design
+      # (see docker-compose.runners-omninode-studio-runner.yml, "WHAT IS
+      # DELIBERATELY ABSENT"). Which legs those are is data in the legs
+      # variable, never a machine name here.
       - name: Assert the lab credentials are readable by the job user
+        if: matrix.leg.lab_credentials
         run: |
           set -euo pipefail
           : "${KUBECONFIG:?KUBECONFIG must be set on a verify-class runner}"

@@ -303,6 +303,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # OMN-19613: depth 2 brings in the pull_request merge commit's first
+          # parent (the base tip it was merged onto), which is what
+          # scripts/ci/precommit_diff_scope.py diffs against to scope the
+          # per-file Plugin* guard below. Without it the scope fails closed to
+          # the whole tree, which is correct but slower.
+          fetch-depth: 2
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -344,6 +351,9 @@ jobs:
       - name: Check Kafka bootstrap no localhost fallback (OMN-8783)
         run: uv run python scripts/ci_check_kafka_no_localhost_default.py
 
+      - name: Check Kafka hardcoded broker fallbacks (whole-tree backstop)
+        run: bash scripts/validation/check_kafka_no_hardcoded_fallback.sh
+
       - name: Check no localhost env fallbacks in src/ (OMN-10732)
         run: uv run python scripts/validate_no_env_fallbacks.py
 
@@ -360,8 +370,21 @@ jobs:
       - name: Single-canonical in-memory event bus (OMN-13419)
         run: bash scripts/validation/check_no_infra_inmemory_import.sh
 
+      # OMN-19613: the guard is an AST check on each file's own classes, so a
+      # file the PR did not touch cannot turn it red. On pull_request it scans
+      # only the PR's files; it scans the whole tree on push (which proves the
+      # merged union on dev, OMN-18835), merge_group and dispatch, when the PR
+      # changes .pre-commit-config.yaml or this workflow, when the PR moves the
+      # omnibase-core pin in uv.lock (the validator's code lives in core), and
+      # whenever the base cannot be resolved. The step always runs; only the
+      # file list narrows, so the check never goes missing from a PR.
       - name: Check Plugin* lifecycle class guard (OMN-13284, relocated to omnibase_core)
-        run: uv run pre-commit run no-plugin-daemon-classes --all-files
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          scope="$(uv run python scripts/ci/precommit_diff_scope.py --event-name "$EVENT_NAME")"
+          mapfile -t scope_args <<< "$scope"
+          uv run pre-commit run no-plugin-daemon-classes "${scope_args[@]}"
 
       # OMN-13030: Deployed-SHA claims in handoff/OCC/evidence docs must carry an
       # adjacent `docker exec <container> cat /app/build-provenance.json` probe.
@@ -386,6 +409,20 @@ jobs:
       - name: operation_match operation-field gate (OMN-13530)
         run: uv run python -m omnibase_core.validators.operation_match_requires_operation src/omnibase_infra
 
+      # OMN-19613: the fourteen omnibase_infra validator modules below run in ONE
+      # interpreter. Each used to be its own `uv run python -m` step, and each of
+      # those cost 12-15 s on the runners (run 35616533588) even for a one-file
+      # input, because the cost was start-up and import, paid fourteen times on
+      # the job every test shard waits for. scripts/ci/run_validators_in_process.py
+      # calls each module's main(argv) with exactly the arguments its step passed,
+      # runs ALL of them even after a failure, exits 1 if any failed, and reports
+      # each failure as its own error annotation titled with the old step name,
+      # plus a per-validator exit/seconds table in the job summary.
+      # tests/ci/test_lint_validator_runner.py pins that no validator step exists
+      # outside this list. Add a new omnibase_infra validator as one more line in
+      # the heredoc, with its rationale as one more section above the step.
+      #
+      # --- handler_routing flat-schema gate (OMN-14141) ---
       # OMN-14141: every handler_routing.handlers[] entry must carry a nested
       # 'handler: {name, module}' mapping. The flat 'handler_class'/
       # 'handler_module' schema silently parses to ZERO dispatchers and then
@@ -394,9 +431,8 @@ jobs:
       # gate paired with the runtime parse guard in
       # auto_wiring/discovery._parse_handler_routing. SYNC with pre-commit hook
       # 'handler-routing-schema-gate'.
-      - name: handler_routing flat-schema gate (OMN-14141)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_routing_schema src/omnibase_infra
-
+      #
+      # --- tenant_scoped_ingress opt-in gate (OMN-14360) ---
       # OMN-14360 (OMN-14208 Path A): fail-closed gate on the
       # event_bus.tenant_scoped_ingress opt-in. A flag-true contract must bind
       # at least one tenant-<slug>.-prefixed subscribe_topic, and every other
@@ -411,12 +447,10 @@ jobs:
       # (not contract-validation.yml, which validates ticket contracts via a
       # reusable action with no uv setup) so it runs in this already-required
       # lint job against the pinned toolchain.
-      - name: tenant_scoped_ingress opt-in gate (OMN-14360)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.tenant_scoped_ingress_schema src/omnibase_infra
-
-      - name: Check handler Any signature gate (OMN-10820)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra
-
+      #
+      # --- Check handler Any signature gate (OMN-10820) ---
+      #
+      # --- Check handler dispatch-entrypoint gate (OMN-14135) ---
       # OMN-14135: a contract-declared handler exposing NEITHER handle() nor
       # handle_async() is bound by auto-wiring to _missing_handle, which raises on
       # EVERY dispatch — while the contract validates, the node boots, and CI stays
@@ -427,9 +461,8 @@ jobs:
       # PR that adds a bad handler. Ratchet is frozen in
       # config/validation/handler_dispatch_entrypoint_baseline.yaml and is shrink-only.
       # SYNC with pre-commit hook 'handler-dispatch-entrypoint'.
-      - name: Check handler dispatch-entrypoint gate (OMN-14135)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_dispatch_entrypoint src/omnibase_infra
-
+      #
+      # --- Check contract topic category gate (OMN-18013) ---
       # OMN-18013 (operator ruling item 1), superseding the OMN-14605 gate. Routing is
       # now PER-TOPIC: derive_route_message_category stamps each ModelDispatchRoute
       # with the category derived from THAT ROUTE'S OWN topic name, so the
@@ -441,9 +474,8 @@ jobs:
       # with EnumMessageCategory.from_topic at dispatch on 32 live topics).
       # The OMN-14605 baseline is burned to zero and DELETED.
       # SYNC with pre-commit hook 'contract-topic-category'.
-      - name: Check contract topic category gate (OMN-18013)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.contract_topic_category --scope omnibase_infra
-
+      #
+      # --- Check handler event_type source gate (OMN-18013) ---
       # OMN-18013 (operator ruling item 2). The runtime stamps the DERIVED ALIAS for a
       # topic as event_type (derive_event_type_alias_for_topic, the single source on
       # both sides of the wire, OMN-17296) — never the topic string. Before OMN-18013
@@ -452,27 +484,24 @@ jobs:
       # message onto any dispatcher and was the only path by which a hand-typed alias
       # was ever reachable. That override is removed; this gate removes the shapes that
       # depended on it. SYNC with pre-commit hook 'handler-event-type-source'.
-      - name: Check handler event_type source gate (OMN-18013)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.handler_event_type_source --scope omnibase_infra
-
+      #
+      # --- Check golden-chain contract input gate (OMN-18013) ---
       # OMN-18013 (operator ruling item 4). 108 test sites across the corpus passed a
       # full ONEX TOPIC as an envelope event_type — a spelling the bus never carries.
       # They were green only because derive_entry_message_types registers BOTH the
       # topic and the alias as dispatcher index keys, so the wrong one still resolved
       # inside the test while production used the other. SYNC with pre-commit hook
       # 'no-literal-event-type-in-tests'.
-      - name: Check golden-chain contract input gate (OMN-18013)
-        run: uv run python -m omnibase_infra.validators.no_literal_event_type_in_tests tests
-
+      #
+      # --- Check no baseline refreeze (OMN-18013) ---
       # OMN-18013 (operator ruling item 5). The subscriber-dispatcher-resolution and
       # mixed-category baselines were burned to zero and DELETED. A shrink-only ratchet
       # is better than an amnesty list but still takes a row from whoever cannot make
       # the gate pass — every OMN-16939 live victim was a baselined row. A file that
       # does not exist cannot take one. SYNC with pre-commit hook
       # 'no-baseline-refreeze'.
-      - name: Check no baseline refreeze (OMN-18013)
-        run: uv run python -m omnibase_infra.validators.no_baseline_refreeze .
-
+      #
+      # --- Check result-applier construction gate (OMN-15468) ---
       # OMN-15468: an applier built outside its factory silently loses BOTH
       # re-route mechanisms — the published_events map (class-based routing to a
       # declared `…Failed` topic) and the contract's declared failure terminal
@@ -481,9 +510,8 @@ jobs:
       # delegate-skill-completed.v1 carried status="failed" with a typed
       # terminal_failure_cause. SYNC with pre-commit hook
       # 'contract-result-applier-construction'.
-      - name: Check result-applier construction gate (OMN-15468)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.contract_result_applier_construction src/omnibase_infra
-
+      #
+      # --- Check subscriber dispatcher resolution gate (OMN-16939) ---
       # OMN-16939: the dispatcher-side sibling of the subscribe-wiring ratchet. A
       # declared subscribe_topic that resolves to NO registered dispatcher for its own
       # (category, message type) is consumed, DLQ'd and COMMITTED on every message —
@@ -496,9 +524,8 @@ jobs:
       # omnimarket victims went unseen). OMN-18013 burned this repo's 22-row baseline
       # to ZERO and DELETED the file; the validator has no --baseline flag left.
       # SYNC with pre-commit hook 'subscriber-dispatcher-resolution'.
-      - name: Check subscriber dispatcher resolution gate (OMN-16939)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.subscriber_dispatcher_resolution src/omnibase_infra
-
+      #
+      # --- Check operation_match fan-out gate (OMN-16088) ---
       # OMN-16088 (split from OMN-15978 AC4): an operation_match handler_routing entry
       # (carries `operation:`) with no `topic:`/`event_type:` scoping falls through to
       # _topics_for_handler_entry's unscoped branch and is assigned EVERY subscribe
@@ -510,9 +537,8 @@ jobs:
       # rows — and DELETED config/validation/operation_match_fanout_baseline.yaml;
       # no --baseline flag remains and `no-baseline-refreeze` refuses its return.
       # SYNC with pre-commit hook 'operation-match-fanout'.
-      - name: Check operation_match fan-out gate (OMN-16088)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.operation_match_fanout src/omnibase_infra
-
+      #
+      # --- Check envelope tenant dimension gate (OMN-16831) ---
       # OMN-16831 ruled item 2 (operator ruling 2026-08-28, option D). A producer
       # records which tenant its event belongs to AT WRITE TIME; the projection
       # tenant authority only verifies that claim and must never source one.
@@ -524,14 +550,28 @@ jobs:
       # each recorded a tenant somewhere and left the dimension off, and every one
       # ended at a tenant-classified projection write refused fail-closed.
       # SYNC with pre-commit hook 'envelope-tenant-dimension'.
-      - name: Check envelope tenant dimension gate (OMN-16831)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.envelope_tenant_dimension src/omnibase_infra
-
-      - name: Check type-ignore budget gate (OMN-10822)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.type_ignore_budget --max-violations 74 src/omnibase_infra
-
-      - name: LLM topology contract drift validator (OMN-11926)
-        run: PYTHONPATH=src uv run python -m omnibase_infra.validators.llm_topology_validator contracts/llm_endpoints.yaml
+      #
+      # --- Check type-ignore budget gate (OMN-10822) ---
+      #
+      # --- LLM topology contract drift validator (OMN-11926) ---
+      - name: omnibase_infra validators, one process (OMN-19613)
+        run: |
+          PYTHONPATH=src uv run python scripts/ci/run_validators_in_process.py <<'VALIDATORS'
+          handler_routing flat-schema gate (OMN-14141) | omnibase_infra.validators.handler_routing_schema src/omnibase_infra
+          tenant_scoped_ingress opt-in gate (OMN-14360) | omnibase_infra.validators.tenant_scoped_ingress_schema src/omnibase_infra
+          Check handler Any signature gate (OMN-10820) | omnibase_infra.validators.handler_any_signature --max-violations 0 src/omnibase_infra
+          Check handler dispatch-entrypoint gate (OMN-14135) | omnibase_infra.validators.handler_dispatch_entrypoint src/omnibase_infra
+          Check contract topic category gate (OMN-18013) | omnibase_infra.validators.contract_topic_category --scope omnibase_infra
+          Check handler event_type source gate (OMN-18013) | omnibase_infra.validators.handler_event_type_source --scope omnibase_infra
+          Check golden-chain contract input gate (OMN-18013) | omnibase_infra.validators.no_literal_event_type_in_tests tests
+          Check no baseline refreeze (OMN-18013) | omnibase_infra.validators.no_baseline_refreeze .
+          Check result-applier construction gate (OMN-15468) | omnibase_infra.validators.contract_result_applier_construction src/omnibase_infra
+          Check subscriber dispatcher resolution gate (OMN-16939) | omnibase_infra.validators.subscriber_dispatcher_resolution src/omnibase_infra
+          Check operation_match fan-out gate (OMN-16088) | omnibase_infra.validators.operation_match_fanout src/omnibase_infra
+          Check envelope tenant dimension gate (OMN-16831) | omnibase_infra.validators.envelope_tenant_dimension src/omnibase_infra
+          Check type-ignore budget gate (OMN-10822) | omnibase_infra.validators.type_ignore_budget --max-violations 74 src/omnibase_infra
+          LLM topology contract drift validator (OMN-11926) | omnibase_infra.validators.llm_topology_validator contracts/llm_endpoints.yaml
+          VALIDATORS
 
       # OMN-13026: Transport-mock lint. Bare AsyncMock/MagicMock without
       # spec=/spec_set= on EventBus/transport/kafka surfaces. Ratchet: existing
@@ -872,6 +912,18 @@ jobs:
           echo "================================================================"
           uv run python scripts/batch_validate_node_contracts.py --verbose
 
+      # OMN-19565: the lab proof profile registry, config/lab_proof_profiles.yaml.
+      # Every registry repository has exactly one row, every step names a node
+      # and an operation that node's contract routes, and no row claims
+      # `enforce: true` before its bar is recorded. The self-test proves the
+      # one-row-per-repository rule is not vacuous: each one-row-removed copy
+      # must be refused. SYNC with the .pre-commit-config.yaml hook
+      # `lab-proof-profiles`.
+      - name: Lab proof profile registry (OMN-19565)
+        run: |
+          uv run python scripts/ci/validate_lab_proof_profiles.py
+          uv run python scripts/ci/validate_lab_proof_profiles.py --self-test
+
       # OMN-17423 AC4. The runtime CredentialRedactionFilter installed by
       # service_kernel.configure_logging() is defense in depth; this gate is
       # the enforcement layer, refusing the source pattern before a handler
@@ -894,6 +946,13 @@ jobs:
             --mode=self-test \
             --fixture scripts/ci/tests/fixtures/credential_in_log_fixture.py \
             --expected 9
+
+      # OMN-19612: validate-spdx-headers runs staged-file-scoped in
+      # .pre-commit-config.yaml (pass_filenames: true); this is its
+      # whole-tree CI counterpart so the header requirement still holds
+      # over the entire tree, not only a developer's staged diff.
+      - name: SPDX header check (OMN-19612)
+        run: uv run --frozen onex spdx validate src tests scripts
 
   infra-node-handler-ownership:
     needs: occ-preflight
@@ -1061,6 +1120,18 @@ jobs:
           echo "Topic Enum Drift Check (OMN-3187)"
           echo "================================================================"
           uv run python scripts/generate_topic_enums.py --check
+
+  # OMN-19677: the baseline can only shrink relative to the merge base;
+  # registered as a strict CI Summary gate.
+  topic-naming-baseline-oneway:
+    name: Topic Naming Baseline One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
+    uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
+    with:
+      baseline-path: scripts/validation/topic_naming_baseline.txt
+      parser: line-set
 
   # Topic naming lint -- CI gate for ONEX topic naming convention (OMN-3188)
   # Validates onex.{kind}.{producer}.{event}.v{n} format in all contract.yaml files
@@ -1462,6 +1533,97 @@ jobs:
           # below any plausible legitimate lockfile size, not a live count
           # that needs updating on every dependency bump.
           uv run python scripts/ci/check_lockfile_registry_allowlist.py uv.lock --min-packages 20
+
+  # Lab probe windows (OMN-19412, lab release-sync plan T0.3, seam L0.3).
+  # config/lab_probe_windows.yaml is the list of scheduled lab probes the
+  # reconcile dispatcher (OMN-19420) and runtime-train (OMN-19424) read to keep
+  # a lane mutation out of the gap before a probe. This job re-derives every
+  # cron, lane and maximum duration from the workflow files and refuses any
+  # disagreement, and refuses a scheduled probe with no entry. omnibase_infra is
+  # read at THIS checkout (so a PR adding a probe cron is judged on its own
+  # head); omninode_infra and omnimarket at their default branch, `dev`.
+  # Registered in scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS, which is what
+  # makes it block through the required CI Summary context. No `if:` and no
+  # continue-on-error: a token mint or checkout that fails fails the job, since
+  # a check that could not read a repository has proven nothing about it.
+  lab-probe-windows:
+    needs: occ-preflight
+    name: Lab Probe Windows (OMN-19412)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    # Same lightweight-gate baseline as lockfile-registry-allowlist above; the
+    # check itself parses about 290 small YAML files.
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      # omninode_infra is private; the default token is scoped to this repo.
+      - name: Mint a read-only omninode_infra token
+        id: infra-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: omninode_infra
+          permission-contents: read
+
+      - name: Checkout omninode_infra workflows at dev
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omninode_infra
+          ref: dev
+          path: .probe-roots/omninode_infra
+          token: ${{ steps.infra-token.outputs.token }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows
+          sparse-checkout-cone-mode: false
+
+      - name: Checkout omnimarket workflows at dev
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: .probe-roots/omnimarket
+          persist-credentials: false
+          sparse-checkout: |
+            .github/workflows
+          sparse-checkout-cone-mode: false
+
+      # A probe job placed by `fromJSON(vars.NAME)` (omninode_infra#1725,
+      # omnibase_infra#4233) is resolved from the COMMITTED value of the
+      # variable, config/runner_routing_policy.yaml probe_placement_variables,
+      # so this check reads no live state and needs no token. It used to read
+      # the live variables with CROSS_REPO_PAT, the operator's personal token,
+      # which is being retired (RULING 2026-09-27T22:46:17Z item 3). Live vs
+      # committed agreement is probe-placement-drift.yml's job, in each repo,
+      # over that repo's own vars context.
+      - name: Every probe cron, lane and duration agrees with its workflow, and every probe is listed
+        run: |
+          set -euo pipefail
+          echo "omninode_infra@dev = $(git -C .probe-roots/omninode_infra rev-parse HEAD)"
+          echo "omnimarket@dev = $(git -C .probe-roots/omnimarket rev-parse HEAD)"
+          uv run python scripts/ci/check_lab_probe_windows.py \
+            --root omnibase_infra=. \
+            --root omninode_infra=.probe-roots/omninode_infra \
+            --root omnimarket=.probe-roots/omnimarket
 
   # Dep-provenance content-lineage gate (OMN-15604) -- a [tool.uv.sources]
   # git-pinned rev must build the SAME src/ tree as the released tag its
@@ -2104,6 +2266,12 @@ jobs:
     timeout-minutes: 30
     name: Detect Changes
     needs: [occ-preflight, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate]
+    # OMN-19927: on a push or a dispatch this job must run even when the
+    # docs-only tier skipped its lint-class needs, because the provenance
+    # step below decides whether that push may skip tests at all. On every
+    # other event the condition is the implicit success() it replaces: all
+    # needs succeeded, none skipped.
+    if: ${{ !cancelled() && !failure() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || !contains(needs.*.result, 'skipped')) }}
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -2112,12 +2280,17 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
+    # OMN-19927: the provenance step reads this repository's Actions runs.
+    permissions:
+      actions: read
+      contents: read
     outputs:
       is_full_suite: ${{ steps.detect.outputs.is_full_suite }}
       full_suite_reason: ${{ steps.detect.outputs.full_suite_reason }}
       split_count: ${{ steps.detect.outputs.split_count }}
       matrix: ${{ steps.detect.outputs.matrix }}
       selected_paths: ${{ steps.detect.outputs.selected_paths }}
+      merge_provenance: ${{ steps.provenance.outputs.verdict }}
 
     steps:
       - name: Checkout code
@@ -2146,16 +2319,45 @@ jobs:
           echo "Changed files:"
           cat changed.txt
 
+      # OMN-19927 (plan task S2): was this commit validated by a successful
+      # merge group? A queue landing fast-forwards `dev` to the merge-group
+      # commit, so the answer is a lookup of that sha's merge-group `CI`
+      # run and its `CI Summary` job. omnibase_infra#4111 reached `dev` as
+      # e263eee0 by a direct REST merge after six failed merge groups; this
+      # push run diffed HEAD~1, ran two shards of smart selection, and went
+      # green while the three tests the queue had failed never ran.
+      #
+      # The step holds no provenance logic: it runs
+      # node_merge_provenance_observe_effect then node_merge_provenance_compute
+      # through their CI boundary and writes the verdict. UNVALIDATED and
+      # UNDECIDABLE force the full suite in the next step. Pull requests and
+      # merge groups never run it: a PR is not a `dev` commit, and a merge
+      # group is already the full suite.
+      - name: Merge provenance (OMN-19927)
+        id: provenance
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv run python -m scripts.ci.merge_provenance --repository "${{ github.repository }}" --sha "${{ github.sha }}" --github-output "$GITHUB_OUTPUT" --result-json provenance.json
+
       - name: Resolve test selection
         id: detect
         env:
           FLAG: ${{ vars.ENABLE_SMART_TESTS == 'true' && 'on' || 'off' }}
+          # FAIL CLOSED (OMN-19927): on a push or a dispatch, anything other
+          # than an explicit `false` from the provenance step -- including a
+          # step that crashed and wrote nothing -- forces the full suite.
+          FORCE_FULL: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.provenance.outputs.force_full_suite != 'false' && 'true' || 'false' }}
         run: |
+          force_args=()
+          if [ "$FORCE_FULL" = "true" ]; then force_args=(--force-full-suite unvalidated_push); fi
           uv run python -m scripts.ci.detect_test_paths \
             --changed-files-from changed.txt \
             --ref-name "${{ github.ref_name }}" \
             --event-name "${{ github.event_name }}" \
             --feature-flag "$FLAG" \
+            "${force_args[@]}" \
             > selection.json
           cat selection.json
           is_full=$(jq -r '.is_full_suite' selection.json)
@@ -2173,7 +2375,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: test-selection
-          path: selection.json
+          path: |
+            selection.json
+            provenance.json
+          if-no-files-found: warn
           retention-days: 7
 
   # Parallel test execution — matrix shape driven by detect-changes output (OMN-10715).
@@ -2208,7 +2413,12 @@ jobs:
     # tests-gate (below) distinguishes this admission-skip from the
     # pre-existing docs-only skip and fails closed rather than passing it
     # through as a legitimate exemption.
-    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true') && (github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready'))
+    # OMN-19927: the docs-only skip never applies to a push the merge queue
+    # did not validate. The first arm is the pre-existing condition with its
+    # implicit success() made explicit; the second admits a forced
+    # `unvalidated_push` selection even when the docs-only tier skipped the
+    # lint-class needs.
+    if: needs.occ-preflight.result == 'success' && ((success() && needs.zone-filter.outputs.docs_only != 'true') || (!cancelled() && !failure() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.full_suite_reason == 'unvalidated_push')) && (github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready'))
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -2309,7 +2519,7 @@ jobs:
           fi
           uv run pytest $paths \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer" \
+            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer and not ephemeral_pg" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
@@ -2340,7 +2550,7 @@ jobs:
         run: |
           uv run pytest \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer" \
+            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer and not ephemeral_pg" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
@@ -2529,6 +2739,18 @@ jobs:
           path: .onex_state/compliance/report.yaml
           retention-days: 30
 
+  # OMN-19677: the baseline can only shrink relative to the merge base;
+  # registered as a strict CI Summary gate.
+  skip-count-baseline-oneway:
+    name: Skip Count Baseline One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
+    uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
+    with:
+      baseline-path: config/skip_count_baseline.yaml
+      parser: yaml-counted-list-map:suites
+
   # ============================================================================
   # OMN-18776 — skip-count baseline ratchet (epic OMN-18775)
   #
@@ -2690,10 +2912,14 @@ jobs:
           TESTS_RESULT: ${{ needs.test-parallel.result }}
           SPLIT_COUNT: ${{ needs.detect-changes.outputs.split_count }}
           DOCS_ONLY: ${{ needs.zone-filter.outputs.docs_only }}
+          FULL_SUITE_REASON: ${{ needs.detect-changes.outputs.full_suite_reason }}
           ADMITTED: ${{ github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready') }}
         run: |
           if [ "$TESTS_RESULT" = "skipped" ]; then
-            if [ "$DOCS_ONLY" = "true" ]; then
+            if [ "$FULL_SUITE_REASON" = "unvalidated_push" ]; then
+              echo "::error::Test matrix skipped although this push was not validated by the merge queue (OMN-19927) -- the full suite was selected and must run; a skip is not a pass"
+              exit 1
+            elif [ "$DOCS_ONLY" = "true" ]; then
               echo "Test matrix skipped - docs-only / declarative-evidence diff (legitimate exemption)"
             elif [ "$ADMITTED" != "true" ]; then
               echo "::error::Test matrix skipped - PR is draft and missing the 'ci:ready' fallback label (OMN-16216 draft-state CI admission gate). Mark the PR ready for review (or apply 'ci:ready' during the transition window) to run the full test matrix."
@@ -3173,6 +3399,85 @@ jobs:
     with:
       mode: compose
 
+  # ============================================================================
+  # Laptop profile boot (OMN-19498)
+  # ----------------------------------------------------------------------------
+  # Boots the catalog bundle `local` (OMN-19496) exactly as its documentation
+  # tells a new engineer to -- `make local-env`, `make up-local` -- through
+  # reusable-runtime-boot.yml mode `catalog-local`, and fails unless the
+  # migration gate is healthy, both runtime kernels report /health "healthy"
+  # with is_running true, and the delegate-skill command topic has a consumer.
+  #
+  # Unlike runtime-boot-smoke above it EXECUTES on pull requests: on every
+  # pull request that touches the surfaces the laptop boot is made of (the
+  # catalog, the runtime image, the migrations, the boot-critical kernel and
+  # wiring code, this workflow), on every push to `dev` that does, and on every
+  # workflow_dispatch and merge_group. Unrelated pull requests skip it, which
+  # the CI Summary sweep accepts; a failure when it does run fails CI Summary.
+  # Widening the path set is a one-line change once it has a green record.
+  # ============================================================================
+  laptop-profile-paths:
+    name: Laptop profile paths changed (OMN-19498)
+    # OMNI_RUNNER_SELECTOR_V1 - trusted events default to self-hosted omnibase-ci; pull_request defaults to ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.paths.outputs.changed }}
+    steps:
+      - name: Checkout omnibase_infra
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Diff against the base
+        id: paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request)
+              git fetch --no-tags origin "$PR_BASE_REF"
+              range="origin/${PR_BASE_REF}...HEAD"
+              ;;
+            push)
+              if [ -z "$PUSH_BEFORE" ] || [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+                echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0
+              fi
+              range="${PUSH_BEFORE}..HEAD"
+              ;;
+            *)
+              echo "changed=true" >> "$GITHUB_OUTPUT"; exit 0
+              ;;
+          esac
+          changed_files="$(git diff --name-only "$range")"
+          pattern='^(docker/catalog/|docker/Dockerfile\.runtime$|docker/entrypoint-runtime\.sh$|docker/local\.env\.example$|docker/lane-overlays/local\.|docker/runtime-policy\.env$|docker/migrations/|scripts/run-forward-migrations\.sh$|scripts/check_migrations_complete\.sh$|src/omnibase_infra/docker/catalog/|src/omnibase_infra/runtime/service_kernel\.py$|src/omnibase_infra/runtime/auto_wiring/|Makefile$|pyproject\.toml$|uv\.lock$|\.github/workflows/reusable-runtime-boot\.yml$)'
+          matched="$(printf '%s\n' "$changed_files" | grep -E "$pattern" || true)"
+          if [ -n "$matched" ]; then
+            echo "Laptop profile surfaces changed:"
+            printf '%s\n' "$matched"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No laptop profile surface changed in ${range}."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  runtime-boot-laptop-profile:
+    name: Runtime Boot Laptop Profile (catalog local)
+    needs: [laptop-profile-paths]
+    if: needs.laptop-profile-paths.outputs.changed == 'true'
+    uses: ./.github/workflows/reusable-runtime-boot.yml
+    with:
+      mode: catalog-local
+
   # ===========================================================================
   # OMN-15108 fan-out of OMN-14877 (omnibase_core#1478 pattern) / OMN-14430
   # ---------------------------------------------------------------------------
@@ -3221,6 +3526,18 @@ jobs:
       - name: Every reconciler resolves its tools explicitly and writes as the owner
         run: python3 scripts/check_reconciler_privilege.py
 
+  # OMN-19677: the baseline can only shrink relative to the merge base;
+  # registered as a strict CI Summary gate.
+  validator-requirements-baseline-oneway:
+    name: Validator Requirements Baseline One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
+    uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
+    with:
+      baseline-path: architecture-handshakes/validator-requirements-baseline.yaml
+      parser: yaml-list:gaps
+
   validate-validator-requirements:
     name: Enforce validator-requirements.yaml (OMN-13291)
     # OMNI_RUNNER_SELECTOR_V1 — runners are resolved from centralized selector variables.
@@ -3267,6 +3584,18 @@ jobs:
             --repo-root .. \
             --spec ../architecture-handshakes/validator-requirements.yaml \
             --baseline ../architecture-handshakes/validator-requirements-baseline.yaml
+
+  # OMN-19677: the baseline can only shrink relative to the merge base;
+  # registered as a strict CI Summary gate.
+  runtime-profiles-allowlist-oneway:
+    name: Runtime Profiles Allowlist One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
+    uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
+    with:
+      baseline-path: config/validation/runtime_profiles_allowlist.yaml
+      parser: yaml-list:allowlist
 
   # Migrated from validator-runtime-profiles.yml (OMN-15108, OMN-14877
   # pattern). Enforces runtime_profiles on command-consuming contracts
@@ -3323,6 +3652,18 @@ jobs:
               print(f"[{issue.severity.value}] {issue.file_path}:{issue.line_number}: {issue.message}")
           raise SystemExit(0 if result.is_valid else 1)
           PY
+
+  # OMN-19677: the baseline can only shrink relative to the merge base;
+  # registered as a strict CI Summary gate.
+  noncanonical-class-allowlist-oneway:
+    name: Noncanonical Class Allowlist One-way (OMN-19677)
+    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
+    permissions:
+      contents: read
+    uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
+    with:
+      baseline-path: .onex_ratchets/noncanonical_class_allowlist.yaml
+      parser: yaml-list:allowlist
 
   no-noncanonical-lifecycle-classes:
     name: no-noncanonical-lifecycle-classes
@@ -3738,7 +4079,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: b0ce124838108bdce47f0e02245906ec5be4fde2
+          ref: fa40689b11f296214d4f26920f1a769b951970c9
           path: .proof-dependencies/omninode-infra
           token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false
@@ -3965,9 +4306,8 @@ jobs:
     permissions:
       actions: read
       contents: read
-      # OMN-14909 (CI-01): read the head SHA's cross-workflow check-runs for the
-      # REPORT-ONLY cascade projection step below. Read scope only — no verdict
-      # authority; the poll step above owns pass/fail.
+      # OMN-15496: the poll step reads commits/<head>/check-runs to enforce the
+      # cross-workflow contexts included in the fail-closed verdict.
       checks: read
     # Hard backstop above the internal poll deadline (DEADLINE_MINUTES below).
     # Kept under any run-cancellation window so the required context ALWAYS posts
@@ -4079,6 +4419,7 @@ jobs:
             python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}" \
               --check-runs-file check_runs.json --event-name "${EVENT_NAME}" \
               --workflow-runs-file workflow_runs.json \
+              --current-run-id "${RUN_ID}" \
               --pr-author "${PR_AUTHOR:-}" \
               --pr-title "${PR_TITLE:-}" \
               --pr-head-ref "${PR_HEAD_REF:-}" \
@@ -4093,20 +4434,38 @@ jobs:
             sleep "${POLL_INTERVAL_SECONDS}"
           done
 
+  ci-cascade-reason-graph:
+    name: CI cascade reason-graph (report-only)
+    needs: [ci-summary]
+    if: always()
+    # advisory-ok: OMN-14909 report-only telemetry after the CI Summary verdict; defines no pass/fail policy
+    continue-on-error: true
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+    steps:
+      - name: Checkout (gate script)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
       # OMN-14909 (CI-01, plan §3.C5) — REPORT-ONLY cascade reason-graph.
-      # Collapses the head SHA's full cross-workflow check-run list into ONE
-      # typed root + BLOCKED_UPSTREAM dependents so a single upstream defect
-      # (e.g. a missing Evidence-Source making occ-preflight red) is presented
-      # as ONE rerunnable root instead of the ~37 independently-rerunnable red
-      # checks that provoke the rerun reflex. This step:
-      #   * runs `if: always()` so it renders even when the poll above FAILED,
-      #   * is `continue-on-error: true` and ends every command with `|| true`,
-      #     so it can NEVER change the CI Summary verdict — the poll step above
-      #     is the sole pass/fail authority (gate not weakened), and
-      #   * writes only to $GITHUB_STEP_SUMMARY.
+      # It now runs as its own job after the CI Summary verdict, so it cannot
+      # touch the required context. It collapses the head SHA's full cross-
+      # workflow check-run list into ONE typed root + BLOCKED_UPSTREAM dependents
+      # so a single upstream defect (e.g. a missing Evidence-Source making
+      # occ-preflight red) is presented as ONE rerunnable root instead of the
+      # ~37 independently-rerunnable red checks that provoke the rerun reflex.
+      # Every command remains non-fatal, and the step writes only to
+      # $GITHUB_STEP_SUMMARY.
       - name: CI cascade reason-graph (report-only, counts roots not checks)
-        if: always()
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -4451,6 +4810,69 @@ jobs:
             -v --tb=short -p no:randomly
 
   # ===========================================================================
+  # Bus ACL Boundary (OMN-19928)
+  # ---------------------------------------------------------------------------
+  # Regression (a) of 2026-09-28: omnibase_infra#4227 added a topic to the
+  # gateway forwarder's cloud inbound set that the dev cloud broker refused,
+  # and the forwarder exited in a restart loop on the lab. No CI broker could
+  # see it: every one is either plaintext or SASL with its one user a
+  # superuser, and a superuser skips every topic grant.
+  #
+  # This job starts two throwaway brokers of its own (a lane broker and a
+  # cloud broker that enforces grants), gives the forwarder a NON-superuser
+  # principal on the cloud broker with grants for every contract topic but
+  # one inbound topic, starts the forwarder as its own process, and asserts
+  # it is alive after 30 s, reports the refused topic by name, and still
+  # delivers an admitted inbound record. It never adopts a declared broker,
+  # so it never touches a lab lane.
+  #
+  # Unconditional (no `if:`, no `needs:`, no path filter) and registered in
+  # STRICT_GATE_JOBS in scripts/ci/ci_summary_gate.py: an absent, skipped,
+  # cancelled or timed-out run fails CI Summary, because a boundary test that
+  # quietly does not run is the failure this job exists to end. The sharded
+  # matrix excludes the `kafka` marker, so the test runs nowhere else.
+  #
+  # RESIDUAL: the cloud leg speaks SCRAM here, not MSK IAM.
+  bus-acl-boundary:
+    name: Bus ACL Boundary (OMN-19928)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    # Same placement chain as customer-path-boundary: this job executes docker,
+    # so OMNI_DOCKER_CI_RUNS_ON_JSON governs it before the general trusted seam.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Pre-pull the harness broker image
+        # Identical to REDPANDA_IMAGE in
+        # tests/integration/customer_path/redpanda_sasl_harness.py.
+        run: docker pull redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
+
+      - name: Run bus ACL boundary tests
+        env:
+          # A missing docker daemon must be RED here, never a green skip.
+          OMN18012_REQUIRE_HARNESS: "1"
+        run: |
+          uv run pytest tests/integration/bus_acl_boundary/ \
+            -v --tb=short -p no:randomly
+
+  # ===========================================================================
   # Subscribe Wiring Health (OMN-16795)
   # ---------------------------------------------------------------------------
   # scripts/check_subscribe_wiring_health.py has existed since OMN-7385 and was
@@ -4685,6 +5107,21 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # OMN-17886 AC4: an EMPTY server for the live-ACL gate. The corpus has to
+      # build into the real database names (sixteen migrations run
+      # `\connect omnidash_analytics`), and the service above already holds a
+      # migrated omnibase_infra, so the gate gets a server of its own.
+      acl_gate_postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test_password
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4868,6 +5305,67 @@ jobs:
           uv run pytest \
             tests/integration/migrations/test_omn15683_mixed_representation_conversion.py \
             -v --tb=short -p no:randomly
+
+      # OMN-17887: the migration that drops onex-lab's empty `tenant` schema,
+      # applied by the real forward runner as a NOSUPERUSER role_omnidash to a
+      # schema that is absent, empty (carrying a USAGE grant and a
+      # default-privileges entry), holding a relation, foreign-owned, and
+      # already dropped. It shares the OMN-17886 gate's empty server and runs
+      # first: it refuses a server that already has its two databases or four
+      # roles, and drops all of them afterwards, so the gate still starts empty.
+      - name: Drop-empty-tenant-schema migration proof (OMN-17887)
+        if: steps.ensure_psql.outputs.available == 'true'
+        env:
+          OMN17887_GATE_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.acl_gate_postgres.ports['5432'] }}/postgres
+          # With a Postgres in hand a SKIP is a vacuous green.
+          OMN17887_REQUIRE_PG: "1"
+        run: |
+          uv run pytest \
+            tests/integration/migrations/test_drop_empty_tenant_schema_omn17887.py \
+            -v --tb=short -p no:randomly
+
+      # OMN-17886 AC4: build omnidash_analytics from EMPTY with the real forward
+      # runner, then diff its omninode_internal ACLs against the topology. A
+      # migration that confers an undeclared grant, or omits a declared one,
+      # fails here. The findings the corpus still produces are listed one by one
+      # in config/omninode_internal_live_acl_allowlist.yaml, which is
+      # shrink-only: an entry that stops reproducing fails the gate too.
+      # The gateway_link_health_status revoke proof and the gateway_link_health
+      # grant proof both run first on the same server, as a NOSUPERUSER
+      # role_omnidash through the real forward runner: the gate itself builds
+      # as postgres, for which a REVOKE or a GRANT always takes. It refuses a
+      # server that already has its two databases or three roles and drops all
+      # of them afterwards, so the gate still starts empty.
+      - name: omninode_internal live-ACL gate (OMN-17886)
+        if: steps.ensure_psql.outputs.available == 'true'
+        env:
+          OMN17886_GATE_DB_URL: postgresql://postgres:test_password@${{ steps.postgres_host.outputs.host }}:${{ job.services.acl_gate_postgres.ports['5432'] }}/postgres
+          # With a Postgres in hand a SKIP is a vacuous green.
+          OMN17886_REQUIRE_PG: "1"
+        run: |
+          uv run pytest \
+            tests/integration/migrations/test_grant_gateway_link_health_omn17886.py \
+            tests/integration/migrations/test_revoke_gateway_link_health_status_omn17886.py \
+            tests/integration/migrations/test_omninode_internal_live_acl_gate_omn17886.py \
+            -v --tb=short -p no:randomly
+
+      # OMN-19550: the EphemeralPostgres live-apply proofs. Each test needs its
+      # own throwaway cluster (it creates and drops cluster-wide roles), which
+      # the sharded splits cannot provide, so the splits deselect the
+      # `ephemeral_pg` marker and this job EXECUTES them: the fixture starts a
+      # postgres:16-alpine container per test through this runner's docker and
+      # drives the migration through psql, as the forward runner does in
+      # production. ONEX_MIGRATION_PROOF_REQUIRE_PG=1 turns a missing backend
+      # (no psql, no docker) into a failure, never a skip, so deselected there
+      # is not skipped here. Named by path, like the steps above.
+      - name: EphemeralPostgres live-apply proofs (OMN-19550)
+        env:
+          ONEX_MIGRATION_PROOF_REQUIRE_PG: "1"
+        run: |
+          uv run pytest \
+            tests/integration/migrations/test_session_content_live_apply_omn19550.py \
+            -m ephemeral_pg \
+            -v -rs --tb=short -p no:randomly
 
       - name: Assert manifest tables exist
         env:

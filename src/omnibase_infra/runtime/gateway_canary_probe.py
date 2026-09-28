@@ -309,7 +309,19 @@ async def run_canary_check(
     real outbound traffic does (``prefix_topic``) -- the probe is not a
     parallel code path, it drives the same transform real traffic drives.
     """
+    # OMN-18691: the canary is a round trip over the TRUST BOUNDARY, so it
+    # exists only where that boundary does. A mirror-only forwarder has no
+    # cloud leg to probe; its liveness signal is the lane-mirror delivery
+    # counters, which `check_lane_mirror_leg` already reads from a file and
+    # which need no broker round trip. Refused rather than skipped: a canary
+    # that silently reports nothing is indistinguishable from one that passed.
     canary = config.forwarder.canary
+    if canary is None or config.local_bus is None or config.cloud_bus is None:
+        raise ValueError(
+            "the gateway canary probes the cloud round trip and requires a "
+            "declared canary plus both resolved trust-boundary legs; this "
+            "config declares a lane_mirror only"
+        )
     tenant_slug = config.forwarder.tenant_identity.tenant_slug
     local_result, cloud_result = await asyncio.gather(
         check_canary_leg(
@@ -398,6 +410,12 @@ async def probe(
     broker spam the cadence exists to prevent.
     """
     canary = config.forwarder.canary
+    if canary is None:
+        raise ValueError(
+            "the gateway canary probe requires a declared canary; a "
+            "mirror-only forwarder has no cloud round trip to cadence "
+            "(OMN-18691)"
+        )
     egress_result = check_egress_leg(egress_health_path)
     mirror_result = check_lane_mirror_leg(lane_mirror_health_path)
     file_legs = (egress_result, mirror_result)

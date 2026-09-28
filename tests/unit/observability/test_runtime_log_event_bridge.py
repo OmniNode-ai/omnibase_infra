@@ -24,6 +24,7 @@ from omnibase_infra.observability.runtime_log_event_bridge import (
     _log_level_to_severity,
     _templatize_message,
 )
+from omnibase_infra.runtime.observability import active_flow_key
 
 
 @pytest.mark.unit
@@ -182,6 +183,44 @@ class TestRuntimeLogEventBridge:
 
         assert bridge.events_emitted == 1
         producer.send.assert_called_once()
+
+    @patch.dict("os.environ", {"ENABLE_RUNTIME_LOG_BRIDGE": "true"})
+    async def test_runtime_error_dispatch_context_suppresses_only_recursive_logs(
+        self,
+    ) -> None:
+        """An ERROR from this topic's active consumer cannot republish itself."""
+        import asyncio
+
+        producer = AsyncMock()
+        producer.send = AsyncMock()
+        topic = "onex.evt.omnibase-infra.runtime-error.v1"
+        bridge = RuntimeLogEventBridge(producer, topic=topic)
+        logger_name = "omnibase_infra.runtime.auto_wiring.recursive-guard-test"
+        target_logger = logging.getLogger(logger_name)
+        previous_level = target_logger.level
+        previous_propagate = target_logger.propagate
+        target_logger.setLevel(logging.ERROR)
+        target_logger.propagate = False
+        bridge.attach_to_loggers([logger_name])
+        await bridge.start()
+        try:
+            with active_flow_key("test-runtime-error", topic):
+                target_logger.error("boundary failure must not re-enter runtime-error")
+
+            await asyncio.sleep(0)
+            producer.send.assert_not_awaited()
+            assert bridge.events_suppressed_in_flight == 1
+
+            target_logger.error("unrelated error still reaches the runtime-error topic")
+            await asyncio.sleep(0.05)
+
+            producer.send.assert_awaited_once()
+            assert bridge.events_emitted == 1
+        finally:
+            bridge.detach_from_loggers([logger_name])
+            target_logger.setLevel(previous_level)
+            target_logger.propagate = previous_propagate
+            await bridge.stop()
 
     def test_is_enabled_default_false(self) -> None:
         with patch.dict("os.environ", {}, clear=True):
