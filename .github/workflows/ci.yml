@@ -4803,6 +4803,69 @@ jobs:
             -v --tb=short -p no:randomly
 
   # ===========================================================================
+  # Bus ACL Boundary (OMN-19928)
+  # ---------------------------------------------------------------------------
+  # Regression (a) of 2026-09-28: omnibase_infra#4227 added a topic to the
+  # gateway forwarder's cloud inbound set that the dev cloud broker refused,
+  # and the forwarder exited in a restart loop on the lab. No CI broker could
+  # see it: every one is either plaintext or SASL with its one user a
+  # superuser, and a superuser skips every topic grant.
+  #
+  # This job starts two throwaway brokers of its own (a lane broker and a
+  # cloud broker that enforces grants), gives the forwarder a NON-superuser
+  # principal on the cloud broker with grants for every contract topic but
+  # one inbound topic, starts the forwarder as its own process, and asserts
+  # it is alive after 30 s, reports the refused topic by name, and still
+  # delivers an admitted inbound record. It never adopts a declared broker,
+  # so it never touches a lab lane.
+  #
+  # Unconditional (no `if:`, no `needs:`, no path filter) and registered in
+  # STRICT_GATE_JOBS in scripts/ci/ci_summary_gate.py: an absent, skipped,
+  # cancelled or timed-out run fails CI Summary, because a boundary test that
+  # quietly does not run is the failure this job exists to end. The sharded
+  # matrix excludes the `kafka` marker, so the test runs nowhere else.
+  #
+  # RESIDUAL: the cloud leg speaks SCRAM here, not MSK IAM.
+  bus-acl-boundary:
+    name: Bus ACL Boundary (OMN-19928)
+    # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
+    # Same placement chain as customer-path-boundary: this job executes docker,
+    # so OMNI_DOCKER_CI_RUNS_ON_JSON governs it before the general trusted seam.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_DOCKER_CI_RUNS_ON_JSON || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Pre-pull the harness broker image
+        # Identical to REDPANDA_IMAGE in
+        # tests/integration/customer_path/redpanda_sasl_harness.py.
+        run: docker pull redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
+
+      - name: Run bus ACL boundary tests
+        env:
+          # A missing docker daemon must be RED here, never a green skip.
+          OMN18012_REQUIRE_HARNESS: "1"
+        run: |
+          uv run pytest tests/integration/bus_acl_boundary/ \
+            -v --tb=short -p no:randomly
+
+  # ===========================================================================
   # Subscribe Wiring Health (OMN-16795)
   # ---------------------------------------------------------------------------
   # scripts/check_subscribe_wiring_health.py has existed since OMN-7385 and was
