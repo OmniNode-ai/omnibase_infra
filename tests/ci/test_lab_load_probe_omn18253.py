@@ -225,9 +225,13 @@ def test_the_lane_probe_is_not_blocked_by_this_job() -> None:
     a failing probe is recorded rather than dropped.
     """
     jobs = _workflow()["jobs"]
-    assert "needs" not in jobs["dev-lane-liveness"], (
-        "the lane liveness job must not depend on the lab-load probe"
-    )
+    # OMN-19894: the liveness job depends on the lane resolver only (it runs
+    # beside the lane the overlay names), never on the lab-load probe.
+    assert jobs["dev-lane-liveness"].get("needs") in (
+        None,
+        "resolve-lane",
+        ["resolve-lane"],
+    ), "the lane liveness job must not depend on the lab-load probe"
     saturation = jobs["saturation-record"]
     assert JOB in saturation["needs"]
     assert "always()" in str(saturation["if"]), (

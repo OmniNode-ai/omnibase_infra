@@ -6,7 +6,9 @@
 # Runs the full integration test suite nightly against docker-compose.e2e.yml.
 # Must NOT target the live .201 instance — all services are containerized.
 #
-# Constraint check: workflow asserts INTEGRATION_POSTGRES_HOST != 192.168.86.201.
+# Constraint check: no host variable may name a live lab host. The live lab
+# hosts are the hosts of the deployment overlay's lane list (vars.LAB_LANES_JSON,
+# OMN-19894), never an address written here.
 
 name: Nightly Integration Tests
 
@@ -31,8 +33,9 @@ env:
   CACHE_VERSION: "0.4.0"
   # Contract-declared success threshold — number of consecutive green runs for stability
   SUCCESS_THRESHOLD: "3"
-  # All host vars pinned to localhost — the .201 guard below rejects any value
-  # that resolves to the live instance.
+  # All host vars pinned to localhost — the live-lab-host guard below rejects
+  # any value naming a host of the overlay's lab lanes.
+  LAB_LANES_JSON: ${{ vars.LAB_LANES_JSON }}
   INTEGRATION_POSTGRES_HOST: "localhost"
   OMNI_INFRA_HOST: "localhost"
   POSTGRES_HOST: "localhost"
@@ -69,23 +72,30 @@ jobs:
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
     steps:
-      - name: Reject if ANY host variable targets .201
+      - name: Reject if ANY host variable targets a live lab host
         # Broadened guard (per CR review): check all host vars the runtime
-        # might pick up, not just INTEGRATION_POSTGRES_HOST. If any evaluates
-        # to 192.168.86.201 the e2e workflow fails closed.
+        # might pick up, not just INTEGRATION_POSTGRES_HOST. If any names a
+        # host of the overlay's lab lanes (vars.LAB_LANES_JSON, OMN-19894) the
+        # e2e workflow fails closed; an unset overlay fails closed too.
         run: |
+          LAB_HOSTS="$(python3 -c 'import json, os, sys, urllib.parse
+          raw = os.environ.get("LAB_LANES_JSON", "").strip()
+          if not raw:
+              sys.exit("vars.LAB_LANES_JSON is unset: the live lab hosts cannot be named, so this guard refuses")
+          print(" ".join(sorted({urllib.parse.urlparse(v).hostname for lane in json.loads(raw) for k, v in lane.items() if k.endswith("_url")})))')" || exit 1
+          is_lab_host() { local h; for h in ${LAB_HOSTS}; do [[ "$1" == "$h" ]] && return 0; done; return 1; }
           fail=0
           for HOST_VAR in INTEGRATION_POSTGRES_HOST OMNI_INFRA_HOST POSTGRES_HOST REDPANDA_ADVERTISE_HOST; do
             HOST="${!HOST_VAR:-}"
-            if [[ "$HOST" == "192.168.86.201" ]]; then
-              echo "::error::${HOST_VAR}=$HOST targets the live .201 instance. This workflow must use the containerized e2e stack only."
+            if is_lab_host "$HOST"; then
+              echo "::error::${HOST_VAR}=$HOST targets a live lab host. This workflow must use the containerized e2e stack only."
               fail=1
             else
               echo "${HOST_VAR}=${HOST:-<unset>} (ok)"
             fi
           done
           [[ $fail -eq 0 ]] || exit 1
-          echo "Host checks passed: no host variable points to live .201"
+          echo "Host checks passed: no host variable points to a live lab host (${LAB_HOSTS})"
 
   integration-tests:
     name: Integration Test Suite (e2e stack)
@@ -170,6 +180,20 @@ jobs:
       # mirroring .github/workflows/reusable-runtime-boot.yml. Host ports are
       # allocated free because the e2e defaults (19092/18082/...) are bound by
       # the live lane.
+      - name: Name the live lab hosts from the overlay
+        # OMN-19894: the hosts this run must never reach are the hosts of the
+        # deployment overlay's lab lanes (vars.LAB_LANES_JSON), never an
+        # address written in this file. An unset overlay stops the run here.
+        run: |
+          set -euo pipefail
+          LAB_HOSTS="$(python3 -c 'import json, os, sys, urllib.parse
+          raw = os.environ.get("LAB_LANES_JSON", "").strip()
+          if not raw:
+              sys.exit("vars.LAB_LANES_JSON is unset: the live lab hosts cannot be named, so this guard refuses")
+          print(" ".join(sorted({urllib.parse.urlparse(v).hostname for lane in json.loads(raw) for k, v in lane.items() if k.endswith("_url")})))')"
+          echo "live lab hosts (never an e2e target): ${LAB_HOSTS}"
+          echo "LAB_HOSTS=${LAB_HOSTS}" >> "${GITHUB_ENV}"
+
       - name: Derive isolated e2e namespace
         run: |
           set -euo pipefail
@@ -295,10 +319,15 @@ jobs:
           fi
 
           # Same live-host guard as "Reject if ANY host variable targets
-          # .201": the value computed here is dynamic and did not exist yet
-          # when that static check ran, so it needs its own assertion.
-          if [[ "$e2e_advertise_host" == "192.168.86.201" ]]; then
-            echo "::error::detected Docker host gateway resolves to the live .201 instance; refusing to advertise it"
+          # a live lab host": the value computed here is dynamic and did not
+          # exist yet when that static check ran, so it needs its own assertion.
+          # LAB_HOSTS was named from the overlay by the step "Name the live
+          # lab hosts from the overlay" (pure bash here, so a stubbed python3
+          # in a test cannot change the answer). Unset is refused.
+          : "${LAB_HOSTS:?LAB_HOSTS is unset: the live lab hosts were not named, so this guard refuses}"
+          is_lab_host() { local h; for h in ${LAB_HOSTS}; do [[ "$1" == "$h" ]] && return 0; done; return 1; }
+          if is_lab_host "$e2e_advertise_host"; then
+            echo "::error::detected Docker host gateway resolves to a live lab host; refusing to advertise it"
             exit 1
           fi
 
@@ -439,8 +468,13 @@ jobs:
             exit 1
           fi
 
-          if [[ "$resolved_host" == "192.168.86.201" || "$resolved_kafka_host" == "192.168.86.201" ]]; then
-            echo "::error::resolved e2e connectivity host is the live .201 instance; refusing"
+          # LAB_HOSTS was named from the overlay by the step "Name the live
+          # lab hosts from the overlay" (pure bash here, so a stubbed python3
+          # in a test cannot change the answer). Unset is refused.
+          : "${LAB_HOSTS:?LAB_HOSTS is unset: the live lab hosts were not named, so this guard refuses}"
+          is_lab_host() { local h; for h in ${LAB_HOSTS}; do [[ "$1" == "$h" ]] && return 0; done; return 1; }
+          if is_lab_host "$resolved_host" || is_lab_host "$resolved_kafka_host"; then
+            echo "::error::resolved e2e connectivity host is a live lab host; refusing"
             exit 1
           fi
 

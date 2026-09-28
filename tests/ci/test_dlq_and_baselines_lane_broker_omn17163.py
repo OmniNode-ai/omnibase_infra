@@ -99,13 +99,15 @@ _LANE_OVERLAY_REPO = "OmniNode-ai/omnimarket"
 #: Keeping them on a label whose remaining purpose is to SERIALISE lane
 #: mutations queued them behind release-train deploys for no reason.
 #:
-#: `host-201` is the half that carries the network fact now, and it is not
-#: optional: `omnibase-verify` alone would admit the arm64 verify runners on
-#: the other lab hosts, which are in a different network namespace and would
-#: report the lane's broker port unreachable -- a lane outage in appearance,
-#: a routing mistake in fact. The pin stays a literal list, so AC8's real
-#: claim, that no variable flip can move these jobs, is untouched.
-_LANE_DOMAIN_RUNNER = ["self-hosted", "omnibase-verify", "host-201"]
+#: OMN-19894 (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z) retired the
+#: `host-201` pin: the broker is a declared address, and a run on the .202
+#: verify runner read it (proof runs on the OMN-19894 pull request). AC8's
+#: claim, that no trusted-CI routing flip can move these jobs, still holds: the
+#: lab-pool variable is a different variable from the one AC8 names.
+#: OMN-19894: the overlay's lab pool, never a host label. The broker is a
+#: declared address every lab runner reaches, and this variable is not the
+#: trusted-CI routing variable, so no org routing flip can move it.
+_LANE_DOMAIN_RUNNER = "${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}"
 
 #: The exact address that took 545 runs red, plus the shape of any other
 #: `host:port` literal on the lane's broker port. Matching the PORT rather than
@@ -262,11 +264,7 @@ def test_positive_control_the_reference_workflow_satisfies_these_pins() -> None:
     which of the two containers serves the job changed.
     """
     canary_text = _executable(_text(_CANARY_WORKFLOW))
-    assert _sole_job(_CANARY_WORKFLOW)["runs-on"] == [
-        "self-hosted",
-        "omnibase-verify",
-        "host-201",
-    ]
+    assert _sole_job(_CANARY_WORKFLOW)["runs-on"] == _LANE_DOMAIN_RUNNER
     assert not _HOST_LOCAL_BROKER.search(canary_text)
     assert _ROUTING_VARIABLE not in canary_text
     assert _LANE_OVERLAY_PATH in canary_text
@@ -290,15 +288,10 @@ def test_runs_on_the_only_runner_in_the_lane_reachability_domain(
 ) -> None:
     runs_on = _sole_job(workflow_path)["runs-on"]
     assert runs_on == _LANE_DOMAIN_RUNNER, (
-        f"{workflow_path.name} must pin a runner inside the .201 lane's network "
-        "reachability domain, literally: the lane's broker port is reachable "
-        "only from that host, and that is a network fact no routing variable "
-        "can express"
+        f"{workflow_path.name} must run on the overlay's lab pool "
+        "(OMN-19894): any lab runner reaches the declared broker"
     )
-    # The half the label name alone does not carry. A class-only pin schedules
-    # successfully on another lab host and then reports the lane unreachable,
-    # which reads as an outage rather than as a routing mistake.
-    assert "host-201" in runs_on
+    assert "host-201" not in _text(workflow_path)
 
 
 @pytest.mark.unit

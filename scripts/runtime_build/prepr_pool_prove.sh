@@ -24,7 +24,7 @@
 #               prepr_teardown_slot.sh, both from the test-merge tree. Neither
 #               takes a lane argument; the project is derived from the slot.
 #
-# Params (sourced): TAG W [INFRA_PR INFRA_HEAD] [MARKET_PR MARKET_HEAD]
+# Params (sourced): TAG W [INFRA_PR INFRA_HEAD | INFRA_GROUP [INFRA_GROUP_BASE INFRA_GROUP_TREE]] [MARKET_PR MARKET_HEAD]
 #   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS CORE_REF SPI_REF COMPAT_REF
 #   DOCKER_CONFIG_MODE SLOT_KIND PREPR_SLOT PROJECT MAIN_PORT EFFECTS_PORT SLOT_PORTS
 #   POSITIVE_CONTROL REASON]
@@ -54,6 +54,72 @@ R=$W/root; T=$W/test
 ts() { date -u +%FT%TZ; }
 lsn() { if command -v ss >/dev/null 2>&1; then ss -ltn; else lsof -nP -iTCP -sTCP:LISTEN; fi; }
 
+# Image identity is proven from content, never from the revision label (a label
+# is evidence of intent, not of what was built; OMN-18893). For each repository
+# under test the probe lists every file of its installed package inside the
+# running container (IMG_LIST_PY, run by the container's python) and compares
+# that listing with the build tree's tracked files under src/<pkg>/
+# (PKG_TREE_PY, run by the host's python3). A PR that changes nothing under src/
+# is then proven by the whole package reading identical, and a PR whose image
+# differs from its tree still fails (OMN-19896). The tests extract both scripts
+# from between their heredoc markers and run them.
+IFS= read -r -d '' IMG_LIST_PY <<'PY' || :
+import hashlib, importlib, os, sys
+pkg = importlib.import_module(sys.argv[1])
+top = os.path.dirname(pkg.__file__)
+base = os.path.dirname(top)
+for root, dirs, files in os.walk(top):
+    dirs[:] = [d for d in dirs if d != "__pycache__"]
+    for name in files:
+        if name.endswith((".pyc", ".pyo")):
+            continue
+        path = os.path.join(root, name)
+        with open(path, "rb") as fh:
+            digest = hashlib.sha256(fh.read()).hexdigest()
+        print(digest + "  " + os.path.relpath(path, base))
+PY
+IFS= read -r -d '' PKG_TREE_PY <<'PY' || :
+import hashlib, os, subprocess, sys
+root, pkg, container, listing = sys.argv[1:5]
+out = subprocess.run(["git", "-C", root, "ls-files", "-z", "--", "src/" + pkg],
+                     capture_output=True, check=False).stdout
+tree = {}
+for raw in out.split(b"\0"):
+    rel = raw.decode("utf-8", "replace")
+    if not rel.startswith("src/"):
+        continue
+    path = os.path.join(root, rel)
+    rel = rel[len("src/"):]
+    if "/__pycache__/" in rel or rel.endswith((".pyc", ".pyo")):
+        continue
+    if os.path.islink(path) or not os.path.isfile(path):
+        continue
+    with open(path, "rb") as fh:
+        tree[rel] = hashlib.sha256(fh.read()).hexdigest()
+image = {}
+try:
+    with open(listing, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            digest, sep, rel = line.rstrip("\n").partition("  ")
+            if sep and len(digest) == 64:
+                image[rel] = digest
+except OSError:
+    pass
+missing = sorted(set(tree) - set(image))
+differ = sorted(r for r in tree if r in image and image[r] != tree[r])
+extra = sorted(set(image) - set(tree))
+# a module the image carries and the tree does not is stale code that can run;
+# other extras (a force-included resource) are counted, not held against it
+stale = [r for r in extra if r.endswith(".py")]
+ok = bool(tree) and not missing and not differ and not stale
+print("pkg-tree %s %s tree-files=%d image-files=%d missing=%d differ=%d stale-py=%d extra-other=%d match=%s"
+      % (pkg, container, len(tree), len(image), len(missing), len(differ), len(stale),
+         len(extra) - len(stale), "yes" if ok else "NO"))
+for kind, items in (("missing", missing), ("differ", differ), ("stale-py", stale)):
+    for rel in items[:5]:
+        print("pkg-tree-diff %s %s %s %s" % (pkg, container, kind, rel))
+PY
+
 fetch_pr() { # dir repo pr expected -> merges PR head into dev (no-ff), falls back to raw head on conflict
   local d=$1 repo=$2 pr=$3 exp=$4
   git clone -q --branch dev "https://github.com/OmniNode-ai/$repo.git" "$d"
@@ -67,6 +133,46 @@ fetch_pr() { # dir repo pr expected -> merges PR head into dev (no-ff), falls ba
     git -C "$d" switch -q --detach FETCH_HEAD
     echo "$repo test-merge CONFLICTS with dev; building the raw head $(git -C "$d" rev-parse HEAD)"
   fi
+}
+
+# A group of pull requests is proved on the commit the merge queue would land:
+# the group base (dev, or the exact dev sha the calling lane planned on) with
+# each member squashed on in queue order, one commit per member, the way the
+# omnibase_infra dev merge queue squashes (OMN-18893). The author, committer and
+# dates are fixed, so the same base and heads give the same commit shas here and
+# in prepr_pool_group.py on the lane's machine; the tree hash is what the landed
+# commit is later compared with. A member that does not squash cleanly fails the
+# clone: members are chosen with disjoint files, so a conflict is a planning
+# error, never something to build around.
+GROUP_GIT_ENV="GIT_AUTHOR_NAME=lab-pool-group GIT_AUTHOR_EMAIL=lab-pool-group@lab.invalid GIT_COMMITTER_NAME=lab-pool-group GIT_COMMITTER_EMAIL=lab-pool-group@lab.invalid GIT_AUTHOR_DATE=2026-01-01T00:00:00+0000 GIT_COMMITTER_DATE=2026-01-01T00:00:00+0000"
+fetch_group() { # dir repo "n:head n:head ..." [base] [expected tree]
+  local d=$1 repo=$2 members=$3 base=${4:-} want=${5:-} m n exp h
+  git clone -q --branch dev "https://github.com/OmniNode-ai/$repo.git" "$d"
+  if [ -n "$base" ]; then
+    git -C "$d" switch -q --detach "$base" || { echo "group-base-missing $repo $base"; return 1; }
+  fi
+  echo "$repo group base $(git -C "$d" rev-parse HEAD) (dev $(git -C "$d" rev-parse origin/dev))"
+  for m in $members; do
+    n=${m%%:*}; exp=${m#*:}
+    git -C "$d" fetch -q origin "pull/$n/head" || { echo "group-fetch-failed $repo#$n"; return 1; }
+    h=$(git -C "$d" rev-parse FETCH_HEAD)
+    echo "$repo#$n fetched head $h expected $exp match=$([ "$h" = "$exp" ] && echo yes || echo NO)"
+    # git wants an identity for a squash merge too; a host may have none set
+    # shellcheck disable=SC2086
+    if ! env $GROUP_GIT_ENV git -C "$d" merge -q --squash FETCH_HEAD > "$d.merge.log" 2>&1; then
+      echo "group-conflict $repo#$n $(grep -m1 -iE 'conflict|fatal|error' "$d.merge.log")"; return 1
+    fi
+    # shellcheck disable=SC2086
+    env $GROUP_GIT_ENV git -C "$d" commit -q --allow-empty -m "lab-pool group member $repo#$n $h" \
+      || { echo "group-commit-failed $repo#$n"; return 1; }
+    if git -C "$d" diff --quiet HEAD^ HEAD; then echo "group-empty $repo#$n (its diff is already on the base)"; fi
+    echo "group-step $repo#$n commit $(git -C "$d" rev-parse HEAD) tree $(git -C "$d" rev-parse 'HEAD^{tree}')"
+  done
+  local tree agrees count
+  tree=$(git -C "$d" rev-parse 'HEAD^{tree}')
+  count=$(echo "$members" | wc -w | tr -d ' ')
+  if [ -z "$want" ]; then agrees=unchecked; elif [ "$tree" = "$want" ]; then agrees=yes; else agrees=NO; fi
+  echo "group-commit $repo $(git -C "$d" rev-parse HEAD) tree $tree base $(git -C "$d" rev-parse "HEAD~$count") tree-agrees=$agrees"
 }
 
 case "$PHASE" in
@@ -99,7 +205,11 @@ snap-pre|snap-post)
   ;;
 clone)
   echo "clone start $(ts)"; mkdir -p "$R" "$T"
-  if [ -n "${INFRA_PR:-}" ]; then fetch_pr "$R/omnibase_infra" omnibase_infra "$INFRA_PR" "$INFRA_HEAD"
+  if [ -n "${INFRA_GROUP:-}" ]; then
+    fetch_group "$R/omnibase_infra" omnibase_infra "$INFRA_GROUP" "${INFRA_GROUP_BASE:-}" "${INFRA_GROUP_TREE:-}" || { echo "clone failed: group did not build"; exit 1; }
+    # the focused tests run against the group commit itself
+    git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q "$R/omnibase_infra" HEAD; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
+  elif [ -n "${INFRA_PR:-}" ]; then fetch_pr "$R/omnibase_infra" omnibase_infra "$INFRA_PR" "$INFRA_HEAD"
     git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "pull/$INFRA_PR/head"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
   else git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_infra.git "$R/omnibase_infra"; fi
   if [ -n "${MARKET_PR:-}" ]; then fetch_pr "$R/omnimarket" omnimarket "$MARKET_PR" "$MARKET_HEAD"
@@ -207,8 +317,24 @@ probe)
   done
   echo "health wait $(( $(date +%s) - start ))s ended $(ts) starting=$starting $MAIN=$c1 $EFF=$c2"
   echo "== identity"
-  docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$M" 2>&1
+  # the label is printed for the reader and never judged: it records intent only
+  echo "image-revision-label $(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$M" 2>&1 | tail -1)"
   echo "build GIT_SHA $(git -C "$R/omnibase_infra" rev-parse HEAD) market $(git -C "$R/omnimarket" rev-parse HEAD)"
+  # every repository a PR is under test in has its whole installed package
+  # compared with its build tree, in both runtimes, so identity never depends
+  # on which files a caller listed in ID_FILES
+  SUBJECTS=""
+  [ -n "${INFRA_PR:-}${INFRA_GROUP:-}" ] && SUBJECTS="omnibase_infra"
+  [ -n "${MARKET_PR:-}" ] && SUBJECTS="$SUBJECTS omnimarket"
+  for repo in $SUBJECTS; do
+    echo "identity-subject $repo"
+    echo "src-diff $repo files=$(git -C "$R/$repo" diff --name-only origin/dev...HEAD -- src/ 2>/dev/null | grep -c .)"
+    for c in $M $E; do
+      docker exec "$c" python -c "$IMG_LIST_PY" "$repo" > "/tmp/$TAG-img-$repo-$c.txt" 2> "/tmp/$TAG-img-$repo-$c.err" \
+        || echo "pkg-tree-list-error $repo $c $(tail -1 "/tmp/$TAG-img-$repo-$c.err")"
+      python3 -c "$PKG_TREE_PY" "$R/$repo" "$repo" "$c" "/tmp/$TAG-img-$repo-$c.txt" 2>&1 | tail -16
+    done
+  done
   for c in $M $E; do echo "$c omnimarket=$(docker exec $c python -c "import importlib.metadata as m; print(m.version('omnimarket'))" 2>&1 | tail -1) infra=$(docker exec $c python -c "import importlib.metadata as m; print(m.version('omnibase_infra'))" 2>&1 | tail -1)"; done
   for spec in ${ID_FILES:-}; do repo=${spec%%:*}; f=${spec#*:}; pkg=${repo}
     want=$(git -C "$R/$repo" show "HEAD:src/$f" 2>/dev/null | shasum -a 256 | cut -c1-12)
