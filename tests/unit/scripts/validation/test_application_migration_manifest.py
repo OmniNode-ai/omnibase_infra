@@ -822,6 +822,8 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # 216 -> 217 for OMN-19721: node_projection_runtime_error_fingerprints/0002
     # adds the nullable runtime_error_fingerprints.last_applied_event_id column,
     # so a broker redelivery of one runtime-error event is counted once.
+    # 217 -> 218 for OMN-19550: node_projection_session_content/0001 creates
+    # omninode_internal.session_content and grants the projection writer role.
     # Additive (expand-only), vendored FIRST per the vendor-parity ordering.
     # 217 -> 219 for OMN-19716: node_projection_topic_activity/0000 creates the
     # topic_activity table and 0001 grants the runtime role SELECT, INSERT and
@@ -834,7 +836,10 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # pr_landing_state and pr_landing_transitions read models and 0001 grants
     # the runtime role on both. Vendored FIRST per the vendor-parity ordering,
     # ahead of omnimarket#3000.
-    assert len(result.declarations) == 222
+    # 222 -> 223 for OMN-19550: node_projection_session_content/0001 creates
+    # omninode_internal.session_content and grants the projection writer role.
+    # Additive (expand-only), vendored FIRST per the vendor-parity ordering.
+    assert len(result.declarations) == 223
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
