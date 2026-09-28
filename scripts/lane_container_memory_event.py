@@ -351,7 +351,11 @@ def build_event(
     ``boot_time``, ``read_at``, ``containers`` (each with ``container_id``,
     ``container_name``, ``lane``, ``started_at``, ``memory_max``,
     ``memory_peak``, ``memory_events`` as the raw file text) and
-    ``worker_logs`` (each with ``runner_name``, ``log_name``, ``text``).
+    ``worker_runs``: the runner worker logs the collector parsed with
+    :func:`parse_worker_log`, one CI run entry each. The collector parses them
+    as it streams each runner's ``_diag`` archive, so no log text is ever held
+    in memory past its own parse; on .202's first pass after a boot that text
+    was about 240 MB across 974 logs.
 
     ``previous_state`` is the last published pass's ``next_state``, or ``None``.
     """
@@ -446,14 +450,9 @@ def build_event(
             )
 
     runs: list[dict[str, str | None]] = []
-    for log in observation.get("worker_logs") or []:
-        parsed = parse_worker_log(
-            str(_require(log, "text", "worker log")),
-            runner_name=str(_require(log, "runner_name", "worker log")),
-            log_name=str(_require(log, "log_name", "worker log")),
-        )
-        if parsed is not None:
-            runs.append(parsed)
+    for index, run in enumerate(_require(observation, "worker_runs", "observation")):
+        _check_fields(run, CI_RUN_FIELDS, f"worker_runs[{index}]")
+        runs.append(dict(run))
 
     event: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,

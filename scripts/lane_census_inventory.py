@@ -50,7 +50,6 @@ entirely.
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import os
 import shutil
@@ -59,10 +58,11 @@ import subprocess
 import sys
 import tarfile
 import urllib.parse
+from collections.abc import Callable
 from datetime import UTC, datetime
 from http.client import HTTPConnection
 from pathlib import Path
-from typing import Any
+from typing import IO, Any, cast
 
 # Exit code for "inventory could not be observed". Distinct from the driver's
 # drift code (30) and its bad-args (2) / missing-deps (3) codes.
@@ -316,19 +316,25 @@ class MemoryProbeError(RuntimeError):
     """Raised when a memory counter or a runner worker log could not be read."""
 
 
-def api_get_raw(socket_path: str, path: str, timeout: float) -> bytes:
-    """GET a Docker Engine API path and return the raw body (for archives)."""
+def api_stream[T](
+    socket_path: str, path: str, timeout: float, consume: Callable[[IO[bytes]], T]
+) -> T:
+    """GET a Docker Engine API path and hand the unread body to ``consume``.
+
+    Used for ``_diag`` archives, which run to about 20 MB per runner: the body is
+    parsed as it streams and never held whole.
+    """
     conn = _UnixHTTPConnection(socket_path, timeout)
     try:
         conn.request("GET", path)
         response = conn.getresponse()
-        body = response.read()
         if response.status != 200:
+            body = response.read(400)
             raise MemoryProbeError(
                 f"Docker Engine API GET {path} returned HTTP {response.status}: "
-                f"{body[:400].decode('utf-8', 'replace')}"
+                f"{body.decode('utf-8', 'replace')}"
             )
-        return body
+        return consume(response)
     finally:
         conn.close()
 
@@ -397,17 +403,32 @@ def boot_time_iso(proc_root: str) -> str:
     raise MemoryProbeError(f"{proc_root}/stat carries no btime line")
 
 
-def worker_logs_from_archive(
-    archive: bytes, *, runner_name: str, since_epoch: float
-) -> list[dict[str, str]]:
-    """Worker logs in a ``_diag`` archive last written at or after ``since_epoch``.
+def _parse_worker_log() -> Callable[..., dict[str, str | None] | None]:
+    """The builder's worker-log parser, so collector and builder share one grammar."""
+    here = str(Path(__file__).resolve().parent)
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import lane_container_memory_event
+
+    return cast(
+        "Callable[..., dict[str, str | None] | None]",
+        lane_container_memory_event.parse_worker_log,
+    )
+
+
+def worker_runs_from_archive(
+    stream: IO[bytes], *, runner_name: str, since_epoch: float
+) -> list[dict[str, str | None]]:
+    """CI runs from a streamed ``_diag`` archive, for logs written since ``since_epoch``.
 
     A log's mtime is its last write, so a log older than the window's start
-    belongs to a job that finished before the window and is not read.
+    belongs to a job that finished before the window and is not read. Each log
+    is parsed and dropped before the next is read.
     """
-    logs: list[dict[str, str]] = []
+    parse = _parse_worker_log()
+    runs: list[dict[str, str | None]] = []
     try:
-        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:*") as tar:
+        with tarfile.open(fileobj=stream, mode="r|*") as tar:
             for member in tar:
                 base = Path(member.name).name
                 if not member.isfile() or not base.startswith("Worker_"):
@@ -417,18 +438,21 @@ def worker_logs_from_archive(
                 handle = tar.extractfile(member)
                 if handle is None:
                     raise MemoryProbeError(f"{runner_name}: cannot read {member.name}")
-                logs.append(
-                    {
-                        "runner_name": runner_name,
-                        "log_name": base,
-                        "text": handle.read().decode("utf-8", "replace"),
-                    }
-                )
+                try:
+                    run = parse(
+                        handle.read().decode("utf-8", "replace"),
+                        runner_name=runner_name,
+                        log_name=base,
+                    )
+                except ValueError as exc:
+                    raise MemoryProbeError(str(exc)) from exc
+                if run is not None:
+                    runs.append(run)
     except tarfile.TarError as exc:
         raise MemoryProbeError(
             f"{runner_name}: unreadable _diag archive: {exc}"
         ) from exc
-    return sorted(logs, key=lambda log: log["log_name"])
+    return runs
 
 
 def _state_lower_bound(state_path: str | None, boot_id: str, boot_time: str) -> float:
@@ -459,7 +483,7 @@ def collect_memory_observation(
     runner_diag_path: str,
     state_path: str | None,
 ) -> dict[str, Any]:
-    """Read every lane container's memory counters and the runners' worker logs."""
+    """Read every lane container's memory counters and the runners' CI runs."""
     boot_id = _read_text(Path(proc_root) / "sys/kernel/random/boot_id").strip()
     if not boot_id:
         raise MemoryProbeError("empty host boot id")
@@ -473,7 +497,7 @@ def collect_memory_observation(
         raise MemoryProbeError(f"container list unreadable: {exc}") from exc
 
     containers: list[dict[str, Any]] = []
-    worker_logs: list[dict[str, str]] = []
+    worker_runs: list[dict[str, str | None]] = []
     for row in rows:
         if str(row.get("State") or "") != "running":
             continue
@@ -516,24 +540,35 @@ def collect_memory_observation(
             )
         if is_runner:
             query = urllib.parse.urlencode({"path": runner_diag_path})
+
+            def consume(
+                body: IO[bytes], runner_name: str = name
+            ) -> list[dict[str, str | None]]:
+                return worker_runs_from_archive(
+                    body, runner_name=runner_name, since_epoch=since_epoch
+                )
+
             try:
-                archive = api_get_raw(
-                    socket_path, f"/containers/{cid}/archive?{query}", api_timeout_s
+                worker_runs.extend(
+                    api_stream(
+                        socket_path,
+                        f"/containers/{cid}/archive?{query}",
+                        api_timeout_s,
+                        consume,
+                    )
                 )
             except (OSError, MemoryProbeError) as exc:
                 raise MemoryProbeError(f"{name}: _diag archive failed: {exc}") from exc
-            worker_logs.extend(
-                worker_logs_from_archive(
-                    archive, runner_name=name, since_epoch=since_epoch
-                )
-            )
 
     return {
         "host_boot_id": boot_id,
         "boot_time": boot_time,
         "read_at": read_at,
         "containers": sorted(containers, key=lambda c: str(c["container_name"])),
-        "worker_logs": worker_logs,
+        "worker_runs": sorted(
+            worker_runs,
+            key=lambda r: (str(r["runner_name"]), str(r["job_started_at"])),
+        ),
     }
 
 

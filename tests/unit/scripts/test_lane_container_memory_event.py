@@ -60,6 +60,18 @@ REDPANDA_ID = "a03d4887a7266a85e1df700cb8b9b0004084b2322718f674b5c9abbf3dcefafa"
 CONSUMER_ID = "5e1f0c2b7d9a4e6f8b3c1d0a2e4f6b8c9d1e3f5a7b9c2d4e6f8a1b3c5d7e9f0a"
 
 
+def _runs(*logs: dict[str, str]) -> list[dict[str, str | None]]:
+    """Parse fixture worker logs the way the collector does as it streams them."""
+    runs = []
+    for log in logs:
+        run = mem.parse_worker_log(
+            log["text"], runner_name=log["runner_name"], log_name=log["log_name"]
+        )
+        if run is not None:
+            runs.append(run)
+    return runs
+
+
 def _observation() -> dict[str, Any]:
     return {
         "host_boot_id": BOOT_ID,
@@ -85,7 +97,7 @@ def _observation() -> dict[str, Any]:
                 "memory_events": "low 0\nhigh 0\nmax 1060\noom 1\noom_kill 1\noom_group_kill 0\n",
             },
         ],
-        "worker_logs": [
+        "worker_runs": _runs(
             {
                 "runner_name": "omnipc2-ci-runner-13",
                 "log_name": "Worker_20260928-185104-utc.log",
@@ -117,7 +129,7 @@ def _observation() -> dict[str, Any]:
                     completed="2026-09-28 17:05:00Z",
                 ),
             },
-        ],
+        ),
     }
 
 
@@ -277,22 +289,34 @@ def test_an_unreadable_counter_is_refused_never_a_zero() -> None:
 
 
 def test_a_completed_worker_log_that_names_no_job_is_refused() -> None:
-    observation = _observation()
-    observation["worker_logs"][0]["text"] = (
+    text = (
         "[2026-09-28 18:51:04Z INFO HostContext] start\n"
         "[2026-09-28 18:51:33Z INFO Worker] Job completed.\n"
     )
     with pytest.raises(mem.MemoryObservationError, match="names no repository"):
-        _build(observation)
+        mem.parse_worker_log(
+            text,
+            runner_name="omnipc2-ci-runner-13",
+            log_name="Worker_20260928-185104-utc.log",
+        )
 
 
 def test_a_worker_log_still_starting_is_read_next_pass() -> None:
-    observation = _observation()
-    observation["worker_logs"][1]["text"] = (
-        "[2026-09-28 18:59:00Z INFO HostContext] start\n"
+    assert (
+        mem.parse_worker_log(
+            "[2026-09-28 18:59:00Z INFO HostContext] start\n",
+            runner_name="omnipc2-ci-runner-6",
+            log_name="Worker_20260928-185900-utc.log",
+        )
+        is None
     )
-    event, _state, _alerts = _build(observation)
-    assert [r["run_id"] for r in event["ci_runs"]] == ["36468089372"]
+
+
+def test_a_malformed_worker_run_is_refused() -> None:
+    observation = _observation()
+    del observation["worker_runs"][0]["run_id"]
+    with pytest.raises(mem.MemoryObservationError, match="missing"):
+        _build(observation)
 
 
 def test_the_event_matches_the_published_v1_fixture() -> None:

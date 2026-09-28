@@ -526,10 +526,16 @@ def test_memory_observation_reads_lane_counters_and_runner_worker_logs(
     assert redpanda["lane"] == "sim-202"
     assert redpanda["memory_max"].strip() == "max"
     assert "oom_kill 0" in redpanda["memory_events"]
-    assert [log["log_name"] for log in observation["worker_logs"]] == [
-        "Worker_20260928-185104-utc.log"
+    # The pre-boot log is not read: one run, parsed as the archive streamed.
+    assert observation["worker_runs"] == [
+        {
+            "repo": "OmniNode-ai/omnimarket",
+            "run_id": "36454760449",
+            "runner_name": "omnipc2-ci-runner-13",
+            "job_started_at": "2026-09-28T18:51:04.000000Z",
+            "job_completed_at": "2026-09-28T18:51:33.000000Z",
+        }
     ]
-    assert observation["worker_logs"][0]["runner_name"] == "omnipc2-ci-runner-13"
 
 
 def test_an_unreadable_counter_exits_7_and_keeps_the_census_envelope(
@@ -574,4 +580,4 @@ def test_an_absent_fleet_config_is_an_error_unless_declared_empty(
     assert absent.returncode == inventory.EXIT_MEMORY_UNOBSERVABLE, absent.stderr
     assert declared.returncode == 0, declared.stderr
     observation = json.loads((tmp_path / "memory.json").read_text())
-    assert observation["worker_logs"] == []
+    assert observation["worker_runs"] == []
