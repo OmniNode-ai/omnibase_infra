@@ -28,14 +28,19 @@
 #   3. Its verdict is C11's and C15's is chain-canary's, and a board that
 #      resolves two criteria from one conclusion cannot say which one moved.
 #
-# WHY SELF-HOSTED, AND WHY host-201 IS REQUIRED
-#   Unchanged from chain-canary.yml, and read that file's own two notes before
-#   editing this line. `omnibase-verify` names a runner CLASS, not a host; a
-#   second verify-class runner exists on another lab host. The lane's onex-api
-#   is reachable only through THIS host's `host.docker.internal` gateway alias,
-#   so a run placed anywhere else reports the lane unreachable — and a
-#   permanently-red check is a disabled check. The pair fails SAFE: if that
-#   runner is down the job queues rather than running somewhere blind.
+# WHERE IT RUNS, AND WHICH LANE IT GRADES (OMN-19894)
+#   Operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check must not rely
+#   on one machine, and resolves its target through the chain of responders.
+#   So the job runs on any runner of the pool the overlay names
+#   (vars.LAB_PROBE_RUNS_ON_JSON), and the lane it grades is the first lane of
+#   the overlay's ordered list (vars.LAB_LANES_JSON) whose onex-api answers,
+#   reached at the address the overlay declares for it. Neither a host label
+#   nor an address appears in this file. No lane answering is RED naming every
+#   lane tried (.github/actions/resolve-lab-lane), never a skip. Until
+#   OMN-19894 every run was pinned to the .201 verify runner and reached the
+#   lane through that host's docker gateway alias, so the probe queued forever
+#   whenever .201 was down. A lane listed for this probe must honour the
+#   credential below; one that refuses it grades RED with that refusal named.
 #
 # WHY THERE IS NO pull_request TRIGGER, THOUGH THE FIRST CUT HAD ONE
 #   The first cut ran on `pull_request` scoped to this workflow's own four
@@ -96,9 +101,9 @@ on:
   workflow_dispatch:
     inputs:
       gateway_url:
-        description: 'Tenant-bearing API base URL (onex-api on the dev lane).'
+        description: 'Tenant-bearing API base URL. Empty grades the first lane of vars.LAB_LANES_JSON whose gateway answers.'
         required: false
-        default: 'http://host.docker.internal:8090'
+        default: ''
       other_tenant_slug:
         description: 'A tenant slug the credential does NOT own; drives the wrong-tenant arm.'
         required: false
@@ -117,7 +122,7 @@ permissions:
 jobs:
   c11-negative-paths:
     name: C11 negative paths (dev lane)
-    runs-on: [self-hosted, omnibase-verify, host-201]
+    runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
     timeout-minutes: 10
 
     steps:
@@ -134,13 +139,18 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Resolve the lab lane through the overlay's chain of responders
+        if: ${{ !github.event.inputs.gateway_url }}
+        uses: ./.github/actions/resolve-lab-lane
+        with:
+          lanes-json: ${{ vars.LAB_LANES_JSON }}
+          require: gateway_url
+
       - name: Drive the four negative paths and grade them
         env:
-          # Inside a runner container `localhost` is the container itself, so a
-          # localhost probe would hit the wrong network namespace and
-          # manufacture a false RED. The host-gateway alias is what reaches the
-          # lane's published port — same precedent as chain-canary.yml.
-          GATEWAY_URL: ${{ github.event.inputs.gateway_url || 'http://host.docker.internal:8090' }}
+          # The lane's address as the overlay declares it (LANE_GATEWAY_URL,
+          # exported by the resolve step), or an explicit dispatch override.
+          GATEWAY_URL_OVERRIDE: ${{ github.event.inputs.gateway_url }}
           OTHER_TENANT_SLUG: ${{ github.event.inputs.other_tenant_slug || 'onex-lab-house' }}
           # The NAME is what the probe is told; the VALUE reaches it only here,
           # as environment. See the header note.
@@ -149,6 +159,8 @@ jobs:
           set -uo pipefail
           # NOT `set -e`: a non-zero probe is the verdict and must still write
           # its record before the job ends.
+          GATEWAY_URL="${GATEWAY_URL_OVERRIDE:-${LANE_GATEWAY_URL:-}}"
+          echo "lane: ${LANE_NAME:-dispatch override}, gateway ${GATEWAY_URL}"
           python3 scripts/ci/c11_negative_paths_probe.py \
             --base-url "${GATEWAY_URL}" \
             --credential-env CHAIN_CANARY_GATEWAY_API_KEY \
