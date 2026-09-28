@@ -226,6 +226,45 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
 fi
 
+# --- GitHub reads on the read-only App token (OMN-19852) -------------------
+#
+# Every GitHub call this reporter makes is a READ: the required-context probe
+# (about 158 calls a tick, measured 2026-09-27), the fleet probe and its hourly
+# scheduled-workflow sweep (about 730 calls a sweep, measured the same day) and
+# the backup-freshness read. They ran on GH_PAT, which is the operator's own
+# login, and so spent about 1,400 of the one per-user 5,000/hour bucket that
+# merges and arming need (operator ruling 2026-09-25T14:18:52Z: lane reads move
+# to the read-only App onexbot-pr-reader, writes stay on the operator).
+#
+# When OMNINODE_GH_READ_TOKEN_FILE names a file holding an installation token of
+# that App (refreshed by the host's token cron), it replaces GH_PAT, GITHUB_TOKEN
+# and GH_TOKEN for this process and every probe it starts. A token file that is
+# set but missing, empty or older than the bound is NOT used -- the reads fall
+# back to GH_PAT -- and check_gh_read_identity says so in a WARNING row, so a dead
+# token cron is visible instead of quietly moving the load back.
+GH_READ_TOKEN_FILE=${OMNINODE_GH_READ_TOKEN_FILE:-}
+# An installation token lives 60 minutes; the detached fleet sweep can run 15.
+# A file no older than 40 minutes leaves the sweep a token with 20 to spare.
+GH_READ_TOKEN_MAX_AGE_SECONDS=${OMNINODE_GH_READ_TOKEN_MAX_AGE_SECONDS:-2400}
+GH_READ_IDENTITY=operator
+GH_READ_TOKEN_PROBLEM=""
+if [[ -n "$GH_READ_TOKEN_FILE" ]]; then
+  if [[ -r "$GH_READ_TOKEN_FILE" && -s "$GH_READ_TOKEN_FILE" ]]; then
+    gh_read_token_age=$(( $(date +%s) - $(date -r "$GH_READ_TOKEN_FILE" +%s) ))
+    if (( gh_read_token_age <= GH_READ_TOKEN_MAX_AGE_SECONDS )); then
+      GH_PAT="$(head -n 1 "$GH_READ_TOKEN_FILE")"
+      GITHUB_TOKEN="$GH_PAT"
+      GH_TOKEN="$GH_PAT"
+      export GH_PAT GITHUB_TOKEN GH_TOKEN
+      GH_READ_IDENTITY=app
+    else
+      GH_READ_TOKEN_PROBLEM="reader token file ${GH_READ_TOKEN_FILE} is ${gh_read_token_age}s old (bound ${GH_READ_TOKEN_MAX_AGE_SECONDS}s); GitHub reads fell back to GH_PAT, the operator's bucket. Check the host's token cron"
+    fi
+  else
+    GH_READ_TOKEN_PROBLEM="reader token file ${GH_READ_TOKEN_FILE} is missing, unreadable or empty; GitHub reads fell back to GH_PAT, the operator's bucket. Check the host's token cron"
+  fi
+fi
+
 if [[ "$MODE" != "dry-run" ]]; then
   : "${SLACK_BOT_TOKEN:?SLACK_BOT_TOKEN must be set in $ENV_FILE}"
   SLACK_CHANNEL_ID="${SLACK_CHANNEL_ID:-${SLACK_DEFAULT_CHANNEL:-}}"
@@ -997,6 +1036,17 @@ check_fleet_failures() {
 # token or an unreachable API is a different thing: we could not look, which
 # must not render as "nothing wrong" but is not evidence the backup is gone.
 # That asymmetry is the same one `check_ci_required_contexts` draws.
+# OMN-19852: which identity this tick's GitHub reads ran on. Configured-but-
+# unusable is a WARNING; not configured at all prints nothing (the pre-App
+# behaviour, unchanged for a host that has no token cron).
+check_gh_read_identity() {
+  if [[ -n "$GH_READ_TOKEN_PROBLEM" ]]; then
+    printf 'github|WARNING|read-identity|%s\n' "$GH_READ_TOKEN_PROBLEM"
+  elif [[ "$GH_READ_IDENTITY" == "app" ]]; then
+    printf 'github|OK|read-identity|GitHub reads on the read-only App token from %s\n' "$GH_READ_TOKEN_FILE"
+  fi
+}
+
 check_postgres_backup_freshness() {
   local repo="${OMNINODE_BACKUP_GATE_REPO:-OmniNode-ai/omninode_infra}"
   local workflow="${OMNINODE_BACKUP_GATE_WORKFLOW:-postgres-backup-freshness-gate.yml}"
@@ -1400,6 +1450,7 @@ collect() {
     check_ci_required_contexts
     check_runner_tree_converge
     check_fleet_failures
+    check_gh_read_identity
     check_postgres_backup_freshness
     check_census_drift
   }
