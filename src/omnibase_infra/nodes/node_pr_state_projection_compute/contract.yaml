@@ -21,11 +21,11 @@ name: "node_pr_state_projection_compute"
 node_type: "COMPUTE_GENERIC"
 contract_version:
   major: 1
-  minor: 0
-  patch: 1
-node_version: "0.1.1"
+  minor: 1
+  patch: 0
+node_version: "0.1.2"
 description: >
-  Subscribes to onex.evt.github.pr-status.v1 and projects each PR status event into a ModelPayloadPrStateUpsert intent, including the non-null is_draft seam field, for NodePrStateWriteEffect to persist into the pr_state latest-known-state table. Uses the canonical def-B typed ModelEventMessage handler entrypoint and mirrors the canonical node_build_loop_projection_compute pattern.
+  Subscribes to onex.evt.github.pr-status.v1 and projects each PR status event into a ModelPayloadPrStateUpsert intent, including the non-null is_draft seam field for poller events and the CI, review, merge-queue and ref columns of partial webhook observations (OMN-19492, None meaning unobserved), for NodePrStateWriteEffect to persist into the pr_state latest-known-state table. Uses the canonical def-B typed ModelEventMessage handler entrypoint and mirrors the canonical node_build_loop_projection_compute pattern.
 
 event_bus:
   version:

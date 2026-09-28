@@ -18,11 +18,11 @@ runtime_profiles:
   - effects
 contract_version:
   major: 1
-  minor: 0
+  minor: 1
   patch: 0
-node_version: "0.1.0"
+node_version: "0.1.1"
 description: >
-  Capability-oriented EFFECT node for pr_state persistence. Consumes ModelPayloadPrStateUpsert intents and UPSERTs one row per (repo, pr_number), including the non-null is_draft field, into the public.pr_state latest-known-state table via ON CONFLICT DO UPDATE, so the table always reflects the most recently projected state per PR.
+  Capability-oriented EFFECT node for pr_state persistence. Consumes ModelPayloadPrStateUpsert intents and UPSERTs one row per (repo, pr_number), including the non-null is_draft field, into the public.pr_state latest-known-state table via ON CONFLICT DO UPDATE. Every state column is COALESCE(new, stored) so a partial webhook observation (OMN-19492) never clears a column it says nothing about, and as_of only moves forward.
 
 # Strongly typed I/O models
 input_model:
@@ -68,8 +68,8 @@ io_operations:
     input_fields:
       - repo: "str"
       - pr_number: "int"
-      - triage_state: "str"
-      - title: "str"
+      - triage_state: "str | None"
+      - title: "str | None"
       - ci_status: "str | None"
       - review_decision: "str | None"
       - mergeable: "str | None"
@@ -80,7 +80,7 @@ io_operations:
       - source: "str"
       - correlation_id: "UUID | None"
       - as_of: "datetime"
-      - is_draft: "bool"
+      - is_draft: "bool | None"
     output_fields:
       - success: "bool"
       - repo: "str"

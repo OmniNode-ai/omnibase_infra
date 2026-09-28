@@ -912,6 +912,34 @@ Producer: PostMergeConsumer (OMN-6727)
 Consumer: omnidash (future)
 """
 
+SUFFIX_GITHUB_WEBHOOK_DELIVERY: str = "onex.cmd.github.webhook-delivery.v1"
+"""Topic suffix for signed GitHub webhook deliveries (OMN-19492, OMN-14375).
+
+Published by the onex-api webhook door on the dev-system cluster (OMN-19592)
+and carried to the .201 dev lane by the gateway forwarder's inbound leg
+(OMN-19593). Each command carries the raw request body (base64), the
+``X-GitHub-Event`` name, the ``X-GitHub-Delivery`` id and the
+``X-Hub-Signature-256`` header, so the consumer can re-verify the HMAC on the
+exact bytes GitHub signed.
+
+Producer: onex-api ``POST /v1/github/webhook``
+Consumer: NodeGitHubWebhookIngressEffect
+"""
+
+SUFFIX_GITHUB_WEBHOOK_DELIVERY_REFUSED: str = (
+    "onex.evt.github.webhook-delivery-refused.v1"
+)
+"""Topic suffix for refused GitHub webhook deliveries (OMN-19492).
+
+The failure terminal of NodeGitHubWebhookIngressEffect: the consume boundary
+publishes one record here for every delivery the ingress refuses (no secret
+configured, a signature that does not verify, a malformed body), alongside the
+dead-lettered command, so a refusal is visible without reading the DLQ.
+
+Producer: the consume boundary of NodeGitHubWebhookIngressEffect
+Consumer: none yet (operator-visible sink)
+"""
+
 SUFFIX_GITHUB_PR_STATUS: str = "onex.evt.github.pr-status.v1"
 """Topic suffix for GitHub PR triage status events (OMN-2656).
 
@@ -1104,6 +1132,24 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "retention.ms": "604800000",
             "cleanup.policy": "delete",
         },  # 7 days
+    ),
+    # Refused GitHub webhook deliveries, the ingress failure terminal (OMN-19492)
+    ModelTopicSpec(
+        suffix=SUFFIX_GITHUB_WEBHOOK_DELIVERY_REFUSED,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Signed GitHub webhook deliveries (1 partition — keeps per-PR delivery order, OMN-19492)
+    ModelTopicSpec(
+        suffix=SUFFIX_GITHUB_WEBHOOK_DELIVERY,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days, beyond GitHub's 3-day redelivery window
     ),
     # GitHub PR triage status events (1 partition — low-throughput, OMN-2656)
     ModelTopicSpec(
