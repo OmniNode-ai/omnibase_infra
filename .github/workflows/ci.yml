@@ -1600,6 +1600,26 @@ jobs:
             .github/workflows
           sparse-checkout-cone-mode: false
 
+      # A probe job placed by `fromJSON(vars.NAME)` (omninode_infra#1725,
+      # omnibase_infra#4233: the host-agnostic probes of operator RULINGs
+      # 2026-09-28T01:58:06Z and 01:58:17Z) runs on whatever pool the live
+      # variable names, so the check needs the live variables to know which
+      # pool a probe holds. Variables are not readable with any installed App's
+      # permissions (none grants Variables read), so this is the same read-only
+      # CROSS_REPO_PAT read the hourly runner-routing audit makes
+      # (runner-routing-audit.yml). No continue-on-error: a scope that could
+      # not be read leaves the check unable to resolve a placement, which fails.
+      - name: Read the Actions variables probe jobs are placed by
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          set -euo pipefail
+          mkdir -p .probe-vars
+          gh variable list --org OmniNode-ai --json name,value > .probe-vars/org.json
+          for repo in omnibase_infra omninode_infra omnimarket; do
+            gh variable list --repo "OmniNode-ai/${repo}" --json name,value > ".probe-vars/${repo}.json"
+          done
+
       - name: Every probe cron, lane and duration agrees with its workflow, and every probe is listed
         run: |
           set -euo pipefail
@@ -1608,7 +1628,11 @@ jobs:
           uv run python scripts/ci/check_lab_probe_windows.py \
             --root omnibase_infra=. \
             --root omninode_infra=.probe-roots/omninode_infra \
-            --root omnimarket=.probe-roots/omnimarket
+            --root omnimarket=.probe-roots/omnimarket \
+            --variables org=.probe-vars/org.json \
+            --variables omnibase_infra=.probe-vars/omnibase_infra.json \
+            --variables omninode_infra=.probe-vars/omninode_infra.json \
+            --variables omnimarket=.probe-vars/omnimarket.json
 
   # Dep-provenance content-lineage gate (OMN-15604) -- a [tool.uv.sources]
   # git-pinned rev must build the SAME src/ tree as the released tag its

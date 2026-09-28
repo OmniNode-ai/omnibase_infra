@@ -255,9 +255,12 @@ def test_agreeing_file_and_workflows_pass(
 def test_cli_exits_zero_when_clean_and_one_on_drift(
     window_file: Path, roots: dict[str, Path]
 ) -> None:
-    argv = ["--windows", str(window_file)] + [
-        f"--root={name}={path}" for name, path in roots.items()
-    ]
+    empty = _write(window_file.parent / "no-variables.json", "[]")
+    argv = (
+        ["--windows", str(window_file)]
+        + [f"--root={name}={path}" for name, path in roots.items()]
+        + [f"--variables={scope}={empty}" for scope in plw.VARIABLE_SCOPES]
+    )
     assert plw.main(argv) == 0
     _write(
         roots["omnibase_infra"] / ".github/workflows/c16.yml",
