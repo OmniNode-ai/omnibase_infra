@@ -39,7 +39,7 @@ on:
   workflow_call:
     inputs:
       mode:
-        description: "Execution mode: 'real' (probe live .201 stack), 'compose' (bring up local stack) or 'catalog-local' (boot the laptop profile, catalog bundle local, as its documentation tells a new engineer to)."
+        description: "Execution mode: 'real' (probe a live lab stack), 'compose' (bring up local stack) or 'catalog-local' (boot the laptop profile, catalog bundle local, as its documentation tells a new engineer to)."
         required: true
         type: string
       runtime_host:
