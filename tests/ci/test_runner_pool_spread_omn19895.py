@@ -15,7 +15,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -31,7 +31,7 @@ def _step() -> dict[str, Any]:
     doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     for step in doc["jobs"]["runner-pool-spread"]["steps"]:
         if step.get("name") == STEP:
-            return step
+            return cast("dict[str, Any]", step)
     raise AssertionError(f"step {STEP!r} not found")
 
 
