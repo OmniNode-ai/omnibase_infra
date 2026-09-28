@@ -39,11 +39,11 @@ on:
   workflow_call:
     inputs:
       mode:
-        description: "Execution mode: 'real' (probe live .201 stack), 'compose' (bring up local stack) or 'catalog-local' (boot the laptop profile, catalog bundle local, as its documentation tells a new engineer to)."
+        description: "Execution mode: 'real' (probe a live lab stack), 'compose' (bring up local stack) or 'catalog-local' (boot the laptop profile, catalog bundle local, as its documentation tells a new engineer to)."
         required: true
         type: string
       runtime_host:
-        description: "Runtime + postgres + redpanda host. localhost in compose mode; 192.168.86.201 in real mode."
+        description: "Runtime + postgres + redpanda host. localhost in compose mode; in real mode, the lab lane host the caller resolves from its deployment overlay."
         required: false
         type: string
         default: "localhost"
