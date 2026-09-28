@@ -455,6 +455,48 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="container_memory",
         ),
     ),
+    # OMN-19513: vendor the work-ledger migrations ahead of omnimarket#3050.
+    # Until the contract pin advances, these self-expiring declarations keep
+    # both runtime grants derivable. They match the source contract's write
+    # access and work_ledger role; 0001 grants SELECT, INSERT, UPDATE on both
+    # tables and never DELETE. The expiry module names both entries and
+    # requires their removal once the pin includes omnimarket#3050.
+    ContractTableDeclaration(
+        node="legacy_migration:work_ledger_rows",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_work_ledger/"
+            "0000_create_work_ledger.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="work_ledger_rows",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_work_ledger/"
+                "0000_create_work_ledger.sql"
+            ),
+            access="write",
+            role="work_ledger",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:work_ledger_state",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_work_ledger/"
+            "0000_create_work_ledger.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="work_ledger_state",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_work_ledger/"
+                "0000_create_work_ledger.sql"
+            ),
+            access="write",
+            role="work_ledger",
+        ),
+    ),
     # OMN-19513: infra vendors both Claude hook event projection tables before
     # omnimarket#2956 lands the node contract. Until the pin advances, these
     # interim declarations keep the shipped table grants derivable. The expiry

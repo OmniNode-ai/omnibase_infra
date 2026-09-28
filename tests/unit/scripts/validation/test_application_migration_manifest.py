@@ -1214,3 +1214,25 @@ def test_duplicate_verified_adoptions_are_rejected(tmp_path: Path) -> None:
         validator.ManifestError, match="duplicate verified checksum adoption"
     ):
         _validate(migrations_dir, ledger_dir)
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["0000_create_work_ledger.sql", "0001_grant_omninode_runtime_work_ledger.sql"],
+)
+def test_work_ledger_migrations_are_declared_in_the_internal_domain(
+    filename: str,
+) -> None:
+    """OMN-19513: both migrations from omnimarket#3050 are checksum-bound."""
+    artifact_path = f"nodes/node_projection_work_ledger/{filename}"
+    declarations = [
+        declaration
+        for declaration in _validate(require_complete=True).declarations
+        if declaration.artifact_path == artifact_path
+    ]
+    assert len(declarations) == 1
+    declaration = declarations[0]
+    assert declaration.domain == "omninode_internal"
+    assert declaration.checksum == validator._content_sha256(
+        MIGRATIONS_DIR / artifact_path
+    )
