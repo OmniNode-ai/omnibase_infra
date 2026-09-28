@@ -54,19 +54,23 @@ provable for a reason outside the PR), 3 no free host, 4 lease refused,
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
+import gzip
+import hashlib
 import importlib.util
 import json
 import os
 import re
 import shlex
+import socket
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
-from typing import Protocol
+from typing import Any, Protocol
 
 import yaml
 
@@ -76,6 +80,11 @@ POOL_CONFIG = REPO_ROOT / "config" / "prepr_runtime_pool.yaml"
 LANE_MANIFEST = REPO_ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
 PROVE_SH = SCRIPT_DIR / "prepr_pool_prove.sh"
 SLOT_POLICY_PY = SCRIPT_DIR / "prepr_slot_policy.py"
+# OMN-19566: the receipt module, the fact publisher and the profile registry
+LAB_PASS_RECEIPT_PY = SCRIPT_DIR.parent / "ci" / "lab_pass_receipt.py"
+PUBLISH_LAB_FACT_PY = SCRIPT_DIR.parent / "ci" / "publish_lab_fact_event.py"
+PROFILE_REGISTRY = REPO_ROOT / "config" / "lab_proof_profiles.yaml"
+RUNTIME_PROOF_KIND = "runtime_image"
 
 KINDS = ("isolated", "prepr-slot")
 DEFAULT_POSITIVE_CONTROL = "omnibase-infra-dogfood"
@@ -817,6 +826,21 @@ def judge(
         notes.append(
             "wiring failures the base does not have: " + ", ".join(new_failures[:8])
         )
+    # OMN-19566: the runtime profiles name changed_path_live as mandatory. The
+    # probe prints one mention count per LIVE_GREP name per runtime; a name no
+    # runtime mentions is a changed path that never ran. With no LIVE_GREP there
+    # is no line and no check, and the receipt's verifier then names the check
+    # as missing rather than this judge inventing a pass.
+    mentions: dict[str, int] = {}
+    for _, name, count in re.findall(r"^\s+(\S+) mentions (\S+): (\d+)$", probe, re.M):
+        mentions[name] = mentions.get(name, 0) + int(count)
+    if mentions:
+        dead = sorted(n for n, c in mentions.items() if c == 0)
+        checks["changed_path_live"] = not dead
+        if dead:
+            notes.append(
+                "changed path not live, no runtime log mentions: " + ", ".join(dead)
+            )
     rcs = re.findall(r"^(\S+) focused rc=(\d+)", tests, re.M)
     failed_ids = re.findall(r"^FAILED (\S+)", tests, re.M)
     # pytest rc 1 = tests failed; a dev control at rc 1 means the test fails at
@@ -898,6 +922,11 @@ def render_readback(
             f"omnibase_infra#{n} head {h[:10]}"
             for n, h in group_members(params["INFRA_GROUP"])
         )
+    if params.get("MARKET_GROUP"):
+        subject.extend(
+            f"omnimarket#{n} head {h[:10]}"
+            for n, h in group_members(params["MARKET_GROUP"], name="MARKET_GROUP")
+        )
     if params.get("INFRA_PR"):
         subject.append(
             f"omnibase_infra#{params['INFRA_PR']} head {params.get('INFRA_HEAD', '?')[:10]}"
@@ -927,6 +956,408 @@ def render_readback(
     return "\n".join(lines)
 
 
+# --------------------------------------------------------------------------- receipt
+
+
+def _receipts() -> ModuleType:
+    """scripts/ci/lab_pass_receipt.py, the one module a lab receipt is written in.
+
+    Registered in ``sys.modules`` before it runs: its dataclasses resolve their
+    postponed annotations through their module's entry there.
+    """
+    loaded = sys.modules.get("lab_pass_receipt")
+    if loaded is not None and getattr(loaded, "__file__", None) == str(
+        LAB_PASS_RECEIPT_PY
+    ):
+        return loaded
+    spec = importlib.util.spec_from_file_location(
+        "lab_pass_receipt", LAB_PASS_RECEIPT_PY
+    )
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot load {LAB_PASS_RECEIPT_PY}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["lab_pass_receipt"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@dataclass(frozen=True)
+class RuntimeProfile:
+    """A repository's ``runtime_image`` proof profile, read from the registry."""
+
+    profile_id: str
+    profile_version: str
+    mandatory_checks: frozenset[str]
+
+
+def runtime_profile(
+    repo: str, registry: Path = PROFILE_REGISTRY
+) -> RuntimeProfile | None:
+    """The ``runtime_image`` variant of ``OmniNode-ai/<repo>``'s profile, or None.
+
+    The registry (``config/lab_proof_profiles.yaml``, OMN-19565) is the one place
+    a profile's mandatory checks are declared; a receipt judged against any other
+    list would be judged against a policy nobody reviewed.
+    """
+    raw = yaml.safe_load(registry.read_text(encoding="utf-8")) or {}
+    for profile in raw.get("profiles") or []:
+        if profile.get("repo") != f"OmniNode-ai/{repo}":
+            continue
+        for variant in profile.get("variants") or []:
+            if variant.get("proof_kind") == RUNTIME_PROOF_KIND:
+                return RuntimeProfile(
+                    profile_id=str(profile["profile_key"]),
+                    profile_version=str(profile["profile_version"]),
+                    mandatory_checks=frozenset(variant.get("mandatory_checks") or ()),
+                )
+    return None
+
+
+PR_SUBJECT_RE = re.compile(
+    r"^pr-subject (\S+)#(\d+) head=([0-9a-f]{40}) base=([0-9a-f]{40}) "
+    r"merge-base=([0-9a-f]{40}) diff-digest=(sha256:[0-9a-f]{64})$",
+    re.M,
+)
+
+
+@dataclass(frozen=True)
+class PrSubjectFacts:
+    """What the clone phase printed about one PR under proof (``pr_subject``)."""
+
+    repo: str
+    pr_number: int
+    head: str
+    base: str
+    merge_base: str
+    diff_digest: str
+
+
+def pr_subject_facts(clone: str) -> list[PrSubjectFacts]:
+    return [
+        PrSubjectFacts(repo, int(pr), head, base, merge_base, digest)
+        for repo, pr, head, base, merge_base, digest in PR_SUBJECT_RE.findall(clone)
+    ]
+
+
+def _lines(text: str, pattern: str) -> str:
+    return "; ".join(m.strip() for m in re.findall(pattern, text, re.M))
+
+
+def _check_map(
+    outputs: Mapping[str, str], ports: tuple[int, int]
+) -> dict[str, tuple[str, str]]:
+    """Judge check -> (receipt check name, the lines that decided it).
+
+    The receipt speaks the profile vocabulary (``EnumLabProofCheck``), because a
+    profile's ``mandatory_checks`` are named in it; the judge keeps its own
+    names, which the readback and every existing test use. Evidence is the
+    phase text the judge read, so a reader of the receipt sees what was read,
+    not only what was concluded.
+    """
+    clone = outputs.get("clone", "")
+    build = outputs.get("build", "")
+    probe = outputs.get("probe", "")
+    tests = outputs.get("tests", "")
+    return {
+        "head_matches": (
+            "subject_head_identity",
+            _lines(clone, r"^\S+#\d+ fetched head .*$"),
+        ),
+        "group_built": ("group_built", _lines(clone, r"^group-commit .*$")),
+        "stack_built": (
+            "stack_built",
+            _lines(build, r"^(?:build|up) rc=\d+.*$|^slot-migration FAILED$"),
+        ),
+        "image_identity": (
+            "runtime_image_identity",
+            _lines(probe, r"^(?:pkg-tree \S+ \S+ .*|file \S+ image=.*)$"),
+        ),
+        f"health_{ports[0]}": (
+            "runtime_main_healthy",
+            _lines(probe, rf"^port {ports[0]} HTTP .*$"),
+        ),
+        f"health_{ports[1]}": (
+            "runtime_effects_healthy",
+            _lines(probe, rf"^port {ports[1]} HTTP .*$"),
+        ),
+        "migration_gate_healthy": (
+            "migration_gate_healthy",
+            _lines(probe, r"^/?\S*migration-gate health=.*$"),
+        ),
+        "no_wiring_failures": (
+            "no_wiring_failures",
+            _lines(probe, r"^\S+ lines=\d+ autowire-fail=.*$"),
+        ),
+        "focused_tests": ("focused_tests", _lines(tests, r"^\S+ focused rc=.*$")),
+        "changed_path_live": (
+            "changed_path_live",
+            _lines(probe, r"^\s+\S+ mentions \S+: \d+$"),
+        ),
+    }
+
+
+#: A check that does not depend on the stack having come up. Every other check
+#: of a run whose stack never built is INDETERMINATE, whatever the judge read:
+#: a FAIL there is not a finding about the PR, and a PASS there (a port that
+#: answered healthy) came from some other stack, so the run learnt nothing about
+#: the PR either way (the readback's INCONCLUSIVE).
+_STACK_INDEPENDENT = frozenset({"head_matches", "group_built", "stack_built"})
+
+_EVIDENCE_LIMIT = 600
+
+
+def receipt_checks(
+    rb: Readback, outputs: Mapping[str, str], ports: tuple[int, int]
+) -> list[Any]:
+    """The judge's verdicts as ``ModelLabPassCheck`` rows, one per judged check."""
+    receipts = _receipts()
+    mapping = _check_map(outputs, ports)
+    built = rb.checks.get("stack_built", False)
+    rows: list[Any] = []
+    for key, ok in rb.checks.items():
+        name, lines = mapping.get(key, (key, ""))
+        evidence = lines or f"no line for {key} in the phase output"
+        evidence = f"prepr_runtime_pool.judge {key}: {evidence}"[:_EVIDENCE_LIMIT]
+        if not built and key not in _STACK_INDEPENDENT:
+            rows.append(
+                receipts.ModelLabPassCheck.indeterminate_check(
+                    name,
+                    "INDETERMINATE: the stack never built, so this was not "
+                    f"established. {evidence}"[:_EVIDENCE_LIMIT],
+                )
+            )
+        else:
+            rows.append(receipts.ModelLabPassCheck(name=name, ok=ok, evidence=evidence))
+    return rows
+
+
+@dataclass(frozen=True)
+class MintedReceipt:
+    key: str
+    result: str
+    token: str
+    reason: str
+    receipt_path: Path
+    event_path: Path
+
+
+def default_verifier_identity() -> str:
+    """The judge that mints a receipt, named apart from the lane that ran it.
+
+    The runner is the lane holding the host lease, on the pool host; the
+    verifier is this driver's pure judge, on the machine the driver runs on.
+    Receipt honesty (plan section 1) refuses a receipt whose two are one.
+    """
+    # The receipt is published on public repositories (its bus event and its
+    # check run), so the driver's machine is named by a stable digest of its
+    # host name, never the name itself: distinct per machine, identifying no one.
+    machine = hashlib.sha256(socket.gethostname().encode("utf-8")).hexdigest()[:10]
+    return f"prepr_runtime_pool.judge@driver-{machine}"
+
+
+def mint_pr_head_receipts(
+    rb: Readback,
+    outputs: Mapping[str, str],
+    host: PoolHost,
+    holder: str,
+    started: dt.datetime,
+    finished: dt.datetime,
+    verifier_identity: str,
+    out_dir: Path,
+    registry: Path = PROFILE_REGISTRY,
+) -> tuple[list[MintedReceipt], list[str]]:
+    """One ``pr-head`` receipt per PR the run proved, PASS or FAIL (OMN-19566).
+
+    Keyed by the exact head the clone fetched, never by the head a params file
+    asked for: a head that moved before the fetch is the run's
+    ``subject_head_identity`` FAIL, recorded against the head actually proved.
+    Each receipt is verified at mint time against its profile's mandatory
+    checks, and the token is written into its bus event. A PASS that lacks a
+    mandatory check (no ``LIVE_GREP``, so no ``changed_path_live``) is minted
+    as what it is and carries ``MISSING_MANDATORY_CHECK``.
+    """
+    receipts = _receipts()
+    minted: list[MintedReceipt] = []
+    notes: list[str] = []
+    ports = (host.main_port, host.effects_port)
+    facts = pr_subject_facts(outputs.get("clone", ""))
+    if not facts:
+        return minted, ["no pr-subject line in the clone output: no receipt minted"]
+    checks = receipt_checks(rb, outputs, ports)
+    result = (
+        receipts.EnumLabPassResult.PASS
+        if all(c.ok for c in checks)
+        else receipts.EnumLabPassResult.FAIL
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for fact in facts:
+        profile = runtime_profile(fact.repo, registry)
+        if profile is None:
+            notes.append(
+                f"no receipt for {fact.repo}#{fact.pr_number}: the registry has no "
+                f"{RUNTIME_PROOF_KIND} profile for it"
+            )
+            continue
+        try:
+            subject = receipts.ModelLabProofSubject(
+                repo=f"OmniNode-ai/{fact.repo}",
+                pr_number=fact.pr_number,
+                base_sha=fact.base,
+                merge_base_sha=fact.merge_base,
+                profile_id=profile.profile_id,
+                profile_version=profile.profile_version,
+                handler_kind=receipts.EnumLabProofHandlerKind.RUNTIME_IMAGE,
+                # the pool member's name, never its LAN address: the receipt
+                # is published on public repositories
+                host=host.name,
+                slot=f"{host.kind} {host.compose_project}",
+                runner_identity=f"{holder}@{host.name}",
+                verifier_identity=verifier_identity,
+                pr_diff_digest=fact.diff_digest,
+            )
+            receipt = receipts.ModelLabPassReceipt(
+                sha=fact.head,
+                lane=receipts.EnumLabLane.PR_HEAD,
+                started_at=started,
+                finished_at=finished,
+                result=result,
+                checks=tuple(checks),
+                agent_command_id=None,
+                subject=subject,
+            )
+        except ValueError as exc:
+            notes.append(
+                f"receipt for {fact.repo}#{fact.pr_number} refused at construction: {exc}"
+            )
+            continue
+        token, reason = receipts.verify_pr_head_receipt_at_live_head(
+            receipt,
+            live_head_sha=fact.head,
+            mandatory_checks=profile.mandatory_checks,
+            current_pr_diff_digest=fact.diff_digest,
+        )
+        event = receipts.build_pr_head_bus_event(
+            receipt,
+            verdict=token,
+            reason=reason,
+            mandatory_checks=profile.mandatory_checks,
+        )
+        stem = f"{fact.repo}-{fact.pr_number}-{fact.head}"
+        receipt_path = out_dir / f"{stem}.receipt.json"
+        event_path = out_dir / f"{stem}.event.json"
+        receipt_path.write_text(receipt.to_json(indent=2) + "\n", encoding="utf-8")
+        event_path.write_text(json.dumps(event, indent=2) + "\n", encoding="utf-8")
+        minted.append(
+            MintedReceipt(
+                key=receipts.pr_head_receipt_key_text(receipt),
+                result=receipt.result.value,
+                token=token.value,
+                reason=reason,
+                receipt_path=receipt_path,
+                event_path=event_path,
+            )
+        )
+    return minted, notes
+
+
+def render_receipts(minted: Sequence[MintedReceipt], notes: Sequence[str]) -> str:
+    lines = [
+        f"  receipt {m.key} result={m.result} verifier={m.token} ({m.reason}) "
+        f"file={m.receipt_path} event={m.event_path}"
+        for m in minted
+    ]
+    lines += [f"  receipt: {note}" for note in notes]
+    return "\n".join(lines)
+
+
+def publish_events(
+    minted: Sequence[MintedReceipt],
+    bus_lane: str,
+    bus_overlay: Path,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> list[str]:
+    """Publish each receipt's event through publish_lab_fact_event.py.
+
+    The same transport every lab fact takes (the overlay declares the lane's
+    protocol; credentials come from the environment and never from argv). That
+    script exits 0 on every publish-side failure, so what it printed is the
+    result, and it is returned for the readback rather than judged here.
+    """
+    results: list[str] = []
+    for m in minted:
+        done = runner(
+            [
+                sys.executable,
+                str(PUBLISH_LAB_FACT_PY),
+                "--event",
+                str(m.event_path),
+                "--bus-lane",
+                bus_lane,
+                "--bus-overlay",
+                str(bus_overlay),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=120,
+        )
+        said = (done.stdout.strip() or done.stderr.strip() or "no output").splitlines()
+        results.append(f"  publish {m.key}: rc={done.returncode} {said[-1][:240]}")
+    return results
+
+
+#: The workflow that posts the informational check run (OMN-19566 slice 3).
+CHECK_RUN_WORKFLOW = "lab-proof-receipt.yml"
+CHECK_RUN_WORKFLOW_REPO = "OmniNode-ai/omnibase_infra"
+
+
+def encode_receipt_input(receipt_path: Path) -> str:
+    """The receipt as the workflow's ``receipt_gzip_b64`` input."""
+    raw = receipt_path.read_bytes()
+    return base64.b64encode(gzip.compress(raw, mtime=0)).decode("ascii")
+
+
+def dispatch_check_runs(
+    minted: Sequence[MintedReceipt],
+    ref: str = "dev",
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> list[str]:
+    """Dispatch ``lab-proof-receipt.yml`` once per receipt, PASS or FAIL.
+
+    Check runs can only be created by a GitHub App, whose key lives in Actions
+    secrets, so the post is the workflow's; this only hands it the receipt.
+    The workflow re-reads the live head, recomputes the diff digest and pins
+    the profile from the registry, so nothing this driver says is taken on
+    trust there. A dispatch failure is reported, never raised: the receipt
+    file and its bus event are the record, the check run is its mirror.
+    """
+    results: list[str] = []
+    for m in minted:
+        done = runner(
+            [
+                "gh",
+                "workflow",
+                "run",
+                CHECK_RUN_WORKFLOW,
+                "--repo",
+                CHECK_RUN_WORKFLOW_REPO,
+                "--ref",
+                ref,
+                "-f",
+                f"receipt_gzip_b64={encode_receipt_input(m.receipt_path)}",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        said = (done.stdout.strip() or done.stderr.strip() or "no output").splitlines()
+        results.append(
+            f"  check-run dispatch {m.key}: rc={done.returncode} {said[-1][:240]}"
+        )
+    return results
+
+
 # --------------------------------------------------------------------------- run
 
 
@@ -949,22 +1380,22 @@ def read_params(path: Path) -> dict[str, str]:
 GROUP_MEMBER_RE = re.compile(r"^(\d+):([0-9a-f]{40})$")
 
 
-def group_members(spec: str) -> list[tuple[str, str]]:
-    """Parse INFRA_GROUP: space-separated ``<pr>:<full head sha>``, in queue order."""
+def group_members(spec: str, name: str = "INFRA_GROUP") -> list[tuple[str, str]]:
+    """Parse a group parameter: ``<pr>:<full head sha>``, in queue order."""
     members: list[tuple[str, str]] = []
     for item in spec.split():
         m = GROUP_MEMBER_RE.match(item)
         if m is None:
             raise ValueError(
-                f"INFRA_GROUP member {item!r} is not <pr number>:<40-hex head sha>"
+                f"{name} member {item!r} is not <pr number>:<40-hex head sha>"
             )
         members.append((m.group(1), m.group(2)))
     if len(members) < 2:
         raise ValueError(
-            "INFRA_GROUP needs at least two members; prove one PR with INFRA_PR"
+            f"{name} needs at least two members; prove one PR with {name[:-6]}PR"
         )
     if len({n for n, _ in members}) != len(members):
-        raise ValueError("INFRA_GROUP names a PR twice")
+        raise ValueError(f"{name} names a PR twice")
     return members
 
 
@@ -984,18 +1415,45 @@ def run_proof(
     log: Callable[[str], None] = lambda s: print(s, file=sys.stderr),
     base_probe: str | None = None,
     with_base_control: bool = False,
+    receipt_dir: Path | None = None,
+    verifier_identity: str | None = None,
+    publish: Callable[[Sequence[MintedReceipt]], list[str]] | None = None,
 ) -> tuple[int, str]:
     params = read_params(params_path)
-    if not any(params.get(k) for k in ("INFRA_PR", "INFRA_GROUP", "MARKET_PR")):
-        return EXIT_USAGE, "params name none of INFRA_PR, INFRA_GROUP, MARKET_PR"
+    if not any(
+        params.get(k) for k in ("INFRA_PR", "INFRA_GROUP", "MARKET_PR", "MARKET_GROUP")
+    ):
+        return (
+            EXIT_USAGE,
+            "params name none of INFRA_PR, INFRA_GROUP, MARKET_PR, MARKET_GROUP",
+        )
+    if params.get("MARKET_GROUP") and (
+        params.get("INFRA_GROUP") or params.get("INFRA_PR")
+    ):
+        other = "INFRA_GROUP" if params.get("INFRA_GROUP") else "INFRA_PR"
+        return (
+            EXIT_USAGE,
+            f"params name both {other} and MARKET_GROUP; one group per run: "
+            "a cross-repo group is not proved",
+        )
     if params.get("INFRA_PR") and params.get("INFRA_GROUP"):
         return (
             EXIT_USAGE,
             "params name both INFRA_PR and INFRA_GROUP; a run proves one or the other",
         )
+    if params.get("MARKET_PR") and params.get("MARKET_GROUP"):
+        return (
+            EXIT_USAGE,
+            "params name both MARKET_PR and MARKET_GROUP; a run proves one or the other",
+        )
     if params.get("INFRA_GROUP"):
         try:
             group_members(params["INFRA_GROUP"])
+        except ValueError as exc:
+            return EXIT_USAGE, str(exc)
+    if params.get("MARKET_GROUP"):
+        try:
+            group_members(params["MARKET_GROUP"], name="MARKET_GROUP")
         except ValueError as exc:
             return EXIT_USAGE, str(exc)
     now = now_fn()
@@ -1031,6 +1489,7 @@ def run_proof(
     ports = (host.main_port, host.effects_port)
     released, rwhy = False, "not attempted"
     base_text = base_probe
+    outputs: dict[str, str] = {}
     try:
         outputs = _run_stack(
             cfg,
@@ -1069,6 +1528,9 @@ def run_proof(
                     "INFRA_GROUP_TREE",
                     "MARKET_PR",
                     "MARKET_HEAD",
+                    "MARKET_GROUP",
+                    "MARKET_GROUP_BASE",
+                    "MARKET_GROUP_TREE",
                     "TESTS",
                 )
             }
@@ -1095,9 +1557,27 @@ def run_proof(
         log(f"lease {host.name}: {rwhy}")
     if not released:
         rb.notes.append(f"lease not released: {rwhy}")
+    finished_at = now_fn()
     text = render_readback(
-        rb, host, params, started, now_fn().strftime("%Y-%m-%dT%H:%M:%SZ")
+        rb, host, params, started, finished_at.strftime("%Y-%m-%dT%H:%M:%SZ")
     )
+    # OMN-19566: every proof, PASS, FAIL or INCONCLUSIVE, leaves one pr-head
+    # receipt per PR it proved, keyed by the exact head, beside its bus event.
+    minted, receipt_notes = mint_pr_head_receipts(
+        rb,
+        outputs,
+        host,
+        holder,
+        now,
+        max(finished_at, now),
+        verifier_identity or default_verifier_identity(),
+        receipt_dir or params_path.parent / "lab-proof-receipts",
+    )
+    receipt_text = render_receipts(minted, receipt_notes)
+    if receipt_text:
+        text += "\n" + receipt_text
+    if publish is not None and minted:
+        text += "\n" + "\n".join(publish(minted))
     # the ledger grammar takes PASS, FAIL or ABORTED on a surface RELEASE; an
     # INCONCLUSIVE run is released as ABORTED with the verdict in its text
     release_result = rb.outcome if rb.outcome in ("PASS", "FAIL") else "ABORTED"
@@ -1259,6 +1739,32 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
         type=Path,
         help="probe output of an earlier base control at the same dev, instead of building one",
     )
+    rn.add_argument(
+        "--receipt-dir",
+        type=Path,
+        help="where each run's pr-head receipts and events go (default: lab-proof-receipts beside --params)",
+    )
+    rn.add_argument(
+        "--verifier-identity",
+        help="the identity that mints the receipt (default: this driver's judge on this machine)",
+    )
+    rn.add_argument(
+        "--publish-bus-lane",
+        help="also publish each receipt's event on this CI bus lane (needs --bus-overlay)",
+    )
+    rn.add_argument(
+        "--bus-overlay",
+        type=Path,
+        help="omnimarket config/ci_bus_lanes.yaml, the declared transport for --publish-bus-lane",
+    )
+    rn.add_argument(
+        "--dispatch-check-run",
+        action="store_true",
+        help=(
+            "also dispatch lab-proof-receipt.yml per receipt, which posts the "
+            "informational lab-proof-receipt check run on the proven head"
+        ),
+    )
     rl = sub.add_parser("release", help="release a lease this holder left behind")
     rl.add_argument("--host", required=True)
     rl.add_argument("--holder", required=True)
@@ -1306,6 +1812,22 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
         ok, why = release_lease(cfg, tp, cfg.host(args.host), args.holder)
         print(why)
         return EXIT_PASS if ok else EXIT_LEASE_REFUSED
+    publisher: Callable[[Sequence[MintedReceipt]], list[str]] | None = None
+    if args.publish_bus_lane and args.bus_overlay is None:
+        print("--publish-bus-lane needs --bus-overlay", file=sys.stderr)
+        return EXIT_USAGE
+    if args.publish_bus_lane or args.dispatch_check_run:
+        lane, overlay = args.publish_bus_lane, args.bus_overlay
+        dispatch = bool(args.dispatch_check_run)
+
+        def publisher(minted: Sequence[MintedReceipt]) -> list[str]:
+            said: list[str] = []
+            if lane:
+                said += publish_events(minted, lane, overlay)
+            if dispatch:
+                said += dispatch_check_runs(minted)
+            return said
+
     code, text = run_proof(
         cfg,
         tp,
@@ -1318,6 +1840,9 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
         if args.base_probe
         else None,
         with_base_control=args.base_control,
+        receipt_dir=args.receipt_dir,
+        verifier_identity=args.verifier_identity,
+        publish=publisher,
     )
     print(text)
     return code

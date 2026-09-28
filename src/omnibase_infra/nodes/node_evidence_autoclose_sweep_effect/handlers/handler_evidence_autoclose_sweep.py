@@ -254,7 +254,14 @@ def _dod_verify_argv(ticket_id: str) -> list[str]:
     sweep job additionally asserts the binary resolves before any ticket is
     scanned, so the loud failure comes first.
     """
-    return [str(Path(sys.executable).parent / "onex"), "skill", "dod_verify", ticket_id]
+    return [
+        str(Path(sys.executable).parent / "onex"),
+        "skill",
+        "dod_verify",
+        ticket_id,
+        "--execution-audience",
+        "hosted",
+    ]
 
 
 # Injectable subprocess-runner signatures (real impls call `gh`/the dispatch

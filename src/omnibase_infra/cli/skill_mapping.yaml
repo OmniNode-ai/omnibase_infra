@@ -180,12 +180,11 @@ skills:
       - {name: ticket-id, payload_field: ticket_id, arg_type: string, positional: true, required: true}
       - {name: contract-path, payload_field: contract_path, arg_type: string}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+      - {name: execution-audience, payload_field: execution_audience, arg_type: string}
   # OMN-16106 first slice: companion-merge -> dod_verify -> governed Done
   # flip. Node-backed in omnibase_infra itself (not omnimarket) — the sweep
-  # shells out to `uv run onex skill dod_verify <ticket>` verbatim per
-  # ticket, so it must run from a locality where THAT dispatch already
-  # resolves (the omnibase_infra clone, same as every other `onex skill`
-  # invocation here). apply defaults false (DRY-RUN); pass --apply to let
+  # dispatches `onex skill dod_verify <ticket> --execution-audience hosted`
+  # from its own dispatch environment. apply defaults false (DRY-RUN); pass --apply to let
   # the sweep call the Linear mutation API for real.
   # OMN-17942 / OMN-16106 class (g). The other half of the creation gate: the
   # gate stops NEW tickets entering In Progress with no executable probe, and
@@ -497,7 +496,6 @@ skills:
       - {name: fix-only, payload_field: fix_only, arg_type: boolean, default: false}
       - {name: merge-only, payload_field: merge_only, arg_type: boolean, default: false}
       - {name: max-parallel-polish, payload_field: max_parallel_polish, arg_type: integer}
-      - {name: admin-fallback-threshold-minutes, payload_field: admin_fallback_threshold_minutes, arg_type: integer}
       - {name: verify, payload_field: verify, arg_type: boolean, default: false}
       - {name: verify-timeout-seconds, payload_field: verify_timeout_seconds, arg_type: integer}
       - {name: loop-until-done, payload_field: loop_until_done, arg_type: boolean, default: true}
