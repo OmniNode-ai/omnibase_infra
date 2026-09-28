@@ -601,6 +601,18 @@ def test_parse_applies_boolean_default_when_omitted() -> None:
     assert _parse_skill_args(mapping, ()) == {"dry_run": False}
 
 
+def test_dod_verify_skill_accepts_explicit_hosted_audience() -> None:
+    """The hosted autoclose sweep must carry its audience into the node input."""
+    mapping = load_skill_registry().get("dod_verify")
+    assert mapping is not None
+    payload = _parse_skill_args(
+        mapping, ("OMN-15359", "--execution-audience", "hosted")
+    )
+    assert payload["ticket_id"] == "OMN-15359"
+    assert payload["execution_audience"] == "hosted"
+    assert "execution_audience" not in _parse_skill_args(mapping, ("OMN-15359",))
+
+
 def test_parse_integer_coercion_and_failure() -> None:
     mapping = _mapping_with(
         ModelSkillArgSpec(

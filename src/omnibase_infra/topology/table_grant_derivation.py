@@ -318,7 +318,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     #
     # OMN-19550 and OMN-19833 added three more, for session_content,
     # pr_landing_state and pr_landing_transitions, and all three were DELETED
-    # here by the pin advance to 26bb7c636f5e, which carries omnimarket#2905
+    # here by the pin advance to 341957de4ffc, which carries omnimarket#2905
     # and #3000 -- the retiring pull requests the entries named in their own
     # comments. Same mechanism as the entries above and the same proof: the
     # expiry module went red on the bot's pin-advance pull request naming all
@@ -329,6 +329,47 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
     #
+    # OMN-19513: infra vendors both Claude hook event projection tables before
+    # omnimarket#2956 lands the node contract. Until the pin advances, these
+    # interim declarations keep the shipped table grants derivable. The expiry
+    # test tracks both entries and requires removal after the contract arrives.
+    # Retired by: omnimarket#2956 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:claude_agent_spans",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
+            "0000_create_claude_hook_events.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="claude_agent_spans",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
+                "0000_create_claude_hook_events.sql"
+            ),
+            access="read_write",
+            role="claude_agent_spans",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:claude_hook_events",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
+            "0000_create_claude_hook_events.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="claude_hook_events",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
+                "0000_create_claude_hook_events.sql"
+            ),
+            access="read_write",
+            role="claude_hook_events",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
