@@ -156,3 +156,41 @@ def test_runner_pool_spread_runs_off_the_fleet_it_watches() -> None:
     assert doc["jobs"]["runner-pool-spread"]["runs-on"] == "ubuntu-latest"
     triggers = doc.get("on", doc.get(True))
     assert "schedule" in triggers and "workflow_dispatch" in triggers
+
+
+def test_runner_pool_spread_reads_each_hosts_pools(tmp_path: Path) -> None:
+    """A host row's `pools:` prefixes count toward that host.
+
+    The live spread (2026-09-28): 44 omninode-runner on .201 and 16
+    omnipc2-ci-runner on .202 for omnibase-ci, and a customer-plane runner on
+    each of .201 and .202. Every one of those prefixes except omninode-runner is
+    declared under a host's `pools:` list, so a probe that reads only the host
+    row's own prefix sees one host and goes red on a spread fleet.
+    """
+    runners = (
+        [
+            _runner(f"omninode-runner-{n}", "self-hosted", "omnibase-ci")
+            for n in range(1, 45)
+        ]
+        + [
+            _runner(f"omnipc2-ci-runner-{n}", "self-hosted", "omnibase-ci")
+            for n in range(1, 17)
+        ]
+        + [
+            _runner("omninode-verify-runner-1", "self-hosted", "omnibase-verify"),
+            _runner("omnipc2-verify-runner-1", "self-hosted", "omnibase-verify"),
+            _runner(
+                "omninode-customer-plane-runner-1",
+                "self-hosted",
+                "omnibase-customer-plane",
+            ),
+            _runner(
+                "omnipc2-customer-plane-runner-1",
+                "self-hosted",
+                "omnibase-customer-plane",
+            ),
+        ]
+    )
+    result = _run(tmp_path, runners)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "undeclared" not in result.stdout, result.stdout
