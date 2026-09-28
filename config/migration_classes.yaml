@@ -117,6 +117,7 @@ migrations:
   forward/103_create_tenant_projection_writer_role.sql: forward-only # ALTER ROLE
   forward/105_create_ledger_chain.sql: expand-only
   forward/106_add_delegation_workflow_state_traffic_class.sql: forward-only # DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT CK_DELEGATION_WORKFLOW_STATE_TRAFFIC_CLASS
+  forward/108_create_pr_landing_workflow_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
   forward/nodes/node_canary_score_reducer/0001_create_capability_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0002_capability_scores_tenant_id_and_rls.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
@@ -137,6 +138,7 @@ migrations:
   forward/nodes/node_evidence_dashboard_reducer/0001_create_evidence_dashboard_projection_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT EVIDENCE_DASHBOARD_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT EVIDENCE_CO
   forward/nodes/node_evidence_dashboard_reducer/0002_grant_omninode_runtime_evidence_dashboard_tables.sql: expand-only
   forward/nodes/node_gateway_link_health_write_effect/0001_create_gateway_link_health.sql: forward-only # ALTER TABLE ALTER COLUMN; CREATE OR REPLACE
+  forward/nodes/node_gateway_link_health_write_effect/0002_revoke_omninode_runtime_gateway_link_health_status.sql: forward-only # REVOKE
   forward/nodes/node_hook_event_capture/0001_create_hook_events.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT HOOK_EVENTS_PKEY; ALTER TABLE ADD CONSTRAINT UQ_HOOK_EVENTS_TENANT_EVENT_S
   forward/nodes/node_hook_event_capture/0002_hook_events_tenant_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_hook_event_capture/0003_add_hook_events_envelope_id.sql: expand-only

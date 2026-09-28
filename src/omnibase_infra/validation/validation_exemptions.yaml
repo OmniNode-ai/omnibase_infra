@@ -112,6 +112,27 @@ pattern_exemptions:
     documentation:
       - OMN-12700 PR description
     ticket: OMN-12700
+  # OMN-19492: the GitHub webhook ingress observations are keyed by the PR's
+  # natural identity. entity_id is the name the dispatch result applier reads
+  # for the Kafka partition key (_resolve_partition_key), so every observation
+  # of one PR lands on one partition in order; its value is '<owner>/<repo>#<n>',
+  # a GitHub pull request, not an ONEX entity with a UUID.
+  - file_pattern: 'model_github_pr_state_observation\.py'
+    violation_pattern: "Field 'entity_id' should use UUID type instead of str"
+    reason: >
+      entity_id carries the '<owner>/<repo>#<n>' pull request identity as the per-PR Kafka partition key the dispatch result applier reads by field name; a GitHub pull request has no UUID.
+
+    documentation:
+      - OMN-19492 PR description
+    ticket: OMN-19492
+  - file_pattern: 'model_github_pr_merged_observation\.py'
+    violation_pattern: "Field 'entity_id' should use UUID type instead of str"
+    reason: >
+      entity_id carries the '<owner>/<repo>#<n>' pull request identity as the per-PR Kafka partition key the dispatch result applier reads by field name; a GitHub pull request has no UUID.
+
+    documentation:
+      - OMN-19492 PR description
+    ticket: OMN-19492
   # ==========================================================================
   # ContractLinter Exemptions (OMN-517)
   # ==========================================================================

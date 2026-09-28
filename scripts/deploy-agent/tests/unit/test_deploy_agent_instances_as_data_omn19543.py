@@ -238,12 +238,12 @@ class TestDev200Instance:
         )
 
     def test_dev_200_is_routed_nothing(self) -> None:
-        """No route names dev-200, so every command takes the default, and the
-        dev-200 agent skips it (a route to a stopped instance would stall every
-        omnimarket rebuild)."""
+        """No route names dev-200, so unmatched commands take the default, and
+        the dev-200 agent skips them (a route to a stopped instance would stall
+        every matching rebuild)."""
         table = load_routing_table(_REPO_ROOT)
         assert all(r.instance != "dev-200" for r in table.routes)
-        for requester in ("gha/omnimarket/123", "gha/omnibase_infra/9", "operator"):
+        for requester in ("gha/omnibase_infra/9", "operator"):
             assert table.route(EnumRuntimeLane.DEV, requester) == "dev-201"
 
     def test_dev_200_proves_omnimarket_only(self) -> None:

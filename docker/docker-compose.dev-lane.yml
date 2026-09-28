@@ -183,13 +183,13 @@ x-dev-lane-analytics-env: &dev_lane_analytics_env
 # for the reason the analytics block above states: an empty password renders a
 # non-empty DSN and moves the failure from compose render to first connect.
 #
-# ONLY the three writers whose declared relations resolve to ONE principal use
-# this. The delegation, savings and tenant-credentials writers span two schema
-# domains, no single DSN satisfies them, and they stay on the analytics anchor
-# under OMN-17454 — which owns the multi-principal mechanism. Moving one of
-# them here would trade a watermark refusal for a table refusal.
+# The single-domain internal writers use this as their only database binding.
+# OMN-17454's split writers also need it for registry reads and watermarks,
+# alongside the tenant binding below; neither principal can serve both domains.
 x-dev-lane-internal-projection-env: &dev_lane_internal_projection_env
   OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD must be set — a standalone internal-projection writer connects to omnidash_analytics as the non-BYPASSRLS omninode_runtime principal (OMN-18109), never as role_omnidash and never as the postgres superuser}@postgres:5432/omnidash_analytics"
+x-dev-lane-tenant-projection-env: &dev_lane_tenant_projection_env
+  ONEX_TENANT_DB_URL: "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?TENANT_PROJECTION_WRITER_PASSWORD must be set — a standalone tenant-projection writer connects as tenant_projection_writer (OMN-17454)}@postgres:5432/omnidash_analytics"
 # =============================================================================
 # STRICT AUTO-WIRING (OMN-17531)
 # =============================================================================
@@ -1296,7 +1296,8 @@ services:
       - -m
       - omnimarket.nodes.node_projection_delegation.handlers.handler_delegation
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_tenant_projection_env, *dev_lane_internal_projection_env, *dev_lane_broker_auth_env]
+      ONEX_DATABASE_TOPOLOGY_PROFILE: local
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.delegation-writer.consume.v1"
@@ -1451,7 +1452,8 @@ services:
       - -m
       - omnimarket.nodes.node_projection_savings.handlers.handler_savings
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_tenant_projection_env, *dev_lane_internal_projection_env, *dev_lane_broker_auth_env]
+      ONEX_DATABASE_TOPOLOGY_PROFILE: local
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.savings-writer.consume.v1"
@@ -1505,7 +1507,8 @@ services:
       - -m
       - omnimarket.nodes.node_projection_tenant_credentials.handlers.handler_tenant_credentials_projection
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_broker_auth_env]
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_tenant_projection_env, *dev_lane_internal_projection_env, *dev_lane_broker_auth_env]
+      ONEX_DATABASE_TOPOLOGY_PROFILE: local
       KAFKA_BROKERS: "redpanda:9092"
       KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
       KAFKA_CONSUMER_GROUP: "local.omnimarket-projections.tenant-credentials-writer.consume.v1"

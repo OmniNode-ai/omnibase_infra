@@ -870,9 +870,60 @@ def _build_runtime_handler_dependencies(
             }
         )
 
+    # OMN-19492: the GitHub webhook ingress verifies every delivery's HMAC with
+    # the App webhook secret. Like the gateway handlers above it gets a
+    # SecretResolver built from the deploy-rendered resolver config and never
+    # reads the secret from the environment itself. Only a lane whose profile
+    # maps the logical name gets the dependency; on every other lane the
+    # handler is built with no resolver and refuses each delivery, which is
+    # the fail-closed state (dead-lettered, never a silent success).
+    if gateway_secret_resolver_config_path:
+        webhook_dependencies = _github_webhook_ingress_dependencies(
+            gateway_secret_resolver_config_path
+        )
+        if webhook_dependencies is not None:
+            dependencies["HandlerGitHubWebhookIngress"] = webhook_dependencies
+
     if not dependencies:
         return None
     return dependencies
+
+
+def _github_webhook_ingress_dependencies(
+    config_path: Path,
+) -> dict[str, object] | None:
+    """The webhook ingress handler's resolver, or None when the lane maps no secret.
+
+    OMN-19492. Returns ``None`` (the handler then refuses every delivery) when
+    the rendered resolver config does not map the webhook secret's logical
+    name; raises ``ProtocolConfigurationError`` when the config itself cannot
+    be read, the same posture as the gateway block.
+    """
+    from omnibase_infra.nodes.node_github_webhook_ingress_effect.handlers.handler_github_webhook_ingress import (
+        WEBHOOK_SECRET_REF,
+    )
+    from omnibase_infra.runtime.models.model_secret_resolver_config import (
+        ModelSecretResolverConfig,
+    )
+    from omnibase_infra.runtime.secret_resolver import SecretResolver
+
+    try:
+        raw_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        resolver_config = ModelSecretResolverConfig.model_validate(raw_config)
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise ProtocolConfigurationError(
+            "GitHub webhook ingress dependency wiring requires a valid rendered "
+            f"secret-resolver config at {config_path}"
+        ) from exc
+    mapped = {mapping.logical_name for mapping in resolver_config.mappings}
+    if WEBHOOK_SECRET_REF not in mapped:
+        logger.info(
+            "GitHub webhook ingress: no secret-resolver mapping found for the "
+            "configured webhook secret reference on this lane; the ingress "
+            "handler will refuse every delivery"
+        )
+        return None
+    return {"secret_resolver": SecretResolver(config=resolver_config)}
 
 
 def load_runtime_config(

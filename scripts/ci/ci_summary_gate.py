@@ -2028,6 +2028,7 @@ def evaluate_external_contexts(
     expected: tuple[str, ...],
     *,
     now: datetime | None = None,
+    workflow_runs: list[dict[str, object]] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Return ``(failures, missing_or_pending)`` for the declared external contexts.
 
@@ -2043,16 +2044,19 @@ def evaluate_external_contexts(
 
     if not expected:
         return [], []
-    latest = latest_check_run_by_name(check_runs or [])
+    rows = latest_check_run_rows(check_runs or [])
     failures: list[str] = []
     unresolved: list[str] = []
     for context in expected:
-        state = latest.get(context)
-        if state is None or state.status != "completed":
+        raw = rows.get(context)
+        state = None if raw is None else _state_from_check_run(context, raw)
+        if raw is None or state is None or state.status != "completed":
             unresolved.append(context)
         elif state.conclusion in EXTERNAL_GOOD_CONCLUSIONS:
             continue
-        elif verdict_is_provisional(state, now):
+        elif verdict_is_provisional(state, now) or replacement_run_in_flight(
+            raw, workflow_runs
+        ):
             unresolved.append(context)
         else:
             failures.append(context)
@@ -2063,6 +2067,7 @@ def provisional_external_verdicts(
     check_runs: list[dict[str, object]] | None,
     expected: tuple[str, ...],
     now: datetime | None,
+    workflow_runs: list[dict[str, object]] | None = None,
 ) -> list[str]:
     """The subset of ``expected`` held PENDING by a due automatic replacement.
 
@@ -2074,13 +2079,17 @@ def provisional_external_verdicts(
 
     if not expected:
         return []
-    latest = latest_check_run_by_name(check_runs or [])
+    rows = latest_check_run_rows(check_runs or [])
     return sorted(
         context
         for context in expected
-        if (state := latest.get(context)) is not None
-        and state.status == "completed"
-        and verdict_is_provisional(state, now)
+        if (raw := rows.get(context)) is not None
+        and (state := _state_from_check_run(context, raw)).status == "completed"
+        and state.conclusion not in EXTERNAL_GOOD_CONCLUSIONS
+        and (
+            verdict_is_provisional(state, now)
+            or replacement_run_in_flight(raw, workflow_runs)
+        )
     )
 
 
@@ -2293,6 +2302,122 @@ def check_run_event_index(
     return index
 
 
+def check_run_workflow_run_id(raw: dict[str, object]) -> int | None:
+    """The Actions workflow-run id that wrote this check-run, or ``None``.
+
+    Read from the row's own ``html_url``/``details_url``
+    (``.../actions/runs/<run id>/job/<job id>``). ``None`` for a row no Actions
+    run wrote (a GitHub App) or whose URL is unreadable.
+    """
+
+    for key in ("html_url", "details_url"):
+        match = _RUN_ID_RE.search(str(raw.get(key) or ""))
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def own_workflow_run_ids(
+    jobs: list[dict[str, object]],
+    current_run_id: int | None = None,
+) -> frozenset[int]:
+    """The id of the workflow run this CI Summary job belongs to (OMN-17427).
+
+    From the explicit ``--current-run-id`` the poller passes, and from the
+    ``run_id`` every row of the run's own jobs payload carries, so a jobs fetch
+    that came back empty still knows which run it is.
+    """
+
+    ids: set[int] = set()
+    if current_run_id:
+        ids.add(current_run_id)
+    for raw in jobs:
+        try:
+            run_id = int(str(raw.get("run_id") or 0))
+        except (TypeError, ValueError):
+            continue
+        if run_id:
+            ids.add(run_id)
+    return frozenset(ids)
+
+
+def _run_int(raw: dict[str, object], key: str) -> int:
+    try:
+        return int(str(raw.get(key) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def replacement_run_in_flight(
+    raw: dict[str, object],
+    workflow_runs: list[dict[str, object]] | None,
+) -> bool:
+    """True while the producer of this non-green row is running AGAIN on this head.
+
+    OMN-17427. The OMN-18355 / OMN-17864 graces guess, from a clock, that a
+    replacement is on its way. This reads it from ``actions/runs?head_sha=``,
+    which the poller already fetches, and it holds for as long as the
+    replacement actually runs rather than for a fixed ten or twenty minutes.
+
+    MEASURED, omnibase_infra#4216 head 09f3839a: the Hostile Reviewer run
+    36336140596 was cancelled at 17:17:59Z by run 36336398239 of the same
+    workflow, created at 17:17:43Z for the same head. The replacement waited
+    for a runner and wrote its `Hostile Review Gate` row at 17:47:23Z,
+    concluding success. `CI Summary` (run 36336140897 attempt 1) reported
+    ``cancelled_without_replacement: cancelled 636s ago, past the 600s re-run
+    grace`` at 17:28:35Z while that replacement run was queued, and a rerun
+    with no change to the head passed. The same shape reddened
+    omnibase_infra#4218, #4219 and #4209 on 2026-09-27, each at 631-649s.
+
+    Two shapes count, and only two:
+
+    * the row's own run is not ``completed`` and its CURRENT attempt started
+      after the row concluded -- a re-run attempt of the same run;
+    * a NEWER run (higher id) of the same ``workflow_id``, for the same event,
+      is not ``completed`` -- a re-trigger such as the ``edited`` event.
+
+    FAIL-CLOSED: a row with no run URL, a run missing from the payload, or no
+    payload at all is not in flight. This never greens a row: it only holds
+    PENDING while the same producer is demonstrably producing a newer row for
+    this head. When that execution finishes, latest-wins takes its row; if it
+    wrote none, the red stands and fails on the next poll. The poller's
+    deadline still converts a sustained PENDING into FAILURE.
+    """
+
+    if not workflow_runs:
+        return False
+    run_id = check_run_workflow_run_id(raw)
+    if run_id is None:
+        return False
+    own = next((r for r in workflow_runs if _run_int(r, "id") == run_id), None)
+    if own is None:
+        return False
+    if str(own.get("status") or "") != "completed":
+        attempt_started = _parse_timestamp(
+            None if own.get("run_started_at") is None else str(own["run_started_at"])
+        )
+        row_completed = _parse_timestamp(
+            None if raw.get("completed_at") is None else str(raw["completed_at"])
+        )
+        if (
+            attempt_started is not None
+            and row_completed is not None
+            and attempt_started > row_completed
+        ):
+            return True
+    workflow_id = _run_int(own, "workflow_id")
+    if not workflow_id:
+        return False
+    event = str(own.get("event") or "")
+    return any(
+        _run_int(r, "workflow_id") == workflow_id
+        and _run_int(r, "id") > run_id
+        and str(r.get("event") or "") == event
+        and str(r.get("status") or "") != "completed"
+        for r in workflow_runs
+    )
+
+
 def resolve_check_run_event(
     raw: dict[str, object],
     events: dict[int, str],
@@ -2305,11 +2430,8 @@ def resolve_check_run_event(
     exactly the rows an allow list would have exempted for free.
     """
 
-    for key in ("html_url", "details_url"):
-        match = _RUN_ID_RE.search(str(raw.get(key) or ""))
-        if match:
-            return events.get(int(match.group(1)))
-    return None
+    run_id = check_run_workflow_run_id(raw)
+    return None if run_id is None else events.get(run_id)
 
 
 # OMN-18991 — the reason token a settled cancellation reports under.
@@ -2363,6 +2485,8 @@ def evaluate_external_sweep(
     now: datetime | None,
     conditional_exclusions: dict[str, ConditionalSweepExclusion] | None = None,
     pr_context: PullRequestContext | None = None,
+    own_run_ids: frozenset[int] = frozenset(),
+    workflow_runs: list[dict[str, object]] | None = None,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
     """Layer 5 — default-deny over every check-run nothing else accounts for.
 
@@ -2410,6 +2534,14 @@ def evaluate_external_sweep(
     for name, raw in sorted(latest_check_run_rows(check_runs).items()):
         if name in accounted:
             continue
+        # OMN-17427: a row THIS run wrote is one of its own jobs. Layers 1-3
+        # judge it from the jobs payload, and a job that payload does not list
+        # yet holds the verdict PENDING there. `in_run_names` is only the names
+        # listed when that payload was fetched, so without this a job created a
+        # second later (a skippable gate written straight to `skipped`) reads
+        # here as a red nothing names.
+        if own_run_ids and check_run_workflow_run_id(raw) in own_run_ids:
+            continue
         if resolve_check_run_event(raw, events) in SWEEP_NON_PR_EVENTS:
             continue
         if name in active:
@@ -2443,7 +2575,9 @@ def evaluate_external_sweep(
             # learn why a red row stopped being red.
             excluded.append(f"{name} ({state.conclusion}; {conditional.condition})")
             continue
-        if verdict_is_provisional(state, now):
+        if verdict_is_provisional(state, now) or replacement_run_in_flight(
+            raw, workflow_runs
+        ):
             # OMN-18991: PENDING, not a quiet pass. A replacement is
             # demonstrably due, so the poller looks again; when the grace
             # closes this same row reds through the branch below. Bounded by
@@ -2488,6 +2622,7 @@ def evaluate(
     conditional_sweep_exclusions: dict[str, ConditionalSweepExclusion] | None = None,
     pr_context: PullRequestContext | None = None,
     workflow_runs: list[dict[str, object]] | None = None,
+    current_run_id: int | None = None,
 ) -> tuple[int, str]:
     """Return ``(exit_code, human_report)`` for the current job snapshot.
 
@@ -2588,10 +2723,10 @@ def evaluate(
 
     # (4) OMN-15496 external contexts: cross-workflow checks on the PR head.
     external_failures, external_unresolved = evaluate_external_contexts(
-        check_runs, external_contexts, now=now
+        check_runs, external_contexts, now=now, workflow_runs=workflow_runs
     )
     external_provisional = provisional_external_verdicts(
-        check_runs, external_contexts, now
+        check_runs, external_contexts, now, workflow_runs
     )
 
     # (5) OMN-18960 default-deny external sweep: every check-run on the head
@@ -2638,6 +2773,8 @@ def evaluate(
             now=now,
             conditional_exclusions=conditional_sweep_exclusions,
             pr_context=pr_context,
+            own_run_ids=own_workflow_run_ids(jobs, current_run_id),
+            workflow_runs=workflow_runs,
         )
         if sweep_external
         else ([], [], [], [], [])
@@ -2957,6 +3094,14 @@ def main(argv: list[str] | None = None) -> int:
         "stricter reading.",
     )
     parser.add_argument(
+        "--current-run-id",
+        type=int,
+        default=None,
+        help="This workflow run's id (github.run_id). Check-runs this run wrote "
+        "are its own jobs, judged from --jobs-file, and the default-deny "
+        "external sweep never re-judges them (OMN-17427).",
+    )
+    parser.add_argument(
         "--event-actor",
         default=None,
         help="Login that triggered this run (github.actor), which is NOT always "
@@ -2988,6 +3133,7 @@ def main(argv: list[str] | None = None) -> int:
             actor=args.event_actor or "",
         ),
         workflow_runs=_load_workflow_runs(args.workflow_runs_file),
+        current_run_id=args.current_run_id,
         # The poller runs this module once per poll, so wall-clock IS the
         # observation time for the OMN-18355 cancellation grace. It is not a
         # caller-supplied input: there is no flag for it, so it cannot be

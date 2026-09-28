@@ -212,6 +212,11 @@ LOCAL_ONLY_KEYS: frozenset[str] = frozenset(
         "POSTGRES_USER",  # k8s uses Infisical-sourced DSN; local docker uses default "postgres"
         # Local filesystem paths — not meaningful in container images
         "OMNIBASE_INFRA_DIR",
+        # OMN-19492: the GitHub webhook ingress runs on the .201 dev lane only.
+        # The onex-dev cluster hosts the webhook DOOR (onex-api, which reads its
+        # own copy from the cluster secret store), not the ingress node, so no
+        # runtime Deployment there binds this key.
+        "GITHUB_WEBHOOK_SECRET",
         # OmniMemory crawl path — local server path, has no k8s equivalent
         "OMNIMEMORY_CRAWL_PATH_PREFIXES",
         # Local runtime surface and marketplace skill roots are Docker-runtime

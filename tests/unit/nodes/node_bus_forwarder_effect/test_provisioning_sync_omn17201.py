@@ -22,7 +22,7 @@ tenant-prefixed forms absent.
 
 WHY A PINNED LITERAL LIST AND NOT A CROSS-REPO IMPORT. omninode_infra is not on
 this repo's import path in CI, and vendoring its module would make one repo's
-tests depend on the other's checkout. Instead BOTH repos pin the same fifteen
+tests depend on the other's checkout. Instead BOTH repos pin the same
 wire-format literals independently -- this file from the contract's side,
 ``topic_constants.FORWARDER_MIRROR_TOPIC_UNION`` from the provisioner's side --
 so a one-sided edit fails a test in whichever repo made it, which is the
@@ -49,7 +49,7 @@ CONTRACT_PATH = (
     / "contract.yaml"
 )
 
-# The seventeen canonical topics that every tenant's wire set must contain.
+# The eighteen canonical topics that every tenant's wire set must contain.
 # Counterpart: omninode_infra docker/onex-api/topic_constants.py
 # ``FORWARDER_MIRROR_TOPIC_UNION`` / ``DEFAULT_TENANT_CANONICAL_TOPICS``.
 PROVISIONED_TENANT_CANONICAL_TOPICS: frozenset[str] = frozenset(
@@ -72,6 +72,8 @@ PROVISIONED_TENANT_CANONICAL_TOPICS: frozenset[str] = frozenset(
         # OMN-19439: the delegate-skill terminals, metadata-scrubbed.
         "onex.evt.omnimarket.delegate-skill-completed.v1",
         "onex.evt.omnimarket.delegate-skill-failed.v1",
+        # OMN-19593: signed GitHub webhook deliveries, inbound to the lab.
+        "onex.cmd.github.webhook-delivery.v1",
     }
 )
 
@@ -122,10 +124,11 @@ def test_each_hook_class_is_in_the_provisioned_set(topic: str) -> None:
 @pytest.mark.unit
 def test_pin_is_a_falsifiable_count() -> None:
     """8 pre-existing topics plus all seven governed capture topics = 15, plus
-    OMN-19439's two metadata-scrubbed delegate-skill terminals = 17.
+    OMN-19439's two metadata-scrubbed delegate-skill terminals = 17, plus
+    OMN-19593's inbound GitHub webhook delivery command = 18.
 
     A count assertion catches the case a set-equality edit would launder: an
     author who "fixes" a failure by editing BOTH sides of the pin at once still
     has to move this number, which is the line a reviewer reads.
     """
-    assert len(PROVISIONED_TENANT_CANONICAL_TOPICS) == 17
+    assert len(PROVISIONED_TENANT_CANONICAL_TOPICS) == 18

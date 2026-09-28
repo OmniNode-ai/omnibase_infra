@@ -272,6 +272,7 @@ databases:
           - object_type: TABLE
             objects:
               - delegation_workflow_state
+              - pr_landing_workflow_state
               - session_phase_state
             privileges: [INSERT, SELECT, UPDATE]
             schema: public
