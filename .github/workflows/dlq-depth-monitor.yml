@@ -42,6 +42,10 @@
 #       lane's reachability domain. That is a NETWORK-NAMESPACE fact, not a
 #       trust fact, and it is why this job now pins the label literally rather
 #       than reading a variable a routing flip can move underneath it.
+#       OMN-19894 superseded that pin: the broker is now a declared address
+#       any lab runner reaches, so the job runs on the lab pool the overlay
+#       names (vars.LAB_PROBE_RUNS_ON_JSON), a variable of its own that no
+#       trusted-CI routing flip touches.
 #
 #   (2) THE ADDRESS. `KAFKA_BOOTSTRAP_SERVERS: ${{ secrets.… || 'localhost:19092' }}`
 #       resolved to the literal every single run: no secret of that name
@@ -140,20 +144,12 @@ concurrency:
 jobs:
   dlq-depth-monitor:
     name: DLQ Depth Monitor (read-only)
-    # See "(1) THE RUNNER" above before changing this. Pinned literally, not
-    # read from a routing variable: the constraint is that this job must sit in
-    # the .201 host's network namespace, which no org-wide routing decision can
-    # satisfy and a routing flip must not be able to silently revoke.
-    #
-    # OMN-18602: the label moved from `omnibase-deploy` to the verify class.
-    # The constraint above is UNCHANGED and is why the pin is three labels, not
-    # two -- `host-201` is what keeps this job in the .201 network namespace,
-    # and `omnibase-verify` alone would admit the arm64 verify runners on the
-    # other lab hosts, which are in a different namespace entirely. The job is
-    # read-only (it is named so) and never needed the deploy runner's private
-    # clone tree; it was on that label only because the label happened to be
-    # the one host-scoped self-hosted pin that existed when it was written.
-    runs-on: [self-hosted, omnibase-verify, host-201]
+    # OMN-19894 (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check
+    # must not rely on one machine). Any runner of the overlay's pool
+    # (vars.LAB_PROBE_RUNS_ON_JSON): this job reads the lane over the network
+    # only (the broker declared in omnimarket config/ci_bus_lanes.yaml), and a
+    # runner on any lab host reaches it. No host label is written here.
+    runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
     timeout-minutes: 15
     permissions:
       contents: read

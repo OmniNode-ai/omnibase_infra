@@ -20,9 +20,10 @@
 #   docstring has the full 0/1/2 table). This workflow only schedules it,
 #   asserts the record artifact is present and non-empty, and uploads it.
 #
-# WHY host-201, AND WHY OUTSIDE THE RUNTIME CONTAINER
-#   The lab lane's broker has no route from a GitHub-hosted runner (the same
-#   reason provider-rung-canary.yml and the C12 producer pin this label). This
+# WHY A LAB-POOL RUNNER, AND WHY OUTSIDE THE RUNTIME CONTAINER
+#   The lab lane's broker has no route from a GitHub-hosted runner, so the job
+#   runs on the overlay's lab pool (vars.LAB_PROBE_RUNS_ON_JSON, OMN-19894),
+#   any host of which reaches the declared broker. This
 #   probe deliberately runs the CLI DIRECTLY on the runner host rather than
 #   `docker exec`-ing into omninode-runtime-effects (provider-rung-canary's
 #   pattern): AC2 measures the FRONT DOOR -- the command a lane operator runs
@@ -57,7 +58,12 @@ permissions:
 jobs:
   r1-front-door-probe:
     name: R1 front-door probe (dev lane, outside the runtime container)
-    runs-on: [self-hosted, omnibase-verify, host-201]
+    # OMN-19894 (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check
+    # must not rely on one machine). Any runner of the overlay's pool
+    # (vars.LAB_PROBE_RUNS_ON_JSON): this job reads the lane over the network
+    # only (the broker declared in omnimarket config/ci_bus_lanes.yaml), and a
+    # runner on any lab host reaches it. No host label is written here.
+    runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
     timeout-minutes: 15
 
     steps:
