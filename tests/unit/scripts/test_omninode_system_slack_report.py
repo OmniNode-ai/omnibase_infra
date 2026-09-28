@@ -2718,3 +2718,62 @@ def test_an_unparseable_verdict_is_a_warning_not_a_green(
     )
     assert "(WARNING)" in rows[0]
     assert "unparseable" in rows[0]
+
+
+# --------------------------------------------------------------------------
+# OMN-19852: GitHub reads on the read-only App token, visibly.
+# --------------------------------------------------------------------------
+
+
+def test_reader_token_file_moves_github_reads_and_says_so(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_outage_http(lane_ports), docker_state=_outage_docker()
+    )
+    token_file = tmp_path / "reader-token"
+    token_file.write_text("ghs_fixture-not-a-token\n")
+    report = _run(
+        FIXED_SCRIPT,
+        tmp_path,
+        bin_dir,
+        extra_env={"OMNINODE_GH_READ_TOKEN_FILE": str(token_file)},
+    )
+    # A usable token is an OK row, never an issue line.
+    assert "`read-identity`" not in report, report
+
+
+def test_stale_reader_token_file_is_a_warning_not_silence(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_outage_http(lane_ports), docker_state=_outage_docker()
+    )
+    token_file = tmp_path / "reader-token"
+    token_file.write_text("ghs_fixture-not-a-token\n")
+    old = time.time() - 7200
+    os.utime(token_file, (old, old))
+    report = _run(
+        FIXED_SCRIPT,
+        tmp_path,
+        bin_dir,
+        extra_env={"OMNINODE_GH_READ_TOKEN_FILE": str(token_file)},
+    )
+    assert "WARNING `read-identity`" in report, report
+    assert "fell back to GH_PAT" in report, report
+
+
+def test_missing_reader_token_file_is_a_warning(
+    tmp_path: Path, lane_ports: dict[str, str]
+) -> None:
+    bin_dir = _make_stub_bin(
+        tmp_path, http=_outage_http(lane_ports), docker_state=_outage_docker()
+    )
+    report = _run(
+        FIXED_SCRIPT,
+        tmp_path,
+        bin_dir,
+        extra_env={"OMNINODE_GH_READ_TOKEN_FILE": str(tmp_path / "absent")},
+    )
+    assert "WARNING `read-identity`" in report, report
+    assert "missing, unreadable or empty" in report, report

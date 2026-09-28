@@ -703,3 +703,92 @@ def test_probe_has_no_third_party_imports() -> None:
     assert not unexpected, (
         f"non-stdlib or unvetted imports would break the host run: {unexpected}"
     )
+
+
+# ---------------------------------------------------------------------------
+# OMN-19852: the reporter reads on the read-only App token, which has no
+# Administration permission, so the protection endpoint answers 403.
+# ---------------------------------------------------------------------------
+
+
+def _app_token_scenario(tmp_path: Path, branch_doc: object) -> Path:
+    scenario = tmp_path / "absent-app"
+    shutil.copytree(FIXTURES / "absent", scenario)
+    (
+        scenario
+        / "repos_OmniNode_ai_omnibase_infra_branches_dev_protection_required_status_checks.json"
+    ).write_text(
+        json.dumps(
+            {
+                "__error__": "HTTP 403 on /repos/OmniNode-ai/omnibase_infra/branches/dev/protection/required_status_checks"
+            }
+        )
+    )
+    (scenario / "repos_OmniNode_ai_omnibase_infra_branches_dev.json").write_text(
+        json.dumps(branch_doc)
+    )
+    return scenario
+
+
+def _run_scenario(scenario: Path) -> list[str]:
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    env.update(
+        {
+            "OMNINODE_CI_PROBE_FIXTURE_DIR": str(scenario),
+            "OMNINODE_CI_PROBE_REPOS": "omnibase_infra",
+            "OMNINODE_CI_PROBE_NOW": "2026-07-30T20:00:00Z",
+        }
+    )
+    proc = subprocess.run(
+        ["python3", str(PROBE), "--skip-zero-job-scan"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    return [r for r in proc.stdout.splitlines() if r.strip()]
+
+
+def test_protection_403_reads_required_contexts_from_the_branch(tmp_path: Path) -> None:
+    """On the App token the outage replay must still name the absent context."""
+    scenario = _app_token_scenario(
+        tmp_path,
+        {
+            "name": "dev",
+            "protected": True,
+            "protection": {
+                "enabled": True,
+                "required_status_checks": {
+                    "enforcement_level": "everyone",
+                    "contexts": [REQUIRED_CONTEXT],
+                    "checks": [{"context": REQUIRED_CONTEXT, "app_id": 15368}],
+                },
+            },
+        },
+    )
+    rows = _run_scenario(scenario)
+    crit = criticals(rows)
+    assert len(crit) == 1, "\n".join(rows)
+    assert REQUIRED_CONTEXT in crit[0] and f"#{OUTAGE_PR}" in crit[0], crit[0]
+    assert warnings(rows) == [], "\n".join(rows)
+
+
+def test_protection_403_on_an_unprotected_branch_requires_nothing(
+    tmp_path: Path,
+) -> None:
+    scenario = _app_token_scenario(tmp_path, {"name": "dev", "protected": False})
+    rows = _run_scenario(scenario)
+    assert criticals(rows) == [] and warnings(rows) == [], "\n".join(rows)
+
+
+def test_reporter_moves_github_reads_to_the_reader_token_file() -> None:
+    """The reporter swaps GH_PAT for the reader token and says so either way."""
+    text = REPORTER.read_text(encoding="utf-8")
+    assert "OMNINODE_GH_READ_TOKEN_FILE" in text
+    assert re.search(r"^\s+check_gh_read_identity$", text, re.M), (
+        "not wired into collect()"
+    )
+    assert "github|WARNING|read-identity|" in text
