@@ -1,0 +1,174 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# lab-proof-receipt.yml: the informational `lab-proof-receipt` check run on a
+# PR head (OMN-19566, T2 slice 3 of the lab-proof plan, epic OMN-19564).
+#
+# WHAT IT DOES. The lab pool driver (prepr_runtime_pool.py run
+# --dispatch-check-run) mints one pr-head receipt per PR it proves, PASS or
+# FAIL, and dispatches this workflow with that receipt. The job reads the PR's
+# LIVE head from the API, recomputes the PR's diff digest from a fresh clone
+# with the verifier's own command, pins the profile and its mandatory checks
+# from config/lab_proof_profiles.yaml (the typed registry's --pin), runs the
+# offline verifier, and posts one check run named `lab-proof-receipt` on the
+# PROVEN head: `success` only for the verifier's ACCEPTED, `failure` with the
+# token in its title for anything else.
+#
+# WHY IT IS NEVER A REQUIRED CONTEXT. A check run posted on the PR head sha
+# never appears on a merge_group build, so a required context of this name
+# would hold every queued PR until it timed out. The required context, when a
+# repository reaches its proof bar, is the separate `lab-proof` job (T20,
+# OMN-19584), which re-verifies against the live head. That rollout is the
+# operator's; this workflow only makes the proof visible on the PR.
+#
+# WHY A DISPATCHED WORKFLOW. Check runs can only be created by a GitHub App.
+# The onexbot installation (app 3342522) carries checks: write org-wide and
+# its key lives only in Actions secrets, so the post happens here, narrowed to
+# the one repository the receipt names. Nothing new is granted.
+#
+# WHAT A DISPATCHER CAN AND CANNOT CLAIM. The receipt is an input, so whoever
+# can dispatch this workflow chooses the check rows it carries. What they
+# cannot choose: the head (read live), the diff digest (recomputed here), the
+# profile and its mandatory checks (read from the reviewed registry), and the
+# runner/verifier distinctness and carry-over rules (the verifier's). That is
+# acceptable for an informational check and is exactly why it is not the gate.
+name: lab-proof-receipt
+
+on:
+  workflow_dispatch:
+    inputs:
+      receipt_gzip_b64:
+        description: >-
+          The pr-head receipt JSON, gzip-compressed then base64-encoded
+          (prepr_runtime_pool.py encodes it; a receipt is a few KB).
+        required: true
+        type: string
+      details_url:
+        description: Optional link for the check run (for example, the proof's readback).
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  post:
+    name: Post lab-proof-receipt
+    runs-on: >-
+      ${{
+        fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout the verifier
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up CI Python environment
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-key-prefix: uv-lab-proof-receipt
+          cache-enabled: "false"
+
+      - name: Decode the receipt and read its subject
+        id: receipt
+        env:
+          RECEIPT_B64: ${{ inputs.receipt_gzip_b64 }}
+        run: |
+          set -euo pipefail
+          printf '%s' "${RECEIPT_B64}" | base64 -d | gunzip >"${RUNNER_TEMP}/receipt.json"
+          uv run python - "${RUNNER_TEMP}/receipt.json" >>"${GITHUB_OUTPUT}" <<'PY'
+          import json
+          import re
+          import sys
+
+          doc = json.load(open(sys.argv[1], encoding="utf-8"))
+          subject = doc.get("subject") or {}
+          repo = str(subject.get("repo", ""))
+          pr = str(subject.get("pr_number", ""))
+          if doc.get("lane") != "pr-head":
+              sys.exit(f"not a pr-head receipt: lane={doc.get('lane')!r}")
+          if not re.fullmatch(r"OmniNode-ai/[A-Za-z0-9._-]+", repo):
+              sys.exit(f"subject repo {repo!r} is not an OmniNode-ai repository")
+          if not re.fullmatch(r"[1-9][0-9]*", pr):
+              sys.exit(f"subject pr_number {pr!r} is not a PR number")
+          print(f"repo={repo}")
+          print(f"name={repo.split('/', 1)[1]}")
+          print(f"pr={pr}")
+          print(f"kind={subject.get('handler_kind', '')}")
+          PY
+
+      # Narrowed to the one repository the receipt names, and to what the steps
+      # below call: pulls/{n} (pull-requests), the clone (contents), the POST
+      # (checks: write), and metadata, which every installation token carries.
+      - name: Mint onexbot app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: ${{ steps.receipt.outputs.name }}
+          permission-checks: write
+          permission-contents: read
+          permission-pull-requests: read
+          permission-metadata: read
+
+      - name: Read the live head and recompute the diff digest
+        id: live
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ steps.receipt.outputs.repo }}
+          PR: ${{ steps.receipt.outputs.pr }}
+        run: |
+          set -euo pipefail
+          head=$(gh api "repos/${REPO}/pulls/${PR}" --jq .head.sha)
+          base=$(gh api "repos/${REPO}/pulls/${PR}" --jq .base.ref)
+          clone="${RUNNER_TEMP}/subject"
+          rm -rf "${clone}"
+          git clone --quiet --filter=blob:none --no-checkout \
+            "https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git" "${clone}"
+          git -C "${clone}" fetch --quiet origin "+refs/pull/${PR}/head:refs/remotes/pr/head"
+          git -C "${clone}" cat-file -e "${head}^{commit}"
+          merge_base=$(git -C "${clone}" merge-base "origin/${base}" "${head}")
+          digest=$(uv run python scripts/ci/lab_pass_receipt.py pr-diff-digest \
+            --repo-dir "${clone}" --merge-base "${merge_base}" --head "${head}")
+          echo "live head ${head} (base ${base}, merge base ${merge_base}, digest ${digest})"
+          {
+            echo "head=${head}"
+            echo "digest=${digest}"
+          } >>"${GITHUB_OUTPUT}"
+
+      - name: Verify at the live head and post the check run
+        env:
+          LAB_PROOF_CHECK_TOKEN: ${{ steps.app-token.outputs.token }}
+          HEAD_SHA: ${{ steps.live.outputs.head }}
+          DIGEST: ${{ steps.live.outputs.digest }}
+          DETAILS_URL: ${{ inputs.details_url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPO: ${{ steps.receipt.outputs.repo }}
+          KIND: ${{ steps.receipt.outputs.kind }}
+        run: |
+          set -euo pipefail
+          # The profile and its mandatory checks come from the reviewed
+          # registry, through its typed model, never from the dispatcher.
+          uv run python scripts/ci/validate_lab_proof_profiles.py \
+            --registry config/lab_proof_profiles.yaml \
+            --pin "${REPO}" "${KIND}" >"${RUNNER_TEMP}/pin.json"
+          uv run python scripts/ci/lab_pass_receipt.py post-pr-head-check \
+            --receipt "${RUNNER_TEMP}/receipt.json" \
+            --head-sha "${HEAD_SHA}" \
+            --profile-pin "${RUNNER_TEMP}/pin.json" \
+            --current-pr-diff-digest "${DIGEST}" \
+            --details-url "${DETAILS_URL:-${RUN_URL}}" \
+            | tee "${RUNNER_TEMP}/posted.json"
+          {
+            echo "## lab-proof-receipt"
+            echo ""
+            echo '```json'
+            cat "${RUNNER_TEMP}/posted.json"
+            echo '```'
+          } >>"${GITHUB_STEP_SUMMARY}"
