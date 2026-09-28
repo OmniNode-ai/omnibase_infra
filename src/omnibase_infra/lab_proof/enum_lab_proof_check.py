@@ -8,7 +8,7 @@ evaluates exactly the checks a row names. A name outside this set is refused by
 the registry validator, so a misspelled check cannot silently stop being
 required.
 
-Ticket: OMN-19565
+Ticket: OMN-19565, OMN-19930
 """
 
 from __future__ import annotations
@@ -28,6 +28,10 @@ class EnumLabProofCheck(StrEnum):
     CONSUMER_IMPORT_SMOKE = "consumer_import_smoke"
     NO_WIRING_FAILURES = "no_wiring_failures"
     GOLDEN_CHAIN_DELEGATION = "golden_chain_delegation"
+    # Board checks run by node_board_probe_effect whose surface class is
+    # lab_hardware (OMN-19930): the lab lane's gateway forwarder is up and its
+    # cloud leg refuses no inbound topic.
+    FORWARDER_REFUSED_TOPIC = "forwarder_refused_topic"
     # Hand-run recipe checks (profiles with execution manual_recipe). Declared so
     # a hand-run row names its checks in the same vocabulary a node row does.
     RUNTIME_IMAGE_IDENTITY = "runtime_image_identity"
