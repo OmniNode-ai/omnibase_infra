@@ -34,6 +34,35 @@ CREATE TABLE IF NOT EXISTS omninode_internal.demo_readiness_latest (
                OR status = 'UNCONFIGURED')
 );
 
+-- COLUMN RECONCILIATION: one guarded ADD COLUMN per declared column, so
+-- CREATE TABLE IF NOT EXISTS stays idempotent in SHAPE, not just existence.
+ALTER TABLE omninode_internal.demo_readiness_latest
+    ADD COLUMN IF NOT EXISTS node_id                  TEXT;
+ALTER TABLE omninode_internal.demo_readiness_latest
+    ADD COLUMN IF NOT EXISTS run_id                   TEXT;
+ALTER TABLE omninode_internal.demo_readiness_latest
+    ADD COLUMN IF NOT EXISTS status                   TEXT;
+ALTER TABLE omninode_internal.demo_readiness_latest
+    ADD COLUMN IF NOT EXISTS dashboard_configuration  TEXT;
+ALTER TABLE omninode_internal.demo_readiness_latest
+    ADD COLUMN IF NOT EXISTS observed_at              TIMESTAMPTZ;
+ALTER TABLE omninode_internal.demo_readiness_latest
+    ADD COLUMN IF NOT EXISTS source_event_id          UUID;
+ALTER TABLE omninode_internal.demo_readiness_latest
+    ADD COLUMN IF NOT EXISTS evidence_path            TEXT;
+ALTER TABLE omninode_internal.demo_readiness_latest
+    ADD COLUMN IF NOT EXISTS dry_run                  BOOLEAN;
+ALTER TABLE omninode_internal.demo_readiness_latest
+    ADD COLUMN IF NOT EXISTS failure_count            INTEGER;
+ALTER TABLE omninode_internal.demo_readiness_latest
+    ADD COLUMN IF NOT EXISTS demo_blocker_count       INTEGER;
+ALTER TABLE omninode_internal.demo_readiness_latest
+    ADD COLUMN IF NOT EXISTS demo_degraded_count      INTEGER;
+ALTER TABLE omninode_internal.demo_readiness_latest
+    ADD COLUMN IF NOT EXISTS total_finding_count      INTEGER;
+ALTER TABLE omninode_internal.demo_readiness_latest
+    ADD COLUMN IF NOT EXISTS projection_cursor        BIGSERIAL;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_demo_readiness_projection_cursor
     ON omninode_internal.demo_readiness_latest (projection_cursor);
 
