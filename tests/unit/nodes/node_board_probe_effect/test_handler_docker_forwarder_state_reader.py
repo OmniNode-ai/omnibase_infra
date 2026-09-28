@@ -25,8 +25,8 @@ from aiokafka.errors import TopicAuthorizationFailedError
 from omnibase_infra.event_bus import kafka_transport
 from omnibase_infra.event_bus.kafka_transport import KafkaTransport
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
-from omnibase_infra.nodes.node_board_probe_effect.adapters.adapter_docker_forwarder_state_reader import (
-    AdapterDockerForwarderStateReader,
+from omnibase_infra.nodes.node_board_probe_effect.handlers.handler_docker_forwarder_state_reader import (
+    HandlerDockerForwarderStateReader,
     parse_refused_topics,
 )
 from omnibase_infra.nodes.node_board_probe_effect.models import (
@@ -100,7 +100,7 @@ class _Runner:
 
 
 def _observe(runner: _Runner):  # type: ignore[no-untyped-def]
-    reader = AdapterDockerForwarderStateReader(runner=runner, now=lambda: NOW)
+    reader = HandlerDockerForwarderStateReader(runner=runner, now=lambda: NOW)
     return asyncio.run(reader.observe(_request()))
 
 
