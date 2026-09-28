@@ -34,6 +34,7 @@ from pathlib import Path
 import yaml
 
 from omnibase_infra.backends.backend_probe import (
+    ConsumerGroupDescribeDeniedError,
     ConsumerGroupLivenessUnknownError,
     live_consumer_groups,
 )
@@ -42,6 +43,7 @@ from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 
 __all__ = [
     "REBIND_WINDOW_FAILURE_CLASS",
+    "DelegateLocusAclRefusedError",
     "DelegateLocusRefusedError",
     "contract_command_topic",
     "contract_terminal_topic",
@@ -97,6 +99,21 @@ class DelegateLocusRefusedError(RuntimeError):
     when the lane cannot be reached would reproduce it exactly, with the
     added insult of having been asked not to.
     """
+
+
+class DelegateLocusAclRefusedError(DelegateLocusRefusedError):
+    """The refusal is a missing broker grant, not a missing lane (OMN-19914).
+
+    Raised when every consumer group bound to the command topic was hidden
+    from this principal by the broker. Its class name is what the written
+    transport refusal records as ``transport_error_type``, so a reader of the
+    receipt sees "grant missing" without parsing prose, and its message names
+    the group(s) and the exact DESCRIBE grant that would let the probe answer.
+    """
+
+    def __init__(self, message: str, *, group_ids: tuple[str, ...]) -> None:
+        super().__init__(message)
+        self.group_ids = group_ids
 
 
 def contract_terminal_topic(contract_path: Path) -> str:
@@ -344,6 +361,15 @@ def _assert_dispatch_viable(
                 bootstrap_servers=kafka_bootstrap,
                 timeout=_LIVENESS_TIMEOUT_SECONDS,
             )
+        except ConsumerGroupDescribeDeniedError as exc:
+            raise DelegateLocusAclRefusedError(
+                f"cannot confirm a deployed orchestrator is consuming "
+                f"'{command_topic}': {exc} Refusing rather than running here and "
+                "reporting it as a lane result. Add the grant to the lane's "
+                "declared broker ACLs and apply them, or pass --locus "
+                "in-process to run it locally on purpose.",
+                group_ids=exc.group_ids,
+            ) from exc
         except ConsumerGroupLivenessUnknownError as exc:
             raise DelegateLocusRefusedError(
                 "cannot confirm a deployed orchestrator is consuming "
