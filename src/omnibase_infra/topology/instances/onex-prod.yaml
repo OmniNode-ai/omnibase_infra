@@ -82,6 +82,7 @@ databases:
               - delegate_skill_command_claims
               - dod_verify_runs
               - gateway_link_health
+              - lab_container_memory_window
               - lab_lane_health
               - live_events
               - log_entries
