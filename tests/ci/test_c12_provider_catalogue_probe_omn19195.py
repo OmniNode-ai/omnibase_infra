@@ -358,7 +358,10 @@ def test_the_workflow_cannot_soften_its_verdict() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "continue-on-error" not in text
     assert "|| true" not in text
-    assert "runs-on: [self-hosted, omnibase-verify, host-201]" in text
+    # OMN-19894: beside the resolved lane's docker daemon, as that lane's
+    # overlay entry declares it; never a host label written here.
+    assert "runs-on: ${{ fromJSON(needs.resolve-lane.outputs.docker_runs_on) }}" in text
+    assert "host-201" not in text
     # No pull_request trigger: a path-scoped PR job sits in neither required
     # surface and the advisory-job gate refuses it (the C11 finding).
     triggers = yaml.safe_load(text)[True]  # PyYAML reads the bare `on` key as True

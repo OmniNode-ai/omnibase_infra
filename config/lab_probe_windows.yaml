@@ -26,8 +26,13 @@
 #   lane                  what the probe reads, as the workflow itself names it:
 #                           job_name  a job named "... (<lane> lane)"
 #                           run_name  the run title's lane= token (its scheduled default)
-#                           runs_on   the runner label every job is pinned to
-#                                     (omnipc2-customer is the no-checkout customer machine, .202)
+#                           runs_on   a runner label every job is placed on: a literal
+#                                     label, or the pool a `fromJSON(vars.NAME)` placement
+#                                     resolves to from the live Actions variables (repository,
+#                                     then organisation), read by the CI job before the check
+#                                     (omnipc2-customer is the no-checkout customer machine;
+#                                     omnibase-verify is the verify pool C13, C14 and C29 use
+#                                     since omninode_infra#1725 made them host-agnostic)
 #                           none      the workflow names no lane; `reads` says what it reads
 #   max_duration_minutes  the longest `needs` chain of job timeout-minutes
 #                         (GitHub's default of 360 for a job that sets none).
@@ -71,7 +76,7 @@ probes:
     cron: ['27 2,8,14,20 * * *']
     lane: dev
     lane_source: job_name
-    max_duration_minutes: 10
+    max_duration_minutes: 15
   - id: C28
     name: consumer flow
     repo: omnibase_infra
@@ -79,7 +84,7 @@ probes:
     cron: ['13 0,6,12,18 * * *']
     lane: dev
     lane_source: job_name
-    max_duration_minutes: 30
+    max_duration_minutes: 35
   - id: provider-rung
     name: provider-rung liveness canary
     repo: omnibase_infra
@@ -87,13 +92,13 @@ probes:
     cron: ['47 2,8,14,20 * * *']
     lane: dev
     lane_source: job_name
-    max_duration_minutes: 10
+    max_duration_minutes: 15
   - id: C13
     name: customer-local delegation
     repo: omninode_infra
     workflow: .github/workflows/c13-customer-local-delegation.yml
     cron: ['29 4,16 * * *']
-    lane: omnipc2-customer
+    lane: omnibase-verify
     lane_source: runs_on
     max_duration_minutes: 45
   - id: C14
@@ -101,7 +106,7 @@ probes:
     repo: omninode_infra
     workflow: .github/workflows/c14-customer-local-routing.yml
     cron: ['41 5,17 * * *']
-    lane: omnipc2-customer
+    lane: omnibase-verify
     lane_source: runs_on
     max_duration_minutes: 30
   - id: C29
@@ -109,7 +114,7 @@ probes:
     repo: omninode_infra
     workflow: .github/workflows/c29-customer-byo-key-delegation.yml
     cron: ['53 4,16 * * *']
-    lane: omnipc2-customer
+    lane: omnibase-verify
     lane_source: runs_on
     max_duration_minutes: 30
   - id: C17

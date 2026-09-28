@@ -599,7 +599,9 @@ def test_the_workflow_cannot_soften_its_verdict() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "continue-on-error" not in text
     assert "|| true" not in text
-    assert "runs-on: [self-hosted, omnibase-verify, host-201]" in text
+    # OMN-19894: beside the resolved lane, as its overlay entry declares.
+    assert "runs-on: ${{ fromJSON(needs.resolve-lane.outputs.docker_runs_on) }}" in text
+    assert "host-201" not in text
     triggers = yaml.safe_load(text)[True]  # PyYAML reads the bare `on` key as True
     assert set(triggers) == {"schedule", "workflow_dispatch"}
     assert 'exit "${status}"' in text
@@ -619,6 +621,8 @@ def test_the_workflow_cannot_soften_its_verdict() -> None:
 def test_the_workflow_deploys_nothing() -> None:
     text = WORKFLOW.read_text(encoding="utf-8").lower()
     body = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+    # The lane selector names the compose project it reads; that is not a verb.
+    body = body.replace("compose_project=", "")
     for verb in ("compose", "restart", "deploy-runtime", "docker run", "docker stop"):
         assert verb not in body, verb
 

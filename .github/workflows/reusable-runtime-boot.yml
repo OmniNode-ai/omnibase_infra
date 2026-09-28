@@ -43,7 +43,7 @@ on:
         required: true
         type: string
       runtime_host:
-        description: "Runtime + postgres + redpanda host. localhost in compose mode; 192.168.86.201 in real mode."
+        description: "Runtime + postgres + redpanda host. localhost in compose mode; in real mode, the lab host the caller passes (never a literal in this file)."
         required: false
         type: string
         default: "localhost"
