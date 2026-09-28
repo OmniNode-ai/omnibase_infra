@@ -124,6 +124,7 @@ jobs:
         with:
           lanes-json: ${{ vars.LAB_LANES_JSON }}
           require: gateway_url docker_runs_on
+          match: compose_project=omnibase-infra
 
   c12-provider-catalogue:
     name: C12 provider catalogue (dev lane)

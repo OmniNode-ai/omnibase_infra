@@ -19,9 +19,9 @@
 #   It was found by hand, during an unrelated diagnosis. This job is what
 #   replaces that luck.
 #
-# WHY SELF-HOSTED omnibase-deploy
-#   Same fate boundary as chain-canary.yml and dev-lane-liveness.yml. The
-#   bastion is reachable from the .201 tailnet and from nowhere on
+# WHY SELF-HOSTED (the overlay's lab pool since OMN-19894)
+#   Same fate boundary as chain-canary.yml. The bastion is reachable from the
+#   lab tailnet and from nowhere on
 #   GitHub-hosted compute, so an ubuntu-latest job could only ever assert
 #   "I cannot see it."
 #
@@ -91,26 +91,11 @@ concurrency:
 jobs:
   bastion-canary:
     name: MSK bastion routing canary
-    # OMN-18408: `omnibase-verify`, not `omnibase-deploy`. Same lab host,
-    # same docker socket and same `host.docker.internal` gateway -- the
-    # reason the job is self-hosted at all is unchanged. What changed is
-    # WHICH container serves it: `omnibase-deploy` has exactly one member,
-    # which also runs the release-train deploy, so every scheduled probe
-    # queued behind it (12 queued + 1 in progress at 2026-09-15T20:00Z).
-    # This job writes nothing and needs no private OMNI_HOME clone, so it
-    # belongs on the read-only verify runner. Do not move it back.
-    # OMN-18408: `host-201` is REQUIRED alongside `omnibase-verify`, and is not
-    # decoration. `omnibase-verify` names a runner CLASS (read-only probe
-    # runner); it does not name a HOST. On 2026-09-16 a second verify-class
-    # runner, omninode-mini-runner-1, came online on another lab host carrying
-    # `self-hosted,omnibase-verify,arch-arm64` -- which makes it a legal match
-    # for a bare `[self-hosted, omnibase-verify]`. This job probes the .201
-    # lane's own docker daemon through that host's gateway alias, so a run
-    # placed anywhere else cannot see the lane and reports it unreachable: a
-    # permanently-red check is a disabled check. `host-201` is carried only by
-    # the .201 verify runner, so the pair fails SAFE -- if that runner is down
-    # the job queues rather than running somewhere it cannot observe anything.
-    runs-on: [self-hosted, omnibase-verify, host-201]
+    # OMN-19894 (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check
+    # must not rely on one machine). Any runner of the overlay's pool
+    # (vars.LAB_PROBE_RUNS_ON_JSON) that can reach the bastion; it reads nothing
+    # of the lab lane. No host label is written here.
+    runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
     timeout-minutes: 15
     steps:
       - name: Checkout repository

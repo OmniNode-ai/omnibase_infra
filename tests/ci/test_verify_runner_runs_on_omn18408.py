@@ -53,9 +53,6 @@ DEPLOY_LABEL = ["self-hosted", "omnibase-deploy"]
 # acceptance criteria and in the authorising operator-consent row, plus the
 # five OMN-18602 moved when it took the follow-up decision OMN-18408 deferred.
 MOVED_JOBS = (
-    ("dev-lane-liveness.yml", "dev-lane-liveness", "dev-lane-liveness"),
-    ("dev-lane-staleness.yml", "dev-lane-staleness", "dev-lane-staleness"),
-    ("msk-bastion-canary.yml", "bastion-canary", "MSK bastion routing canary"),
     (
         "runtime-rebuild-trigger.yml",
         "verify-lab-overlay-converged",
@@ -84,68 +81,12 @@ MOVED_JOBS = (
         "verify-onex-api-delivered",
         "Verify the dev lane runs onex-api at this commit",
     ),
-    ("baselines-scheduler.yml", "baselines-compute", "Baselines Batch Compute"),
-    ("dlq-depth-monitor.yml", "dlq-depth-monitor", "DLQ Depth Monitor (read-only)"),
 )
 
-# Jobs that were BORN on the verify label rather than moved onto it. Kept in a
-# separate tuple on purpose: MOVED_JOBS above is the record of two specific
-# decisions (OMN-18408 and its OMN-18602 follow-up), and folding a new job into
-# it would quietly rewrite what those decisions covered.
-#
-# The bar for landing here is the same one OMN-18602 settled the label's meaning
-# on: the job READS the .201 lane and never mutates it. `refresh` collects a
-# docker inventory through the socket the runner already mounts and opens a pull
-# request; the only thing it writes is a branch in this repository.
-#
-# It needs the HOST label for the same reason all ten above do, and more sharply:
-# a census collected against the wrong daemon is not an outage, it is a WRONG
-# ANSWER committed to the repository as the documented lane topology. The
-# `omnibase-ci` pool cannot be used for it at all -- 60 of its runners carry no
-# host label (read live from the org runner census on 2026-09-17), so placement
-# there is unpinned by construction.
-NEW_VERIFY_JOBS = (
-    (
-        "lane-census-refresh.yml",
-        "refresh",
-        "Collect the lab census and open a bump PR when it has moved",
-    ),
-    # OMN-16987: the provider-rung liveness canary. Born on the label, and it
-    # clears the OMN-18602 bar the same way C12 does: one `docker exec`, as the
-    # runtime's own user, runs a Python process that reads the deployed
-    # delegation contract and resolves each key in memory. It writes no file,
-    # restarts nothing and publishes nothing on the lane. Its only outbound
-    # effect is one minimal chat completion per distinct cloud rung, and one
-    # wrong-key request per endpoint, to the providers themselves.
-    #
-    # It needs the HOST label for the identical reason: on another lab host's
-    # daemon there is no `omninode-runtime-effects` container to exec into.
-    (
-        "provider-rung-canary.yml",
-        "provider-rung-canary",
-        "Provider-rung liveness canary (dev lane)",
-    ),
-    # OMN-19445: the R1/MD-14 front-door probe. Born on the label, and it
-    # clears the OMN-18602 bar the same way the read-only canaries above do:
-    # it never mutates the lane, only runs `onex delegate` against it and
-    # grades the exit code. It needs the lab host's docker socket-adjacent
-    # network route to reach the dev-lane broker directly -- the same reason
-    # provider-rung-canary.yml and the C12 producer pin this label -- and it
-    # deliberately runs the CLI on the runner host itself, not inside
-    # omninode-runtime-effects, because it measures the FRONT DOOR (the
-    # command a lane operator runs on their own machine), not whether the
-    # runtime can reach itself.
-    #
-    # It needs the HOST label for the identical reason every entry above
-    # does: a verify-class runner on another lab host has no route to this
-    # lane's broker, so an unpinned run would fail closed as a false lane
-    # outage rather than a routing mistake.
-    (
-        "r1-front-door-probe.yml",
-        "r1-front-door-probe",
-        "R1 front-door probe (dev lane, outside the runtime container)",
-    ),
-)
+# Jobs that were BORN on the host-pinned verify label. OMN-19894 moved every
+# one of them to the overlay (UNPINNED_JOBS below), so none is left; the tuple
+# stays so the moved-set record above keeps its meaning.
+NEW_VERIFY_JOBS: tuple[tuple[str, str, str], ...] = ()
 
 # Every job legally on the label, however it got there.
 VERIFY_JOBS = MOVED_JOBS + NEW_VERIFY_JOBS
@@ -197,6 +138,21 @@ UNPINNED_JOBS = (
     ("chain-canary-c16-receipt-identity.yml", "c16-receipt-identity", POOL_RUNS_ON),
     ("chain-canary-c28-consumer-flow.yml", "resolve-lane", POOL_RUNS_ON),
     ("chain-canary-c28-consumer-flow.yml", "c28-consumer-flow", LANE_SIDE_RUNS_ON),
+    ("baselines-scheduler.yml", "baselines-compute", POOL_RUNS_ON),
+    ("dlq-depth-monitor.yml", "dlq-depth-monitor", POOL_RUNS_ON),
+    ("msk-bastion-canary.yml", "bastion-canary", POOL_RUNS_ON),
+    ("r1-front-door-probe.yml", "r1-front-door-probe", POOL_RUNS_ON),
+    ("dev-lane-liveness.yml", "resolve-lane", POOL_RUNS_ON),
+    ("dev-lane-liveness.yml", "dev-lane-liveness", LANE_SIDE_RUNS_ON),
+    ("dev-lane-staleness.yml", "resolve-lane", POOL_RUNS_ON),
+    ("dev-lane-staleness.yml", "dev-lane-staleness", LANE_SIDE_RUNS_ON),
+    ("provider-rung-canary.yml", "resolve-lane", POOL_RUNS_ON),
+    ("provider-rung-canary.yml", "provider-rung-canary", LANE_SIDE_RUNS_ON),
+    (
+        "lane-census-refresh.yml",
+        "refresh",
+        "${{ fromJSON(vars.LANE_CENSUS_RUNS_ON_JSON) }}",
+    ),
 )
 
 

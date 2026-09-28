@@ -67,12 +67,14 @@ resolver = _load_resolver()
 LANES = [
     {
         "name": "lane-a",
+        "compose_project": "project-a",
         "gateway_url": "http://10.0.0.1:8090",
         "projection_url": "http://10.0.0.1:3002",
         "docker_runs_on": ["self-hosted", "pool", "beside-a"],
     },
     {
         "name": "lane-b",
+        "compose_project": "project-b",
         "gateway_url": "http://10.0.0.2:8090",
         "projection_url": "http://10.0.0.2:3002",
         "docker_runs_on": ["self-hosted", "pool", "beside-b"],
@@ -86,6 +88,7 @@ def _run_main(
     require: str,
     answering: set[str],
     monkeypatch: pytest.MonkeyPatch,
+    match: str = "",
 ) -> tuple[int, dict[str, str], dict[str, str]]:
     probed: list[str] = []
 
@@ -102,6 +105,7 @@ def _run_main(
         {
             "LAB_LANES_JSON": lanes if isinstance(lanes, str) else json.dumps(lanes),
             "LANE_REQUIRE": require,
+            "LANE_MATCH": match,
             "GITHUB_ENV": str(env_file),
             "GITHUB_OUTPUT": str(out_file),
         }
@@ -176,6 +180,38 @@ def test_canary_no_responder_is_red(
     err = capsys.readouterr().out
     assert "::error::" in err and "RED, not a skip" in err
     assert "lane-a" in err and "lane-b" in err
+
+
+def test_canary_lane_resolution_places_a_lane_side_job_beside_its_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A probe that reads project-b's containers runs beside project-b, wherever it is."""
+    code, env, out = _run_main(
+        tmp_path,
+        LANES,
+        "docker_runs_on",
+        set(),
+        monkeypatch,
+        match="compose_project=project-b",
+    )
+    assert code == 0
+    assert env["LANE_NAME"] == "lane-b"
+    assert json.loads(out["docker_runs_on"]) == ["self-hosted", "pool", "beside-b"]
+
+
+def test_canary_no_responder_is_red_when_no_lane_matches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code, env, _ = _run_main(
+        tmp_path,
+        LANES,
+        "docker_runs_on",
+        set(),
+        monkeypatch,
+        match="compose_project=nowhere",
+    )
+    assert code == 1
+    assert env == {}
 
 
 @pytest.mark.parametrize("raw", ["", "   ", "[]", "{}", "not json"])
@@ -261,7 +297,52 @@ def test_canary_names_no_machine(workflow: str, job: str, runs_on: str) -> None:
         assert pin not in text, f"{workflow} names a machine: {pin!r}"
 
 
+# The non-board lab probes OMN-19894 moved in the same change.
+OTHER_PROBES = (
+    ("baselines-scheduler.yml", "baselines-compute", POOL_RUNS_ON),
+    ("dlq-depth-monitor.yml", "dlq-depth-monitor", POOL_RUNS_ON),
+    ("msk-bastion-canary.yml", "bastion-canary", POOL_RUNS_ON),
+    ("r1-front-door-probe.yml", "r1-front-door-probe", POOL_RUNS_ON),
+    ("dev-lane-liveness.yml", "dev-lane-liveness", LANE_SIDE_RUNS_ON),
+    ("dev-lane-staleness.yml", "dev-lane-staleness", LANE_SIDE_RUNS_ON),
+    ("provider-rung-canary.yml", "provider-rung-canary", LANE_SIDE_RUNS_ON),
+    (
+        "lane-census-refresh.yml",
+        "refresh",
+        "${{ fromJSON(vars.LANE_CENSUS_RUNS_ON_JSON) }}",
+    ),
+)
+
+
+@pytest.mark.parametrize(("workflow", "job", "runs_on"), OTHER_PROBES)
+def test_lab_probe_takes_its_runner_from_the_overlay(
+    workflow: str, job: str, runs_on: str
+) -> None:
+    text = (WORKFLOWS / workflow).read_text(encoding="utf-8")
+    assert _job(workflow, job)["runs-on"] == runs_on
+    assert "host-201" not in text and "192.168." not in text
+    if runs_on == LANE_SIDE_RUNS_ON:
+        assert _job(workflow, "resolve-lane")["runs-on"] == POOL_RUNS_ON
+        assert "match: compose_project=omnibase-infra" in text
+
+
 def test_chain_canary_reads_the_lane_over_the_network_only() -> None:
     text = (WORKFLOWS / "chain-canary.yml").read_text(encoding="utf-8")
     for pin in ("docker logs", "docker.sock", "host.docker.internal"):
         assert pin not in text
+
+
+def test_workflows_read_only_outputs_the_action_declares() -> None:
+    """A composite action exposes only its declared outputs; any other
+    ``steps.lane.outputs.<x>`` reads an empty string (the first C28 proof run,
+    OMN-19894, handed the probe an empty base URL that way)."""
+    import re
+
+    action = yaml.safe_load((ACTION_DIR / "action.yml").read_text(encoding="utf-8"))
+    declared = set(action["outputs"])
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        text = path.read_text(encoding="utf-8")
+        if "./.github/actions/resolve-lab-lane" not in text:
+            continue
+        used = set(re.findall(r"steps\.lane\.outputs\.([a-z_]+)", text))
+        assert used <= declared, f"{path.name} reads undeclared {used - declared}"

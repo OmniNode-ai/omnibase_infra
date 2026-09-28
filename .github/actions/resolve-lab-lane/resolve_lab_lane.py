@@ -32,6 +32,11 @@ THE OVERLAY SHAPE
     required ``*_url`` must answer ``GET <url>/health`` with a 2xx; a lane with
     one silent surface is skipped, and the next lane is tried.
 
+    ``LANE_MATCH`` (optional, ``field=value`` pairs) narrows eligibility to the
+    lanes a probe knows how to read: a probe that reads containers of the
+    compose project ``omnibase-infra`` asks for ``compose_project=omnibase-infra``
+    and is then placed beside that lane, wherever the overlay says it runs.
+
 WHAT IT WRITES
     ``GITHUB_ENV``: ``LANE_NAME`` and ``LANE_<FIELD>`` for every declared field
     of the chosen lane (lists as JSON). ``GITHUB_OUTPUT``: ``name``, ``lane``
@@ -162,10 +167,19 @@ def choose_lane(
     lanes: Sequence[Mapping[str, Any]],
     require: Sequence[str],
     probe: Callable[[str], str | None],
+    match: Mapping[str, str] | None = None,
 ) -> tuple[Mapping[str, Any] | None, list[str]]:
-    """First lane that declares every required field and whose required URLs answer."""
+    """First matching lane that declares every required field and whose required URLs answer."""
     tried: list[str] = []
     for lane in lanes:
+        unmatched = [
+            f"{field}={lane.get(field, '<undeclared>')}"
+            for field, want in (match or {}).items()
+            if lane.get(field) != want
+        ]
+        if unmatched:
+            tried.append(f"{lane['name']}: does not match ({', '.join(unmatched)})")
+            continue
         missing = [field for field in require if field not in lane]
         if missing:
             tried.append(f"{lane['name']}: does not declare {', '.join(missing)}")
@@ -199,13 +213,22 @@ def _env_value(value: Any) -> str:
 def main(environ: Mapping[str, str] | None = None) -> int:
     env = os.environ if environ is None else environ
     require = [f for f in re.split(r"[\s,]+", env.get("LANE_REQUIRE", "")) if f]
+    match: dict[str, str] = {}
+    for pair in (p for p in re.split(r"[\s,]+", env.get("LANE_MATCH", "")) if p):
+        field, sep, want = pair.partition("=")
+        if not sep or not FIELD_RE.match(field) or not want:
+            _say(f"::error::LANE_MATCH entry {pair!r} is not field=value")
+            return 1
+        match[field] = want
     timeout = float(env.get("LANE_PROBE_TIMEOUT_SECONDS", "10"))
     try:
         lanes = parse_lanes(env.get("LAB_LANES_JSON", ""))
     except OverlayError as exc:
         _say(f"::error::{exc}")
         return 1
-    lane, tried = choose_lane(lanes, require, lambda url: http_health(url, timeout))
+    lane, tried = choose_lane(
+        lanes, require, lambda url: http_health(url, timeout), match
+    )
     for line in tried:
         _say(f"lane skipped -- {line}")
     if lane is None:

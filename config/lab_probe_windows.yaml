@@ -87,7 +87,7 @@ probes:
     cron: ['47 2,8,14,20 * * *']
     lane: dev
     lane_source: job_name
-    max_duration_minutes: 10
+    max_duration_minutes: 15
   - id: C13
     name: customer-local delegation
     repo: omninode_infra

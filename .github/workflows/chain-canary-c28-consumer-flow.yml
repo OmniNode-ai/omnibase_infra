@@ -108,7 +108,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       lane: ${{ steps.lane.outputs.name }}
-      projection_url: ${{ steps.lane.outputs.projection_url }}
+      lane_json: ${{ steps.lane.outputs.lane }}
       docker_runs_on: ${{ steps.lane.outputs.docker_runs_on }}
     steps:
       - name: Checkout the lane resolver
@@ -129,6 +129,7 @@ jobs:
         with:
           lanes-json: ${{ vars.LAB_LANES_JSON }}
           require: projection_url docker_runs_on
+          match: compose_project=omnibase-infra
 
   c28-consumer-flow:
     name: C28 consumer flow (dev lane)
@@ -166,7 +167,7 @@ jobs:
 
       - name: Re-measure C28 on the dev lane and grade it
         env:
-          C28_BASE_URL: ${{ github.event.inputs.base_url || needs.resolve-lane.outputs.projection_url }}
+          C28_BASE_URL: ${{ github.event.inputs.base_url || fromJSON(needs.resolve-lane.outputs.lane_json).projection_url }}
           LANE_NAME: ${{ needs.resolve-lane.outputs.lane }}
         run: |
           set -uo pipefail

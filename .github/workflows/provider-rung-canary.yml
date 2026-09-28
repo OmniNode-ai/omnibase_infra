@@ -46,11 +46,11 @@
 #   and a key are probed once, so a run costs one completion per distinct rung.
 #
 # WHY THIS RUNNER
-#   The subject is a container on the lab host; reaching it needs that host's
-#   docker socket, which the `omnibase-verify` runner on host-201 already
-#   carries (the C12 producer reads onex-api the same way). `host-201` is
-#   required, not decoration: a verify-class runner on another lab host has no
-#   such container. The pair fails SAFE — if the runner is down the job queues.
+#   The subject is a container of a lab lane; reaching it needs the docker
+#   socket of the host that runs it. So `resolve-lane` picks the lane from the
+#   overlay (vars.LAB_LANES_JSON) and this job runs on the runner labels that
+#   lane declares (OMN-19894); the C12 producer reads onex-api the same way. No
+#   host label is written here.
 #
 # WHY THERE IS NO pull_request TRIGGER
 #   A path-scoped pull-request job sits in neither required_status_checks nor
@@ -83,9 +83,44 @@ permissions:
   contents: read
 
 jobs:
+  resolve-lane:
+    name: Resolve the lab lane (chain of responders)
+    runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
+    timeout-minutes: 5
+    outputs:
+      lane: ${{ steps.lane.outputs.name }}
+      docker_runs_on: ${{ steps.lane.outputs.docker_runs_on }}
+    steps:
+      - name: Checkout the lane resolver
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/actions/resolve-lab-lane
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Resolve the lab lane through the overlay's chain of responders
+        id: lane
+        uses: ./.github/actions/resolve-lab-lane
+        with:
+          lanes-json: ${{ vars.LAB_LANES_JSON }}
+          require: docker_runs_on
+          match: compose_project=omnibase-infra
+
   provider-rung-canary:
     name: Provider-rung liveness canary (dev lane)
-    runs-on: [self-hosted, omnibase-verify, host-201]
+    needs: resolve-lane
+    # OMN-19894 (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check
+    # must not rely on one machine). This job reads the lane's containers
+    # through the docker daemon that runs them, so it runs beside the lane that
+    # `resolve-lane` picked from the overlay (vars.LAB_LANES_JSON, the first
+    # lane of compose project omnibase-infra), on the runner labels that lane
+    # declares. No host label is written here.
+    runs-on: ${{ fromJSON(needs.resolve-lane.outputs.docker_runs_on) }}
     timeout-minutes: 10
 
     steps:

@@ -9,6 +9,10 @@ inputs:
   require:
     description: 'Space-separated fields a lane must declare; each *_url among them must answer.'
     required: true
+  match:
+    description: 'Optional space-separated field=value pairs a lane must carry to be eligible.'
+    required: false
+    default: ''
 outputs:
   name:
     description: 'The chosen lane name.'
@@ -28,4 +32,5 @@ runs:
       env:
         LAB_LANES_JSON: ${{ inputs.lanes-json }}
         LANE_REQUIRE: ${{ inputs.require }}
+        LANE_MATCH: ${{ inputs.match }}
       run: python3 "${GITHUB_ACTION_PATH}/resolve_lab_lane.py"
