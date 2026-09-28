@@ -31,6 +31,21 @@ WHAT COUNTS AS A PROBE (the unlisted direction)
     exclusion list. A listed entry need not match the rule (the release train
     and C17 do not name a lane) but must still agree with its workflow.
 
+A JOB PLACED BY AN EXPRESSION (omninode_infra#1725, omnibase_infra#4233)
+    Operator rulings 2026-09-28T01:58:06Z and 01:58:17Z made the probes
+    host-agnostic: a job is placed by ``${{ fromJSON(vars.NAME) }}`` (the
+    deployment overlay's runner pool) instead of a literal label. The check
+    resolves that placement the way the runner does, from the Actions
+    variables: the workflow's repository first, then the organisation, then a
+    ``|| '<literal>'`` fallback in the expression itself. The forms read are
+    ``fromJSON(vars.NAME)`` and ``vars.NAME``, each with that optional
+    fallback. The ``runs_on`` lane of such a probe is the resolved runner pool,
+    so its window is the window of that pool. Any other placement (a
+    ``needs.<job>.outputs`` value only the run can decide, a conditional on the
+    event) cannot be resolved before the run: a ``runs_on`` entry over it is an
+    error naming the job and the expression, never a pass. In the unlisted
+    direction such a job names no customer-machine label, exactly as before.
+
 WHERE THE WORKFLOWS COME FROM
     ``--root <repo>=<path>`` for each of omnibase_infra, omninode_infra and
     omnimarket. The CI job passes the pull request's own checkout for
@@ -38,6 +53,12 @@ WHERE THE WORKFLOWS COME FROM
     and sparse checkouts of the other two repositories at their default branch.
     Every root is required; a missing root or an empty workflow directory is a
     usage error (exit 2), never a clean pass.
+
+    ``--variables <scope>=<path>`` for ``org`` and for each repository: the
+    live Actions variables, in the ``gh variable list --json name,value``
+    shape, that the CI job reads before the check. Every scope is required for
+    the same reason as every root: a scope nobody read would resolve nothing
+    and hide a probe.
 
 THE CONSUMER SIDE
     :func:`load_windows` returns typed :class:`ProbeWindow` records, and
@@ -53,6 +74,7 @@ unreadable window file.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from collections.abc import Iterable, Mapping, Sequence
@@ -76,6 +98,10 @@ NO_LANE = "none"
 # admits only those producers (see omninode_infra c13-customer-local-delegation.yml).
 CUSTOMER_MACHINE_LABELS: frozenset[str] = frozenset({"omnipc2-customer"})
 
+# The --variables scope that holds the organisation's Actions variables.
+ORG_SCOPE = "org"
+VARIABLE_SCOPES: tuple[str, ...] = (ORG_SCOPE, *REPOS)
+
 # GitHub Actions' job timeout when a job declares none.
 GITHUB_DEFAULT_TIMEOUT_MINUTES = 360
 
@@ -98,6 +124,13 @@ _RUN_NAME_LANE_RE = re.compile(
 )
 _EXPR_DEFAULT_RE = re.compile(r"\|\|\s*'([^']+)'")
 _CRON_FIELD_RE = re.compile(r"^(\*|\d+(-\d+)?)(/\d+)?$")
+# A whole runs-on value that is one expression, and the two placements read.
+_WHOLE_EXPR_RE = re.compile(r"^\s*\$\{\{(?P<body>.*)\}\}\s*$", re.DOTALL)
+_VAR_REF = (
+    r"vars\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:\|\|\s*'(?P<fallback>[^']*)'\s*)?"
+)
+_FROMJSON_VAR_RE = re.compile(r"^\s*fromJSON\(\s*" + _VAR_REF + r"\)\s*$")
+_BARE_VAR_RE = re.compile(r"^\s*" + _VAR_REF + r"$")
 
 EXIT_OK = 0
 EXIT_DRIFT = 1
@@ -110,6 +143,53 @@ class WindowFileError(ValueError):
 
 class WorkflowError(ValueError):
     """A workflow file cannot be read or a field cannot be derived from it."""
+
+
+class ActionsVariables:
+    """The Actions variables a runner resolves ``vars.NAME`` from.
+
+    ``scopes`` maps ``org`` and repository names to ``{name: value}``. A
+    repository's own variable wins over the organisation's, as on GitHub. A
+    repository that is not in ``scopes`` was never read, which is an error at
+    lookup, never an empty answer.
+    """
+
+    def __init__(self, scopes: Mapping[str, Mapping[str, str]]) -> None:
+        self._scopes = {k: dict(v) for k, v in scopes.items()}
+
+    def lookup(self, repo: str, name: str) -> str | None:
+        if repo not in self._scopes:
+            raise WorkflowError(
+                f"no Actions variables were read for {repo}, so vars.{name} cannot be resolved"
+            )
+        if ORG_SCOPE not in self._scopes:
+            raise WorkflowError(
+                f"no organisation Actions variables were read, so vars.{name} cannot be resolved"
+            )
+        value = self._scopes[repo].get(name) or self._scopes[ORG_SCOPE].get(name)
+        return value or None
+
+
+def load_variables(path: Path) -> dict[str, str]:
+    """Read one scope's variables, as ``gh variable list --json name,value`` prints them."""
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise WindowFileError(f"{path}: unreadable variables file: {exc}") from exc
+    if not isinstance(document, list):
+        raise WindowFileError(f"{path}: a variables file must be a JSON list")
+    values: dict[str, str] = {}
+    for item in document:
+        if (
+            not isinstance(item, dict)
+            or not isinstance(item.get("name"), str)
+            or not isinstance(item.get("value"), str)
+        ):
+            raise WindowFileError(
+                f"{path}: every variable must be an object with a string name and value, got {item!r}"
+            )
+        values[item["name"]] = item["value"]
+    return values
 
 
 # --------------------------------------------------------------------------- #
@@ -392,22 +472,96 @@ def run_name_lane(workflow: Mapping[Any, Any]) -> str | None:
     return default.group(1)
 
 
-def _literal_labels(runs_on: object) -> set[str] | None:
-    if isinstance(runs_on, str):
-        return None if "${{" in runs_on else {runs_on}
+def _labels_from_value(value: str, source: str) -> set[str]:
+    try:
+        parsed = json.loads(value)
+    except ValueError as exc:
+        raise WorkflowError(f"{source} = {value!r} is not JSON") from exc
+    if isinstance(parsed, str) and parsed:
+        return {parsed}
+    if (
+        isinstance(parsed, list)
+        and parsed
+        and all(isinstance(x, str) and x for x in parsed)
+    ):
+        return set(parsed)
+    raise WorkflowError(f"{source} = {value!r} is not a label or a list of labels")
+
+
+def resolve_runs_on(
+    runs_on: object, repo: str, variables: ActionsVariables | None
+) -> set[str]:
+    """The runner labels a ``runs-on`` value places its job on.
+
+    Literal labels are read as written. A whole-value ``fromJSON(vars.NAME)`` or
+    ``vars.NAME`` (either with a ``|| '<literal>'`` fallback) is resolved from
+    ``variables`` for ``repo``. Anything else raises :class:`WorkflowError`
+    saying why, because a placement the check cannot read is not a pass.
+    """
     if isinstance(runs_on, list) and all(
         isinstance(x, str) and "${{" not in x for x in runs_on
     ):
+        if not runs_on:
+            raise WorkflowError("runs-on is an empty list")
         return set(runs_on)
-    return None
+    if not isinstance(runs_on, str):
+        raise WorkflowError(f"runs-on {runs_on!r} is not a label or a list of labels")
+    whole = _WHOLE_EXPR_RE.match(runs_on)
+    if whole is None:
+        if "${{" in runs_on:
+            raise WorkflowError(
+                f"runs-on {runs_on!r} mixes an expression with text, which cannot be resolved"
+            )
+        return {runs_on}
+    body = whole.group("body").strip()
+    placement = _FROMJSON_VAR_RE.match(body)
+    as_json = placement is not None
+    if placement is None:
+        placement = _BARE_VAR_RE.match(body)
+    if placement is None:
+        raise WorkflowError(
+            f"runs-on {runs_on!r} is placed by something only the run can decide; "
+            "the check resolves fromJSON(vars.NAME) and vars.NAME, each with an optional "
+            "|| '<literal>' fallback"
+        )
+    name, fallback = placement.group("name"), placement.group("fallback")
+    if variables is None:
+        raise WorkflowError(
+            f"no Actions variables were read for {repo}, so vars.{name} cannot be resolved"
+        )
+    value = variables.lookup(repo, name)
+    source = f"vars.{name}"
+    if value is None:
+        if fallback is None:
+            raise WorkflowError(
+                f"vars.{name} is not set in {repo} or the organisation, and the expression has no fallback"
+            )
+        value, source = fallback, f"the fallback of vars.{name}"
+    if as_json:
+        return _labels_from_value(value, source)
+    if not value.strip():
+        raise WorkflowError(f"{source} is empty")
+    return {value}
 
 
-def runs_on_labels(workflow: Mapping[Any, Any]) -> list[set[str] | None]:
-    """Literal runner labels per job; None for a job placed by an expression."""
-    return [_literal_labels(job.get("runs-on")) for job in _jobs(workflow).values()]
+def runs_on_labels(
+    workflow: Mapping[Any, Any], repo: str, variables: ActionsVariables | None
+) -> dict[str, set[str] | WorkflowError]:
+    """Runner labels per job id, or the reason a job's placement cannot be read."""
+    placed: dict[str, set[str] | WorkflowError] = {}
+    for job_id, job in _jobs(workflow).items():
+        try:
+            placed[job_id] = resolve_runs_on(job.get("runs-on"), repo, variables)
+        except WorkflowError as exc:
+            placed[job_id] = exc
+    return placed
 
 
-def lane_markers(workflow: Mapping[Any, Any]) -> dict[str, set[str]]:
+def lane_markers(
+    workflow: Mapping[Any, Any],
+    repo: str = "",
+    variables: ActionsVariables | None = None,
+) -> dict[str, set[str]]:
     """Every way the workflow names a lane it reads, keyed by lane_source."""
     markers: dict[str, set[str]] = {}
     job_lanes = job_name_lanes(workflow)
@@ -416,10 +570,12 @@ def lane_markers(workflow: Mapping[Any, Any]) -> dict[str, set[str]]:
     run_lane = run_name_lane(workflow)
     if run_lane is not None:
         markers["run_name"] = {run_lane}
+    # A job whose placement cannot be read names no label here; a runs_on
+    # entry over it is refused in derive_lane instead.
     customer = {
         label
-        for labels in runs_on_labels(workflow)
-        if labels
+        for labels in runs_on_labels(workflow, repo, variables).values()
+        if isinstance(labels, set)
         for label in labels & CUSTOMER_MACHINE_LABELS
     }
     if customer:
@@ -427,8 +583,18 @@ def lane_markers(workflow: Mapping[Any, Any]) -> dict[str, set[str]]:
     return markers
 
 
-def derive_lane(workflow: Mapping[Any, Any], lane_source: str, declared: str) -> str:
-    """The lane the workflow itself says it reads, through ``lane_source``."""
+def derive_lane(
+    workflow: Mapping[Any, Any],
+    lane_source: str,
+    declared: str,
+    repo: str = "",
+    variables: ActionsVariables | None = None,
+) -> str:
+    """The lane the workflow itself says it reads, through ``lane_source``.
+
+    For ``runs_on`` that is the runner pool every job is placed on, with an
+    expression placement resolved from ``variables`` for ``repo``.
+    """
     if lane_source == "job_name":
         lanes = job_name_lanes(workflow)
         if len(lanes) != 1:
@@ -442,16 +608,23 @@ def derive_lane(workflow: Mapping[Any, Any], lane_source: str, declared: str) ->
             raise WorkflowError("run-name carries no lane= token")
         return lane
     if lane_source == "runs_on":
-        per_job = runs_on_labels(workflow)
-        if any(labels is None for labels in per_job):
+        placed = runs_on_labels(workflow, repo, variables)
+        unread = [
+            f"job {job_id!r}: {reason}"
+            for job_id, reason in placed.items()
+            if isinstance(reason, WorkflowError)
+        ]
+        if unread:
             raise WorkflowError(
-                "a job is placed by an expression, so its runner label cannot be read"
+                "the runner of a job cannot be resolved, so its pool is unknown: "
+                + "; ".join(unread)
             )
-        if all(labels is not None and declared in labels for labels in per_job):
+        per_job = [labels for labels in placed.values() if isinstance(labels, set)]
+        if all(declared in labels for labels in per_job):
             return declared
-        found = sorted({label for labels in per_job if labels for label in labels})
+        found = sorted({label for labels in per_job for label in labels})
         return ",".join(found)
-    markers = lane_markers(workflow)
+    markers = lane_markers(workflow, repo, variables)
     if markers:
         named = sorted({lane for lanes in markers.values() for lane in lanes})
         return ",".join(named)
@@ -501,7 +674,9 @@ def _workflow_files(root: Path) -> list[Path]:
     return sorted([*directory.glob("*.yml"), *directory.glob("*.yaml")])
 
 
-def _check_entry(window: ProbeWindow, root: Path) -> list[str]:
+def _check_entry(
+    window: ProbeWindow, root: Path, variables: ActionsVariables | None
+) -> list[str]:
     label = f"{window.id} ({window.key})"
     path = root / window.workflow
     if not path.is_file():
@@ -519,7 +694,9 @@ def _check_entry(window: ProbeWindow, root: Path) -> list[str]:
                 f"{label}: cron mismatch: the window file has {sorted(window.cron)!r}, "
                 f"the workflow has {sorted(crons)!r}"
             )
-        lane = derive_lane(workflow, window.lane_source, window.lane)
+        lane = derive_lane(
+            workflow, window.lane_source, window.lane, window.repo, variables
+        )
         if lane != window.lane:
             errors.append(
                 f"{label}: lane mismatch via {window.lane_source}: the window file has {window.lane!r}, "
@@ -536,8 +713,15 @@ def _check_entry(window: ProbeWindow, root: Path) -> list[str]:
     return errors
 
 
-def check(windows: Sequence[ProbeWindow], roots: Mapping[str, Path]) -> list[str]:
+def check(
+    windows: Sequence[ProbeWindow],
+    roots: Mapping[str, Path],
+    variables: ActionsVariables | None = None,
+) -> list[str]:
     """Every disagreement between ``windows`` and the workflows under ``roots``.
+
+    ``variables`` resolves a job placed by ``vars.NAME``; with none, such a
+    placement under a ``runs_on`` entry is an error, never a pass.
 
     Entries are checked against their repository's root; every scheduled probe
     under every given root must have an entry. An entry whose repository has
@@ -552,7 +736,7 @@ def check(windows: Sequence[ProbeWindow], roots: Mapping[str, Path]) -> list[str
                 f"{window.id} ({window.key}): no workflow root was given for {window.repo}"
             )
             continue
-        errors.extend(_check_entry(window, root))
+        errors.extend(_check_entry(window, root, variables))
     for repo, root in sorted(roots.items()):
         for path in _workflow_files(root):
             key = f"{repo}:{path.relative_to(root).as_posix()}"
@@ -561,7 +745,7 @@ def check(windows: Sequence[ProbeWindow], roots: Mapping[str, Path]) -> list[str
             try:
                 workflow = read_workflow(path)
                 crons = workflow_crons(workflow)
-                markers = lane_markers(workflow) if crons else {}
+                markers = lane_markers(workflow, repo, variables) if crons else {}
             except WorkflowError as exc:
                 errors.append(f"{key}: cannot be classified: {exc}")
                 continue
@@ -600,6 +784,25 @@ def _parse_roots(values: Sequence[str]) -> dict[str, Path]:
     return roots
 
 
+def _parse_variables(values: Sequence[str]) -> ActionsVariables:
+    scopes: dict[str, dict[str, str]] = {}
+    for value in values:
+        name, sep, path = value.partition("=")
+        if not sep or not name or not path:
+            raise WindowFileError(f"--variables {value!r}: expected <scope>=<path>")
+        if name not in VARIABLE_SCOPES:
+            raise WindowFileError(
+                f"--variables {value!r}: {name!r} is not one of {list(VARIABLE_SCOPES)}"
+            )
+        scopes[name] = load_variables(Path(path))
+    missing = [scope for scope in VARIABLE_SCOPES if scope not in scopes]
+    if missing:
+        raise WindowFileError(
+            f"--variables is required for the organisation and every probe repository; missing {missing}"
+        )
+    return ActionsVariables(scopes)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__.splitlines()[0] if __doc__ else None
@@ -613,14 +816,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="a repository checkout holding .github/workflows; required for each of "
         + ", ".join(REPOS),
     )
+    parser.add_argument(
+        "--variables",
+        action="append",
+        default=[],
+        metavar="SCOPE=PATH",
+        help="the live Actions variables (gh variable list --json name,value) for each of "
+        + ", ".join(VARIABLE_SCOPES),
+    )
     args = parser.parse_args(argv)
     try:
         roots = _parse_roots(args.root)
+        variables = _parse_variables(args.variables)
         windows = load_windows(args.windows)
     except WindowFileError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return EXIT_USAGE
-    errors = check(windows, roots)
+    errors = check(windows, roots, variables)
     scanned = ", ".join(
         f"{repo}={len(_workflow_files(root))}" for repo, root in sorted(roots.items())
     )
