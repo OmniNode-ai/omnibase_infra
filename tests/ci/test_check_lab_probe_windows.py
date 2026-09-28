@@ -29,6 +29,7 @@ from scripts.ci import check_lab_probe_windows as plw
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WINDOW_FILE = REPO_ROOT / "config" / "lab_probe_windows.yaml"
+PLACEMENT_POLICY = REPO_ROOT / "config" / "runner_routing_policy.yaml"
 
 # The ten probes the lab release-sync plan's section 4 E names (T0.3 AC1).
 PLAN_SECTION_4E: dict[str, tuple[str, str]] = {
@@ -255,11 +256,24 @@ def test_agreeing_file_and_workflows_pass(
 def test_cli_exits_zero_when_clean_and_one_on_drift(
     window_file: Path, roots: dict[str, Path]
 ) -> None:
-    empty = _write(window_file.parent / "no-variables.json", "[]")
+    policy = _write(
+        window_file.parent / "runner-routing-policy.yaml",
+        textwrap.dedent(
+            """\
+            probe_placement_variables:
+              omnibase_infra:
+                UNUSED: null
+              omninode_infra:
+                UNUSED: null
+              omnimarket:
+                UNUSED: null
+            """
+        ),
+    )
     argv = (
         ["--windows", str(window_file)]
         + [f"--root={name}={path}" for name, path in roots.items()]
-        + [f"--variables={scope}={empty}" for scope in plw.VARIABLE_SCOPES]
+        + ["--placement-policy", str(policy)]
     )
     assert plw.main(argv) == 0
     _write(
@@ -523,4 +537,5 @@ def test_committed_file_agrees_with_this_repos_workflows() -> None:
     CI job at their default branch, not here."""
     windows = [w for w in plw.load_windows(WINDOW_FILE) if w.repo == "omnibase_infra"]
     assert windows
-    assert plw.check(windows, {"omnibase_infra": REPO_ROOT}) == []
+    placements = plw.load_placements(PLACEMENT_POLICY)
+    assert plw.check(windows, {"omnibase_infra": REPO_ROOT}, placements) == []
