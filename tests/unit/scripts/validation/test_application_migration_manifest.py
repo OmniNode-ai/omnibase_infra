@@ -839,7 +839,10 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # 222 -> 223 for OMN-19550: node_projection_session_content/0001 creates
     # omninode_internal.session_content and grants the projection writer role.
     # Additive (expand-only), vendored FIRST per the vendor-parity ordering.
-    assert len(result.declarations) == 223
+    # 223 -> 224 for OMN-17886: node_gateway_link_health_write_effect/0002
+    # revokes the runtime role's privileges on the gateway_link_health_status
+    # view. The node lives in omnibase_infra, so nothing is vendored.
+    assert len(result.declarations) == 224
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #
