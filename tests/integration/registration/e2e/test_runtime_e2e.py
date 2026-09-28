@@ -453,7 +453,7 @@ class TestRuntimeE2EFlow:
         introspection_event: ModelNodeIntrospectionEvent,
         unique_node_id: UUID,
     ) -> None:
-        """Test that runtime publishes registration-completed event.
+        """Test that runtime publishes a node-registration-result event.
 
         This test requires RUNTIME_E2E_OUTPUT_EVENTS_ENABLED=true because output
         event publishing may not be configured in all runtime deployments.
@@ -479,11 +479,11 @@ class TestRuntimeE2EFlow:
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     pass
 
-        # Subscribe to the registration-completed topic. OMN-8784 removed
+        # Subscribe to the node-registration-result topic. OMN-8784 removed
         # ONEX_OUTPUT_TOPIC; the runtime derives its publish topic from the
         # node contract's event_bus.publish_topics, so the test uses the
         # contract-declared topic name directly.
-        output_topic = "onex.evt.registration-completed.v1"
+        output_topic = "onex.evt.platform.node-registration-result.v1"
         group_id = f"e2e-runtime-{unique_node_id.hex[:8]}"
 
         unsub = await real_kafka_event_bus.subscribe(
