@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-lane-census.service — the hourly lane census and memory pass for a lab
+# host that carries NO onex-disk-gc.service (OMN-19959).
+#
+# WHY A UNIT OF ITS OWN ON SUCH A HOST. On a host that runs the disk-GC unit
+# (.201) the census is a drop-in on that one unit, and install-lane-census.sh
+# never installs this file there: one schedule per host. The .202 host
+# (omnipc2) carries no disk-GC unit, and installing it there would run a docker
+# and volume GC with --execute from a path that does not exist on that host,
+# failing the unit before any drop-in could run. So a host without the base
+# unit gets this one, and only through `install-lane-census.sh --standalone`,
+# which refuses when the base unit is present.
+#
+# No '-' prefix on ExecStart, unlike the drop-in: here the unit is the census
+# alone, so a drift (30), an unpublished memory event (6), an unreadable memory
+# counter (7) or a memory alert (31) marks the unit failed and shows in
+# `systemctl --user --failed`.
+#
+# The installer rewrites %h/Code/omni_home/omnibase_infra to the clone it runs
+# from and appends LANE_MEMORY_BROKER_CONTAINER.
+
+[Unit]
+Description=ONEX lane census and lane container memory pass (OMN-13011, OMN-19959)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+After=docker.service
+
+[Service]
+Type=oneshot
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+ExecStartPre=/bin/mkdir -p %h/.local/log/onex %h/.local/state/onex
+ExecStart=/bin/bash %h/Code/omni_home/omnibase_infra/scripts/lane-census-check.sh --snapshot %h/.local/state/onex/census-snapshot.json --memory
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=onex-lane-census

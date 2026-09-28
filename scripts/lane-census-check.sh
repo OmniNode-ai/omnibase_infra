@@ -26,6 +26,24 @@
 #   ./scripts/lane-census-check.sh --json           # emit the plan JSON to stdout
 #   ./scripts/lane-census-check.sh --snapshot PATH  # write the census SNAPSHOT to PATH ('-' = stdout)
 #   ./scripts/lane-census-check.sh --observed-out PATH  # write the census-OBSERVED document (OMN-18769)
+#   ./scripts/lane-census-check.sh --memory         # also run the lane container memory pass (OMN-19959)
+#   ./scripts/lane-census-check.sh --memory --memory-event-out PATH  # and write its event to PATH
+#
+# THE MEMORY PASS (OMN-19959). With --memory the collector also reads every lane
+# container's cgroup v2 memory.max, memory.peak and memory.events, and the worker
+# logs of this host's runner containers, and the pass publishes ONE event on
+# onex.evt.omnibase-infra.lane-container-memory.v1 through the broker container
+# named by LANE_MEMORY_BROKER_CONTAINER (`rpk` is not on the lab host PATH, so the
+# produce runs inside that container, as runner-monitor.sh does). The SASL pair
+# is expanded inside the container from the variable NAMES in
+# LANE_MEMORY_BROKER_SASL_USER_VAR / LANE_MEMORY_BROKER_SASL_PASS_VAR; no value
+# ever reaches this host's argv. The previous pass's counters live in
+# LANE_MEMORY_STATE_PATH and advance only after a successful publish.
+#   exit 6  the memory event was not published (no broker container, or the produce failed)
+#   exit 7  the memory counters or a runner worker log could not be read
+#   exit 31 a lane container was OOM-killed this window, or hit its limit in two consecutive passes
+# A memory code replaces a census 0 or 30; the census's own failure codes win.
+# --dry-run builds and logs the memory event but neither publishes it nor advances the state.
 #
 # THE SNAPSHOT IS NOT THE PLAN (OMN-18606). `--json` emits the PLAN document
 # (keys: findings, has_drift, lanes_checked, schema_version). The staleness gate
@@ -77,6 +95,21 @@ OBSERVED_OUT=""
 EXIT_INVENTORY_UNAVAILABLE=4
 # Host not declared in the manifest's hosts registry — NOT drift (OMN-19088).
 EXIT_HOST_UNDECLARED=5
+# OMN-19959: the lane container memory pass (`--memory`). One event per host per
+# pass on its own topic -- a memory observation is not drift, so the drift
+# topic's vocabulary is untouched. See scripts/lane_container_memory_event.py.
+MEMORY=false
+MEMORY_TOPIC="onex.evt.omnibase-infra.lane-container-memory.v1"
+MEMORY_EVENT_OUT=""
+# The memory event was not published: no broker container named, or the
+# produce failed. Distinct from every census code (0, 30, 2, 3, 4, 5).
+EXIT_MEMORY_UNPUBLISHED=6
+# The memory counters or a runner worker log could not be read or built.
+EXIT_MEMORY_UNOBSERVABLE=7
+# A lane container was OOM-killed this window, or hit its limit in two
+# consecutive passes.
+EXIT_MEMORY_ALERT=31
+MEMORY_RC=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -89,6 +122,10 @@ while [[ $# -gt 0 ]]; do
     --observed-out)
       [[ $# -ge 2 ]] || { echo "ERROR: --observed-out requires a path ('-' for stdout)" >&2; exit 2; }
       OBSERVED_OUT="$2"; shift 2 ;;
+    --memory) MEMORY=true; shift ;;
+    --memory-event-out)
+      [[ $# -ge 2 ]] || { echo "ERROR: --memory-event-out requires a path" >&2; exit 2; }
+      MEMORY_EVENT_OUT="$2"; shift 2 ;;
     --help|-h) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -173,13 +210,27 @@ trap 'rm -rf "$SCRATCH"' EXIT
 # (relaxes to the default pattern if unresolvable — see the planner).
 RUNTIME_TAG="${RUNTIME_TAG:-}"
 
+MEMORY_STATE="${LANE_MEMORY_STATE_PATH:-${HOME}/.local/state/onex/lane-container-memory-state.json}"
+MEMORY_ARGS=()
+if [[ "$MEMORY" == true ]]; then
+  MEMORY_ARGS=(--memory-out "$SCRATCH/memory-observation.json" --memory-state "$MEMORY_STATE")
+fi
+
 set +e
 ENVELOPE_JSON="$(
   LANE="$LANE" RUNTIME_TAG="$RUNTIME_TAG" \
-    "$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_census_inventory.py" 2>"$SCRATCH/inventory.err"
+    "$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_census_inventory.py" ${MEMORY_ARGS[@]+"${MEMORY_ARGS[@]}"} 2>"$SCRATCH/inventory.err"
 )"
 INVENTORY_RC=$?
 set -e
+
+# OMN-19959: exit 7 from the collector means the census inventory on stdout is
+# valid and only the memory observation failed. The census carries on; the
+# memory pass reports its failure through the final exit code.
+if [[ $INVENTORY_RC -eq $EXIT_MEMORY_UNOBSERVABLE && "$MEMORY" == true ]]; then
+  MEMORY_RC=$EXIT_MEMORY_UNOBSERVABLE
+  INVENTORY_RC=0
+fi
 
 if [[ $INVENTORY_RC -ne 0 ]]; then
   while IFS= read -r line; do [[ -n "$line" ]] && log "$line"; done <"$SCRATCH/inventory.err"
@@ -190,6 +241,88 @@ fi
 
 # Surface any fallback/degradation notices without changing the exit policy.
 while IFS= read -r line; do [[ -n "$line" ]] && log "$line"; done <"$SCRATCH/inventory.err"
+
+# ---------------------------------------------------------------------------
+# OMN-19959: the lane container memory pass. Runs before the planner so a
+# drifted or clean census publishes it alike. Every failure is a distinct exit
+# code carried to the end of the script by finish(); none is a warning.
+# ---------------------------------------------------------------------------
+memory_pass() {
+  local event_file="$SCRATCH/memory-event.json"
+  local state_out="$SCRATCH/memory-state.json"
+  local alerts_file="$SCRATCH/memory-alerts.txt"
+
+  if ! "$LANE_CENSUS_PYTHON" "${SCRIPT_DIR}/lane_container_memory_event.py" \
+      --host "$HOST" \
+      --observation "$SCRATCH/memory-observation.json" \
+      --state "$MEMORY_STATE" \
+      --event-out "$event_file" \
+      --state-out "$state_out" \
+      --alerts-out "$alerts_file" 2>"$SCRATCH/memory-build.err"; then
+    while IFS= read -r line; do [[ -n "$line" ]] && log "$line"; done <"$SCRATCH/memory-build.err"
+    log "MEMORY: the memory event could not be built (exit $EXIT_MEMORY_UNOBSERVABLE)."
+    MEMORY_RC=$EXIT_MEMORY_UNOBSERVABLE
+    return 0
+  fi
+
+  if [[ -n "$MEMORY_EVENT_OUT" ]]; then
+    mkdir -p "$(dirname "$MEMORY_EVENT_OUT")"
+    cp "$event_file" "$MEMORY_EVENT_OUT"
+  fi
+
+  local alert_count
+  alert_count="$(grep -c . "$alerts_file" || true)"
+  while IFS= read -r line; do [[ -n "$line" ]] && log "MEMORY ALERT: $line"; done <"$alerts_file"
+  log "MEMORY: built event for host=$HOST ($(wc -c <"$event_file" | tr -d ' ') bytes, ${alert_count} alert(s))"
+
+  if [[ "$DRY_RUN" == true ]]; then
+    log "DRY-RUN — not publishing the memory event and not advancing $MEMORY_STATE."
+    [[ "$alert_count" -gt 0 ]] && MEMORY_RC=$EXIT_MEMORY_ALERT
+    return 0
+  fi
+
+  local broker="${LANE_MEMORY_BROKER_CONTAINER:-}"
+  local user_var="${LANE_MEMORY_BROKER_SASL_USER_VAR:-DEV_KAFKA_SASL_USERNAME}"
+  local pass_var="${LANE_MEMORY_BROKER_SASL_PASS_VAR:-DEV_KAFKA_SASL_PASSWORD}"
+  local mechanism="${LANE_MEMORY_BROKER_SASL_MECHANISM:-SCRAM-SHA-256}"
+  if [[ -z "$broker" ]]; then
+    log "MEMORY: LANE_MEMORY_BROKER_CONTAINER is unset — the memory event is NOT published (exit $EXIT_MEMORY_UNPUBLISHED)."
+    MEMORY_RC=$EXIT_MEMORY_UNPUBLISHED
+    return 0
+  fi
+  # The SASL pair is expanded INSIDE the broker container by `sh -c`; this host
+  # passes only the variable names. rpk reads RPK_USER / RPK_PASS /
+  # RPK_SASL_MECHANISM from the environment, so no flag carries a credential.
+  if docker exec -i "$broker" sh -c \
+      'RPK_USER="${'"$user_var"'}" RPK_PASS="${'"$pass_var"'}" RPK_SASL_MECHANISM="'"$mechanism"'" rpk topic produce "'"$MEMORY_TOPIC"'"' \
+      <"$event_file" >>"$LOG_FILE" 2>&1; then
+    mkdir -p "$(dirname "$MEMORY_STATE")"
+    mv "$state_out" "$MEMORY_STATE"
+    log "MEMORY: published to $MEMORY_TOPIC via broker container $broker; state advanced."
+  else
+    log "MEMORY: produce to $MEMORY_TOPIC via broker container $broker FAILED — state NOT advanced (exit $EXIT_MEMORY_UNPUBLISHED)."
+    MEMORY_RC=$EXIT_MEMORY_UNPUBLISHED
+    return 0
+  fi
+  [[ "$alert_count" -gt 0 ]] && MEMORY_RC=$EXIT_MEMORY_ALERT
+  return 0
+}
+
+if [[ "$MEMORY" == true && $MEMORY_RC -eq 0 ]]; then
+  memory_pass
+fi
+
+# The census's own clean (0) and drift (30) outcomes give way to a memory code,
+# so a memory failure or alert is never masked by a clean fleet. The census's
+# failure codes (2, 3, 4, 5) exit before this is reached and keep their meaning.
+finish() {
+  local rc="$1"
+  if [[ $MEMORY_RC -ne 0 ]]; then
+    log "exit $MEMORY_RC (memory pass) in place of census exit $rc"
+    exit "$MEMORY_RC"
+  fi
+  exit "$rc"
+}
 
 # OMN-19088: the planner evaluates only the lanes the manifest declares for this
 # host and reports the others not-applicable. It resolves HOST through the
@@ -268,7 +401,7 @@ fi
 
 if [[ "$HAS_DRIFT" != "True" ]]; then
   log "No lane drift. Desired == actual."
-  exit 0
+  finish 0
 fi
 
 log "DRIFT detected:"
@@ -284,7 +417,7 @@ PYEOF
 if [[ "$DRY_RUN" == true ]]; then
   echo "$EVENT_JSON"
   log "DRY-RUN — not publishing drift event."
-  exit 30
+  finish 30
 fi
 
 # Publish to the bus. The broker address MUST come from KAFKA_BOOTSTRAP_SERVERS —
@@ -292,7 +425,7 @@ fi
 # an operator running by hand must export it. We never hardcode a broker / LAN IP.
 if [[ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" ]]; then
   log "KAFKA_BOOTSTRAP_SERVERS unset — cannot publish. Drift event logged above for manual replay."
-  exit 30
+  finish 30
 fi
 BOOTSTRAP="$KAFKA_BOOTSTRAP_SERVERS"
 if command -v rpk >/dev/null 2>&1; then
@@ -306,4 +439,4 @@ else
 fi
 
 # Fail-fast on drift (gates-block policy, no warn-only mode).
-exit 30
+finish 30

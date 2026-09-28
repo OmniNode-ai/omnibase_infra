@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-lane-census.timer — hourly trigger for onex-lane-census.service on a lab
+# host with no onex-disk-gc.timer (OMN-19959). Same cadence as the shared
+# disk-GC timer the census rides on .201, so every host's census interval is one
+# hour. Installed only by `install-lane-census.sh --standalone`, which refuses
+# when onex-disk-gc.service is present.
+
+[Unit]
+Description=ONEX lane census and memory pass timer (OMN-19959)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+
+[Timer]
+OnStartupSec=5min
+OnCalendar=hourly
+RandomizedDelaySec=2min
+Persistent=true
+Unit=onex-lane-census.service
+
+[Install]
+WantedBy=timers.target

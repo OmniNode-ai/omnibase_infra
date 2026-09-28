@@ -395,3 +395,183 @@ def test_engine_api_is_used_when_the_socket_answers(
         assert not calllog.exists(), "docker CLI was invoked despite a live socket"
     finally:
         proc.kill()
+
+
+# ---------------------------------------------------------------------------
+# OMN-19959 — the memory observation, read in the same pass
+# ---------------------------------------------------------------------------
+
+_MEMORY_FIXTURES = (
+    Path(__file__).resolve().parent / "fixtures" / "lane_container_memory"
+)
+
+
+def _fake_engine() -> Any:
+    name = "fake_docker_engine_omn19959"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            name, Path(__file__).resolve().parent / f"{name}.py"
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        # Registered before exec: a dataclass resolves its module by name.
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+def test_runner_prefixes_come_from_every_host_in_the_fleet_config(
+    inventory: Any,
+) -> None:
+    """The prefix set runner-monitor.sh reads, nested role pools included (OMN-19842)."""
+    import yaml
+
+    config = yaml.safe_load((_MEMORY_FIXTURES / "runner_fleet.yaml").read_text())
+    assert inventory.runner_prefixes_from_fleet_config(config) == [
+        "omninode-runner",
+        "omnipc2-ci-runner",
+        "omnipc2-customer-plane-runner",
+        "omnipc2-verify-runner",
+    ]
+
+
+def test_lane_projects_map_compose_projects_to_lane_names(inventory: Any) -> None:
+    import yaml
+
+    manifest = yaml.safe_load((_MEMORY_FIXTURES / "lane-manifest.yaml").read_text())
+    assert inventory.lane_projects_from_manifest(manifest) == {
+        "omnibase-infra-sim-202": "sim-202"
+    }
+
+
+def _memory_run(
+    tmp_path: Path, host: Any, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    out = tmp_path / "memory.json"
+    env = dict(os.environ)
+    env.update(host.env())
+    env["LANE_MANIFEST"] = str(_MEMORY_FIXTURES / "lane-manifest.yaml")
+    env["LANE_MEMORY_RUNNER_FLEET_CONFIG"] = str(_MEMORY_FIXTURES / "runner_fleet.yaml")
+    env.update(extra_env or {})
+    return subprocess.run(
+        [sys.executable, str(_INVENTORY_PATH), "--memory-out", str(out)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+        check=False,
+    )
+
+
+def _memory_host(tmp_path: Path, *, diag_readable: bool = True) -> Any:
+    fake = _fake_engine()
+    containers = [
+        fake.FakeContainer(
+            cid="a" * 64,
+            name="omnibase-infra-sim-202-redpanda",
+            pid=5101,
+            project=fake.SIM_PROJECT,
+        ),
+        fake.FakeContainer(
+            cid="b" * 64,
+            name="some-unrelated-container",
+            pid=5102,
+            project="not-a-lane",
+        ),
+        fake.FakeContainer(
+            cid="c" * 64,
+            name="omnipc2-ci-runner-13",
+            pid=5103,
+            project="omnipc2-ci-runner",
+            diag_readable=diag_readable,
+            worker_logs={
+                # Written after boot: read.
+                "Worker_20260928-185104-utc.log": (
+                    fake.worker_log(
+                        repo="OmniNode-ai/omnimarket",
+                        run_id="36454760449",
+                        started="2026-09-28 18:51:04Z",
+                        completed="2026-09-28 18:51:33Z",
+                    ),
+                    fake.BOOT_EPOCH + 3600,
+                ),
+                # Last written before this boot: not read.
+                "Worker_20260927-100000-utc.log": ("old\n", fake.BOOT_EPOCH - 3600),
+            },
+        ),
+    ]
+    return fake.FakeHost(tmp_path / "host", containers)
+
+
+def test_memory_observation_reads_lane_counters_and_runner_worker_logs(
+    tmp_path: Path,
+) -> None:
+    host = _memory_host(tmp_path)
+    try:
+        result = _memory_run(tmp_path, host)
+    finally:
+        host.close()
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["inventory_source"] == "engine_api", (
+        "the census envelope must still be printed unchanged"
+    )
+    observation = json.loads((tmp_path / "memory.json").read_text())
+    assert observation["host_boot_id"] == _fake_engine().BOOT_ID
+    assert observation["boot_time"] == "2026-09-28T12:10:00Z"
+    names = [c["container_name"] for c in observation["containers"]]
+    assert names == ["omnibase-infra-sim-202-redpanda"], (
+        "only lane containers carry a record; runners and unrelated containers do not"
+    )
+    redpanda = observation["containers"][0]
+    assert redpanda["lane"] == "sim-202"
+    assert redpanda["memory_max"].strip() == "max"
+    assert "oom_kill 0" in redpanda["memory_events"]
+    assert [log["log_name"] for log in observation["worker_logs"]] == [
+        "Worker_20260928-185104-utc.log"
+    ]
+    assert observation["worker_logs"][0]["runner_name"] == "omnipc2-ci-runner-13"
+
+
+def test_an_unreadable_counter_exits_7_and_keeps_the_census_envelope(
+    tmp_path: Path, inventory: Any
+) -> None:
+    host = _memory_host(tmp_path)
+    try:
+        (host.sysfs_root / f"system.slice/docker-{'a' * 64}.scope/memory.peak").unlink()
+        result = _memory_run(tmp_path, host)
+    finally:
+        host.close()
+    assert result.returncode == inventory.EXIT_MEMORY_UNOBSERVABLE == 7
+    assert json.loads(result.stdout)["containers"], "the census envelope was lost"
+    assert "memory.peak" in result.stderr
+
+
+def test_an_unreadable_runner_diag_is_an_error_never_an_empty_list(
+    tmp_path: Path, inventory: Any
+) -> None:
+    host = _memory_host(tmp_path, diag_readable=False)
+    try:
+        result = _memory_run(tmp_path, host)
+    finally:
+        host.close()
+    assert result.returncode == inventory.EXIT_MEMORY_UNOBSERVABLE, result.stderr
+    assert "omnipc2-ci-runner-13" in result.stderr
+
+
+def test_an_absent_fleet_config_is_an_error_unless_declared_empty(
+    tmp_path: Path, inventory: Any
+) -> None:
+    host = _memory_host(tmp_path)
+    try:
+        absent = _memory_run(
+            tmp_path,
+            host,
+            {"LANE_MEMORY_RUNNER_FLEET_CONFIG": str(tmp_path / "no-such.yaml")},
+        )
+        declared = _memory_run(tmp_path, host, {"LANE_MEMORY_RUNNER_FLEET_CONFIG": ""})
+    finally:
+        host.close()
+    assert absent.returncode == inventory.EXIT_MEMORY_UNOBSERVABLE, absent.stderr
+    assert declared.returncode == 0, declared.stderr
+    observation = json.loads((tmp_path / "memory.json").read_text())
+    assert observation["worker_logs"] == []
