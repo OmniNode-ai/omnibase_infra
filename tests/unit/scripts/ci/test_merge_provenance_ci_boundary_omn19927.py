@@ -186,3 +186,42 @@ def test_selection_step_forces_full_on_anything_but_an_explicit_false() -> None:
 def test_detect_changes_can_read_actions_runs() -> None:
     permissions = _detect_changes_job()["permissions"]
     assert permissions == {"actions": "read", "contents": "read"}
+
+
+def _job(name: str) -> dict[str, Any]:
+    workflow = yaml.safe_load(CI_YML.read_text())
+    job = workflow["jobs"][name]
+    assert isinstance(job, dict)
+    return job
+
+
+def test_detect_changes_runs_on_a_docs_only_push() -> None:
+    """Its lint-class needs skip on a docs-only diff; a push must still decide."""
+    condition = str(_job("detect-changes")["if"])
+    assert "!cancelled()" in condition
+    assert "!failure()" in condition
+    assert "github.event_name == 'push'" in condition
+    assert "!contains(needs.*.result, 'skipped')" in condition
+
+
+def test_test_matrix_runs_a_forced_suite_even_on_a_docs_only_diff() -> None:
+    condition = str(_job("test-parallel")["if"])
+    assert "success() && needs.zone-filter.outputs.docs_only != 'true'" in condition
+    assert (
+        "needs.detect-changes.outputs.full_suite_reason == 'unvalidated_push'"
+        in condition
+    )
+
+
+def test_tests_gate_fails_a_skipped_matrix_under_unvalidated_push() -> None:
+    steps = _job("tests-gate")["steps"]
+    step = next(s for s in steps if s.get("name") == "Check test matrix results")
+    assert (
+        step["env"]["FULL_SUITE_REASON"]
+        == "${{ needs.detect-changes.outputs.full_suite_reason }}"
+    )
+    run = step["run"]
+    forced = run.index('if [ "$FULL_SUITE_REASON" = "unvalidated_push" ]; then')
+    docs = run.index('elif [ "$DOCS_ONLY" = "true" ]; then')
+    assert forced < docs, "the forced-suite check must precede the docs-only exemption"
+    assert "exit 1" in run[forced:docs]

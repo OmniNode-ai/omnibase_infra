@@ -36,6 +36,18 @@ _PER_PAGE = 100
 _MAX_PAGES = 10
 
 
+def _workflow_path(raw: object) -> str:
+    """The workflow file path without a ``@<ref>`` suffix.
+
+    The runs API returns ``.github/workflows/ci.yml`` for this repository
+    (read 2026-09-28 on run 36409772437), but documents ``path@ref`` for
+    some runs; both forms name the same workflow file.
+    """
+    if not isinstance(raw, str) or not raw:
+        raise ValueError(f"workflow run path is not a non-empty string: {raw!r}")
+    return raw.split("@", 1)[0]
+
+
 class MergeGroupReadError(RuntimeError):
     """A read of the Actions API failed or came back incomplete."""
 
@@ -126,7 +138,7 @@ class HandlerMergeGroupRunReadGithub:
                     event=row["event"],
                     head_sha=row["head_sha"],
                     head_branch=row.get("head_branch") or "",
-                    workflow_path=row["path"],
+                    workflow_path=_workflow_path(row["path"]),
                     status=row["status"],
                     conclusion=row.get("conclusion"),
                 )
