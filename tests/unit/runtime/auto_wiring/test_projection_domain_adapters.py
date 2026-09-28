@@ -29,6 +29,7 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
 from omnibase_infra.runtime.projection_tenant_authority import (
     VerifiedProjectionTenantAuthority,
     assert_projection_tenant_authority_matches_event,
+    parse_canonical_tenant_uuid,
     verify_signed_projection_tenant_authority,
 )
 from tests.helpers.application_db_topology import (
@@ -346,6 +347,83 @@ def test_equal_canonical_row_string_is_assertion_not_authority() -> None:
     insert = cursor.execute.call_args_list[2]
     assert insert.args[1]["tenant_id"] == tenant_id
     assert isinstance(insert.args[1]["tenant_id"], UUID)
+
+
+#: Spellings ``UUID()`` ACCEPTS and silently normalises. Each one parses, so
+#: none of them is caught by the malformed-input cases below, and each names a
+#: real producer: a hand-written replay fixture (uppercase), a .NET or Windows
+#: emitter (braces), an RFC 4122 URN form (urn:), and the nil sentinel that a
+#: partially-populated row carries when nothing supplied a tenant at all.
+_NON_CANONICAL_TENANT_SPELLINGS = (
+    "00000000-0000-0000-0000-000000000000",
+    "0FC1B2A3-4D5E-6F70-8192-A3B4C5D6E7F8",
+    "{0fc1b2a3-4d5e-6f70-8192-a3b4c5d6e7f8}",
+    "urn:uuid:0fc1b2a3-4d5e-6f70-8192-a3b4c5d6e7f8",
+    "0fc1b2a34d5e6f708192a3b4c5d6e7f8",
+    " 0fc1b2a3-4d5e-6f70-8192-a3b4c5d6e7f8",
+)
+
+
+@pytest.mark.parametrize("supplied", _NON_CANONICAL_TENANT_SPELLINGS)
+def test_sentinel_and_non_canonical_tenant_spellings_are_refused(
+    supplied: str,
+) -> None:
+    """OMN-15425 AC2 names SENTINEL writes apart from malformed ones.
+
+    The distinction is load-bearing and was untested. ``UUID()`` accepts every
+    string above and normalises it, so the malformed-input proof below steps
+    straight over all of them, and the adapter's own
+    ``supplied_uuid != context.tenant_id`` check only catches the ones that
+    round-trip to a DIFFERENT tenant. What refuses these is
+    ``parse_canonical_tenant_uuid``'s ``str(tenant_id) != value or int == 0``
+    guard, and nothing exercised that branch: neuter it and the suite stayed
+    green, which is the whole reason this test exists.
+
+    The nil UUID is the case with teeth. It parses, it is not another tenant's
+    id, and a row carrying it would be written under a tenant that cannot
+    exist — the "landed under the house tenant" shape this ticket is about.
+    """
+    with pytest.raises(ProjectionTenantContextError):
+        parse_canonical_tenant_uuid(supplied, authority="unit proof")
+
+
+def test_the_canonical_spelling_is_accepted() -> None:
+    """Green control: the guard above refuses spellings, not all input.
+
+    Without this, an implementation that raised unconditionally would satisfy
+    every case in the parametrization.
+    """
+    tenant_id = uuid4()
+    assert (
+        parse_canonical_tenant_uuid(str(tenant_id), authority="unit proof") == tenant_id
+    )
+
+
+def test_row_tenant_in_a_non_canonical_spelling_of_the_verified_id_fails_closed() -> (
+    None
+):
+    """The one adapter path the mismatch check cannot reach.
+
+    Every other rejected row tenant round-trips to a different UUID, so
+    ``supplied_uuid != context.tenant_id`` catches it whether or not the
+    canonical guard exists. An UPPERCASE spelling of the verified tenant's own
+    id round-trips to exactly that tenant — so here, and only here, the
+    canonical guard is the only thing standing between a non-canonical write
+    and the table.
+    """
+    tenant_id = uuid4()
+    target = projection_database_target("delegation_events", schema="public")
+
+    with patch("psycopg2.connect") as connect:
+        adapter = _verified_adapter(target, tenant_id)
+        with pytest.raises(ProjectionTenantContextError):
+            adapter.upsert(
+                "delegation_events",
+                "event_id",
+                {"event_id": uuid4(), "tenant_id": str(tenant_id).upper()},
+            )
+
+    connect.assert_not_called()
 
 
 @pytest.mark.parametrize("supplied", [uuid4(), "not-a-uuid", "", 7])

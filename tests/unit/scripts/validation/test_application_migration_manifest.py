@@ -822,8 +822,27 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # 216 -> 217 for OMN-19721: node_projection_runtime_error_fingerprints/0002
     # adds the nullable runtime_error_fingerprints.last_applied_event_id column,
     # so a broker redelivery of one runtime-error event is counted once.
+    # 217 -> 218 for OMN-19550: node_projection_session_content/0001 creates
+    # omninode_internal.session_content and grants the projection writer role.
     # Additive (expand-only), vendored FIRST per the vendor-parity ordering.
-    assert len(result.declarations) == 217
+    # 217 -> 219 for OMN-19716: node_projection_topic_activity/0000 creates the
+    # topic_activity table and 0001 grants the runtime role SELECT, INSERT and
+    # UPDATE on it. Vendored FIRST per the vendor-parity ordering.
+    # 219 -> 220 for OMN-19860: node_projection_delegation/0048 adds the
+    # nullable delegation_events.caller_lane column, so a delegation row names
+    # the ledger lane that issued it. Additive (expand-only), vendored FIRST
+    # per the vendor-parity ordering.
+    # 220 -> 222 for OMN-19833: node_projection_pr_landing/0000 creates the
+    # pr_landing_state and pr_landing_transitions read models and 0001 grants
+    # the runtime role on both. Vendored FIRST per the vendor-parity ordering,
+    # ahead of omnimarket#3000.
+    # 222 -> 223 for OMN-19550: node_projection_session_content/0001 creates
+    # omninode_internal.session_content and grants the projection writer role.
+    # Additive (expand-only), vendored FIRST per the vendor-parity ordering.
+    # 223 -> 224 for OMN-17886: node_gateway_link_health_write_effect/0002
+    # revokes the runtime role's privileges on the gateway_link_health_status
+    # view. The node lives in omnibase_infra, so nothing is vendored.
+    assert len(result.declarations) == 224
     assert result.blocked == ()
     assert len(result.legacy_node_declarations) == 2
     #

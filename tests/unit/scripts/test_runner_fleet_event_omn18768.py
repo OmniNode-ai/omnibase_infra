@@ -358,3 +358,65 @@ class TestFleetPrefixCoversTheWholePool:
         )
         assert event["runner_count"] == len(self.LIVE_POOL_NAMES)
         assert {r["runner_name"] for r in event["runners"]} == set(self.LIVE_POOL_NAMES)
+
+
+@pytest.mark.unit
+class TestMultiHostNamePrefixSet:
+    """OMN-19842 — the fleet emit's name_prefix is a SET, not one literal.
+
+    A fleet spanning several hosts (OMN-17477) declares several
+    `runner_name_prefix` values with no shared substring: `omninode-runner`
+    (.201) and `omnipc2-verify-runner` (.202) are both real prefixes in the
+    live inventory. A single-string startswith match silently dropped the
+    second forever; this pins the fix.
+    """
+
+    def test_a_runner_matching_any_declared_prefix_is_kept(self) -> None:
+        event = _build(
+            [
+                _runner("omninode-runner-1", runner_id=1),
+                _runner("omnipc2-verify-runner-1", runner_id=2),
+            ],
+            name_prefix="omninode-runner,omnipc2-verify-runner",
+        )
+        names = {r["runner_name"] for r in event["runners"]}
+        assert names == {"omninode-runner-1", "omnipc2-verify-runner-1"}
+        assert event["runner_count"] == 2
+
+    def test_a_runner_outside_every_declared_prefix_is_still_excluded(self) -> None:
+        event = _build(
+            [
+                _runner("omninode-runner-1", runner_id=1),
+                _runner("omnipc2-verify-runner-1", runner_id=2),
+                _runner("some-other-fleet-9", runner_id=9),
+            ],
+            name_prefix="omninode-runner,omnipc2-verify-runner",
+        )
+        names = {r["runner_name"] for r in event["runners"]}
+        assert names == {"omninode-runner-1", "omnipc2-verify-runner-1"}
+        assert event["runner_count"] == 2
+
+    def test_a_prefix_that_shares_no_substring_with_omninode_is_not_dropped(
+        self,
+    ) -> None:
+        """The defect stated directly: `omnipc2-verify-runner` shares no
+        substring with `omninode-`, so the old single-literal default
+        excluded it unconditionally, forever."""
+        event = _build(
+            [_runner("omnipc2-verify-runner-1", runner_id=1)],
+            name_prefix="omninode-,omnipc2-verify-runner",
+        )
+        assert event["runner_count"] == 1
+        assert event["runners"][0]["runner_name"] == "omnipc2-verify-runner-1"
+
+    def test_a_bare_single_prefix_with_no_comma_behaves_as_before(self) -> None:
+        """Back-compat: the pre-OMN-19842 single-literal call shape still works."""
+        event = _build(
+            [
+                _runner("omninode-runner-1", runner_id=1),
+                _runner("some-other-fleet-9", runner_id=9),
+            ],
+            name_prefix="omninode-runner",
+        )
+        assert event["runner_count"] == 1
+        assert event["runners"][0]["runner_name"] == "omninode-runner-1"

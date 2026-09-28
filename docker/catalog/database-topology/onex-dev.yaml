@@ -83,6 +83,8 @@ databases:
               - live_events
               - log_entries
               - open_obligations
+              - pr_landing_state
+              - pr_landing_transitions
               - prod_promotion_gate_decisions
               - projection_watermarks
               - runner_fleet_liveness
@@ -90,6 +92,8 @@ databases:
               - savings_correlation_finalizations
               - savings_injection_signals
               - savings_validator_catch_signals
+              - session_content
+              - topic_activity
               - topic_produce_windows
               - work_events
             privileges:
@@ -293,6 +297,7 @@ databases:
           - object_type: TABLE
             objects:
               - delegation_workflow_state
+              - pr_landing_workflow_state
               - session_phase_state
             privileges:
               - INSERT
@@ -358,5 +363,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 110ba9024c9cca3ecf157bbeffd2ce866663a68a34992001f00528b450c5ef4c
+  sha256: 8bec6e1a26d4a6ac667b87534c5882f443141a8c2ffc87b9f39b2ee54ce480d1
 topology_instance: onex-dev

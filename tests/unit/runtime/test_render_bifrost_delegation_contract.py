@@ -22,6 +22,9 @@ _CLOUD_OVERLAY = _ROOT / "docker" / "lane-overlays" / "onex-dev.bifrost.yaml"
 _ENDPOINT = "http://192.168.86.201:8000/v1/chat/completions"
 # OMN-16833: the second live local rung — DS-V4-Flash on .200:8101.
 _DS_V4_ENDPOINT = "http://192.168.86.200:8101/v1/chat/completions"
+# OMN-17099: the embedding rung the dev overlay now binds (live probe
+# 2026-09-27: .201:8002/v1/embeddings serves text-embedding-qwen3).
+_EMBEDDING_ENDPOINT = "http://192.168.86.201:8002/v1/embeddings"
 
 
 @pytest.mark.unit
@@ -65,6 +68,12 @@ def _write_base_contract(
                         "backend_id": "local-reasoner",
                         "model_name": "retired",
                         "endpoint_url_env": "BIFROST_LOCAL_REASONER_ENDPOINT_URL",
+                    },
+                    {
+                        "backend_id": "local-embedding",
+                        "model_name": "text-embedding-qwen3",
+                        "endpoint_url_env": "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL",
+                        "tier": "local",
                     },
                 ]
             },
@@ -112,8 +121,69 @@ def test_typed_overlay_wins_over_poisoned_model_and_endpoint_environment(
     # the renderer strips its stale env hint so it fails closed rather than
     # resolving a dead endpoint.
     assert by_id["local-reasoner"].get("endpoint_url") is None
+    # OMN-17099: the dev overlay now binds local-embedding to its real
+    # /v1/embeddings endpoint — the gap this ticket closes. A poisoned env
+    # var must not resurrect it either.
+    assert by_id["local-embedding"]["endpoint_url"] == _EMBEDDING_ENDPOINT
+    assert by_id["local-embedding"]["model_name"] == "text-embedding-qwen3"
     assert all("endpoint_url_env" not in backend for backend in by_id.values())
     assert all("required" not in backend for backend in by_id.values())
+
+
+@pytest.mark.unit
+def test_render_accepts_and_writes_a_complete_embeddings_endpoint(
+    tmp_path: Path,
+) -> None:
+    """OMN-17099: the render's own endpoint-shape gate must accept /v1/embeddings.
+
+    ``_validate_rendered_contract`` used to require every non-null
+    ``endpoint_url`` to end in ``/chat/completions``, so even a binding the
+    schema now accepts (test_model_bifrost_lane_overlay's embeddings-path
+    tests) would still fail here. A minimal base + overlay isolates this gate
+    from the shared ``dev.bifrost.yaml`` fixture above.
+    """
+    source = tmp_path / "base.yaml"
+    overlay_path = tmp_path / "lane.bifrost.yaml"
+    target = tmp_path / "rendered.yaml"
+    source.write_text(
+        yaml.safe_dump(
+            {
+                "backends": [
+                    {
+                        "backend_id": "local-embedding",
+                        "model_name": "text-embedding-qwen3",
+                        "endpoint_url": None,
+                        "tier": "local",
+                    }
+                ]
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    overlay_path.write_text(
+        "schema_version: bifrost_lane_overlay.v3\n"
+        "lane: dev\n"
+        "locale: lab\n"
+        "backends:\n"
+        "  - backend_id: local-embedding\n"
+        f"    endpoint_url: {_EMBEDDING_ENDPOINT!r}\n"
+        "    served_model_id: text-embedding-qwen3\n"
+        "    parameter_count: 0.6B\n"
+        "    context_window: 8192\n"
+        "    max_tokens: 1\n"
+        "    timeout_ms: 30000\n",
+        encoding="utf-8",
+    )
+
+    rendered = render_bifrost_delegation_contract(
+        source_path=source, overlay_path=overlay_path, target_path=target
+    )
+
+    assert rendered == target
+    contract = yaml.safe_load(target.read_text(encoding="utf-8"))
+    by_id = {backend["backend_id"]: backend for backend in contract["backends"]}
+    assert by_id["local-embedding"]["endpoint_url"] == _EMBEDDING_ENDPOINT
 
 
 @pytest.mark.unit
@@ -479,3 +549,106 @@ def test_cloud_lane_overlay_still_resolves_only_from_its_own_pin(
         environ={"BIFROST_LANE_OVERLAY_PATH": str(_CLOUD_OVERLAY)},
     )
     assert rendered == target
+
+
+# ---------------------------------------------------------------------------
+# OMN-19432: a typed-decision backend (TypeSafe Jev) renders without the chat
+# path, is never counted as a delegation rung, and a bare base is still refused.
+# ---------------------------------------------------------------------------
+
+_TYPED_DECISION_ENDPOINT = "https://decisions.example.invalid/v1/systemone"
+
+
+def _write_base_with_typed_decision_backend(
+    path: Path, *, decision_endpoint: str, cloud_endpoint: str | None = _CLOUD_ENDPOINT
+) -> None:
+    _write_mixed_base_contract(path, cloud_endpoint=cloud_endpoint)
+    contract = yaml.safe_load(path.read_text(encoding="utf-8"))
+    contract["backends"].append(
+        {
+            "backend_id": "cloud-typed-decision",
+            "provider": "typesafe",
+            "model_name": "jev-latest",
+            "endpoint_url": decision_endpoint,
+            "secret_ref": "llm.typesafe.api_key",
+            "tier": "typed_decision",
+        }
+    )
+    path.write_text(yaml.safe_dump(contract, sort_keys=False), encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_typed_decision_backend_renders_its_operation_url_verbatim(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_base_with_typed_decision_backend(
+        source, decision_endpoint=_TYPED_DECISION_ENDPOINT
+    )
+
+    render_bifrost_delegation_contract(
+        source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+    )
+
+    contract = yaml.safe_load(target.read_text(encoding="utf-8"))
+    by_id = {backend["backend_id"]: backend for backend in contract["backends"]}
+    assert by_id["cloud-typed-decision"]["endpoint_url"] == _TYPED_DECISION_ENDPOINT
+
+
+@pytest.mark.unit
+def test_chat_backend_without_the_chat_path_is_still_refused(tmp_path: Path) -> None:
+    """Positive control for the test above: the same non-chat URL on a backend
+    that is NOT declared typed_decision still fails the render."""
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_mixed_base_contract(source, cloud_endpoint=_TYPED_DECISION_ENDPOINT)
+
+    with pytest.raises(ProtocolConfigurationError, match="must be complete"):
+        render_bifrost_delegation_contract(
+            source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+        )
+    assert not target.exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "bare",
+    [
+        "https://decisions.example.invalid/v1",
+        "https://decisions.example.invalid/v1beta/",
+        "https://decisions.example.invalid",
+        "http://decisions.example.invalid/v1/systemone",
+    ],
+)
+def test_typed_decision_backend_bare_base_or_plain_http_is_refused(
+    tmp_path: Path, bare: str
+) -> None:
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_base_with_typed_decision_backend(source, decision_endpoint=bare)
+
+    with pytest.raises(ProtocolConfigurationError, match="typed-decision endpoint"):
+        render_bifrost_delegation_contract(
+            source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+        )
+    assert not target.exists()
+
+
+@pytest.mark.unit
+def test_typed_decision_backend_is_not_an_active_delegation_endpoint(
+    tmp_path: Path,
+) -> None:
+    """A contract whose only endpoint is a typed-decision one has no rung to
+    delegate to, so the render still refuses it as having no active endpoint."""
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_base_with_typed_decision_backend(
+        source, decision_endpoint=_TYPED_DECISION_ENDPOINT, cloud_endpoint=None
+    )
+
+    with pytest.raises(ProtocolConfigurationError, match="no active endpoint"):
+        render_bifrost_delegation_contract(
+            source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+        )
+    assert not target.exists()

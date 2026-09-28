@@ -142,6 +142,7 @@ adjacency:
   contracts: {reverse_deps: []}
   decorators: {reverse_deps: []}
   docker: {reverse_deps: []}
+  examples: {reverse_deps: []}
   gateways: {reverse_deps: []}
   hooks: {reverse_deps: []}
   infrastructure: {reverse_deps: []}

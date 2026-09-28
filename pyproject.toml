@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.38.59"
+version = "0.38.60"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{ name = "OmniNode.ai", email = "contact@omninode.ai" }]
 license = {text = "MIT"}
@@ -43,7 +43,7 @@ dependencies = [
     # `>=FLOOR,<NEXT_MINOR_OF_FLOOR` and admits the override's exact version.
     # A dependency cascade moves only the override on a patch release; a
     # change that starts to need a newer core raises FLOOR by hand.
-    "omnibase-core>=0.47.23,<0.48.0",
+    "omnibase-core>=0.47.24,<0.48.0",
     "omnibase-spi==0.23.5",
     # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
     "omnibase-compat==0.5.7",
@@ -257,7 +257,10 @@ dev = [
 override-dependencies = [
     # OMN-19655: the one exact omnibase-core pin. uv.lock and the runtime image
     # resolve from here; [project.dependencies] publishes the compatible range.
-    "omnibase-core==0.47.23",
+    # OMN-19749: released omnibase-core 0.47.24 (PyPI, OMN-18595) carries
+    # omnibase_core#1786's runtime lane declaration types this draft needs; the
+    # temporary git-rev override below is removed in the same change.
+    "omnibase-core==0.47.24",
     "omnibase-spi==0.23.5",
     "omnibase-compat==0.5.7",
 ]
@@ -268,6 +271,10 @@ override-dependencies = [
 # omnibase-spi git-rev overrides DELETED — resolved from PyPI once 0.46.1 /
 # 0.23.0 are published.
 onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", rev = "2dd26ade7caaa7131e532473ec9d8a207d0e77ab" }
+# OMN-19749: the temporary git-rev override to omnibase_core#1786's squash
+# (be874b620) is REMOVED. omnibase-core 0.47.24 is published on PyPI (OMN-18595)
+# and contains that squash as an ancestor; the override-dependencies pin above
+# resolves the released wheel.
 # OMN-12549 CLOSED: the cross-repo seam is now on PyPI (omnibase-core 0.46.3,
 # omnibase-spi 0.23.1). The temporary immutable-rev git overrides for
 # omnibase-core/omnibase-spi were DELETED here and the version pins bumped to
@@ -521,6 +528,7 @@ markers = [
     "linear: Tests requiring a real Linear API key (LINEAR_API_KEY env var)",
     "bastion: Tests that dial the live MSK SNI bastion and AWS MSK (OMN-15744). Excluded from the nightly integration sweep, which runs on a runner with neither AWS credentials nor bastion reach -- there they would be permanent red noise. Selected deliberately by msk-bastion-canary.yml.",
     "live_github_api: Tests that call the live GitHub REST API directly (network-dependent) -- excluded from the merge-required test-parallel path and run on a scheduled, non-required canary instead (OMN-16096)",
+    "ephemeral_pg: Live-apply migration proofs that need their own throwaway PostgreSQL cluster per test (tests/integration/migrations/conftest.py EphemeralPostgres: a postgres:16-alpine container or initdb, plus psql). Deselected from the PR test splits, which have neither, and selected by the Migration Integration Test job in ci.yml with ONEX_MIGRATION_PROOF_REQUIRE_PG=1 (OMN-19550). Deselected there is not skipped here: selecting them in CI without a backend is a FAILURE, never a skip.",
     "cross_repo_consumer: Tests that read the OmniMarket delegation consumer's own source to prove cross-repo keyword parity (OMN-18321). They FAIL CLOSED when that source is unresolvable, by design, so they are deselected from the generic test splits -- which do not check it out -- and selected by the job that does: consumer-kwarg-parity in delegation-seam-gate.yml, plus the always_run pre-commit hook. Deselected here is not skipped there; the gate that owns them is the enforcement surface.",
 ]
 addopts = [

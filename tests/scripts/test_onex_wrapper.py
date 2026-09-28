@@ -157,6 +157,18 @@ class _Workspace:
         )
         self.path_onex.chmod(0o755)
 
+    def install_path_onex_symlink_to(self, target: Path) -> None:
+        """A symlink at the PATH shim location, pointing at ``target``.
+
+        Stands in for a deliberately created ``~/.local/bin/onex`` symlink
+        (OMN-19810): PATH resolution (``command -v``) returns this literal
+        symlink path, never the resolved target, so the shadow check must
+        resolve it before comparing.
+        """
+        if self.path_onex.exists() or self.path_onex.is_symlink():
+            self.path_onex.unlink()
+        self.path_onex.symlink_to(target)
+
     def install_reconciler(
         self, *, creates_entrypoint: bool, exit_code: int = 0
     ) -> None:
@@ -360,6 +372,55 @@ def test_no_warning_when_nothing_shadows_the_entrypoint(workspace: _Workspace) -
 
     assert result.returncode == _SENTINEL_OK
     assert "WARNING" not in result.stderr
+
+
+def test_no_warning_when_path_onex_is_a_symlink_to_the_entrypoint(
+    workspace: _Workspace,
+) -> None:
+    """OMN-19810: a symlink at the PATH shim resolving to $ENTRYPOINT is not a
+    shadow. Before the fix, ``command -v`` returned the unresolved symlink
+    path and compared unequal to $ENTRYPOINT every time, printing a false
+    WARNING on every dispatch."""
+    workspace.install_entrypoint()
+    workspace.install_path_onex_symlink_to(workspace.entrypoint)
+
+    result = workspace.run("node", "x")
+
+    assert result.returncode == _SENTINEL_OK
+    assert "WARNING" not in result.stderr
+
+
+def test_no_warning_when_path_onex_is_a_symlink_to_the_wrapper(
+    workspace: _Workspace,
+) -> None:
+    """Same as above, for a symlink resolving to $SCRIPT_DIR/onex (this
+    wrapper) rather than to $ENTRYPOINT."""
+    workspace.install_entrypoint()
+    workspace.install_path_onex_symlink_to(workspace.wrapper)
+
+    result = workspace.run("node", "x")
+
+    assert result.returncode == _SENTINEL_OK
+    assert "WARNING" not in result.stderr
+
+
+def test_warning_still_fires_for_a_symlink_to_somewhere_else(
+    workspace: _Workspace,
+) -> None:
+    """The fix must not become "any symlink is fine": a symlink resolving to
+    neither $ENTRYPOINT nor the wrapper still shadows and still warns."""
+    workspace.install_entrypoint()
+    other = workspace.root / "other_onex_build" / "onex"
+    other.parent.mkdir(parents=True)
+    other.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    other.chmod(0o755)
+    workspace.install_path_onex_symlink_to(other)
+
+    result = workspace.run("node", "x")
+
+    assert result.returncode == _SENTINEL_OK
+    assert "WARNING" in result.stderr
+    assert str(workspace.path_onex) in result.stderr
 
 
 # --------------------------------------------------------------------------- #

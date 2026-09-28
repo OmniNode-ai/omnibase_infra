@@ -1,0 +1,24 @@
+-- OMN-17886: Rollback for
+-- nodes/node_gateway_link_health_write_effect/0002_revoke_omninode_runtime_gateway_link_health_status.sql.
+--
+-- Gives omninode_runtime back the privileges the forward file removed from the
+-- gateway_link_health_status view: INSERT, SELECT and UPDATE, the set the
+-- default-privilege rule conferred on a from-empty build. Manual execution
+-- only -- never auto-applied (rollback/ is not mounted to
+-- docker-entrypoint-initdb.d and no runner reads it).
+--
+-- The forward file runs REVOKE ALL and records nothing about what it removed,
+-- so this file restores the from-empty set only. What a given lane held comes
+-- from the read-only readback of the view's ACL taken before the forward file
+-- reached that lane. Compare against it before running this: if the lane held
+-- more than SELECT, INSERT and UPDATE, add the rest by hand; if it held
+-- nothing, the forward file changed nothing, and this file must not be run
+-- there, because it would add grants the topology does not declare and the
+-- live-ACL gate reports as UNDECLARED_GRANT.
+--
+-- It does not remove the forward file's ledger row, so the node loop will not
+-- revoke again unless that row is removed too.
+--
+-- Run as the view's owner, a member of the owner role, or a superuser.
+
+GRANT SELECT, INSERT, UPDATE ON omninode_internal.gateway_link_health_status TO omninode_runtime;
