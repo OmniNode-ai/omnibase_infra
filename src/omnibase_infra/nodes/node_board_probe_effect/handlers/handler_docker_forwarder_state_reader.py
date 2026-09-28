@@ -137,6 +137,10 @@ class HandlerDockerForwarderStateReader(ProtocolForwarderStateReader):
                 started_at = datetime.fromisoformat(started_at_text).replace(
                     microsecond=0
                 )
+                if started_at.tzinfo is None:
+                    # Docker reports UTC; a zone-less value is read as UTC so
+                    # the grader's age arithmetic never mixes naive and aware.
+                    started_at = started_at.replace(tzinfo=UTC)
             except ValueError as exc:
                 return self._failed_read(argv, f"{exc}: {state_output}")
 

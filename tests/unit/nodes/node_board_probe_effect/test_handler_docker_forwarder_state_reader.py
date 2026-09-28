@@ -131,6 +131,12 @@ def test_a_stopped_container_is_observed_as_not_running() -> None:
     assert not observation.running
 
 
+def test_a_zone_less_start_time_is_read_as_utc() -> None:
+    state = {"Running": True, "StartedAt": "2026-09-28T13:50:23.846688704"}
+    observation = _observe(_Runner(state=state))
+    assert observation.started_at == datetime(2026, 9, 28, 13, 50, 23, tzinfo=UTC)
+
+
 def test_a_missing_container_is_an_unreadable_observation() -> None:
     observation = _observe(_Runner(inspect_rc=1))
     assert not observation.read_ok
