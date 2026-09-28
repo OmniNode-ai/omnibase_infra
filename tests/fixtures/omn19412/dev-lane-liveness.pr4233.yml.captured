@@ -1,0 +1,441 @@
+# dev-lane-liveness.yml — scheduled lab/dev lane liveness probe (OMN-15190)
+#
+# WHY THIS EXISTS
+#   The lab/dev lane (compose project `omnibase-infra` on the `.201` host) has
+#   been GC/idle-reclaimed to zero containers at least five times (2026-07-13,
+#   07-14, 07-24, 07-26 x2). Every single occurrence was discovered
+#   REACTIVELY, by whichever PR happened to hit the resulting org-wide
+#   occ-autobind / occ-companion-effect connection-refused cascade into
+#   occ-preflight / Receipt Gate. Nothing watched the lane.
+#
+#   Operator ruling 2026-07-29 (WS-4): the lab lane is KEEP-ALIVE — testing
+#   things live is the point of the lab — so lane-down is a DEFECT, not the
+#   ephemeral-by-design state OMN-13414 documented. This workflow is the
+#   surface that says so.
+#
+#   The probe logic is NOT new: `scripts/system_health_check.sh` is the repo's
+#   canonical health gate and already carried most of it. It had zero call
+#   sites. This wires it and adds the lane-specific check (`--lane` mode ->
+#   dev_lane_liveness + redpanda + runtime_containers).
+#
+# WHY A SEPARATE FILE FROM runner-fleet-canary.yml
+#   Same 15-minute cadence, adjacent concern, deliberately NOT the same file.
+#   The fleet canary carries an invariant asserted by
+#   tests/ci/test_runner_listener_liveness.py: EVERY job in that workflow runs
+#   on GitHub-hosted compute, because a canary that shares fate with the fleet
+#   it watches proves nothing. This job must run self-hosted (below), so
+#   folding it in would have meant narrowing that safety test inside a feature
+#   PR — the thing OMN-15234 explicitly split into its own ticket when it had
+#   to narrow a repo-wide gate. Separate file, guard untouched, and the two
+#   red signals stay distinguishable: "the fleet is dying" and "the lane is
+#   dying" are different pages.
+#
+# WHY SELF-HOSTED IS CORRECT HERE (this is not the fleet canary's mistake)
+#   The fate boundary that matters is COMPOSE PROJECT, not host. The watched
+#   thing is project `omnibase-infra`; the watcher is the `omnibase-deploy`
+#   runner in a different project on the same host. The lane has repeatedly
+#   died with the runner fully alive — that IS the observed failure mode.
+#   And it must probe from where the CI publishers actually publish: the
+#   lane's broker host-port is on the tailnet, unreachable from GitHub-hosted
+#   compute, so an ubuntu-latest job could only ever assert "I cannot see it."
+#   `omnibase-deploy` is the one runner with both docker.sock and the
+#   host-gateway alias (docker/docker-compose.runners.yml).
+#
+#   Residual, stated rather than hidden: if the whole `.201` host dies this
+#   job never gets scheduled and reports nothing. That case is covered by
+#   runner-fleet-canary.yml, which runs on GitHub-hosted compute and goes red
+#   on the same cadence.
+#
+# PR-TIME GUARD
+#   Deliberately no `pull_request` trigger: the deploy runner is not a PR
+#   runner, so a PR-triggered job could only skip its own probe. The PR-time
+#   guard is the hermetic suite `tests/ci/test_dev_lane_liveness.py`, which
+#   drives the real bash artifact and asserts this file's wiring (the `--lane`
+#   invocation, `LANE_PROBE_HOST`, `ONEX_LANE_KEEPALIVE`, the schedule, and
+#   the runs-on on both this job and the fleet canary's).
+name: dev-lane-liveness
+
+on:
+  schedule:
+    # Every 15 minutes, offset 7 past the quarter to avoid a thundering herd
+    # with runner-fleet-canary.yml (*/15) — repo cron convention.
+    - cron: "7,22,37,52 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-lane:
+    name: Resolve the lab lane (chain of responders)
+    runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
+    timeout-minutes: 5
+    outputs:
+      lane: ${{ steps.lane.outputs.name }}
+      docker_runs_on: ${{ steps.lane.outputs.docker_runs_on }}
+    steps:
+      - name: Checkout the lane resolver
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: .github/actions/resolve-lab-lane
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Resolve the lab lane through the overlay's chain of responders
+        id: lane
+        uses: ./.github/actions/resolve-lab-lane
+        with:
+          lanes-json: ${{ vars.LAB_LANES_JSON }}
+          require: docker_runs_on
+          match: compose_project=omnibase-infra
+
+  dev-lane-liveness:
+    name: dev-lane-liveness
+    needs: resolve-lane
+    # OMN-19894 (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check
+    # must not rely on one machine). This job reads the lane's containers
+    # through the docker daemon that runs them, so it runs beside the lane that
+    # `resolve-lane` picked from the overlay (vars.LAB_LANES_JSON, the first
+    # lane of compose project omnibase-infra), on the runner labels that lane
+    # declares. No host label is written here.
+    runs-on: ${{ fromJSON(needs.resolve-lane.outputs.docker_runs_on) }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (health gate script + rendered runtime policy)
+        uses: actions/checkout@v4
+        with:
+          # No git operations after checkout — do not leave the Actions token
+          # in local git config (zizmor artipacked).
+          persist-credentials: false
+
+      - name: Probe lab/dev lane liveness
+        env:
+          # Inside the deploy-runner container `localhost` is the container
+          # itself, so the script's on-host default would probe the wrong
+          # network namespace and manufacture a false RED. Set explicitly here
+          # rather than relying on the live container's compose env, which is
+          # only refreshed on recreate (OMN-14958 / OMN-14900).
+          LANE_PROBE_HOST: host.docker.internal
+          # Operator ruling 2026-07-29 (WS-4): lane-down is a defect.
+          ONEX_LANE_KEEPALIVE: "1"
+        run: |
+          set -euo pipefail
+          bash scripts/system_health_check.sh --lane --ci | tee lane-health.json
+
+      - name: Publish lane verdict to job summary
+        if: always()
+        run: |
+          set -uo pipefail
+          {
+            echo "## Lab/dev lane liveness (OMN-15190)"
+            echo ""
+            echo '```json'
+            cat lane-health.json 2>/dev/null \
+              || echo '{"overall":"unknown","detail":"probe produced no output"}'
+            echo '```'
+            echo ""
+            echo "RED here means the lab lane is down or degraded. It is KEEP-ALIVE"
+            echo "by operator ruling — recovery path:"
+            echo "\`knowledge-base:runbooks/cold-lane-full-bringup.md\`."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  # --- OMN-18031 G7: the lab half of the saturation record -----------------
+  #
+  # WHY THIS LIVES HERE AND NOT IN runner-fleet-canary.yml. The first build put
+  # it there, on the reasoning that the canary is an EXISTING scheduler and the
+  # consent row forbids adding a third one. That broke a codified invariant:
+  # `tests/ci/test_dev_lane_liveness.py::test_fleet_canary_is_not_borrowed_for_the_lane_probe`
+  # asserts `list(canary["jobs"]) == ["fleet-status"]` and its own message says
+  # where host-scoped probes belong — "put lane/host-scoped probes in
+  # dev-lane-liveness.yml instead". The canary asserts every one of its jobs is
+  # GitHub-hosted because a canary that shares fate with the fleet it watches
+  # proves nothing, and folding a self-hosted job in would have required
+  # narrowing that guard. This workflow is the sanctioned home for exactly this
+  # shape, and it is also an existing scheduler, so no third one is added.
+  #
+  # DELIBERATELY SELF-HOSTED, and therefore deliberately fate-shared with the
+  # fleet. A hosted runner cannot read lab load at all: the pre-push picker
+  # reaches lab hosts over ssh to tailnet/RFC1918 addresses that GitHub-hosted
+  # compute has no route to. The only way to measure the lab is to run on it.
+  #
+  # The cost is named rather than hidden: the lab half of the record is missing
+  # exactly when the lab is busiest. That is why its ABSENCE is itself one of
+  # the four alert conditions (`lab_probe_unavailable_sustained`) — the one
+  # reason a 3-minute self-hosted job cannot start is that no runner is free.
+  lab-load-probe:
+    name: lab-load-probe
+    # Literal, not OMNI_RUNNER_SELECTOR_V1: this job's whole purpose is to
+    # execute ON a lab host, so a seam flip must never be able to relocate it
+    # onto GitHub-hosted compute, where it would measure the wrong machine and
+    # report it as the lab. Same reasoning the dev-lane-liveness job above
+    # already applies to its own runs-on.
+    runs-on: [self-hosted, omnibase-ci]
+    # OMN-18253: `continue-on-error: true` used to sit here, on the stated
+    # reasoning that "this job failing IS a data point, not an outage". The
+    # reasoning was right and is preserved; the mechanism was wrong.
+    #
+    # What it actually bought was that NO failure inside this job reached the
+    # run's conclusion -- including the ModuleNotFoundError that killed 10 of
+    # the job's first 12 runs and left a zero-byte artifact. "The lab is quiet",
+    # "I could not reach the API" and "I crashed before writing anything" were
+    # one green.
+    #
+    # The data-point property now lives where it belongs, in the probe itself:
+    # `probe_lab_load.py` exits 0 for a MEASUREMENT, saturated or not, and
+    # non-zero only when it could not measure at all. A busy lab host therefore
+    # still cannot fail this job. What can is the probe being unable to answer,
+    # which is exactly the state worth seeing.
+    #
+    # Nothing downstream is blocked either way: `dev-lane-liveness` has no
+    # `needs` on this job, and `saturation-record` runs under `if: always()`
+    # because an absent lab record is alert condition 4.
+    # tests/ci/test_lab_load_probe_omn18253.py pins all of it.
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Probe the fleet's org busy/idle counts as the lab saturation signal
+        # OMN-18031 follow-up (2026-09-12): this used to call
+        # `probe_local_lab_load()`, which reads THIS CONTAINER's own
+        # `/proc/loadavg` and `os.cpu_count()`. That measures the runner
+        # container, not the `.201` host: the same host read 1.524x from an
+        # on-host dry run and 0.2232x from inside one of its own runner
+        # containers in the same window, and `max_lab_load_ratio` is
+        # calibrated against the host-scoped number. No host-published load
+        # metric exists to read instead (checked: no node-exporter/cAdvisor
+        # surface, no deploy-agent host-metrics artifact in this repo), so
+        # this reads the org runner registry's busy/idle counts for
+        # `omnibase-ci` instead -- the one live signal this probe CAN measure
+        # honestly with nothing but outbound HTTPS. See
+        # `probe_lab_saturation_from_fleet`'s docstring for the full reasoning.
+        #
+        # OMN-18253: the probe moved out of an inline heredoc into
+        # `scripts/ci/probe_lab_load.py`. Two reasons, both measured rather
+        # than stylistic.
+        #
+        # (1) THE HEREDOC COULD NOT FAIL HONESTLY.
+        # `probe_lab_saturation_from_fleet` NEVER raises -- every failure comes
+        # back as `{"ok": false, "error": ...}` -- so the heredoc printed a
+        # record saying it had measured nothing and exited 0. `set -euo
+        # pipefail` does not help: nothing returned non-zero. A probe that
+        # could not reach the runner API was a green step.
+        # (2) THE REDIRECT MANUFACTURED THE ZERO-BYTE ARTIFACT. `> lab-load.json`
+        # creates the file before python runs, so an import failure left an
+        # empty record that looked like a measurement of nothing. The module
+        # writes the file itself, after deciding what to say, and records even
+        # an unhandled exception rather than dying before writing.
+        #
+        # A BUSY LAB STILL EXITS 0. Saturation is `ok: true` with a high ratio;
+        # only an inability to measure is non-zero. That is what keeps this a
+        # data point rather than an outage now that the job no longer suppresses
+        # its own failures.
+        env:
+          RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/probe_lab_load.py \
+            --out lab-load.json \
+            --runner-group omnibase-ci \
+            --api-url "${GITHUB_API_URL:-https://api.github.com}" \
+            --token "${RUNNER_FLEET_STATUS_TOKEN:-${CROSS_REPO_PAT:-}}"
+      # OMN-18247. `if: always()` is load-bearing here for the same reason it is
+      # on the uploader: when the producing step dies, `> lab-load.json` has
+      # ALREADY created the file, so what reaches the uploader is a zero-byte
+      # record that `if-no-files-found` cannot see at any setting. That is the
+      # exact state this job shipped in for 10 of its first 12 runs. Running the
+      # assertion only on success would leave precisely that case unchecked.
+      - name: Assert the lab load record is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact lab-load \
+            --require lab-load.json
+      - name: Upload lab load record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lab-load
+          path: lab-load.json
+          # `error`, not `warn`: absence of this record is a fact about the
+          # lab, not a note to scroll past (OMN-18247).
+          if-no-files-found: error
+          retention-days: 7
+
+  # --- OMN-18031 G7: merge, evaluate, alert --------------------------------
+  #
+  # Hosted for the same reason the fleet canary is: the monitor must survive
+  # the saturation it reports on. It probes the org runner registry itself
+  # rather than consuming an artifact from the canary, which keeps the canary
+  # byte-for-byte unchanged and removes a cross-workflow artifact dependency.
+  saturation-record:
+    name: saturation-record
+    needs: [lab-load-probe]
+    # `always()` is load-bearing: an absent lab probe is the state this monitor
+    # most needs to record, and it is alert condition 4.
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Probe the org runner registry
+        env:
+          RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          set -uo pipefail
+          python3 - <<'PYEOF' > fleet-status.json
+          import json, os, sys
+          sys.path.insert(0, "scripts/ci")
+          # Both names are stdlib-plus-PyYAML by construction. The typed
+          # `load_contract_policy` reads the same contract field but imports
+          # the model, and with it omnibase_core and pydantic, which this bare
+          # `python3` has no install behind it to provide (OMN-18684).
+          from runner_route_decision import probe_fleet, load_contract_runner_group
+          runner_group = load_contract_runner_group()
+          token = os.environ.get("RUNNER_FLEET_STATUS_TOKEN") or os.environ.get("CROSS_REPO_PAT")
+          print(json.dumps(probe_fleet(token, runner_group, "https://api.github.com")))
+          PYEOF
+          cat fleet-status.json
+
+      - name: Download this run's lab half
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: lab-load
+          path: ./.sat-current
+
+      - name: Download prior records for the sustain window
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          mkdir -p ./.sat-history
+          # The sustain window is read from this workflow's own previous record
+          # artifacts — no new datastore, and nothing to keep in sync.
+          gh run list --workflow dev-lane-liveness.yml --repo "${GITHUB_REPOSITORY}" \
+            --status completed --limit 8 --json databaseId --jq '.[].databaseId' \
+            > ./.sat-runs.txt || true
+          # Read the ids with an explicit loop: an unquoted variable does not
+          # word-split under every shell (CLAUDE.md rule 16).
+          while IFS= read -r run_id; do
+            [ -n "${run_id}" ] || continue
+            gh run download "${run_id}" --repo "${GITHUB_REPOSITORY}" \
+              --name saturation-record --dir "./.sat-history/${run_id}" || true
+          done < ./.sat-runs.txt
+          find ./.sat-history -name '*.json' | head -20 || true
+
+      # OMN-18031 follow-up (2026-09-12): this step used to not exist, and
+      # ROUTE_REASON below was a hardcoded literal `unknown` -- NOT on the
+      # condition-3 allowlist, so `route_fallback_sustained` (the alert the
+      # operator actually asked for) could never fire. This aggregates the
+      # `route` job's own most recent `runner-route-decision-*` artifact
+      # (uploaded by every `ci.yml` run via runner-route-reusable.yml) the
+      # same way the earlier step already aggregates `lab-load` artifacts:
+      # a repo-wide listing, filtered and picked by a pure, unit-tested
+      # function (`select_latest_route_artifact` /
+      # `extract_route_reason` in runner_saturation_record.py), then a
+      # best-effort download. Any failure anywhere in this chain leaves
+      # `reason` at the same safe `unknown` default this workflow already had.
+      - name: Fetch the most recent route decision's reason
+        id: route_reason
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          mkdir -p ./.route-reason
+          reason="unknown"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            > ./.route-reason/artifacts.json 2> ./.route-reason/artifacts.err \
+            || cat ./.route-reason/artifacts.err
+          if [ -s ./.route-reason/artifacts.json ]; then
+            artifact_id="$(python3 - <<'PYEOF'
+          import json, sys
+          sys.path.insert(0, "scripts/ci")
+          from runner_saturation_record import select_latest_route_artifact
+          with open("./.route-reason/artifacts.json", encoding="utf-8") as handle:
+              payload = json.load(handle)
+          artifact = select_latest_route_artifact(payload.get("artifacts", []))
+          print(artifact["id"] if artifact else "")
+          PYEOF
+          )" || artifact_id=""
+            if [ -n "${artifact_id}" ]; then
+              download_url="$(gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}" \
+                --jq '.archive_download_url' || true)"
+              if [ -n "${download_url}" ] \
+                && curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+                  -o ./.route-reason/artifact.zip "${download_url}" \
+                && unzip -p ./.route-reason/artifact.zip runner-route-decision.json \
+                  > ./.route-reason/decision.json 2>/dev/null; then
+                extracted="$(python3 - <<'PYEOF'
+          import json, sys
+          sys.path.insert(0, "scripts/ci")
+          from runner_saturation_record import extract_route_reason
+          with open("./.route-reason/decision.json", encoding="utf-8") as handle:
+              payload = json.load(handle)
+          value = extract_route_reason(payload)
+          print(value or "")
+          PYEOF
+          )" || extracted=""
+                [ -n "${extracted}" ] && reason="${extracted}"
+              fi
+            fi
+          fi
+          echo "reason=${reason}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build the record and evaluate sustained saturation
+        id: evaluate
+        env:
+          # Populated from the route job's own most recent decision artifact
+          # by the step above; falls back to `unknown` (not on the
+          # condition-3 allowlist, so it raises nothing) when no artifact
+          # could be found or read.
+          ROUTE_REASON: ${{ steps.route_reason.outputs.reason || 'unknown' }}
+          # Same channel the fleet canary already alerts to — inherited, not
+          # chosen here. Absent tokens degrade to annotation + artifact only.
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+        run: |
+          set -uo pipefail
+          python3 scripts/ci/runner_saturation_record.py \
+            --policy config/runner_routing_policy.yaml \
+            --fleet-json fleet-status.json \
+            --lab-json ./.sat-current/lab-load.json \
+            --route-reason "${ROUTE_REASON}" \
+            --history ./.sat-history \
+            --out runner-saturation-record.json
+
+      # OMN-18247. Both files are required, not just the record. The writer
+      # emits `[]` into the alerts file when nothing fired, so an ABSENT alerts
+      # file means the evaluation never ran — a different fact from "no alert
+      # fired", and one a directory-shaped upload would hide behind its sibling.
+      - name: Assert the saturation record and its alerts are present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact saturation-record \
+            --require runner-saturation-record.json \
+            --require runner-saturation-alerts.json
+      - name: Upload the saturation record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: saturation-record
+          path: |
+            runner-saturation-record.json
+            runner-saturation-alerts.json
+          if-no-files-found: error
+          retention-days: 7
