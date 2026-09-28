@@ -1515,10 +1515,13 @@ def test_the_shipped_config_hardcodes_no_machine_address() -> None:
 @pytest.mark.unit
 def test_the_shipped_config_loads_and_declares_every_condition_a_subject(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """A config that declares no subject would make the alarm permanently quiet."""
     monkeypatch.setenv("ONEX_INFRA_HOST", "lab.invalid")
     monkeypatch.setenv("ONEX_RUNTIME_SSH_HOST", "user@lab.invalid")
+    fake_omni_home = tmp_path / "omni-home"
+    monkeypatch.setenv("OMNI_HOME", str(fake_omni_home))
     config = ModelAlarmConfig.load(CONFIG)
     assert config.lane is EnumLabLane.COMPOSE_DEV
     assert config.container_restart_bounds
@@ -1526,6 +1529,17 @@ def test_the_shipped_config_loads_and_declares_every_condition_a_subject(
     assert config.docker_command[0] == "ssh"
     assert config.effects_group_prefix
     assert config.effects_group_suffix
+    # OMN-18867: the shipped runtime_path_validator carries an unexpanded
+    # ${OMNI_HOME} placeholder (Operating Rule 6), so a real value here proves
+    # the field is declared and resolves rather than staying empty.
+    assert config.runtime_path_validator == str(
+        fake_omni_home
+        / "omniclaude"
+        / ".github"
+        / "actions"
+        / "deploy-gate"
+        / "validate_pr_deploy_required.py"
+    )
 
 
 @pytest.mark.unit
