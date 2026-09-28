@@ -1,0 +1,42 @@
+# omnirunners.slice on .202 -- OMN-19895: one cgroup for the omnipc2-ci-runner pool.
+#
+# Same unit NAME as the primary host's (docker/runners/systemd/omnirunners.slice),
+# because the pool's compose file names `cgroup_parent: omnirunners.slice`, and
+# the same four limits, sized for THIS host. scripts/deploy-runners.sh installs
+# this file as /etc/systemd/system/omnirunners.slice on .202 when deploying
+# `--host=192.168.86.202 --pool=omnipc2-ci-runner`, and reads it back; the
+# deploy fails closed if the live values differ.
+#
+# WHAT SHARES THE HOST. .202 (32 cores, 60 GiB RAM, 7 GiB swap) serves the 4090
+# model through llama.cpp and runs the dev-202 and sim-202 compose lanes.
+# Measured 2026-09-28T09:15Z, before any CI runner existed here:
+#   - llama-server resident memory ~9.9 GiB (llamacpp-gpu0.service MemoryCurrent
+#     10.1 GB); decode 98.6 / 99.3 / 99.5 tokens/s for a 200-token completion,
+#     prompt 106-114 tokens/s. Decode runs on the GPU, so CPU contention moves
+#     it little; memory pressure that pushed it to swap would move it a lot.
+#   - the two lanes: two redpanda brokers at 3.8 and 1.8 GiB and about fifteen
+#     runtime, projection and consumer containers at 0.4-0.6 GiB each.
+#   - `free`: 26 GiB used, 33 GiB available (page cache included).
+#
+# THE LIMITS.
+#   MemoryHigh=20G     16 runners throttle and reclaim inside this slice above
+#                      20 GiB in aggregate, well inside the 33 GiB available.
+#   MemoryMax=24G      a burst beyond it is an OOM kill inside a CI job, never
+#                      the model server or a lane broker.
+#   MemorySwapMax=2G   the host's swap is only 7 GiB; CI may not fill it.
+#   CPUWeight=25       the same yield the primary pool has: under contention CI
+#                      gets a quarter of a default (100) sibling's share, and
+#                      every idle core when there is none.
+# Falsifier (plan task 3): a burst of 16 concurrent CI jobs here leaves the
+# model's decode rate within 10 percent of the idle baseline above.
+[Unit]
+Description=OmniNode CI runner pool on .202 (OMN-19895)
+Before=slices.target
+
+[Slice]
+MemoryAccounting=yes
+MemoryHigh=20G
+MemoryMax=24G
+MemorySwapMax=2G
+CPUAccounting=yes
+CPUWeight=25

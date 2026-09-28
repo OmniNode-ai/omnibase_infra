@@ -42,10 +42,36 @@ PRIMARY_COMPOSE = REPO_ROOT / "docker" / "docker-compose.runners.yml"
 GITHUB_ARCH_LABEL = {"amd64": "x64", "arm64": "arm64"}
 
 
-def _compose_for(prefix: str) -> Path:
-    if prefix == load_runner_fleet_config(FLEET_CONFIG).runner_name_prefix:
+def _compose_for(prefix: str, *, on_primary: bool = False) -> Path:
+    # OMN-19895: a pool on the primary host lives in the primary compose file;
+    # a pool anywhere else brings its own file named for its prefix, the same
+    # rule deploy-runners.sh --host/--pool resolves.
+    if (
+        on_primary
+        or prefix == load_runner_fleet_config(FLEET_CONFIG).runner_name_prefix
+    ):
         return PRIMARY_COMPOSE
     return REPO_ROOT / "docker" / f"docker-compose.runners-{prefix}.yml"
+
+
+def _declared_units():
+    """(host, prefix, expected_count, compose) for every host row and pool."""
+    config = load_runner_fleet_config(FLEET_CONFIG)
+    for host in config.hosts:
+        on_primary = host.host == config.runner_host
+        yield (
+            host,
+            host.runner_name_prefix,
+            host.expected_count,
+            _compose_for(host.runner_name_prefix),
+        )
+        for pool in host.pools:
+            yield (
+                host,
+                pool.runner_name_prefix,
+                pool.expected_count,
+                _compose_for(pool.runner_name_prefix, on_primary=on_primary),
+            )
 
 
 def _services(path: Path) -> dict[str, dict]:
@@ -57,21 +83,20 @@ def test_every_declared_host_has_a_compose_file_defining_its_services() -> None:
     config = load_runner_fleet_config(FLEET_CONFIG)
     assert config.hosts, "the inventory must declare at least the primary host"
 
-    for host in config.hosts:
-        compose = _compose_for(host.runner_name_prefix)
+    for host, prefix, expected_count, compose in _declared_units():
         assert compose.is_file(), (
-            f"host {host.host} declares prefix {host.runner_name_prefix!r} but "
+            f"host {host.host} declares prefix {prefix!r} but "
             f"{compose.relative_to(REPO_ROOT)} does not exist"
         )
         named = [
             name
             for name in _services(compose)
-            if re.fullmatch(rf"{re.escape(host.runner_name_prefix)}-\d+", name)
+            if re.fullmatch(rf"{re.escape(prefix)}-\d+", name)
         ]
-        assert len(named) >= host.expected_count, (
-            f"host {host.host} declares expected_count={host.expected_count} but "
-            f"{compose.relative_to(REPO_ROOT)} defines only {len(named)} service(s) "
-            f"matching {host.runner_name_prefix}-<N>: {sorted(named)}"
+        assert len(named) >= expected_count, (
+            f"host {host.host} declares expected_count={expected_count} for "
+            f"{prefix} but {compose.relative_to(REPO_ROOT)} defines only "
+            f"{len(named)} service(s) matching {prefix}-<N>: {sorted(named)}"
         )
 
 
@@ -83,12 +108,9 @@ def test_every_runner_registers_the_architecture_label_of_its_host() -> None:
     one: missing means a job cannot be pinned, wrong means it is pinned to the
     other architecture and the job is placed where it will not work.
     """
-    config = load_runner_fleet_config(FLEET_CONFIG)
-
-    for host in config.hosts:
-        compose = _compose_for(host.runner_name_prefix)
+    for host, prefix, _count, compose in _declared_units():
         for name, definition in _services(compose).items():
-            if not re.fullmatch(rf"{re.escape(host.runner_name_prefix)}-\d+", name):
+            if not re.fullmatch(rf"{re.escape(prefix)}-\d+", name):
                 continue
             labels = str(definition.get("environment", {}).get("RUNNER_LABELS", ""))
             if not labels:

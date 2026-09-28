@@ -1,0 +1,65 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-19895 -- a second omnibase-customer-plane runner, on .202, so the C4 and
+# C8 board probes survive the primary host (.201) being down. Operator consent
+# for the registration: omni_home ROLLING_WORK_LEDGER.md:13156.
+#
+# The service is omninode-customer-plane-runner-1 from docker-compose.runners.yml
+# with its names changed and nothing else: credential-free (OMN-18392), so no
+# lab credentials directory, no KUBECONFIG, no docker socket and no docker group.
+# The customer-plane reachability probe asserts each of those absences, and a
+# runner that held any of them would make its refusals meaningless.
+# tests/ci/test_customer_plane_runner_credential_free_omn18392.py pins this file
+# the same way it pins the .201 pair.
+#
+# NOT omnipc2-customer. That is the rootless podman runner under the ghrunner
+# account on this host (omninode_infra deploy/omnipc2-runner/), label
+# omnipc2-customer, for the customer-machine smoke. This one is a container of
+# the fleet image under the operator account's docker daemon, and binds no host
+# path besides its three hook scripts, the disk-admission marker directory and
+# its own creds volume, so /data and every home directory are outside it.
+#
+# DEPLOYING:
+#   scripts/deploy-runners.sh --host=192.168.86.202 --pool=omnipc2-customer-plane-runner
+services:
+  omnipc2-customer-plane-runner-1:
+    image: omninode-runner:latest
+    container_name: omnipc2-customer-plane-runner-1
+    restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    cpus: "1.0"
+    pids_limit: 2048
+    environment:
+      # OMN-17477 arch label; additive, lands on recreate.
+      RUNNER_LABELS: self-hosted,omnibase-customer-plane,linux,x64,arch-amd64
+      RUNNER_NAME: omnipc2-customer-plane-runner-1
+      GITHUB_ORG_URL: https://github.com/OmniNode-ai
+      RUNNER_TOKEN: ${RUNNER_TOKEN}
+      RUNNER_GROUP: omnibase-ci
+      ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+      UV_CONCURRENT_DOWNLOADS: "1"
+      UV_CONCURRENT_BUILDS: "1"
+      UV_CONCURRENT_INSTALLS: "1"
+      UV_HTTP_TIMEOUT: "600"
+    volumes:
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - omnipc2-customer-plane-runner-1-creds:/home/runner/.runner-creds
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+volumes:
+  omnipc2-customer-plane-runner-1-creds:
+    name: omnipc2-customer-plane-runner-1-creds

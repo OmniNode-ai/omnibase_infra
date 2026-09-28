@@ -44,7 +44,7 @@ def _config() -> ModelRunnerFleetConfig:
 # `py/incomplete-url-substring-sanitization` alerts this file first raised were
 # exactly that false shape. `.get()` says the same thing and does not.
 EXPECTED_HOSTS: tuple[tuple[str, str, int], ...] = (
-    ("omninode-pc.tail75df5e.ts.net", "amd64", 60),
+    ("omninode-pc.tail75df5e.ts.net", "amd64", 44),
     ("stickybeatz-2.tail75df5e.ts.net", "arm64", 1),
     ("omnibook.tail75df5e.ts.net", "arm64", 1),
     ("192.168.86.202", "amd64", 1),
@@ -95,7 +95,8 @@ def test_runner_name_prefixes_cannot_collide_across_hosts() -> None:
     runners as its own.
     """
     config = _config()
-    prefixes = [host.runner_name_prefix for host in config.hosts]
+    # OMN-19895: pool prefixes share the one namespace with host prefixes.
+    prefixes = [prefix for host in config.hosts for prefix in host.all_prefixes()]
     assert len(prefixes) == len(set(prefixes)), f"duplicate prefixes: {prefixes}"
     for a in prefixes:
         for b in prefixes:
@@ -113,7 +114,10 @@ def test_declared_total_sums_only_the_hosts_carrying_that_class() -> None:
     """
     config = _config()
 
+    # OMN-19895: 44 on the primary host plus .202's 16-runner pool. The spread
+    # moved capacity between hosts; it did not change the declared total.
     assert config.declared_total("action") == 60
+    assert config.declared_total("customer-plane") == 3
     assert config.declared_total("verify") >= 1
     # A class nothing declares is zero, not an error and not the whole fleet.
     assert config.declared_total("no-such-class") == 0
@@ -130,5 +134,62 @@ def test_host_rows_reject_an_empty_class_list() -> None:
     """A host that carries no class is capacity nothing can ever use."""
     raw = yaml.safe_load(FLEET_CONFIG.read_text(encoding="utf-8"))
     raw["hosts"][0]["classes"] = []
+    with pytest.raises(ValueError):
+        ModelRunnerFleetConfig.model_validate(raw)
+
+
+# --- OMN-19895: a host carries more than one pool ---------------------------
+
+
+def test_the_action_fleet_spans_two_hosts() -> None:
+    """No required CI context may rely on one machine (operator rulings
+    2026-09-28T01:58:06Z and 01:58:17Z), so the action class is declared on
+    two hosts, and the customer-plane class likewise."""
+    config = _config()
+    for runner_class in ("action", "customer-plane"):
+        hosts = [h.host for h in config.hosts if h.declared_count(runner_class) > 0]
+        assert len(hosts) >= 2, f"{runner_class} is declared on {hosts} only"
+
+
+def test_a_runner_name_resolves_to_the_host_its_pool_is_on() -> None:
+    config = _config()
+    primary = config.primary_host().host
+    by_name = {
+        "omninode-runner-44": primary,
+        "omninode-verify-runner-2": primary,
+        "omninode-customer-plane-runner-1": primary,
+        "omnipc2-ci-runner-16": "192.168.86.202",
+        "omnipc2-customer-plane-runner-1": "192.168.86.202",
+        "omnipc2-verify-runner-1": "192.168.86.202",
+    }
+    for name, host in by_name.items():
+        found = config.host_of_runner(name)
+        assert found is not None and found.host == host, (name, found)
+    # An unknown name is claimed by no host, and a prefix is not a runner name.
+    assert config.host_of_runner("mystery-box-1") is None
+    assert config.host_of_runner("omnipc2-ci-runner") is None
+
+
+def _with_pool(prefix: str) -> dict:
+    raw = yaml.safe_load(FLEET_CONFIG.read_text(encoding="utf-8"))
+    raw["hosts"][1].setdefault("pools", []).append(
+        {"runner_name_prefix": prefix, "expected_count": 1, "classes": ["verify"]}
+    )
+    return raw
+
+
+def test_a_pool_prefix_may_not_repeat_another_hosts_prefix() -> None:
+    with pytest.raises(ValueError, match="unique"):
+        ModelRunnerFleetConfig.model_validate(_with_pool("omnipc2-ci-runner"))
+
+
+def test_a_pool_prefix_may_not_nest_under_another_prefix() -> None:
+    with pytest.raises(ValueError, match="nested"):
+        ModelRunnerFleetConfig.model_validate(_with_pool("omninode-runner-extra"))
+
+
+def test_a_pool_needs_a_class() -> None:
+    raw = yaml.safe_load(FLEET_CONFIG.read_text(encoding="utf-8"))
+    raw["hosts"][0]["pools"][0]["classes"] = []
     with pytest.raises(ValueError):
         ModelRunnerFleetConfig.model_validate(raw)

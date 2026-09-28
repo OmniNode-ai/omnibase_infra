@@ -29,8 +29,15 @@ runner_name_prefix: omninode-runner
 # of competing as equals, at 60 runners exactly as it would at 40.
 # 60 always-on steady-state runners. All 60 are steady (no burst profiles),
 # so burst_count == expected_count (no separate burst tier).
-expected_count: 60
-burst_count: 60
+#
+# OMN-19895 (operator consent ROLLING_WORK_LEDGER.md:13156, plan
+# knowledge-base-internal beta/plans/2026-09-28-runner-fleet-spread-plan.md):
+# the 60 are SPREAD, not cut. 44 stay here on the primary host and 16 run on
+# .202 as the `omnipc2-ci-runner` pool below, so every required CI context has
+# runners on two hosts and survives either one stopping. The scalars below are
+# the primary host's share; `declared_total("action")` is still 60.
+expected_count: 44
+burst_count: 44
 # OMN-17477 — DECLARED HOST INVENTORY.
 #
 # The five scalar fields above describe ONE host, which is what the fleet was
@@ -71,8 +78,19 @@ hosts:
   - host: omninode-pc.tail75df5e.ts.net
     arch: amd64
     runner_name_prefix: omninode-runner
-    expected_count: 60
+    expected_count: 44
     classes: [action]
+    # OMN-19895 -- the primary host's other runner families, declared so the
+    # fleet probe (runner-pool-spread.yml) counts them toward this host instead
+    # of reporting them undeclared. Their services live in the primary compose
+    # file and are stood up with `deploy-runners.sh --add`, as before.
+    pools:
+      - runner_name_prefix: omninode-verify-runner
+        expected_count: 3
+        classes: [verify]
+      - runner_name_prefix: omninode-customer-plane-runner
+        expected_count: 2
+        classes: [customer-plane]
   # .101 — Mac mini, M2 Pro, 12 cores. Docker Desktop, data root on an external
   # volume. Deploy/verify class first: those jobs are cloud-touching
   # (kubectl/aws/gh) and architecture-neutral, so they are the class that can
@@ -106,6 +124,21 @@ hosts:
     runner_name_prefix: omnipc2-verify-runner
     expected_count: 1
     classes: [verify]
+    # OMN-19895 -- .202 takes a share of the action fleet and a second
+    # customer-plane runner, so neither label relies on the primary host alone.
+    # The earlier "verify class only" rule above protected the model server and
+    # the dev-202/sim-202 lanes from CI competing as equals; the CI pool keeps
+    # that property by running inside its own aggregate cgroup,
+    # docker/runners/systemd/pools/omnipc2-ci-runner/omnirunners.slice, sized
+    # from a measurement of the model server and both lanes. Deployed with
+    # `deploy-runners.sh --host=192.168.86.202 --pool=<prefix>`.
+    pools:
+      - runner_name_prefix: omnipc2-ci-runner
+        expected_count: 16
+        classes: [action]
+      - runner_name_prefix: omnipc2-customer-plane-runner
+        expected_count: 1
+        classes: [customer-plane]
   # .200 -- Mac Studio M2 Ultra, arm64, always-on (OMN-19657, operator approval
   # ledger 2026-09-25T18:27:30Z, answering the open question at ledger
   # 2026-09-25T10:29:02Z). One verify runner, labelled host-200, for the

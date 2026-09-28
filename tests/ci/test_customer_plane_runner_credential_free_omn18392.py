@@ -39,10 +39,18 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.runners.yml"
 
-CUSTOMER_PLANE_SERVICES = (
-    "omninode-customer-plane-runner-1",
-    "omninode-customer-plane-runner-2",
+# OMN-19895: the third member lives on .202 in its own compose file, so the
+# C4 and C8 probes survive the primary host stopping. It is the same service
+# with its names changed, and it is held to every absence below.
+OMNIPC2_CUSTOMER_PLANE_FILE = (
+    REPO_ROOT / "docker" / "docker-compose.runners-omnipc2-customer-plane-runner.yml"
 )
+SERVICE_FILES: dict[str, Path] = {
+    "omninode-customer-plane-runner-1": COMPOSE_FILE,
+    "omninode-customer-plane-runner-2": COMPOSE_FILE,
+    "omnipc2-customer-plane-runner-1": OMNIPC2_CUSTOMER_PLANE_FILE,
+}
+CUSTOMER_PLANE_SERVICES = tuple(SERVICE_FILES)
 # The general pool, used only as the positive control for every absence below.
 CONTROL_SERVICE = "omninode-runner-1"
 
@@ -73,15 +81,16 @@ PROBE_FORBIDDEN_ENV = (
 )
 
 
-def _compose() -> dict[str, Any]:
-    loaded = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
+def _compose(path: Path = COMPOSE_FILE) -> dict[str, Any]:
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
     return loaded
 
 
 def _service(name: str) -> dict[str, Any]:
-    services = _compose()["services"]
-    assert name in services, f"{name} is not defined in {COMPOSE_FILE}"
+    path = SERVICE_FILES.get(name, COMPOSE_FILE)
+    services = _compose(path)["services"]
+    assert name in services, f"{name} is not defined in {path}"
     return services[name]
 
 
@@ -92,9 +101,10 @@ def _volumes(service: dict[str, Any]) -> list[str]:
 # --- the pair exists and is targetable --------------------------------------
 
 
-def test_both_customer_plane_services_are_defined() -> None:
-    services = _compose()["services"]
-    missing = [n for n in CUSTOMER_PLANE_SERVICES if n not in services]
+def test_every_customer_plane_service_is_defined() -> None:
+    missing = [
+        n for n, path in SERVICE_FILES.items() if n not in _compose(path)["services"]
+    ]
     assert not missing, f"customer-plane runner services missing: {missing}"
 
 
@@ -198,9 +208,9 @@ def test_each_has_its_own_credential_volume() -> None:
     """The runner's registration cache key is labels + org URL, so a shared
     volume would let one of these adopt another runner's registration.
     """
-    compose = _compose()
     seen = set()
     for name in CUSTOMER_PLANE_SERVICES:
+        compose = _compose(SERVICE_FILES[name])
         creds = [v for v in _volumes(_service(name)) if v.endswith("/.runner-creds")]
         assert len(creds) == 1, f"{name} has {creds} credential volumes"
         volume_name = creds[0].split(":")[0]

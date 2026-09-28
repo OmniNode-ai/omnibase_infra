@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_infra.observability.runner_health.enum_runner_host_arch import (
     EnumRunnerHostArch,
 )
+from omnibase_infra.observability.runner_health.model_runner_fleet_pool import (
+    ModelRunnerFleetPool,
+)
 
 
 class ModelRunnerFleetHost(BaseModel):
@@ -81,6 +84,29 @@ class ModelRunnerFleetHost(BaseModel):
             "neutral default."
         ),
     )
+
+    pools: tuple[ModelRunnerFleetPool, ...] = Field(
+        default=(),
+        description=(
+            "OMN-19895 -- further runner pools on this host, each with its own "
+            "name prefix, count and classes. Empty for a host that carries one "
+            "class of runner, which is every host row written before this field."
+        ),
+    )
+
+    def all_prefixes(self) -> tuple[str, ...]:
+        """This host's own prefix followed by each pool's."""
+        return (
+            self.runner_name_prefix,
+            *(pool.runner_name_prefix for pool in self.pools),
+        )
+
+    def declared_count(self, runner_class: str) -> int:
+        """Declared runners of ``runner_class`` on this host, row plus pools."""
+        total = self.expected_count if runner_class in self.classes else 0
+        return total + sum(
+            pool.expected_count for pool in self.pools if runner_class in pool.classes
+        )
 
     @property
     def arch_label(self) -> str:
