@@ -11,6 +11,7 @@ is an observation with ``read_ok=False``, never an empty list.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
@@ -26,6 +27,8 @@ from omnibase_infra.nodes.node_merge_provenance_observe_effect.models.model_merg
 from omnibase_infra.nodes.node_merge_provenance_observe_effect.protocols.protocol_merge_group_run_reader import (
     ProtocolMergeGroupRunReader,
 )
+
+logger = logging.getLogger(__name__)
 
 _MAX_ERROR_CHARS = 300
 
@@ -50,7 +53,14 @@ class HandlerMergeProvenanceObserve:
         """Observe ``request.sha``; a failed read returns ``read_ok=False``."""
         try:
             runs = await asyncio.to_thread(self._read, request)
-        except Exception as exc:  # noqa: BLE001 -- every failure is an observation
+        except Exception as exc:  # boundary: every failure is an observation
+            # Degrade, never raise: a failed read is recorded as read_ok=False,
+            # which the compute node grades UNDECIDABLE and CI runs in full.
+            logger.exception(
+                "merge-provenance read failed for %s@%s; recorded as read_ok=false",
+                request.repository,
+                request.sha,
+            )
             return self._observation(
                 request,
                 read_ok=False,
