@@ -41,18 +41,14 @@
 # but .201 (ruling 2026-09-25T00:56:45Z for dev-202, ruling
 # 2026-09-25T10:22:22Z for one slot per lab host); omnibase_infra stays .201.
 #
-# NO ROUTE TO dev-202 OR dev-200 YET. The omnimarket row below is the plan's target
-# ((dev, omnimarket) -> dev-202). It is added in the same change that brings the
-# dev-202 instance up (task B8), because a route to an instance that is not
-# running would stop every omnimarket rebuild: .201 would skip them and nothing
-# would accept them. dev-200 (the .200 host, OMN-19543) is declared on the
-# same terms: its instance reads every record in its own group and skips each
-# one, until a route names it.
-#
-#   routes:
-#     - runtime_lane: dev
-#       requester_repository: omnimarket
-#       instance: dev-202
+# THE ROUTE (task B8, OMN-19510). omnimarket's dev rebuilds run on the dev-202
+# instance on .202 and are proven there under the compose-dev-202 receipt; every
+# other requester, omnibase_infra included, stays on the default .201 instance
+# (operator RULING 2026-09-25T00:56:45Z: omnimarket may be proven on .202,
+# omnibase_infra stays .201-only). dev-200 (the .200 host, OMN-19543) carries no
+# route yet: its instance reads every record in its own group and skips each
+# one, until a route names it and a runner exists to verify a merge routed
+# there.
 #
 # verify: (OMN-19507 AC2) is how the per-merge verify job reads the instance a
 # merge was routed to: the lab-pass lane its receipt is emitted under, the
@@ -195,4 +191,7 @@ instances:
       model_reserve_gib: 70
       min_headroom_gib: 16
       recheck_seconds: 60
-routes: []
+routes:
+  - runtime_lane: dev
+    requester_repository: omnimarket
+    instance: dev-202
