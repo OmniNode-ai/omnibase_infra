@@ -182,24 +182,24 @@ ROUTED_JOBS = frozenset(
 )
 
 
-def _routed_labels() -> Any:
-    """What a routed job's ``runs-on`` resolves to under the COMMITTED table.
+def _routed_labels(requester: str = "gha/omnibase_infra/pr-1") -> Any:
+    """What a routed job's ``runs-on`` resolves to for `requester` under the
+    COMMITTED table.
 
-    The table routes every merge to dev-201 today, so this is the literal the
-    two jobs carried before OMN-19507; a route to dev-202 would move them to
-    that instance's own host-scoped runner, pinned in
-    tests/ci/test_deploy_lane_verify_route_omn19507.py.
+    Every requester but omnimarket still resolves to dev-201/host-201 -- the
+    literal the two jobs carried before OMN-19507 -- so that stays the default
+    here. Task B8 (OMN-19510) landed the real omnimarket -> dev-202 route,
+    moving that one caller's own resolution to its host-scoped runner; see
+    ``test_the_reusable_verify_job_moves_with_omnimarkets_own_route`` below and
+    the full pin in tests/ci/test_deploy_lane_verify_route_omn19507.py.
     """
     from scripts.ci.deploy_lane_verify_route import job_outputs, load_table, resolve
 
-    labels = {
+    return json.loads(
         job_outputs(resolve(load_table(), runtime_lane="dev", requested_by=requester))[
             "verify_runs_on"
         ]
-        for requester in ("gha/omnibase_infra/pr-1", "gha/omnimarket/pr-1")
-    }
-    assert len(labels) == 1, labels
-    return json.loads(labels.pop())
+    )
 
 
 def _runs_on(workflow: str, job_key: str) -> Any:
@@ -219,6 +219,22 @@ def test_moved_job_runs_on_the_verify_label(
 ) -> None:
     assert _runs_on(workflow, job_key) == VERIFY_LABEL
     assert _jobs(workflow)[job_key].get("name") == job_name
+
+
+def test_the_reusable_verify_job_moves_with_omnimarkets_own_route() -> None:
+    """Task B8 (OMN-19510): when omnimarket itself calls the reusable
+    workflow, ``verify-sibling-converged`` reads the SAME
+    ``verify_runs_on`` output as every other caller, but that output now
+    resolves to dev-202's own host-scoped runner rather than the dev-201
+    literal every other caller still gets."""
+    assert ("runtime-rebuild-trigger-reusable.yml", "verify-sibling-converged") in (
+        ROUTED_JOBS
+    )
+    assert _routed_labels("gha/omnimarket/pr-1") == [
+        "self-hosted",
+        "omnibase-verify",
+        "host-202",
+    ]
 
 
 @pytest.mark.parametrize(("workflow", "job_key"), STAYED_JOBS)
