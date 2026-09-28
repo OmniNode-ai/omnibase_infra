@@ -2259,6 +2259,12 @@ jobs:
     timeout-minutes: 30
     name: Detect Changes
     needs: [occ-preflight, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate]
+    # OMN-19927: on a push or a dispatch this job must run even when the
+    # docs-only tier skipped its lint-class needs, because the provenance
+    # step below decides whether that push may skip tests at all. On every
+    # other event the condition is the implicit success() it replaces: all
+    # needs succeeded, none skipped.
+    if: ${{ !cancelled() && !failure() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || !contains(needs.*.result, 'skipped')) }}
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -2267,12 +2273,17 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
+    # OMN-19927: the provenance step reads this repository's Actions runs.
+    permissions:
+      actions: read
+      contents: read
     outputs:
       is_full_suite: ${{ steps.detect.outputs.is_full_suite }}
       full_suite_reason: ${{ steps.detect.outputs.full_suite_reason }}
       split_count: ${{ steps.detect.outputs.split_count }}
       matrix: ${{ steps.detect.outputs.matrix }}
       selected_paths: ${{ steps.detect.outputs.selected_paths }}
+      merge_provenance: ${{ steps.provenance.outputs.verdict }}
 
     steps:
       - name: Checkout code
@@ -2301,16 +2312,45 @@ jobs:
           echo "Changed files:"
           cat changed.txt
 
+      # OMN-19927 (plan task S2): was this commit validated by a successful
+      # merge group? A queue landing fast-forwards `dev` to the merge-group
+      # commit, so the answer is a lookup of that sha's merge-group `CI`
+      # run and its `CI Summary` job. omnibase_infra#4111 reached `dev` as
+      # e263eee0 by a direct REST merge after six failed merge groups; this
+      # push run diffed HEAD~1, ran two shards of smart selection, and went
+      # green while the three tests the queue had failed never ran.
+      #
+      # The step holds no provenance logic: it runs
+      # node_merge_provenance_observe_effect then node_merge_provenance_compute
+      # through their CI boundary and writes the verdict. UNVALIDATED and
+      # UNDECIDABLE force the full suite in the next step. Pull requests and
+      # merge groups never run it: a PR is not a `dev` commit, and a merge
+      # group is already the full suite.
+      - name: Merge provenance (OMN-19927)
+        id: provenance
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv run python -m scripts.ci.merge_provenance --repository "${{ github.repository }}" --sha "${{ github.sha }}" --github-output "$GITHUB_OUTPUT" --result-json provenance.json
+
       - name: Resolve test selection
         id: detect
         env:
           FLAG: ${{ vars.ENABLE_SMART_TESTS == 'true' && 'on' || 'off' }}
+          # FAIL CLOSED (OMN-19927): on a push or a dispatch, anything other
+          # than an explicit `false` from the provenance step -- including a
+          # step that crashed and wrote nothing -- forces the full suite.
+          FORCE_FULL: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && steps.provenance.outputs.force_full_suite != 'false' && 'true' || 'false' }}
         run: |
+          force_args=()
+          if [ "$FORCE_FULL" = "true" ]; then force_args=(--force-full-suite unvalidated_push); fi
           uv run python -m scripts.ci.detect_test_paths \
             --changed-files-from changed.txt \
             --ref-name "${{ github.ref_name }}" \
             --event-name "${{ github.event_name }}" \
             --feature-flag "$FLAG" \
+            "${force_args[@]}" \
             > selection.json
           cat selection.json
           is_full=$(jq -r '.is_full_suite' selection.json)
@@ -2328,7 +2368,10 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: test-selection
-          path: selection.json
+          path: |
+            selection.json
+            provenance.json
+          if-no-files-found: warn
           retention-days: 7
 
   # Parallel test execution — matrix shape driven by detect-changes output (OMN-10715).
@@ -2363,7 +2406,12 @@ jobs:
     # tests-gate (below) distinguishes this admission-skip from the
     # pre-existing docs-only skip and fails closed rather than passing it
     # through as a legitimate exemption.
-    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true') && (github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready'))
+    # OMN-19927: the docs-only skip never applies to a push the merge queue
+    # did not validate. The first arm is the pre-existing condition with its
+    # implicit success() made explicit; the second admits a forced
+    # `unvalidated_push` selection even when the docs-only tier skipped the
+    # lint-class needs.
+    if: needs.occ-preflight.result == 'success' && ((success() && needs.zone-filter.outputs.docs_only != 'true') || (!cancelled() && !failure() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.full_suite_reason == 'unvalidated_push')) && (github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready'))
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -2857,10 +2905,14 @@ jobs:
           TESTS_RESULT: ${{ needs.test-parallel.result }}
           SPLIT_COUNT: ${{ needs.detect-changes.outputs.split_count }}
           DOCS_ONLY: ${{ needs.zone-filter.outputs.docs_only }}
+          FULL_SUITE_REASON: ${{ needs.detect-changes.outputs.full_suite_reason }}
           ADMITTED: ${{ github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready') }}
         run: |
           if [ "$TESTS_RESULT" = "skipped" ]; then
-            if [ "$DOCS_ONLY" = "true" ]; then
+            if [ "$FULL_SUITE_REASON" = "unvalidated_push" ]; then
+              echo "::error::Test matrix skipped although this push was not validated by the merge queue (OMN-19927) -- the full suite was selected and must run; a skip is not a pass"
+              exit 1
+            elif [ "$DOCS_ONLY" = "true" ]; then
               echo "Test matrix skipped - docs-only / declarative-evidence diff (legitimate exemption)"
             elif [ "$ADMITTED" != "true" ]; then
               echo "::error::Test matrix skipped - PR is draft and missing the 'ci:ready' fallback label (OMN-16216 draft-state CI admission gate). Mark the PR ready for review (or apply 'ci:ready' during the transition window) to run the full test matrix."
