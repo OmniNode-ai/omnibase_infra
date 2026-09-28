@@ -376,6 +376,13 @@ def test_the_forwarder_survives_a_topic_the_cloud_broker_refuses(
     superusers = brokers.cloud.superusers()
     assert superusers == (harness.SASL_USERNAME,), superusers
     assert CLOUD_PRINCIPAL.username not in superusers
+    users = brokers.cloud.rpk("security", "user", "list").stdout
+    assert CLOUD_PRINCIPAL.username in users, users
+    acls = brokers.cloud.acl_listing()
+    assert f"User:{CLOUD_PRINCIPAL.username}" in acls, acls
+    assert _wire(REFUSED_CANONICAL_TOPIC) not in acls, (
+        f"the refused topic carries a grant:\n{acls}"
+    )
     refused = brokers.cloud.rpk_as(
         CLOUD_PRINCIPAL,
         "topic",
