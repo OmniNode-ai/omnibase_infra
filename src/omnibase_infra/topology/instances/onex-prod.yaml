@@ -81,6 +81,7 @@ databases:
               - consumer_flow_windows
               - delegate_skill_command_claims
               - dod_verify_runs
+              - gateway_link_health
               - lab_lane_health
               - live_events
               - log_entries

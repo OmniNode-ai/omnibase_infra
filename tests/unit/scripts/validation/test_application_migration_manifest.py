@@ -874,6 +874,8 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # drift between the declaration count and the actual node .sql files is
     # already caught inside validate_manifests() itself (filesystem_paths ==
     # manifest_paths), so this is a second, independent read of the same tree.
+    # OMN-17887 (node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql)
+    # is covered by this live derivation and needs no paragraph or literal here.
     live_node_sql_count = len(list((MIGRATIONS_DIR / "nodes").glob("*/*.sql")))
     assert len(result.declarations) + len(result.blocked) == live_node_sql_count
     assert result.blocked == ()
