@@ -58,11 +58,6 @@ MOVED_JOBS = (
     # this host, and the bastion's reachability from the other lab hosts is
     # unmeasured. It moves when both are settled.
     ("msk-bastion-canary.yml", "bastion-canary", "MSK bastion routing canary"),
-    (
-        "runtime-rebuild-trigger.yml",
-        "verify-lab-overlay-converged",
-        "Verify the k3s onex-lab overlay applied the merged sha",
-    ),
     # --- OMN-18602 -------------------------------------------------------
     # The remainder OMN-18408 left on the deploy label. Every one of them is a
     # read-only probe: none writes to the lane, and none needs the private
@@ -284,3 +279,30 @@ def test_every_moved_job_is_host_scoped_not_merely_class_scoped() -> None:
             f"{workflow}:{job_key} is scoped to the verify CLASS but not to a "
             "HOST; it can be placed on a verify runner that cannot see the lane"
         )
+
+
+def test_the_lab_overlay_receipt_job_reads_the_overlay_not_a_host() -> None:
+    """OMN-19894: the per-merge onex-lab receipt job left the .201 verify runner.
+
+    It reads one lane-specific thing, the deploy agent's HTTP record, so it runs
+    on the overlay's pool and reads the agent at the ``deploy_agent_url`` the
+    overlay declares for the lane whose agent applies the onex-lab overlay.
+    Neither its runner nor the agent address is a literal in the job.
+    """
+    job = _jobs("runtime-rebuild-trigger.yml")["verify-lab-overlay-converged"]
+    assert job["runs-on"] == POOL_RUNS_ON
+    lane = next(step for step in job["steps"] if step.get("id") == "lane")
+    assert lane["uses"] == "./.github/actions/resolve-lab-lane"
+    assert lane["with"] == {
+        "lanes-json": "${{ vars.LAB_LANES_JSON }}",
+        "require": "deploy_agent_url",
+        "match": "compose_project=omnibase-infra",
+    }
+    steps = [step.get("id") for step in job["steps"]]
+    assert steps.index("lane") < steps.index("record")
+    record = next(step for step in job["steps"] if step.get("id") == "record")
+    assert record["env"]["LAB_AGENT_URL"] == "${{ env.LANE_DEPLOY_AGENT_URL }}"
+    assert record["if"] == "always()", "no lane answering must still emit a FAIL"
+    rendered = yaml.safe_dump(job)
+    assert HOST_LABEL not in rendered
+    assert "host.docker.internal" not in rendered
