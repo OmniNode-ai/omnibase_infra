@@ -97,6 +97,53 @@ class ConsumerGroupLivenessUnknownError(RuntimeError):
     """
 
 
+# Kafka's GROUP_AUTHORIZATION_FAILED. Named by number here because the
+# per-group describe response carries only the code.
+_GROUP_ACCESS_DENIED_ERROR_CODE = 30
+
+
+class ConsumerGroupDescribeDeniedError(ConsumerGroupLivenessUnknownError):
+    """The broker refused to describe every candidate group to this principal.
+
+    OMN-19914. A subclass of UNKNOWN because it still cannot say whether the
+    topic is consumed, so every fail-closed caller keeps refusing. It exists so
+    the refusal can name the exact grant that would let the question be asked,
+    instead of a bare client error. It is raised only when NO candidate could
+    be proven live: once one ``Stable`` group is proven, a group this principal
+    may not describe cannot change the answer to "is anything consuming this
+    topic", so it is logged and skipped rather than refusing the dispatch.
+
+    The message deliberately avoids the substrings the receipt sanitizer
+    treats as credential-shaped (``util_error_sanitization.SENSITIVE_PATTERNS``
+    redacts the whole message on any hit, and both the Kafka error class name
+    and the word for a bearer credential are hits), so the group names and the
+    missing grant survive into the written refusal. The test pins that.
+    """
+
+    def __init__(
+        self,
+        *,
+        group_ids: tuple[str, ...],
+        bootstrap_servers: str,
+        principal: str | None,
+    ) -> None:
+        self.group_ids = group_ids
+        self.bootstrap_servers = bootstrap_servers
+        self.principal = principal
+        who = f"User:{principal}" if principal else "this client's principal"
+        grants = "; ".join(
+            f"ALLOW {who} DESCRIBE on GROUP '{group_id}'" for group_id in group_ids
+        )
+        super().__init__(
+            f"the broker at {bootstrap_servers} denied DESCRIBE on "
+            f"{len(group_ids)} consumer group(s) bound to the topic (Kafka "
+            f"error {_GROUP_ACCESS_DENIED_ERROR_CODE}, group access denied), and "
+            "no other group could be proven live, so liveness is unknown. "
+            f"Missing ACL: {grants}. A PREFIXED grant on the group's first "
+            "dot-separated segment covers every version of it."
+        )
+
+
 def live_consumer_groups(
     *,
     topic: str,
@@ -187,19 +234,25 @@ async def _live_consumer_groups_async(
     callback has exactly one implementation and the probe shares it.
     """
     from aiokafka.admin import AIOKafkaAdminClient
+    from aiokafka.errors import GroupAuthorizationFailedError
 
     from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
     from omnibase_infra.event_bus.kafka_auth import (
         build_aiokafka_auth_kwargs_for,
     )
 
+    # OMN-18432: the probe authenticates as whoever the publish will. A bound
+    # lane transport answers for its own address; everywhere else this is the
+    # environment-sourced answer it has always been.
+    auth_kwargs = build_aiokafka_auth_kwargs_for(bootstrap_servers)
+    # The username only, for naming a missing grant (OMN-19914). Never the
+    # password, and absent on PLAINTEXT and IAM lanes.
+    principal_value = auth_kwargs.get("sasl_plain_username")
+    principal = principal_value if isinstance(principal_value, str) else None
     admin = AIOKafkaAdminClient(
         bootstrap_servers=bootstrap_servers,
         request_timeout_ms=int(timeout * 1000),
-        # OMN-18432: the probe authenticates as whoever the publish will. A
-        # bound lane transport answers for its own address; everywhere else
-        # this is the environment-sourced answer it has always been.
-        **build_aiokafka_auth_kwargs_for(bootstrap_servers),
+        **auth_kwargs,
     )
     await admin.start()
     try:
@@ -247,13 +300,30 @@ async def _live_consumer_groups_async(
         # safe, this loop can be collapsed only with a lane proof that covers
         # the same three-group shape. Until then, any describe failure or
         # missing candidate response still leaves the answer UNKNOWN rather
-        # than returning a partial consumer set.
+        # than returning a partial consumer set -- with ONE exception, below.
+        #
+        # OMN-19914: a group this principal may not DESCRIBE is not a failure
+        # of the question, it is a group the question cannot see. A principal
+        # granted CLUSTER DESCRIBE lists every group on the broker, including
+        # groups outside its own environment token (a pre-PR slot's
+        # ``prepr1.*`` groups share the dev broker and carry the same topic
+        # scope suffix), and the coordinator lookup for such a group raises
+        # GroupAuthorizationFailedError. Those groups are collected, not
+        # fatal: if another candidate is proven ``Stable`` the answer is
+        # already "yes, something consumes this", and no hidden group can
+        # turn it into "no". Only when nothing was proven live does the denial
+        # decide the outcome, and then it refuses with the grant it lacked.
         described: list[ConsumerGroupDescribeResponse] = []
+        denied: list[str] = []
         for candidate in candidates:
-            responses = cast(
-                "list[ConsumerGroupDescribeResponse]",
-                await admin.describe_consumer_groups([candidate]),
-            )
+            try:
+                responses = cast(
+                    "list[ConsumerGroupDescribeResponse]",
+                    await admin.describe_consumer_groups([candidate]),
+                )
+            except GroupAuthorizationFailedError:
+                denied.append(candidate)
+                continue
             response_group_ids = {
                 str(group[1])
                 for response in responses
@@ -277,6 +347,10 @@ async def _live_consumer_groups_async(
     for response in described:
         for group in getattr(response, "groups", []):
             error_code, group_id, state = group[0], group[1], group[2]
+            if error_code == _GROUP_ACCESS_DENIED_ERROR_CODE:
+                # The same denial, reported in the response rather than raised.
+                denied.append(str(group_id))
+                continue
             if error_code:
                 # A per-group error makes the listing partial, and a partial
                 # answer to "is anything consuming this" is not an answer.
@@ -287,6 +361,23 @@ async def _live_consumer_groups_async(
                 )
             if str(state).upper() == "STABLE":
                 found.add(str(group_id))
+    if denied:
+        denied_sorted = tuple(sorted(set(denied)))
+        if not found:
+            raise ConsumerGroupDescribeDeniedError(
+                group_ids=denied_sorted,
+                bootstrap_servers=bootstrap_servers,
+                principal=principal,
+            )
+        logger.warning(
+            "consumer group liveness for %r on %s: %d live group(s) proven; "
+            "skipped %d group(s) this principal may not describe (OMN-19914): %s",
+            topic,
+            bootstrap_servers,
+            len(found),
+            len(denied_sorted),
+            ", ".join(denied_sorted),
+        )
     return tuple(sorted(found))
 
 

@@ -286,6 +286,13 @@ def _uncovered_changed_test_dirs(
 
 FULL_SUITE_BRANCHES = {"main"}
 
+# The only reasons a caller may force (OMN-19927). Every other reason is
+# derived here from the diff, the branch or the event, and a caller able to
+# name one would be able to mislabel why the suite escalated.
+_FORCEABLE_FULL_SUITE_REASONS: frozenset[EnumFullSuiteReason | None] = frozenset(
+    {None, EnumFullSuiteReason.UNVALIDATED_PUSH}
+)
+
 # Full suite uses 15 splits (infra CI split count)
 _FULL_SUITE_SPLIT_COUNT = 15
 
@@ -660,7 +667,14 @@ def compute_selection(
     ref_name: str,
     event_name: str = "pull_request",
     feature_flag_enabled: bool = True,
+    force_full_suite_reason: EnumFullSuiteReason | None = None,
 ) -> ModelTestSelection:
+    if force_full_suite_reason not in _FORCEABLE_FULL_SUITE_REASONS:
+        raise ValueError(
+            "force_full_suite_reason accepts only "
+            f"{sorted(r.value for r in _FORCEABLE_FULL_SUITE_REASONS if r)}, "
+            f"got {force_full_suite_reason!r}"
+        )
     config = load_adjacency_map(adjacency_path)
 
     # 0. Feature flag short-circuit: off → legacy 15-split full suite.
@@ -674,6 +688,15 @@ def compute_selection(
         return _full_suite(EnumFullSuiteReason.MERGE_GROUP)
     if event_name == "schedule":
         return _full_suite(EnumFullSuiteReason.SCHEDULED)
+
+    # 1b. Unvalidated push (OMN-19927). CI passes this only when
+    # node_merge_provenance_compute found no successful merge-group
+    # `CI Summary` for the pushed commit (UNVALIDATED) or could not read it
+    # (UNDECIDABLE). It outranks every narrowing below, the docs-only
+    # exemption included: the diff against HEAD~1 is not a delta from a tree
+    # anything proved.
+    if force_full_suite_reason is not None:
+        return _full_suite(force_full_suite_reason)
 
     # 2. Test infrastructure escalation.
     for changed in changed_files:
@@ -875,6 +898,15 @@ def main(argv: list[str] | None = None) -> int:
         default="on",
         help="When 'off', emit a FEATURE_FLAG_OFF full-suite selection regardless of changed files.",
     )
+    parser.add_argument(
+        "--force-full-suite",
+        choices=(EnumFullSuiteReason.UNVALIDATED_PUSH.value,),
+        default=None,
+        help=(
+            "Select the full suite under this reason. CI passes it only for a "
+            "push whose merge provenance is UNVALIDATED or UNDECIDABLE (OMN-19927)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     changed = [
@@ -888,6 +920,11 @@ def main(argv: list[str] | None = None) -> int:
         ref_name=args.ref_name,
         event_name=args.event_name,
         feature_flag_enabled=(args.feature_flag == "on"),
+        force_full_suite_reason=(
+            EnumFullSuiteReason(args.force_full_suite)
+            if args.force_full_suite
+            else None
+        ),
     )
     sys.stdout.write(selection.model_dump_json())
     sys.stdout.write("\n")
