@@ -14,6 +14,10 @@ import asyncio
 
 import pytest
 
+from omnibase_infra.nodes.node_merge_provenance_observe_effect.handlers.handler_merge_group_run_read_github import (
+    HandlerMergeGroupRunReadGithub,
+    MergeGroupReadError,
+)
 from omnibase_infra.nodes.node_merge_provenance_observe_effect.handlers.handler_merge_provenance_observe import (
     HandlerMergeProvenanceObserve,
 )
@@ -134,3 +138,85 @@ def test_a_failed_read_is_read_ok_false_never_empty(fail_on: str) -> None:
     assert obs.read_error
     assert "HTTP" in obs.read_error
     assert obs.runs == ()
+
+
+# ---------------------------------------------------------------------------
+# The GitHub REST binding, driven through an injected fetch
+# ---------------------------------------------------------------------------
+
+
+def _github(pages: dict[str, dict[str, object]]) -> HandlerMergeGroupRunReadGithub:
+    def fetch(path: str) -> dict[str, object]:
+        for prefix, payload in pages.items():
+            if path.startswith(prefix):
+                if path.endswith("&page=1"):
+                    return payload
+                # Every later page is empty, as GitHub returns past the end.
+                key = "jobs" if "jobs" in payload else "workflow_runs"
+                return {"total_count": payload["total_count"], key: []}
+        raise AssertionError(f"unexpected read {path}")
+
+    return HandlerMergeGroupRunReadGithub(token="t", fetch=fetch)
+
+
+def _run_row(path: str) -> dict[str, object]:
+    return {
+        "id": 36409772437,
+        "run_attempt": 1,
+        "event": "merge_group",
+        "head_sha": SHA,
+        "head_branch": "gh-readonly-queue/dev/pr-4235-31258513",
+        "path": path,
+        "status": "completed",
+        "conclusion": "failure",
+    }
+
+
+@pytest.mark.parametrize(
+    "path", [".github/workflows/ci.yml", ".github/workflows/ci.yml@refs/heads/dev"]
+)
+def test_github_binding_reads_the_run_path_with_or_without_a_ref(path: str) -> None:
+    reader = _github(
+        {
+            f"/repos/{REPO}/actions/runs?": {
+                "total_count": 1,
+                "workflow_runs": [_run_row(path)],
+            },
+            f"/repos/{REPO}/actions/runs/36409772437/jobs": {
+                "total_count": 1,
+                "jobs": [
+                    {
+                        "name": "CI Summary",
+                        "status": "completed",
+                        "conclusion": "success",
+                    }
+                ],
+            },
+        }
+    )
+    obs = _observe(reader)  # type: ignore[arg-type]
+    assert obs.read_ok is True
+    assert [r.summary_job_conclusion for r in obs.runs] == ["success"]
+
+
+def test_github_binding_refuses_a_short_page() -> None:
+    reader = _github(
+        {
+            f"/repos/{REPO}/actions/runs?": {
+                "total_count": 2,
+                "workflow_runs": [_run_row(".github/workflows/ci.yml")],
+            },
+        }
+    )
+    with pytest.raises(MergeGroupReadError, match="refusing a short list"):
+        reader.list_merge_group_runs(REPO, SHA)
+
+
+def test_github_binding_turns_an_unknown_status_into_a_failed_read() -> None:
+    row = _run_row(".github/workflows/ci.yml")
+    row["status"] = "teleported"
+    reader = _github(
+        {f"/repos/{REPO}/actions/runs?": {"total_count": 1, "workflow_runs": [row]}}
+    )
+    obs = _observe(reader)  # type: ignore[arg-type]
+    assert obs.read_ok is False
