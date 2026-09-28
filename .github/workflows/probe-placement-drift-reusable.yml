@@ -1,0 +1,81 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+---
+# Probe placement drift, the reusable half (OMN-19412 follow-up).
+#
+# The required "Lab Probe Windows (OMN-19412)" check resolves a scheduled job
+# placed by `fromJSON(vars.NAME)` from the COMMITTED value of the variable,
+# config/runner_routing_policy.yaml probe_placement_variables, so it reads no
+# live state and needs no token (it read the live variables with the operator's
+# CROSS_REPO_PAT until then; RULING 2026-09-27T22:46:17Z item 3 retires that).
+# This workflow is what keeps the committed map true: it compares it with what
+# `vars.NAME` actually resolves to in the calling repository.
+#
+# The caller passes `toJSON(vars)`: its own vars context, which a run can read
+# with no token and no App permission. That is the only identity that reads a
+# repository's effective variables without a personal token, which is why each
+# of omnibase_infra, omninode_infra and omnimarket calls this from its own
+# probe-placement-drift.yml rather than one repository reading the others.
+#
+# The committed map is read from omnibase_infra dev, a public repository, so
+# the checkout needs no credential either. A difference fails the run, naming
+# the variable, the committed value and the live one.
+name: Probe Placement Drift (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      repo:
+        description: The calling repository's name, the key of its entry in probe_placement_variables.
+        required: true
+        type: string
+      vars-json:
+        description: The caller's toJSON(vars), its effective Actions variables.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Probe placement drift (OMN-19412)
+    # OMNI_RUNNER_SELECTOR_V1 - trusted CI resolves through the caller's seam; public forks default to ubuntu-latest.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout the committed placement map (omnibase_infra dev)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_infra
+          ref: ${{ github.job_workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/setup-python-uv
+            config/runner_routing_policy.yaml
+            scripts/ci/check_probe_placement_drift.py
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: "3.12"
+          cache-enabled: "false"
+          skip-install: "true"
+
+      - name: Every committed placement matches the live variable
+        env:
+          PROBE_REPO: ${{ inputs.repo }}
+          PROBE_VARS_JSON: ${{ inputs.vars-json }}
+        run: |
+          set -euo pipefail
+          printf '%s' "${PROBE_VARS_JSON}" > "${RUNNER_TEMP}/vars.json"
+          uv run --no-project --with pyyaml==6.0.2 python scripts/ci/check_probe_placement_drift.py \
+            --repo "${PROBE_REPO}" \
+            --vars-json-file "${RUNNER_TEMP}/vars.json"

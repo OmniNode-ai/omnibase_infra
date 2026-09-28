@@ -15,9 +15,9 @@ pull request, and a scheduled job placed on the customer machine through a
 variable was invisible to the unlisted-probe direction.
 
 The check now resolves ``fromJSON(vars.NAME)`` (and ``vars.NAME``, each with an
-optional ``|| '<literal>'`` fallback) from the Actions variables the runner
-would read: the workflow's repository first, then the organisation. Anything it
-cannot resolve fails naming the job and the expression. Never a pass.
+optional ``|| '<literal>'`` fallback) from the value committed for that
+repository in ``config/runner_routing_policy.yaml``. Anything it cannot resolve
+fails naming the job and the expression. Never a pass.
 
 The workflow bytes here are captured, not typed: C13 at the omninode_infra#1725
 merge commit, and the C11 and dev-lane-liveness workflows at the
@@ -31,6 +31,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts.ci import check_lab_probe_windows as plw
 
@@ -81,8 +82,8 @@ def _c13(lane: str) -> plw.ProbeWindow:
     )
 
 
-def _vars(**scopes: dict[str, str]) -> plw.ActionsVariables:
-    return plw.ActionsVariables(scopes)
+def _placements(repo: str, **values: str | None) -> plw.CommittedPlacements:
+    return plw.CommittedPlacements({repo: values})
 
 
 # --------------------------------------------------------------------------- #
@@ -91,11 +92,11 @@ def _vars(**scopes: dict[str, str]) -> plw.ActionsVariables:
 
 
 @pytest.mark.unit
-def test_1725_c13_resolves_from_the_repository_variable(tmp_path: Path) -> None:
+def test_1725_c13_resolves_from_the_committed_repository_value(
+    tmp_path: Path,
+) -> None:
     root = _root(tmp_path, "omninode_infra", {C13_PATH: C13_1725})
-    variables = _vars(
-        org={}, omninode_infra={"CUSTOMER_MACHINE_RUNS_ON_JSON": VERIFY_POOL}
-    )
+    variables = _placements("omninode_infra", CUSTOMER_MACHINE_RUNS_ON_JSON=VERIFY_POOL)
     assert (
         plw.check([_c13("omnibase-verify")], {"omninode_infra": root}, variables) == []
     )
@@ -107,9 +108,7 @@ def test_1725_c13_on_the_old_customer_label_is_a_lane_mismatch(
 ) -> None:
     """The probe really moved: the window file must say which pool it now holds."""
     root = _root(tmp_path, "omninode_infra", {C13_PATH: C13_1725})
-    variables = _vars(
-        org={}, omninode_infra={"CUSTOMER_MACHINE_RUNS_ON_JSON": VERIFY_POOL}
-    )
+    variables = _placements("omninode_infra", CUSTOMER_MACHINE_RUNS_ON_JSON=VERIFY_POOL)
     errors = plw.check([_c13("omnipc2-customer")], {"omninode_infra": root}, variables)
     assert len(errors) == 1, errors
     assert "lane mismatch" in errors[0]
@@ -125,48 +124,66 @@ def test_1725_c13_with_the_variable_unset_fails_naming_the_job(
     errors = plw.check(
         [_c13("omnibase-verify")],
         {"omninode_infra": root},
-        _vars(org={}, omninode_infra={}),
+        _placements("omninode_infra", CUSTOMER_MACHINE_RUNS_ON_JSON=None),
     )
     assert len(errors) == 1, errors
     assert "c13-customer-local" in errors[0]
     assert "CUSTOMER_MACHINE_RUNS_ON_JSON" in errors[0]
-    assert "not set" in errors[0]
+    assert "committed as unset" in errors[0]
 
 
 @pytest.mark.unit
-def test_1725_c13_with_no_variables_read_fails_naming_the_job(
+def test_1725_c13_with_no_committed_placements_fails_naming_the_job(
     tmp_path: Path,
 ) -> None:
     root = _root(tmp_path, "omninode_infra", {C13_PATH: C13_1725})
     errors = plw.check([_c13("omnibase-verify")], {"omninode_infra": root})
     assert len(errors) == 1, errors
     assert "c13-customer-local" in errors[0]
-    assert "no Actions variables were read for omninode_infra" in errors[0]
+    assert "no committed placement values were given for omninode_infra" in errors[0]
 
 
 @pytest.mark.unit
-def test_the_organisation_variable_answers_when_the_repository_has_none(
+def test_1725_c13_with_an_undeclared_variable_fails_naming_the_job(
     tmp_path: Path,
 ) -> None:
     root = _root(tmp_path, "omninode_infra", {C13_PATH: C13_1725})
-    variables = _vars(
-        org={"CUSTOMER_MACHINE_RUNS_ON_JSON": VERIFY_POOL}, omninode_infra={}
+    errors = plw.check(
+        [_c13("omnibase-verify")],
+        {"omninode_infra": root},
+        _placements("omninode_infra"),
     )
+    assert len(errors) == 1, errors
+    assert "c13-customer-local" in errors[0]
+    assert "CUSTOMER_MACHINE_RUNS_ON_JSON" in errors[0]
+    assert "declares no value" in errors[0]
+
+
+@pytest.mark.unit
+def test_a_variable_declared_null_uses_the_expression_fallback(
+    tmp_path: Path,
+) -> None:
+    workflow = C13_1725.read_text(encoding="utf-8").replace(
+        "vars.CUSTOMER_MACHINE_RUNS_ON_JSON",
+        'vars.CUSTOMER_MACHINE_RUNS_ON_JSON || \'["self-hosted","omnibase-verify"]\'',
+    )
+    root = _root(tmp_path, "omninode_infra", {C13_PATH: workflow})
+    variables = _placements("omninode_infra", CUSTOMER_MACHINE_RUNS_ON_JSON=None)
     assert (
         plw.check([_c13("omnibase-verify")], {"omninode_infra": root}, variables) == []
     )
 
 
 @pytest.mark.unit
-def test_the_repository_variable_overrides_the_organisation(tmp_path: Path) -> None:
+def test_a_variable_declared_null_without_a_fallback_fails_naming_the_job(
+    tmp_path: Path,
+) -> None:
     root = _root(tmp_path, "omninode_infra", {C13_PATH: C13_1725})
-    variables = _vars(
-        org={"CUSTOMER_MACHINE_RUNS_ON_JSON": '["omnipc2-customer"]'},
-        omninode_infra={"CUSTOMER_MACHINE_RUNS_ON_JSON": VERIFY_POOL},
-    )
-    assert (
-        plw.check([_c13("omnibase-verify")], {"omninode_infra": root}, variables) == []
-    )
+    variables = _placements("omninode_infra", CUSTOMER_MACHINE_RUNS_ON_JSON=None)
+    errors = plw.check([_c13("omnibase-verify")], {"omninode_infra": root}, variables)
+    assert len(errors) == 1, errors
+    assert "c13-customer-local" in errors[0]
+    assert "committed as unset" in errors[0]
 
 
 @pytest.mark.unit
@@ -182,7 +199,7 @@ def test_a_variable_that_is_not_a_label_list_fails_loudly(
     tmp_path: Path, value: str, why: str
 ) -> None:
     root = _root(tmp_path, "omninode_infra", {C13_PATH: C13_1725})
-    variables = _vars(org={}, omninode_infra={"CUSTOMER_MACHINE_RUNS_ON_JSON": value})
+    variables = _placements("omninode_infra", CUSTOMER_MACHINE_RUNS_ON_JSON=value)
     errors = plw.check([_c13("omnibase-verify")], {"omninode_infra": root}, variables)
     assert len(errors) == 1, errors
     assert "c13-customer-local" in errors[0]
@@ -219,7 +236,11 @@ def test_the_literal_fallback_answers_an_unset_variable(
         plw.check(
             [_c13("omnibase-verify")],
             {"omninode_infra": root},
-            _vars(org={}, omninode_infra={}),
+            _placements(
+                "omninode_infra",
+                POOL_JSON=None,
+                POOL_LABEL=None,
+            ),
         )
         == []
     )
@@ -236,7 +257,7 @@ def test_4233_c11_is_still_a_listed_dev_lane_probe(tmp_path: Path) -> None:
     c11 = _window(
         "C11", "omnibase_infra", C11_PATH, "17 2,8,14,20 * * *", "dev", "job_name", 10
     )
-    variables = _vars(org={}, omnibase_infra={"LAB_PROBE_RUNS_ON_JSON": VERIFY_POOL})
+    variables = _placements("omnibase_infra", LAB_PROBE_RUNS_ON_JSON=VERIFY_POOL)
     assert plw.check([c11], {"omnibase_infra": root}, variables) == []
     unlisted = plw.check([], {"omnibase_infra": root}, variables)
     assert len(unlisted) == 1, unlisted
@@ -246,7 +267,7 @@ def test_4233_c11_is_still_a_listed_dev_lane_probe(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_4233_c11_as_a_runs_on_entry_resolves_the_probe_pool(tmp_path: Path) -> None:
     root = _root(tmp_path, "omnibase_infra", {C11_PATH: C11_4233})
-    variables = _vars(org={}, omnibase_infra={"LAB_PROBE_RUNS_ON_JSON": VERIFY_POOL})
+    variables = _placements("omnibase_infra", LAB_PROBE_RUNS_ON_JSON=VERIFY_POOL)
     entry = _window(
         "C11",
         "omnibase_infra",
@@ -266,7 +287,7 @@ def test_4233_a_job_placed_by_a_needs_output_fails_naming_the_job(
     """A placement only a previous job's run can decide is not resolvable before
     the run, so a runs_on entry over it is refused, never guessed."""
     root = _root(tmp_path, "omnibase_infra", {LIVENESS_PATH: LIVENESS_4233})
-    variables = _vars(org={}, omnibase_infra={"LAB_PROBE_RUNS_ON_JSON": VERIFY_POOL})
+    variables = _placements("omnibase_infra", LAB_PROBE_RUNS_ON_JSON=VERIFY_POOL)
     entry = _window(
         "liveness",
         "omnibase_infra",
@@ -311,9 +332,9 @@ def test_a_customer_machine_job_placed_by_a_variable_is_an_unlisted_probe(
         "omninode_infra",
         {".github/workflows/smoke.yml": CUSTOMER_BY_VARIABLE},
     )
-    variables = _vars(
-        org={},
-        omninode_infra={"CUSTOMER_RUNNER_SMOKE_RUNS_ON_JSON": '["omnipc2-customer"]'},
+    variables = _placements(
+        "omninode_infra",
+        CUSTOMER_RUNNER_SMOKE_RUNS_ON_JSON='["omnipc2-customer"]',
     )
     errors = plw.check([], {"omninode_infra": root}, variables)
     assert len(errors) == 1, errors
@@ -321,18 +342,52 @@ def test_a_customer_machine_job_placed_by_a_variable_is_an_unlisted_probe(
     assert "omnipc2-customer" in errors[0]
 
 
+@pytest.mark.unit
+def test_an_unlisted_scheduled_workflow_with_an_undeclared_variable_is_an_error(
+    tmp_path: Path,
+) -> None:
+    root = _root(
+        tmp_path,
+        "omninode_infra",
+        {".github/workflows/smoke.yml": CUSTOMER_BY_VARIABLE},
+    )
+    errors = plw.check(
+        [],
+        {"omninode_infra": root},
+        _placements("omninode_infra"),
+    )
+    assert len(errors) == 1, errors
+    assert errors[0].startswith(
+        "omninode_infra:.github/workflows/smoke.yml: cannot be classified:"
+    )
+    assert "job 'smoke'" in errors[0]
+    assert "declares no value" in errors[0]
+
+
 # --------------------------------------------------------------------------- #
-# The CLI reads the variables the CI job lists and refuses a missing scope.
+# The CLI reads the committed placement policy and validates its shape.
 # --------------------------------------------------------------------------- #
 
 
-def _variables_file(tmp_path: Path, scope: str, values: dict[str, str]) -> Path:
-    path = tmp_path / f"vars-{scope}.json"
+def _policy_file(
+    tmp_path: Path,
+    declared: dict[str, dict[str, str | None]],
+    name: str = "runner-routing-policy.yaml",
+) -> Path:
+    path = tmp_path / name
     path.write_text(
-        json.dumps([{"name": k, "value": v} for k, v in values.items()]),
+        yaml.safe_dump({plw.PLACEMENT_KEY: declared}, sort_keys=True),
         encoding="utf-8",
     )
     return path
+
+
+def _valid_policy_values() -> dict[str, dict[str, str | None]]:
+    return {
+        "omnibase_infra": {"UNUSED": None},
+        "omninode_infra": {"CUSTOMER_MACHINE_RUNS_ON_JSON": VERIFY_POOL},
+        "omnimarket": {"UNUSED": None},
+    }
 
 
 WINDOWS = textwrap.dedent(
@@ -366,7 +421,7 @@ NOT_A_PROBE = textwrap.dedent(
 )
 
 
-def _cli_argv(tmp_path: Path, skip_scope: str | None = None) -> list[str]:
+def _cli_argv(tmp_path: Path, policy: Path | None = None) -> list[str]:
     windows = tmp_path / "w.yaml"
     windows.write_text(WINDOWS, encoding="utf-8")
     roots = {
@@ -378,44 +433,78 @@ def _cli_argv(tmp_path: Path, skip_scope: str | None = None) -> list[str]:
             tmp_path, "omnimarket", {".github/workflows/a.yml": NOT_A_PROBE}
         ),
     }
-    scopes = {
-        "org": {},
-        "omnibase_infra": {},
-        "omninode_infra": {"CUSTOMER_MACHINE_RUNS_ON_JSON": VERIFY_POOL},
-        "omnimarket": {},
-    }
+    if policy is None:
+        policy = _policy_file(tmp_path, _valid_policy_values())
     argv = ["--windows", str(windows)]
     argv += [f"--root={name}={path}" for name, path in roots.items()]
-    argv += [
-        f"--variables={scope}={_variables_file(tmp_path, scope, values)}"
-        for scope, values in scopes.items()
-        if scope != skip_scope
-    ]
+    argv += ["--placement-policy", str(policy)]
     return argv
 
 
 @pytest.mark.unit
-def test_cli_resolves_the_1725_shape_from_the_listed_variables(tmp_path: Path) -> None:
+def test_cli_resolves_the_1725_shape_from_the_committed_policy(tmp_path: Path) -> None:
     assert plw.main(_cli_argv(tmp_path)) == plw.EXIT_OK
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    "scope", ["org", "omnibase_infra", "omninode_infra", "omnimarket"]
-)
-def test_cli_refuses_a_missing_variables_scope(tmp_path: Path, scope: str) -> None:
-    assert plw.main(_cli_argv(tmp_path, skip_scope=scope)) == plw.EXIT_USAGE
+@pytest.mark.parametrize("repo", plw.REPOS)
+def test_cli_refuses_a_policy_missing_a_probe_repository(
+    tmp_path: Path, repo: str
+) -> None:
+    declared = _valid_policy_values()
+    del declared[repo]
+    policy = _policy_file(tmp_path, declared)
+    assert plw.main(_cli_argv(tmp_path, policy)) == plw.EXIT_USAGE
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "payload",
-    ["not json", '{"name": "X"}', '[{"name": "X"}]', '[{"name": 1, "value": "v"}]'],
+    [
+        "- not\n- a mapping\n",
+        "some_other_key: {}\n",
+        textwrap.dedent(
+            """\
+            probe_placement_variables:
+              omnibase_infra: {}
+              omninode_infra:
+                X: value
+              omnimarket:
+                X: value
+            """
+        ),
+        textwrap.dedent(
+            """\
+            probe_placement_variables:
+              omnibase_infra:
+                X: 3
+              omninode_infra:
+                X: value
+              omnimarket:
+                X: value
+            """
+        ),
+    ],
 )
-def test_cli_refuses_a_malformed_variables_file(tmp_path: Path, payload: str) -> None:
-    argv = _cli_argv(tmp_path)
-    bad = tmp_path / "bad.json"
+def test_cli_refuses_a_malformed_placement_policy(tmp_path: Path, payload: str) -> None:
+    bad = tmp_path / "bad-policy.yaml"
     bad.write_text(payload, encoding="utf-8")
-    argv = [a for a in argv if not a.startswith("--variables=org=")]
-    argv.append(f"--variables=org={bad}")
-    assert plw.main(argv) == plw.EXIT_USAGE
+    assert plw.main(_cli_argv(tmp_path, bad)) == plw.EXIT_USAGE
+
+
+@pytest.mark.unit
+def test_the_real_policy_declares_every_probe_repo_and_the_verify_pool() -> None:
+    placements = plw.load_placements(REPO_ROOT / "config/runner_routing_policy.yaml")
+    representative_names = {
+        "omnibase_infra": "LAB_PROBE_RUNS_ON_JSON",
+        "omninode_infra": "CUSTOMER_MACHINE_RUNS_ON_JSON",
+        "omnimarket": "OMNI_OCC_AUTOBIND_RUNS_ON_JSON",
+    }
+    assert set(representative_names) == set(plw.REPOS)
+    resolved = {
+        repo: placements.lookup(repo, name)
+        for repo, name in representative_names.items()
+    }
+    pool = resolved["omninode_infra"]
+    assert pool is not None
+    assert "omnibase-verify" in set(json.loads(pool))

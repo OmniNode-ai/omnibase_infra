@@ -497,7 +497,6 @@ skills:
       - {name: fix-only, payload_field: fix_only, arg_type: boolean, default: false}
       - {name: merge-only, payload_field: merge_only, arg_type: boolean, default: false}
       - {name: max-parallel-polish, payload_field: max_parallel_polish, arg_type: integer}
-      - {name: admin-fallback-threshold-minutes, payload_field: admin_fallback_threshold_minutes, arg_type: integer}
       - {name: verify, payload_field: verify, arg_type: boolean, default: false}
       - {name: verify-timeout-seconds, payload_field: verify_timeout_seconds, arg_type: integer}
       - {name: loop-until-done, payload_field: loop_until_done, arg_type: boolean, default: true}

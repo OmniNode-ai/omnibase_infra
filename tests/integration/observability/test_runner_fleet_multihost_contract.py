@@ -170,26 +170,35 @@ PROOF_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "arm64-verify-runner-proo
 def test_every_arm64_verify_host_has_a_leg_in_the_proof_workflow() -> None:
     """A declared arm64 verify host must be proven individually, not as a class.
 
-    The proof job pins the class label AND a host label, one matrix leg per
-    host. Without the host label a single leg would be satisfied by whichever
-    arm64 host happened to be idle, so a second host could sit broken behind a
-    green check indefinitely -- undocumented-but-running in its other
-    direction, and the reading would be worse than no check because it names a
-    host it did not touch.
-
-    This asserts the correspondence rather than leaving it to be remembered
-    when the next host is added.
+    One leg per host, each pinned to the class label AND that host's label, so a
+    second host cannot sit broken behind a green check. Since OMN-19894 the legs
+    are data (ARM64_VERIFY_PROOF_LEGS_JSON), not a literal host matrix, and the
+    workflow's legs job holds them to the inventory at run time through
+    .github/actions/resolve-arm64-proof-legs. This asserts the wiring, and that the
+    script's reading of the inventory is the compose files' own.
     """
+    import importlib.util
+
+    action = REPO_ROOT / ".github" / "actions" / "resolve-arm64-proof-legs"
+    spec = importlib.util.spec_from_file_location(
+        "resolve_arm64_proof_legs", action / "resolve_arm64_proof_legs.py"
+    )
+    assert spec is not None and spec.loader is not None
+    resolver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(resolver)
+
     config = load_runner_fleet_config(FLEET_CONFIG)
     workflow = yaml.safe_load(PROOF_WORKFLOW.read_text(encoding="utf-8"))
-    legs = set(workflow["jobs"]["arm64-verify-proof"]["strategy"]["matrix"]["host"])
-
-    declared = {
-        f"host-{host.host.split('.')[0].split('-')[-1]}"
-        for host in config.hosts
-        if host.arch.value == "arm64" and "verify" in host.classes
-    }
-    assert declared, "the inventory declares no arm64 verify host"
+    jobs = workflow["jobs"]
+    proof = jobs["arm64-verify-proof"]
+    assert proof["needs"] == "legs"
+    assert proof["strategy"]["matrix"]["leg"] == (
+        "${{ fromJSON(needs.legs.outputs.legs) }}"
+    )
+    assert proof["runs-on"] == "${{ matrix.leg.runs_on }}"
+    step = next(step for step in jobs["legs"]["steps"] if step.get("id") == "legs")
+    assert step["uses"] == "./.github/actions/resolve-arm64-proof-legs"
+    assert step["with"] == {"legs-json": "${{ vars.ARM64_VERIFY_PROOF_LEGS_JSON }}"}
 
     compose_labels: set[str] = set()
     for host in config.hosts:
@@ -201,15 +210,5 @@ def test_every_arm64_verify_host_has_a_leg_in_the_proof_workflow() -> None:
                 definition.get("environment", {}).get("RUNNER_LABELS", "")
             ).split(",")
             compose_labels.update(x for x in labels if x.startswith("host-"))
-
-    missing = compose_labels - legs
-    assert not missing, (
-        f"{sorted(missing)} name arm64 verify hosts whose runners register that "
-        f"label, but .github/workflows/arm64-verify-runner-proof.yml proves only "
-        f"{sorted(legs)}; add a matrix leg per host"
-    )
-    stale = legs - compose_labels
-    assert not stale, (
-        f"{sorted(stale)} are proof legs for hosts no compose file registers; "
-        "a leg for an absent host blocks on a machine that will never answer"
-    )
+    assert compose_labels, "the inventory declares no arm64 verify host"
+    assert resolver.declared_host_labels() == compose_labels

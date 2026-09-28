@@ -436,6 +436,20 @@ def test_omn_13712_wire_map_skills_registered() -> None:
     assert not mismatched, f"WIRE-MAP skill(s) wired to the wrong node: {mismatched}"
 
 
+def test_merge_sweep_maps_no_admin_merge_fallback() -> None:
+    """OMN-19929: the merge_sweep orchestrator has no admin-merge fallback.
+
+    An admin merge of a PR the merge queue refused is a merge outside the
+    queue, so omnimarket removed the switch from the start command, which
+    forbids unknown fields. The CLI must not map an argument onto it.
+    """
+    registry = load_skill_registry()
+    merge_sweep = next(s for s in registry.skills if s.skill_name == "merge_sweep")
+    fields = {arg.payload_field for arg in merge_sweep.args}
+    assert "admin_fallback_threshold_minutes" not in fields
+    assert "enable_admin_merge_fallback" not in fields
+
+
 def test_omn_13712_wire_map_nodes_resolve_in_catalog() -> None:
     """Every OMN-13712 backing node exists in the omnimarket onex.nodes catalog.
 
