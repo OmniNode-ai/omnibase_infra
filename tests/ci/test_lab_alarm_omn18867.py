@@ -184,6 +184,91 @@ def test_an_unresolved_delivered_sha_is_indeterminate_not_ok() -> None:
     assert report.outcome is EnumConditionOutcome.INDETERMINATE
 
 
+@pytest.mark.unit
+def test_a_non_runtime_delivered_sha_is_graded_on_its_runtime_ancestor() -> None:
+    """OMN-18867 2026-09-28: a non-runtime delivered sha asks its ancestor.
+
+    Falsifier: the reader is asked for the delivered sha itself, which never
+    gets a receipt, and the condition reads INDETERMINATE forever.
+    """
+    ancestor = "c" * 40
+    asked: list[str] = []
+
+    def reader(repo: str, lane: EnumLabLane, sha: str) -> ModelLabPassReceipt:
+        asked.append(sha)
+        return _receipt(EnumLabPassResult.PASS, ok=True)
+
+    report = evaluate_lab_pass_receipt(
+        repo="o/r",
+        lane=EnumLabLane.COMPOSE_DEV,
+        sha=SHA,
+        reader=reader,
+        resolve_subject=lambda sha: (ancestor, f"{ancestor}, the nearest ancestor"),
+    )
+    assert asked == [ancestor]
+    assert report.outcome is EnumConditionOutcome.OK
+    assert "nearest ancestor" in report.evidence
+
+
+@pytest.mark.unit
+def test_a_fail_on_the_ancestor_alarms_naming_the_ancestor() -> None:
+    ancestor = "d" * 40
+    report = evaluate_lab_pass_receipt(
+        repo="o/r",
+        lane=EnumLabLane.COMPOSE_DEV,
+        sha=SHA,
+        reader=lambda repo, lane, sha: _receipt(EnumLabPassResult.FAIL, ok=False),
+        resolve_subject=lambda sha: (ancestor, "inherited"),
+    )
+    assert report.outcome is EnumConditionOutcome.ALARM
+    assert report.alarms[0].subject == ancestor
+
+
+@pytest.mark.unit
+def test_a_resolver_that_falls_back_to_the_exact_sha_stays_fail_closed() -> None:
+    def boom(repo: str, lane: EnumLabLane, sha: str) -> ModelLabPassReceipt:
+        raise ReceiptLookupError(f"no unexpired artifact for {sha}")
+
+    report = evaluate_lab_pass_receipt(
+        repo="o/r",
+        lane=EnumLabLane.COMPOSE_DEV,
+        sha=SHA,
+        reader=boom,
+        resolve_subject=lambda sha: (sha, f"{sha} itself: classifier could not load"),
+    )
+    assert report.outcome is EnumConditionOutcome.INDETERMINATE
+    assert "classifier could not load" in report.evidence
+
+
+@pytest.mark.unit
+def test_an_unconfigured_validator_builds_no_resolver(tmp_path: Path) -> None:
+    from scripts.lab_alarm import make_clone_subject_resolver
+
+    assert (
+        make_clone_subject_resolver(
+            clone=tmp_path, runtime_path_validator="", repo="o/r"
+        )
+        is None
+    )
+
+
+@pytest.mark.unit
+def test_the_committed_config_names_the_deploy_gate_validator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from scripts.lab_alarm import ModelAlarmConfig
+
+    monkeypatch.setenv("OMNI_HOME", "/omni")
+    monkeypatch.setenv("ONEX_INFRA_HOST", "lab.invalid")
+    monkeypatch.setenv("ONEX_RUNTIME_SSH_HOST", "u@lab.invalid")
+    config = ModelAlarmConfig.load(
+        Path(__file__).resolve().parents[2] / "config" / "lab_alarm.json"
+    )
+    assert config.runtime_path_validator.endswith(
+        "omniclaude/.github/actions/deploy-gate/validate_pr_deploy_required.py"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Condition 2 — container restart bounds
 # ---------------------------------------------------------------------------
@@ -1430,10 +1515,13 @@ def test_the_shipped_config_hardcodes_no_machine_address() -> None:
 @pytest.mark.unit
 def test_the_shipped_config_loads_and_declares_every_condition_a_subject(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """A config that declares no subject would make the alarm permanently quiet."""
     monkeypatch.setenv("ONEX_INFRA_HOST", "lab.invalid")
     monkeypatch.setenv("ONEX_RUNTIME_SSH_HOST", "user@lab.invalid")
+    fake_omni_home = tmp_path / "omni-home"
+    monkeypatch.setenv("OMNI_HOME", str(fake_omni_home))
     config = ModelAlarmConfig.load(CONFIG)
     assert config.lane is EnumLabLane.COMPOSE_DEV
     assert config.container_restart_bounds
@@ -1441,6 +1529,17 @@ def test_the_shipped_config_loads_and_declares_every_condition_a_subject(
     assert config.docker_command[0] == "ssh"
     assert config.effects_group_prefix
     assert config.effects_group_suffix
+    # OMN-18867: the shipped runtime_path_validator carries an unexpanded
+    # ${OMNI_HOME} placeholder (Operating Rule 6), so a real value here proves
+    # the field is declared and resolves rather than staying empty.
+    assert config.runtime_path_validator == str(
+        fake_omni_home
+        / "omniclaude"
+        / ".github"
+        / "actions"
+        / "deploy-gate"
+        / "validate_pr_deploy_required.py"
+    )
 
 
 @pytest.mark.unit

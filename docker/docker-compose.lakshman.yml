@@ -570,6 +570,46 @@ services:
       - "com.omninode.lane.class=collaborator"
       - "com.omninode.runtime.address=runtime://omninode-pc/lakshman/effects"
       - "com.omninode.runtime.id=lakshman-effects"
+  # OMN-15359 AC3: the collaborator lane needs its own projection process.
+  # The shared dev writer cannot write this lane's database: the projects have
+  # separate networks, brokers, databases and credentials. Keep every runtime
+  # identity lane-scoped so the two writers can run on .201 at the same time.
+  projection-delegation-writer:
+    !!merge <<: *runtime-base
+    container_name: omnimarket-lakshman-projection-delegation-writer
+    command:
+      - python
+      - -m
+      - omnimarket.nodes.node_projection_delegation.handlers.handler_delegation
+    depends_on:
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      !!merge <<: *lakshman-runtime-env
+      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      KAFKA_CONSUMER_GROUP: "lakshman.omnimarket-projections.delegation-writer.consume.v1"
+      PROJECTION_RUNNER_HEALTH_PORT: "8199"
+      ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
+      ONEX_ENVIRONMENT: "lakshman"
+      PYTHONUNBUFFERED: "1"
+    ports: !override []
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8199/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "com.omninode.service=projection-delegation-writer"
+      - "com.omninode.layer=runtime"
+      - "com.omninode.lane=lakshman"
+      - "com.omninode.ticket=OMN-15359"
   projection-api:
     !!merge <<: *runtime-base
     container_name: omnimarket-lakshman-projection-api

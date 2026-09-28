@@ -998,6 +998,10 @@ async def run_gateway_forwarder(
             prefix_topic(tenant_slug, topic) for topic in mirror_topics.inbound
         ),
         auto_offset_reset=config.cloud_bus.auto_offset_reset,
+        # OMN-15629 / OMN-19592: webhook delivery cannot exist on the cloud bus
+        # until its owner places the secret; one refused inbound topic must not
+        # kill the heartbeat copy or every other admitted inbound topic.
+        refused_topic_retry_seconds=float(config.forwarder.inbound_topic_retry_seconds),
     )
     # OMN-17034: the lane-mirror leg's own transports. Deliberately separate
     # KafkaTransport instances with their own consumer group: a single

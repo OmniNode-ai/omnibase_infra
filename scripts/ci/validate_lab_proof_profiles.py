@@ -15,6 +15,11 @@ gate that keeps it honest, run by pre-commit and by CI:
 
 Exit 0 when both hold; exit 1 naming every problem otherwise.
 
+``--pin REPO KIND`` prints, as JSON, the profile id, version and mandatory checks
+the registry declares for one repository's variant of that proof kind (OMN-19566:
+what the ``lab-proof-receipt`` workflow judges a receipt against). Exit 1 when the
+registry has no such row or variant.
+
 ``--self-test`` proves the gate is not vacuous: it removes each row in turn from
 an in-memory copy of the registry and exits 0 only if every copy is refused,
 naming the repository whose row is missing.
@@ -32,8 +37,10 @@ from pydantic import ValidationError
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from omnibase_infra.lab_proof.enum_lab_proof_kind import EnumLabProofKind
 from omnibase_infra.lab_proof.lab_proof_profile_registry import (
     load_lab_proof_profile_registry,
+    profile_pin,
     validate_steps_against_repo,
 )
 from omnibase_infra.lab_proof.model_lab_proof_profile_registry import (
@@ -70,9 +77,28 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument(
+        "--pin",
+        nargs=2,
+        metavar=("REPO", "KIND"),
+        help="print the registry's profile pin for OmniNode-ai/<repo> and a proof kind",
+    )
     args = parser.parse_args(argv)
     if args.self_test:
         return self_test(args.registry)
+    if args.pin:
+        repo, kind = args.pin
+        try:
+            pin = profile_pin(
+                load_lab_proof_profile_registry(args.registry),
+                repo,
+                EnumLabProofKind(kind),
+            )
+        except (KeyError, ValidationError, ValueError) as exc:
+            print(f"no profile pin for {repo} {kind}: {exc}", file=sys.stderr)
+            return 1
+        print(pin.model_dump_json())
+        return 0
     try:
         registry = load_lab_proof_profile_registry(args.registry)
     except (ValidationError, ValueError) as exc:

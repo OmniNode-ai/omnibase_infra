@@ -403,6 +403,47 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="pr_landing_transitions",
         ),
     ),
+    # OMN-19513: infra vendors both Claude hook event projection tables before
+    # omnimarket#2956 lands the node contract. Until the pin advances, these
+    # interim declarations keep the shipped table grants derivable. The expiry
+    # test tracks both entries and requires removal after the contract arrives.
+    # Retired by: omnimarket#2956 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:claude_agent_spans",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
+            "0000_create_claude_hook_events.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="claude_agent_spans",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
+                "0000_create_claude_hook_events.sql"
+            ),
+            access="read_write",
+            role="claude_agent_spans",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:claude_hook_events",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
+            "0000_create_claude_hook_events.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="claude_hook_events",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
+                "0000_create_claude_hook_events.sql"
+            ),
+            access="read_write",
+            role="claude_hook_events",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
@@ -476,13 +517,17 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     #     handler_savings_correlation). read_write matches the SELECT, INSERT,
     #     UPDATE the creating migrations grant.
     #
-    # gateway_link_health is not declared yet, although its write effect
-    # upserts it: no migration GRANTs it, so its omninode_runtime privileges
-    # come only from the default-privilege rules, and declaring it now would be
-    # a declared grant nothing delivers (check_topology_grant_delivery). It is
-    # declared together with its explicit GRANT migration (AC2 step 2). The
-    # gateway_link_health_status VIEW is not declared at all: no runtime node
-    # reads or writes it, so its privileges are revoked rather than declared.
+    #   * gateway_link_health (AC2 step 2): HandlerGatewayLinkHealthUpsert
+    #     runs INSERT ... ON CONFLICT (tenant_id) DO UPDATE, which needs SELECT,
+    #     INSERT and UPDATE. Declared together with the migration that GRANTs
+    #     it explicitly (node_gateway_link_health_write_effect/0003), so the
+    #     declaration never runs ahead of a migration that delivers it
+    #     (check_topology_grant_delivery). Before that file, its privileges came
+    #     only from the default-privilege rules, which AC2 step 4 drops.
+    #
+    # The gateway_link_health_status VIEW is not declared at all: no runtime
+    # node reads or writes it, so its privileges are revoked rather than
+    # declared.
     ContractTableDeclaration(
         node="infra_direct_sql:node_savings_estimation_compute",
         contract_path=Path(
@@ -535,6 +580,24 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="savings_correlation_finalizations",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="infra_direct_sql:node_gateway_link_health_write_effect",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_gateway_link_health_write_effect/"
+            "0001_create_gateway_link_health.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="gateway_link_health",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_gateway_link_health_write_effect/"
+                "0001_create_gateway_link_health.sql"
+            ),
+            access="read_write",
+            role="gateway_link_health",
         ),
     ),
 )
