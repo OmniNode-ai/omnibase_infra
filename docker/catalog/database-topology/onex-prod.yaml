@@ -79,6 +79,7 @@ databases:
               - consumer_flow_windows
               - delegate_skill_command_claims
               - dod_verify_runs
+              - gateway_link_health
               - lab_lane_health
               - live_events
               - log_entries
@@ -363,5 +364,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: d4deaab63d5f021dacbcd84bad5b4fa52d4b8e45dc20748fbeaac0adff1add96
+  sha256: 0413c5e2c1d7b1ccfd1109ff5e4d3a274be5e74cd45a7a970651afea60bea110
 topology_instance: onex-prod
