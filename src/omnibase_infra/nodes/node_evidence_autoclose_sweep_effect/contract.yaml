@@ -5,9 +5,9 @@
 # OMN-16106 first slice: companion-merge -> dod_verify -> governed Done flip.
 #
 # Enumerates onex_change_control PRs merged in a lookback window, extracts
-# each merged companion's Evidence-Ticket binding, re-runs the EXISTING
-# `onex skill dod_verify <ticket>` verifier exactly as the controller does
-# for governed flips, and either flips the bound Linear ticket Done (all
+# each merged companion's Evidence-Ticket binding, runs the existing
+# `onex skill dod_verify <ticket> --execution-audience hosted` verifier,
+# and either flips the bound Linear ticket Done (all
 # ACs receipt-proven, zero failed) or posts the honest gap as a comment
 # (never flips on any gap). DRY-RUN by default (apply=false); ANY ambiguity
 # (missing binding, ambiguous multi-ticket companion, dod_verify non-zero
@@ -726,8 +726,13 @@ io_operations:
 # has no "external CLI tool" member, so the two runtime tool requirements are
 # documented here in prose rather than as invalid schema entries:
 #   - `gh` (GitHub CLI), authenticated — paginated PR/file enumeration.
-#   - `onex skill dod_verify <ticket>` — the EXISTING verifier, invoked from
-#     the sweep interpreter's OWN `onex` binary (OMN-16846: not `uv run`,
+#   - `onex skill dod_verify <ticket> --execution-audience hosted` — the
+#     EXISTING verifier, invoked from a hosted sweep run with its audience
+#     declared explicitly (OMN-15359). An omitted audience is refused by
+#     node_dod_verify before it loads the contract or executes evidence;
+#     the sweep must not infer a local_done_gate audience. The verifier is
+#     invoked from the sweep interpreter's OWN `onex` binary (OMN-16846:
+#     not `uv run`,
 #     which would re-resolve the project venv at the cwd and so tie the
 #     verifier's environment to the product clone the behaviour checks must
 #     run pytest in). The sweep must therefore be launched from an
@@ -793,7 +798,7 @@ metadata:
   author: "OmniNode Team"
   transport_type: "http"
   created: "2026-08-17"
-  updated: "2026-09-09"
+  updated: "2026-09-28"
   tags:
     - "effect"
     - "linear"

@@ -24,7 +24,7 @@
 #               prepr_teardown_slot.sh, both from the test-merge tree. Neither
 #               takes a lane argument; the project is derived from the slot.
 #
-# Params (sourced): TAG W [INFRA_PR INFRA_HEAD | INFRA_GROUP [INFRA_GROUP_BASE INFRA_GROUP_TREE]] [MARKET_PR MARKET_HEAD]
+# Params (sourced): TAG W [INFRA_PR INFRA_HEAD | INFRA_GROUP [INFRA_GROUP_BASE INFRA_GROUP_TREE]] [MARKET_PR MARKET_HEAD | MARKET_GROUP [MARKET_GROUP_BASE MARKET_GROUP_TREE]]
 #   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS CORE_REF SPI_REF COMPAT_REF
 #   DOCKER_CONFIG_MODE SLOT_KIND PREPR_SLOT PROJECT MAIN_PORT EFFECTS_PORT SLOT_PORTS
 #   POSITIVE_CONTROL REASON]
@@ -120,12 +120,26 @@ for kind, items in (("missing", missing), ("differ", differ), ("stale-py", stale
         print("pkg-tree-diff %s %s %s %s" % (pkg, container, kind, rel))
 PY
 
+# The facts a pr-head lab-proof receipt binds (OMN-19566): the proven head, the
+# dev sha it was proven against, their merge base, and the digest of the PR's own
+# diff. The digest is `git diff --no-color --no-ext-diff <merge-base>..<head>`
+# hashed with sha256, byte for byte the command lab_pass_receipt.py's
+# compute_pr_diff_digest_from_repo runs, so a verifier elsewhere recomputes the
+# same value from the same two shas.
+pr_subject() { # dir repo pr head base
+  local d=$1 repo=$2 pr=$3 h=$4 base=$5 mb dg
+  mb=$(git -C "$d" merge-base "$base" "$h" 2>/dev/null) || { echo "pr-subject-unavailable $repo#$pr no merge base with $base"; return 0; }
+  dg=$(git -C "$d" diff --no-color --no-ext-diff "$mb..$h" | shasum -a 256 | cut -d' ' -f1)
+  echo "pr-subject $repo#$pr head=$h base=$base merge-base=$mb diff-digest=sha256:$dg"
+}
+
 fetch_pr() { # dir repo pr expected -> merges PR head into dev (no-ff), falls back to raw head on conflict
   local d=$1 repo=$2 pr=$3 exp=$4
   git clone -q --branch dev "https://github.com/OmniNode-ai/$repo.git" "$d"
   git -C "$d" fetch -q origin "pull/$pr/head"
   local h; h=$(git -C "$d" rev-parse FETCH_HEAD)
   echo "$repo#$pr fetched head $h expected $exp match=$([ "$h" = "$exp" ] && echo yes || echo NO)"
+  pr_subject "$d" "$repo" "$pr" "$h" "$(git -C "$d" rev-parse origin/dev)"
   if git -C "$d" -c user.name=prover -c user.email=prover@lab.invalid merge -q --no-ff --no-edit FETCH_HEAD >/dev/null 2>&1; then
     echo "$repo test-merge clean $(git -C "$d" rev-parse HEAD) (dev $(git -C "$d" rev-parse origin/dev))"
   else
@@ -137,13 +151,15 @@ fetch_pr() { # dir repo pr expected -> merges PR head into dev (no-ff), falls ba
 
 # A group of pull requests is proved on the commit the merge queue would land:
 # the group base (dev, or the exact dev sha the calling lane planned on) with
-# each member squashed on in queue order, one commit per member, the way the
-# omnibase_infra dev merge queue squashes (OMN-18893). The author, committer and
-# dates are fixed, so the same base and heads give the same commit shas here and
-# in prepr_pool_group.py on the lane's machine; the tree hash is what the landed
-# commit is later compared with. A member that does not squash cleanly fails the
-# clone: members are chosen with disjoint files, so a conflict is a planning
-# error, never something to build around.
+# each member squashed on in queue order, one commit per member. This is how the
+# omnibase_infra dev merge queue squashes, and the sequence omnimarket creates
+# when its PRs squash onto dev one at a time with no interleaving merge
+# (OMN-18893). The author, committer and dates are fixed, so the same base and
+# heads give the same commit shas here and in prepr_pool_group.py on the lane's
+# machine; the tree hash is what the landed commit is later compared with. A
+# member that does not squash cleanly fails the clone: members are chosen with
+# disjoint files, so a conflict is a planning error, never something to build
+# around.
 GROUP_GIT_ENV="GIT_AUTHOR_NAME=lab-pool-group GIT_AUTHOR_EMAIL=lab-pool-group@lab.invalid GIT_COMMITTER_NAME=lab-pool-group GIT_COMMITTER_EMAIL=lab-pool-group@lab.invalid GIT_AUTHOR_DATE=2026-01-01T00:00:00+0000 GIT_COMMITTER_DATE=2026-01-01T00:00:00+0000"
 fetch_group() { # dir repo "n:head n:head ..." [base] [expected tree]
   local d=$1 repo=$2 members=$3 base=${4:-} want=${5:-} m n exp h
@@ -157,6 +173,7 @@ fetch_group() { # dir repo "n:head n:head ..." [base] [expected tree]
     git -C "$d" fetch -q origin "pull/$n/head" || { echo "group-fetch-failed $repo#$n"; return 1; }
     h=$(git -C "$d" rev-parse FETCH_HEAD)
     echo "$repo#$n fetched head $h expected $exp match=$([ "$h" = "$exp" ] && echo yes || echo NO)"
+    pr_subject "$d" "$repo" "$n" "$h" "$(git -C "$d" rev-parse origin/dev)"
     # git wants an identity for a squash merge too; a host may have none set
     # shellcheck disable=SC2086
     if ! env $GROUP_GIT_ENV git -C "$d" merge -q --squash FETCH_HEAD > "$d.merge.log" 2>&1; then
@@ -212,7 +229,11 @@ clone)
   elif [ -n "${INFRA_PR:-}" ]; then fetch_pr "$R/omnibase_infra" omnibase_infra "$INFRA_PR" "$INFRA_HEAD"
     git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "pull/$INFRA_PR/head"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
   else git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_infra.git "$R/omnibase_infra"; fi
-  if [ -n "${MARKET_PR:-}" ]; then fetch_pr "$R/omnimarket" omnimarket "$MARKET_PR" "$MARKET_HEAD"
+  if [ -n "${MARKET_GROUP:-}" ]; then
+    fetch_group "$R/omnimarket" omnimarket "$MARKET_GROUP" "${MARKET_GROUP_BASE:-}" "${MARKET_GROUP_TREE:-}" || { echo "clone failed: group did not build"; exit 1; }
+    # the focused tests run against the group commit itself
+    git clone -q "https://github.com/OmniNode-ai/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q "$R/omnimarket" HEAD; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
+  elif [ -n "${MARKET_PR:-}" ]; then fetch_pr "$R/omnimarket" omnimarket "$MARKET_PR" "$MARKET_HEAD"
     git clone -q "https://github.com/OmniNode-ai/omnimarket.git" "$T/omnimarket"; git -C "$T/omnimarket" fetch -q origin "pull/$MARKET_PR/head"; git -C "$T/omnimarket" switch -q --detach FETCH_HEAD
   else git clone -q --branch dev https://github.com/OmniNode-ai/omnimarket.git "$R/omnimarket"; fi
   git clone -q --branch main https://github.com/OmniNode-ai/omnibase_compat.git "$R/omnibase_compat"
@@ -325,7 +346,7 @@ probe)
   # on which files a caller listed in ID_FILES
   SUBJECTS=""
   [ -n "${INFRA_PR:-}${INFRA_GROUP:-}" ] && SUBJECTS="omnibase_infra"
-  [ -n "${MARKET_PR:-}" ] && SUBJECTS="$SUBJECTS omnimarket"
+  [ -n "${MARKET_PR:-}${MARKET_GROUP:-}" ] && SUBJECTS="$SUBJECTS omnimarket"
   for repo in $SUBJECTS; do
     echo "identity-subject $repo"
     echo "src-diff $repo files=$(git -C "$R/$repo" diff --name-only origin/dev...HEAD -- src/ 2>/dev/null | grep -c .)"

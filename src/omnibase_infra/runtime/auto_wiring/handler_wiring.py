@@ -1943,7 +1943,10 @@ def _extract_dispatch_correlation_id(
 
 
 def _extract_state_io_key(
-    envelope: object, payload: object, key_name: str
+    envelope: object,
+    payload: object,
+    key_name: str,
+    event_model_cls: type[BaseModel] | None = None,
 ) -> object | None:
     """Read the contract-declared ``state_io.key`` field off a dispatch message.
 
@@ -1953,6 +1956,17 @@ def _extract_state_io_key(
     and is read from the validated payload only — the transport envelope has no
     business fields, and silently borrowing one from ``__debug_trace`` would
     key a durable row on transport metadata.
+
+    OMN-19829: the payload handed in here is the raw materialized wire dict, not
+    the route's typed ``event_model``. A contract whose route model DERIVES the
+    key (``node_pr_landing_orchestrator``: ``landing_key`` is a property built
+    from ``repository`` and ``pr_number``, because no producer puts it on the
+    wire) therefore read ``None`` and failed every message closed -- 81 of 81
+    companion outcomes DLQ'd on the .201 dev lane on 2026-09-28. When the wire
+    dict lacks the key and the route declares an ``event_model``, the key is
+    read off that model validated from the same dict, which is exactly the
+    object the handler receives. A dict that does not validate still yields
+    ``None`` and still fails closed.
     """
     if key_name == "correlation_id":
         return _extract_dispatch_correlation_id(envelope, payload)
@@ -1960,7 +1974,14 @@ def _extract_state_io_key(
     if candidate is not None:
         return candidate
     if isinstance(payload, Mapping):
-        return payload.get(key_name)
+        candidate = payload.get(key_name)
+        if candidate is not None or event_model_cls is None:
+            return candidate
+        try:
+            typed = event_model_cls.model_validate(payload)
+        except ValidationError:
+            return None
+        return getattr(typed, key_name, None)
     return None
 
 
@@ -6475,8 +6496,9 @@ def _make_stateful_dispatch_callback(
     async def _callback(
         envelope: ModelEventEnvelope[object],
     ) -> ModelDispatchResult | None:
-        payload = _extract_dispatch_payload(envelope)
-        raw_key = _extract_state_io_key(envelope, payload, state_key)
+        event_model_cls = _safe_import_event_model_class(event_model)
+        payload = _extract_dispatch_payload(envelope, event_model_cls)
+        raw_key = _extract_state_io_key(envelope, payload, state_key, event_model_cls)
         # ``correlation_id`` stays UUID-shaped (it is a UUID everywhere on the
         # wire, and the retry helper logs it as one). A contract-declared domain
         # key (OMN-16924) is an opaque string — ``session_id`` is not a UUID —

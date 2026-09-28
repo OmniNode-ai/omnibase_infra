@@ -147,6 +147,11 @@
 #   zero dev-105 containers and networks (positive control: 12 omnibase-infra-dogfood
 #   containers by the same filter). macOS ephemeral range 49152-65535 (sysctl
 #   net.inet.ip.portrange). The dev-105 lane is DECLARED, not built: no lane was mutated.
+# verified: 2026-09-28 via local render of the lakshman profile with render-only
+#   credentials: `docker compose ... --profile lakshman config --services` exits 0
+#   and includes `projection-delegation-writer` among 11 services (OMN-15359).
+#   This attests compose-to-manifest source parity only; live .201 deployment is
+#   not claimed and remains a separate approved action after this PR merges.
 # (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
 #
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
@@ -591,6 +596,9 @@ lanes:
         kind: service
         replicas: 1
       - name: omnimarket-lakshman-projection-api
+        kind: service
+        replicas: 1
+      - name: omnimarket-lakshman-projection-delegation-writer
         kind: service
         replicas: 1
   # ---------------------------------------------------------------------------
