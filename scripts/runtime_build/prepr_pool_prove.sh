@@ -120,12 +120,26 @@ for kind, items in (("missing", missing), ("differ", differ), ("stale-py", stale
         print("pkg-tree-diff %s %s %s %s" % (pkg, container, kind, rel))
 PY
 
+# The facts a pr-head lab-proof receipt binds (OMN-19566): the proven head, the
+# dev sha it was proven against, their merge base, and the digest of the PR's own
+# diff. The digest is `git diff --no-color --no-ext-diff <merge-base>..<head>`
+# hashed with sha256, byte for byte the command lab_pass_receipt.py's
+# compute_pr_diff_digest_from_repo runs, so a verifier elsewhere recomputes the
+# same value from the same two shas.
+pr_subject() { # dir repo pr head base
+  local d=$1 repo=$2 pr=$3 h=$4 base=$5 mb dg
+  mb=$(git -C "$d" merge-base "$base" "$h" 2>/dev/null) || { echo "pr-subject-unavailable $repo#$pr no merge base with $base"; return 0; }
+  dg=$(git -C "$d" diff --no-color --no-ext-diff "$mb..$h" | shasum -a 256 | cut -d' ' -f1)
+  echo "pr-subject $repo#$pr head=$h base=$base merge-base=$mb diff-digest=sha256:$dg"
+}
+
 fetch_pr() { # dir repo pr expected -> merges PR head into dev (no-ff), falls back to raw head on conflict
   local d=$1 repo=$2 pr=$3 exp=$4
   git clone -q --branch dev "https://github.com/OmniNode-ai/$repo.git" "$d"
   git -C "$d" fetch -q origin "pull/$pr/head"
   local h; h=$(git -C "$d" rev-parse FETCH_HEAD)
   echo "$repo#$pr fetched head $h expected $exp match=$([ "$h" = "$exp" ] && echo yes || echo NO)"
+  pr_subject "$d" "$repo" "$pr" "$h" "$(git -C "$d" rev-parse origin/dev)"
   if git -C "$d" -c user.name=prover -c user.email=prover@lab.invalid merge -q --no-ff --no-edit FETCH_HEAD >/dev/null 2>&1; then
     echo "$repo test-merge clean $(git -C "$d" rev-parse HEAD) (dev $(git -C "$d" rev-parse origin/dev))"
   else
@@ -157,6 +171,7 @@ fetch_group() { # dir repo "n:head n:head ..." [base] [expected tree]
     git -C "$d" fetch -q origin "pull/$n/head" || { echo "group-fetch-failed $repo#$n"; return 1; }
     h=$(git -C "$d" rev-parse FETCH_HEAD)
     echo "$repo#$n fetched head $h expected $exp match=$([ "$h" = "$exp" ] && echo yes || echo NO)"
+    pr_subject "$d" "$repo" "$n" "$h" "$(git -C "$d" rev-parse origin/dev)"
     # git wants an identity for a squash merge too; a host may have none set
     # shellcheck disable=SC2086
     if ! env $GROUP_GIT_ENV git -C "$d" merge -q --squash FETCH_HEAD > "$d.merge.log" 2>&1; then
