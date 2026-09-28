@@ -43,7 +43,7 @@ on:
         required: true
         type: string
       runtime_host:
-        description: "Runtime + postgres + redpanda host. localhost in compose mode; in real mode, the lab lane host the caller resolves from its deployment overlay."
+        description: "Runtime + postgres + redpanda host. localhost in compose mode; in real mode, the lab host the caller passes (never a literal in this file)."
         required: false
         type: string
         default: "localhost"

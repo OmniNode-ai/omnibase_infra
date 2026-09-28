@@ -563,6 +563,7 @@ class Readback:
     notes: list[str]
     restored: bool
     residue: str
+    group: GroupFacts | None = None
 
     @property
     def outcome(self) -> str:
@@ -649,6 +650,53 @@ def image_identity(probe: str, notes: list[str]) -> bool:
     return ok
 
 
+GROUP_FAILURE_RE = re.compile(
+    r"^(group-conflict|group-fetch-failed|group-commit-failed|group-base-missing) (.*)$",
+    re.M,
+)
+
+
+@dataclass
+class GroupFacts:
+    """What one group clone built (prepr_pool_prove.sh ``fetch_group``)."""
+
+    repo: str | None
+    commit: str | None
+    tree: str | None
+    base: str | None
+    tree_agrees: str | None
+    members: list[tuple[str, str]]
+    empty: list[str]
+    failures: list[str]
+
+
+def group_facts(clone: str) -> GroupFacts | None:
+    """What a group clone printed (prepr_pool_prove.sh fetch_group), or None.
+
+    ``commit``, ``tree`` and ``base`` come from the one ``group-commit`` line;
+    ``members`` are the ``repo#n head`` pairs in the order they were squashed;
+    ``failures`` lists every line that stopped the group building.
+    """
+    if not re.search(r"^\S+ group base ", clone, re.M):
+        return None
+    members = re.findall(r"^(\S+#\d+) fetched head (\S+) expected", clone, re.M)
+    m = re.search(
+        r"^group-commit (\S+) (\S+) tree (\S+) base (\S+) tree-agrees=(\w+)$",
+        clone,
+        re.M,
+    )
+    return GroupFacts(
+        repo=m.group(1) if m else None,
+        commit=m.group(2) if m else None,
+        tree=m.group(3) if m else None,
+        base=m.group(4) if m else None,
+        tree_agrees=m.group(5) if m else None,
+        members=members,
+        empty=re.findall(r"^group-empty (\S+)", clone, re.M),
+        failures=[f"{a} {b}" for a, b in GROUP_FAILURE_RE.findall(clone)],
+    )
+
+
 def judge(
     outputs: Mapping[str, str],
     base_probe: str | None = None,
@@ -677,6 +725,19 @@ def judge(
     notes: list[str] = []
 
     checks["head_matches"] = "match=NO" not in clone and "match=yes" in clone
+    group = group_facts(clone)
+    if group is not None:
+        # A group run (OMN-18893 batching) proves the commit the merge queue lands:
+        # every member squashed on, no conflict, and, when the lane planned the
+        # tree, the host building exactly that tree.
+        built = group.commit is not None and not group.failures
+        checks["group_built"] = built and group.tree_agrees != "NO"
+        for failure in group.failures:
+            notes.append(f"group: {failure}")
+        if group.tree_agrees == "NO":
+            notes.append("group: the host built a different tree from the planned one")
+        for member in group.empty:
+            notes.append(f"group: {member} adds nothing on the base (already on dev)")
     # A pre-PR slot migrates fresh databases before it starts anything. A
     # migration that fails there built fine and is the PR's finding (FAIL), not
     # an unprovable stack (prepr_verify_lane.sh step 10).
@@ -817,7 +878,9 @@ def judge(
         restored = False
         notes.append(f"slot teardown verdict {slot_td.group(1)}")
     residue += f", snapshot-diff={diff_m.group(1) if diff_m else 'missing'}"
-    return Readback(checks=checks, notes=notes, restored=restored, residue=residue)
+    return Readback(
+        checks=checks, notes=notes, restored=restored, residue=residue, group=group
+    )
 
 
 def render_readback(
@@ -827,7 +890,14 @@ def render_readback(
     started: str,
     finished: str,
 ) -> str:
-    subject = []
+    subject: list[str] = []
+    if params.get("INFRA_GROUP"):
+        # one entry per member, each naming its own head, so a land lane reading
+        # this readback for any one member finds its PR and head (OMN-18893)
+        subject.extend(
+            f"omnibase_infra#{n} head {h[:10]}"
+            for n, h in group_members(params["INFRA_GROUP"])
+        )
     if params.get("INFRA_PR"):
         subject.append(
             f"omnibase_infra#{params['INFRA_PR']} head {params.get('INFRA_HEAD', '?')[:10]}"
@@ -841,6 +911,13 @@ def render_readback(
         f"{'pre-PR slot' if host.kind == 'prepr-slot' else 'isolated'} project {host.compose_project}, "
         f"{started} to {finished}",
     ]
+    if rb.group is not None:
+        lines.append(
+            f"  group: {len(rb.group.members)} member(s) squashed in queue order onto base "
+            f"{(rb.group.base or '?')[:12]}, commit {(rb.group.commit or '?')[:12]}, "
+            f"tree {rb.group.tree or '?'} (tree-agrees={rb.group.tree_agrees or '?'}); "
+            "the proof holds for the landed commit whose tree equals this tree"
+        )
     for name, ok in rb.checks.items():
         lines.append(f"  {'ok  ' if ok else 'FAIL'} {name}")
     for note in rb.notes:
@@ -869,6 +946,28 @@ def read_params(path: Path) -> dict[str, str]:
     return params
 
 
+GROUP_MEMBER_RE = re.compile(r"^(\d+):([0-9a-f]{40})$")
+
+
+def group_members(spec: str) -> list[tuple[str, str]]:
+    """Parse INFRA_GROUP: space-separated ``<pr>:<full head sha>``, in queue order."""
+    members: list[tuple[str, str]] = []
+    for item in spec.split():
+        m = GROUP_MEMBER_RE.match(item)
+        if m is None:
+            raise ValueError(
+                f"INFRA_GROUP member {item!r} is not <pr number>:<40-hex head sha>"
+            )
+        members.append((m.group(1), m.group(2)))
+    if len(members) < 2:
+        raise ValueError(
+            "INFRA_GROUP needs at least two members; prove one PR with INFRA_PR"
+        )
+    if len({n for n, _ in members}) != len(members):
+        raise ValueError("INFRA_GROUP names a PR twice")
+    return members
+
+
 def _utcnow() -> dt.datetime:
     return dt.datetime.now(dt.UTC)
 
@@ -887,8 +986,18 @@ def run_proof(
     with_base_control: bool = False,
 ) -> tuple[int, str]:
     params = read_params(params_path)
-    if not params.get("INFRA_PR") and not params.get("MARKET_PR"):
-        return EXIT_USAGE, "params name neither INFRA_PR nor MARKET_PR"
+    if not any(params.get(k) for k in ("INFRA_PR", "INFRA_GROUP", "MARKET_PR")):
+        return EXIT_USAGE, "params name none of INFRA_PR, INFRA_GROUP, MARKET_PR"
+    if params.get("INFRA_PR") and params.get("INFRA_GROUP"):
+        return (
+            EXIT_USAGE,
+            "params name both INFRA_PR and INFRA_GROUP; a run proves one or the other",
+        )
+    if params.get("INFRA_GROUP"):
+        try:
+            group_members(params["INFRA_GROUP"])
+        except ValueError as exc:
+            return EXIT_USAGE, str(exc)
     now = now_fn()
     holds = live_surface_holds(ledger_lines, now)
     states = survey(cfg, transport, holds, now, me=holder)
@@ -952,7 +1061,16 @@ def run_proof(
                 k: v
                 for k, v in params.items()
                 if k
-                not in ("INFRA_PR", "INFRA_HEAD", "MARKET_PR", "MARKET_HEAD", "TESTS")
+                not in (
+                    "INFRA_PR",
+                    "INFRA_HEAD",
+                    "INFRA_GROUP",
+                    "INFRA_GROUP_BASE",
+                    "INFRA_GROUP_TREE",
+                    "MARKET_PR",
+                    "MARKET_HEAD",
+                    "TESTS",
+                )
             }
             base_out = _run_stack(
                 cfg,

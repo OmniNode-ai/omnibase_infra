@@ -1171,3 +1171,145 @@ def test_a_slot_is_picked_only_when_every_isolated_member_is_taken() -> None:
     assert pool.pick(_survey(hosts)).host.name == "lab-101"
     hosts["lab-101"].online = False
     assert pool.pick(_survey(hosts)).host.name == "lab-201-prepr-1"
+
+
+# ------------------------------------------------------------------ group proof
+
+GROUP_CLONE = """omnibase_infra group base cd2cc37bd48852d195eb18d3d6b08b04d973f064 (dev cd2cc37bd48852d195eb18d3d6b08b04d973f064)
+omnibase_infra#4134 fetched head fdd93c786c27fd9daf2a878a0d9cd189f4868989 expected fdd93c786c27fd9daf2a878a0d9cd189f4868989 match=yes
+group-step omnibase_infra#4134 commit 27629e91ea63223168320f848a371aac38868c27 tree 29a02c42f933477f8210ed83fdcd706a3fe07e30
+omnibase_infra#4198 fetched head e812bfd787753ea76eb7f599b7cdbf933ebf534c expected e812bfd787753ea76eb7f599b7cdbf933ebf534c match=yes
+group-step omnibase_infra#4198 commit 606e69a0e2ef1d176049fb83ba2f67dfb1932bcc tree bc5de1bd286eee60ef64e5970e120eeecf48f756
+omnibase_infra#4214 fetched head 0ba71c956606c2a500b4f0d095bcde22e2ffb29b expected 0ba71c956606c2a500b4f0d095bcde22e2ffb29b match=yes
+group-step omnibase_infra#4214 commit 8036b4c7a3b574ddfc29266d991163574a7b7d0c tree bca014d9c20c11139da49d5395d94b87b86b7a28
+group-commit omnibase_infra 8036b4c7a3b574ddfc29266d991163574a7b7d0c tree bca014d9c20c11139da49d5395d94b87b86b7a28 base cd2cc37bd48852d195eb18d3d6b08b04d973f064 tree-agrees=yes
+"""
+GROUP_MEMBERS = [
+    ("4134", "fdd93c786c27fd9daf2a878a0d9cd189f4868989"),
+    ("4198", "e812bfd787753ea76eb7f599b7cdbf933ebf534c"),
+    ("4214", "0ba71c956606c2a500b4f0d095bcde22e2ffb29b"),
+]
+GROUP_SPEC = " ".join(f"{number}:{head}" for number, head in GROUP_MEMBERS)
+
+
+@pytest.mark.unit
+def test_group_facts_parse_real_host_clone_output() -> None:
+    facts = pool.group_facts(GROUP_CLONE)
+    assert facts is not None
+    assert facts.repo == "omnibase_infra"
+    assert facts.members == [(f"omnibase_infra#{n}", h) for n, h in GROUP_MEMBERS]
+    assert facts.commit == "8036b4c7a3b574ddfc29266d991163574a7b7d0c"
+    assert facts.tree == "bca014d9c20c11139da49d5395d94b87b86b7a28"
+    assert facts.base == "cd2cc37bd48852d195eb18d3d6b08b04d973f064"
+    assert facts.tree_agrees == "yes"
+    assert facts.failures == []
+    assert facts.empty == []
+
+
+@pytest.mark.unit
+def test_non_group_clone_has_no_group_facts() -> None:
+    assert pool.group_facts(GOOD["clone"]) is None
+
+
+@pytest.mark.unit
+def test_judge_accepts_a_group_built_with_the_planned_tree() -> None:
+    rb = pool.judge({**GOOD, "clone": GROUP_CLONE})
+    assert rb.checks["group_built"] is True
+    assert rb.outcome == "PASS"
+
+
+@pytest.mark.unit
+def test_judge_names_a_group_conflict_without_a_final_commit() -> None:
+    conflict = "group-conflict omnibase_infra#4134 CONFLICT (content)"
+    clone = "\n".join(GROUP_CLONE.splitlines()[:2]) + "\n" + conflict + "\n"
+    rb = pool.judge({**GOOD, "clone": clone})
+    assert rb.checks["group_built"] is False
+    assert any(conflict in note for note in rb.notes)
+    assert rb.group is not None and rb.group.commit is None
+
+
+@pytest.mark.unit
+def test_judge_rejects_a_group_tree_that_disagrees() -> None:
+    rb = pool.judge(
+        {**GOOD, "clone": GROUP_CLONE.replace("tree-agrees=yes", "tree-agrees=NO")}
+    )
+    assert rb.checks["group_built"] is False
+    assert any("different tree" in note for note in rb.notes)
+
+
+@pytest.mark.unit
+def test_group_members_parse_valid_spec_in_order() -> None:
+    assert pool.group_members(GROUP_SPEC) == GROUP_MEMBERS
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("spec", "reason"),
+    [
+        (f"4134:abc 4198:{'b' * 40}", "40-hex head sha"),
+        (f"4134:{'a' * 40}", "at least two members"),
+        (f"4134:{'a' * 40} 4134:{'b' * 40}", "names a PR twice"),
+    ],
+)
+def test_group_members_reject_invalid_specs(spec: str, reason: str) -> None:
+    with pytest.raises(ValueError, match=reason):
+        pool.group_members(spec)
+
+
+@pytest.mark.unit
+def test_group_readback_names_every_member_and_group() -> None:
+    facts = pool.group_facts(GROUP_CLONE)
+    assert facts is not None
+    rb = pool.Readback(
+        checks={"stack_built": True, "group_built": True},
+        notes=[],
+        restored=True,
+        residue="clean",
+        group=facts,
+    )
+    text = pool.render_readback(
+        rb,
+        CFG.host("lab-101"),
+        {"INFRA_GROUP": GROUP_SPEC},
+        "2026-09-28T10:00:00Z",
+        "2026-09-28T10:30:00Z",
+    )
+    lines = text.splitlines()
+    assert lines[0].startswith(
+        "LAB PROOF PASS: omnibase_infra#4134 head fdd93c786c + "
+        "omnibase_infra#4198 head e812bfd787 + "
+        "omnibase_infra#4214 head 0ba71c9566 on lab-101"
+    )
+    assert any(line.startswith("  group: 3 member(s)") for line in lines)
+
+
+class NoHostTransport:
+    def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+        pytest.fail(
+            "invalid group params must be rejected before running a host command"
+        )
+
+    def put(self, host: Any, local: Path, remote: str) -> int:
+        pytest.fail("invalid group params must be rejected before copying to a host")
+
+
+@pytest.mark.unit
+def test_run_rejects_pr_and_group_before_touching_any_host(tmp_path: Path) -> None:
+    path = _params(tmp_path)
+    path.write_text(
+        path.read_text(encoding="utf-8") + f"INFRA_GROUP='{GROUP_SPEC}'\n",
+        encoding="utf-8",
+    )
+    code, text = pool.run_proof(
+        CFG,
+        NoHostTransport(),
+        path,
+        "me",
+        60,
+        None,
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == 5
+    assert "both INFRA_PR and INFRA_GROUP" in text

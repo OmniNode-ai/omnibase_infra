@@ -24,7 +24,7 @@
 #               prepr_teardown_slot.sh, both from the test-merge tree. Neither
 #               takes a lane argument; the project is derived from the slot.
 #
-# Params (sourced): TAG W [INFRA_PR INFRA_HEAD] [MARKET_PR MARKET_HEAD]
+# Params (sourced): TAG W [INFRA_PR INFRA_HEAD | INFRA_GROUP [INFRA_GROUP_BASE INFRA_GROUP_TREE]] [MARKET_PR MARKET_HEAD]
 #   MODEL_ENDPOINT [ID_FILES LIVE_GREP GROUP_GREP SQL TESTS CORE_REF SPI_REF COMPAT_REF
 #   DOCKER_CONFIG_MODE SLOT_KIND PREPR_SLOT PROJECT MAIN_PORT EFFECTS_PORT SLOT_PORTS
 #   POSITIVE_CONTROL REASON]
@@ -135,6 +135,46 @@ fetch_pr() { # dir repo pr expected -> merges PR head into dev (no-ff), falls ba
   fi
 }
 
+# A group of pull requests is proved on the commit the merge queue would land:
+# the group base (dev, or the exact dev sha the calling lane planned on) with
+# each member squashed on in queue order, one commit per member, the way the
+# omnibase_infra dev merge queue squashes (OMN-18893). The author, committer and
+# dates are fixed, so the same base and heads give the same commit shas here and
+# in prepr_pool_group.py on the lane's machine; the tree hash is what the landed
+# commit is later compared with. A member that does not squash cleanly fails the
+# clone: members are chosen with disjoint files, so a conflict is a planning
+# error, never something to build around.
+GROUP_GIT_ENV="GIT_AUTHOR_NAME=lab-pool-group GIT_AUTHOR_EMAIL=lab-pool-group@lab.invalid GIT_COMMITTER_NAME=lab-pool-group GIT_COMMITTER_EMAIL=lab-pool-group@lab.invalid GIT_AUTHOR_DATE=2026-01-01T00:00:00+0000 GIT_COMMITTER_DATE=2026-01-01T00:00:00+0000"
+fetch_group() { # dir repo "n:head n:head ..." [base] [expected tree]
+  local d=$1 repo=$2 members=$3 base=${4:-} want=${5:-} m n exp h
+  git clone -q --branch dev "https://github.com/OmniNode-ai/$repo.git" "$d"
+  if [ -n "$base" ]; then
+    git -C "$d" switch -q --detach "$base" || { echo "group-base-missing $repo $base"; return 1; }
+  fi
+  echo "$repo group base $(git -C "$d" rev-parse HEAD) (dev $(git -C "$d" rev-parse origin/dev))"
+  for m in $members; do
+    n=${m%%:*}; exp=${m#*:}
+    git -C "$d" fetch -q origin "pull/$n/head" || { echo "group-fetch-failed $repo#$n"; return 1; }
+    h=$(git -C "$d" rev-parse FETCH_HEAD)
+    echo "$repo#$n fetched head $h expected $exp match=$([ "$h" = "$exp" ] && echo yes || echo NO)"
+    # git wants an identity for a squash merge too; a host may have none set
+    # shellcheck disable=SC2086
+    if ! env $GROUP_GIT_ENV git -C "$d" merge -q --squash FETCH_HEAD > "$d.merge.log" 2>&1; then
+      echo "group-conflict $repo#$n $(grep -m1 -iE 'conflict|fatal|error' "$d.merge.log")"; return 1
+    fi
+    # shellcheck disable=SC2086
+    env $GROUP_GIT_ENV git -C "$d" commit -q --allow-empty -m "lab-pool group member $repo#$n $h" \
+      || { echo "group-commit-failed $repo#$n"; return 1; }
+    if git -C "$d" diff --quiet HEAD^ HEAD; then echo "group-empty $repo#$n (its diff is already on the base)"; fi
+    echo "group-step $repo#$n commit $(git -C "$d" rev-parse HEAD) tree $(git -C "$d" rev-parse 'HEAD^{tree}')"
+  done
+  local tree agrees count
+  tree=$(git -C "$d" rev-parse 'HEAD^{tree}')
+  count=$(echo "$members" | wc -w | tr -d ' ')
+  if [ -z "$want" ]; then agrees=unchecked; elif [ "$tree" = "$want" ]; then agrees=yes; else agrees=NO; fi
+  echo "group-commit $repo $(git -C "$d" rev-parse HEAD) tree $tree base $(git -C "$d" rev-parse "HEAD~$count") tree-agrees=$agrees"
+}
+
 case "$PHASE" in
 snap-pre|snap-post)
   out=/tmp/$TAG-$PHASE.txt
@@ -165,7 +205,11 @@ snap-pre|snap-post)
   ;;
 clone)
   echo "clone start $(ts)"; mkdir -p "$R" "$T"
-  if [ -n "${INFRA_PR:-}" ]; then fetch_pr "$R/omnibase_infra" omnibase_infra "$INFRA_PR" "$INFRA_HEAD"
+  if [ -n "${INFRA_GROUP:-}" ]; then
+    fetch_group "$R/omnibase_infra" omnibase_infra "$INFRA_GROUP" "${INFRA_GROUP_BASE:-}" "${INFRA_GROUP_TREE:-}" || { echo "clone failed: group did not build"; exit 1; }
+    # the focused tests run against the group commit itself
+    git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q "$R/omnibase_infra" HEAD; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
+  elif [ -n "${INFRA_PR:-}" ]; then fetch_pr "$R/omnibase_infra" omnibase_infra "$INFRA_PR" "$INFRA_HEAD"
     git clone -q "https://github.com/OmniNode-ai/omnibase_infra.git" "$T/omnibase_infra"; git -C "$T/omnibase_infra" fetch -q origin "pull/$INFRA_PR/head"; git -C "$T/omnibase_infra" switch -q --detach FETCH_HEAD
   else git clone -q --branch dev https://github.com/OmniNode-ai/omnibase_infra.git "$R/omnibase_infra"; fi
   if [ -n "${MARKET_PR:-}" ]; then fetch_pr "$R/omnimarket" omnimarket "$MARKET_PR" "$MARKET_HEAD"
@@ -280,7 +324,7 @@ probe)
   # compared with its build tree, in both runtimes, so identity never depends
   # on which files a caller listed in ID_FILES
   SUBJECTS=""
-  [ -n "${INFRA_PR:-}" ] && SUBJECTS="omnibase_infra"
+  [ -n "${INFRA_PR:-}${INFRA_GROUP:-}" ] && SUBJECTS="omnibase_infra"
   [ -n "${MARKET_PR:-}" ] && SUBJECTS="$SUBJECTS omnimarket"
   for repo in $SUBJECTS; do
     echo "identity-subject $repo"
