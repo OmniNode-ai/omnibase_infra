@@ -54,6 +54,72 @@ R=$W/root; T=$W/test
 ts() { date -u +%FT%TZ; }
 lsn() { if command -v ss >/dev/null 2>&1; then ss -ltn; else lsof -nP -iTCP -sTCP:LISTEN; fi; }
 
+# Image identity is proven from content, never from the revision label (a label
+# is evidence of intent, not of what was built; OMN-18893). For each repository
+# under test the probe lists every file of its installed package inside the
+# running container (IMG_LIST_PY, run by the container's python) and compares
+# that listing with the build tree's tracked files under src/<pkg>/
+# (PKG_TREE_PY, run by the host's python3). A PR that changes nothing under src/
+# is then proven by the whole package reading identical, and a PR whose image
+# differs from its tree still fails (OMN-19896). The tests extract both scripts
+# from between their heredoc markers and run them.
+IFS= read -r -d '' IMG_LIST_PY <<'PY' || :
+import hashlib, importlib, os, sys
+pkg = importlib.import_module(sys.argv[1])
+top = os.path.dirname(pkg.__file__)
+base = os.path.dirname(top)
+for root, dirs, files in os.walk(top):
+    dirs[:] = [d for d in dirs if d != "__pycache__"]
+    for name in files:
+        if name.endswith((".pyc", ".pyo")):
+            continue
+        path = os.path.join(root, name)
+        with open(path, "rb") as fh:
+            digest = hashlib.sha256(fh.read()).hexdigest()
+        print(digest + "  " + os.path.relpath(path, base))
+PY
+IFS= read -r -d '' PKG_TREE_PY <<'PY' || :
+import hashlib, os, subprocess, sys
+root, pkg, container, listing = sys.argv[1:5]
+out = subprocess.run(["git", "-C", root, "ls-files", "-z", "--", "src/" + pkg],
+                     capture_output=True, check=False).stdout
+tree = {}
+for raw in out.split(b"\0"):
+    rel = raw.decode("utf-8", "replace")
+    if not rel.startswith("src/"):
+        continue
+    path = os.path.join(root, rel)
+    rel = rel[len("src/"):]
+    if "/__pycache__/" in rel or rel.endswith((".pyc", ".pyo")):
+        continue
+    if os.path.islink(path) or not os.path.isfile(path):
+        continue
+    with open(path, "rb") as fh:
+        tree[rel] = hashlib.sha256(fh.read()).hexdigest()
+image = {}
+try:
+    with open(listing, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            digest, sep, rel = line.rstrip("\n").partition("  ")
+            if sep and len(digest) == 64:
+                image[rel] = digest
+except OSError:
+    pass
+missing = sorted(set(tree) - set(image))
+differ = sorted(r for r in tree if r in image and image[r] != tree[r])
+extra = sorted(set(image) - set(tree))
+# a module the image carries and the tree does not is stale code that can run;
+# other extras (a force-included resource) are counted, not held against it
+stale = [r for r in extra if r.endswith(".py")]
+ok = bool(tree) and not missing and not differ and not stale
+print("pkg-tree %s %s tree-files=%d image-files=%d missing=%d differ=%d stale-py=%d extra-other=%d match=%s"
+      % (pkg, container, len(tree), len(image), len(missing), len(differ), len(stale),
+         len(extra) - len(stale), "yes" if ok else "NO"))
+for kind, items in (("missing", missing), ("differ", differ), ("stale-py", stale)):
+    for rel in items[:5]:
+        print("pkg-tree-diff %s %s %s %s" % (pkg, container, kind, rel))
+PY
+
 fetch_pr() { # dir repo pr expected -> merges PR head into dev (no-ff), falls back to raw head on conflict
   local d=$1 repo=$2 pr=$3 exp=$4
   git clone -q --branch dev "https://github.com/OmniNode-ai/$repo.git" "$d"
@@ -207,8 +273,24 @@ probe)
   done
   echo "health wait $(( $(date +%s) - start ))s ended $(ts) starting=$starting $MAIN=$c1 $EFF=$c2"
   echo "== identity"
-  docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$M" 2>&1
+  # the label is printed for the reader and never judged: it records intent only
+  echo "image-revision-label $(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$M" 2>&1 | tail -1)"
   echo "build GIT_SHA $(git -C "$R/omnibase_infra" rev-parse HEAD) market $(git -C "$R/omnimarket" rev-parse HEAD)"
+  # every repository a PR is under test in has its whole installed package
+  # compared with its build tree, in both runtimes, so identity never depends
+  # on which files a caller listed in ID_FILES
+  SUBJECTS=""
+  [ -n "${INFRA_PR:-}" ] && SUBJECTS="omnibase_infra"
+  [ -n "${MARKET_PR:-}" ] && SUBJECTS="$SUBJECTS omnimarket"
+  for repo in $SUBJECTS; do
+    echo "identity-subject $repo"
+    echo "src-diff $repo files=$(git -C "$R/$repo" diff --name-only origin/dev...HEAD -- src/ 2>/dev/null | grep -c .)"
+    for c in $M $E; do
+      docker exec "$c" python -c "$IMG_LIST_PY" "$repo" > "/tmp/$TAG-img-$repo-$c.txt" 2> "/tmp/$TAG-img-$repo-$c.err" \
+        || echo "pkg-tree-list-error $repo $c $(tail -1 "/tmp/$TAG-img-$repo-$c.err")"
+      python3 -c "$PKG_TREE_PY" "$R/$repo" "$repo" "$c" "/tmp/$TAG-img-$repo-$c.txt" 2>&1 | tail -16
+    done
+  done
   for c in $M $E; do echo "$c omnimarket=$(docker exec $c python -c "import importlib.metadata as m; print(m.version('omnimarket'))" 2>&1 | tail -1) infra=$(docker exec $c python -c "import importlib.metadata as m; print(m.version('omnibase_infra'))" 2>&1 | tail -1)"; done
   for spec in ${ID_FILES:-}; do repo=${spec%%:*}; f=${spec#*:}; pkg=${repo}
     want=$(git -C "$R/$repo" show "HEAD:src/$f" 2>/dev/null | shasum -a 256 | cut -c1-12)

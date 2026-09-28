@@ -1600,6 +1600,26 @@ jobs:
             .github/workflows
           sparse-checkout-cone-mode: false
 
+      # A probe job placed by `fromJSON(vars.NAME)` (omninode_infra#1725,
+      # omnibase_infra#4233: the host-agnostic probes of operator RULINGs
+      # 2026-09-28T01:58:06Z and 01:58:17Z) runs on whatever pool the live
+      # variable names, so the check needs the live variables to know which
+      # pool a probe holds. Variables are not readable with any installed App's
+      # permissions (none grants Variables read), so this is the same read-only
+      # CROSS_REPO_PAT read the hourly runner-routing audit makes
+      # (runner-routing-audit.yml). No continue-on-error: a scope that could
+      # not be read leaves the check unable to resolve a placement, which fails.
+      - name: Read the Actions variables probe jobs are placed by
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          set -euo pipefail
+          mkdir -p .probe-vars
+          gh variable list --org OmniNode-ai --json name,value > .probe-vars/org.json
+          for repo in omnibase_infra omninode_infra omnimarket; do
+            gh variable list --repo "OmniNode-ai/${repo}" --json name,value > ".probe-vars/${repo}.json"
+          done
+
       - name: Every probe cron, lane and duration agrees with its workflow, and every probe is listed
         run: |
           set -euo pipefail
@@ -1608,7 +1628,11 @@ jobs:
           uv run python scripts/ci/check_lab_probe_windows.py \
             --root omnibase_infra=. \
             --root omninode_infra=.probe-roots/omninode_infra \
-            --root omnimarket=.probe-roots/omnimarket
+            --root omnimarket=.probe-roots/omnimarket \
+            --variables org=.probe-vars/org.json \
+            --variables omnibase_infra=.probe-vars/omnibase_infra.json \
+            --variables omninode_infra=.probe-vars/omninode_infra.json \
+            --variables omnimarket=.probe-vars/omnimarket.json
 
   # Dep-provenance content-lineage gate (OMN-15604) -- a [tool.uv.sources]
   # git-pinned rev must build the SAME src/ tree as the released tag its
@@ -4012,7 +4036,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: 8b8d5d3b5dda51bdcc99168d4c358a6df0f19380
+          ref: fa40689b11f296214d4f26920f1a769b951970c9
           path: .proof-dependencies/omninode-infra
           token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false
@@ -5182,6 +5206,11 @@ jobs:
       # fails here. The findings the corpus still produces are listed one by one
       # in config/omninode_internal_live_acl_allowlist.yaml, which is
       # shrink-only: an entry that stops reproducing fails the gate too.
+      # The gateway_link_health_status revoke proof runs first on the same
+      # server, as a NOSUPERUSER role_omnidash through the real forward runner:
+      # the gate itself builds as postgres, for which a REVOKE always takes. It
+      # refuses a server that already has its two databases or three roles and
+      # drops all of them afterwards, so the gate still starts empty.
       - name: omninode_internal live-ACL gate (OMN-17886)
         if: steps.ensure_psql.outputs.available == 'true'
         env:
@@ -5190,6 +5219,7 @@ jobs:
           OMN17886_REQUIRE_PG: "1"
         run: |
           uv run pytest \
+            tests/integration/migrations/test_revoke_gateway_link_health_status_omn17886.py \
             tests/integration/migrations/test_omninode_internal_live_acl_gate_omn17886.py \
             -v --tb=short -p no:randomly
 
