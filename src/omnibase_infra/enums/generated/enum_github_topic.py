@@ -22,3 +22,4 @@ class EnumGithubTopic(str, Enum):
     EVT_PR_MERGED_V1 = "onex.evt.github.pr-merged.v1"  # onex.evt.github.pr-merged.v1
     EVT_PR_STATUS_V1 = "onex.evt.github.pr-status.v1"  # onex.evt.github.pr-status.v1
     EVT_PR_WEBHOOK_V1 = "onex.evt.github.pr-webhook.v1"  # onex.evt.github.pr-webhook.v1
+    EVT_WEBHOOK_DELIVERY_REFUSED_V1 = "onex.evt.github.webhook-delivery-refused.v1"  # onex.evt.github.webhook-delivery-refused.v1

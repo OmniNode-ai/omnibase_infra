@@ -926,6 +926,20 @@ Producer: onex-api ``POST /v1/github/webhook``
 Consumer: NodeGitHubWebhookIngressEffect
 """
 
+SUFFIX_GITHUB_WEBHOOK_DELIVERY_REFUSED: str = (
+    "onex.evt.github.webhook-delivery-refused.v1"
+)
+"""Topic suffix for refused GitHub webhook deliveries (OMN-19492).
+
+The failure terminal of NodeGitHubWebhookIngressEffect: the consume boundary
+publishes one record here for every delivery the ingress refuses (no secret
+configured, a signature that does not verify, a malformed body), alongside the
+dead-lettered command, so a refusal is visible without reading the DLQ.
+
+Producer: the consume boundary of NodeGitHubWebhookIngressEffect
+Consumer: none yet (operator-visible sink)
+"""
+
 SUFFIX_GITHUB_PR_STATUS: str = "onex.evt.github.pr-status.v1"
 """Topic suffix for GitHub PR triage status events (OMN-2656).
 
@@ -1113,6 +1127,15 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     # Post-merge check chain results (1 partition — low-throughput, OMN-6727)
     ModelTopicSpec(
         suffix=SUFFIX_GITHUB_POST_MERGE_RESULT,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Refused GitHub webhook deliveries, the ingress failure terminal (OMN-19492)
+    ModelTopicSpec(
+        suffix=SUFFIX_GITHUB_WEBHOOK_DELIVERY_REFUSED,
         partitions=1,
         kafka_config={
             "retention.ms": "604800000",

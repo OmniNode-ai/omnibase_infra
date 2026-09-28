@@ -26,8 +26,8 @@ runtime_profiles:
 contract_version:
   major: 1
   minor: 0
-  patch: 0
-node_version: "0.1.0"
+  patch: 1
+node_version: "0.1.1"
 description: >
   Consumes signed GitHub webhook deliveries from onex.cmd.github.webhook-delivery.v1, re-verifies the X-Hub-Signature-256 HMAC over the exact received bytes in constant time, refuses (typed error, dead-lettered) any delivery it cannot verify or parse, and folds pull_request, pull_request_review and summary check_run deliveries into partial PR-state observations on onex.evt.github.pr-status.v1 plus one merged event per merge on onex.evt.github.pr-merged.v1. Refuses every delivery when no webhook secret is configured.
 
@@ -45,6 +45,7 @@ event_bus:
   publish_topics:
     - "onex.evt.github.pr-status.v1"
     - "onex.evt.github.pr-merged.v1"
+    - "onex.evt.github.webhook-delivery-refused.v1"
 consumed_events:
   - topic: "onex.cmd.github.webhook-delivery.v1"
     event_type: "GitHubWebhookDelivery"
@@ -57,6 +58,18 @@ published_events:
   - topic: "onex.evt.github.pr-merged.v1"
     event_type: "GitHubPrMergedObservation"
     description: "A merged pull request, with a deterministic event_id per (repo, number, merge sha)."
+  - topic: "onex.evt.github.webhook-delivery-refused.v1"
+    event_type: "BoundaryFailureTerminal"
+    description: "The failure terminal: one record per refused delivery (no secret, bad signature, malformed body), published by the consume boundary."
+# The FAILURE terminal. A refused delivery raises a typed error; the consume
+# boundary dead-letters the command and publishes its failure terminal HERE.
+# Without this declaration the boundary answers at the first output topic of
+# the contract, onex.evt.github.pr-status.v1, and the pr_state fold then
+# refuses that record as a malformed status event (measured on the .201
+# pre-PR slot).
+runtime_dispatch:
+  terminal_events:
+    - "onex.evt.github.webhook-delivery-refused.v1"
 handler_routing:
   routing_strategy: "operation_match"
   handlers:
