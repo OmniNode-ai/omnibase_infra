@@ -320,6 +320,42 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
     #
+    # OMN-19550: the same infra-first window, for session_content -- the full
+    # prompt, tool input, tool result and assistant reply captured for one
+    # session content chunk. This repository vendors the create migration
+    # BEFORE omnimarket lands the node package that declares the relation in
+    # its contract, because omnimarket's node-migration-vendor-parity gate
+    # refuses a node migration with no vendored counterpart here. So for one
+    # window the shipped topology instances declare a relation the PINNED
+    # contracts cannot derive.
+    #
+    # Regenerating against the pin instead of bridging would DELETE that
+    # declaration while the vendored migration still grants the relation,
+    # tripping the OMN-18768 reverse ratchet and refusing the projection
+    # binding at boot. This entry is SELF-EXPIRING: it is registered in
+    # _INTERIM_ENTRIES in
+    # tests/ci/test_supplemental_declaration_expiry_omn18863.py, which goes red
+    # on the pin advance that makes it redundant and says to delete it.
+    #
+    # Retired by: omnimarket#2905 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:session_content",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_session_content/"
+            "0001_create_session_content.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="session_content",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_session_content/"
+                "0001_create_session_content.sql"
+            ),
+            access="write",
+            role="session_content",
+        ),
+    ),
     # OMN-19833: the two PR landing read models, the same infra-first window as
     # the retired bridges above. This repo vendors
     # node_projection_pr_landing/0000 and 0001 ahead of omnimarket#3000, whose
