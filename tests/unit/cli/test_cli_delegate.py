@@ -5,8 +5,8 @@
 
 The acceptance probe is STRUCTURAL (no size assertions, plan Phase 2 item 1):
 
-- ``classify_task_type`` maps prompt keywords to the delegate task taxonomy
-  (first match wins, research fallback);
+- the task class is resolved by the task-class authority read through the
+  registry (a stand-in here; see ``tests/helpers/cli_registry_stand_in``);
 - ``run_delegate`` writes its scratch payload under ``<state-root>/tmp/`` with
   a run_id-suffixed name — never ``/tmp`` (``feedback_no_tmp_use_workspace``);
 - the payload validates against the delegate node's input model
@@ -54,13 +54,10 @@ from omnibase_infra.cli import cli_delegate
 from omnibase_infra.cli.cli_delegate import (
     BUS_CHOICES,
     DEFAULT_BUS,
-    DEFAULT_TASK_TYPE,
     DELEGATE_SOURCE,
-    DELEGATE_SOURCE_CHOICES,
     DelegateTimeoutExceededError,
     _write_local_run_files,
     build_backend_overrides,
-    classify_task_type,
     delegate_command,
     resolve_default_bus,
     run_delegate,
@@ -78,11 +75,23 @@ from omnibase_infra.cli.omnimarket_drift_guard import (
     DRIFT_OVERRIDE_ENV,
     check_omnimarket_drift,
 )
-from omnibase_infra.cli.task_class_selection import TaskClassContractError
+from omnibase_infra.cli.task_class_registry import TaskClassContractError
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
-from omnibase_infra.enums.enum_task_type_resolution import EnumTaskTypeResolution
 from omnibase_infra.runtime_identity import collect_runtime_identity
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
+from tests.helpers.cli_registry_stand_in import (
+    install_stand_in_registry,
+    wiring_authority,
+)
+from tests.helpers.cli_registry_stand_in.node_delegate_stand_in.model_stand_in_delegate_request import (
+    ModelStandInDelegateRequest,
+)
+
+#: The adapter sources the stand-in delegate contract's input model admits.
+#: Read off the model, as ``onex delegate`` reads the real one.
+_STAND_IN_SOURCES = get_args(
+    ModelStandInDelegateRequest.model_fields["source"].annotation
+)
 
 pytestmark = pytest.mark.unit
 
@@ -237,187 +246,6 @@ _CORRELATED_NOOP_CONTRACT = (
 )
 
 
-_OMN18305_PROBE_CONTRACT = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "delegation"
-    / "omn18305"
-    / "task_class_contracts_probe.yaml"
-)
-
-
-class TestClassifyTaskType:
-    """OMN-18305: classification is contract-declared, not keyword density.
-
-    The rules themselves (word boundaries, presence-not-frequency, shape
-    gating, priority) are pinned in ``test_task_class_selection.py`` against a
-    probe contract so they run without omnimarket. What is pinned HERE is the
-    CLI-facing behaviour and the two reproductions from the ticket.
-    """
-
-    @staticmethod
-    def _probe_classes() -> tuple[object, ...]:
-        from omnibase_infra.cli.task_class_selection import (
-            load_selectable_task_classes,
-        )
-
-        return load_selectable_task_classes(_OMN18305_PROBE_CONTRACT)
-
-    def test_the_latest_window_is_not_a_test_task(self) -> None:
-        """The four-word reproduction: 'latest' must not match 'test'."""
-        assert (
-            classify_task_type("the latest window", classes=self._probe_classes())
-            != "short_keyword"
-        )
-
-    def test_a_genuine_test_request_still_resolves_to_the_test_class(self) -> None:
-        assert (
-            classify_task_type(
-                "write a test for the handler", classes=self._probe_classes()
-            )
-            == "short_keyword"
-        )
-
-    def test_no_keyword_table_survives_in_cli_source(self) -> None:
-        """AC2: the hardcoded table is gone, not merely bypassed."""
-        source = Path(cli_delegate.__file__).read_text(encoding="utf-8")
-        assert "_CLASSIFICATION_RULES" not in source
-
-
-class TestTaskTypeVocabulary:
-    """AC4: the CLI's selectable vocabulary equals the contract's public set."""
-
-    #: The contract's ``gateway_exposure: public`` projection, as of
-    #: OMN-18305. THE OTHER HALF OF THIS ASSERTION LIVES IN OMNIMARKET:
-    #: ``tests/unit/inference/test_task_class_selection_omn18305.py`` pins the
-    #: live contract to this same list. Neither repo can see the other (repo
-    #: layering forbids importing omnimarket here, and omnimarket pins this
-    #: package from the registry), and omnibase_infra's own test suite refuses
-    #: to run at all with omnimarket installed -- the OMN-15620 venv-purity
-    #: gate treats a co-installed omnimarket as duplicate node registration.
-    #: So a live comparison is not available in either suite; two pinned
-    #: halves of one list is. Changing the contract turns omnimarket's half
-    #: red, which is the signal to update this one.
-    EXPECTED_PUBLIC_CLASSES = (
-        "code_generation",
-        "code_review",
-        "complex_reasoning",
-        "document",
-        "planning",
-        "reasoning",
-        "refactor",
-        "research",
-        "review",
-        "summarization",
-        "test",
-    )
-
-    def test_choices_mirror_matches_the_contracts_public_projection(self) -> None:
-        assert sorted(cli_delegate.TASK_TYPE_CHOICES) == sorted(
-            self.EXPECTED_PUBLIC_CLASSES
-        )
-
-    def test_stand_in_contract_carries_the_same_vocabulary(self) -> None:
-        """The test stand-in cannot drift away from the mirror it stands in for."""
-        from omnibase_infra.cli.task_class_selection import (
-            load_selectable_task_classes,
-        )
-        from tests.unit.cli.conftest import STAND_IN_TASK_CLASS_CONTRACT
-
-        stand_in = load_selectable_task_classes(STAND_IN_TASK_CLASS_CONTRACT)
-        assert sorted(entry.name for entry in stand_in) == sorted(
-            cli_delegate.TASK_TYPE_CHOICES
-        )
-
-    def test_summarization_and_planning_are_reachable(self) -> None:
-        """The two classes an engineering standup belongs to were unreachable."""
-        assert "summarization" in cli_delegate.TASK_TYPE_CHOICES
-        assert "planning" in cli_delegate.TASK_TYPE_CHOICES
-
-    def test_explicit_task_type_fails_closed_when_the_contract_is_unresolvable(
-        self,
-    ) -> None:
-        """OMN-18342 AC(a)/regression guard.
-
-        An explicit ``--task-type`` must never be decided by ``TASK_TYPE_CHOICES``
-        alone. When the contract cannot be resolved (e.g. omnimarket absent), the
-        run fails closed naming the resolution failure -- it does NOT silently
-        fall back to validating against the mirror, even for a value the mirror
-        would accept.
-        """
-        with patch.object(
-            cli_delegate,
-            "resolve_task_class_contract_path",
-            side_effect=TaskClassContractError("omnimarket absent"),
-        ):
-            with pytest.raises(TaskClassContractError, match="omnimarket absent"):
-                cli_delegate.resolve_task_class(
-                    "summarise the ledger", explicit="summarization"
-                )
-
-    def test_explicit_task_type_present_in_contract_is_accepted(self) -> None:
-        """OMN-18342 AC(b): positive control.
-
-        An explicit value that IS present in the resolved contract is accepted,
-        and the resolution is recorded as EXPLICIT provenance.
-        """
-        from tests.unit.cli.conftest import STAND_IN_TASK_CLASS_CONTRACT
-
-        with patch.object(
-            cli_delegate,
-            "resolve_task_class_contract_path",
-            return_value=STAND_IN_TASK_CLASS_CONTRACT,
-        ):
-            resolved = cli_delegate.resolve_task_class(
-                "summarise the ledger", explicit="summarization"
-            )
-
-        assert resolved.task_type == "summarization"
-        assert resolved.resolution is EnumTaskTypeResolution.EXPLICIT
-
-    def test_explicit_task_type_absent_from_contract_is_refused_naming_the_contract(
-        self, tmp_path: Path
-    ) -> None:
-        """OMN-18342 AC(a): RED test.
-
-        A value present in the ``TASK_TYPE_CHOICES`` mirror but ABSENT from the
-        resolved contract must be refused, and the error names the contract's
-        own vocabulary -- never the mirror. This is the falsifier for the
-        regression introduced by ``0181d708d``: that commit's early-return
-        validated ``explicit`` against ``TASK_TYPE_CHOICES`` without ever
-        resolving the contract, so a mirror-only class would have been wrongly
-        accepted here.
-        """
-        assert "planning" in cli_delegate.TASK_TYPE_CHOICES  # present in the mirror
-
-        truncated_contract = tmp_path / "truncated_task_class_contract.yaml"
-        truncated_contract.write_text(
-            "\n".join(
-                [
-                    "task_classes:",
-                    "  research:",
-                    "    gateway_exposure: public",
-                    "    selection:",
-                    "      priority: 1",
-                    "      phrases: []",
-                ]
-            ),
-            encoding="utf-8",
-        )
-
-        with patch.object(
-            cli_delegate,
-            "resolve_task_class_contract_path",
-            return_value=truncated_contract,
-        ):
-            with pytest.raises(
-                TaskClassContractError, match="the task-class contract exposes"
-            ):
-                cli_delegate.resolve_task_class(
-                    "plan the migration", explicit="planning"
-                )
-
-
 class TestReceiptEnvironmentIsolation:
     """Receipt-mode delegation must not load a home dotenv file."""
 
@@ -568,11 +396,9 @@ class TestPayloadScratch:
 
 class TestSourceFlag:
     """OMN-15185: ``--source`` threads a registered adapter source into the
-    delegation payload's ``source`` field, closed to
-    :data:`DELEGATE_SOURCE_CHOICES` (mirroring the wire model's
-    ``ModelDelegateSkillRequest.source`` Literal). Omitting the flag must
-    preserve pre-OMN-15185 behavior exactly (``DELEGATE_SOURCE``,
-    ``"claude-code"``).
+    delegation payload's ``source`` field, closed to the values the delegate
+    contract's input model admits (OMN-19407: read from the model, never
+    copied). Omitting the flag stamps ``DELEGATE_SOURCE`` (``"claude-code"``).
     """
 
     def test_default_omitted_flag_uses_delegate_source_constant(
@@ -603,7 +429,7 @@ class TestSourceFlag:
         payload = json.loads(payload_path.read_text(encoding="utf-8"))
         assert payload["source"] == DELEGATE_SOURCE == "claude-code"
 
-    @pytest.mark.parametrize("source_choice", DELEGATE_SOURCE_CHOICES)
+    @pytest.mark.parametrize("source_choice", _STAND_IN_SOURCES)
     def test_each_choice_lands_in_payload(
         self,
         source_choice: str,
@@ -634,7 +460,7 @@ class TestSourceFlag:
         payload = json.loads(payload_path.read_text(encoding="utf-8"))
         assert payload["source"] == source_choice
 
-    @pytest.mark.parametrize("source_choice", DELEGATE_SOURCE_CHOICES)
+    @pytest.mark.parametrize("source_choice", _STAND_IN_SOURCES)
     def test_cli_flag_each_choice_reaches_overrides(
         self,
         source_choice: str,
@@ -730,51 +556,6 @@ class TestSourceFlag:
         assert result.exit_code != 0
         assert "Error" in result.output
         assert "not-a-real-source" in result.output
-
-
-class TestSourceFlagDriftGuard:
-    """``DELEGATE_SOURCE_CHOICES`` duplicates omnimarket's wire model Literal
-    (``ModelDelegateSkillRequest.source``) because omnibase_infra does not
-    depend on omnimarket -- repo layering runs compat -> core -> spi -> infra,
-    and separately omnimarket depends on omnibase-infra, never the reverse
-    (importing omnimarket here would be circular/wrong-direction). This is
-    exactly OMN-15175's duplicate-alias failure class: a hand-rolled Literal
-    silently fell out of sync with this same wire model after it was widened.
-
-    When omnimarket IS importable in the test env, assert the tuple matches
-    the LIVE Literal args exactly. It normally is NOT importable in
-    omnibase_infra's own test env (no omnimarket dependency); in that case,
-    assert against the documented value list stated in the
-    ``DELEGATE_SOURCE_CHOICES`` docstring/comment in ``cli_delegate.py``, so a
-    silent edit that changes one without the other still fails this test.
-    """
-
-    # Mirrors the value list documented in cli_delegate.py's
-    # DELEGATE_SOURCE_CHOICES comment -- update BOTH together.
-    _DOCUMENTED_CHOICES = ("claude-code", "codex", "external-client")
-
-    def test_choices_match_wire_model_or_documented_fallback(self) -> None:
-        try:
-            from omnimarket.models.delegation.wire.model_delegate_skill_request import (
-                ModelDelegateSkillRequest,
-            )
-        except ImportError:
-            assert set(DELEGATE_SOURCE_CHOICES) == set(self._DOCUMENTED_CHOICES), (
-                "DELEGATE_SOURCE_CHOICES drifted from its own documented "
-                "value list (OMN-15175 duplicate-alias failure class) -- "
-                "omnimarket is not importable in this test env to check "
-                "against the live wire model directly, so verify by hand "
-                "against omnimarket's "
-                "model_delegate_skill_request.py:ModelDelegateSkillRequest"
-                ".source Literal."
-            )
-            return
-        source_field = ModelDelegateSkillRequest.model_fields["source"]
-        live_choices = get_args(source_field.annotation)
-        assert set(DELEGATE_SOURCE_CHOICES) == set(live_choices), (
-            f"DELEGATE_SOURCE_CHOICES {DELEGATE_SOURCE_CHOICES} drifted from "
-            f"the live ModelDelegateSkillRequest.source Literal {live_choices}"
-        )
 
 
 class TestSingleReceiptOnStdout:
@@ -1278,26 +1059,8 @@ class TestHardTimeoutBackstop:
             "_resolve_packaged_contract",
             lambda _name: tmp_path / "contract.yaml",
         )
-        task_class_contract_path = tmp_path / "task_class_contract.yaml"
-        task_class_contract_path.write_text(
-            (
-                Path(__file__).resolve().parents[2]
-                / "fixtures"
-                / "delegation"
-                / "omn18305"
-                / "task_class_contracts_vocabulary.yaml"
-            )
-            .read_text(encoding="utf-8")
-            .replace(
-                "terminal_delivery_margin_seconds: 60",
-                "terminal_delivery_margin_seconds: 1",
-            ),
-            encoding="utf-8",
-        )
-        monkeypatch.setattr(
-            cli_delegate,
-            "resolve_task_class_contract_path",
-            lambda: task_class_contract_path,
+        install_stand_in_registry(
+            monkeypatch, wiring_authority(terminal_delivery_margin_seconds=1)
         )
         monkeypatch.setattr(
             cli_delegate, "run_receipt_mode", _swallowing_run_receipt_mode
@@ -2022,7 +1785,7 @@ class TestLocalRunArtifacts:
             addressing=_ADDRESSING,
             prompt="research the route",
             task_type="research",
-            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+            task_type_resolution="explicit",
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -2071,7 +1834,7 @@ class TestLocalRunArtifacts:
             addressing=_ADDRESSING,
             prompt="research the route",
             task_type="research",
-            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+            task_type_resolution="explicit",
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -2093,7 +1856,7 @@ class TestLocalRunArtifacts:
             addressing=_ADDRESSING,
             prompt="proof",
             task_type="research",
-            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+            task_type_resolution="explicit",
         )
         assert not (tmp_path / "runs").exists()
 
@@ -2210,7 +1973,7 @@ class TestLocalRunArtifactsOnEscalatedRun:
             addressing=_ADDRESSING,
             prompt="Reply with exactly: OK",
             task_type="research",
-            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+            task_type_resolution="explicit",
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -2252,7 +2015,7 @@ class TestLocalRunArtifactsOnEscalatedRun:
             addressing=_ADDRESSING,
             prompt="Reply with exactly: OK",
             task_type="research",
-            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+            task_type_resolution="explicit",
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -2281,7 +2044,7 @@ class TestLocalRunArtifactsOnEscalatedRun:
             addressing=_ADDRESSING,
             prompt="proof",
             task_type="research",
-            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+            task_type_resolution="explicit",
         )
         assert not (tmp_path / "runs").exists()
 
@@ -2344,7 +2107,7 @@ class TestFailedDelegationIsRendered:
             addressing=_ADDRESSING,
             prompt="summarise the coordination ledger",
             task_type="complex_reasoning",
-            task_type_resolution=EnumTaskTypeResolution.CONTRACT.value,
+            task_type_resolution="contract",
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -2380,7 +2143,7 @@ class TestFailedDelegationIsRendered:
             addressing=_ADDRESSING,
             prompt="summarise the coordination ledger",
             task_type="complex_reasoning",
-            task_type_resolution=EnumTaskTypeResolution.CONTRACT.value,
+            task_type_resolution="contract",
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -2424,7 +2187,7 @@ class TestFailedDelegationIsRendered:
             addressing=_ADDRESSING,
             prompt="summarise the coordination ledger",
             task_type="complex_reasoning",
-            task_type_resolution=EnumTaskTypeResolution.CONTRACT.value,
+            task_type_resolution="contract",
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -2554,7 +2317,7 @@ class TestDispatchedDelegationWritesRunFiles:
                 "separated by commas, and nothing else."
             ),
             task_type="summarization",
-            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+            task_type_resolution="explicit",
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -2572,7 +2335,7 @@ class TestDispatchedDelegationWritesRunFiles:
             addressing=_ADDRESSING,
             prompt="List the first five prime numbers",
             task_type="summarization",
-            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+            task_type_resolution="explicit",
         )
 
         run_dir = tmp_path / "runs" / str(receipt.run_id)
@@ -2602,7 +2365,7 @@ class TestDispatchedDelegationWritesRunFiles:
             addressing=_ADDRESSING,
             prompt="List the first five prime numbers",
             task_type="summarization",
-            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+            task_type_resolution="explicit",
         )
 
         announced = capsys.readouterr().err
@@ -2665,7 +2428,7 @@ class TestUnresolvableTerminalFailsLoudly:
                 addressing=_ADDRESSING,
                 prompt="List the first five prime numbers",
                 task_type="summarization",
-                task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+                task_type_resolution="explicit",
             )
 
         message = str(raised.value)
@@ -2698,7 +2461,7 @@ class TestUnresolvableTerminalFailsLoudly:
                 addressing=_ADDRESSING,
                 prompt="List the first five prime numbers",
                 task_type="summarization",
-                task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+                task_type_resolution="explicit",
             )
 
         message = str(raised.value)
@@ -2724,7 +2487,7 @@ class TestUnresolvableTerminalFailsLoudly:
             addressing=_ADDRESSING,
             prompt="proof",
             task_type="summarization",
-            task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+            task_type_resolution="explicit",
         )
         assert not (tmp_path / "runs").exists()
 
