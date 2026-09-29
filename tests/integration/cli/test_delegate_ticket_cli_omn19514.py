@@ -43,14 +43,6 @@ from tests.fixtures.handler_correlated_noop import (
 
 pytestmark = pytest.mark.integration
 
-_STAND_IN_TASK_CLASS_CONTRACT = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "delegation"
-    / "omn18305"
-    / "task_class_contracts_vocabulary.yaml"
-)
-
 _MODEL_IMPORT_PATH = "tests.fixtures.handler_correlated_noop.ModelCorrelatedNoopRequest"
 _HANDLER_IMPORT_PATH = "tests.fixtures.handler_correlated_noop.HandlerCorrelatedNoop"
 
@@ -86,11 +78,6 @@ def stand_in_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
     monkeypatch.delenv("ONEX_CONTRACTS_DIR", raising=False)
     monkeypatch.setattr(cli_delegate, "check_omnimarket_drift", lambda **_: None)
-    monkeypatch.setattr(
-        cli_delegate,
-        "resolve_task_class_contract_path",
-        lambda: _STAND_IN_TASK_CLASS_CONTRACT,
-    )
     contract_path = tmp_path / cli_delegate.DELEGATE_NODE_NAME / "contract.yaml"
     contract_path.parent.mkdir()
     contract_path.write_text(_NOOP_CONTRACT, encoding="utf-8")

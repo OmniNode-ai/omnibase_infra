@@ -1,0 +1,5 @@
+# OMN-15359 operator lane: no credential material in this overlay.
+# The consumer group must be distinct from dev and every other lane.
+kafka_bootstrap_servers: "redpanda:9092"
+kafka_consumer_group: "lakshman.omnimarket-projections.tenant-registry-writer.consume.v1"
+database_url_secret_ref: "env:OMNINODE_INTERNAL_DB_URL"
