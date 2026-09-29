@@ -16,6 +16,7 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
 )
 from scripts.ci.check_application_database_sql import (
     changed_sql_paths,
+    pull_request_merge_ref_base,
     validate_changed_sql,
     violation_key,
 )
@@ -729,3 +730,83 @@ def test_ci_workflow_base_revision_has_no_hardcoded_pin() -> None:
         "push events have no pull_request/merge_group base; the fallback "
         "must be github.event.before"
     )
+
+
+def _pull_request_merge_repository(
+    tmp_path: Path, *, feature_sql: bool
+) -> tuple[Path, str, str, str]:
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "--initial-branch=main")
+    (repository / "seed.sql").write_text("SELECT 1;\n", encoding="utf-8")
+    event_base = _commit(repository, "baseline A")
+
+    _git(repository, "switch", "-c", "feature")
+    feature_path = "feature.sql" if feature_sql else "feature.txt"
+    (repository / feature_path).write_text("SELECT 2;\n", encoding="utf-8")
+    _commit(repository, "feature change")
+
+    _git(repository, "switch", "main")
+    (repository / "dev_only.sql").write_text("SELECT 3;\n", encoding="utf-8")
+    current_base = _commit(repository, "dev commit B")
+    _git(repository, "checkout", "--detach", current_base)
+    _git(
+        repository,
+        "-c",
+        "user.name=OMN-15361 proof",
+        "-c",
+        "user.email=omn-15361@example.invalid",
+        "merge",
+        "--no-ff",
+        "feature",
+        "-m",
+        "synthetic pull request merge M",
+    )
+    return repository, event_base, current_base, _git(repository, "rev-parse", "HEAD")
+
+
+def test_pull_request_merge_ref_excludes_new_base_branch_sql(tmp_path: Path) -> None:
+    repository, event_base, current_base, merge_head = _pull_request_merge_repository(
+        tmp_path, feature_sql=False
+    )
+    assert [
+        path.name for path in changed_sql_paths(repository, event_base, merge_head)
+    ] == ["dev_only.sql"]
+    resolved_base = pull_request_merge_ref_base(repository, merge_head)
+    assert resolved_base == current_base
+    assert changed_sql_paths(repository, resolved_base, merge_head) == ()
+
+
+def test_pull_request_merge_ref_includes_feature_sql(tmp_path: Path) -> None:
+    repository, _event_base, _current_base, merge_head = _pull_request_merge_repository(
+        tmp_path, feature_sql=True
+    )
+    resolved_base = pull_request_merge_ref_base(repository, merge_head)
+    assert [
+        path.name for path in changed_sql_paths(repository, resolved_base, merge_head)
+    ] == ["feature.sql"]
+
+
+def test_pull_request_merge_ref_rejects_single_parent_commit(tmp_path: Path) -> None:
+    repository, _base, head = _two_commit_repository(tmp_path)
+    with pytest.raises(RuntimeError, match="not a pull request merge commit"):
+        pull_request_merge_ref_base(repository, head)
+
+
+def test_ci_workflow_sql_steps_guard_pull_request_merge_ref() -> None:
+    workflow = (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    lines = workflow.splitlines()
+    step_starts = [
+        index for index, line in enumerate(lines) if line.startswith("      - name:")
+    ]
+    sql_steps: list[str] = []
+    for start, end in zip(step_starts, [*step_starts[1:], len(lines)], strict=True):
+        step = "\n".join(lines[start:end])
+        if "scripts/ci/check_application_database_sql.py" in step:
+            sql_steps.append(step)
+    assert len(sql_steps) == 2
+    for step in sql_steps:
+        assert "run: >-" in step
+        run_block = step.split("run: >-", maxsplit=1)[1]
+        assert "github.event_name == 'pull_request'" in run_block
+        assert "--pull-request-merge-ref" in run_block
