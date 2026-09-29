@@ -8,12 +8,10 @@
 # (omnimarket) or an M4 verdict workflow (omninode_infra) is red. Auto-merge, the
 # landing lane and humans already obey a check, so no skill needs to change.
 #
-# SHADOW FIRST. The check is reported, not required: a caller's job is NOT
-# registered in any required set (omnibase_infra: STRICT_GATE_JOBS in
-# scripts/ci/ci_summary_gate.py). config/delegation_health_check.yaml carries the
-# per-repository rollout state, and `validate_rollout` in
-# scripts/ci/delegation_health_check.py fails the check itself when a repository
-# is declared `required: true` with fewer than 7 days of shadow runs (AC3).
+# ENFORCING. There is no shadow state (operator ruling 2026-09-29T12:02:35Z,
+# OMN-19998). On omnibase_infra a red of this check fails CI Summary through the
+# default-deny external sweep in scripts/ci/ci_summary_gate.py.
+# config/delegation_health_check.yaml names the sources and why each belongs.
 #
 # THE READER IS THE EXISTING ONE. Each source is read through
 # `lab_pass_receipt.py`'s workflow-verdict reader (OMN-18866), the same state-keyed,
@@ -36,15 +34,6 @@ on:
         description: "Which repository is calling: omnibase_infra or omnimarket."
         required: true
         type: string
-      changed_files:
-        description: "Comma-separated changed files of the pull request."
-        required: true
-        type: string
-      labels:
-        description: "Comma-separated labels of the pull request."
-        required: false
-        default: ""
-        type: string
     secrets:
       ONEXBOT_OCC_APP_ID:
         required: true
@@ -53,10 +42,11 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   delegation-health:
-    name: Delegation Health Check (shadow)
+    name: Delegation Health Check
     runs-on: >-
       ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     timeout-minutes: 10
@@ -91,14 +81,80 @@ jobs:
             omninode_infra
           permission-actions: read
 
+      # The tree under test, blobless: `git diff --name-only` needs commits and
+      # trees, never file contents.
+      - name: Checkout the tree under test
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          path: .tree-under-test
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      # The changed files and labels of THIS event, derived here rather than
+      # passed in, so the check reads the same facts on a pull request and on a
+      # merge-queue head. A pull request diffs from its merge base (three dots:
+      # the event's base.sha is the base tip, not the merge base). A queue head
+      # is built on its base, so two dots. A queue head names its pull request
+      # in its ref (gh-readonly-queue/<base>/pr-<n>-<sha>) and the labels are
+      # read from that pull request, so a fix-forward label admits the queue
+      # head exactly as it admitted the pull request. Anything unreadable fails
+      # the step: an empty or unresolved input must never read as "not runtime".
+      - name: Resolve the changed files and labels of this event
+        id: event
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          MQ_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MQ_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          MQ_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          set -euo pipefail
+          tree=.tree-under-test
+          case "$EVENT_NAME" in
+            pull_request)
+              git -C "$tree" diff --name-only "${PR_BASE_SHA}...${PR_HEAD_SHA}" > "$RUNNER_TEMP/changed.txt"
+              labels="$(python3 -c 'import json, os; print(",".join(json.loads(os.environ["PR_LABELS_JSON"]) or []))')"
+              ;;
+            merge_group)
+              git -C "$tree" diff --name-only "${MQ_BASE_SHA}..${MQ_HEAD_SHA}" > "$RUNNER_TEMP/changed.txt"
+              if [[ ! "$MQ_HEAD_REF" =~ /pr-([1-9][0-9]*)-[0-9a-f]{40}$ ]]; then
+                echo "::error::merge-queue ref '${MQ_HEAD_REF}' names no pull request"
+                exit 1
+              fi
+              pr="${BASH_REMATCH[1]}"
+              labels="$(gh api "repos/${REPO}/pulls/${pr}" --jq '[.labels[].name] | join(",")')"
+              ;;
+            *)
+              echo "::error::unsupported event '${EVENT_NAME}' for the delegation-health check"
+              exit 1
+              ;;
+          esac
+          if [[ ! -s "$RUNNER_TEMP/changed.txt" ]]; then
+            echo "::error::no changed files resolved for this ${EVENT_NAME} event"
+            exit 1
+          fi
+          files="$(paste -sd, "$RUNNER_TEMP/changed.txt")"
+          echo "changed $(wc -l < "$RUNNER_TEMP/changed.txt") file(s); labels: ${labels:-<none>}"
+          {
+            echo "files=${files}"
+            echo "labels=${labels}"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
 
-      - name: Read the delegation verdicts for this runtime PR
+      - name: Read the delegation verdicts for this runtime change
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}
-          PR_CHANGED_FILES: ${{ inputs.changed_files }}
-          PR_LABELS: ${{ inputs.labels }}
+          PR_CHANGED_FILES: ${{ steps.event.outputs.files }}
+          PR_LABELS: ${{ steps.event.outputs.labels }}
           REPO_KEY: ${{ inputs.repo_key }}
         run: |
           set -euo pipefail
