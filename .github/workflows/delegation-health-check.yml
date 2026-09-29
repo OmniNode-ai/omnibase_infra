@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# delegation-health-check.yml -- OMN-19451. omnibase_infra's caller of the
+# delegation-health check (see delegation-health-reusable.yml for the design).
+#
+# SHADOW: this workflow is deliberately NOT in STRICT_GATE_JOBS
+# (scripts/ci/ci_summary_gate.py) and not a required context. It is made required
+# only by adding the job name there once config/delegation_health_check.yaml
+# records at least 7 days of shadow; tests/ci/test_delegation_health_check_omn19451.py
+# keeps the registration and the declared state in step.
+name: Delegation Health Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [dev]
+
+concurrency:
+  group: delegation-health-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changed-files:
+    name: Collect changed files
+    runs-on: >-
+      ${{
+        (github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 10
+    outputs:
+      all: ${{ steps.changed-files.outputs.all_changed_files }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v47
+        with:
+          separator: ","
+
+  delegation-health:
+    name: Delegation Health Check (shadow)
+    needs: changed-files
+    # A fork PR carries no secrets, so the verdict repositories cannot be read.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/delegation-health-reusable.yml
+    with:
+      repo_key: omnibase_infra
+      changed_files: ${{ needs.changed-files.outputs.all }}
+      labels: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+    secrets:
+      ONEXBOT_OCC_APP_ID: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+      ONEXBOT_OCC_PRIVATE_KEY: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
