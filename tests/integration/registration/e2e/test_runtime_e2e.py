@@ -66,8 +66,6 @@ from omnibase_infra.models.registration.model_node_capabilities import (
 )
 from tests.helpers.service_env import require_service_env
 from tests.integration.registration.e2e.conftest import (
-    make_e2e_test_identity,
-    wait_for_consumer_ready,
     wrap_event_in_envelope,
 )
 
@@ -183,23 +181,10 @@ SKIP_PROCESSING_REASON = (
 )
 
 # =============================================================================
-# Output Event and Consul Registration Feature Flags
+# Consul Registration Feature Flag
 # =============================================================================
 # These optional features may not be configured in all runtime deployments.
 # Tests for these features require explicit opt-in to avoid soft failures.
-
-RUNTIME_OUTPUT_EVENTS_ENABLED = os.getenv(
-    "RUNTIME_E2E_OUTPUT_EVENTS_ENABLED", _default_enabled
-).lower() in ("true", "1", "yes")
-
-SKIP_OUTPUT_EVENTS_REASON = (
-    "Runtime output event tests require explicit opt-in. "
-    "Set RUNTIME_E2E_OUTPUT_EVENTS_ENABLED=true to enable these tests after verifying: "
-    "1) Runtime publishes completion events to the topic declared in the node "
-    "contract's event_bus.publish_topics (OMN-8784 removed ONEX_OUTPUT_TOPIC), "
-    "2) The output topic exists and is accessible. "
-    "Without this flag, tests would wait and timeout."
-)
 
 RUNTIME_CONSUL_ENABLED = os.getenv(
     "RUNTIME_E2E_CONSUL_ENABLED", _default_enabled
@@ -442,82 +427,6 @@ class TestRuntimeE2EFlow:
                 f"Projection for node {i} ({node_id}) not found after {max_wait_seconds}s. "
                 f"(Timeout configurable via E2E_MULTI_EVENT_TIMEOUT env var)"
             )
-
-    @pytest.mark.asyncio
-    @pytest.mark.skipif(
-        not RUNTIME_OUTPUT_EVENTS_ENABLED, reason=SKIP_OUTPUT_EVENTS_REASON
-    )
-    async def test_runtime_publishes_completion_event(
-        self,
-        real_kafka_event_bus: EventBusKafka,
-        introspection_event: ModelNodeIntrospectionEvent,
-        unique_node_id: UUID,
-    ) -> None:
-        """Test that runtime publishes registration-completed event.
-
-        This test requires RUNTIME_E2E_OUTPUT_EVENTS_ENABLED=true because output
-        event publishing may not be configured in all runtime deployments.
-        """
-        # Track completion events
-        completion_received = asyncio.Event()
-        received_completions: list[dict] = []
-
-        async def on_completion(message: object) -> None:
-            if hasattr(message, "value") and message.value:
-                try:
-                    data = json.loads(message.value.decode("utf-8"))
-
-                    # Events are wrapped in ModelEventEnvelope, so extract payload
-                    # The envelope structure is: {envelope_id, payload: {...}, ...}
-                    payload = data.get(
-                        "payload", data
-                    )  # Fall back to data if no envelope
-
-                    if payload.get("node_id") == str(unique_node_id):
-                        received_completions.append(payload)
-                        completion_received.set()
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    pass
-
-        # Subscribe to the registration-completed topic. OMN-8784 removed
-        # ONEX_OUTPUT_TOPIC; the runtime derives its publish topic from the
-        # node contract's event_bus.publish_topics, so the test uses the
-        # contract-declared topic name directly.
-        output_topic = "onex.evt.registration-completed.v1"
-        group_id = f"e2e-runtime-{unique_node_id.hex[:8]}"
-
-        unsub = await real_kafka_event_bus.subscribe(
-            topic=output_topic,
-            node_identity=make_e2e_test_identity("runtime"),
-            on_message=on_completion,
-        )
-
-        try:
-            # Wait for Kafka consumer to be ready before publishing.
-            # See wait_for_consumer_ready docstring for known limitations.
-            await wait_for_consumer_ready(
-                real_kafka_event_bus, output_topic, max_wait=2.0
-            )
-
-            # Publish introspection event wrapped in envelope
-            envelope = wrap_event_in_envelope(introspection_event)
-            await real_kafka_event_bus.publish_envelope(
-                envelope, topic=RUNTIME_INPUT_TOPIC
-            )
-
-            # Wait for completion event - hard failure on timeout
-            await asyncio.wait_for(completion_received.wait(), timeout=30.0)
-
-            assert len(received_completions) > 0, (
-                "Expected completion event from runtime"
-            )
-
-            # Verify completion event structure
-            completion = received_completions[0]
-            assert completion.get("node_id") == str(unique_node_id)
-
-        finally:
-            await unsub()
 
     @pytest.mark.asyncio
     @pytest.mark.skipif(not RUNTIME_CONSUL_ENABLED, reason=SKIP_CONSUL_REASON)

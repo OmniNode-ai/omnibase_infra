@@ -496,6 +496,28 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="claude_hook_events",
         ),
     ),
+    # OMN-19399: infra vendors worktree_reconcile_hosts before omnimarket#3047
+    # lands its node contract. This bridge keeps the shipped grants derivable
+    # until the pin advances; the expiry test then requires its removal.
+    # Retired by: omnimarket#3047 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:worktree_reconcile_hosts",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_worktree_reconcile/"
+            "0000_create_worktree_reconcile_hosts.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="worktree_reconcile_hosts",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_worktree_reconcile/"
+                "0000_create_worktree_reconcile_hosts.sql"
+            ),
+            access="read_write",
+            role="worktree_reconcile_hosts",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
