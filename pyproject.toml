@@ -260,7 +260,7 @@ override-dependencies = [
     # OMN-19749: released omnibase-core 0.47.24 (PyPI, OMN-18595) carries
     # omnibase_core#1786's runtime lane declaration types this draft needs; the
     # temporary git-rev override below is removed in the same change.
-    "omnibase-core==0.47.24",
+    "omnibase-core==0.47.25",
     "omnibase-spi==0.23.5",
     "omnibase-compat==0.5.7",
 ]
