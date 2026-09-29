@@ -202,6 +202,13 @@ state_postgres = "omnibase_infra.backends.backend_probe:probe_postgres"
 [project.entry-points."onex.domain_plugins"]
 registration = "omnibase_infra.nodes.node_registration_orchestrator.plugin:ServiceRegistration"
 
+[project.entry-points."onex.doctor"]
+delegation_identity = "omnibase_infra.doctor.checks.check_delegation_identity:CheckDelegationIdentity"
+delegation_key = "omnibase_infra.doctor.checks.check_delegation_key:CheckDelegationKey"
+delegation_gateway = "omnibase_infra.doctor.checks.check_delegation_gateway:CheckDelegationGateway"
+delegation_quota = "omnibase_infra.doctor.checks.check_delegation_quota:CheckDelegationQuota"
+delegation_local_model = "omnibase_infra.doctor.checks.check_delegation_local_model:CheckDelegationLocalModel"
+
 [dependency-groups]
 dev = [
     # Effects-only candidate builds use `uv build --offline --no-build-isolation`.

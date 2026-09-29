@@ -254,6 +254,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolEvidenceBundle": "utils/util_evidence_bundle_writer.py",
     "ProtocolConsumerFlowTarget": "nodes/node_board_probe_effect/protocols/protocol_consumer_flow_target.py",  # [NODE] OMN-19931 A1: node-local target seam pending omnibase_spi and omnibase_core releases.
     "ProtocolForwarderStateReader": "nodes/node_board_probe_effect/protocols/protocol_forwarder_state_reader.py",  # [NODE] OMN-19930 one-method read seam (observe) the board_probe forwarder_refused_topic check grades through; the Docker CLI reader implements it and tests inject a fake. Infra-local, not spi: a node-internal test seam bound to this probe, not a cross-repo contract.
+    "ProtocolModelsTransport": "doctor/protocol_models_transport.py",  # [DI] OMN-19453 the single OpenAI-compatible models GET the delegation doctor local-model probe issues; tests inject a fake instead of opening a socket. Infra-local, not spi: it narrows the omnibase_core HTTP client surface to one method for this CLI probe and is not a cross-repo contract.
 }
 
 # Duplicate protocol names that appear in multiple files (node-internal
