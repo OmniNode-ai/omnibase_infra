@@ -1,0 +1,248 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 103 and seed -668244640902720855 with 2 workers on 32 cores with 23552MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.0-34-generic amd64, Eclipse Adoptium 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /m/DeclaredStateReconcile.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module DeclaredStateReconcile
+Starting... (2026-09-29 01:45:39)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Computed 2 initial states...
+Computed 4 initial states...
+Finished computing initial states: 8 distinct states generated at 2026-09-29 01:45:39.
+Checking temporal properties for the current state space with 190250 total distinct states at (2026-09-29 01:45:42)
+Error: Temporal properties were violated.
+
+Error: The following behavior constitutes a counter-example:
+
+State 1: <Initial predicate>
+/\ flipsLeft = 1
+/\ toRemove = (r1 :> {} @@ r2 :> {})
+/\ staleApplied = FALSE
+/\ lock = "none"
+/\ obsGrants = (r1 :> {} @@ r2 :> {})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 0
+/\ pc = (r1 :> "idle" @@ r2 :> "idle")
+/\ editsLeft = 2
+/\ toAdd = (r1 :> {} @@ r2 :> {})
+/\ grants = {}
+/\ expect = (r1 :> 0 @@ r2 :> 0)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 0 @@ r2 :> 0)
+
+State 2: <HandEdit line 56, col 5 to line 65, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 1
+/\ toRemove = (r1 :> {} @@ r2 :> {})
+/\ staleApplied = FALSE
+/\ lock = "none"
+/\ obsGrants = (r1 :> {} @@ r2 :> {})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 1
+/\ pc = (r1 :> "idle" @@ r2 :> "idle")
+/\ editsLeft = 1
+/\ toAdd = (r1 :> {} @@ r2 :> {})
+/\ grants = {g3}
+/\ expect = (r1 :> 0 @@ r2 :> 0)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 0 @@ r2 :> 0)
+
+State 3: <Observe line 84, col 5 to line 94, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 1
+/\ toRemove = (r1 :> {} @@ r2 :> {})
+/\ staleApplied = FALSE
+/\ lock = "none"
+/\ obsGrants = (r1 :> {} @@ r2 :> {g3})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 1
+/\ pc = (r1 :> "idle" @@ r2 :> "observed")
+/\ editsLeft = 1
+/\ toAdd = (r1 :> {} @@ r2 :> {})
+/\ grants = {g3}
+/\ expect = (r1 :> 0 @@ r2 :> 1)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 0 @@ r2 :> 1)
+
+State 4: <HandEdit line 56, col 5 to line 65, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 1
+/\ toRemove = (r1 :> {} @@ r2 :> {})
+/\ staleApplied = FALSE
+/\ lock = "none"
+/\ obsGrants = (r1 :> {} @@ r2 :> {g3})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 2
+/\ pc = (r1 :> "idle" @@ r2 :> "observed")
+/\ editsLeft = 0
+/\ toAdd = (r1 :> {} @@ r2 :> {})
+/\ grants = {}
+/\ expect = (r1 :> 0 @@ r2 :> 1)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 0 @@ r2 :> 1)
+
+State 5: <Observe line 84, col 5 to line 94, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 1
+/\ toRemove = (r1 :> {} @@ r2 :> {})
+/\ staleApplied = FALSE
+/\ lock = "none"
+/\ obsGrants = (r1 :> {} @@ r2 :> {g3})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 2
+/\ pc = (r1 :> "observed" @@ r2 :> "observed")
+/\ editsLeft = 0
+/\ toAdd = (r1 :> {} @@ r2 :> {})
+/\ grants = {}
+/\ expect = (r1 :> 2 @@ r2 :> 1)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 2 @@ r2 :> 1)
+
+State 6: <Plan line 105, col 5 to line 115, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 1
+/\ toRemove = (r1 :> {} @@ r2 :> {g3})
+/\ staleApplied = FALSE
+/\ lock = "none"
+/\ obsGrants = (r1 :> {} @@ r2 :> {g3})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 2
+/\ pc = (r1 :> "observed" @@ r2 :> "planned")
+/\ editsLeft = 0
+/\ toAdd = (r1 :> {} @@ r2 :> {g1, g2})
+/\ grants = {}
+/\ expect = (r1 :> 2 @@ r2 :> 1)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 2 @@ r2 :> 1)
+
+State 7: <Flip line 68, col 5 to line 74, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 0
+/\ toRemove = (r1 :> {} @@ r2 :> {g3})
+/\ staleApplied = FALSE
+/\ lock = "none"
+/\ obsGrants = (r1 :> {} @@ r2 :> {g3})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 2
+/\ pc = (r1 :> "observed" @@ r2 :> "planned")
+/\ editsLeft = 0
+/\ toAdd = (r1 :> {} @@ r2 :> {g1, g2})
+/\ grants = {}
+/\ expect = (r1 :> 2 @@ r2 :> 1)
+/\ observable = FALSE
+/\ obsVer = (r1 :> 2 @@ r2 :> 1)
+
+State 8: <Recover line 77, col 5 to line 81, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 0
+/\ toRemove = (r1 :> {} @@ r2 :> {g3})
+/\ staleApplied = FALSE
+/\ lock = "none"
+/\ obsGrants = (r1 :> {} @@ r2 :> {g3})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 2
+/\ pc = (r1 :> "observed" @@ r2 :> "planned")
+/\ editsLeft = 0
+/\ toAdd = (r1 :> {} @@ r2 :> {g1, g2})
+/\ grants = {}
+/\ expect = (r1 :> 2 @@ r2 :> 1)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 2 @@ r2 :> 1)
+
+State 9: <Plan line 105, col 5 to line 115, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 0
+/\ toRemove = (r1 :> {} @@ r2 :> {g3})
+/\ staleApplied = FALSE
+/\ lock = "none"
+/\ obsGrants = (r1 :> {} @@ r2 :> {g3})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 2
+/\ pc = (r1 :> "planned" @@ r2 :> "planned")
+/\ editsLeft = 0
+/\ toAdd = (r1 :> {g1, g2} @@ r2 :> {g1, g2})
+/\ grants = {}
+/\ expect = (r1 :> 2 @@ r2 :> 1)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 2 @@ r2 :> 1)
+
+State 10: <Acquire line 118, col 5 to line 126, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 0
+/\ toRemove = (r1 :> {} @@ r2 :> {g3})
+/\ staleApplied = FALSE
+/\ lock = r2
+/\ obsGrants = (r1 :> {} @@ r2 :> {g3})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 2
+/\ pc = (r1 :> "planned" @@ r2 :> "applying")
+/\ editsLeft = 0
+/\ toAdd = (r1 :> {g1, g2} @@ r2 :> {g1, g2})
+/\ grants = {}
+/\ expect = (r1 :> 2 @@ r2 :> 1)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 2 @@ r2 :> 1)
+
+State 11: <Refuse line 174, col 5 to line 184, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 0
+/\ toRemove = (r1 :> {} @@ r2 :> {})
+/\ staleApplied = FALSE
+/\ lock = r2
+/\ obsGrants = (r1 :> {} @@ r2 :> {g3})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 2
+/\ pc = (r1 :> "planned" @@ r2 :> "idle")
+/\ editsLeft = 0
+/\ toAdd = (r1 :> {g1, g2} @@ r2 :> {})
+/\ grants = {}
+/\ expect = (r1 :> 2 @@ r2 :> 1)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 2 @@ r2 :> 1)
+
+State 12: <Observe line 84, col 5 to line 94, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 0
+/\ toRemove = (r1 :> {} @@ r2 :> {})
+/\ staleApplied = FALSE
+/\ lock = r2
+/\ obsGrants = (r1 :> {} @@ r2 :> {})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 2
+/\ pc = (r1 :> "planned" @@ r2 :> "observed")
+/\ editsLeft = 0
+/\ toAdd = (r1 :> {g1, g2} @@ r2 :> {})
+/\ grants = {}
+/\ expect = (r1 :> 2 @@ r2 :> 2)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 2 @@ r2 :> 2)
+
+State 13: <Plan line 105, col 5 to line 115, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 0
+/\ toRemove = (r1 :> {} @@ r2 :> {})
+/\ staleApplied = FALSE
+/\ lock = r2
+/\ obsGrants = (r1 :> {} @@ r2 :> {})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 2
+/\ pc = (r1 :> "planned" @@ r2 :> "planned")
+/\ editsLeft = 0
+/\ toAdd = (r1 :> {g1, g2} @@ r2 :> {g1, g2})
+/\ grants = {}
+/\ expect = (r1 :> 2 @@ r2 :> 2)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 2 @@ r2 :> 2)
+
+State 14: Stuttering
+Finished checking temporal properties in 00s at 2026-09-29 01:45:42
+582399 states generated, 214118 distinct states found, 23868 states left on queue.
+Finished in 03s at (2026-09-29 01:45:42)
