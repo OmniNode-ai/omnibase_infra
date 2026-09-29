@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 from pathlib import Path
 
 import pytest
@@ -24,20 +23,6 @@ _MANIFEST = _FORWARD / "_ledger" / "application-migrations.tsv"
 _CLASSES = _ROOT / "config" / "migration_classes.yaml"
 _SHA256 = "9c597ab869dad0238a7d06ea99e93b90868166bff70b5c80763021e3076b7e7c"
 _GRANT_SHA256 = "56aeaea91083bc4421813a23f43a83d0f96d157938cd5914bec6344ad47ba1e3"
-
-
-def test_vendored_bytes_match_the_supplied_omnimarket_source() -> None:
-    """A source checkout makes the vendor-parity assertion direct and exact."""
-    source_root = os.environ.get("OMNIMARKET_SRC")
-    if source_root is None:
-        pytest.skip("OMNIMARKET_SRC is required for direct vendor-source comparison")
-    migrations = (
-        Path(source_root) / "src" / "omnimarket" / "nodes" / _NODE / "migrations"
-    )
-    for vendored, name in ((_VENDORED, _CREATE), (_VENDORED_GRANT, _GRANT)):
-        source = migrations / name
-        assert source.is_file(), source
-        assert vendored.read_bytes() == source.read_bytes()
 
 
 def test_vendored_bytes_and_manifest_binding_are_exact() -> None:
