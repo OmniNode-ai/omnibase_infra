@@ -16,17 +16,19 @@ Two layers, so the guard never goes quiet:
 * The static layer reads every `docker/docker-compose*.yml` as YAML and needs
   no Docker daemon or CLI. It checks the base literal, and that no overlay
   declares a different memory limit for either service.
-* The render layer runs `docker compose config --format json --no-interpolate`
-  over the base and over each lane stack, so compose's own merge semantics
-  (`!override`, `!reset`, anchors) decide the effective limit. It needs the
-  docker CLI (no daemon, no environment: `--no-interpolate` leaves `${...}`
-  unresolved), and it skips only when the CLI is absent, in which case the
-  static layer still holds the line.
+* The render layer runs `docker compose config --format json` over the base and
+  over each lane stack, so compose's own merge semantics (`!override`,
+  `!reset`, anchors) decide the effective limit. It supplies only `PATH`,
+  `HOME`, and placeholder values for required variables referenced by the
+  stack, so interpolation is deterministic without depending on the caller's
+  environment. It needs the docker CLI (no daemon), and it skips only when the
+  CLI is absent, in which case the static layer still holds the line.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -76,6 +78,7 @@ LANE_STACKS: dict[str, tuple[str, ...]] = {
 # go-units RAMInBytes: binary multiples, case-insensitive, optional trailing b.
 _SIZE_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([kmgtp]?)i?b?\s*$", re.IGNORECASE)
 _UNIT = {"": 1, "k": 1 << 10, "m": 1 << 20, "g": 1 << 30, "t": 1 << 40, "p": 1 << 50}
+_REQUIRED_VARIABLE_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*):?\?")
 
 
 def _to_bytes(value: object) -> int:
@@ -204,16 +207,32 @@ def _docker_compose_available() -> bool:
     return result.returncode == 0
 
 
+def _compose_environment(stack: tuple[str, ...]) -> dict[str, str]:
+    environment = {name: os.environ[name] for name in ("PATH", "HOME")}
+    for name in stack:
+        contents = (DOCKER_DIR / name).read_text()
+        required_variables = _REQUIRED_VARIABLE_RE.findall(contents)
+        environment.update(dict.fromkeys(required_variables, "placeholder"))
+        for variable in required_variables:
+            if variable.endswith(("_PORT", "_REPLICAS")):
+                # Compose validates port and replica substitutions as integers.
+                environment[variable] = "1"
+            elif variable.endswith("_DIR") or variable == "OMNI_HOME":
+                # Volume sources and container paths must be path-shaped.
+                environment[variable] = str(REPO_ROOT / "placeholder")
+    return environment
+
+
 @pytest.mark.skipif(
     not _docker_compose_available(),
     reason="docker compose CLI absent; the static layer above still guards the limit",
 )
 @pytest.mark.parametrize("lane", sorted(LANE_STACKS))
 def test_rendered_lane_stack_carries_512_mib(lane: str) -> None:
-    command = ["docker", "compose"]
+    command = ["docker", "compose", "--profile", "*"]
     for name in LANE_STACKS[lane]:
         command += ["-f", str(DOCKER_DIR / name)]
-    command += ["config", "--format", "json", "--no-interpolate"]
+    command += ["config", "--format", "json"]
     result = subprocess.run(
         command,
         cwd=REPO_ROOT,
@@ -221,6 +240,7 @@ def test_rendered_lane_stack_carries_512_mib(lane: str) -> None:
         capture_output=True,
         text=True,
         timeout=60,
+        env=_compose_environment(LANE_STACKS[lane]),
     )
     assert result.returncode == 0, (
         f"docker compose config failed for {lane}:\n{result.stderr}"
