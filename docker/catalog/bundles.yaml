@@ -60,6 +60,17 @@ runtime-core:
 local:
   description: "Laptop profile — the ONEX stack plus your own runtime (main + effects) in containers, no lab or ops secrets (OMN-19496). `make up-local`."
   project: omnibase-infra-local
+  # OMN-19972: a laptop's database, broker and kernels are for that laptop.
+  # Every published port binds loopback, so nothing is exposed to the network
+  # the developer happens to be on. The lab lanes render the same manifests
+  # without this and stay reachable.
+  publish_host: 127.0.0.1
+  # OMN-19972: the shared Redpanda manifest defaults its advertised address to
+  # the lab's LAN IP, which the dev lane on .201 relies on. The laptop render
+  # must name no lab host, so its default is localhost; the env file can still
+  # set REDPANDA_ADVERTISE_HOST.
+  env_default_overrides:
+    REDPANDA_ADVERTISE_HOST: localhost
   services:
     - postgres
     - redpanda
