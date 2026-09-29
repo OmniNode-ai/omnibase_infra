@@ -31,8 +31,8 @@ no evidence and the hook falls through to its pre-existing precedence
 OMN-20063 closes the third network surface: the GitHub-hosted remote-verify
 leg (OMN-16688) reads the real Actions API for HEAD's sha. On a queue-landed
 dev push, a green merge_group full-suite run on that exact sha already exists,
-so the hook passes instead of refusing. An empty gh config directory and empty
-authentication tokens keep that leg offline. This can only remove evidence,
+so the hook passes instead of refusing. ``gh_offline_env`` (an empty gh config directory and empty
+authentication tokens) keeps that leg offline. This can only remove evidence,
 preserving the same strict direction as the lab isolation.
 """
 
@@ -62,12 +62,26 @@ LAB_ISOLATION_ENV = {
 
 
 def network_free_lab_env() -> dict[str, str]:
-    """Env fragment that makes the lab and GitHub verification legs network-free."""
-    return {
-        **LAB_ISOLATION_ENV,
-        "GH_CONFIG_DIR": _GH_CONFIG_DIR,
-        "GH_TOKEN": "",
-        "GITHUB_TOKEN": "",
-        "GH_ENTERPRISE_TOKEN": "",
-        "GITHUB_ENTERPRISE_TOKEN": "",
-    }
+    """Env fragment that makes the lab-dispatch leg network-free."""
+    return dict(LAB_ISOLATION_ENV)
+
+
+#: gh reads its credentials from these variables or from ``GH_CONFIG_DIR``.
+#: Empty values are "unset" to gh, and an empty config directory holds no
+#: hosts.yml, so gh refuses with exit 4 before any request. Kept apart from
+#: ``network_free_lab_env`` on purpose: that fragment is pinned to the
+#: placement-map class the override-grant carve-out admits
+#: (``test_the_lab_isolation_seam_is_in_the_class_the_carve_out_admits``).
+GH_AUTH_ENV_NAMES = (
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+)
+
+
+def gh_offline_env() -> dict[str, str]:
+    """Env fragment that makes the GitHub-hosted remote-verify leg offline (OMN-20063)."""
+    fragment = dict.fromkeys(GH_AUTH_ENV_NAMES, "")
+    fragment["GH_CONFIG_DIR"] = _GH_CONFIG_DIR
+    return fragment

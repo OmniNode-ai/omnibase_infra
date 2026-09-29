@@ -48,7 +48,7 @@ import pytest
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
-from tests.ci._prepush_lab_isolation import network_free_lab_env
+from tests.ci._prepush_lab_isolation import gh_offline_env, network_free_lab_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOK_SCRIPT = REPO_ROOT / "scripts" / "hooks" / "prepush_smart_tests.sh"
@@ -238,6 +238,7 @@ def test_guard_refuses_full_suite_escalation_on_non_200_host() -> None:
     # changes its IDENTITY, not its ssh target, so without this the hook ships a
     # real bundle to a real lab host from inside this test.
     env.update(network_free_lab_env())
+    env.update(gh_offline_env())
     result = subprocess.run(
         ["bash", str(HOOK_SCRIPT)],
         cwd=REPO_ROOT,
@@ -394,6 +395,7 @@ def _run_hook_with_stubbed_selection(
     env["PREPUSH_200_HOSTNAME"] = _GUARANTEED_NON_MATCHING_HOSTNAME
     env.update(de_designating_env())
     env.update(network_free_lab_env())
+    env.update(gh_offline_env())
     for leaky in (
         "PREPUSH_FULL_SUITE",
         "PREPUSH_ALLOW_LOCAL_FULL_SUITE",
@@ -595,8 +597,8 @@ def test_guard_allows_a_genuinely_narrow_selection_on_a_local_host(
 def test_lab_isolation_makes_the_remote_verify_leg_resolve_to_no_evidence() -> None:
     """OMN-20063: real CI evidence must not let a refusal harness pass."""
     env = scrub_git_location_env(os.environ)
-    env.update(network_free_lab_env())
-    fragment = network_free_lab_env()
+    env.update(gh_offline_env())
+    fragment = gh_offline_env()
     config_dir = Path(fragment["GH_CONFIG_DIR"])
     assert config_dir.is_dir()
     assert not list(config_dir.iterdir())
@@ -687,6 +689,7 @@ def test_the_heavy_harness_never_dispatches_a_real_lab_run(tmp_path: Path) -> No
     env["PREPUSH_200_HOSTNAME"] = _GUARANTEED_NON_MATCHING_HOSTNAME
     env.update(de_designating_env())
     env.update(network_free_lab_env())
+    env.update(gh_offline_env())
 
     result = subprocess.run(
         ["bash", str(HOOK_SCRIPT)],
@@ -707,6 +710,9 @@ def test_the_heavy_harness_never_dispatches_a_real_lab_run(tmp_path: Path) -> No
     )
 
 
+_GH_OFFLINE_APPLICATION_RE = re.compile(r"^\s*env\.update\(gh_offline_env\(\)\)$", re.M)
+
+
 def test_both_hook_harnesses_apply_the_lab_isolation() -> None:
     """Static pin so a new harness cannot quietly reintroduce live dispatch.
 
@@ -720,6 +726,12 @@ def test_both_hook_harnesses_apply_the_lab_isolation() -> None:
         text = path.read_text(encoding="utf-8")
         hook_runs = text.count('["bash", str(HOOK_SCRIPT)]')
         assert hook_runs > 0, f"{path.name}: expected at least one hook subprocess"
+        gh_isolations = len(_GH_OFFLINE_APPLICATION_RE.findall(text))
+        assert gh_isolations >= hook_runs, (
+            f"{path.name}: {hook_runs} hook subprocess call site(s) but only "
+            f"{gh_isolations} applications of the gh isolation -- a harness "
+            "that omits it reads real CI evidence for HEAD (OMN-20063)"
+        )
         assert text.count("network_free_lab_env()") >= hook_runs, (
             f"{path.name}: {hook_runs} hook subprocess call site(s) but only "
             f"{text.count('network_free_lab_env()')} applications of the lab "
