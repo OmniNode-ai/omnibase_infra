@@ -169,6 +169,8 @@ migrations:
   forward/nodes/node_projection_baselines_roi/001_create_baselines_roi_snapshots.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT BASELINES_ROI_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT BASELINES_ROI_SNA
   forward/nodes/node_projection_baselines_roi/002_realign_roi_snapshots_to_producer_schema.sql: forward-only # DROP; EXECUTE; ALTER TABLE ADD CONSTRAINT BASELINES_ROI_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT BASELINES_R
   forward/nodes/node_projection_baselines_roi/003_grant_omninode_runtime_baselines_roi_snapshots.sql: expand-only
+  forward/nodes/node_projection_board_probe_results/0000_create_board_probe_results.sql: forward-only # ALTER TABLE ADD COLUMN; UNIQUE INDEX on an existing table
+  forward/nodes/node_projection_board_probe_results/0001_grant_omninode_runtime_board_probe_results.sql: expand-only
   forward/nodes/node_projection_capsule_store/078_create_capsule_store.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPSULE_STORE_PKEY; ALTER TABLE ADD CONSTRAINT CAPSULE_STORE_SUCCESS_RATE_
   forward/nodes/node_projection_capsule_store/079_create_capsule_effectiveness_view.sql: forward-only # CREATE OR REPLACE
   forward/nodes/node_projection_capsule_store/080_grant_omninode_runtime_capsule_store.sql: expand-only
