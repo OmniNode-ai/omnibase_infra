@@ -112,6 +112,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "claude_agent_spans": "omnimarket#2956",
     "claude_hook_events": "omnimarket#2956",
     "worktree_reconcile_hosts": "omnimarket#3047",
+    "delegation_eval_items": "omnimarket#3059",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
     "lab_container_memory_window": "omnimarket#3051",
 }

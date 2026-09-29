@@ -518,6 +518,27 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="worktree_reconcile_hosts",
         ),
     ),
+    # OMN-19790: infra vendors delegation_eval_items before omnimarket#3059
+    # lands its node contract. This bridge expires once the pin includes it.
+    # Retired by: omnimarket#3059 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:delegation_eval_items",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_delegation_eval/"
+            "0000_create_delegation_eval_items.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="delegation_eval_items",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_delegation_eval/"
+                "0000_create_delegation_eval_items.sql"
+            ),
+            access="read_write",
+            role="delegation_eval_labels",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
