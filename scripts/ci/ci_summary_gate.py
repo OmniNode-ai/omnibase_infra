@@ -2003,6 +2003,101 @@ def verdict_is_provisional(state: JobState, now: datetime | None) -> bool:
     ) or supersedable_verdict_is_provisional(state, now)
 
 
+def _run_id_of(raw: dict[str, object]) -> int | None:
+    """The Actions run id a check-run row was written by, or ``None``."""
+
+    for key in ("html_url", "details_url"):
+        match = _RUN_ID_RE.search(str(raw.get(key) or ""))
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def replacement_run_in_flight(
+    raw: dict[str, object],
+    workflow_runs: list[dict[str, object]] | None,
+) -> bool:
+    """True while a ``cancelled`` row's replacement run is demonstrably running.
+
+    OMN-19869. :data:`CANCELLED_SUPERSESSION_GRACE_S` assumed the replacement
+    row lands within a minute of the cancellation. On a producer whose gate job
+    ``needs:`` a long chain it does not. MEASURED 2026-09-27 on three armed
+    omnibase_infra PRs: the OCC bot's body edit cancelled the first Hostile
+    Reviewer run, and the replacement run wrote ``Hostile Review Gate`` only
+    after occ-preflight (~8 min) and the adversarial job (~3 min). ``CI
+    Summary`` failed closed at the 600s grace every time, seconds before the
+    replacement arrived: #4209 10m55s (FAILURE 13:03:21Z, replacement success
+    13:03:27Z), #4210 10m42s, #4207 10m21s. Each PR then sat BLOCKED with
+    auto-merge armed and never entered the merge queue.
+
+    The replacement is not a guess here: it is a run of the SAME workflow on
+    the SAME head that has not completed, read from the
+    ``actions/runs?head_sha=`` payload the poller already fetches. While it
+    runs, the cancellation is "no verdict yet" -- PENDING, never green.
+
+    FAIL-CLOSED IN EVERY UNCERTAIN CASE:
+
+    * a non-``cancelled`` row → ``False`` (this only ever widens a WAIT on a
+      cancellation, and nothing here can resolve any context green);
+    * no workflow-runs payload, a row with no run URL, a run id absent from the
+      payload, or a run with no ``workflow_id`` → ``False``, and the 600s rule
+      decides exactly as before;
+    * the newer run completed without writing a replacement row → ``False``;
+    * a newer run on a DIFFERENT head sha → ignored.
+
+    The poller's 90-minute deadline still converts a sustained PENDING into
+    FAILURE, so a replacement that never terminates cannot hold a head open.
+    """
+
+    if str(raw.get("conclusion") or "") != "cancelled" or not workflow_runs:
+        return False
+    run_id = _run_id_of(raw)
+    if run_id is None:
+        return False
+    by_id: dict[int, dict[str, object]] = {}
+    for run in workflow_runs:
+        try:
+            by_id[int(str(run.get("id") or 0))] = run
+        except (TypeError, ValueError):
+            continue
+    origin = by_id.get(run_id)
+    if origin is None:
+        return False
+    workflow_id = origin.get("workflow_id")
+    head_sha = origin.get("head_sha")
+    if workflow_id in (None, "") or not head_sha:
+        return False
+    for other_id, run in by_id.items():
+        if other_id < run_id:
+            continue
+        if run.get("workflow_id") != workflow_id or run.get("head_sha") != head_sha:
+            continue
+        # The same run id counts too: a re-run of the cancelled run itself is
+        # a replacement on its way, and its status reads non-completed again.
+        if str(run.get("status") or "") != "completed":
+            return True
+    return False
+
+
+def cancelled_rows_with_replacement_in_flight(
+    check_runs: list[dict[str, object]] | None,
+    workflow_runs: list[dict[str, object]] | None,
+) -> frozenset[str]:
+    """Names whose WINNING row is a cancellation with a replacement run in flight.
+
+    Resolved over the same latest-wins winners every layer reads, so a name
+    whose latest row is not ``cancelled`` is never in the set.
+    """
+
+    if not check_runs or not workflow_runs:
+        return frozenset()
+    return frozenset(
+        name
+        for name, raw in latest_check_run_rows(check_runs).items()
+        if replacement_run_in_flight(raw, workflow_runs)
+    )
+
+
 def applicable_external_contexts(
     expected: tuple[str, ...],
     pr_author: str | None,
@@ -2028,6 +2123,7 @@ def evaluate_external_contexts(
     expected: tuple[str, ...],
     *,
     now: datetime | None = None,
+    replacements_in_flight: frozenset[str] = frozenset(),
 ) -> tuple[list[str], list[str]]:
     """Return ``(failures, missing_or_pending)`` for the declared external contexts.
 
@@ -2052,7 +2148,11 @@ def evaluate_external_contexts(
             unresolved.append(context)
         elif state.conclusion in EXTERNAL_GOOD_CONCLUSIONS:
             continue
-        elif verdict_is_provisional(state, now):
+        elif verdict_is_provisional(state, now) or (
+            state.conclusion == "cancelled" and context in replacements_in_flight
+        ):
+            # OMN-19869: a cancellation whose replacement run is still running
+            # is PENDING past the grace; see replacement_run_in_flight.
             unresolved.append(context)
         else:
             failures.append(context)
@@ -2063,6 +2163,7 @@ def provisional_external_verdicts(
     check_runs: list[dict[str, object]] | None,
     expected: tuple[str, ...],
     now: datetime | None,
+    replacements_in_flight: frozenset[str] = frozenset(),
 ) -> list[str]:
     """The subset of ``expected`` held PENDING by a due automatic replacement.
 
@@ -2080,7 +2181,10 @@ def provisional_external_verdicts(
         for context in expected
         if (state := latest.get(context)) is not None
         and state.status == "completed"
-        and verdict_is_provisional(state, now)
+        and (
+            verdict_is_provisional(state, now)
+            or (state.conclusion == "cancelled" and context in replacements_in_flight)
+        )
     )
 
 
@@ -2363,6 +2467,7 @@ def evaluate_external_sweep(
     now: datetime | None,
     conditional_exclusions: dict[str, ConditionalSweepExclusion] | None = None,
     pr_context: PullRequestContext | None = None,
+    replacements_in_flight: frozenset[str] = frozenset(),
 ) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
     """Layer 5 — default-deny over every check-run nothing else accounts for.
 
@@ -2443,7 +2548,11 @@ def evaluate_external_sweep(
             # learn why a red row stopped being red.
             excluded.append(f"{name} ({state.conclusion}; {conditional.condition})")
             continue
-        if verdict_is_provisional(state, now):
+        if verdict_is_provisional(state, now) or (
+            # OMN-19869: a replacement run of the same workflow is still
+            # running on this head, so the cancellation is not settled yet.
+            state.conclusion == "cancelled" and name in replacements_in_flight
+        ):
             # OMN-18991: PENDING, not a quiet pass. A replacement is
             # demonstrably due, so the poller looks again; when the grace
             # closes this same row reds through the branch below. Bounded by
@@ -2587,11 +2696,18 @@ def evaluate(
     ]
 
     # (4) OMN-15496 external contexts: cross-workflow checks on the PR head.
+    # OMN-19869: cancellations whose replacement run is demonstrably running.
+    replacements_in_flight = cancelled_rows_with_replacement_in_flight(
+        check_runs, workflow_runs
+    )
     external_failures, external_unresolved = evaluate_external_contexts(
-        check_runs, external_contexts, now=now
+        check_runs,
+        external_contexts,
+        now=now,
+        replacements_in_flight=replacements_in_flight,
     )
     external_provisional = provisional_external_verdicts(
-        check_runs, external_contexts, now
+        check_runs, external_contexts, now, replacements_in_flight
     )
 
     # (5) OMN-18960 default-deny external sweep: every check-run on the head
@@ -2638,6 +2754,7 @@ def evaluate(
             now=now,
             conditional_exclusions=conditional_sweep_exclusions,
             pr_context=pr_context,
+            replacements_in_flight=replacements_in_flight,
         )
         if sweep_external
         else ([], [], [], [], [])
