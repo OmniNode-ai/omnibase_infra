@@ -21,7 +21,7 @@ _VENDORED = _FORWARD / "nodes" / _NODE / _CREATE
 _VENDORED_GRANT = _FORWARD / "nodes" / _NODE / _GRANT
 _MANIFEST = _FORWARD / "_ledger" / "application-migrations.tsv"
 _CLASSES = _ROOT / "config" / "migration_classes.yaml"
-_SHA256 = "9c597ab869dad0238a7d06ea99e93b90868166bff70b5c80763021e3076b7e7c"
+_SHA256 = "b0ab68051fcfb30672051891baba670b3a8e25a6a05e0084a0feb38b3805814e"
 _GRANT_SHA256 = "56aeaea91083bc4421813a23f43a83d0f96d157938cd5914bec6344ad47ba1e3"
 
 
