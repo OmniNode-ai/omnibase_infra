@@ -91,6 +91,9 @@ jobs:
             omninode_infra
           permission-actions: read
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
       - name: Read the delegation verdicts for this runtime PR
         env:
           GH_TOKEN: ${{ steps.token.outputs.token }}

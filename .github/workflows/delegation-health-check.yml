@@ -27,9 +27,11 @@ permissions:
 jobs:
   changed-files:
     name: Collect changed files
+    # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest.
     runs-on: >-
       ${{
-        (github.event.pull_request.head.repo.full_name != github.repository)
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
@@ -46,6 +48,7 @@ jobs:
         with:
           separator: ","
 
+  # advisory-ok: OMN-19451 shadow rollout; required only after 7 days of shadow per config/delegation_health_check.yaml
   delegation-health:
     name: Delegation Health Check (shadow)
     needs: changed-files
