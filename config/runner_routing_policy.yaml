@@ -1066,6 +1066,9 @@ route:
         - Contract Sync Gate (Wave C) [OMN-8915]
         - contract-validation
         - Customer Path Boundary (OMN-18012)
+        # OMN-19451: the delegation-health check, registered in
+        # EXPECTED_EXTERNAL_CONTEXTS when its shadow mode was removed (OMN-19998).
+        - delegation-health-check / Delegation Health Check
         - Demo Loop Gate
         - Dep Provenance Gate
         - Dep Provenance Lineage Gate (OMN-15604)

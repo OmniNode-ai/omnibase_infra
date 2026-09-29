@@ -24,7 +24,7 @@ _CREATE = "0000_create_usage_by_model_day.sql"
 _GRANT = "0001_grant_usage_by_model_day.sql"
 _TABLES = ("usage_by_model_day_calls", "usage_by_model_day")
 _SHA256 = {
-    _CREATE: "64490dbee5157b4cb4b56882272de4cfd5b72419125bfd525688ada8bab88bc9",
+    _CREATE: "68a3afb7dc00fc560aebb44a22c2ee474737125e4526349ee2eb4b6cde3f094e",
     _GRANT: "2bf2ec13f194a2dfa0738cb57f65a765b730a1739416d40e7126678254fe979f",
 }
 

@@ -13,7 +13,8 @@ Consumes ``onex.cmd.github.webhook-delivery.v1``. For each command it:
    gateway forwarder and this node trusts nothing it did not verify;
 3. folds the delivery (``webhook_fold.fold_delivery``, pure) into PR-state
    observations for ``onex.evt.github.pr-status.v1`` and, for a merge, one
-   event for ``onex.evt.github.pr-merged.v1``;
+   event for ``onex.evt.github.pr-merged.v1``, plus watched branch ref and CI
+   observations for ``onex.evt.github.branch-head.v1``;
 4. returns them for the runtime to publish.
 
 A refused or malformed delivery raises a typed error, so the runtime routes it
@@ -79,8 +80,24 @@ def load_summary_check_names(contract_path: Path = _CONTRACT_PATH) -> frozenset[
     return frozenset(names)
 
 
+def load_watched_branches(contract_path: Path = _CONTRACT_PATH) -> frozenset[str]:
+    """Load the contract's non-empty ``config.watched_branches`` list."""
+    raw = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    config = raw.get("config") if isinstance(raw, dict) else None
+    branches = config.get("watched_branches") if isinstance(config, dict) else None
+    if (
+        not isinstance(branches, list)
+        or not branches
+        or not all(isinstance(branch, str) and branch.strip() for branch in branches)
+    ):
+        raise ValueError(
+            f"{contract_path}: config.watched_branches must be a non-empty list of strings"
+        )
+    return frozenset(branches)
+
+
 class HandlerGitHubWebhookIngress:
-    """EFFECT handler: signed GitHub delivery in, PR-state and merge events out."""
+    """EFFECT handler: signed delivery in, PR, merge and branch observations out."""
 
     def __init__(
         self,
@@ -88,6 +105,7 @@ class HandlerGitHubWebhookIngress:
         summary_check_names: frozenset[str] | None = None,
         *,
         webhook_secret: str | None = None,
+        watched_branches: frozenset[str] | None = None,
     ) -> None:
         """Build the handler.
 
@@ -100,6 +118,8 @@ class HandlerGitHubWebhookIngress:
                 verdict; defaults to the contract's ``config.summary_check_names``.
             webhook_secret: A literal secret, for tests and replay tools only;
                 it takes precedence over the resolver.
+            watched_branches: Branches to observe; defaults to the contract's
+                ``config.watched_branches``.
         """
         self._secret_resolver = secret_resolver
         self._literal_secret = webhook_secret
@@ -107,6 +127,11 @@ class HandlerGitHubWebhookIngress:
             summary_check_names
             if summary_check_names is not None
             else load_summary_check_names()
+        )
+        self._watched_branches = (
+            watched_branches
+            if watched_branches is not None
+            else load_watched_branches()
         )
 
     async def _webhook_secret(self) -> bytes:
@@ -156,6 +181,7 @@ class HandlerGitHubWebhookIngress:
                 received_at=delivery.received_at,
                 published_at=datetime.now(UTC),
                 summary_check_names=self._summary_check_names,
+                watched_branches=self._watched_branches,
             )
         except WebhookFoldError as exc:
             self._refuse(delivery, correlation_id, f"unexpected shape: {exc}")
@@ -208,4 +234,5 @@ __all__: list[str] = [
     "WEBHOOK_SECRET_REF",
     "HandlerGitHubWebhookIngress",
     "load_summary_check_names",
+    "load_watched_branches",
 ]
