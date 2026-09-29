@@ -540,6 +540,28 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="worktree_reconcile_hosts",
         ),
     ),
+    # OMN-19937: infra vendors board_probe_results before omnimarket#3061
+    # lands its node contract. This bridge keeps the shipped grants derivable
+    # until the pin advances; the expiry test then requires its removal.
+    # Retired by: omnimarket#3061 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:board_probe_results",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_board_probe_results/"
+            "0000_create_board_probe_results.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="board_probe_results",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_board_probe_results/"
+                "0000_create_board_probe_results.sql"
+            ),
+            access="read_write",
+            role="board_probe_results",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426

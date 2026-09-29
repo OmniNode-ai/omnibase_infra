@@ -17,8 +17,8 @@
 #
 # WHAT IT MEASURES
 #   Exactly what that readback measured, clause by clause, on the lane as it
-#   is deployed at run time. scripts/ci/c28_consumer_flow_probe.py's docstring
-#   is the full statement; in one line each:
+#   is deployed at run time. node_board_probe_effect runs consumer_flow,
+#   ported from the C28 producer; in one line each:
 #     kinds     both named subscription kinds (the audit-purpose projection
 #               consumer and the publishing reducer) have live, instrumented
 #               rows on the consumer-flow exposure across several windows
@@ -63,20 +63,16 @@
 #   `workflow_dispatch` run of the branch on the lab runner, cited in the pull
 #   request.
 #
-# EXIT 2 IS "COULD NOT LOOK", NOT A VERDICT
+# UNREADABLE IS INDETERMINATE
 #   A lane container not running and healthy after the settle window, a boot
-#   that changed under the run twice, or docker, the broker, the database or
-#   the exposure refusing, exit 2. Both 1 and 2 fail the job; the record says
-#   which happened.
+#   that changed under the run twice, or refused Docker/HTTP/database reads
+#   produce INDETERMINATE. Only PASS has success status; onex node exits
+#   nonzero otherwise. The handler writes the observation and verdict to the
+#   C28 record before returning; the CLI also emits its standard receipt.
 
 name: Chain Canary — C28 consumer flow
 
 on:
-  # TEMPORARY (OMN-19812): lets this branch run on the lab runner before the
-  # file exists on the default branch, where workflow_dispatch cannot reach
-  # it. Removed in the next commit, before review.
-  push:
-    branches: ['jonah/omn-19812-c28-consumer-flow-probe']
   schedule:
     # 4x/day at :13, offset from C11 (:17), C12 (:27), C16 (:29),
     # chain-canary (:41 odd hours), provider-rung (:47), dev-lane-liveness
@@ -161,28 +157,41 @@ jobs:
           cache-dependency-glob: "uv.lock"
 
       - name: Install dependencies
-        # Clause 2 runs this checkout's own tests; the probe itself imports
-        # the standard library only.
+        # Clause 2 runs this checkout's tests; onex loads the packaged node.
         run: uv sync --frozen
 
-      - name: Re-measure C28 on the dev lane and grade it
+      - name: Prepare the consumer-flow node request
         env:
           C28_BASE_URL: ${{ github.event.inputs.base_url || fromJSON(needs.resolve-lane.outputs.lane_json).projection_url }}
           LANE_NAME: ${{ needs.resolve-lane.outputs.lane }}
         run: |
-          set -uo pipefail
-          echo "lane: ${LANE_NAME}, projection-api ${C28_BASE_URL}"
-          # NOT `set -e`: a non-zero probe is the verdict and must still write
-          # its record before the job ends.
-          python3 scripts/ci/c28_consumer_flow_probe.py \
-            --base-url "${C28_BASE_URL}" \
-            --pytest-cmd "uv run --frozen pytest" \
-            --scratch "${RUNNER_TEMP}" \
-            --record c28-consumer-flow.json \
-            --summary "${GITHUB_STEP_SUMMARY}"
-          status=$?
-          echo "probe exit status: ${status}"
-          exit "${status}"
+          jq -n --arg subject_lane "$LANE_NAME" --arg base_url "$C28_BASE_URL" \
+            --arg scratch "$RUNNER_TEMP" \
+            '{subject_lane: $subject_lane, base_url: $base_url, scratch: $scratch, pytest_cmd: "uv run --frozen pytest", record: "c28-consumer-flow.json"}' \
+            > c28-request.json
+          # RuntimeLocal single-shot dispatch uses the top-level handler.
+          # Select it from the node's declared C28 route, retaining its contract.
+          uv run --frozen python - <<'PYCODE'
+          from pathlib import Path
+          import yaml
+          path = Path("src/omnibase_infra/nodes/node_board_probe_effect/contract.yaml")
+          contract = yaml.safe_load(path.read_text())
+          route = next(r for r in contract["handler_routing"]["handlers"] if r["operation"] == "board_probe.consumer_flow")
+          model = route["input_model"]
+          contract["input_model"] = model
+          contract["handler"] = {
+              "module": route["handler"]["module"],
+              "class": route["handler"]["name"],
+              "input_model": model["module"] + "." + model["name"],
+          }
+          Path("c28-contract.yaml").write_text(yaml.safe_dump(contract, sort_keys=False))
+          PYCODE
+
+      - name: Re-measure C28 on the dev lane and grade it
+        run: >-
+          uv run --frozen onex node node_board_probe_effect
+          --contract c28-contract.yaml --input c28-request.json
+          --timeout 1700 --output receipt
 
       - name: Assert the C28 record is present and non-empty
         if: always()
