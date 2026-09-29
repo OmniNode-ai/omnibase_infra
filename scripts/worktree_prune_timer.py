@@ -500,7 +500,7 @@ def force_remove_debris(
 
 
 def append_ledger_note(ledger: Path, report: ModelRunReport, omni_home: Path) -> str:
-    """Append ONE NOTE row through the mutex wrapper, never by hand."""
+    """Append ONE STATUS row through the mutex wrapper, never by hand."""
     reasons = (
         ", ".join(f"{k}={v}" for k, v in sorted(report.refusals.items())) or "none"
     )
@@ -509,7 +509,7 @@ def append_ledger_note(ledger: Path, report: ModelRunReport, omni_home: Path) ->
         for f in report.removal_failures[:5]
     )
     row = (
-        f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} | NOTE | "
+        f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} | STATUS | "
         f"lane=worktree-prune-timer | actor=launchd | model=none | "
         f"ticket=OMN-18832 | unattended prune run, consent="
         f"{report.consent_citation} | worktrees_removed="
