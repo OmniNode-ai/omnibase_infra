@@ -25,7 +25,7 @@ from omnibase_infra.runtime.render_bifrost_delegation_contract import (
     render_bifrost_delegation_contract,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
 _DECLARED = "Qwen3.8-27B"
 
