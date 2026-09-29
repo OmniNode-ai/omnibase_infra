@@ -165,6 +165,8 @@ class ModelGatewayForwarderConfig(BaseModel):
     reconnect_backoff_initial_seconds: float = Field(default=1.0, gt=0)
     reconnect_backoff_max_seconds: float = Field(default=30.0, gt=0)
     reconnect_backoff_jitter_seconds: float = Field(default=0.5, ge=0)
+    # OMN-15629: retry a cloud-inbound topic without dropping admitted topics.
+    inbound_topic_retry_seconds: int = Field(default=300, ge=1)
     degraded_after_seconds: int = Field(default=60, ge=1)
 
     @property
