@@ -808,7 +808,13 @@ def load_runtime_affecting(
 
     def _runtime_affecting(sha: str) -> bool:
         changed = default_changed_files(clone, sha)
-        runtime_paths = classifier_module.classify_runtime_paths(changed, canonical)
+        # OMN-19375: the trigger reads the same two manifests at the same pair
+        # of commits, so a version-only bump it declines is walked past here.
+        runtime_paths = classifier_module.classify_runtime_paths(
+            changed,
+            canonical,
+            manifest_reader=classifier_module.git_manifest_reader(clone, sha),
+        )
         return bool(
             classifier_module.is_runtime_affecting(
                 runtime_paths, lambda: labels_for(sha)

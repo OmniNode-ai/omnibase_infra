@@ -799,6 +799,8 @@ load_runtime_path_classifier = (
     _runtime_change_classifier.load_runtime_path_classifier  # type: ignore[attr-defined]
 )
 classify_runtime_paths = _runtime_change_classifier.classify_runtime_paths  # type: ignore[attr-defined]
+inert_version_bump_paths = _runtime_change_classifier.inert_version_bump_paths  # type: ignore[attr-defined]
+git_manifest_reader = _runtime_change_classifier.git_manifest_reader  # type: ignore[attr-defined]
 
 
 #: OMN-19318: the trigger's decision IS the shared runtime-affecting predicate
@@ -1123,6 +1125,17 @@ def emit_github_output(
     ),
 )
 @click.option(
+    "--source-checkout",
+    type=click.Path(path_type=Path, exists=True, file_okay=False),
+    default=None,
+    help=(
+        "A clone of the source repository holding --source-sha and its first "
+        "parent. With it, a root pyproject.toml/uv.lock change that is only a "
+        "version-inert package's own version is not lane state (OMN-19375); "
+        "without it, nothing is exempt."
+    ),
+)
+@click.option(
     "--dry-run",
     is_flag=True,
     default=False,
@@ -1142,6 +1155,7 @@ def main(
     consumer_model: Path | None,
     runtime_path_validator: Path,
     runner_environment: str,
+    source_checkout: Path | None,
     dry_run: bool,
 ) -> None:
     """Publish a node_redeploy_orchestrator start command if a PR contains runtime changes.
@@ -1178,9 +1192,24 @@ def main(
         sys.exit(1)
     sibling_sha = "" if source_repo.strip() == OWN_REPO else source_sha
 
+    manifest_reader = (
+        git_manifest_reader(source_checkout, source_sha)
+        if source_checkout is not None
+        else None
+    )
+    if manifest_reader is not None:
+        inert = inert_version_bump_paths(files, manifest_reader)
+        if inert:
+            click.echo(
+                f"Version-only manifest change, not lane state (OMN-19375): "
+                f"{', '.join(inert)}"
+            )
+
     try:
         classifier = load_runtime_path_classifier(runtime_path_validator)
-        runtime_paths = classify_runtime_paths(files, classifier)
+        runtime_paths = classify_runtime_paths(
+            files, classifier, manifest_reader=manifest_reader
+        )
     except ValueError as exc:
         click.echo(f"ERROR: {exc}", err=True)
         sys.exit(1)
