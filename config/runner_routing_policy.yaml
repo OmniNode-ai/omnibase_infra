@@ -1051,6 +1051,9 @@ route:
         - advisory-job-gate / advisory-job-gate
         - Application Database Domain Enforcement (OMN-15361)
         - Arch Invariants (OMN-3343)
+        # OMN-19928: the forwarder against a grant-enforcing broker, registered
+        # STRICT in ci.yml and enforced by the CI Summary poller.
+        - Bus ACL Boundary (OMN-19928)
         - call-reject-skip-token / scan / reject-skip-gate-token
         - Canonical Inference Gate
         - CI Evidence Policy (OMN-18247)

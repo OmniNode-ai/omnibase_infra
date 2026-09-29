@@ -55,6 +55,11 @@ from omnibase_infra.cli.skill_terminal_publish import (
     publish_skill_terminal_event,
     resolve_skill_terminal_target,
 )
+from omnibase_infra.cli.task_class_registry import (
+    TaskClassContractError,
+    load_task_class_authority,
+    resolve_task_class,
+)
 from omnibase_infra.cli.workspace_reconcile import make_workspace_reconciler
 
 __all__ = ["MAPPING_FILENAME", "load_skill_registry", "run_skill_by_name"]
@@ -189,21 +194,36 @@ def _parse_skill_args(
     return payload
 
 
-def _apply_classifiers(
+def _resolve_task_class(
     mapping: ModelSkillMapping, payload: dict[str, JsonValue]
 ) -> None:
-    """Assign classifier target fields that remain unset after arg parsing."""
-    for classifier in mapping.classifiers:
-        if payload.get(classifier.target_field) is not None:
-            continue
-        source = payload.get(classifier.source_field)
-        source_text = str(source).lower() if source is not None else ""
-        assigned = classifier.fallback
-        for keywords, value in classifier.rules:
-            if any(keyword.lower() in source_text for keyword in keywords):
-                assigned = value
-                break
-        payload[classifier.target_field] = assigned
+    """Resolve the mapping's task class through the task-class contract (OMN-19407).
+
+    The same read and the same resolution ``onex delegate`` uses: an explicit
+    value is checked against the contract (an internal class admitted, an
+    unroutable one refused in the contract's words), and an unset one is
+    chosen by the contract's selection and declared fallback. A registry that
+    cannot be read is a refusal naming it.
+    """
+    declared = mapping.task_class
+    if declared is None:
+        return
+    explicit = payload.get(declared.target_field)
+    prompt = payload.get(declared.prompt_field)
+    try:
+        resolution = resolve_task_class(
+            load_task_class_authority(),
+            "" if prompt is None else str(prompt),
+            explicit=None if explicit is None else str(explicit),
+        )
+    except TaskClassContractError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(
+        f"task class: {resolution.task_type} "
+        f"({resolution.resolution} — {resolution.reason})",
+        err=True,
+    )
+    payload[declared.target_field] = resolution.task_type
 
 
 def _write_payload(
@@ -301,7 +321,7 @@ def run_skill_by_name(
     \b
     Examples:
         onex skill compliance_sweep --repos omnibase_core,omnibase_infra
-        onex skill dod_verify OMN-1234
+        onex skill dod_verify OMN-1234 --execution-audience hosted
         onex skill delegate "summarize this paragraph" --task-type document
     """
     try:
@@ -327,7 +347,7 @@ def run_skill_by_name(
         )
 
     payload = _parse_skill_args(mapping, skill_args)
-    _apply_classifiers(mapping, payload)
+    _resolve_task_class(mapping, payload)
     enforce_prod_dispatch_locality(mapping.node_name, payload)
 
     contract_path = _resolve_packaged_contract(mapping.node_name)

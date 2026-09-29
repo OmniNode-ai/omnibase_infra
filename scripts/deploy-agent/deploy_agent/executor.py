@@ -10,12 +10,14 @@ import logging
 import os
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import time
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
@@ -86,6 +88,11 @@ from deploy_agent.routing import AGENT_CLONE_ROOT, RoutingTableError
 from deploy_agent.tracking_ref import (
     load_tracking_ref_from_env,
     load_tracking_remote_ref_from_env,
+)
+from deploy_agent.unit_drift import (
+    load_manifest,
+    own_unit_name_from_cgroup,
+    sync_own_unit,
 )
 
 # Maps deploy scope to catalog bundle names used by compose_gen.
@@ -908,6 +915,33 @@ def _run(
         cwd=cwd,
         env=env,
     )
+
+
+def _sync_own_unit_after_pull(agent_dir: str) -> str | None:
+    """Repair only our Linux unit and return its name when restart is needed.
+
+    OMN-20037: pulling the PATH fix left the installed unit stale for two days.
+    A re-exec cannot pick up systemd's changed unit environment; a restart can.
+    """
+    if sys.platform != "linux":
+        return None
+    try:
+        unit_name = own_unit_name_from_cgroup(Path("/proc/self/cgroup").read_text())
+    except OSError:
+        return None
+    if unit_name is None:
+        return None
+    repo_root = Path(agent_dir).resolve().parents[1]
+    changed = sync_own_unit(
+        load_manifest(repo_root / "deploy" / "unit-drift-manifest.yaml"),
+        unit_name=unit_name,
+        repo_root=repo_root,
+        hostname=socket.gethostname(),
+        home=Path.home(),
+        runner=lambda cmd: _run(cmd, timeout=60).returncode,
+        stamp=datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
+    )
+    return unit_name if changed else None
 
 
 def _uv_sync_after_pull(agent_dir: str, boundary: EnumSelfUpdateBoundary) -> None:
@@ -2252,6 +2286,30 @@ class DeployExecutor:
             # --ff-only onto origin/<branch> lands exactly there, so the
             # post-pull HEAD is known without a second rev-parse.
             disk_sha = remote_sha
+
+        # OMN-20037: even a current clone can have a stale installed unit.
+        try:
+            synced_unit = _sync_own_unit_after_pull(agent_dir)
+            if synced_unit is not None:
+                logger.info(
+                    "self_update[boundary=%s]: synced unit %s; restarting via systemd",
+                    boundary.value,
+                    synced_unit,
+                )
+                if on_before_reexec is not None:
+                    on_before_reexec()
+                subprocess.run(
+                    ["systemctl", "--user", "restart", synced_unit],
+                    check=True,
+                    timeout=60,
+                )
+                return
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "self_update[boundary=%s]: unit sync/restart failed: %s",
+                boundary.value,
+                exc,
+            )
 
         # STEP 2 -- decide whether to RE-EXEC, and decide it against the code
         # this process actually loaded. The clone being current with the remote

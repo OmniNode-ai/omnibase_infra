@@ -26,6 +26,7 @@
 # this block is what changes.
 #
 # Related tickets:
+#   - OMN-19941: an undecidable verdict input fails closed (a planned but unobserved focused_tests step fails)
 #   - OMN-19572: the omnibase_core foundation_override profile
 #   - OMN-19565: the proof-profile registry
 #   - OMN-19564: epic, a lab proof for every code PR
@@ -42,7 +43,7 @@ node_version:
   patch: 0
 node_type: "COMPUTE_GENERIC"
 description: >
-  Compute node with two pure handlers. lab_proof.plan renders one proof run from a registry profile row, the subject PR commit, the host's lane directory and the bundle facts below into ordered argv steps with working directories, timeouts, polling and mechanical expectations; it refuses a row that does not run by nodes, a proof kind with no plan, and a subject from another repository. lab_proof.verdict evaluates the row's mandatory checks from the run's observations and decides the outcome, with an optional base-control result that turns a FAIL reproduced at the merge base into DEV_INHERITED.
+  Compute node with two pure handlers. lab_proof.plan renders one proof run from a registry profile row, the subject PR commit, the host's lane directory and the bundle facts below into ordered argv steps with working directories, timeouts, polling and mechanical expectations; it refuses a row that does not run by nodes, a proof kind with no plan, and a subject from another repository. lab_proof.verdict evaluates the row's mandatory checks from the run's observations and decides the outcome, with an optional base-control result that turns a FAIL reproduced at the merge base into DEV_INHERITED. lab_proof.verdict fails a mandatory check closed when a planned step has no observation.
 
 input_model:
   name: "ModelLabProofPlanRequest"
