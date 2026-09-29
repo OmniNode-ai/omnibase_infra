@@ -17,13 +17,6 @@ from omnibase_infra.cli.cli_delegate import delegate_command
 
 pytestmark = pytest.mark.integration
 
-_TASK_CLASS_CONTRACT = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "delegation"
-    / "omn18305"
-    / "task_class_contracts_vocabulary.yaml"
-)
 _FIXTURE_MODULE = "tests.fixtures.handler_correlated_noop"
 _NOOP_CONTRACT = (
     "---\n"
@@ -51,9 +44,6 @@ def _offline_delegate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     for key in (*_CONFIG_KEYS, "OMNI_HOME", "ONEX_CONTRACTS_DIR"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(cli_delegate, "check_omnimarket_drift", lambda **_: None)
-    monkeypatch.setattr(
-        cli_delegate, "resolve_task_class_contract_path", lambda: _TASK_CLASS_CONTRACT
-    )
     contract = tmp_path / cli_delegate.DELEGATE_NODE_NAME / "contract.yaml"
     contract.parent.mkdir()
     contract.write_text(_NOOP_CONTRACT, encoding="utf-8")

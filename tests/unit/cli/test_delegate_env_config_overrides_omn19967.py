@@ -28,7 +28,6 @@ from omnibase_infra.cli.delegate_env_config_overrides import (
 )
 from omnibase_infra.cli.model_delegate_run_addressing import ModelDelegateRunAddressing
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
-from omnibase_infra.enums.enum_task_type_resolution import EnumTaskTypeResolution
 from omnibase_infra.runtime_identity import collect_runtime_identity
 
 pytestmark = pytest.mark.unit
@@ -86,7 +85,7 @@ def _written_receipt(tmp_path: Path, env: dict[str, str]) -> dict[str, object]:
         state_root=tmp_path,
         prompt="Reply with exactly: OK",
         task_type="summarization",
-        task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+        task_type_resolution="explicit",
         addressing=_IN_PROCESS,
         config_overrides=env_config_overrides(env),
     )
