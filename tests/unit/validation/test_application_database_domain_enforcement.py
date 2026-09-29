@@ -1124,6 +1124,44 @@ def test_red_control_unknown_topology_schema() -> None:
 
 
 @pytest.mark.parametrize(
+    ("not_distinct", "distinct"),
+    [
+        ("IS NOT DISTINCT FROM", "IS DISTINCT FROM"),
+        ("is\n NoT\tDiStInCt \n FrOm", "iS \t dIsTiNcT\nfRoM"),
+    ],
+)
+def test_distinct_from_in_trigger_body_is_not_a_relation_target(
+    not_distinct: str, distinct: str
+) -> None:
+    statement = (
+        "CREATE OR REPLACE FUNCTION public.f() RETURNS TRIGGER AS $$ "
+        f"BEGIN IF NEW.a {not_distinct} OLD.a AND NEW.b {distinct} "
+        "OLD.b THEN NEW.c = OLD.c; END IF; RETURN NEW; END; "
+        "$$ LANGUAGE plpgsql;"
+    )
+
+    assert not lint_application_database_sql(statement, _TOPOLOGY)
+
+
+def test_distinct_from_subquery_relation_is_still_checked() -> None:
+    statement = (
+        "CREATE OR REPLACE FUNCTION public.f() RETURNS TRIGGER AS $$ "
+        "BEGIN IF NEW.a IS DISTINCT FROM (SELECT v FROM unqualified_tbl) "
+        "THEN RETURN NEW; END IF; RETURN NEW; END; $$ LANGUAGE plpgsql;"
+    )
+
+    assert "'unqualified_tbl' must be schema-qualified" in "\n".join(
+        lint_application_database_sql(statement, _TOPOLOGY)
+    )
+
+
+def test_plain_from_old_schema_is_still_checked() -> None:
+    violations = lint_application_database_sql("SELECT * FROM old.x;", _TOPOLOGY)
+
+    assert "'old.x' uses unknown topology schema" in "\n".join(violations)
+
+
+@pytest.mark.parametrize(
     "statement",
     [
         "CREATE TEMPORARY TABLE events (id uuid);",
