@@ -14,12 +14,8 @@ from uuid import UUID
 from omnibase_core.models.delegation.wire import ModelDelegationProvenance
 
 #: The execution budget a caller that passes neither argument resolves to
-#: (OMN-18924). Mirrors `omnibase_infra.cli.task_class_selection`'s
-#: DEFAULT_EXECUTION_BUDGET; the two are pinned equal by
-#: tests/unit/runtime/test_dispatch_port_budget_defaults_omn18924.py rather
-#: than shared by an import, because the runtime layer does not depend on the
-#: CLI layer and adding that edge to share two integers would be the wrong
-#: trade.
+#: (OMN-18924). The port and this protocol are pinned to one value by
+#: tests/unit/runtime/test_dispatch_port_budget_defaults_omn18924.py.
 DEFAULT_EXECUTION_TIMEOUT_SECONDS = 240
 DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS = 60
 
