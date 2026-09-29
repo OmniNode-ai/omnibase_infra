@@ -438,6 +438,8 @@ USER root
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY runner-job-started.sh /usr/local/bin/runner-job-started.sh
 COPY healthcheck.sh /usr/local/bin/healthcheck.sh
+# OMN-19960: sourced by entrypoint.sh to export the cgroup CPU count to jobs.
+COPY cgroup-cpu-env.sh /usr/local/bin/cgroup-cpu-env.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/runner-job-started.sh /usr/local/bin/healthcheck.sh
 
 # Run as root — entrypoint fixes Docker socket GID then drops to runner via gosu

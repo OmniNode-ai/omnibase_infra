@@ -18,9 +18,10 @@ importing Kafka (dependency inversion: this impl lives in infra and points inwar
 Scope discipline (plan I6 — "runtime owns policy, transport owns mechanism")
 ---------------------------------------------------------------------------
 This class is ONLY the raw Kafka client behind the protocol. It carries **zero**
-dispatch / coercion / fan-out / DLQ / retry logic — ``RuntimeDispatch`` (core, S4)
-owns every one of those decisions and expresses them through the two protocol
-primitives (``poll`` / ``commit`` / ``nack`` / ``send``). The mapping to Kafka:
+dispatch / coercion / fan-out / DLQ / message-retry logic — ``RuntimeDispatch``
+(core, S4) owns every one of those decisions and expresses them through the two
+protocol primitives (``poll`` / ``commit`` / ``nack`` / ``send``). The mapping to
+Kafka:
 
 * ``poll``   -> ``AIOKafkaConsumer.getmany`` (per-partition, offset-ordered).
 * ``commit`` -> ``AIOKafkaConsumer.commit({tp: offset+1})``. Kafka's committed
@@ -35,6 +36,10 @@ primitives (``poll`` / ``commit`` / ``nack`` / ``send``). The mapping to Kafka:
 * ``send``   -> ``AIOKafkaProducer.send_and_wait`` (awaits the broker ack).
 * ``send_with_coordinate`` -> the same call, returning the ``(topic,
   partition, offset)`` the broker assigned (OMN-17201).
+
+The opt-in refused-topic retry is transport mechanism, not deployment policy: it
+can peel broker-refused subscribe topics and retry them, but the composition root
+owns whether to enable it and which retry interval to supply.
 
 Two settings are FORCED for these NEW transport consumers and are deliberately not
 read from the shared config (plan S3): ``enable_auto_commit=False`` (the runtime,
@@ -54,11 +59,20 @@ licenses "in-memory golden chain => Kafka golden chain".
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import inspect
-from collections.abc import Mapping, Sequence
+import logging
+import time
+from collections.abc import Callable, Collection, Mapping, Sequence
 from typing import cast
 
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from aiokafka.errors import (
+    KafkaError,
+    TopicAuthorizationFailedError,
+    UnknownTopicOrPartitionError,
+)
 from aiokafka.structs import TopicPartition
 
 from omnibase_core.models.runtime.model_transport_message import ModelTransportMessage
@@ -76,6 +90,8 @@ from omnibase_infra.topics.topic_namespace import (
 )
 
 __all__ = ["KafkaTransport"]
+
+logger = logging.getLogger(__name__)
 
 
 class KafkaTransport:
@@ -103,7 +119,24 @@ class KafkaTransport:
         group: str = "onex.transport.kafka",
         topics: Sequence[str] = (),
         auto_offset_reset: str = "earliest",
+        refused_topic_retry_seconds: float | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
+        if (
+            refused_topic_retry_seconds is not None
+            and not refused_topic_retry_seconds > 0
+        ):
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="validate_config",
+                target_name="kafka_transport",
+            )
+            raise ProtocolConfigurationError(
+                "refused_topic_retry_seconds must be greater than zero",
+                context=context,
+                parameter="refused_topic_retry_seconds",
+                value=refused_topic_retry_seconds,
+            )
         self._config = config
         self._group = group
         # CANONICAL topics -- the runtime's view, and what every comparison,
@@ -120,6 +153,10 @@ class KafkaTransport:
             for t in self._topics
         )
         self._auto_offset_reset = auto_offset_reset
+        self._refused_topic_retry_seconds = refused_topic_retry_seconds
+        self._clock = clock
+        self._refused_physical_topics: set[str] = set()
+        self._next_refused_topic_retry_at: float | None = None
         self._producer: AIOKafkaProducer | None = None
         self._consumer: AIOKafkaConsumer | None = None
         self._started = False
@@ -209,37 +246,166 @@ class KafkaTransport:
         OMN-15748/OMN-15690) must never go through ``close()`` + ``start()``,
         which stops both clients.
         """
-        # Group ``subscribe`` (topics passed positionally): the consumer joins
-        # the group and, on join, NATIVELY resumes each partition from its
-        # group-committed offset (a fresh group starts at ``auto_offset_reset``).
-        # This is what makes "restart resumes from the committed offset" and
-        # "uncommitted offsets redeliver on restart" hold, with no manual
-        # ``seek`` dance. A single transport instance is the sole group member,
-        # so it is assigned every partition of its topics — matching the unified
-        # runtime's single-poll-loop-per-topic-set model (single-owner-per-topic
-        # is the S6 boot invariant, R1). The one-time join latency is absorbed by
-        # ``_prime`` below so the runtime's first ``poll`` still returns promptly.
-        self._consumer = AIOKafkaConsumer(
-            *self._physical_topics,
-            bootstrap_servers=self._config.bootstrap_servers,
-            group_id=self._group,
-            # FORCED for the new transport consumers (plan S3): the runtime, not
-            # the client, decides when an offset is durable. Legacy push
-            # consumers keep their per-consumer config setting untouched.
-            enable_auto_commit=False,
-            auto_offset_reset=self._auto_offset_reset,
-            session_timeout_ms=self._config.session_timeout_ms,
-            heartbeat_interval_ms=self._config.heartbeat_interval_ms,
-            max_poll_interval_ms=self._config.max_poll_interval_ms,
-            retry_backoff_ms=self._config.reconnect_backoff_ms,
-            **self._client_version_kwargs(AIOKafkaConsumer),
-            **self._auth_kwargs(),
+        while True:
+            active_topics = tuple(
+                topic
+                for topic in self._physical_topics
+                if topic not in self._refused_physical_topics
+            )
+            if not active_topics:
+                self._consumer = None
+                self._schedule_refused_topic_retry()
+                return
+
+            # Group ``subscribe`` (topics passed positionally): the consumer joins
+            # the group and, on join, NATIVELY resumes each partition from its
+            # group-committed offset (a fresh group starts at ``auto_offset_reset``).
+            # This is what makes "restart resumes from the committed offset" and
+            # "uncommitted offsets redeliver on restart" hold, with no manual
+            # ``seek`` dance. A single transport instance is the sole group member,
+            # so it is assigned every partition of its topics — matching the unified
+            # runtime's single-poll-loop-per-topic-set model (single-owner-per-topic
+            # is the S6 boot invariant, R1). The one-time join latency is absorbed by
+            # ``_prime`` below so the runtime's first ``poll`` still returns promptly.
+            consumer = AIOKafkaConsumer(
+                *active_topics,
+                bootstrap_servers=self._config.bootstrap_servers,
+                group_id=self._group,
+                # FORCED for the new transport consumers (plan S3): the runtime, not
+                # the client, decides when an offset is durable. Legacy push
+                # consumers keep their per-consumer config setting untouched.
+                enable_auto_commit=False,
+                auto_offset_reset=self._auto_offset_reset,
+                session_timeout_ms=self._config.session_timeout_ms,
+                heartbeat_interval_ms=self._config.heartbeat_interval_ms,
+                max_poll_interval_ms=self._config.max_poll_interval_ms,
+                retry_backoff_ms=self._config.reconnect_backoff_ms,
+                **self._client_version_kwargs(AIOKafkaConsumer),
+                **self._auth_kwargs(),
+            )
+            self._consumer = consumer
+            try:
+                await consumer.start()
+            except (TopicAuthorizationFailedError, UnknownTopicOrPartitionError) as exc:
+                if self._refused_topic_retry_seconds is None:
+                    raise
+                with contextlib.suppress(Exception):
+                    await consumer.stop()
+                self._consumer = None
+                refused = self._identify_refused_topics(consumer, active_topics, exc)
+                if not refused:
+                    raise
+                for topic in active_topics:
+                    if topic not in refused:
+                        continue
+                    self._refused_physical_topics.add(topic)
+                    logger.warning(
+                        "kafka_transport_topic_refused topic=%s group=%s error=%s "
+                        "retry_in_seconds=%s",
+                        strip_topic_namespace(topic, namespace=self._topic_namespace),
+                        self._group,
+                        type(exc).__name__,
+                        self._refused_topic_retry_seconds,
+                    )
+                continue
+
+            # Trigger the group join + first fetch now, buffering the first batch, so
+            # the runtime's first poll() returns the available records instead of
+            # racing the lazy rebalance.
+            await self._prime(consumer)
+            self._schedule_refused_topic_retry()
+            return
+
+    def _identify_refused_topics(
+        self,
+        consumer: AIOKafkaConsumer,
+        active_topics: tuple[str, ...],
+        exc: KafkaError,
+    ) -> set[str]:
+        """Identify refused physical topics from aiokafka's metadata snapshot.
+
+        aiokafka registers every subscribed topic for metadata at consumer
+        construction (``client.set_topics``) and bootstraps before
+        ``_wait_topics``, so by the time either error is raised the snapshot
+        covers the whole subscription. An authorization refusal is read only
+        from the broker's explicit answer (``unauthorized_topics`` and the
+        error's own topic argument); "no partitions" is consulted only for
+        ``UnknownTopicOrPartitionError``, which aiokafka raises without naming
+        the topic, so an admitted topic is never peeled on a guess.
+        """
+        refused: set[str] = set()
+        cluster = getattr(getattr(consumer, "_client", None), "cluster", None)
+        if cluster is not None:
+            unauthorized = getattr(cluster, "unauthorized_topics", ())
+            if isinstance(unauthorized, Collection):
+                refused.update(
+                    topic for topic in active_topics if topic in unauthorized
+                )
+            partitions_for_topic = getattr(cluster, "partitions_for_topic", None)
+            if isinstance(exc, UnknownTopicOrPartitionError) and callable(
+                partitions_for_topic
+            ):
+                lookup = cast("Callable[[str], object | None]", partitions_for_topic)
+                for topic in active_topics:
+                    with contextlib.suppress(Exception):
+                        if lookup(topic) is None:
+                            refused.add(topic)
+
+        if not refused and exc.args:
+            fallback = exc.args[0]
+            if isinstance(fallback, str) and fallback in active_topics:
+                refused.add(fallback)
+        return refused
+
+    def _schedule_refused_topic_retry(self) -> None:
+        """Schedule the next opt-in retry when at least one topic is refused."""
+        if (
+            self._refused_physical_topics
+            and self._refused_topic_retry_seconds is not None
+        ):
+            self._next_refused_topic_retry_at = (
+                self._clock() + self._refused_topic_retry_seconds
+            )
+        else:
+            self._next_refused_topic_retry_at = None
+
+    async def _retry_refused_topics_if_due(self) -> None:
+        """Rebuild the subscription when the refused-topic interval expires."""
+        retry_at = self._next_refused_topic_retry_at
+        if (
+            self._refused_topic_retry_seconds is None
+            or not self._refused_physical_topics
+            or retry_at is None
+            or self._clock() < retry_at
+        ):
+            return
+
+        previous_refused = set(self._refused_physical_topics)
+        canonical_topics = sorted(
+            strip_topic_namespace(topic, namespace=self._topic_namespace)
+            for topic in previous_refused
         )
-        await self._consumer.start()
-        # Trigger the group join + first fetch now, buffering the first batch, so
-        # the runtime's first poll() returns the available records instead of
-        # racing the lazy rebalance.
-        await self._prime(self._consumer)
+        logger.info(
+            "kafka_transport_topic_retry topics=%s group=%s",
+            ",".join(canonical_topics),
+            self._group,
+        )
+        self._refused_physical_topics.clear()
+        self._next_refused_topic_retry_at = None
+        if self._consumer is not None:
+            try:
+                await self._consumer.stop()
+            finally:
+                self._consumer = None
+        await self._start_consumer()
+
+        admitted = previous_refused - self._refused_physical_topics
+        for topic in sorted(admitted):
+            logger.info(
+                "kafka_transport_topic_admitted topic=%s group=%s",
+                strip_topic_namespace(topic, namespace=self._topic_namespace),
+                self._group,
+            )
 
     async def restart_consumer(self) -> None:
         """Recreate ONLY the consumer-side client; the shared producer stays up.
@@ -344,6 +510,12 @@ class KafkaTransport:
         task failure alone to detect it.
         """
         if self._consumer is None:
+            if (
+                self._refused_topic_retry_seconds is not None
+                and bool(self._physical_topics)
+                and set(self._physical_topics) == self._refused_physical_topics
+            ):
+                return True
             return False
         try:
             return bool(self._consumer.assignment())
@@ -384,6 +556,14 @@ class KafkaTransport:
         return frozenset(caught_up)
 
     # -- consumer protocol ------------------------------------------------------
+
+    @property
+    def refused_topics(self) -> frozenset[str]:
+        """Canonical topic names currently excluded after broker refusal."""
+        return frozenset(
+            strip_topic_namespace(topic, namespace=self._topic_namespace)
+            for topic in self._refused_physical_topics
+        )
 
     def _require_consumer(self) -> AIOKafkaConsumer:
         if self._consumer is None:
@@ -428,11 +608,20 @@ class KafkaTransport:
                 parameter="max_messages",
                 value=max_messages,
             )
-        consumer = self._require_consumer()
         if self._buffer:
             batch = self._buffer[:max_messages]
             del self._buffer[:max_messages]
             return batch
+        await self._retry_refused_topics_if_due()
+        if (
+            self._consumer is None
+            and self._refused_topic_retry_seconds is not None
+            and bool(self._physical_topics)
+            and set(self._physical_topics) == self._refused_physical_topics
+        ):
+            await asyncio.sleep(timeout_ms / 1000)
+            return []
+        consumer = self._require_consumer()
         raw = await consumer.getmany(timeout_ms=timeout_ms, max_records=max_messages)
         polled: list[ModelTransportMessage] = []
         # Deterministic partition ordering; records within a partition stay

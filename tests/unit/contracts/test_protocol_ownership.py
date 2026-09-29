@@ -131,6 +131,12 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolPartialRetryRequest": "nodes/node_registry_effect/handlers/handler_partial_retry.py",
     "ProtocolRegistrationPersistence": "nodes/node_registration_storage_effect/protocols/protocol_registration_persistence.py",
     "ProtocolDiscoveryOperations": "nodes/node_service_discovery_effect/protocols/protocol_discovery_operations.py",
+    # [NODE] OMN-19927 the read port of node_merge_provenance_observe_effect:
+    # merge-group runs for a sha and the jobs of a run's latest attempt.
+    # HandlerMergeGroupRunReadGithub is the one runtime binding and unit tests
+    # supply a fake. Infra-local, not spi: it reads THIS repository's Actions
+    # runs for its own CI test selection, not a cross-repo contract.
+    "ProtocolMergeGroupRunReader": "nodes/node_merge_provenance_observe_effect/protocols/protocol_merge_group_run_reader.py",
     "ProtocolLedgerPersistence": "nodes/node_ledger_write_effect/protocols/protocol_ledger_persistence.py",
     "ProtocolGatewaySessionStore": "nodes/node_gateway_attach_effect/services/protocol_gateway_session_store.py",  # [NODE] OMN-15750 DI seam so the attach session-store backend (in-process for this slice, Valkey follow-on) is swappable without touching handlers
     "ProtocolGatewayTransport": "protocols/protocol_gateway_transport.py",  # [NODE] OMN-15922 POST seam for the onex-auth gateway client; infra-internal (not a cross-repo contract, so not spi) and load-bearing as a seam because it is what lets the whole grant -> attach -> re-attach cycle run against an in-memory fake with no socket. Deliberately separate from ProtocolHttpClient: that one is runtime_checkable and already satisfied structurally by adapters implementing exactly get(), so adding a method would silently un-satisfy every one of them
@@ -198,6 +204,10 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # left dev red for every open pull request; recorded here rather than
     # routed around (OMN-18833 lane).
     "ProtocolDriftGuardVerdict": "cli/protocol_drift_guard_verdict.py",
+    "ProtocolExecutionBudget": "cli/protocol_execution_budget.py",  # [DI] OMN-19407 reads a task class's execution ceiling and delivery margin.
+    "ProtocolSelectionFallback": "cli/protocol_selection_fallback.py",  # [DI] OMN-19407 reads the fallback class for an unclaimed prompt.
+    "ProtocolTaskClassAuthority": "cli/protocol_task_class_authority.py",  # [DI] OMN-19407 reads the task-class authority contract.
+    "ProtocolTaskTypeResolution": "cli/protocol_task_type_resolution.py",  # [DI] OMN-19407 reads a resolved task type and decision rationale.
     # === [NODE] Bifrost shadow policy protocol ===
     # [NODE] DI boundary for shadow comparison policy — pluggable shadow policy interface (OMN-5570)
     "ProtocolShadowPolicy": "nodes/node_llm_inference_effect/handlers/bifrost/handler_bifrost_gateway.py",
@@ -242,6 +252,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "OmniGateValidatorCallable": "gate/validator_registry.py",
     # [NODE] OMN-11207 structural protocol for evidence bundles accepted by the writer
     "ProtocolEvidenceBundle": "utils/util_evidence_bundle_writer.py",
+    "ProtocolForwarderStateReader": "nodes/node_board_probe_effect/protocols/protocol_forwarder_state_reader.py",  # [NODE] OMN-19930 one-method read seam (observe) the board_probe forwarder_refused_topic check grades through; the Docker CLI reader implements it and tests inject a fake. Infra-local, not spi: a node-internal test seam bound to this probe, not a cross-repo contract.
 }
 
 # Duplicate protocol names that appear in multiple files (node-internal

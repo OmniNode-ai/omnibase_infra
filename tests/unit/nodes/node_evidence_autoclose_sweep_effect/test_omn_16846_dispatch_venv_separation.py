@@ -124,7 +124,13 @@ def test_dod_verify_argv_uses_the_sweep_interpreters_own_onex() -> None:
         "co-installed omnimarket) is decided by composition rather than by "
         "whatever project the process cwd happens to resolve to"
     )
-    assert argv[1:] == ["skill", "dod_verify", "OMN-16759"]
+    assert argv[1:] == [
+        "skill",
+        "dod_verify",
+        "OMN-16759",
+        "--execution-audience",
+        "hosted",
+    ], "the hosted sweep must not execute local_done_gate evidence"
 
 
 def test_dod_verify_argv_does_not_shell_out_through_uv_run() -> None:
@@ -137,6 +143,20 @@ def test_dod_verify_argv_does_not_shell_out_through_uv_run() -> None:
         "behaviour checks run pytest in, where the OMN-15620 purity gate "
         "correctly refuses it (run 33194402437: failed=3, "
         "behavior_proving=0)"
+    )
+
+
+def test_hosted_diagnostic_invocation_declares_its_audience() -> None:
+    """The workflow's direct diagnostic verifier uses the same hosted boundary."""
+    diagnostic_steps = [
+        str(step.get("run", ""))
+        for step in _steps()
+        if "== per-ticket dod_verify detail ==" in str(step.get("run", ""))
+    ]
+    assert len(diagnostic_steps) == 1
+    assert (
+        'skill dod_verify "${ticket}" --execution-audience hosted'
+        in diagnostic_steps[0]
     )
 
 
