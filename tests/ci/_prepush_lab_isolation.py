@@ -38,9 +38,12 @@ preserving the same strict direction as the lab isolation.
 
 from __future__ import annotations
 
+import atexit
+import shutil
 import tempfile
 
 _GH_CONFIG_DIR = tempfile.mkdtemp(prefix="prepush-gh-isolation-")
+atexit.register(shutil.rmtree, _GH_CONFIG_DIR, ignore_errors=True)
 
 #: Deliberately names no real row label. See the module docstring.
 #:
