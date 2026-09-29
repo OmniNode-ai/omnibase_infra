@@ -43,6 +43,11 @@ import re
 import subprocess
 from pathlib import Path
 
+import pytest
+
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
 from tests.ci._prepush_lab_isolation import network_free_lab_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -584,6 +589,58 @@ def test_guard_allows_a_genuinely_narrow_selection_on_a_local_host(
 # =============================================================================
 # The test harness itself must not spend a lab host (OMN-16991)
 # =============================================================================
+
+
+@pytest.mark.unit
+def test_lab_isolation_makes_the_remote_verify_leg_resolve_to_no_evidence() -> None:
+    """OMN-20063: real CI evidence must not let a refusal harness pass."""
+    env = scrub_git_location_env(os.environ)
+    env.update(network_free_lab_env())
+    fragment = network_free_lab_env()
+    config_dir = Path(fragment["GH_CONFIG_DIR"])
+    assert config_dir.is_dir()
+    assert not list(config_dir.iterdir())
+    assert env["GH_CONFIG_DIR"] == fragment["GH_CONFIG_DIR"]
+    for token in (
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "GH_ENTERPRISE_TOKEN",
+        "GITHUB_ENTERPRISE_TOKEN",
+    ):
+        assert fragment[token] == ""
+
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=REPO_ROOT,
+        env=scrub_git_location_env(env),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=True,
+    ).stdout.strip()
+    result = subprocess.run(
+        [
+            "uv",
+            "run",
+            "python",
+            "scripts/hooks/prepush_remote_verify.py",
+            "check",
+            "--head-sha",
+            head_sha,
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode in (1, 2), (
+        f"expected no evidence, got exit {result.returncode}: {output}"
+    )
+    assert "PASS" not in output
+    assert not list(config_dir.iterdir())
 
 
 def test_the_heavy_harness_never_dispatches_a_real_lab_run(tmp_path: Path) -> None:

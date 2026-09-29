@@ -27,9 +27,20 @@ with zero ssh, and stays correct when a row is added.
 It can only make the gate stricter. With no host placeable the lab leg produces
 no evidence and the hook falls through to its pre-existing precedence
 (GitHub-hosted verify -> grant -> die), which is exactly what these tests assert.
+
+OMN-20063 closes the third network surface: the GitHub-hosted remote-verify
+leg (OMN-16688) reads the real Actions API for HEAD's sha. On a queue-landed
+dev push, a green merge_group full-suite run on that exact sha already exists,
+so the hook passes instead of refusing. An empty gh config directory and empty
+authentication tokens keep that leg offline. This can only remove evidence,
+preserving the same strict direction as the lab isolation.
 """
 
 from __future__ import annotations
+
+import tempfile
+
+_GH_CONFIG_DIR = tempfile.mkdtemp(prefix="prepush-gh-isolation-")
 
 #: Deliberately names no real row label. See the module docstring.
 #:
@@ -48,5 +59,12 @@ LAB_ISOLATION_ENV = {
 
 
 def network_free_lab_env() -> dict[str, str]:
-    """Env fragment that makes the lab-dispatch leg network-free."""
-    return dict(LAB_ISOLATION_ENV)
+    """Env fragment that makes the lab and GitHub verification legs network-free."""
+    return {
+        **LAB_ISOLATION_ENV,
+        "GH_CONFIG_DIR": _GH_CONFIG_DIR,
+        "GH_TOKEN": "",
+        "GITHUB_TOKEN": "",
+        "GH_ENTERPRISE_TOKEN": "",
+        "GITHUB_ENTERPRISE_TOKEN": "",
+    }
