@@ -75,8 +75,8 @@ def _sweep_waiver(name: str) -> dict[str, SweepExclusion]:
     """A well-formed, unexpired synthetic sweep exclusion for ``name``.
 
     Used by the falsification controls below to isolate ONE layer at a time.
-    Never a fixture for production behaviour: EXTERNAL_SWEEP_EXCLUSIONS ships
-    empty, and TestExternalSweepExclusions pins that.
+    Never a fixture for production behaviour: TestExternalSweepExclusions pins
+    the shipped registry separately.
     """
 
     today = datetime.now(UTC).date()
@@ -2260,7 +2260,8 @@ class TestExternalSweepExclusions:
         OMN-18960 shipped this empty beside a weaker conclusion set, which the
         2026-09-21 ruling identified as a hidden allowlist. The first ten are
         every name the measurement found non-green on any head; the eleventh
-        (OMN-19218) is path-filtered and appeared on no measured head. Naming
+        (OMN-19218) is path-filtered and appeared on no measured head. The
+        twelfth is the OMN-19451 shadow context measured on 2026-09-29. Naming
         them is what makes the tolerance reviewable.
         """
         assert set(EXTERNAL_SWEEP_EXCLUSIONS) == {
@@ -2275,15 +2276,49 @@ class TestExternalSweepExclusions:
             "Image Size Analysis",
             "Hostile Reviewer (adversarial gate)",
             "Enforce clean + promoted build source",
+            "Delegation Health Check (shadow) / Delegation Health Check (shadow)",
         }
 
     def test_every_entry_carries_a_reason_an_owner_and_both_dates(self) -> None:
-        added_late = {"Enforce clean + promoted build source": "2026-09-22"}
+        delegation_name = (
+            "Delegation Health Check (shadow) / Delegation Health Check (shadow)"
+        )
+        added_late = {
+            "Enforce clean + promoted build source": "2026-09-22",
+            delegation_name: "2026-09-29",
+        }
+        expires_early = {delegation_name: "2026-10-13"}
         for name, entry in EXTERNAL_SWEEP_EXCLUSIONS.items():
             assert entry.reason.strip(), name
             assert entry.ticket.startswith("OMN-"), name
             assert entry.added == added_late.get(name, "2026-09-21"), name
-            assert entry.expires == "2026-12-20", name
+            assert entry.expires == expires_early.get(name, "2026-12-20"), name
+
+    def test_shadow_delegation_failure_is_excluded_by_exact_name(self) -> None:
+        name = "Delegation Health Check (shadow) / Delegation Health Check (shadow)"
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row(name, "failure"))
+        observation = datetime(2026, 9, 29, 17, 0, tzinfo=UTC)
+
+        def run(check_runs: list[dict[str, Any]]) -> tuple[int, str]:
+            return evaluate(
+                _all_gates("success"),
+                check_runs=check_runs,
+                external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+                now=observation,
+            )
+
+        code, report = run(rows)
+        assert code == EXIT_SUCCESS, report
+        assert f"external sweep exclusions applied: {name}" in report
+
+        unrelated = "Unrelated Unregistered Gate"
+        code, report = run([*rows, _row(unrelated, "failure")])
+        assert code == EXIT_FAILURE, report
+        assert (
+            f"external sweep failures (red, and named by NOTHING else): {unrelated} (failure)"
+            in report
+        )
 
     def test_no_entry_overlaps_the_registered_tuple(self) -> None:
         """A name in both would be judged by layer 4 and never reach layer 5."""
@@ -2297,9 +2332,8 @@ class TestExternalSweepExclusions:
 
         An expiry reaches a person through THIS red test rather than through a
         wedged pull request, because `active_sweep_exclusions` drops an expired
-        entry silently and re-arms the gate. Vacuous while the registry is
-        empty, and it is the assertion that stops the registry becoming
-        open-ended the day it is not.
+        entry silently and re-arms the gate. This assertion stops the registry
+        becoming open-ended.
         """
         _active, expired = active_sweep_exclusions(
             EXTERNAL_SWEEP_EXCLUSIONS, now=datetime.now(UTC)
@@ -2933,3 +2967,218 @@ class TestBusAclBoundaryGateOmn19928:
         assert env["OMN18012_REQUIRE_HARNESS"] == "1"
         # It must never adopt a declared broker: no OMN18012_BROKER_* is passed.
         assert not any(key.startswith("OMN18012_BROKER_") for key in env)
+
+
+# OMN-20077 -- the exact shape of the check-run that CI Summary let through on
+# omnibase_infra#4274 (head 4d61341048f70a3a890c3bac6e7087f253cf5936, merged
+# 2026-09-29T07:47:45Z). GitHub reported status in_progress AND conclusion
+# failure on the same row; the gate read the status and never the conclusion.
+INTEGRATION_TEST_COVERAGE_4274: dict[str, Any] = {
+    "id": 109295007859,
+    "name": "Integration Test Coverage",
+    "status": "in_progress",
+    "conclusion": "failure",
+    "started_at": "2026-09-29T07:03:18Z",
+    "completed_at": "2026-09-29T07:03:27Z",
+    "head_sha": "4d61341048f70a3a890c3bac6e7087f253cf5936",
+    "app": {"slug": "github-actions"},
+}
+# The poll that concluded SUCCESS on that head, 22 minutes after the row's
+# completed_at, which is past the 1200 s failure grace.
+NOW_4274 = datetime(2026, 9, 29, 7, 25, 58, tzinfo=UTC)
+RUNNING_FAILURE_CONCLUSIONS = (
+    "failure",
+    "timed_out",
+    "action_required",
+    "startup_failure",
+    "stale",
+)
+
+
+class TestRunningRowWithFailureConclusionOmn20077:
+    """A row carrying a failure conclusion is red whatever its status says."""
+
+    @staticmethod
+    def _green_rows() -> list[dict[str, Any]]:
+        return [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+
+    def test_running_failure_row_from_4274_reds_the_layer5_sweep(self) -> None:
+        """The defect itself: SUCCESS on origin/dev, FAILURE after the fix."""
+        rows = [*self._green_rows(), INTEGRATION_TEST_COVERAGE_4274]
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW_4274,
+        )
+        assert code == EXIT_FAILURE, report
+        assert "Integration Test Coverage (failure" in report
+
+    @pytest.mark.parametrize("conclusion", RUNNING_FAILURE_CONCLUSIONS)
+    def test_running_failure_row_every_failure_class_conclusion_reds(
+        self, conclusion: str
+    ) -> None:
+        rows = [
+            *self._green_rows(),
+            _row("Some Unregistered Gate", conclusion, status="in_progress"),
+        ]
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_FAILURE, (conclusion, report)
+
+    def test_running_failure_row_with_no_conclusion_stays_in_flight(self) -> None:
+        """Unchanged: a running row with no verdict is reported, not waited on."""
+        rows = [
+            *self._green_rows(),
+            _row("Some Unregistered Gate", None, status="in_progress"),
+        ]
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_SUCCESS, report
+        assert "still running" in report
+
+    @pytest.mark.parametrize("conclusion", ["success", "skipped", "neutral"])
+    def test_running_failure_row_a_running_good_conclusion_never_passes_or_reds(
+        self, conclusion: str
+    ) -> None:
+        """A running row with a non-failure conclusion is not a verdict either way."""
+        rows = [
+            *self._green_rows(),
+            _row("Some Unregistered Gate", conclusion, status="in_progress"),
+        ]
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_SUCCESS, (conclusion, report)
+        assert "Some Unregistered Gate" in report
+        assert "still running" in report
+
+    def test_running_failure_row_inside_the_failure_grace_is_pending(self) -> None:
+        """The OMN-17864 grace applies to a running failure row exactly as to a completed one."""
+        fresh = (NOW - timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = [
+            *self._green_rows(),
+            _row("Some Unregistered Gate", "failure", status="in_progress")
+            | {"completed_at": fresh},
+        ]
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_PENDING, report
+
+    def test_running_failure_row_completed_failure_inside_the_grace_is_unchanged(
+        self,
+    ) -> None:
+        fresh = (NOW - timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = [
+            *self._green_rows(),
+            _row("Some Unregistered Gate", "failure") | {"completed_at": fresh},
+        ]
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_PENDING, report
+
+    def test_running_failure_row_cancelled_inside_the_cancellation_grace_is_pending(
+        self,
+    ) -> None:
+        fresh = (NOW - timedelta(seconds=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = [
+            *self._green_rows(),
+            _row("Some Unregistered Gate", "cancelled", status="in_progress")
+            | {"completed_at": fresh},
+        ]
+        code, report = evaluate(
+            _all_gates("success"),
+            check_runs=rows,
+            external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+            now=NOW,
+        )
+        assert code == EXIT_PENDING, report
+
+    def test_running_failure_row_expected_external_context_reds_instead_of_waiting(
+        self,
+    ) -> None:
+        """Layer 4: an asserted context with a running failure row is a failure."""
+        context = HISTORICAL_EXTERNAL_CONTEXTS[0]
+        failures, unresolved = evaluate_external_contexts(
+            [_row(context, "failure", status="in_progress")],
+            (context,),
+            now=NOW,
+        )
+        assert failures == [context]
+        assert unresolved == []
+
+    def test_running_failure_row_expected_context_running_stays_unresolved(
+        self,
+    ) -> None:
+        context = HISTORICAL_EXTERNAL_CONTEXTS[0]
+        for conclusion in (None, "success"):
+            failures, unresolved = evaluate_external_contexts(
+                [_row(context, conclusion, status="in_progress")],
+                (context,),
+                now=NOW,
+            )
+            assert failures == [], conclusion
+            assert unresolved == [context], conclusion
+
+    def test_running_failure_row_in_run_job_outside_the_gates_reds(self) -> None:
+        """Layer 3: a non-gate job of this run with a running failure row."""
+        jobs = [
+            *_all_gates("success"),
+            _job("Some Other Job", "failure", status="in_progress"),
+        ]
+        code, report = evaluate(jobs)
+        assert code == EXIT_FAILURE, report
+        assert "Some Other Job" in report
+
+    def test_running_failure_row_in_run_strict_gate_reds_instead_of_pending(
+        self,
+    ) -> None:
+        """Layer 1: a strict gate that reports failure is red, not pending."""
+        gate = STRICT_GATE_JOBS[0]
+        jobs = [
+            _job(g, "success")
+            for g in (*STRICT_GATE_JOBS, *SKIPPABLE_GATE_JOBS)
+            if g != gate
+        ]
+        jobs.append(_job(gate, "failure", status="in_progress"))
+        code, report = evaluate(jobs)
+        assert code == EXIT_FAILURE, report
+
+    def test_running_failure_row_duplicate_job_name_keeps_the_failure(self) -> None:
+        """A running failure row outranks a same-attempt running duplicate."""
+        jobs = [
+            *_all_gates("success"),
+            _job("Some Other Job", "failure", status="in_progress"),
+            _job("Some Other Job", None, status="in_progress"),
+        ]
+        code, report = evaluate(jobs)
+        assert code == EXIT_FAILURE, report
+
+    def test_running_failure_row_a_running_job_with_no_conclusion_is_not_a_verdict(
+        self,
+    ) -> None:
+        jobs = [
+            *_all_gates("success"),
+            _job("Some Other Job", None, status="in_progress"),
+        ]
+        code, report = evaluate(jobs)
+        assert code == EXIT_SUCCESS, report

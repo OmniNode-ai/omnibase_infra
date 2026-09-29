@@ -4147,6 +4147,8 @@ jobs:
           # unreachable base fails loudly inside the script with remediation.
           APPLICATION_SQL_BASE_REVISION: >-
             ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        # OMN-17427: pull_request.base.sha does not advance when dev moves;
+        # the merge ref's first parent is the base tip used for that merge.
         run: >-
           uv run python scripts/ci/check_application_database_sql.py
           --base-revision "$APPLICATION_SQL_BASE_REVISION"
@@ -4154,6 +4156,7 @@ jobs:
           --ownership-manifest .proof-dependencies/omnimarket/scripts/application-relation-ownership.yaml
           --ownership-manifest .proof-dependencies/omninode-infra/db/migrations/application-relation-ownership.yaml
           --ownership-manifest .proof-dependencies/omninode-infra/k8s/migrations/application-relation-ownership.yaml
+          ${{ github.event_name == 'pull_request' && '--pull-request-merge-ref' || '' }}
 
       # Public-fork pull_request jobs cannot receive organization secrets, and
       # (OMN-16152) neither can dependabot-triggered pull_request jobs even
@@ -4175,6 +4178,7 @@ jobs:
           --base-revision "$APPLICATION_SQL_BASE_REVISION"
           --head-revision HEAD
           --ownership-manifest .proof-dependencies/omnimarket/scripts/application-relation-ownership.yaml
+          ${{ github.event_name == 'pull_request' && '--pull-request-merge-ref' || '' }}
 
       - name: Verify Docker engine
         run: docker info
