@@ -17,6 +17,12 @@ from omnibase_infra.nodes.node_board_probe_effect.models.enum_board_probe_outcom
 from omnibase_infra.nodes.node_board_probe_effect.models.model_board_probe_result import (
     ModelBoardProbeResult,
 )
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_observation import (
+    ModelConsumerFlowObservation,
+)
+from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_request import (
+    ModelConsumerFlowRequest,
+)
 from omnibase_infra.nodes.node_board_probe_effect.models.model_forwarder_refused_topic_request import (
     ModelForwarderRefusedTopicRequest,
 )
@@ -25,6 +31,8 @@ from omnibase_infra.nodes.node_board_probe_effect.models.model_forwarder_state_o
 )
 
 __all__ = [
+    "ModelConsumerFlowObservation",
+    "ModelConsumerFlowRequest",
     "EnumBoardCheckId",
     "EnumBoardCheckSurfaceClass",
     "EnumBoardProbeOutcome",

@@ -32,6 +32,7 @@ class EnumLabProofCheck(StrEnum):
     # lab_hardware (OMN-19930): the lab lane's gateway forwarder is up and its
     # cloud leg refuses no inbound topic.
     FORWARDER_REFUSED_TOPIC = "forwarder_refused_topic"
+    CONSUMER_FLOW = "consumer_flow"
     # Hand-run recipe checks (profiles with execution manual_recipe). Declared so
     # a hand-run row names its checks in the same vocabulary a node row does.
     RUNTIME_IMAGE_IDENTITY = "runtime_image_identity"
