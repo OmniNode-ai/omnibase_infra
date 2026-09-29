@@ -849,6 +849,10 @@ class DLQProducer:
                 ("x-replay-correlation-id", str(replay_correlation_id).encode("utf-8")),
                 ("correlation_id", str(message.correlation_id).encode("utf-8")),
             ]
+            if message.original_message_id is not None:
+                headers.append(
+                    ("message_id", str(message.original_message_id).encode("utf-8"))
+                )
 
         # OMN-17896: last-resort refusal. ``should_replay`` already refuses an
         # empty or unreadable body, so this is unreachable in the wired path --

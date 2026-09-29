@@ -107,6 +107,7 @@ _PINNED_CONTRACTS = _pinned_contracts_root(_PROOF_DEPENDENCIES)
 # will tell you when to take it out.
 _INTERIM_ENTRIES: dict[str, str] = {
     "lab_proof_receipts": "omnimarket#3043",
+    "board_probe_results": "omnimarket#3061",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
     "lab_container_memory_window": "omnimarket#3051",
 }
