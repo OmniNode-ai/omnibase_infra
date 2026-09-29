@@ -2260,8 +2260,7 @@ class TestExternalSweepExclusions:
         OMN-18960 shipped this empty beside a weaker conclusion set, which the
         2026-09-21 ruling identified as a hidden allowlist. The first ten are
         every name the measurement found non-green on any head; the eleventh
-        (OMN-19218) is path-filtered and appeared on no measured head. The
-        twelfth is the OMN-19451 shadow context measured on 2026-09-29. Naming
+        (OMN-19218) is path-filtered and appeared on no measured head. Naming
         them is what makes the tolerance reviewable.
         """
         assert set(EXTERNAL_SWEEP_EXCLUSIONS) == {
@@ -2276,49 +2275,46 @@ class TestExternalSweepExclusions:
             "Image Size Analysis",
             "Hostile Reviewer (adversarial gate)",
             "Enforce clean + promoted build source",
-            "Delegation Health Check (shadow) / Delegation Health Check (shadow)",
         }
 
     def test_every_entry_carries_a_reason_an_owner_and_both_dates(self) -> None:
-        delegation_name = (
-            "Delegation Health Check (shadow) / Delegation Health Check (shadow)"
-        )
-        added_late = {
-            "Enforce clean + promoted build source": "2026-09-22",
-            delegation_name: "2026-09-29",
-        }
-        expires_early = {delegation_name: "2026-10-13"}
+        added_late = {"Enforce clean + promoted build source": "2026-09-22"}
         for name, entry in EXTERNAL_SWEEP_EXCLUSIONS.items():
             assert entry.reason.strip(), name
             assert entry.ticket.startswith("OMN-"), name
             assert entry.added == added_late.get(name, "2026-09-21"), name
-            assert entry.expires == expires_early.get(name, "2026-12-20"), name
+            assert entry.expires == "2026-12-20", name
 
-    def test_shadow_delegation_failure_is_excluded_by_exact_name(self) -> None:
-        name = "Delegation Health Check (shadow) / Delegation Health Check (shadow)"
+    def test_a_red_delegation_health_check_fails_ci_summary(self) -> None:
+        """OMN-19451 / OMN-19998: the check blocks; nothing admits its red.
+
+        It shipped as a "(shadow)" job and was then excluded from the sweep by
+        name (#4312). The 2026-09-29T12:02:35Z operator ruling removed every
+        observe-only mode, so the context is REGISTERED (layer 4 asserts it
+        present, completed and green) and no exclusion names it.
+        """
+        name = "delegation-health-check / Delegation Health Check"
+        assert name in EXPECTED_EXTERNAL_CONTEXTS
+        assert name not in EXTERNAL_SWEEP_EXCLUSIONS
+        assert not any("Delegation Health" in n for n in EXTERNAL_SWEEP_EXCLUSIONS)
+        observation = datetime(2026, 9, 29, 21, 0, tzinfo=UTC)
+        expected = (*HISTORICAL_EXTERNAL_CONTEXTS, name)
         rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
-        rows.append(_row(name, "failure"))
-        observation = datetime(2026, 9, 29, 17, 0, tzinfo=UTC)
 
         def run(check_runs: list[dict[str, Any]]) -> tuple[int, str]:
             return evaluate(
                 _all_gates("success"),
                 check_runs=check_runs,
-                external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+                external_contexts=expected,
                 now=observation,
             )
 
-        code, report = run(rows)
-        assert code == EXIT_SUCCESS, report
-        assert f"external sweep exclusions applied: {name}" in report
-
-        unrelated = "Unrelated Unregistered Gate"
-        code, report = run([*rows, _row(unrelated, "failure")])
+        code, report = run([*rows, _row(name, "failure")])
         assert code == EXIT_FAILURE, report
-        assert (
-            f"external sweep failures (red, and named by NOTHING else): {unrelated} (failure)"
-            in report
-        )
+        assert name in report
+
+        code, report = run([*rows, _row(name)])
+        assert code == EXIT_SUCCESS, report
 
     def test_no_entry_overlaps_the_registered_tuple(self) -> None:
         """A name in both would be judged by layer 4 and never reach layer 5."""
