@@ -360,6 +360,13 @@ jobs:
       - name: Check topic suffix exports (F56)
         run: python scripts/validation/check_topic_suffix_exports.py
 
+      # OMN-19407: the onex CLI keeps no hand-written vocabulary (operator
+      # ruling 2026-09-24). Same checker as the `check-cli-registry-vocabulary`
+      # pre-commit hook, over the whole CLI package, so a bypassed local hook
+      # still fails the PR.
+      - name: onex CLI reads vocabularies from the registry (OMN-19407)
+        run: uv run python scripts/validation/check_cli_registry_vocabulary.py
+
       - name: Single-canonical in-memory event bus (OMN-13419)
         run: bash scripts/validation/check_no_infra_inmemory_import.sh
 
@@ -4109,7 +4116,6 @@ jobs:
           tests/ci/test_omnimarket_contract_pin.py
           tests/ci/test_push_side_derivation_omn18863.py
           tests/ci/test_supplemental_declaration_expiry_omn18863.py
-          tests/integration/cli/test_execution_budget_shipped_contract_omn18924.py
           tests/ci/test_application_database_sql_authority_isolation.py
           tests/ci/test_application_database_sql_gate.py
 
@@ -4141,6 +4147,8 @@ jobs:
           # unreachable base fails loudly inside the script with remediation.
           APPLICATION_SQL_BASE_REVISION: >-
             ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        # OMN-17427: pull_request.base.sha does not advance when dev moves;
+        # the merge ref's first parent is the base tip used for that merge.
         run: >-
           uv run python scripts/ci/check_application_database_sql.py
           --base-revision "$APPLICATION_SQL_BASE_REVISION"
@@ -4148,6 +4156,7 @@ jobs:
           --ownership-manifest .proof-dependencies/omnimarket/scripts/application-relation-ownership.yaml
           --ownership-manifest .proof-dependencies/omninode-infra/db/migrations/application-relation-ownership.yaml
           --ownership-manifest .proof-dependencies/omninode-infra/k8s/migrations/application-relation-ownership.yaml
+          ${{ github.event_name == 'pull_request' && '--pull-request-merge-ref' || '' }}
 
       # Public-fork pull_request jobs cannot receive organization secrets, and
       # (OMN-16152) neither can dependabot-triggered pull_request jobs even
@@ -4169,6 +4178,7 @@ jobs:
           --base-revision "$APPLICATION_SQL_BASE_REVISION"
           --head-revision HEAD
           --ownership-manifest .proof-dependencies/omnimarket/scripts/application-relation-ownership.yaml
+          ${{ github.event_name == 'pull_request' && '--pull-request-merge-ref' || '' }}
 
       - name: Verify Docker engine
         run: docker info

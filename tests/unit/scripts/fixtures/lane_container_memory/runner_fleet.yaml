@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# The shape of ~/.omnibase/runners/config/runner_fleet.yaml on .202 (read
+# 2026-09-28): a scalar prefix at the top, and per-host prefixes, some nested in
+# role pools, under `hosts:`. Only the `hosts:` prefixes select runners.
+runner_name_prefix: omninode-runner
+hosts:
+  lab-201:
+    runner_name_prefix: omninode-runner
+  lab-202:
+    runner_name_prefix: omnipc2-verify-runner
+    pools:
+      - runner_name_prefix: omnipc2-ci-runner
+      - runner_name_prefix: omnipc2-customer-plane-runner
