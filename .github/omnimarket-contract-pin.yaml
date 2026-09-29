@@ -32,4 +32,4 @@
 # An `Omnimarket-Source-Ref: <ref>` PR-body trailer still overrides this pin for
 # cross-repo co-development (OMN-15703's escape hatch, unchanged).
 repository: OmniNode-ai/omnimarket
-omnimarket_contract_ref: 67cae0fe3b806a3b738ca618d555e0046fdf7841
+omnimarket_contract_ref: 29dc6ae208dbd9a3484d80a0d1429568e6ea9e14
