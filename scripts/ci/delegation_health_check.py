@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Check delegation verdicts for runtime PRs and enforce shadow rollout age."""
+"""Check delegation verdicts for runtime PRs; a red verdict blocks the PR."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import os
 import re
 import sys
 from collections.abc import Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from io import StringIO
 from pathlib import Path
 from typing import TextIO
@@ -27,7 +27,7 @@ from scripts import runtime_change_classifier
 from scripts.ci import lab_pass_receipt
 
 FIX_FORWARD_LABEL = "delegation-fix-forward"
-CHECK_JOB_NAME = "Delegation Health Check (shadow)"
+CHECK_JOB_NAME = "Delegation Health Check"
 
 
 class ModelVerdictSource(BaseModel):
@@ -44,23 +44,12 @@ class ModelVerdictSource(BaseModel):
     dispatch_title_contains: str = ""
 
 
-class ModelRepoRollout(BaseModel):
-    """The start of shadow observation and required-check state for a repo."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    shadow_started_at: date
-    required: bool
-
-
 class ModelHealthConfig(BaseModel):
-    """Configured verdict sources and mutable per-repository rollout state."""
+    """Configured verdict sources."""
 
     model_config = ConfigDict(extra="forbid")
 
-    shadow_days_required: int
     sources: tuple[ModelVerdictSource, ...]
-    repos: dict[str, ModelRepoRollout]
 
 
 class ModelFixForwardReading(BaseModel):
@@ -164,25 +153,12 @@ def evaluate_delegation_health(
     return 1
 
 
-def validate_rollout(cfg: ModelHealthConfig, *, now: datetime) -> list[str]:
-    """Refuse required checks before the configured shadow period has elapsed."""
-    errors: list[str] = []
-    for repo, rollout in cfg.repos.items():
-        days = (now.date() - rollout.shadow_started_at).days
-        if rollout.required and days < cfg.shadow_days_required:
-            errors.append(
-                f"{repo}: only {days} shadow days elapsed; "
-                f"{cfg.shadow_days_required} days required before making the check required."
-            )
-    return errors
-
-
 def _comma_separated(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Classify the PR, validate rollout, and persist the check's decision."""
+    """Classify the PR, read the verdicts, and persist the check decision."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config",
@@ -208,29 +184,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     errors: list[str] = []
     try:
         cfg = load_config(args.config)
-        errors = validate_rollout(cfg, now=now)
-        if not errors:
-            labels = _comma_separated(args.labels)
-            classifier = runtime_change_classifier.load_runtime_path_classifier(
-                args.runtime_validator
-            )
-            runtime_paths = runtime_change_classifier.classify_runtime_paths(
-                _comma_separated(args.changed_files),
-                classifier,
-                source_repo=args.repo_key,
-            )
-            runtime_affecting = runtime_change_classifier.is_runtime_affecting(
-                runtime_paths, labels
-            )
-            record["runtime_affecting"] = runtime_affecting
-            code = evaluate_delegation_health(
-                cfg.sources,
-                runtime_affecting=runtime_affecting,
-                labels=labels,
-                out=sys.stdout,
-                now=now,
-                record=record,
-            )
+        labels = _comma_separated(args.labels)
+        classifier = runtime_change_classifier.load_runtime_path_classifier(
+            args.runtime_validator
+        )
+        runtime_paths = runtime_change_classifier.classify_runtime_paths(
+            _comma_separated(args.changed_files),
+            classifier,
+            source_repo=args.repo_key,
+        )
+        runtime_affecting = runtime_change_classifier.is_runtime_affecting(
+            runtime_paths, labels
+        )
+        record["runtime_affecting"] = runtime_affecting
+        code = evaluate_delegation_health(
+            cfg.sources,
+            runtime_affecting=runtime_affecting,
+            labels=labels,
+            out=sys.stdout,
+            now=now,
+            record=record,
+        )
     except (OSError, ValueError, yaml.YAMLError) as exc:
         errors.append(str(exc))
     for error in errors:

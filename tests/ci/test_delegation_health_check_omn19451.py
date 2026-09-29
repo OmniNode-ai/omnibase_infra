@@ -6,14 +6,16 @@ AC1: a replayed red run makes the check fail on a runtime-affecting PR and the
      failure names the red run id.
 AC2: a typed fix-forward label naming a ticket admits the PR and is recorded; a
      label with no ticket id is refused.
-AC3: the check marked required with fewer than 7 days of shadow runs fails.
+AC3 (amended by operator ruling 2026-09-29T12:02:35Z, OMN-19998): there is no
+     shadow state. The check's context is asserted by CI Summary on every pull
+     request and merge-queue head, and nothing excludes its red.
 """
 
 from __future__ import annotations
 
 import io
 import json
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +27,7 @@ pytestmark = pytest.mark.unit
 
 NOW = datetime(2026, 9, 29, 12, 0, 0, tzinfo=UTC)
 CONFIG = Path("config/delegation_health_check.yaml")
+CONTEXT = "delegation-health-check / Delegation Health Check"
 
 
 def _run(run_id: int, *, conclusion: str, repo: str) -> dict[str, Any]:
@@ -92,7 +95,7 @@ class TestAC1RedVerdictFailsRuntimePRs:
         assert "delegation-regression-nightly" in output
 
     def test_a_red_m4_verdict_fails_and_names_the_run(self, monkeypatch: Any) -> None:
-        _replay(monkeypatch, {"m4-customer-pass-verdict.yml": 777001})
+        _replay(monkeypatch, {"m4-c17-customer-surface-verdict.yml": 777001})
         code, output, _ = _check()
         assert code == 1
         assert "777001" in output
@@ -130,15 +133,23 @@ class TestAC1RedVerdictFailsRuntimePRs:
         assert code == 1
         assert "unreadable" in output
 
-    def test_the_configured_sources_cover_the_nightly_and_every_m4_verdict(
+    def test_the_configured_sources_are_the_nightly_and_the_m4_verdicts(
         self,
     ) -> None:
-        names = {s.name for s in _sources()}
-        assert "delegation-regression-nightly" in names
-        assert {s.workflow for s in _sources() if s.name.startswith("m4-")} == {
-            "m4-customer-pass-verdict.yml",
+        assert {s.workflow for s in _sources()} == {
+            "delegation-regression-nightly.yml",
             "m4-c17-customer-surface-verdict.yml",
         }
+
+    def test_the_staging_c9_walk_is_not_an_m4_source(self) -> None:
+        """C9 grades the staging plane and belongs to M4.5, not M4.
+
+        Operator ruling 2026-09-22T20:35:26Z moved the cloud-plane criteria C8,
+        C9 and C10 to M4.5; ruling 2026-09-28T17:47:08Z put staging recovery on
+        hold. Reading m4-customer-pass-verdict.yml here blocked every runtime
+        PR on a staging outage no runtime PR can repair.
+        """
+        assert "m4-customer-pass-verdict.yml" not in {s.workflow for s in _sources()}
 
 
 class TestAC2FixForwardLabel:
@@ -189,55 +200,82 @@ class TestAC2FixForwardLabel:
         assert reading.refused == ("delegation-fix-forward",)
 
 
-class TestAC3ShadowBeforeRequired:
-    def test_the_shipped_config_is_shadow(self) -> None:
-        cfg = dh.load_config(CONFIG)
-        assert dh.validate_rollout(cfg, now=NOW) == []
-        assert all(not r.required for r in cfg.repos.values())
+class TestAC3NoShadowState:
+    def test_the_check_carries_no_shadow_label(self) -> None:
+        assert dh.CHECK_JOB_NAME == "Delegation Health Check"
 
-    def test_required_with_fewer_than_seven_days_of_shadow_is_refused(self) -> None:
-        cfg = dh.load_config(CONFIG)
-        cfg.repos["omnimarket"] = dh.ModelRepoRollout(
-            shadow_started_at=date(2026, 9, 25), required=True
+    def test_the_config_declares_no_rollout_state(self) -> None:
+        import yaml
+
+        raw = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+        assert set(raw) == {"sources"}
+
+    def test_ci_summary_asserts_the_context_and_excludes_nothing(self) -> None:
+        from scripts.ci.ci_summary_gate import (
+            EXPECTED_EXTERNAL_CONTEXTS,
+            EXTERNAL_SWEEP_EXCLUSIONS,
         )
-        errors = dh.validate_rollout(cfg, now=NOW)
-        assert len(errors) == 1
-        assert "omnimarket" in errors[0]
-        assert "7" in errors[0]
 
-    def test_required_after_seven_days_is_allowed(self) -> None:
-        cfg = dh.load_config(CONFIG)
-        cfg.repos["omnimarket"] = dh.ModelRepoRollout(
-            shadow_started_at=date(2026, 9, 22), required=True
+        assert CONTEXT in EXPECTED_EXTERNAL_CONTEXTS
+        assert not any(
+            "Delegation Health" in name for name in EXTERNAL_SWEEP_EXCLUSIONS
         )
-        assert dh.validate_rollout(cfg, now=NOW) == []
 
-    def test_infra_ci_summary_registration_matches_the_declared_state(self) -> None:
-        from scripts.ci.ci_summary_gate import STRICT_GATE_JOBS
 
-        cfg = dh.load_config(CONFIG)
-        registered = dh.CHECK_JOB_NAME in STRICT_GATE_JOBS
-        assert registered == cfg.repos["omnibase_infra"].required
+def _workflow(name: str) -> tuple[dict[Any, Any], str]:
+    import yaml
+
+    path = Path(".github/workflows") / name
+    text = path.read_text(encoding="utf-8")
+    return yaml.safe_load(text), text
 
 
 class TestWorkflowWiring:
     def test_the_reusable_runs_the_script_from_the_pinned_workflow_sha(self) -> None:
-        import yaml
-
-        path = Path(".github/workflows/delegation-health-reusable.yml")
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        doc, text = _workflow("delegation-health-reusable.yml")
         assert "workflow_call" in doc[True]
-        text = path.read_text(encoding="utf-8")
         assert "github.job_workflow_sha" in text
         assert "scripts/ci/delegation_health_check.py" in text
+        assert doc["jobs"]["delegation-health"]["name"] == dh.CHECK_JOB_NAME
 
-    def test_the_caller_passes_labels_and_reacts_to_label_changes(self) -> None:
-        import yaml
+    def test_the_caller_reports_on_pull_requests_and_queue_heads(self) -> None:
+        doc, _ = _workflow("delegation-health-check.yml")
+        triggers = doc[True]
+        assert {"labeled", "unlabeled"} <= set(triggers["pull_request"]["types"])
+        assert "merge_group" in triggers
+        assert "paths" not in (triggers["pull_request"] or {})
 
-        path = Path(".github/workflows/delegation-health-check.yml")
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
-        types = doc[True]["pull_request"]["types"]
-        assert {"labeled", "unlabeled"} <= set(types)
-        job = doc["jobs"]["delegation-health"]
+    def test_the_caller_job_cannot_skip_as_passed(self) -> None:
+        doc, _ = _workflow("delegation-health-check.yml")
+        assert list(doc["jobs"]) == ["delegation-health-check"]
+        job = doc["jobs"]["delegation-health-check"]
         assert job["with"]["repo_key"] == "omnibase_infra"
-        assert "labels" in job["with"]
+        for key in ("needs", "if", "continue-on-error"):
+            assert key not in job, key
+
+    def test_the_check_run_is_the_registered_context(self) -> None:
+        """`<caller job id> / <called job name>`, with no caller `name:`.
+
+        That is the spelling EXPECTED_EXTERNAL_CONTEXTS asserts and the prefix
+        the omniclaude advisory-job gate matches a called workflow's job by.
+        """
+        caller, _ = _workflow("delegation-health-check.yml")
+        reusable, _ = _workflow("delegation-health-reusable.yml")
+        (job_id,) = caller["jobs"]
+        assert "name" not in caller["jobs"][job_id]
+        inner = reusable["jobs"]["delegation-health"]["name"]
+        assert f"{job_id} / {inner}" == CONTEXT
+
+    def test_queue_heads_never_share_a_concurrency_group(self) -> None:
+        doc, _ = _workflow("delegation-health-check.yml")
+        assert "github.ref" in doc["concurrency"]["group"]
+
+    def test_the_reusable_derives_files_and_labels_for_both_events(self) -> None:
+        doc, text = _workflow("delegation-health-reusable.yml")
+        assert set(doc[True]["workflow_call"]["inputs"]) == {"repo_key"}
+        assert "pull_request)" in text and "merge_group)" in text
+        assert "github.event.merge_group.head_ref" in text
+        assert "steps.event.outputs.files" in text
+        assert "steps.event.outputs.labels" in text
+        steps = doc["jobs"]["delegation-health"]["steps"]
+        assert not any(step.get("continue-on-error") for step in steps)
