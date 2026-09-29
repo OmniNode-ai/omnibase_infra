@@ -40,17 +40,6 @@ from omnibase_infra.cli.cli_delegate import delegate_command
 
 pytestmark = pytest.mark.integration
 
-#: Same committed stand-in vocabulary the sibling module uses, for the same
-#: reason: this repo does not depend on omnimarket by layering, so the packaged
-#: task-class contract the CLI resolves is simply absent here and every
-#: delegation would refuse before reaching the code under test.
-STAND_IN_TASK_CLASS_CONTRACT = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "delegation"
-    / "omn18305"
-    / "task_class_contracts_vocabulary.yaml"
-)
 
 #: A delegate-shaped contract standing in for the omnimarket-provided
 #: orchestrator, which this repo does not depend on by layering and therefore
@@ -90,11 +79,6 @@ def _no_ambient_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.delenv("OMNI_HOME", raising=False)
     monkeypatch.setattr(cli_delegate, "check_omnimarket_drift", lambda **_: None)
-    monkeypatch.setattr(
-        cli_delegate,
-        "resolve_task_class_contract_path",
-        lambda: STAND_IN_TASK_CLASS_CONTRACT,
-    )
 
 
 @pytest.fixture(autouse=True)

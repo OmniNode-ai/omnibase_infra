@@ -287,6 +287,19 @@ repos:
         pass_filenames: true
         stages: [pre-commit]
         exclude: ^(archived/|workspace/sibling-repos/).*$
+      # OMN-19407: the onex CLI keeps no hand-written vocabulary. Operator
+      # ruling 2026-09-24: everything is fetched from the registry. Refuses a
+      # `*_CHOICES` literal, a click.Choice over a literal list, and a
+      # multi-string Literal in any CLI module, unless the line carries
+      # `# cli-own-vocabulary: <reason>` for a vocabulary the CLI itself owns.
+      # SYNC with the ci.yml step of the same name.
+      - id: check-cli-registry-vocabulary
+        name: onex CLI reads vocabularies from the registry (OMN-19407)
+        entry: uv run --frozen python scripts/validation/check_cli_registry_vocabulary.py
+        language: system
+        pass_filenames: true
+        stages: [pre-commit]
+        files: ^src/omnibase_infra/cli/.*\.py$
       # Cleanup: Clear tmp/ directory before commits
       - id: clean-tmp-directory
         name: Clean tmp directory

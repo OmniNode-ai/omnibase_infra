@@ -66,7 +66,7 @@ dependencies = [
     # Core dependencies
     "pydantic>=2.11.7,<3.0.0",
     "fastapi>=0.120.1,<0.142.0",
-    "uvicorn>=0.32.0,<0.54.0",
+    "uvicorn>=0.32.0,<0.55.0",
     "pyyaml>=6.0.2,<7.0.0",
     # OMN-15688 (2026-08-04): floor raised to 3.14.3 to clear CVE-2026-69244
     # (HIGH, out-of-bounds heap read in the C HTTP response parser error path
@@ -631,6 +631,7 @@ node_auth_gate_compute = "omnibase_infra.nodes.node_auth_gate_compute"
 node_baseline_capture = "omnibase_infra.nodes.node_baseline_capture"
 node_baseline_comparison_compute = "omnibase_infra.nodes.node_baseline_comparison_compute"
 node_baselines_batch_compute = "omnibase_infra.nodes.node_baselines_batch_compute"
+node_board_probe_effect = "omnibase_infra.nodes.node_board_probe_effect"
 node_broker_disk_watermark_compute = "omnibase_infra.nodes.node_broker_disk_watermark_compute"
 node_build_loop_projection_compute = "omnibase_infra.nodes.node_build_loop_projection_compute"
 node_build_loop_write_effect = "omnibase_infra.nodes.node_build_loop_write_effect"
@@ -688,6 +689,8 @@ node_llm_completion_effect = "omnibase_infra.nodes.node_llm_completion_effect"
 node_llm_embedding_effect = "omnibase_infra.nodes.node_llm_embedding_effect"
 node_llm_inference_effect = "omnibase_infra.nodes.node_llm_inference_effect"
 node_merge_gate_effect = "omnibase_infra.nodes.node_merge_gate_effect"
+node_merge_provenance_compute = "omnibase_infra.nodes.node_merge_provenance_compute"
+node_merge_provenance_observe_effect = "omnibase_infra.nodes.node_merge_provenance_observe_effect"
 node_merge_sweep_auto_merge_effect = "omnibase_infra.nodes.node_merge_sweep_auto_merge_effect"
 node_merge_sweep_classify_compute = "omnibase_infra.nodes.node_merge_sweep_classify_compute"
 node_merge_sweep_pr_list_effect = "omnibase_infra.nodes.node_merge_sweep_pr_list_effect"

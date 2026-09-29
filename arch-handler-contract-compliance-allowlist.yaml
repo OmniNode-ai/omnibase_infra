@@ -173,3 +173,10 @@ allowlisted_handlers:
     violations:
       - missing_handler_routing
     ticket: 'OMN-9194'
+  # OMN-19927: the GitHub REST binding of the observe effect's read port. It is
+  # injected into the routed handler (HandlerMergeProvenanceObserve) through
+  # ProtocolMergeGroupRunReader and is never dispatched a payload of its own.
+  - path: omnibase_infra/nodes/node_merge_provenance_observe_effect/handlers/handler_merge_group_run_read_github.py
+    violations:
+      - missing_handler_routing
+    ticket: 'OMN-19927'
