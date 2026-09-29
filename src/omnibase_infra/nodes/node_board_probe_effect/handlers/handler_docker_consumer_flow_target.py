@@ -15,17 +15,17 @@ from pathlib import Path
 from typing import IO
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.nodes.node_board_probe_effect.handlers.consumer_flow_collection import (
+from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_collection import (
     observe_lane,
     run_negative,
 )
-from omnibase_infra.nodes.node_board_probe_effect.handlers.consumer_flow_lane import (
+from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane import (
     ConsumerFlowLane,
 )
-from omnibase_infra.nodes.node_board_probe_effect.handlers.error_consumer_flow_boot_changed import (
+from omnibase_infra.nodes.node_board_probe_effect.handlers._error_consumer_flow_boot_changed import (
     ConsumerFlowBootChangedError,
 )
-from omnibase_infra.nodes.node_board_probe_effect.handlers.error_consumer_flow_input import (
+from omnibase_infra.nodes.node_board_probe_effect.handlers._error_consumer_flow_input import (
     ConsumerFlowInputError,
 )
 from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_observation import (

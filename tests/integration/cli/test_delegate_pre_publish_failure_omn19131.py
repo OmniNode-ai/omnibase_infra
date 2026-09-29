@@ -68,14 +68,6 @@ pytestmark = pytest.mark.integration
 
 _TERMINAL_SENTENCE = "no resolvable delegation terminal"
 
-_STAND_IN_TASK_CLASS_CONTRACT = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "delegation"
-    / "omn18305"
-    / "task_class_contracts_vocabulary.yaml"
-)
-
 
 class ModelTimeoutlessDelegateRequest(BaseModel):
     """Stand-in for the pre-OMN-18852 released request model.
@@ -132,11 +124,6 @@ def stand_in_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
     monkeypatch.delenv("ONEX_CONTRACTS_DIR", raising=False)
     monkeypatch.setattr(cli_delegate, "check_omnimarket_drift", lambda **_: None)
-    monkeypatch.setattr(
-        cli_delegate,
-        "resolve_task_class_contract_path",
-        lambda: _STAND_IN_TASK_CLASS_CONTRACT,
-    )
     # Named for the delegate node, as the packaged contract is: the receipt
     # writer scopes itself to delegate runs by the workflow path.
     contract_path = tmp_path / cli_delegate.DELEGATE_NODE_NAME / "contract.yaml"

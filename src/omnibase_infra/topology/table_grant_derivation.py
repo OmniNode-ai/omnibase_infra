@@ -403,6 +403,58 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="pr_landing_transitions",
         ),
     ),
+    # OMN-19861: same infra-first window; this repo vendors
+    # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
+    # package that declares the relation. The source contract declares access
+    # read_write, role demo_readiness; 0001 grants omninode_runtime SELECT,
+    # INSERT, UPDATE. Retired by the omnimarket OMN-19861
+    # node_projection_demo_readiness pull request merging and the pin advancing
+    # past it; the expiry module names it.
+    ContractTableDeclaration(
+        node="legacy_migration:demo_readiness_latest",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_demo_readiness/"
+            "0000_create_demo_readiness_latest.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="demo_readiness_latest",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_demo_readiness/"
+                "0000_create_demo_readiness_latest.sql"
+            ),
+            access="read_write",
+            role="demo_readiness",
+        ),
+    ),
+    # OMN-19961: lab_container_memory_window, the same infra-first window as the
+    # bridges above. This repo vendors node_projection_lab_container_memory/0000
+    # and 0001 ahead of omnimarket#3051, whose node-migration-vendor-parity gate
+    # needs the vendored copy at dev tip before it can merge; the pin cannot
+    # declare the relation until it does. 0001 grants omninode_runtime SELECT,
+    # INSERT, UPDATE. The entry carries the access and role the source contract
+    # declares, so the derivation reproduces the grant the instances carry and
+    # writes no generated diff. Retired by omnimarket#3051 merging and the pin
+    # advancing past it; the expiry module names it.
+    ContractTableDeclaration(
+        node="legacy_migration:lab_container_memory_window",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_lab_container_memory/"
+            "0000_create_lab_container_memory_window.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="lab_container_memory_window",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_lab_container_memory/"
+                "0000_create_lab_container_memory_window.sql"
+            ),
+            access="read_write",
+            role="container_memory",
+        ),
+    ),
     # OMN-19513: infra vendors both Claude hook event projection tables before
     # omnimarket#2956 lands the node contract. Until the pin advances, these
     # interim declarations keep the shipped table grants derivable. The expiry
@@ -442,6 +494,28 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="claude_hook_events",
+        ),
+    ),
+    # OMN-19399: infra vendors worktree_reconcile_hosts before omnimarket#3047
+    # lands its node contract. This bridge keeps the shipped grants derivable
+    # until the pin advances; the expiry test then requires its removal.
+    # Retired by: omnimarket#3047 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:worktree_reconcile_hosts",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_worktree_reconcile/"
+            "0000_create_worktree_reconcile_hosts.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="worktree_reconcile_hosts",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_worktree_reconcile/"
+                "0000_create_worktree_reconcile_hosts.sql"
+            ),
+            access="read_write",
+            role="worktree_reconcile_hosts",
         ),
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to

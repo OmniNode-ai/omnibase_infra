@@ -177,10 +177,10 @@ def test_unreadable_io_never_raises(failure: str) -> None:
 
 
 def test_cursor_walk_uses_since_and_stops_on_repeated_cursor() -> None:
-    from omnibase_infra.nodes.node_board_probe_effect.handlers.consumer_flow_collection import (
+    from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_collection import (
         walk,
     )
-    from omnibase_infra.nodes.node_board_probe_effect.handlers.consumer_flow_lane import (
+    from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane import (
         ConsumerFlowLane,
     )
 
@@ -257,10 +257,10 @@ def test_boot_change_retries_the_whole_observation(
 
 
 def test_negative_timeout_restores_the_exact_original_bytes(tmp_path: Path) -> None:
-    from omnibase_infra.nodes.node_board_probe_effect.handlers.consumer_flow_collection import (
+    from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_collection import (
         run_negative,
     )
-    from omnibase_infra.nodes.node_board_probe_effect.handlers.error_consumer_flow_input import (
+    from omnibase_infra.nodes.node_board_probe_effect.handlers._error_consumer_flow_input import (
         ConsumerFlowInputError,
     )
 

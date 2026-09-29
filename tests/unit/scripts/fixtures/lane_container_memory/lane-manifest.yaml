@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# A one-host, one-lane manifest for the OMN-19959 memory-pass tests: the fake
+# Engine API serves exactly this lane, so the census reads clean (exit 0) and
+# every non-zero exit in those tests is the memory pass's own.
+schema_version: "1.0.0"
+default_image_tag_pattern: '.+'
+hosts:
+  lab-202:
+    aliases: [omnipc2]
+lanes:
+  sim-202:
+    hosts: [lab-202]
+    compose_file: docker/docker-compose.sim-202.yml
+    compose_project: omnibase-infra-sim-202
+    network: omnibase-infra-sim-202-network
+    image_tag_pattern: '.+'
+    services:
+      - name: omnibase-infra-sim-202-redpanda
+        kind: service
+        replicas: 1
+      - name: omninode-sim-202-runtime-effects
+        kind: service
+        replicas: 1

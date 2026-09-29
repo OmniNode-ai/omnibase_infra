@@ -112,6 +112,12 @@ BACKSTOPS: dict[str, Backstop] = {
         job_id="lint",
         logical_lines=("bash scripts/validation/check_no_infra_inmemory_import.sh",),
     ),
+    "check-cli-registry-vocabulary": ShellBackstop(
+        job_id="lint",
+        logical_lines=(
+            "uv run python scripts/validation/check_cli_registry_vocabulary.py",
+        ),
+    ),
     "validate-spdx-headers": ShellBackstop(
         job_id="onex-validation",
         logical_lines=("uv run --frozen onex spdx validate src tests scripts",),

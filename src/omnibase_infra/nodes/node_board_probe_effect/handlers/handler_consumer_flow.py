@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from typing import TypeGuard
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.nodes.node_board_probe_effect.handlers.consumer_flow_constants import (
+from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_constants import (
     APPLIED_TOPIC,
     AST_GATE_TEST,
     BRANCHES,

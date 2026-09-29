@@ -53,6 +53,12 @@ board_checks:
     surface_class: "lab_hardware"
     operation: "board_probe.consumer_flow"
     description: "C28: both named kinds are instrumented in advancing windows, negative tests pass and bite per branch, cursor paging reaches every live group, and the boot has applied events and observes the malformed trigger. Unreadable evidence is INDETERMINATE."
+# These are observed through the projection API and broker probe; this node
+# does not subscribe to or publish on these topics.
+consumer_flow_topics:
+  audit_projection: "onex.evt.omnibase-infra.gateway-heartbeat.v1"
+  publishing_reducer: "onex.evt.platform.node-heartbeat.v1"
+  applied: "onex.evt.omnimarket.projection-consumer-flow-applied.v1"
 capabilities:
   - name: "board_probe.consumer_flow"
     description: "Observe and grade C28 consumer-flow observability on the lab lane"

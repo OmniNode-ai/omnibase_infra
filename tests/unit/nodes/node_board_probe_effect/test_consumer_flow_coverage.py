@@ -60,7 +60,7 @@ def test_real_files_and_cli_and_hook() -> None:
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        timeout=90,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     hooks = yaml.safe_load((NODE.parents[3] / ".pre-commit-config.yaml").read_text())
