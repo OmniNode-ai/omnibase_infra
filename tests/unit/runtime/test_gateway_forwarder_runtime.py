@@ -542,7 +542,8 @@ def test_staging_canary_resolves_topics_from_node_contract(tmp_path: Path) -> No
         lane_credential_map_path=credential_map,
     )
 
-    assert len(loaded.forwarder.mirror_topics.inbound) == 3
+    # 4 after OMN-19593/OMN-14375's signed GitHub webhook-delivery command topic.
+    assert len(loaded.forwarder.mirror_topics.inbound) == 4
     # 8 after OMN-16204's OD-9 pair; 13 after OMN-16979's seven governed hook
     # classes; 15 after OMN-19439's two metadata-scrubbed delegate-skill
     # terminals. The governance half is asserted in
@@ -606,8 +607,10 @@ async def test_process_starts_both_legs_and_cleans_readiness(
             group: str,
             topics: Sequence[str],
             auto_offset_reset: str,
+            refused_topic_retry_seconds: float | None = None,
         ) -> None:
             super().__init__(config=config, group=group, topics=topics)
+            self.refused_topic_retry_seconds = refused_topic_retry_seconds
             instances.append(self)
 
     class _StoreFactory(_FakeStore):
@@ -638,6 +641,18 @@ async def test_process_starts_both_legs_and_cleans_readiness(
     assert len(instances) == 2
     assert all(instance.started for instance in instances)
     assert all(instance.closed for instance in instances)
+    # OMN-15629: the INBOUND (cloud) consumer peels a refused topic and retries
+    # it on the contract interval instead of dying on it; the outbound (local)
+    # consumer keeps fail-fast, because its topics are this lane's own.
+    by_group = {instance.group: instance for instance in instances}
+    config = _runtime_config()
+    slug = config.forwarder.tenant_identity.tenant_slug
+    inbound = by_group[f"tenant-{slug}-gateway-forwarder-inbound"]
+    outbound = by_group[f"tenant-{slug}-gateway-forwarder-outbound"]
+    assert inbound.refused_topic_retry_seconds == float(
+        config.forwarder.inbound_topic_retry_seconds
+    )
+    assert outbound.refused_topic_retry_seconds is None
     assert len(stores) == 1
     assert stores[0].started is True
     assert stores[0].closed is True

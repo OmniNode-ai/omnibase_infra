@@ -1369,6 +1369,40 @@ cases:
     test: tests/ci/test_incident_replay_omn19412.py::test_the_real_guard_refuses_the_row_list_on_the_captured_c11
     why: >-
       Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is A PROBE WINDOW LIST THAT OMITTED A PROBE. Until config/lab_probe_windows.yaml the only list of lab probe windows was one ledger row, omni_home docs/tracking/ROLLING_WORK_LEDGER.md at 2026-09-23T20:23:28Z (lane merge-drain-7f), which named C16 and C15 and derived four runtime-merge blackouts from them (20:45Z-21:45Z, 22:55Z-23:45Z, 00:55Z-01:45Z, 02:45Z-03:45Z). It did not name C11, whose job reads the same dev lane at 02:17Z, 08:17Z, 14:17Z and 20:17Z, none of them inside any of those blackouts, so a runtime merge at 02:00Z was within the row's rules and would have redeployed the lane under C11's run. Nothing could have noticed, because a prose list has no reader that compares it with the workflows. The case does not claim such a merge happened; the gap in the list is the defect. NOT A RECONSTRUCTION -- the artifact is the C11 workflow read with git show out of the object store at the dev commit the lane branched from, re-fetchable at the recorded locator and unmodified. The test drives the real check with the row's own list (the committed C15 and C16 entries) over those bytes and requires the unlisted-probe refusal naming the C11 workflow and its cron; a second assertion shows, from the same bytes, that every C11 start falls outside all four of the row's blackouts, so the refusal is not vacuous. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every workflow would replay this perfectly and block every pull request, so the same function is driven over the same bytes with the committed C11 entry and required to return no error.
+  - id: omn19412-a-host-agnostic-probe-placement-read-as-unreadable
+    guard: scripts/ci/check_lab_probe_windows.py
+    incident: OMN-19412
+    regression_class: false_red
+    guard_verdict_on_artifact: accept
+    discriminator: tests/ci/test_incident_replay_omn19412_expression_placement.py::test_the_same_guard_refuses_the_captured_c13_with_the_variable_unset
+    artifact:
+      fixture: tests/fixtures/omn19412/c13-customer-local-delegation.yml.captured
+      sha256: 52d7cf3d3a45812f3e8ac3141a94f424177cb66756e008e634db037653ffc2a7
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omninode_infra@14972e07c96041933d20aec101f962710cb79fcc:.github/workflows/c13-customer-local-delegation.yml
+      captured_at: '2026-09-28T06:26:36Z'
+      captured_by: lane lab-probe-windows-fix-83 (OMN-19412)
+    test: tests/ci/test_incident_replay_omn19412_expression_placement.py::test_the_real_guard_accepts_the_captured_c13_on_the_live_pool
+    why: >-
+      The false_red is A HOST-AGNOSTIC PROBE PLACEMENT READ AS UNREADABLE. omninode_infra#1725 (OMN-17427) merged to dev at 2026-09-28T05:28:12Z and, as operator rulings 2026-09-28T01:58:06Z and 01:58:17Z required, placed C13, C14 and C29 with runs-on fromJSON(vars.CUSTOMER_MACHINE_RUNS_ON_JSON) instead of the literal omnipc2-customer label. The check read literal labels only and reported "a job is placed by an expression, so its runner label cannot be read" for all three, so the required Lab Probe Windows job, a strict gate of CI Summary, failed on every open omnibase_infra pull request from that minute (run 36382911915, job 108802601005, among at least ten PRs). The workflow was good; the verdict was wrong. NOT A RECONSTRUCTION -- the artifact is the C13 workflow read with git show at the #1725 merge commit, re-fetchable at the recorded locator and unmodified, and the variable value the test supplies is the one gh variable list returned for omninode_infra at capture time. The test drives the real check with the committed C13 entry over those bytes and requires acceptance. THE DISCRIMINATOR IS LOAD-BEARING: a guard that accepted every expression would replay this perfectly and hide a probe whose pool nobody can name, so the same bytes are driven with the variable unset and must be refused, naming the job and the variable. SINCE THE OMN-19412 FOLLOW-UP the check resolves the placement from the committed value in config/runner_routing_policy.yaml probe_placement_variables rather than the live variable (no CROSS_REPO_PAT read), so the test supplies that committed value and the discriminator declares it null; an undeclared variable is refused too.
+  - id: omn19412-a-live-placement-moved-while-the-committed-record-named-the-old-pool
+    guard: scripts/ci/check_probe_placement_drift.py
+    incident: OMN-19412
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn19412_placement_drift.py::test_the_same_guard_accepts_the_moved_placement_once_it_is_committed
+    artifact:
+      fixture: tests/fixtures/omn19412/c13-job-108812316933.json.captured
+      sha256: 293108ebaa450a4c61ac562d7adc2e5766ef8f971539c7b884c620d992e8997e
+    capture:
+      method: gh-api
+      source: gh-api:repos/OmniNode-ai/omninode_infra/actions/jobs/108812316933
+      captured_at: '2026-09-28T07:52:00Z'
+      captured_by: lane probe-windows-no-pat-83 (OMN-19412)
+    test: tests/ci/test_incident_replay_omn19412_placement_drift.py::test_the_real_guard_refuses_the_moved_placement_against_the_old_committed_value
+    why: >-
+      The false_green is A LIVE PLACEMENT THAT MOVED WHILE THE COMMITTED RECORD NAMED THE OLD POOL, with no surface comparing the two. omninode_infra#1725 (merged 2026-09-28T05:28:12Z) placed C13, C14 and C29 by fromJSON(vars.CUSTOMER_MACHINE_RUNS_ON_JSON), and the live variable put them on omnibase-verify while omnibase_infra's committed record still said omnipc2-customer; the disagreement surfaced only as a fleet-wide red on the required Lab Probe Windows check (about 55 minutes, FRICTION 2026-09-28T07:03:41Z lane lab-probe-windows-fix-83). Since the OMN-19412 follow-up that check resolves placements from the committed probe_placement_variables map instead of reading live variables with the operator's CROSS_REPO_PAT, and check_probe_placement_drift.py keeps that map equal to live. NOT A RECONSTRUCTION -- the artifact is the C13 job of run 36386308491 as the Actions API returned it, re-fetchable at the recorded locator and committed unmodified; its labels are the evaluated fromJSON(vars.CUSTOMER_MACHINE_RUNS_ON_JSON), which has no fallback, so they are the variable's live value as the runner resolved it. The test drives the real guard with those labels as the live vars and the pre-fix committed placement, and requires a refusal naming the variable and both pools. THE DISCRIMINATOR IS LOAD-BEARING: a guard stuck red would replay the refusal perfectly, so the same bytes with the committed value equal to the live one must be accepted.
   - id: omn19565-lab-evidence-none-left-library-prs-unproved
     guard: scripts/ci/validate_lab_proof_profiles.py
     incident: OMN-19565

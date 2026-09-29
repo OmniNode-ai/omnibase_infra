@@ -16,6 +16,7 @@ import datetime as dt
 import importlib.util
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -423,6 +424,211 @@ def test_restored_needs_zero_residue_a_positive_control_and_an_empty_diff() -> N
     ).restored
     assert not pool.judge({**GOOD, "snap-post": "snapshot-diff=3"}).restored
     assert not pool.judge({k: v for k, v in GOOD.items() if k != "snap-post"}).restored
+
+
+# ------------------------------------------------------------------ image identity (OMN-19896)
+
+# The probe identity section of a runtime PR that changes nothing under src/,
+# as the fixed prove script prints it: omnibase_infra#4111 changed only
+# config/deploy_lane_routing.yaml and deploy-agent tests, so the caller listed
+# no ID_FILES and no per-file line exists. Before OMN-19896 this FAILed
+# image_identity by construction (ledger RELEASE 2026-09-28T02:32:13Z).
+_M = "omnibase-infra-local-omninode-runtime"
+_E = "omnibase-infra-local-runtime-effects"
+_TREE_OK = (
+    "image-revision-label 2fdde86b86d9fc4c4c1c7261ab449cb081737f9e\n"
+    "build GIT_SHA 2fdde86b86d9fc4c4c1c7261ab449cb081737f9e market 8db69992fc\n"
+    "identity-subject omnibase_infra\n"
+    "src-diff omnibase_infra files=0\n"
+    f"pkg-tree omnibase_infra {_M} tree-files=4210 image-files=4210 missing=0 differ=0 stale-py=0 extra-other=0 match=yes\n"
+    f"pkg-tree omnibase_infra {_E} tree-files=4210 image-files=4210 missing=0 differ=0 stale-py=0 extra-other=0 match=yes\n"
+)
+NO_SRC_PROBE = _TREE_OK + GOOD["probe"].split("\n", 1)[1]
+
+
+def test_image_identity_passes_a_runtime_pr_with_no_src_diff() -> None:
+    rb = pool.judge({**GOOD, "probe": NO_SRC_PROBE})
+    assert rb.checks["image_identity"] is True, rb
+    assert rb.outcome == "PASS"
+    assert any("changes nothing under src/" in n for n in rb.notes)
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        # a module the PR deleted still ships in the image
+        _TREE_OK.replace(
+            f"{_E} tree-files=4210 image-files=4210 missing=0 differ=0 stale-py=0 extra-other=0 match=yes",
+            f"{_E} tree-files=4210 image-files=4211 missing=0 differ=0 stale-py=1 extra-other=0 match=NO",
+        ),
+        # the image runs code the build tree does not hold
+        _TREE_OK.replace(
+            "differ=0 stale-py=0 extra-other=0 match=yes",
+            "differ=3 stale-py=0 extra-other=0 match=NO",
+            1,
+        ),
+        # the subject has no compare line at all (the compare never ran)
+        "\n".join(ln for ln in _TREE_OK.splitlines() if not ln.startswith("pkg-tree "))
+        + "\n",
+    ],
+)
+def test_image_identity_fails_when_the_image_is_not_the_build_tree(broken: str) -> None:
+    probe = broken + GOOD["probe"].split("\n", 1)[1]
+    rb = pool.judge({**GOOD, "probe": probe})
+    assert rb.checks["image_identity"] is False
+    assert rb.outcome == "FAIL"
+
+
+def test_image_identity_fails_on_a_changed_file_mismatch_even_when_the_package_matches() -> (
+    None
+):
+    probe = (
+        _TREE_OK
+        + "file omnibase_infra/x.py image=aaa build-tree=bbb match=NO\n"
+        + GOOD["probe"].split("\n", 1)[1]
+    )
+    assert pool.judge({**GOOD, "probe": probe}).checks["image_identity"] is False
+
+
+def test_image_identity_fails_on_an_unreadable_per_file_line() -> None:
+    # the in-container read raised, and its message has spaces: before OMN-19896
+    # the line failed to parse and was silently dropped beside a matching one
+    probe = GOOD["probe"].replace(
+        "file omnibase_infra/x.py image=aaa build-tree=aaa match=yes\n",
+        "file omnibase_infra/x.py image=aaa build-tree=aaa match=yes\n"
+        "file omnibase_infra/y.py image=FileNotFoundError: [Errno 2] No such file build-tree=bbb match=NO\n",
+    )
+    assert pool.judge({**GOOD, "probe": probe}).checks["image_identity"] is False
+
+
+def test_an_older_probe_with_no_subject_keeps_the_per_file_rule() -> None:
+    assert pool.judge(GOOD).checks["image_identity"] is True
+    no_lines = "\n".join(
+        ln for ln in GOOD["probe"].splitlines() if not ln.startswith("file ")
+    )
+    assert pool.judge({**GOOD, "probe": no_lines}).checks["image_identity"] is False
+
+
+def _heredoc(name: str) -> str:
+    text = PROVE_SH.read_text(encoding="utf-8")
+    start = text.index(f"IFS= read -r -d '' {name} <<'PY' || :\n")
+    body = text[start:].split("\n", 1)[1]
+    return body[: body.index("\nPY\n") + 1]
+
+
+def _run(args: list[str], **kw: Any) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, capture_output=True, text=True, check=False, **kw)
+
+
+def _fake_tree(tmp_path: Path) -> tuple[Path, Path]:
+    """A build tree with a tracked package, and the same package installed."""
+    tree = tmp_path / "tree"
+    pkg = tree / "src" / "fakepkg"
+    (pkg / "sub").mkdir(parents=True)
+    (pkg / "__init__.py").write_text("X = 1\n")
+    (pkg / "sub" / "mod.py").write_text("Y = 2\n")
+    (pkg / "sub" / "contract.yaml").write_text("name: y\n")
+    for cmd in (
+        ["git", "init", "-q"],
+        ["git", "add", "-A"],
+        [
+            "git",
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t.invalid",
+            "commit",
+            "-qm",
+            "t",
+        ],
+    ):
+        assert _run(cmd, cwd=tree).returncode == 0
+    site = tmp_path / "site"
+    shutil.copytree(pkg, site / "fakepkg")
+    # bytecode the image carries is not source and never compared
+    (site / "fakepkg" / "__pycache__").mkdir()
+    (site / "fakepkg" / "__pycache__" / "mod.cpython-312.pyc").write_bytes(b"\0")
+    return tree, site
+
+
+def _compare(tree: Path, site: Path, tmp_path: Path) -> str:
+    listing = tmp_path / "img.txt"
+    lst = _run(
+        [sys.executable, "-c", _heredoc("IMG_LIST_PY"), "fakepkg"],
+        env={"PYTHONPATH": str(site), "PATH": "/usr/bin:/bin"},
+    )
+    assert lst.returncode == 0, lst.stderr
+    listing.write_text(lst.stdout)
+    out = _run(
+        [
+            sys.executable,
+            "-c",
+            _heredoc("PKG_TREE_PY"),
+            str(tree),
+            "fakepkg",
+            "rt",
+            str(listing),
+        ]
+    )
+    assert out.returncode == 0, out.stderr
+    return out.stdout
+
+
+def test_the_whole_package_compare_reads_an_identical_install_as_a_match(
+    tmp_path: Path,
+) -> None:
+    tree, site = _fake_tree(tmp_path)
+    out = _compare(tree, site, tmp_path)
+    assert (
+        "pkg-tree fakepkg rt tree-files=3 image-files=3 missing=0 differ=0 stale-py=0"
+        in out
+    )
+    assert out.splitlines()[0].endswith("match=yes"), out
+
+
+@pytest.mark.parametrize(
+    ("mutate", "kind"),
+    [
+        (lambda s: (s / "fakepkg" / "sub" / "mod.py").write_text("Y = 3\n"), "differ"),
+        (lambda s: (s / "fakepkg" / "sub" / "mod.py").unlink(), "missing"),
+        (lambda s: (s / "fakepkg" / "old.py").write_text("Z = 0\n"), "stale-py"),
+    ],
+)
+def test_the_whole_package_compare_names_what_differs(
+    tmp_path: Path, mutate: Any, kind: str
+) -> None:
+    tree, site = _fake_tree(tmp_path)
+    mutate(site)
+    out = _compare(tree, site, tmp_path)
+    assert out.splitlines()[0].endswith("match=NO"), out
+    assert f"pkg-tree-diff fakepkg rt {kind} " in out
+    rb = pool.judge(
+        {
+            **GOOD,
+            "probe": "identity-subject fakepkg\n"
+            + out
+            + GOOD["probe"].split("\n", 1)[1],
+        }
+    )
+    assert rb.checks["image_identity"] is False
+
+
+def test_a_force_included_resource_is_counted_not_held_against_the_image(
+    tmp_path: Path,
+) -> None:
+    tree, site = _fake_tree(tmp_path)
+    (site / "fakepkg" / "config").mkdir()
+    (site / "fakepkg" / "config" / "lanes.yaml").write_text("a: 1\n")
+    out = _compare(tree, site, tmp_path)
+    assert "extra-other=1 match=yes" in out
+
+
+def test_the_probe_compares_every_repo_under_test_in_both_runtimes() -> None:
+    text = PROVE_SH.read_text(encoding="utf-8")
+    probe = text[text.index("probe)") : text.index("tests)")]
+    assert 'echo "identity-subject $repo"' in probe
+    assert "for c in $M $E; do" in probe[probe.index("identity-subject") :]
+    assert '"$IMG_LIST_PY"' in probe and '"$PKG_TREE_PY"' in probe
 
 
 # ------------------------------------------------------------------ run end to end
@@ -965,3 +1171,240 @@ def test_a_slot_is_picked_only_when_every_isolated_member_is_taken() -> None:
     assert pool.pick(_survey(hosts)).host.name == "lab-101"
     hosts["lab-101"].online = False
     assert pool.pick(_survey(hosts)).host.name == "lab-201-prepr-1"
+
+
+# ------------------------------------------------------------------ group proof
+
+GROUP_CLONE = """omnibase_infra group base cd2cc37bd48852d195eb18d3d6b08b04d973f064 (dev cd2cc37bd48852d195eb18d3d6b08b04d973f064)
+omnibase_infra#4134 fetched head fdd93c786c27fd9daf2a878a0d9cd189f4868989 expected fdd93c786c27fd9daf2a878a0d9cd189f4868989 match=yes
+group-step omnibase_infra#4134 commit 27629e91ea63223168320f848a371aac38868c27 tree 29a02c42f933477f8210ed83fdcd706a3fe07e30
+omnibase_infra#4198 fetched head e812bfd787753ea76eb7f599b7cdbf933ebf534c expected e812bfd787753ea76eb7f599b7cdbf933ebf534c match=yes
+group-step omnibase_infra#4198 commit 606e69a0e2ef1d176049fb83ba2f67dfb1932bcc tree bc5de1bd286eee60ef64e5970e120eeecf48f756
+omnibase_infra#4214 fetched head 0ba71c956606c2a500b4f0d095bcde22e2ffb29b expected 0ba71c956606c2a500b4f0d095bcde22e2ffb29b match=yes
+group-step omnibase_infra#4214 commit 8036b4c7a3b574ddfc29266d991163574a7b7d0c tree bca014d9c20c11139da49d5395d94b87b86b7a28
+group-commit omnibase_infra 8036b4c7a3b574ddfc29266d991163574a7b7d0c tree bca014d9c20c11139da49d5395d94b87b86b7a28 base cd2cc37bd48852d195eb18d3d6b08b04d973f064 tree-agrees=yes
+"""
+GROUP_MEMBERS = [
+    ("4134", "fdd93c786c27fd9daf2a878a0d9cd189f4868989"),
+    ("4198", "e812bfd787753ea76eb7f599b7cdbf933ebf534c"),
+    ("4214", "0ba71c956606c2a500b4f0d095bcde22e2ffb29b"),
+]
+GROUP_SPEC = " ".join(f"{number}:{head}" for number, head in GROUP_MEMBERS)
+
+
+@pytest.mark.unit
+def test_group_facts_parse_real_host_clone_output() -> None:
+    facts = pool.group_facts(GROUP_CLONE)
+    assert facts is not None
+    assert facts.repo == "omnibase_infra"
+    assert facts.members == [(f"omnibase_infra#{n}", h) for n, h in GROUP_MEMBERS]
+    assert facts.commit == "8036b4c7a3b574ddfc29266d991163574a7b7d0c"
+    assert facts.tree == "bca014d9c20c11139da49d5395d94b87b86b7a28"
+    assert facts.base == "cd2cc37bd48852d195eb18d3d6b08b04d973f064"
+    assert facts.tree_agrees == "yes"
+    assert facts.failures == []
+    assert facts.empty == []
+
+
+@pytest.mark.unit
+def test_non_group_clone_has_no_group_facts() -> None:
+    assert pool.group_facts(GOOD["clone"]) is None
+
+
+@pytest.mark.unit
+def test_judge_accepts_a_group_built_with_the_planned_tree() -> None:
+    rb = pool.judge({**GOOD, "clone": GROUP_CLONE})
+    assert rb.checks["group_built"] is True
+    assert rb.outcome == "PASS"
+
+
+@pytest.mark.unit
+def test_judge_names_a_group_conflict_without_a_final_commit() -> None:
+    conflict = "group-conflict omnibase_infra#4134 CONFLICT (content)"
+    clone = "\n".join(GROUP_CLONE.splitlines()[:2]) + "\n" + conflict + "\n"
+    rb = pool.judge({**GOOD, "clone": clone})
+    assert rb.checks["group_built"] is False
+    assert any(conflict in note for note in rb.notes)
+    assert rb.group is not None and rb.group.commit is None
+
+
+@pytest.mark.unit
+def test_judge_rejects_a_group_tree_that_disagrees() -> None:
+    rb = pool.judge(
+        {**GOOD, "clone": GROUP_CLONE.replace("tree-agrees=yes", "tree-agrees=NO")}
+    )
+    assert rb.checks["group_built"] is False
+    assert any("different tree" in note for note in rb.notes)
+
+
+@pytest.mark.unit
+def test_group_members_parse_valid_spec_in_order() -> None:
+    assert pool.group_members(GROUP_SPEC) == GROUP_MEMBERS
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("spec", "reason"),
+    [
+        (f"4134:abc 4198:{'b' * 40}", "40-hex head sha"),
+        (f"4134:{'a' * 40}", "at least two members"),
+        (f"4134:{'a' * 40} 4134:{'b' * 40}", "names a PR twice"),
+    ],
+)
+def test_group_members_reject_invalid_specs(spec: str, reason: str) -> None:
+    with pytest.raises(ValueError, match=reason):
+        pool.group_members(spec)
+
+
+@pytest.mark.unit
+def test_group_readback_names_every_member_and_group() -> None:
+    facts = pool.group_facts(GROUP_CLONE)
+    assert facts is not None
+    rb = pool.Readback(
+        checks={"stack_built": True, "group_built": True},
+        notes=[],
+        restored=True,
+        residue="clean",
+        group=facts,
+    )
+    text = pool.render_readback(
+        rb,
+        CFG.host("lab-101"),
+        {"INFRA_GROUP": GROUP_SPEC},
+        "2026-09-28T10:00:00Z",
+        "2026-09-28T10:30:00Z",
+    )
+    lines = text.splitlines()
+    assert lines[0].startswith(
+        "LAB PROOF PASS: omnibase_infra#4134 head fdd93c786c + "
+        "omnibase_infra#4198 head e812bfd787 + "
+        "omnibase_infra#4214 head 0ba71c9566 on lab-101"
+    )
+    assert any(line.startswith("  group: 3 member(s)") for line in lines)
+
+
+@pytest.mark.unit
+def test_market_group_readback_names_every_member() -> None:
+    rb = pool.Readback(
+        checks={"stack_built": True, "group_built": True},
+        notes=[],
+        restored=True,
+        residue="clean",
+    )
+    text = pool.render_readback(
+        rb,
+        CFG.host("lab-101"),
+        {"MARKET_GROUP": GROUP_SPEC},
+        "2026-09-28T10:00:00Z",
+        "2026-09-28T10:30:00Z",
+    )
+    assert text.splitlines()[0].startswith(
+        "LAB PROOF PASS: omnimarket#4134 head fdd93c786c + "
+        "omnimarket#4198 head e812bfd787 + "
+        "omnimarket#4214 head 0ba71c9566 on lab-101"
+    )
+
+
+class NoHostTransport:
+    def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+        pytest.fail(
+            "invalid group params must be rejected before running a host command"
+        )
+
+    def put(self, host: Any, local: Path, remote: str) -> int:
+        pytest.fail("invalid group params must be rejected before copying to a host")
+
+
+@pytest.mark.unit
+def test_run_rejects_pr_and_group_before_touching_any_host(tmp_path: Path) -> None:
+    path = _params(tmp_path)
+    path.write_text(
+        path.read_text(encoding="utf-8") + f"INFRA_GROUP='{GROUP_SPEC}'\n",
+        encoding="utf-8",
+    )
+    code, text = pool.run_proof(
+        CFG,
+        NoHostTransport(),
+        path,
+        "me",
+        60,
+        None,
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == 5
+    assert "both INFRA_PR and INFRA_GROUP" in text
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("extra", "reason"),
+    [
+        (f"MARKET_GROUP='{GROUP_SPEC}'\n", "both MARKET_PR and MARKET_GROUP"),
+        (
+            f"INFRA_GROUP='{GROUP_SPEC}'\nMARKET_GROUP='{GROUP_SPEC}'\n",
+            "both INFRA_GROUP and MARKET_GROUP",
+        ),
+        (f"MARKET_GROUP='{GROUP_SPEC}'\n", "both INFRA_PR and MARKET_GROUP"),
+    ],
+)
+def test_run_rejects_market_group_cross_subjects_before_touching_a_host(
+    tmp_path: Path, extra: str, reason: str
+) -> None:
+    path = _params(tmp_path)
+    if "MARKET_PR" in reason:
+        path.write_text(
+            "MARKET_PR=4210\nMARKET_HEAD=" + "a" * 40 + "\n" + extra,
+            encoding="utf-8",
+        )
+    else:
+        path.write_text(path.read_text(encoding="utf-8") + extra, encoding="utf-8")
+    code, text = pool.run_proof(
+        CFG,
+        NoHostTransport(),
+        path,
+        "me",
+        60,
+        None,
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == pool.EXIT_USAGE
+    assert reason in text
+
+
+@pytest.mark.unit
+def test_run_rejects_a_one_member_market_group_before_touching_a_host(
+    tmp_path: Path,
+) -> None:
+    path = _params(tmp_path)
+    path.write_text(f"MARKET_GROUP='4134:{'a' * 40}'\n", encoding="utf-8")
+    code, text = pool.run_proof(
+        CFG,
+        NoHostTransport(),
+        path,
+        "me",
+        60,
+        None,
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+    )
+    assert code == pool.EXIT_USAGE
+    assert "MARKET_GROUP needs at least two members" in text
+
+
+@pytest.mark.unit
+def test_prove_script_fetches_market_groups_and_probes_them_as_subjects() -> None:
+    text = PROVE_SH.read_text(encoding="utf-8")
+    clone = text[text.index("clone)") : text.index("build)")]
+    assert (
+        'fetch_group "$R/omnimarket" omnimarket "$MARKET_GROUP" '
+        '"${MARKET_GROUP_BASE:-}" "${MARKET_GROUP_TREE:-}"' in clone
+    )
+    assert (
+        '[ -n "${MARKET_PR:-}${MARKET_GROUP:-}" ] && SUBJECTS="$SUBJECTS omnimarket"'
+        in text
+    )

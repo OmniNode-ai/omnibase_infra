@@ -1,0 +1,21 @@
+name: 'Resolve the arm64 verify runner proof legs'
+description: >-
+  OMN-19894. Read the proof legs from the repository variable ARM64_VERIFY_PROOF_LEGS_JSON (one runs_on label set and a lab_credentials flag per leg) and hold them to the declared inventory (config/runner_fleet.yaml plus each host's compose file). A declared arm64 verify host with no leg, a leg for an undeclared host, a duplicate or an unset variable is RED, never a default. See resolve_arm64_proof_legs.py beside this file.
+author: 'OmniNode'
+inputs:
+  legs-json:
+    description: 'The legs list, normally vars.ARM64_VERIFY_PROOF_LEGS_JSON.'
+    required: true
+outputs:
+  legs:
+    description: 'The legs as a JSON list, for a matrix.'
+    value: ${{ steps.resolve.outputs.legs }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve the legs and check them against the inventory
+      id: resolve
+      shell: bash
+      env:
+        ARM64_VERIFY_PROOF_LEGS_JSON: ${{ inputs.legs-json }}
+      run: uv run --no-project --with 'pyyaml==6.0.2' python "${GITHUB_ACTION_PATH}/resolve_arm64_proof_legs.py"

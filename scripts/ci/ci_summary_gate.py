@@ -314,6 +314,11 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # authenticate to an auth-required listener; the sharded test matrix
     # excludes it by marker (`-m "not kafka"`).
     "Customer Path Boundary (OMN-18012)",  # customer-path-boundary
+    # OMN-19928: the forwarder against a broker that enforces grants, with one
+    # refused inbound topic (tests/integration/bus_acl_boundary/). THIS LINE IS
+    # THE MECHANISM: CI Summary counts `skipped` as passed for an unregistered
+    # job, so without it a skipped or deleted boundary job reads green.
+    "Bus ACL Boundary (OMN-19928)",  # bus-acl-boundary
     # OMN-19412: the lab probe-window file's drift check. THIS LINE IS THE
     # MECHANISM, the same as the lockfile entries above: the job has no `if:`,
     # so it always completes, and registering it here is what makes a skip or
@@ -1371,10 +1376,11 @@ DEPENDENCY_BOT_AUTHORS: frozenset[str] = frozenset({"dependabot[bot]", "renovate
 # The ticket token both the title rule and the producers' `if:` look for.
 TICKET_TOKEN_RE = re.compile(r"OMN-\d+")
 
-# A MIRROR, not a second policy. Source of truth, read live on 2026-09-22:
+# A MIRROR, not a second policy. Source of truth, read live on 2026-09-22; the
+# reusable was re-read byte-identical at ebe30bc on 2026-09-29:
 #   OmniNode-ai/onex_change_control
 #   .github/workflows/pr-title-check-reusable.yml
-#   @babdd13ce68f07df20f989f52ff1c4514d03d896
+#   @ebe30bc3589c9f803e8920b941ddaef07b17ed90
 # which is the exact ref .github/workflows/pr-title-check.yml in THIS repo
 # pins, so the mirror and the enforcer cannot be reading different revisions
 # without that pin moving. Its shell tests, in order, are:

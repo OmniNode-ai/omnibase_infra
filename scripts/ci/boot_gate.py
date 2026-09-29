@@ -527,6 +527,107 @@ def _print_table(rows: list[tuple[str, int, int, str]], topic_seen: bool) -> Non
     print(f"\n{REQUIRED_TOPIC}: {'present' if topic_seen else 'ABSENT'}")
 
 
+def render_topic_provision_job(
+    manifest: Path,
+    name: str,
+    namespace: str,
+    image: str,
+    out: Path,
+) -> int:
+    """Re-point omninode_infra's provisioner Job at this lane, and nothing else.
+
+    OMN-18264. The lab lane provisions topics from the SAME committed manifest
+    the staging deploy applies, so the two lanes cannot drift into two
+    provisioners. Only three fields move: the Job's name, its namespace, and the
+    container image.
+
+    RUN-UNIQUE NAME, because a Job's pod template is immutable -- the rule that
+    also keeps this manifest out of the runtime kustomization's ``resources``.
+    Re-applying the committed name across runs fails with
+    ``spec.template: Invalid value``.
+
+    CONTAINER-LEVEL securityContext, because THIS lane enforces the
+    ``restricted`` Pod Security Standard and onex-dev does not. The committed
+    manifest sets the POD-level fields (``runAsNonRoot``, ``runAsUser``,
+    ``seccompProfile``) and that is sufficient where it is applied. Under
+    ``restricted`` the container must ALSO declare
+    ``allowPrivilegeEscalation: false`` and ``capabilities.drop: ["ALL"]``, and
+    without them admission refuses every pod the Job creates:
+
+        pods "onex-topic-provision-..." is forbidden: violates PodSecurity
+        "restricted:latest": allowPrivilegeEscalation != false ...,
+        unrestricted capabilities ...
+
+    Measured on delivery run 36375068551: ten `FailedCreate` events over ten
+    minutes and then `DeadlineExceeded`, with no pod ever starting. These are
+    added only when absent, they are a strict tightening, and they are safe on
+    any lane -- so this adapts the Job to a stricter admission policy rather
+    than diverging from the committed manifest's intent.
+
+    The image is pinned by DIGEST by the caller, so the Job provisions from the
+    contracts of the image this gate is actually booting.
+
+    Everything else is deliberately left alone. In particular the broker is NOT
+    overridden here: the Job reads ``KAFKA_BOOTSTRAP_SERVERS`` from
+    ``onex-runtime-config`` via ``envFrom``, which on this lane resolves to the
+    in-cluster Redpanda at PLAINTEXT. Restating it here would be a second,
+    driftable copy of a value the overlay already owns.
+
+    Fails closed on every shape it cannot prove it understood: a manifest that
+    is not a single Job, a template with a container count other than one, or an
+    unresolvable image field. A silently un-rewritten Job would run the WRONG
+    image against the lane and report success.
+    """
+    try:
+        docs = [d for d in yaml.safe_load_all(manifest.read_text()) if d]
+    except yaml.YAMLError as exc:
+        print(f"::error::{manifest} is not parseable YAML: {exc}")
+        return 1
+
+    jobs = [d for d in docs if d.get("kind") == "Job"]
+    if len(docs) != len(jobs) or len(jobs) != 1:
+        kinds = sorted({str(d.get("kind")) for d in docs})
+        print(
+            f"::error::expected {manifest} to hold exactly one Job and nothing "
+            f"else; found {len(docs)} document(s) of kind(s) {kinds}. Refusing to "
+            "guess which one provisions topics."
+        )
+        return 1
+
+    job = jobs[0]
+    job.setdefault("metadata", {})
+    job["metadata"]["name"] = name
+    job["metadata"]["namespace"] = namespace
+
+    containers = (
+        job.get("spec", {}).get("template", {}).get("spec", {}).get("containers")
+    )
+    if not isinstance(containers, list) or len(containers) != 1:
+        count = len(containers) if isinstance(containers, list) else "none"
+        print(
+            f"::error::expected exactly one container in {manifest}'s pod "
+            f"template; found {count}. The image rewrite below would be "
+            "ambiguous, and an un-rewritten image runs the wrong code."
+        )
+        return 1
+    if not containers[0].get("image"):
+        print(f"::error::{manifest}'s container declares no image to rewrite.")
+        return 1
+    containers[0]["image"] = image
+
+    # Only the fields `restricted` requires at CONTAINER level, and only when
+    # absent, so a manifest that already declares them keeps its own values.
+    sc = containers[0].setdefault("securityContext", {})
+    sc.setdefault("allowPrivilegeEscalation", False)
+    caps = sc.setdefault("capabilities", {})
+    if "drop" not in caps:
+        caps["drop"] = ["ALL"]
+
+    out.write_text(yaml.safe_dump(job, sort_keys=False))
+    print(f"rendered {manifest} -> {out} as Job/{name} in {namespace} at {image}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -570,6 +671,16 @@ def main() -> int:
         ),
     )
 
+    tp = sub.add_parser(
+        "render-topic-provision-job",
+        help="re-point omninode_infra's topic-provisioner Job at this lane",
+    )
+    tp.add_argument("--manifest", type=Path, required=True)
+    tp.add_argument("--name", required=True)
+    tp.add_argument("--namespace", default="onex-dev")
+    tp.add_argument("--image", required=True)
+    tp.add_argument("--out", type=Path, required=True)
+
     args = parser.parse_args()
     if args.command == "pin-image":
         return pin_image(args.kustomization, args.name, args.digest, args.new_name)
@@ -577,6 +688,14 @@ def main() -> int:
         return redact_render(args.source, args.destination)
     if args.command == "prepare-host-paths":
         return prepare_host_paths(args.render, args.node, args.mode)
+    if args.command == "render-topic-provision-job":
+        return render_topic_provision_job(
+            manifest=args.manifest,
+            name=args.name,
+            namespace=args.namespace,
+            image=args.image,
+            out=args.out,
+        )
     return wait_for_boot(
         namespace=args.namespace,
         timeout_seconds=args.timeout_seconds,

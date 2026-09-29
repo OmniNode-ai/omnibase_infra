@@ -31,6 +31,37 @@ WHAT COUNTS AS A PROBE (the unlisted direction)
     exclusion list. A listed entry need not match the rule (the release train
     and C17 do not name a lane) but must still agree with its workflow.
 
+A JOB PLACED BY AN EXPRESSION (omninode_infra#1725, omnibase_infra#4233)
+    Operator rulings 2026-09-28T01:58:06Z and 01:58:17Z made the probes
+    host-agnostic: a job is placed by ``${{ fromJSON(vars.NAME) }}`` (the
+    deployment overlay's runner pool) instead of a literal label. The check
+    resolves that placement from the COMMITTED value of the variable, the
+    ``probe_placement_variables`` map in ``config/runner_routing_policy.yaml``:
+    what ``vars.NAME`` resolves to in that repository (its own variable over
+    the organisation's), or null for unset, in which case the ``|| '<literal>'``
+    fallback in the expression itself applies. The forms read are
+    ``fromJSON(vars.NAME)`` and ``vars.NAME``, each with that optional
+    fallback. The ``runs_on`` lane of such a probe is the resolved runner pool,
+    so its window is the window of that pool. Any other placement (a
+    ``needs.<job>.outputs`` value only the run can decide, a conditional on the
+    event) cannot be resolved before the run: a ``runs_on`` entry over it is an
+    error naming the job and the expression, never a pass. In the unlisted
+    direction such a job names no customer-machine label, exactly as before.
+
+    A variable that places a scheduled job but is not declared for its
+    repository in that map is an error naming the job, in both directions,
+    never read as unset: an unread placement could hide a probe.
+
+WHY COMMITTED, NOT LIVE
+    omnibase_infra#4241 first read the live variables, which needs the
+    operator's personal CROSS_REPO_PAT because no installed App can read
+    Actions variables. That token is being retired (operator RULING
+    2026-09-27T22:46:17Z, item 3), so the check now reads only reviewed,
+    committed state and needs no credential. Live-vs-committed agreement is
+    the job of ``scripts/ci/check_probe_placement_drift.py``, which each of the
+    three repositories runs on a schedule (``probe-placement-drift.yml``) over
+    its own ``vars`` context, again with no token.
+
 WHERE THE WORKFLOWS COME FROM
     ``--root <repo>=<path>`` for each of omnibase_infra, omninode_infra and
     omnimarket. The CI job passes the pull request's own checkout for
@@ -38,6 +69,11 @@ WHERE THE WORKFLOWS COME FROM
     and sparse checkouts of the other two repositories at their default branch.
     Every root is required; a missing root or an empty workflow directory is a
     usage error (exit 2), never a clean pass.
+
+    ``--placement-policy <path>`` (default ``config/runner_routing_policy.yaml``)
+    holds the committed placement values. Every probe repository must have an
+    entry in its ``probe_placement_variables`` map, for the same reason as every
+    root: a repository nobody declared would resolve nothing and hide a probe.
 
 THE CONSUMER SIDE
     :func:`load_windows` returns typed :class:`ProbeWindow` records, and
@@ -53,6 +89,7 @@ unreadable window file.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from collections.abc import Iterable, Mapping, Sequence
@@ -76,6 +113,11 @@ NO_LANE = "none"
 # admits only those producers (see omninode_infra c13-customer-local-delegation.yml).
 CUSTOMER_MACHINE_LABELS: frozenset[str] = frozenset({"omnipc2-customer"})
 
+# The committed placement values (OMN-19412 follow-up): the top-level key of
+# the runner routing policy that maps <repo> -> {NAME: value | null}.
+DEFAULT_PLACEMENT_POLICY = REPO_ROOT / "config" / "runner_routing_policy.yaml"
+PLACEMENT_KEY = "probe_placement_variables"
+
 # GitHub Actions' job timeout when a job declares none.
 GITHUB_DEFAULT_TIMEOUT_MINUTES = 360
 
@@ -98,6 +140,13 @@ _RUN_NAME_LANE_RE = re.compile(
 )
 _EXPR_DEFAULT_RE = re.compile(r"\|\|\s*'([^']+)'")
 _CRON_FIELD_RE = re.compile(r"^(\*|\d+(-\d+)?)(/\d+)?$")
+# A whole runs-on value that is one expression, and the two placements read.
+_WHOLE_EXPR_RE = re.compile(r"^\s*\$\{\{(?P<body>.*)\}\}\s*$", re.DOTALL)
+_VAR_REF = (
+    r"vars\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:\|\|\s*'(?P<fallback>[^']*)'\s*)?"
+)
+_FROMJSON_VAR_RE = re.compile(r"^\s*fromJSON\(\s*" + _VAR_REF + r"\)\s*$")
+_BARE_VAR_RE = re.compile(r"^\s*" + _VAR_REF + r"$")
 
 EXIT_OK = 0
 EXIT_DRIFT = 1
@@ -110,6 +159,72 @@ class WindowFileError(ValueError):
 
 class WorkflowError(ValueError):
     """A workflow file cannot be read or a field cannot be derived from it."""
+
+
+class UndeclaredPlacementError(WorkflowError):
+    """A job is placed by a variable the committed map does not declare.
+
+    Raised through :func:`runs_on_labels` rather than recorded per job, so the
+    unlisted direction reports it too instead of reading the job as unlabelled.
+    """
+
+
+class CommittedPlacements:
+    """The committed value ``vars.NAME`` resolves to, per repository.
+
+    ``declared`` maps a repository to ``{NAME: value}``, where a ``None`` value
+    is a variable declared unset (the expression's fallback applies). A
+    repository or a name that is not declared is an error at lookup, never an
+    empty answer.
+    """
+
+    def __init__(self, declared: Mapping[str, Mapping[str, str | None]]) -> None:
+        self._declared = {repo: dict(names) for repo, names in declared.items()}
+
+    def lookup(self, repo: str, name: str) -> str | None:
+        names = self._declared.get(repo)
+        if names is None or name not in names:
+            raise UndeclaredPlacementError(
+                f"vars.{name} places a job in {repo} but config/runner_routing_policy.yaml "
+                f"{PLACEMENT_KEY}.{repo} declares no value for it; add its committed value "
+                "(or null for unset) in the same change as the workflow"
+            )
+        return names[name]
+
+
+def load_placements(path: Path) -> CommittedPlacements:
+    """Read the committed placement values from the runner routing policy."""
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise WindowFileError(f"{path}: unreadable placement policy: {exc}") from exc
+    if not isinstance(document, dict) or not isinstance(
+        document.get(PLACEMENT_KEY), dict
+    ):
+        raise WindowFileError(f"{path}: no {PLACEMENT_KEY} mapping")
+    declared: dict[str, dict[str, str | None]] = {}
+    for repo, names in document[PLACEMENT_KEY].items():
+        if not isinstance(repo, str) or not isinstance(names, dict) or not names:
+            raise WindowFileError(
+                f"{path}: {PLACEMENT_KEY}.{repo} must be a non-empty mapping of NAME: value"
+            )
+        values: dict[str, str | None] = {}
+        for name, value in names.items():
+            if not isinstance(name, str) or not (
+                value is None or (isinstance(value, str) and value.strip())
+            ):
+                raise WindowFileError(
+                    f"{path}: {PLACEMENT_KEY}.{repo}.{name} must be a non-empty string or null, "
+                    f"got {value!r}"
+                )
+            values[name] = value
+        declared[repo] = values
+    missing = [repo for repo in REPOS if repo not in declared]
+    if missing:
+        raise WindowFileError(
+            f"{path}: {PLACEMENT_KEY} must declare every probe repository; missing {missing}"
+        )
+    return CommittedPlacements(declared)
 
 
 # --------------------------------------------------------------------------- #
@@ -392,22 +507,98 @@ def run_name_lane(workflow: Mapping[Any, Any]) -> str | None:
     return default.group(1)
 
 
-def _literal_labels(runs_on: object) -> set[str] | None:
-    if isinstance(runs_on, str):
-        return None if "${{" in runs_on else {runs_on}
+def _labels_from_value(value: str, source: str) -> set[str]:
+    try:
+        parsed = json.loads(value)
+    except ValueError as exc:
+        raise WorkflowError(f"{source} = {value!r} is not JSON") from exc
+    if isinstance(parsed, str) and parsed:
+        return {parsed}
+    if (
+        isinstance(parsed, list)
+        and parsed
+        and all(isinstance(x, str) and x for x in parsed)
+    ):
+        return set(parsed)
+    raise WorkflowError(f"{source} = {value!r} is not a label or a list of labels")
+
+
+def resolve_runs_on(
+    runs_on: object, repo: str, variables: CommittedPlacements | None
+) -> set[str]:
+    """The runner labels a ``runs-on`` value places its job on.
+
+    Literal labels are read as written. A whole-value ``fromJSON(vars.NAME)`` or
+    ``vars.NAME`` (either with a ``|| '<literal>'`` fallback) is resolved from
+    the committed ``variables`` for ``repo``. Anything else raises :class:`WorkflowError`
+    saying why, because a placement the check cannot read is not a pass.
+    """
     if isinstance(runs_on, list) and all(
         isinstance(x, str) and "${{" not in x for x in runs_on
     ):
+        if not runs_on:
+            raise WorkflowError("runs-on is an empty list")
         return set(runs_on)
-    return None
+    if not isinstance(runs_on, str):
+        raise WorkflowError(f"runs-on {runs_on!r} is not a label or a list of labels")
+    whole = _WHOLE_EXPR_RE.match(runs_on)
+    if whole is None:
+        if "${{" in runs_on:
+            raise WorkflowError(
+                f"runs-on {runs_on!r} mixes an expression with text, which cannot be resolved"
+            )
+        return {runs_on}
+    body = whole.group("body").strip()
+    placement = _FROMJSON_VAR_RE.match(body)
+    as_json = placement is not None
+    if placement is None:
+        placement = _BARE_VAR_RE.match(body)
+    if placement is None:
+        raise WorkflowError(
+            f"runs-on {runs_on!r} is placed by something only the run can decide; "
+            "the check resolves fromJSON(vars.NAME) and vars.NAME, each with an optional "
+            "|| '<literal>' fallback"
+        )
+    name, fallback = placement.group("name"), placement.group("fallback")
+    if variables is None:
+        raise UndeclaredPlacementError(
+            f"no committed placement values were given for {repo}, so vars.{name} cannot be resolved"
+        )
+    value = variables.lookup(repo, name)
+    source = f"vars.{name}"
+    if value is None:
+        if fallback is None:
+            raise WorkflowError(
+                f"vars.{name} is committed as unset in {repo}, and the expression has no fallback"
+            )
+        value, source = fallback, f"the fallback of vars.{name}"
+    if as_json:
+        return _labels_from_value(value, source)
+    if not value.strip():
+        raise WorkflowError(f"{source} is empty")
+    return {value}
 
 
-def runs_on_labels(workflow: Mapping[Any, Any]) -> list[set[str] | None]:
-    """Literal runner labels per job; None for a job placed by an expression."""
-    return [_literal_labels(job.get("runs-on")) for job in _jobs(workflow).values()]
+def runs_on_labels(
+    workflow: Mapping[Any, Any], repo: str, variables: CommittedPlacements | None
+) -> dict[str, set[str] | WorkflowError]:
+    """Runner labels per job id, or the reason a job's placement cannot be read."""
+    placed: dict[str, set[str] | WorkflowError] = {}
+    for job_id, job in _jobs(workflow).items():
+        try:
+            placed[job_id] = resolve_runs_on(job.get("runs-on"), repo, variables)
+        except UndeclaredPlacementError as exc:
+            raise WorkflowError(f"job {job_id!r}: {exc}") from exc
+        except WorkflowError as exc:
+            placed[job_id] = exc
+    return placed
 
 
-def lane_markers(workflow: Mapping[Any, Any]) -> dict[str, set[str]]:
+def lane_markers(
+    workflow: Mapping[Any, Any],
+    repo: str = "",
+    variables: CommittedPlacements | None = None,
+) -> dict[str, set[str]]:
     """Every way the workflow names a lane it reads, keyed by lane_source."""
     markers: dict[str, set[str]] = {}
     job_lanes = job_name_lanes(workflow)
@@ -416,10 +607,14 @@ def lane_markers(workflow: Mapping[Any, Any]) -> dict[str, set[str]]:
     run_lane = run_name_lane(workflow)
     if run_lane is not None:
         markers["run_name"] = {run_lane}
+    # A job whose placement cannot be read names no label here; a runs_on
+    # entry over it is refused in derive_lane instead. A job placed by an
+    # undeclared variable is different: runs_on_labels raises, so the caller
+    # reports the workflow as unclassifiable rather than as no probe.
     customer = {
         label
-        for labels in runs_on_labels(workflow)
-        if labels
+        for labels in runs_on_labels(workflow, repo, variables).values()
+        if isinstance(labels, set)
         for label in labels & CUSTOMER_MACHINE_LABELS
     }
     if customer:
@@ -427,8 +622,18 @@ def lane_markers(workflow: Mapping[Any, Any]) -> dict[str, set[str]]:
     return markers
 
 
-def derive_lane(workflow: Mapping[Any, Any], lane_source: str, declared: str) -> str:
-    """The lane the workflow itself says it reads, through ``lane_source``."""
+def derive_lane(
+    workflow: Mapping[Any, Any],
+    lane_source: str,
+    declared: str,
+    repo: str = "",
+    variables: CommittedPlacements | None = None,
+) -> str:
+    """The lane the workflow itself says it reads, through ``lane_source``.
+
+    For ``runs_on`` that is the runner pool every job is placed on, with an
+    expression placement resolved from ``variables`` for ``repo``.
+    """
     if lane_source == "job_name":
         lanes = job_name_lanes(workflow)
         if len(lanes) != 1:
@@ -442,16 +647,23 @@ def derive_lane(workflow: Mapping[Any, Any], lane_source: str, declared: str) ->
             raise WorkflowError("run-name carries no lane= token")
         return lane
     if lane_source == "runs_on":
-        per_job = runs_on_labels(workflow)
-        if any(labels is None for labels in per_job):
+        placed = runs_on_labels(workflow, repo, variables)
+        unread = [
+            f"job {job_id!r}: {reason}"
+            for job_id, reason in placed.items()
+            if isinstance(reason, WorkflowError)
+        ]
+        if unread:
             raise WorkflowError(
-                "a job is placed by an expression, so its runner label cannot be read"
+                "the runner of a job cannot be resolved, so its pool is unknown: "
+                + "; ".join(unread)
             )
-        if all(labels is not None and declared in labels for labels in per_job):
+        per_job = [labels for labels in placed.values() if isinstance(labels, set)]
+        if all(declared in labels for labels in per_job):
             return declared
-        found = sorted({label for labels in per_job if labels for label in labels})
+        found = sorted({label for labels in per_job for label in labels})
         return ",".join(found)
-    markers = lane_markers(workflow)
+    markers = lane_markers(workflow, repo, variables)
     if markers:
         named = sorted({lane for lanes in markers.values() for lane in lanes})
         return ",".join(named)
@@ -501,7 +713,9 @@ def _workflow_files(root: Path) -> list[Path]:
     return sorted([*directory.glob("*.yml"), *directory.glob("*.yaml")])
 
 
-def _check_entry(window: ProbeWindow, root: Path) -> list[str]:
+def _check_entry(
+    window: ProbeWindow, root: Path, variables: CommittedPlacements | None
+) -> list[str]:
     label = f"{window.id} ({window.key})"
     path = root / window.workflow
     if not path.is_file():
@@ -519,7 +733,9 @@ def _check_entry(window: ProbeWindow, root: Path) -> list[str]:
                 f"{label}: cron mismatch: the window file has {sorted(window.cron)!r}, "
                 f"the workflow has {sorted(crons)!r}"
             )
-        lane = derive_lane(workflow, window.lane_source, window.lane)
+        lane = derive_lane(
+            workflow, window.lane_source, window.lane, window.repo, variables
+        )
         if lane != window.lane:
             errors.append(
                 f"{label}: lane mismatch via {window.lane_source}: the window file has {window.lane!r}, "
@@ -536,8 +752,16 @@ def _check_entry(window: ProbeWindow, root: Path) -> list[str]:
     return errors
 
 
-def check(windows: Sequence[ProbeWindow], roots: Mapping[str, Path]) -> list[str]:
+def check(
+    windows: Sequence[ProbeWindow],
+    roots: Mapping[str, Path],
+    variables: CommittedPlacements | None = None,
+) -> list[str]:
     """Every disagreement between ``windows`` and the workflows under ``roots``.
+
+    ``variables`` (the committed placement values) resolves a job placed by
+    ``vars.NAME``; with none, or with the name undeclared, such a placement is
+    an error, never a pass.
 
     Entries are checked against their repository's root; every scheduled probe
     under every given root must have an entry. An entry whose repository has
@@ -552,7 +776,7 @@ def check(windows: Sequence[ProbeWindow], roots: Mapping[str, Path]) -> list[str
                 f"{window.id} ({window.key}): no workflow root was given for {window.repo}"
             )
             continue
-        errors.extend(_check_entry(window, root))
+        errors.extend(_check_entry(window, root, variables))
     for repo, root in sorted(roots.items()):
         for path in _workflow_files(root):
             key = f"{repo}:{path.relative_to(root).as_posix()}"
@@ -561,7 +785,7 @@ def check(windows: Sequence[ProbeWindow], roots: Mapping[str, Path]) -> list[str
             try:
                 workflow = read_workflow(path)
                 crons = workflow_crons(workflow)
-                markers = lane_markers(workflow) if crons else {}
+                markers = lane_markers(workflow, repo, variables) if crons else {}
             except WorkflowError as exc:
                 errors.append(f"{key}: cannot be classified: {exc}")
                 continue
@@ -613,14 +837,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="a repository checkout holding .github/workflows; required for each of "
         + ", ".join(REPOS),
     )
+    parser.add_argument(
+        "--placement-policy",
+        type=Path,
+        default=DEFAULT_PLACEMENT_POLICY,
+        help=f"the runner routing policy whose {PLACEMENT_KEY} map holds the committed "
+        "value of every variable that places a scheduled job",
+    )
     args = parser.parse_args(argv)
     try:
         roots = _parse_roots(args.root)
+        variables = load_placements(args.placement_policy)
         windows = load_windows(args.windows)
     except WindowFileError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return EXIT_USAGE
-    errors = check(windows, roots)
+    errors = check(windows, roots, variables)
     scanned = ", ".join(
         f"{repo}={len(_workflow_files(root))}" for repo, root in sorted(roots.items())
     )

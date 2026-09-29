@@ -242,6 +242,7 @@ def _stateful_callback(
     state_io: dict[str, object],
     *,
     output_topic_map: dict[str, str] | None = None,
+    event_model: Any = None,
 ) -> Any:
     with (
         patch.dict(
@@ -253,7 +254,7 @@ def _stateful_callback(
     ):
         return _make_stateful_dispatch_callback(
             cast("Any", handler),
-            None,
+            event_model,
             dict(state_io),
             event_bus=None,
             output_topic_map=output_topic_map,
@@ -334,6 +335,85 @@ def test_missing_declared_key_fails_closed_with_no_local_fallback() -> None:
         )
 
     assert "session_id" in str(exc_info.value)
+    assert adapter.rows == {}
+
+
+LANDING_STATE_IO: dict[str, object] = {
+    "database": "omnibase_infra",
+    "table": "pr_landing_workflow_state",
+    "key": "landing_key",
+    "codec": {
+        "module": "tests.integration.test_state_io_domain_key_omn16924",
+        "name": "_SeamCodec",
+    },
+}
+
+
+class ModelDerivedKeyIngress(BaseModel):
+    """A route model whose state_io key is DERIVED, never on the wire (OMN-19829).
+
+    The shape of omnimarket's ``ModelPrLandingCompanionOutcomeIngress``: the
+    producer's wire fields plus a ``landing_key`` property.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    repository: str
+    pr_number: int
+
+    @property
+    def landing_key(self) -> str:
+        return f"{self.repository}#{self.pr_number}"
+
+
+def _derived_key_route() -> Any:
+    from omnibase_infra.runtime.auto_wiring.models import ModelHandlerRef
+
+    return ModelHandlerRef(
+        name="ModelDerivedKeyIngress",
+        module="tests.integration.test_state_io_domain_key_omn16924",
+    )
+
+
+@pytest.mark.integration
+def test_a_key_the_route_model_derives_keys_the_row() -> None:
+    """RED pre-fix: the key was read off the raw wire dict only, so a derived
+    ``landing_key`` read None and every message failed closed (81 of 81
+    companion outcomes DLQ'd on the .201 dev lane, 2026-09-28)."""
+    adapter = _FakeStateStoreAdapter()
+    handler = _FoldingHandler(state="observed")
+    callback = _stateful_callback(
+        handler, adapter, LANDING_STATE_IO, event_model=_derived_key_route()
+    )
+
+    asyncio.run(
+        callback(
+            _envelope(
+                {
+                    "repository": "OmniNode-ai/omnibase_infra",
+                    "pr_number": 4247,
+                    "correlation_id": str(CID),
+                }
+            )
+        )
+    )
+
+    assert list(adapter.rows) == ["OmniNode-ai/omnibase_infra#4247"]
+    assert handler.observed_keys == ["OmniNode-ai/omnibase_infra#4247"]
+
+
+@pytest.mark.integration
+def test_a_payload_the_route_model_rejects_still_fails_closed() -> None:
+    adapter = _FakeStateStoreAdapter()
+    handler = _FoldingHandler(state="observed")
+    callback = _stateful_callback(
+        handler, adapter, LANDING_STATE_IO, event_model=_derived_key_route()
+    )
+
+    with pytest.raises(ModelOnexError) as exc_info:
+        asyncio.run(callback(_envelope({"correlation_id": str(CID)})))
+
+    assert "landing_key" in str(exc_info.value)
     assert adapter.rows == {}
 
 

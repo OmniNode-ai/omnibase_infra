@@ -1,0 +1,120 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# ONEX Node Contract
+# Node: NodeBoardProbeEffect
+#
+# Board checks: each handler reads one surface and grades it PASS, FAIL or
+# INDETERMINATE. INDETERMINATE is a failure on every verdict path; there is no
+# neutral or skipped outcome for a planned check. Each check declares a stable
+# check id and a surface class under board_checks below.
+#
+# The first check is forwarder_refused_topic (plan task S5): on the lab lane
+# under proof, the gateway forwarder is up and its cloud leg refuses no inbound
+# topic. It is class lab_hardware and joins the omnibase_infra lab proof
+# profile's mandatory checks (config/lab_proof_profiles.yaml).
+#
+# Plan: knowledge-base plans/2026-09-28-verification-before-and-after-merge-and-declared-lab-state.md
+#
+# Related tickets:
+#   - OMN-19930: plan task S5, the forwarder_refused_topic check
+#   - OMN-19928: plan task S3, the CI half of the same boundary
+#   - OMN-17427: epic
+name: "node_board_probe_effect"
+contract_name: "node_board_probe_effect"
+node_name: "node_board_probe_effect"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "EFFECT_GENERIC"
+description: >
+  Effect node that runs board checks against a lab or CI surface and returns one typed result per check: the check id, its surface class, the subject, PASS, FAIL or INDETERMINATE, and every reason. It reads; it never mutates the surface it checks.
+
+input_model:
+  name: "ModelForwarderRefusedTopicRequest"
+  module: "omnibase_infra.nodes.node_board_probe_effect.models.model_forwarder_refused_topic_request"
+  description: "The lane whose gateway forwarder to read, its container, the cloud broker the lane declares and the forwarder contract's inbound topic retry interval."
+output_model:
+  name: "ModelBoardProbeResult"
+  module: "omnibase_infra.nodes.node_board_probe_effect.models.model_board_probe_result"
+  description: "One check, one subject, one outcome and its reasons."
+board_checks:
+  - check_id: "forwarder_refused_topic"
+    surface_class: "lab_hardware"
+    operation: "board_probe.forwarder_refused_topic"
+    description: "PASS when the forwarder is up for one retry interval on the declared cloud broker and refuses nothing; FAIL when a topic is refused or the process is down; INDETERMINATE when the state is unreadable, the lane declares no cloud broker, or the cloud leg is another broker."
+capabilities:
+  - name: "board_probe.forwarder_refused_topic"
+    description: "Grade the lab lane's gateway forwarder for refused inbound topics"
+# Top-level handler block: RuntimeLocal's single-shot execution path resolves
+# the handler and its input model from here, so
+# `onex node node_board_probe_effect --input <request.json>` runs the check
+# (same shape as node_in_progress_probe_hygiene_effect).
+handler:
+  module: "omnibase_infra.nodes.node_board_probe_effect.handlers.handler_forwarder_refused_topic"
+  class: "HandlerForwarderRefusedTopic"
+  input_model: "omnibase_infra.nodes.node_board_probe_effect.models.model_forwarder_refused_topic_request.ModelForwarderRefusedTopicRequest"
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "board_probe.forwarder_refused_topic"
+      handler:
+        name: "HandlerForwarderRefusedTopic"
+        module: "omnibase_infra.nodes.node_board_probe_effect.handlers.handler_forwarder_refused_topic"
+      description: "Observe the forwarder through the docker reader and grade it"
+      supported_operations:
+        - "board_probe.forwarder_refused_topic"
+      input_model:
+        name: "ModelForwarderRefusedTopicRequest"
+        module: "omnibase_infra.nodes.node_board_probe_effect.models.model_forwarder_refused_topic_request"
+        description: "The forwarder to read and what its lane declares."
+    - operation: "board_probe.read_forwarder_state"
+      handler:
+        name: "HandlerDockerForwarderStateReader"
+        module: "omnibase_infra.nodes.node_board_probe_effect.handlers.handler_docker_forwarder_state_reader"
+      description: "Read the forwarder's process state, recent topic events and broker map through bounded Docker CLI calls"
+      supported_operations:
+        - "board_probe.read_forwarder_state"
+      input_model:
+        name: "ModelForwarderRefusedTopicRequest"
+        module: "omnibase_infra.nodes.node_board_probe_effect.models.model_forwarder_refused_topic_request"
+        description: "The forwarder to read and what its lane declares."
+error_handling:
+  retry_policy:
+    max_retries: 0
+    initial_delay_ms: 0
+    max_delay_ms: 0
+    exponential_base: 1
+    retry_on: []
+  error_types:
+    - name: "SurfaceUnreadable"
+      description: "The surface could not be read; recorded as an INDETERMINATE result, never raised"
+      recoverable: false
+health_check:
+  enabled: true
+  endpoint: "/health"
+  interval_seconds: 60
+  checks:
+    - name: "forwarder_refused_topic_handler_loaded"
+      type: "handler"
+      critical: true
+metadata:
+  description: "Runs board checks against a lab or CI surface and grades each one"
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-09-28"
+  tags:
+    - effect
+    - lab
+    - board
+    - probe
+  related_tickets:
+    - "OMN-19930"
+    - "OMN-19928"
+    - "OMN-17427"

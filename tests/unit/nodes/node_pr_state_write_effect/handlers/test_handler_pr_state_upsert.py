@@ -256,3 +256,75 @@ class TestHandlerPrStateUpsertHandle:
         )
 
         assert output.correlation_id is not None
+
+
+class TestHandlerPrStateUpsertPartialObservation:
+    """OMN-19492: a partial webhook observation never clears a stored column."""
+
+    def test_every_state_column_coalesces_with_the_stored_value(self) -> None:
+        from omnibase_infra.nodes.node_pr_state_write_effect.handlers.handler_pr_state_upsert import (
+            _SQL_UPSERT,
+        )
+
+        update = _SQL_UPSERT.split("DO UPDATE SET", 1)[1]
+        assignments = {
+            line.split("=", 1)[0].strip(): line.split("=", 1)[1].strip()
+            for line in update.splitlines()
+            if "=" in line
+        }
+        for column in (
+            "triage_state",
+            "title",
+            "ci_status",
+            "review_decision",
+            "mergeable",
+            "merge_state_status",
+            "merge_queue_state",
+            "base_ref",
+            "head_ref",
+            "is_draft",
+        ):
+            assert assignments[column].startswith("COALESCE($"), (
+                f"{column} must be COALESCE(new, stored) so a None in a partial "
+                "observation keeps the stored value"
+            )
+            assert assignments[column].endswith(f"public.pr_state.{column}),")
+        assert "GREATEST(EXCLUDED.as_of, public.pr_state.as_of)" in update
+
+    def test_insert_resolves_the_not_null_defaults(self) -> None:
+        from omnibase_infra.nodes.node_pr_state_write_effect.handlers.handler_pr_state_upsert import (
+            _SQL_UPSERT,
+        )
+
+        values = _SQL_UPSERT.split("VALUES", 1)[1].split("ON CONFLICT", 1)[0]
+        assert "COALESCE($3, 'needs_review')" in values
+        assert "COALESCE($4, '')" in values
+        assert "COALESCE($15, FALSE)" in values
+
+    @pytest.mark.asyncio
+    async def test_a_partial_payload_sends_none_parameters(self) -> None:
+        handler, db_handler = make_handler_with_mock_db()
+        db_handler.execute = AsyncMock(
+            return_value=make_db_result(rows=[{"was_insert": False}])
+        )
+        payload = ModelPayloadPrStateUpsert(
+            repo="OmniNode-ai/omnibase_infra",
+            pr_number=4242,
+            triage_state=None,
+            title=None,
+            is_draft=None,
+            ci_status="SUCCESS",
+            source="webhook",
+            as_of=datetime.now(UTC),
+        )
+
+        await handler.upsert(payload)
+
+        (envelope,), _ = db_handler.execute.call_args
+        parameters = envelope["payload"]["parameters"]
+        assert (parameters[2], parameters[3], parameters[4], parameters[-1]) == (
+            None,
+            None,
+            "SUCCESS",
+            None,
+        )

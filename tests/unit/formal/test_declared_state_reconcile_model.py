@@ -1,0 +1,58 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+"""Committed TLC evidence for the declared-state reconcile model (OMN-19935).
+
+The model passes and every mutation fails its named property, against the
+content digest of the spec and cfg files at the time TLC ran on the lab.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from pathlib import Path
+
+import pytest
+
+MODEL_DIR = Path(__file__).resolve().parents[3] / "formal" / "declared_state_reconcile"
+RESULTS = MODEL_DIR / "results"
+
+EXPECTED_VIOLATIONS = {
+    "mut_no_lock": "Invariant NoInterleave is violated.",
+    "mut_no_fresh": "Invariant NoStaleApply is violated.",
+    "mut_no_filter": "Invariant NoNeededRemoved is violated.",
+    "mut_no_observable_guard": "Invariant NoApplyOnUnobservable is violated.",
+    "mut_leak_lock": "Temporal properties were violated.",
+}
+
+
+def _digest() -> str:
+    h = hashlib.sha256()
+    h.update((MODEL_DIR / "DeclaredStateReconcile.tla").read_bytes())
+    for cfg in sorted(MODEL_DIR.glob("*.cfg")):
+        h.update(cfg.read_bytes())
+    return h.hexdigest()
+
+
+@pytest.mark.unit
+def test_results_bind_to_current_model_digest() -> None:
+    assert (RESULTS / "model.sha256").read_text().strip() == _digest()
+
+
+@pytest.mark.unit
+def test_model_holds_every_property() -> None:
+    out = (RESULTS / "Model.out").read_text()
+    assert "Model checking completed. No error has been found." in out
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("name", "message"), sorted(EXPECTED_VIOLATIONS.items()))
+def test_each_mutation_fails_its_property(name: str, message: str) -> None:
+    out = (RESULTS / f"{name}.out").read_text()
+    assert f"Error: {message}" in out
+    assert "No error has been found" not in out
+
+
+@pytest.mark.unit
+def test_every_mutation_cfg_has_a_result() -> None:
+    cfgs = {p.stem for p in MODEL_DIR.glob("mut_*.cfg")}
+    assert cfgs == set(EXPECTED_VIOLATIONS)

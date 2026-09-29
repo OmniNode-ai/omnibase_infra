@@ -37,8 +37,14 @@ from omnibase_infra.runtime.config_provenance import (
 from omnibase_infra.runtime.dogfood_delegation_fault_routes import (
     load_dogfood_delegation_fault_routes,
 )
+from omnibase_infra.runtime.models.enum_bifrost_endpoint_probe_failure_kind import (
+    EnumBifrostEndpointProbeFailureKind,
+)
 from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
     EnumBifrostLaneLocale,
+)
+from omnibase_infra.runtime.models.model_bifrost_endpoint_probe_failure import (
+    ModelBifrostEndpointProbeFailure,
 )
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
     NEW_BACKEND_DECLARATION_FIELDS,
@@ -71,7 +77,7 @@ _TYPED_DECISION_TIER = "typed_decision"
 #: bare base, which OMN-12815 forbids: nothing downstream appends a path.
 _BARE_VERSION_SEGMENT = re.compile(r"^v\d+(?:(?:alpha|beta)\d*)?$")
 
-EndpointProbe = Callable[[str, str, float], str | None]
+EndpointProbe = Callable[[str, str, float], ModelBifrostEndpointProbeFailure | None]
 
 
 def _resolve_canonical_source_path() -> Path:
@@ -167,7 +173,7 @@ def _resolve_target_path(
 
 def _probe_openai_model_endpoint(
     endpoint_url: str, model_name: str, timeout_seconds: float
-) -> str | None:
+) -> ModelBifrostEndpointProbeFailure | None:
     parsed = urlsplit(endpoint_url)
     path = parsed.path.rstrip("/")
     matched_suffix = next(
@@ -184,8 +190,16 @@ def _probe_openai_model_endpoint(
         request = Request(endpoint, headers={"accept": "application/json"})  # noqa: S310
         with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
             payload = json.loads(response.read().decode("utf-8"))
-    except (HTTPError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return f"{endpoint} is not a readable model endpoint: {exc}"
+    except (HTTPError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return ModelBifrostEndpointProbeFailure(
+            kind=EnumBifrostEndpointProbeFailureKind.REFUSED,
+            detail=f"{endpoint} is not a readable model endpoint: {exc}",
+        )
+    except OSError as exc:
+        return ModelBifrostEndpointProbeFailure(
+            kind=EnumBifrostEndpointProbeFailureKind.UNREACHABLE,
+            detail=f"{endpoint} is unreachable: {exc}",
+        )
     data = payload.get("data") if isinstance(payload, dict) else None
     model_ids = (
         {item.get("id") for item in data if isinstance(item, dict)}
@@ -193,7 +207,13 @@ def _probe_openai_model_endpoint(
         else set()
     )
     if model_name not in model_ids:
-        return f"{endpoint} does not list required model {model_name!r}"
+        return ModelBifrostEndpointProbeFailure(
+            kind=EnumBifrostEndpointProbeFailureKind.REFUSED,
+            detail=(
+                f"{endpoint} does not list required model {model_name!r}; "
+                f"it serves {sorted(str(i) for i in model_ids)}"
+            ),
+        )
     return None
 
 
@@ -345,8 +365,22 @@ def _added_backend_entry(
     # tier and rung names against the ladder it loads. Absent means absent, so
     # an added backend with no placement renders exactly as it did before.
     if binding.placement is not None:
-        entry["placement"] = binding.placement.model_dump(mode="json")
+        # AC4: ``mode`` is written only when it is not the default, so a
+        # fallback placement renders byte-identical to the pre-mode shape.
+        entry["placement"] = binding.placement.model_dump(
+            mode="json", exclude_defaults=True
+        )
     return entry
+
+
+def _render_dark(
+    backend: dict[object, object], binding: ModelBifrostLaneBackendBinding
+) -> None:
+    """Write the declared-but-dark shape: no endpoint, binding kept in place."""
+    backend["endpoint_url"] = None
+    backend["model_name"] = binding.advertised_model
+    backend["max_tokens"] = binding.max_tokens
+    backend["timeout_ms"] = binding.timeout_ms
 
 
 def _merge_lane_overlay(
@@ -417,10 +451,7 @@ def _merge_lane_overlay(
             # the rung is restored by flipping one flag, not by reconstructing
             # it. The probe is skipped for the obvious reason: probing an
             # endpoint already proven dark would only fail the render.
-            backend["endpoint_url"] = None
-            backend["model_name"] = binding.advertised_model
-            backend["max_tokens"] = binding.max_tokens
-            backend["timeout_ms"] = binding.timeout_ms
+            _render_dark(backend, binding)
             continue
         if verify:
             failure = endpoint_probe(
@@ -429,8 +460,18 @@ def _merge_lane_overlay(
                 _DEFAULT_ENDPOINT_PROBE_TIMEOUT_SECONDS,
             )
             if failure is not None:
+                if failure.kind is EnumBifrostEndpointProbeFailureKind.UNREACHABLE:
+                    # OMN-19455: nothing answered, so there is no served id to
+                    # contradict. Mark the rung dark and keep booting.
+                    sys.stdout.write(
+                        f"[entrypoint] Bifrost backend {binding.backend_key!r} "
+                        f"unreachable, marked dark: {failure.detail}\n"
+                    )
+                    _render_dark(backend, binding)
+                    continue
                 raise ProtocolConfigurationError(
-                    f"Bifrost lane binding {binding.backend_key!r} failed verification: {failure}"
+                    f"Bifrost lane binding {binding.backend_key!r} failed "
+                    f"verification: {failure.detail}"
                 )
         backend["endpoint_url"] = binding.endpoint_url
         backend["model_name"] = binding.advertised_model

@@ -122,3 +122,51 @@ def test_an_oversized_placement_in_the_dev_overlay_is_refused(tmp_path: Path) ->
             environ={},
         )
     assert not target.exists()
+
+
+# --- AC4: the dev overlay spreads first-choice traffic (RULING ledger:4257) ---
+
+
+def _render_overlay(tmp_path: Path, overlay_path: Path) -> dict[str, Any]:
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_base_contract(source)
+    render_bifrost_delegation_contract(
+        source_path=source,
+        overlay_path=overlay_path,
+        target_path=target,
+        environ={},
+    )
+    rendered = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert isinstance(rendered, dict)
+    return {backend["backend_id"]: backend for backend in rendered["backends"]}
+
+
+def test_the_committed_dev_overlay_renders_the_omnipc2_placement_as_spread(
+    tmp_path: Path,
+) -> None:
+    """The committed overlay's ``mode: spread`` reaches the routing authority."""
+    by_id = _render_overlay(tmp_path, _DEV_OVERLAY)
+    assert by_id[_PLACED]["placement"]["mode"] == "spread"
+
+
+def test_a_fallback_mode_in_the_dev_overlay_renders_the_pre_mode_bytes(
+    tmp_path: Path,
+) -> None:
+    """NEGATIVE CONTROL: the default mode renders no ``mode`` key at all.
+
+    A routing authority older than the field refuses an unknown key, so a
+    fallback placement must render exactly the shape it rendered before AC4.
+    Without this control, a renderer that wrote every mode would pass the
+    spread case above and break every older consumer.
+    """
+    overlay = _dev_overlay()
+    row = next(b for b in overlay["backends"] if b["backend_id"] == _PLACED)
+    row["placement"]["mode"] = "fallback"
+    fallback = tmp_path / "fallback.bifrost.yaml"
+    fallback.write_text(yaml.safe_dump(overlay, sort_keys=False), encoding="utf-8")
+
+    placement = _render_overlay(tmp_path, fallback)[_PLACED]["placement"]
+    assert "mode" not in placement
+    expected = {k: v for k, v in row["placement"].items() if k != "mode"}
+    assert placement == expected
