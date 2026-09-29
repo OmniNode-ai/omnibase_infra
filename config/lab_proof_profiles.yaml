@@ -139,6 +139,11 @@ profiles:
           - no_wiring_failures
           - focused_tests
           - changed_path_live
+          # OMN-19930 (plan task S5): the lab dev lane's gateway forwarder is up
+          # and the cloud broker its lane declares refuses no inbound topic.
+          # Read by node_board_probe_effect (surface class lab_hardware) on the
+          # host that runs the forwarder; INDETERMINATE fails, like FAIL.
+          - forwarder_refused_topic
         negative_control:
           kind: base_rerun
         timeout_minutes: 45

@@ -160,6 +160,18 @@ class HarnessError(RuntimeError):
     """The harness could not be brought up. Never swallowed into a skip."""
 
 
+@dataclass(frozen=True)
+class RuntimePrincipal:
+    """A SCRAM user the process under test connects as (OMN-19928).
+
+    Never a superuser. Its credentials are synthetic test constants, created in
+    a throwaway broker that is destroyed with the test.
+    """
+
+    username: str
+    password: str
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -432,6 +444,105 @@ class RedpandaSasl:
                 f"trim-prefix did not take on {topic}/{partition}: "
                 f"log start is {log_start}, expected >= {offset}"
             )
+
+    # -- non-superuser principals (OMN-19928) ------------------------------
+    # The harness's own user is a SUPERUSER (see ``_docker_run``), and a
+    # superuser skips every topic and group grant. A test that connects as it
+    # therefore proves authentication and nothing about authorization: the
+    # 2026-09-28 regression (omnibase_infra#4227, a topic the forwarder was not
+    # admitted to) passed every broker in CI for exactly that reason. These
+    # helpers keep the superuser for bootstrap and hand the process under test
+    # a principal that holds only the grants the test gives it.
+    def create_principal(self, principal: RuntimePrincipal) -> None:
+        """Create one SCRAM user that is NOT a superuser."""
+        self.rpk(
+            "security",
+            "user",
+            "create",
+            principal.username,
+            "-p",
+            principal.password,
+            "--mechanism",
+            self.mechanism,
+        )
+
+    def grant(
+        self,
+        principal: RuntimePrincipal,
+        *,
+        operations: tuple[str, ...],
+        topics: tuple[str, ...] = (),
+        groups: tuple[str, ...] = (),
+        cluster: bool = False,
+    ) -> None:
+        """Allow ``operations`` to ``principal`` on the named resources only."""
+        if not (topics or groups or cluster):
+            raise HarnessError("a grant must name at least one resource")
+        args = [
+            "security",
+            "acl",
+            "create",
+            "--allow-principal",
+            f"User:{principal.username}",
+            "--operation",
+            ",".join(operations),
+        ]
+        for topic in topics:
+            args += ["--topic", topic]
+        for group in groups:
+            args += ["--group", group]
+        if cluster:
+            args.append("--cluster")
+        self.rpk(*args)
+
+    def superusers(self) -> tuple[str, ...]:
+        """The broker's configured superuser list, read back from the broker."""
+        proc = self.rpk("cluster", "config", "get", "superusers")
+        names = re.findall(r"^\s*-\s*(\S+)\s*$", proc.stdout, flags=re.MULTILINE)
+        return tuple(name.strip("'\"") for name in names)
+
+    def acl_listing(self) -> str:
+        """``rpk security acl list`` output, for assertions and failure messages."""
+        return self.rpk("security", "acl", "list").stdout
+
+    def container_id(self) -> str:
+        """The full id of the broker container, read from the Docker daemon."""
+        proc = subprocess.run(
+            ["docker", "inspect", "--format", "{{.Id}}", self.container],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        if proc.returncode != 0:
+            raise HarnessError(f"docker inspect {self.container} failed: {proc.stderr}")
+        return proc.stdout.strip()
+
+    def rpk_as(
+        self, principal: RuntimePrincipal, *args: str
+    ) -> subprocess.CompletedProcess[str]:
+        """Run ``rpk`` inside the broker as ``principal`` (never raises)."""
+        return subprocess.run(
+            [
+                "docker",
+                "exec",
+                self.container,
+                "rpk",
+                *args,
+                "-X",
+                f"brokers={self.internal_bootstrap}",
+                "-X",
+                f"user={principal.username}",
+                "-X",
+                f"pass={principal.password}",
+                "-X",
+                f"sasl.mechanism={self.mechanism}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
 
     # -- env ---------------------------------------------------------------
     def env(self) -> dict[str, str]:
