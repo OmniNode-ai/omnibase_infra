@@ -75,6 +75,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - board_probe_results
               - ci_attempt_outcome
               - claude_agent_spans
               - claude_hook_events
@@ -370,5 +371,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 00e64f034352ede3f3e3435c5ee1d0f4a8adc1bb911389262d13f2819c6db4a9
+  sha256: da6bb8d915a3792558be2a5f449718e70596ecb46169531231715402af16a158
 topology_instance: onex-dev

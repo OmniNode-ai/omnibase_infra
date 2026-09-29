@@ -113,6 +113,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "claude_hook_events": "omnimarket#2956",
     "worktree_reconcile_hosts": "omnimarket#3047",
     "pr_state": "omnimarket#3054",
+    "board_probe_results": "omnimarket#3061",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
     "lab_container_memory_window": "omnimarket#3051",
 }

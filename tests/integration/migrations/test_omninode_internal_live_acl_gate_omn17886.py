@@ -377,6 +377,22 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
     assert pr_state_live == pr_state_declared
     assert "DELETE" not in pr_state_live
 
+    # OMN-19937: the board probe results projection grants exactly the runtime
+    # writer's SELECT/INSERT/UPDATE privileges, with no DELETE.
+    board_probe_results_declared = {
+        privilege
+        for principal, relation, privilege in declared_acl(
+            load_topology_profile(PROFILE)
+        ).table_grants
+        if principal == _RUNTIME and relation == "board_probe_results"
+    }
+    assert board_probe_results_declared == {"SELECT", "INSERT", "UPDATE"}
+    board_probe_results_live = _live_privileges(
+        fresh_build, "board_probe_results", _RUNTIME
+    )
+    assert board_probe_results_live == board_probe_results_declared
+    assert "DELETE" not in board_probe_results_live
+
     live = set(report["findings"])
     allowed = {entry["finding"] for entry in _load_allowlist()}
     new = sorted(live - allowed)
