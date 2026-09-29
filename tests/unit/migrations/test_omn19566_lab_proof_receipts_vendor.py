@@ -22,7 +22,7 @@ _CLASSES = _ROOT / "config" / "migration_classes.yaml"
 _CREATE = "0000_create_lab_proof_receipts.sql"
 _GRANT = "0001_grant_omninode_runtime_lab_proof_receipts.sql"
 _SHA256 = {
-    _CREATE: "d3f8330b99a5795de241ee1e2d40801e19f67c888a52f6032fa8130f37ec9bd6",
+    _CREATE: "d6f177c0441cab5bd573c892be1c7b8d33eac5881d7a0bcd934d147328c144e8",
     _GRANT: "673d00436921a386ddb2cdf1bf1ccb0c34816d6417e9fd8fa0b13cec823fad20",
 }
 _TABLES = ("lab_proof_receipts",)
