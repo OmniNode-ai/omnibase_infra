@@ -140,6 +140,18 @@ class Bundle:
     # network, volume and runtime-image names, so it can run beside any other
     # compose project on the same Docker host.
     project: str | None = None
+    # OMN-19972: the host address every published port binds to. ``None``
+    # keeps the historical ``<external>:<internal>`` form, which binds all
+    # interfaces; the lab lanes render from the same shared manifests and are
+    # meant to be reachable. The laptop profile sets ``127.0.0.1`` so a
+    # developer's database and broker are not published to their network.
+    publish_host: str | None = None
+    # OMN-19972: replacement defaults for ``${VAR:-default}`` references in
+    # every entry's command and environment. A shared manifest's default is
+    # right for the lab lanes that render it; a bundle that must not carry it
+    # (the laptop profile and the lab's LAN address) overrides it here instead
+    # of editing the shared manifest.
+    env_default_overrides: dict[str, str] = field(default_factory=dict)
 
     def resolve_includes(
         self,

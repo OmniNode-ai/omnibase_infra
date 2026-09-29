@@ -133,6 +133,7 @@ migrations:
   forward/nodes/node_delegation_routing_reducer/0003_grant_tenant_projection_writer_overlay_sequence.sql: expand-only
   forward/nodes/node_delegation_routing_reducer/0004_add_delegation_routing_tenant_overlay_provider.sql: forward-only # ALTER TABLE ADD CONSTRAINT DELEGATION_ROUTING_TENANT_OVERLAY_PROVIDER_TOKEN
   forward/nodes/node_delegation_routing_reducer/0005_backfill_delegation_routing_tenant_overlay_provider.sql: forward-only # UPDATE
+  forward/nodes/node_delegation_routing_reducer/0006_grant_app_dashboard_overlay.sql: expand-only
   forward/nodes/node_deployment_evidence_reducer/0001_create_deployment_evidence_projection_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT DEPLOYMENT_EVIDENCE_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT DEPLOYMENT
   forward/nodes/node_deployment_evidence_reducer/0002_grant_omninode_runtime_deployment_evidence_tables.sql: expand-only
   forward/nodes/node_evidence_dashboard_reducer/0001_create_evidence_dashboard_projection_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT EVIDENCE_DASHBOARD_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT EVIDENCE_CO
@@ -169,6 +170,8 @@ migrations:
   forward/nodes/node_projection_baselines_roi/001_create_baselines_roi_snapshots.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT BASELINES_ROI_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT BASELINES_ROI_SNA
   forward/nodes/node_projection_baselines_roi/002_realign_roi_snapshots_to_producer_schema.sql: forward-only # DROP; EXECUTE; ALTER TABLE ADD CONSTRAINT BASELINES_ROI_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT BASELINES_R
   forward/nodes/node_projection_baselines_roi/003_grant_omninode_runtime_baselines_roi_snapshots.sql: expand-only
+  forward/nodes/node_projection_board_probe_results/0000_create_board_probe_results.sql: forward-only # ALTER TABLE ADD COLUMN; UNIQUE INDEX on an existing table
+  forward/nodes/node_projection_board_probe_results/0001_grant_omninode_runtime_board_probe_results.sql: expand-only
   forward/nodes/node_projection_capsule_store/078_create_capsule_store.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPSULE_STORE_PKEY; ALTER TABLE ADD CONSTRAINT CAPSULE_STORE_SUCCESS_RATE_
   forward/nodes/node_projection_capsule_store/079_create_capsule_effectiveness_view.sql: forward-only # CREATE OR REPLACE
   forward/nodes/node_projection_capsule_store/080_grant_omninode_runtime_capsule_store.sql: expand-only
@@ -237,6 +240,8 @@ migrations:
   forward/nodes/node_projection_delegation/0046_delegation_events_cohort_key.sql: expand-only
   forward/nodes/node_projection_delegation/0047_delegation_events_ticket_id.sql: expand-only
   forward/nodes/node_projection_delegation/0048_delegation_events_caller_lane.sql: expand-only
+  forward/nodes/node_projection_delegation/0049_delegation_events_data_source.sql: forward-only # ALTER TABLE public.delegation_events ADD CONSTRAINT DELEGATION_EVENTS_DATA_SOURCE_CHECK (ADD CONSTRAINT class)
+  forward/nodes/node_projection_delegation/0050_delegation_summary_excludes_fixture_savings.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
   forward/nodes/node_projection_delegation_inference_response/0001_create_projection_delegation_inference_response_text.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PROJECTION_DELEGATION_INFERENCE_RESPONSE_TEXT_PKEY; ALTER TABLE ADD CONSTR
   forward/nodes/node_projection_delegation_inference_response/0002_inference_response_text_tenant_rekey.sql: forward-only # DROP; ALTER TABLE DROP CONSTRAINT; UPDATE
   forward/nodes/node_projection_delegation_inference_response/0003_inference_response_text_rls_tenant_isolation.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
@@ -326,6 +331,7 @@ migrations:
   forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql: forward-only # CREATE OR REPLACE; ALTER VIEW
   forward/nodes/node_projection_savings/090_grant_tenant_projection_writer_savings_estimates.sql: expand-only
   forward/nodes/node_projection_savings/090_savings_aggregate_excludes_model_text.sql: forward-only # CREATE OR REPLACE
+  forward/nodes/node_projection_savings/091_grant_app_dashboard_savings_series.sql: expand-only
   forward/nodes/node_projection_savings/091_savings_estimates_house_tenant_uuid_backfill.sql: forward-only # UPDATE (house slug -> house UUID); ALTER TABLE ALTER COLUMN SET DEFAULT; transaction-scoped CREATE/DROP POLICY inside one DO block
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab

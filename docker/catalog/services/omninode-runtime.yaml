@@ -21,6 +21,9 @@ hardcoded_env:
   OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra'
   OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence'
   KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+  # OMN-19558: 240s handler + 60s margin needs deadline >= 300s;
+  # the library's 300s poll default caps the deadline at 255s.
+  KAFKA_MAX_POLL_INTERVAL_MS: '1800000'
   KAFKA_BROKER_ALLOWLIST: 'redpanda:'
   OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   BUS_ID: local
