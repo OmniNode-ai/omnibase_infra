@@ -101,6 +101,7 @@ databases:
               - topic_activity
               - topic_produce_windows
               - work_events
+              - worktree_reconcile_hosts
             privileges:
               - INSERT
               - SELECT
@@ -368,5 +369,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 043923d4c22b220ea972ab83570eb19279ac6ada8a2c2d3993d923f7e02e048c
+  sha256: 066ada132aa49e17c87121ecd1b9140ffadff9af41a56f32fd4267a5d6f2becd
 topology_instance: local

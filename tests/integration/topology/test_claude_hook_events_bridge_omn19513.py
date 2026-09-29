@@ -1,7 +1,15 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""The active Claude hook-event bridge derives the grants it ships (OMN-19513)."""
+"""The Claude hook-event bridge was retired and its grants still ship (OMN-19513).
+
+OMN-19513 declared ``claude_agent_spans`` and ``claude_hook_events`` by hand in
+``LEGACY_MIGRATION_TABLE_DECLARATIONS`` until omnimarket#2956 landed. The pin
+advance to ``791c3b89970b`` (OMN-19566, carrying omnimarket#2956) makes the
+pinned contracts declare both relations, so the bridge entries were deleted
+with the commit that made them redundant. The privilege assertions are made
+against the COMMITTED instance files, which is what the deploy applies.
+"""
 
 from __future__ import annotations
 
@@ -11,13 +19,8 @@ from typing import Any
 import pytest
 import yaml
 
-from omnibase_core.enums.enum_database_grant_object_type import (
-    EnumDatabaseGrantObjectType,
-)
-from omnibase_infra.topology import load_topology_profile
 from omnibase_infra.topology.table_grant_derivation import (
     LEGACY_MIGRATION_TABLE_DECLARATIONS,
-    derive_table_grants,
 )
 
 pytestmark = pytest.mark.integration
@@ -67,23 +70,15 @@ def _instance_document(profile: str) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize("relation", _RELATIONS)
-class TestTheActiveBridgeIsCommitted:
-    def test_exactly_one_bridge_carries_the_relation(self, relation: str) -> None:
+class TestTheBridgeWasRetired:
+    def test_no_supplemental_bridge_remains(self, relation: str) -> None:
         entries = _bridge_entries(relation)
-        assert len(entries) == 1, (
-            f"{relation} is carried by {len(entries)} "
-            "LEGACY_MIGRATION_TABLE_DECLARATIONS entries; the active interim "
-            "window requires exactly one bridge. Add the missing declaration or "
-            "remove the duplicate before regenerating topology grants."
-        )
-        table = entries[0].table
-        actual = (table.schema, table.access, table.database_ref)
-        expected = (_SCHEMA, "read_write", _DATABASE_REF)
-        assert actual == expected, (
-            f"{relation}'s active bridge has schema/access/database_ref "
-            f"{actual!r}, expected {expected!r}. Restore the bridge to the "
-            "omninode_internal application read_write declaration so the "
-            "runtime writer derives its required grant."
+        assert not entries, (
+            f"{relation} still has {len(entries)} supplemental "
+            "LEGACY_MIGRATION_TABLE_DECLARATIONS entries, but the pinned "
+            "omnimarket contracts (791c3b89970b, carrying omnimarket#2956) "
+            "declare it. A redundant bridge contributes byte-identical output "
+            "and nothing else will tell you it is there."
         )
 
     @pytest.mark.parametrize("migration", _VENDORED_MIGRATIONS, ids=lambda p: p.name)
@@ -91,45 +86,16 @@ class TestTheActiveBridgeIsCommitted:
         self, relation: str, migration: Path
     ) -> None:
         assert (_REPO_ROOT / migration).is_file(), (
-            f"{migration} is missing while {relation}'s interim bridge is "
-            "active. Restore both vendored Claude hook-event migration files; "
-            "the bridge declares relations that this migration lineage creates "
-            "and grants."
+            f"{migration} is missing while {relation} is "
+            "declared by the pinned contract. Restore both vendored Claude "
+            "hook-event migration files; the instances grant relations that "
+            "this migration lineage creates and grants."
         )
 
 
 @pytest.mark.parametrize("profile", _SHIPPED_INSTANCES)
 @pytest.mark.parametrize("relation", _RELATIONS)
-class TestTheActiveBridgeProducesTheShippedGrant:
-    def test_real_derivation_grants_exact_writer_privileges(
-        self, profile: str, relation: str
-    ) -> None:
-        derived = derive_table_grants(
-            load_topology_profile(profile), LEGACY_MIGRATION_TABLE_DECLARATIONS
-        )
-        matching_grants = tuple(
-            grant
-            for grant in derived.grants.get(_PRINCIPAL, ())
-            if grant.object_type is EnumDatabaseGrantObjectType.TABLE
-            and grant.schema == _SCHEMA
-            and relation in grant.objects
-        )
-        assert len(matching_grants) == 1, (
-            f"real derivation for {profile} produced {len(matching_grants)} "
-            f"{_PRINCIPAL} TABLE grants for {_SCHEMA}.{relation}, not one. "
-            "Keep exactly one active bridge with the required declaration "
-            "shape, then regenerate the shipped topology grants."
-        )
-        privileges = frozenset(
-            privilege.value for privilege in matching_grants[0].privileges
-        )
-        assert privileges == _REQUIRED_PRIVILEGES, (
-            f"real derivation for {profile} gives {_PRINCIPAL} {sorted(privileges)} "
-            f"on {_SCHEMA}.{relation}, expected {sorted(_REQUIRED_PRIVILEGES)} "
-            "and no DELETE. Restore read_write access on the active bridge and "
-            "regenerate the topology grant."
-        )
-
+class TestTheShippedInstancesGrantTheWriter:
     def test_shipped_instance_grants_exact_writer_privileges(
         self, profile: str, relation: str
     ) -> None:
