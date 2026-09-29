@@ -32,13 +32,6 @@ _COMMAND_TOPIC = "onex.cmd.omnimarket.delegate-skill.v1"
 _TERMINAL_TOPIC = "onex.evt.omnimarket.delegate-skill-completed.v1"
 # The committed stand-in task-class contract: this repo does not depend on
 # omnimarket, so its packaged contract is absent in the test venv (OMN-18305).
-_STAND_IN_TASK_CLASS_CONTRACT = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "delegation"
-    / "omn18305"
-    / "task_class_contracts_vocabulary.yaml"
-)
 _GROUP = (
     "local.omnimarket.node_delegate_skill_orchestrator.consume.1.3.0"
     ".__i.runtime-effects.__t." + _COMMAND_TOPIC
@@ -71,11 +64,6 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(cli_delegate, "check_omnimarket_drift", lambda **_: None)
     monkeypatch.setattr(cli_delegate, "_resolve_packaged_contract", lambda _n: contract)
     monkeypatch.setattr(cli_delegate, "run_receipt_mode", _fake_receipt_mode)
-    monkeypatch.setattr(
-        cli_delegate,
-        "resolve_task_class_contract_path",
-        lambda: _STAND_IN_TASK_CLASS_CONTRACT,
-    )
 
     clock = {"now": 0.0, "slept": 0.0}
 

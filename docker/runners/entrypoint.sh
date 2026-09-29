@@ -470,6 +470,26 @@ else
     _save_creds
 fi
 
+# ---------------------------------------------------------------------------
+# Real CPU count for job tools (OMN-19960)
+# ---------------------------------------------------------------------------
+# nproc inside the container reports every host core, not the `cpus:` quota,
+# so pre-commit and `pytest -n auto` fan out 16x too wide and hit the memory
+# limit. Export the cgroup's own count before run.sh is spawned; gosu keeps
+# the environment, so every job step inherits it. See cgroup-cpu-env.sh.
+#
+# The file is baked into the image (v11+), but this entrypoint is bind-mounted
+# from the host's staged copy, which converges ahead of any image rebuild. A
+# runner still on an older image restarts with this entrypoint and no file, so
+# a missing file is logged and skipped, never fatal under `set -e`.
+if [[ -r /usr/local/bin/cgroup-cpu-env.sh ]]; then
+    source /usr/local/bin/cgroup-cpu-env.sh
+    omni_cgroup_cpu_env
+    echo "[entrypoint] cgroup CPU count: ${OMNI_CGROUP_CPUS:-unlimited} (PRE_COMMIT_NO_CONCURRENCY=${PRE_COMMIT_NO_CONCURRENCY:-unset})"
+else
+    echo "[entrypoint] cgroup-cpu-env.sh absent (runner image older than v11); CPU count not exported"
+fi
+
 attempt=0
 listener_restarts=0
 while true; do

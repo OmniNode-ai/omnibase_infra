@@ -167,23 +167,27 @@ def test_the_job_waits_for_the_compose_convergence_guard(job: dict[str, Any]) ->
     assert job["needs"] == ["trigger-rebuild", "verify-lane-converged"]
 
 
-def test_the_job_runs_on_the_lab_host_fleet(job: dict[str, Any]) -> None:
-    """The agent's HTTP surface is on the lab host's LAN. Hosted compute cannot
-    see it, and this label is a runner carrying the host-gateway alias.
+def test_the_job_runs_on_the_overlay_pool_and_reads_the_overlay_agent(
+    job: dict[str, Any],
+) -> None:
+    """The agent's HTTP surface is on the lab LAN, so hosted compute cannot see it.
 
-    OMN-18408 moved this job from `omnibase-deploy` to `omnibase-verify`. The
-    reachability reason is unchanged -- both are containers on the same .201
-    host with the same alias. The move exists because this job's 35-minute
-    ceiling is the budget OMN-18200 AC1 reads as the difference between
-    "converged" and "not verified", and on `omnibase-deploy` it was competing
-    for a single runner with the release-train deploy. The third label, `host-201`, is required because `omnibase-verify` names a runner CLASS: a second verify-class runner came online on another lab host on 2026-09-16 and cannot see this lane.
+    OMN-18408 moved this job from `omnibase-deploy` to `omnibase-verify` (the
+    35-minute ceiling is OMN-18200 AC1's budget and competed with the
+    release-train deploy there). It then carried `host-201` and read the agent
+    through that runner's `host.docker.internal` alias. OMN-19894 (operator
+    rulings 2026-09-28T01:58:06Z and 01:58:17Z) removed that host pin. The job
+    runs on the overlay's lab pool and reads the agent at the `deploy_agent_url`
+    that the overlay declares for the lane whose agent applies the onex-lab
+    overlay. A loopback or gateway alias would name a different machine on every
+    runner, and the resolver refuses both.
     """
-    assert job["runs-on"] == ["self-hosted", "omnibase-verify", "host-201"]
-    assert "host.docker.internal" in _step_text(job), (
-        "localhost inside the runner container reaches the runner, not the host; "
-        "every compose-dev receipt emitted before that was understood carried "
-        "three identical connection-refused failures"
-    )
+    assert job["runs-on"] == "${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}"
+    text = _step_text(job)
+    assert "host.docker.internal" not in text
+    assert "localhost" not in text
+    assert "./.github/actions/resolve-lab-lane" in text
+    assert "${{ env.LANE_DEPLOY_AGENT_URL }}" in text
 
 
 def test_the_checkout_is_pinned_to_the_trusted_base_ref(job: dict[str, Any]) -> None:

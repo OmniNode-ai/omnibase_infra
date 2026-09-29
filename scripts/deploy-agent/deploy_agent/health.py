@@ -20,6 +20,7 @@ from deploy_agent.job_state import JobState, JobStore
 from deploy_agent.lab_overlay import load_latest_record, load_record
 from deploy_agent.loaded_code import loaded_code_sha_if_recorded
 from deploy_agent.queue_depth import ModelControlTopicLag, compute_queue_snapshot
+from deploy_agent.unit_drift import INDETERMINATE_REASON
 
 _start_time = time.monotonic()
 
@@ -29,6 +30,7 @@ def create_health_app(
     get_agent_state: Callable[[], str],
     get_accept_backlog: Callable[[], ModelAcceptBacklogVerdict | None] | None = None,
     get_control_topic_lag: Callable[[], ModelControlTopicLag] | None = None,
+    get_unit_drift: Callable[[], dict[str, object]] | None = None,
 ) -> web.Application:
     """Build the agent's HTTP surface.
 
@@ -45,8 +47,10 @@ def create_health_app(
     app["get_agent_state"] = get_agent_state
     app["get_accept_backlog"] = get_accept_backlog
     app["get_control_topic_lag"] = get_control_topic_lag
+    app["get_unit_drift"] = get_unit_drift
 
     app.router.add_get("/health", _health_handler)
+    app.router.add_get("/unit-drift", _unit_drift_handler)
     app.router.add_get("/job/{correlation_id}", _job_handler)
     # OMN-18144. What is ahead of a command, and how fast this agent has been
     # draining it. The post-merge lab-pass guard reads this to bound its wait
@@ -81,6 +85,16 @@ def create_health_app(
     # API, never locally: this endpoint carries no ancestry logic itself.
     app.router.add_get("/lab-overlay-latest", _lab_overlay_latest_handler)
     return app
+
+
+async def _unit_drift_handler(request: web.Request) -> web.Response:
+    """Read installed-unit drift without exposing any repair action (OMN-20037)."""
+    getter = request.app["get_unit_drift"]
+    return web.json_response(
+        getter()
+        if getter is not None
+        else {"drift": None, "reason": INDETERMINATE_REASON}
+    )
 
 
 async def _health_handler(request: web.Request) -> web.Response:

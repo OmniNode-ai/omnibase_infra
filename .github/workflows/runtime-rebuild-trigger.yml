@@ -1552,18 +1552,18 @@ jobs:
     # of it. The verify runner carries the same docker socket and the same
     # `host.docker.internal` gateway and no OMNI_HOME write mount, which is all
     # this job needs.
-    # OMN-18408: `host-201` is REQUIRED alongside `omnibase-verify`, and is not
-    # decoration. `omnibase-verify` names a runner CLASS (read-only probe
-    # runner); it does not name a HOST. On 2026-09-16 a second verify-class
-    # runner, omninode-mini-runner-1, came online on another lab host carrying
-    # `self-hosted,omnibase-verify,arch-arm64` -- which makes it a legal match
-    # for a bare `[self-hosted, omnibase-verify]`. This job probes the .201
-    # lane's own docker daemon through that host's gateway alias, so a run
-    # placed anywhere else cannot see the lane and reports it unreachable: a
-    # permanently-red check is a disabled check. `host-201` is carried only by
-    # the .201 verify runner, so the pair fails SAFE -- if that runner is down
-    # the job queues rather than running somewhere it cannot observe anything.
-    runs-on: [self-hosted, omnibase-verify, host-201]
+    # OMN-19894 (operator rulings 2026-09-28T01:58:06Z and 01:58:17Z: a check
+    # must not rely on one machine). This job reads ONE thing lane-specific: the
+    # deploy agent's HTTP record. It used to reach the agent through the .201
+    # verify runner's `host.docker.internal` alias, which pinned it to that
+    # host. The agent listens on 0.0.0.0, so the job now runs on any runner of
+    # the overlay's pool and reads the agent at the `deploy_agent_url` the
+    # overlay (vars.LAB_LANES_JSON) declares for the lane whose agent applies
+    # the onex-lab overlay (compose project `omnibase-infra`; the dev-202
+    # instance disables that phase in config/deploy_lane_routing.yaml). No lane
+    # answering fails the resolve step and the record step below still runs,
+    # so the receipt is a FAIL, never absent and never a default.
+    runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
     # The agent's apply carries its own 1500s budget (DEFAULT_APPLY_BUDGET_SECONDS)
     # and begins only after the compose rebuild it follows, so the poll window
     # below is the one that matters and this ceiling is that window plus a tail
@@ -1625,22 +1625,22 @@ jobs:
           echo "LAB_PASS_DIR=${LAB_PASS_WORK}/receipt" >> "$GITHUB_ENV"
           echo "LAB_PASS_CHECKS=${LAB_PASS_WORK}/checks.json" >> "$GITHUB_ENV"
 
+      - name: Resolve the lane whose deploy agent applies the onex-lab overlay
+        id: lane
+        uses: ./.github/actions/resolve-lab-lane
+        with:
+          lanes-json: ${{ vars.LAB_LANES_JSON }}
+          require: deploy_agent_url
+          match: compose_project=omnibase-infra
+
       - name: Read the deploy agent's onex-lab overlay record
         id: record
         if: always()
         env:
           MERGE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}
-          # `host.docker.internal`, NOT `localhost`. This job runs in the
-          # omninode-verify-runner-1 CONTAINER on the lab host (OMN-18408; it
-          # was the deploy runner before the split), not in the host's network
-          # namespace, and that runner carries the host-gateway alias
-          # (docker/docker-compose.runners.yml extra_hosts) --
-          # the same reason the compose-dev probe above and chain-canary.yml use
-          # this form. The dev-lane deploy agent listens on 0.0.0.0:8098; the
-          # prod-pinned unit holds 8099 and is deliberately not read here.
-          # No LAN address is committed: the alias resolves to the docker bridge
-          # gateway.
-          LAB_AGENT_URL: http://host.docker.internal:8098
+          # The lane's agent, as the overlay declares it (OMN-19894). Empty when
+          # no lane answered, which the fetcher reports as a FAIL.
+          LAB_AGENT_URL: ${{ env.LANE_DEPLOY_AGENT_URL }}
           # OMN-18399: the descendant-tolerance fallback's `gh api compare`
           # calls, same token and same pattern as the compose-dev guard above
           # (verify-lane-converged's "Wait for the dev lane..." step) -- no new

@@ -34,7 +34,6 @@ from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_infra.cli.cli_delegate import _write_local_run_files
 from omnibase_infra.cli.model_delegate_run_addressing import ModelDelegateRunAddressing
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
-from omnibase_infra.enums.enum_task_type_resolution import EnumTaskTypeResolution
 from omnibase_infra.runtime_identity import collect_runtime_identity
 
 pytestmark = pytest.mark.unit
@@ -115,7 +114,7 @@ def _write(
         state_root=tmp_path,
         prompt="Reply with exactly: OK",
         task_type="summarization",
-        task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+        task_type_resolution="explicit",
         addressing=addressing,
     )
     return tmp_path / "runs" / str(receipt.run_id), receipt
@@ -273,7 +272,7 @@ class TestTheWriterCannotBeCalledWithoutAddressing:
                 state_root=tmp_path,
                 prompt="Reply with exactly: OK",
                 task_type="summarization",
-                task_type_resolution=EnumTaskTypeResolution.EXPLICIT.value,
+                task_type_resolution="explicit",
             )
 
     def test_the_addressing_model_forbids_an_unknown_field(self) -> None:
