@@ -149,6 +149,15 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_hook_event_capture/"
             "0002_hook_events_tenant_rls.sql"
         ),
+        # OMN-19978: this vendored file is byte-identical to omnimarket and
+        # uses unqualified `pg_roles` in its role guard, like its
+        # node_projection_cost_summary sibling. Exempting here, not editing
+        # the SQL, is the canonical fix; the created-object ownership check
+        # still applies.
+        Path(
+            "docker/migrations/forward/nodes/node_projection_usage_by_model_day/"
+            "0001_grant_usage_by_model_day.sql"
+        ),
         # OMN-15655 also reconciles historical root migration shapes for
         # fixture parity. These are legacy default-schema repair paths, not new
         # application-database authority, and they must retain compatibility with
