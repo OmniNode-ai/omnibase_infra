@@ -452,6 +452,7 @@ class MixinKafkaDlq:
         dlq_payload: dict[str, object] = {
             "original_topic": original_topic,
             "original_message": {
+                "message_id": str(failed_message.headers.message_id),
                 "key": key_str,
                 "value": value_str,
                 "offset": failed_message.offset,
@@ -499,6 +500,7 @@ class MixinKafkaDlq:
             fallback_payload = {
                 "original_topic": original_topic,
                 "original_message": {
+                    "message_id": str(failed_message.headers.message_id),
                     "key": repr(key_str),
                     "value": "<non-serializable>",
                     "offset": failed_message.offset,

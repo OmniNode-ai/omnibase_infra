@@ -12,6 +12,7 @@ from uuid import UUID
 import pytest
 
 from omnibase_infra.nodes.node_github_webhook_ingress_effect.models import (
+    ModelGitHubBranchHeadObservation,
     ModelGitHubPrMergedObservation,
     ModelGitHubPrStateObservation,
 )
@@ -335,3 +336,122 @@ def test_unhandled_events_fold_to_nothing() -> None:
 def test_malformed_pull_request_is_refused() -> None:
     with pytest.raises(WebhookFoldError, match="repository"):
         _fold("pull_request", {"action": "opened", "pull_request": _pr()})
+
+
+# --- OMN-19932 (B1): branch-head and merge-group observations -----------------
+
+WATCHED = frozenset({"dev", "main"})
+SHA_NEW = "c" * 40
+SHA_OLD = "d" * 40
+
+
+def _fold_branch(event: str, payload: dict[str, object]) -> tuple[object, ...]:
+    return fold_delivery(
+        event=event,
+        delivery_id=D1,
+        payload=payload,
+        received_at=RECEIVED,
+        published_at=PUBLISHED,
+        summary_check_names=SUMMARY,
+        watched_branches=WATCHED,
+    )
+
+
+def _summary_run(head_branch: str, *, conclusion: str | None = "success") -> dict:
+    return {
+        "repository": REPO,
+        "check_run": {
+            "name": "CI Summary",
+            "status": "completed" if conclusion else "in_progress",
+            "conclusion": conclusion,
+            "head_sha": SHA_NEW,
+            "completed_at": "2026-09-28T12:00:00Z",
+            "pull_requests": [],
+            "check_suite": {"head_branch": head_branch, "head_sha": SHA_NEW},
+        },
+    }
+
+
+class TestBranchHeadObservations:
+    def test_push_on_a_watched_branch_is_branch_ref_advanced(self) -> None:
+        (obs,) = _fold_branch(
+            "push",
+            {
+                "repository": REPO,
+                "ref": "refs/heads/dev",
+                "before": SHA_OLD,
+                "after": SHA_NEW,
+                "deleted": False,
+            },
+        )
+        assert isinstance(obs, ModelGitHubBranchHeadObservation)
+        assert obs.kind == "branch-ref-advanced"
+        assert (obs.repo, obs.branch, obs.sha, obs.before_sha) == (
+            "OmniNode-ai/omnibase_infra",
+            "dev",
+            SHA_NEW,
+            SHA_OLD,
+        )
+        assert obs.entity_id == "OmniNode-ai/omnibase_infra@dev"
+
+    def test_summary_check_with_empty_pr_list_is_branch_head_status(self) -> None:
+        (obs,) = _fold_branch("check_run", _summary_run("dev"))
+        assert isinstance(obs, ModelGitHubBranchHeadObservation)
+        assert obs.kind == "branch-head-status"
+        assert (obs.branch, obs.sha, obs.ci_status) == ("dev", SHA_NEW, "SUCCESS")
+
+    def test_failed_merge_group_candidate_never_is_a_branch_head_event(self) -> None:
+        out = _fold_branch(
+            "check_run",
+            _summary_run(
+                "gh-readonly-queue/dev/pr-4242-" + SHA_NEW, conclusion="failure"
+            ),
+        )
+        assert [o.kind for o in out] == ["merge-group-status"]  # type: ignore[attr-defined]
+        (obs,) = out
+        assert isinstance(obs, ModelGitHubBranchHeadObservation)
+        assert (obs.branch, obs.sha, obs.ci_status) == ("dev", SHA_NEW, "FAILURE")
+        assert obs.merge_group_ref == "gh-readonly-queue/dev/pr-4242-" + SHA_NEW
+
+    def test_unwatched_branch_folds_to_nothing(self) -> None:
+        assert _fold_branch("check_run", _summary_run("feature/x")) == ()
+        assert (
+            _fold_branch(
+                "push",
+                {
+                    "repository": REPO,
+                    "ref": "refs/heads/feature/x",
+                    "before": SHA_OLD,
+                    "after": SHA_NEW,
+                },
+            )
+            == ()
+        )
+        assert (
+            _fold_branch(
+                "check_run",
+                _summary_run("gh-readonly-queue/feature/x/pr-1-" + SHA_NEW),
+            )
+            == ()
+        )
+
+    def test_branch_deletion_and_non_summary_checks_say_nothing(self) -> None:
+        assert (
+            _fold_branch(
+                "push",
+                {
+                    "repository": REPO,
+                    "ref": "refs/heads/dev",
+                    "before": SHA_OLD,
+                    "after": "0" * 40,
+                    "deleted": True,
+                },
+            )
+            == ()
+        )
+        run = _summary_run("dev")
+        run["check_run"]["name"] = "lint"  # type: ignore[index]
+        assert _fold_branch("check_run", run) == ()
+
+    def test_no_watched_branches_means_no_branch_events(self) -> None:
+        assert _fold("check_run", _summary_run("dev")) == ()

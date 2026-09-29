@@ -161,6 +161,7 @@ adjacency:
   sinks: {reverse_deps: []}
   test_utils: {reverse_deps: []}
   testing: {reverse_deps: []}
+  doctor: {reverse_deps: []}
   tui: {reverse_deps: []}
   verification: {reverse_deps: []}
   validators: {reverse_deps: []}
