@@ -5367,6 +5367,7 @@ jobs:
         run: |
           uv run pytest \
             tests/integration/migrations/test_session_content_live_apply_omn19550.py \
+            tests/integration/migrations/test_delegation_updated_at_absorb_omn19561.py \
             -m ephemeral_pg \
             -v -rs --tb=short -p no:randomly
 

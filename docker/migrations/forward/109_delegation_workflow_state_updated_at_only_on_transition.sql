@@ -4,7 +4,7 @@
 -- outbox bookkeeping alone preserve the last transition timestamp.
 -- Replaces migration 090's function in place, retaining its existing trigger.
 
-CREATE OR REPLACE FUNCTION refresh_delegation_workflow_state_updated_at()
+CREATE OR REPLACE FUNCTION public.refresh_delegation_workflow_state_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
     IF NEW.state IS NOT DISTINCT FROM OLD.state
