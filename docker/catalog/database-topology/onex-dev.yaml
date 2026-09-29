@@ -83,6 +83,7 @@ databases:
               - demo_readiness_latest
               - dod_verify_runs
               - gateway_link_health
+              - lab_container_memory_window
               - lab_lane_health
               - live_events
               - log_entries
@@ -369,5 +370,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: dbcd1c77661196f6c0f40fd90d410017e1296cbdd0d863402042b2af16102584
+  sha256: 3d74ebd725fd26f9c5059c32457255d6486b4b04acb5db906951406f6e5a024b
 topology_instance: onex-dev

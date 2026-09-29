@@ -114,6 +114,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "metering_summary": "omnimarket#3079",
     "worktree_reconcile_hosts": "omnimarket#3047",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
+    "lab_container_memory_window": "omnimarket#3051",
 }
 
 _SKIP_REASON = (

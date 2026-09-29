@@ -728,9 +728,17 @@ jobs:
           # those tests cannot pass and their skip is the one this job's guard
           # config recognises as legitimately optional.
           RUNTIME_E2E_PROCESSING_ENABLED: "true"
-          RUNTIME_E2E_OUTPUT_EVENTS_ENABLED: "true"
           RUNTIME_E2E_CONSUL_ENABLED: "false"
         run: |
+          INTEGRATION_POSTGRES_PASSWORD="$(uv run python - <<'PY'
+          import os
+          from urllib.parse import unquote, urlparse
+
+          print(unquote(urlparse(os.environ["OMNIBASE_INFRA_DB_URL"]).password))
+          PY
+          )"
+          printf '::add-mask::%s\n' "$INTEGRATION_POSTGRES_PASSWORD"
+          export INTEGRATION_POSTGRES_PASSWORD
           uv run pytest \
             tests/integration/test_runtime_consumes_build_loop_terminal_event.py \
             tests/integration/registration/e2e/test_runtime_e2e.py \

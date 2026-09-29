@@ -206,7 +206,7 @@ jobs:
   # lint, validators, contract gates, and receipt-gate callers still run.
   zone-filter:
     needs: occ-preflight
-    uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@fc20d08690f03593eb8c55fd2c02c5f0f75f2b68
+    uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@e12c36249d550204354f1d99428841ee99a89868
     with:
       python-version: "3.12"
 
@@ -3842,9 +3842,9 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    uses: OmniNode-ai/omnimarket/.github/workflows/merge-hold-gate-reusable.yml@ff6e41cbfcad3184d728b2dd387aba2269da5e2c
+    uses: OmniNode-ai/omnimarket/.github/workflows/merge-hold-gate-reusable.yml@fbc9b1ad39f66341edbcb07452f03bdb70b3dfb9
     with:
-      vocabulary_ref: ff6e41cbfcad3184d728b2dd387aba2269da5e2c
+      vocabulary_ref: fbc9b1ad39f66341edbcb07452f03bdb70b3dfb9
       context_name: merge-hold-gate / evaluate
   # OMN-15361: P0/P8 fail-closed application database domain enforcement.
   # Unconditional after OCC eligibility and STRICT in ci_summary_gate.py: validators,

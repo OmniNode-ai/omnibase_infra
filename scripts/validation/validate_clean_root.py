@@ -158,6 +158,7 @@ ALLOWED_ROOT_DIRECTORIES: frozenset[str] = frozenset(
         "tests",
         "docs",
         "scripts",
+        "formal",  # TLA+ models checked by TLC (OMN-19935)
         "architecture-handshakes",
         # Common optional directories
         "config",
