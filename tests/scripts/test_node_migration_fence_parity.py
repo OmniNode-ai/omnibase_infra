@@ -515,6 +515,13 @@ FENCED_OMN18987_IDS = (
     "node:node_projection_delegation:0043z_preflight_delegation_shadow_comparisons.sql",
     "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql",
 )
+# OMN-19790: delegation_eval_items enables FORCE ROW LEVEL SECURITY in its
+# create migration, so it is fenced on arrival. Its release is a separate
+# operator-sequenced step that needs an operator ruling; this fence addition
+# carries no lane release.
+FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS = (
+    "node:node_projection_delegation_eval:0000_create_delegation_eval_items.sql",
+)
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS
     + FENCED_REGISTRATION_IDS
@@ -524,6 +531,7 @@ EXPECTED_FENCE = (
     + FENCED_DELEGATION_UUID_CONVERSION_IDS
     + FENCED_BUDGET_STATE_RLS_IDS
     + FENCED_OMN18987_IDS
+    + FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -882,9 +890,15 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
         found[hook_event_capture_end:uuid_conversion_end]
         == FENCED_DELEGATION_UUID_CONVERSION_IDS
     ), "the OMN-16493 delegation-0031 hold is not the expected id"
-    assert found[uuid_conversion_end:] == (
+    post_conversion_tail_end = uuid_conversion_end + len(
+        FENCED_BUDGET_STATE_RLS_IDS + FENCED_OMN18987_IDS
+    )
+    assert found[uuid_conversion_end:post_conversion_tail_end] == (
         FENCED_BUDGET_STATE_RLS_IDS + FENCED_OMN18987_IDS
     ), "the post-conversion operator fence tail is not the expected ids"
+    assert found[post_conversion_tail_end:] == (FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS), (
+        "the OMN-19790 delegation_eval_items RLS hold is not the expected id"
+    )
 
 
 def test_manifest_shell_parse_matches_yaml_parse() -> None:
