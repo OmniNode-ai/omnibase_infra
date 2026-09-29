@@ -297,6 +297,8 @@ migrations:
   forward/nodes/node_projection_runner_fleet/0001_grant_omninode_runtime_runner_fleet_liveness.sql: expand-only
   forward/nodes/node_projection_demo_readiness/0000_create_demo_readiness_latest.sql: forward-only # UNIQUE INDEX on created table
   forward/nodes/node_projection_demo_readiness/0001_grant_omninode_runtime_demo_readiness_latest.sql: expand-only
+  forward/nodes/node_projection_lab_container_memory/0000_create_lab_container_memory_window.sql: expand-only # additive
+  forward/nodes/node_projection_lab_container_memory/0001_grant_omninode_runtime_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_topic_activity/0000_create_topic_activity.sql: forward-only # ALTER TABLE on the created table
   forward/nodes/node_projection_topic_activity/0001_grant_omninode_runtime_topic_activity.sql: expand-only
   forward/nodes/node_projection_runtime_error_fingerprints/0000_create_runtime_error_fingerprints.sql: forward-only # UNIQUE INDEX on an existing table

@@ -428,6 +428,33 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="demo_readiness",
         ),
     ),
+    # OMN-19961: lab_container_memory_window, the same infra-first window as the
+    # bridges above. This repo vendors node_projection_lab_container_memory/0000
+    # and 0001 ahead of omnimarket#3051, whose node-migration-vendor-parity gate
+    # needs the vendored copy at dev tip before it can merge; the pin cannot
+    # declare the relation until it does. 0001 grants omninode_runtime SELECT,
+    # INSERT, UPDATE. The entry carries the access and role the source contract
+    # declares, so the derivation reproduces the grant the instances carry and
+    # writes no generated diff. Retired by omnimarket#3051 merging and the pin
+    # advancing past it; the expiry module names it.
+    ContractTableDeclaration(
+        node="legacy_migration:lab_container_memory_window",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_lab_container_memory/"
+            "0000_create_lab_container_memory_window.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="lab_container_memory_window",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_lab_container_memory/"
+                "0000_create_lab_container_memory_window.sql"
+            ),
+            access="read_write",
+            role="container_memory",
+        ),
+    ),
     # OMN-19513: infra vendors both Claude hook event projection tables before
     # omnimarket#2956 lands the node contract. Until the pin advances, these
     # interim declarations keep the shipped table grants derivable. The expiry
