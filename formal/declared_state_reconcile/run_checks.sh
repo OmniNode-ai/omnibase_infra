@@ -1,4 +1,19 @@
 #!/usr/bin/env bash
+# Declared-state reconcile model: one reconcile of surface grants against a
+# declared set, with concurrent hand edits, two reconcilers, and an
+# observability flag.
+# Property (meaning)                    Kind       Mutation that must break it
+# Converges (apply and hand edit)       temporal   leak_lock (refusal keeps lock)
+# NoInterleave (reconciles never apply together) invariant  no_lock
+# NoStaleApply (stale plan is refused)   invariant  no_fresh
+# NoNeededRemoved (declared grant kept)  invariant  no_filter
+# NoApplyOnUnobservable                  invariant  no_observable_guard
+# Run with TLA2TOOLS_JAR set:
+#   TLA2TOOLS_JAR=/path/tla2tools.jar ./run_checks.sh results
+# results/ holds committed TLC output for Model.cfg and each mut_*.cfg,
+# plus model.sha256, the digest of the spec and cfg files used for them.
+# The unit test checks the digest, passing model, and mutation violations.
+# Bounds: 3 grants, 2 reconcilers, 2 hand edits, 1 observability flip.
 # Run TLC on the model and every mutation. Usage: run_checks.sh <outdir>
 # Needs TLA2TOOLS_JAR (path to tla2tools.jar) and either `java` or docker (lab: .201).
 set -uo pipefail
