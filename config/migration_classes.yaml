@@ -176,6 +176,7 @@ migrations:
   forward/nodes/node_projection_ci_attempt_outcome/0001_grant_omninode_runtime_ci_attempt_outcome.sql: expand-only
   forward/nodes/node_projection_claude_hook_events/0000_create_claude_hook_events.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.claude_hook_events); UNIQUE INDEX on an existing table (omninode_internal.claude_agent_spans)
   forward/nodes/node_projection_claude_hook_events/0001_grant_omninode_runtime_claude_hook_events.sql: expand-only
+  forward/nodes/node_projection_claude_hook_events/0002_reject_empty_agent_id.sql: forward-only # ALTER TABLE ADD CONSTRAINT CHECK on existing tables (omninode_internal.claude_hook_events, omninode_internal.claude_agent_spans); DROP CONSTRAINT IF EXISTS for idempotent re-add
   forward/nodes/node_projection_consumer_flow/0000_create_consumer_flow_windows.sql: forward-only # ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_consumer_flow/0001_add_projection_cursor.sql: forward-only # ALTER TABLE ALTER COLUMN; UNIQUE INDEX on an existing table
   forward/nodes/node_projection_consumer_flow/0001_reconcile_consumer_flow_window_columns.sql: forward-only # ALTER TABLE ALTER COLUMN
@@ -294,6 +295,8 @@ migrations:
   forward/nodes/node_projection_routing_decision/0023_grant_tenant_projection_writer_agent_routing_decisions.sql: expand-only
   forward/nodes/node_projection_runner_fleet/0000_create_runner_fleet_liveness.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_runner_fleet/0001_grant_omninode_runtime_runner_fleet_liveness.sql: expand-only
+  forward/nodes/node_projection_demo_readiness/0000_create_demo_readiness_latest.sql: forward-only # UNIQUE INDEX on created table
+  forward/nodes/node_projection_demo_readiness/0001_grant_omninode_runtime_demo_readiness_latest.sql: expand-only
   forward/nodes/node_projection_lab_container_memory/0000_create_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_lab_container_memory/0001_grant_omninode_runtime_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_topic_activity/0000_create_topic_activity.sql: forward-only # ALTER TABLE on the created table

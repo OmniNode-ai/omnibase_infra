@@ -80,6 +80,7 @@ databases:
               - claude_hook_events
               - consumer_flow_windows
               - delegate_skill_command_claims
+              - demo_readiness_latest
               - dod_verify_runs
               - gateway_link_health
               - lab_container_memory_window
@@ -367,5 +368,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 2d1e417cc81403319d09f5157788d39166729dc6c14a13bd7a3012d72a06aca5
+  sha256: 7187ef3403394d0f7d5a30e6e4c6965d991aac363c41d8bc1df38ffbbcef55ed
 topology_instance: onex-prod
