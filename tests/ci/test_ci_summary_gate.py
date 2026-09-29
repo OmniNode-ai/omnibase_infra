@@ -75,8 +75,8 @@ def _sweep_waiver(name: str) -> dict[str, SweepExclusion]:
     """A well-formed, unexpired synthetic sweep exclusion for ``name``.
 
     Used by the falsification controls below to isolate ONE layer at a time.
-    Never a fixture for production behaviour: EXTERNAL_SWEEP_EXCLUSIONS ships
-    empty, and TestExternalSweepExclusions pins that.
+    Never a fixture for production behaviour: TestExternalSweepExclusions pins
+    the shipped registry separately.
     """
 
     today = datetime.now(UTC).date()
@@ -2260,7 +2260,8 @@ class TestExternalSweepExclusions:
         OMN-18960 shipped this empty beside a weaker conclusion set, which the
         2026-09-21 ruling identified as a hidden allowlist. The first ten are
         every name the measurement found non-green on any head; the eleventh
-        (OMN-19218) is path-filtered and appeared on no measured head. Naming
+        (OMN-19218) is path-filtered and appeared on no measured head. The
+        twelfth is the OMN-19451 shadow context measured on 2026-09-29. Naming
         them is what makes the tolerance reviewable.
         """
         assert set(EXTERNAL_SWEEP_EXCLUSIONS) == {
@@ -2275,15 +2276,49 @@ class TestExternalSweepExclusions:
             "Image Size Analysis",
             "Hostile Reviewer (adversarial gate)",
             "Enforce clean + promoted build source",
+            "Delegation Health Check (shadow) / Delegation Health Check (shadow)",
         }
 
     def test_every_entry_carries_a_reason_an_owner_and_both_dates(self) -> None:
-        added_late = {"Enforce clean + promoted build source": "2026-09-22"}
+        delegation_name = (
+            "Delegation Health Check (shadow) / Delegation Health Check (shadow)"
+        )
+        added_late = {
+            "Enforce clean + promoted build source": "2026-09-22",
+            delegation_name: "2026-09-29",
+        }
+        expires_early = {delegation_name: "2026-10-13"}
         for name, entry in EXTERNAL_SWEEP_EXCLUSIONS.items():
             assert entry.reason.strip(), name
             assert entry.ticket.startswith("OMN-"), name
             assert entry.added == added_late.get(name, "2026-09-21"), name
-            assert entry.expires == "2026-12-20", name
+            assert entry.expires == expires_early.get(name, "2026-12-20"), name
+
+    def test_shadow_delegation_failure_is_excluded_by_exact_name(self) -> None:
+        name = "Delegation Health Check (shadow) / Delegation Health Check (shadow)"
+        rows = [_row(c) for c in HISTORICAL_EXTERNAL_CONTEXTS]
+        rows.append(_row(name, "failure"))
+        observation = datetime(2026, 9, 29, 17, 0, tzinfo=UTC)
+
+        def run(check_runs: list[dict[str, Any]]) -> tuple[int, str]:
+            return evaluate(
+                _all_gates("success"),
+                check_runs=check_runs,
+                external_contexts=HISTORICAL_EXTERNAL_CONTEXTS,
+                now=observation,
+            )
+
+        code, report = run(rows)
+        assert code == EXIT_SUCCESS, report
+        assert f"external sweep exclusions applied: {name}" in report
+
+        unrelated = "Unrelated Unregistered Gate"
+        code, report = run([*rows, _row(unrelated, "failure")])
+        assert code == EXIT_FAILURE, report
+        assert (
+            f"external sweep failures (red, and named by NOTHING else): {unrelated} (failure)"
+            in report
+        )
 
     def test_no_entry_overlaps_the_registered_tuple(self) -> None:
         """A name in both would be judged by layer 4 and never reach layer 5."""
@@ -2297,9 +2332,8 @@ class TestExternalSweepExclusions:
 
         An expiry reaches a person through THIS red test rather than through a
         wedged pull request, because `active_sweep_exclusions` drops an expired
-        entry silently and re-arms the gate. Vacuous while the registry is
-        empty, and it is the assertion that stops the registry becoming
-        open-ended the day it is not.
+        entry silently and re-arms the gate. This assertion stops the registry
+        becoming open-ended.
         """
         _active, expired = active_sweep_exclusions(
             EXTERNAL_SWEEP_EXCLUSIONS, now=datetime.now(UTC)
