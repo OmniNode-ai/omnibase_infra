@@ -20,7 +20,7 @@ Measured on delivery run 36365404894: every other runtime Deployment Ready,
 `omnimarket-projection-api` 0/1 in CrashLoopBackOff at `Exit Code: 137` with its
 log stopping at "Waiting for application startup.", and the topic ABSENT.
 
-These tests pin that the renderer moves ONLY the three fields it must, reuses
+These tests pin that the renderer moves only the fields it must, reuses
 omninode_infra's committed manifest rather than a second implementation, and
 fails closed on every shape it cannot prove it understood — an un-rewritten Job
 would run the wrong image against the lane and still report success.
@@ -196,3 +196,61 @@ def test_the_step_uses_omninode_infras_committed_manifest_not_a_copy() -> None:
         "omninode_infra/k8s/onex-dev/runtime/job-onex-topic-provision.yaml"
         in step["run"]
     )
+
+
+def test_it_supplies_the_container_fields_restricted_psa_demands(
+    tmp_path: Path,
+) -> None:
+    """The lab lane enforces `restricted`; onex-dev does not.
+
+    The committed manifest sets the POD-level securityContext, which is enough
+    where it is applied. Under `restricted` the CONTAINER must also declare
+    these two, or admission refuses every pod the Job creates -- measured on
+    delivery run 36375068551 as ten `FailedCreate` events then
+    `DeadlineExceeded`, with no pod ever starting.
+    """
+    rc, out = _render(tmp_path, _write(tmp_path, _job()))
+    assert rc == 0
+    sc = yaml.safe_load(out.read_text())["spec"]["template"]["spec"]["containers"][0][
+        "securityContext"
+    ]
+    assert sc["allowPrivilegeEscalation"] is False
+    assert sc["capabilities"]["drop"] == ["ALL"]
+
+
+def test_it_does_not_overwrite_a_container_securitycontext_the_manifest_declares(
+    tmp_path: Path,
+) -> None:
+    """A strict tightening, never a rewrite of the manifest's own choices."""
+    containers = [
+        {
+            "name": "onex-topic-provision",
+            "image": "…/omninode-runtime:placeholder",
+            "securityContext": {
+                "allowPrivilegeEscalation": False,
+                "capabilities": {"drop": ["ALL", "NET_RAW"]},
+                "readOnlyRootFilesystem": True,
+            },
+        }
+    ]
+    rc, out = _render(tmp_path, _write(tmp_path, _job(containers)))
+    assert rc == 0
+    sc = yaml.safe_load(out.read_text())["spec"]["template"]["spec"]["containers"][0][
+        "securityContext"
+    ]
+    assert sc["capabilities"]["drop"] == ["ALL", "NET_RAW"]
+    assert sc["readOnlyRootFilesystem"] is True
+
+
+def test_the_pod_level_security_context_is_left_alone(tmp_path: Path) -> None:
+    job = _job()
+    job["spec"]["template"]["spec"]["securityContext"] = {
+        "runAsNonRoot": True,
+        "runAsUser": 1001,
+        "seccompProfile": {"type": "RuntimeDefault"},
+    }
+    rc, out = _render(tmp_path, _write(tmp_path, job))
+    assert rc == 0
+    pod = yaml.safe_load(out.read_text())["spec"]["template"]["spec"]
+    assert pod["securityContext"]["runAsUser"] == 1001
+    assert pod["securityContext"]["seccompProfile"] == {"type": "RuntimeDefault"}
