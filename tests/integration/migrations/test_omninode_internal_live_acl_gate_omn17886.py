@@ -329,6 +329,40 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
         assert pr_landing_live == pr_landing_declared, pr_landing_table
         assert "DELETE" not in pr_landing_live, pr_landing_table
 
+    # OMN-19399: the worktree reconcile projection grants exactly the runtime
+    # writer's SELECT/INSERT/UPDATE privileges, with no DELETE or sequence.
+    worktree_reconcile_declared = {
+        privilege
+        for principal, relation, privilege in declared_acl(
+            load_topology_profile(PROFILE)
+        ).table_grants
+        if principal == _RUNTIME and relation == "worktree_reconcile_hosts"
+    }
+    assert worktree_reconcile_declared == {"SELECT", "INSERT", "UPDATE"}
+    worktree_reconcile_live = _live_privileges(
+        fresh_build, "worktree_reconcile_hosts", _RUNTIME
+    )
+    assert worktree_reconcile_live == worktree_reconcile_declared
+    assert "DELETE" not in worktree_reconcile_live
+
+    # OMN-19961: lab_container_memory_window, one row per lane container per
+    # census window, written by node_projection_lab_container_memory. The
+    # writer only upserts and never deletes a window, so the runtime role holds
+    # exactly SELECT/INSERT/UPDATE and no DELETE.
+    memory_window_declared = {
+        privilege
+        for principal, relation, privilege in declared_acl(
+            load_topology_profile(PROFILE)
+        ).table_grants
+        if principal == _RUNTIME and relation == "lab_container_memory_window"
+    }
+    assert memory_window_declared == {"SELECT", "INSERT", "UPDATE"}
+    memory_window_live = _live_privileges(
+        fresh_build, "lab_container_memory_window", _RUNTIME
+    )
+    assert memory_window_live == memory_window_declared
+    assert "DELETE" not in memory_window_live
+
     live = set(report["findings"])
     allowed = {entry["finding"] for entry in _load_allowlist()}
     new = sorted(live - allowed)
