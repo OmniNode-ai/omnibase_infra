@@ -34,7 +34,7 @@ node_version:
   patch: 0
 node_type: "EFFECT_GENERIC"
 description: >
-  Effect node that runs board checks against a lab or CI surface and returns one typed result per check: the check id, its surface class, the subject, PASS, FAIL or INDETERMINATE, and every reason. It reads; it never mutates the surface it checks.
+  Effect node that runs board checks against a lab or CI surface and returns one typed result per check: the check id, its surface class, the subject, PASS, FAIL or INDETERMINATE, and every reason. Consumer flow publishes one marked malformed trigger to prove the validation seam is live; its local negative controls restore the mutated source byte for byte.
 
 input_model:
   name: "ModelForwarderRefusedTopicRequest"
@@ -49,7 +49,13 @@ board_checks:
     surface_class: "lab_hardware"
     operation: "board_probe.forwarder_refused_topic"
     description: "PASS when the forwarder is up for one retry interval on the declared cloud broker and refuses nothing; FAIL when a topic is refused or the process is down; INDETERMINATE when the state is unreadable, the lane declares no cloud broker, or the cloud leg is another broker."
+  - check_id: "consumer_flow"
+    surface_class: "lab_hardware"
+    operation: "board_probe.consumer_flow"
+    description: "C28: both named kinds are instrumented in advancing windows, negative tests pass and bite per branch, cursor paging reaches every live group, and the boot has applied events and observes the malformed trigger. Unreadable evidence is INDETERMINATE."
 capabilities:
+  - name: "board_probe.consumer_flow"
+    description: "Observe and grade C28 consumer-flow observability on the lab lane"
   - name: "board_probe.forwarder_refused_topic"
     description: "Grade the lab lane's gateway forwarder for refused inbound topics"
 # Top-level handler block: RuntimeLocal's single-shot execution path resolves
@@ -85,6 +91,28 @@ handler_routing:
         name: "ModelForwarderRefusedTopicRequest"
         module: "omnibase_infra.nodes.node_board_probe_effect.models.model_forwarder_refused_topic_request"
         description: "The forwarder to read and what its lane declares."
+    - operation: "board_probe.consumer_flow"
+      handler:
+        name: "HandlerConsumerFlow"
+        module: "omnibase_infra.nodes.node_board_probe_effect.handlers.handler_consumer_flow"
+      description: "C28 consumer-flow collection and grading"
+      supported_operations:
+        - "board_probe.consumer_flow"
+      input_model:
+        name: "ModelConsumerFlowRequest"
+        module: "omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_request"
+        description: "The lane and bounded sampling, Docker, HTTP and pytest controls."
+    - operation: "board_probe.observe_consumer_flow"
+      handler:
+        name: "HandlerDockerConsumerFlowTarget"
+        module: "omnibase_infra.nodes.node_board_probe_effect.handlers.handler_docker_consumer_flow_target"
+      description: "C28 consumer-flow collection and grading"
+      supported_operations:
+        - "board_probe.observe_consumer_flow"
+      input_model:
+        name: "ModelConsumerFlowRequest"
+        module: "omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_request"
+        description: "The lane and bounded sampling, Docker, HTTP and pytest controls."
 error_handling:
   retry_policy:
     max_retries: 0
@@ -104,6 +132,9 @@ health_check:
     - name: "forwarder_refused_topic_handler_loaded"
       type: "handler"
       critical: true
+    - name: "consumer_flow_handler_loaded"
+      type: "handler"
+      critical: true
 metadata:
   description: "Runs board checks against a lab or CI surface and grades each one"
   author: "OmniNode Team"
@@ -115,6 +146,7 @@ metadata:
     - board
     - probe
   related_tickets:
+    - "OMN-19931"
     - "OMN-19930"
     - "OMN-19928"
     - "OMN-17427"

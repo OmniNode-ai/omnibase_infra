@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+board_checks:
+  - {check_id: consumer_flow, operation: board_probe.consumer_flow, surface_class: cloud}
+coverage:
+  - {check_id: consumer_flow, surface_class: cloud, criteria: [C28]}
