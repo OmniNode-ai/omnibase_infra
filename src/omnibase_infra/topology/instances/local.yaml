@@ -90,6 +90,7 @@ databases:
               - open_obligations
               - pr_landing_state
               - pr_landing_transitions
+              - pr_state
               - prod_promotion_gate_decisions
               - projection_watermarks
               - runner_fleet_liveness

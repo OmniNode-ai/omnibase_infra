@@ -363,6 +363,20 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
     assert memory_window_live == memory_window_declared
     assert "DELETE" not in memory_window_live
 
+    # OMN-19999: the PR state projection grants exactly the runtime writer's
+    # SELECT/INSERT/UPDATE privileges, with no DELETE or sequence.
+    pr_state_declared = {
+        privilege
+        for principal, relation, privilege in declared_acl(
+            load_topology_profile(PROFILE)
+        ).table_grants
+        if principal == _RUNTIME and relation == "pr_state"
+    }
+    assert pr_state_declared == {"SELECT", "INSERT", "UPDATE"}
+    pr_state_live = _live_privileges(fresh_build, "pr_state", _RUNTIME)
+    assert pr_state_live == pr_state_declared
+    assert "DELETE" not in pr_state_live
+
     live = set(report["findings"])
     allowed = {entry["finding"] for entry in _load_allowlist()}
     new = sorted(live - allowed)
