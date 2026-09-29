@@ -1164,13 +1164,13 @@ class SweepExclusion:
 # where the numbers are recorded, not here.
 SWEEP_EXCLUSION_MAX_DAYS: int = 90
 
-# TEN ENTRIES, one per name the measurement found non-green on ANY head over
+# The first TEN ENTRIES, one per name the measurement found non-green on ANY head over
 # the 16-PR window recorded above. OMN-18960 shipped this dict EMPTY beside a
 # weaker conclusion set; OMN-18979 replaced that pairing with the strict bar
 # and these entries, so every tolerance is now a named, dated, owned decision
 # rather than a silent one buried in a frozenset.
 #
-# They all expire on 2026-12-20, ninety days out, INCLUDING the ones whose
+# Those initial entries all expire on 2026-12-20, ninety days out, INCLUDING the ones whose
 # mechanism looks structural — a fork-only job, a main-branch-only job, a
 # manual-dispatch entrypoint. The cap is not a prediction that the mechanism
 # will change. It is what forces a premise that has held for a quarter to be
@@ -1326,6 +1326,21 @@ EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
         ticket="OMN-19218",
         added="2026-09-22",
         expires="2026-12-20",
+    ),
+    "Delegation Health Check (shadow) / Delegation Health Check (shadow)": SweepExclusion(
+        reason=(
+            "Measured on omnibase_infra#4289 head ec90d4ee6c and #4282 on "
+            "2026-09-29: this shadow check fails on runtime PRs when the newest "
+            "omninode_infra m4-customer-pass-verdict run is red for a browser-proof "
+            "reason outside this repository. The check is not in STRICT_GATE_JOBS "
+            "and is not a required context, but the default-deny external sweep "
+            "otherwise makes its failure block CI Summary. Exclude this exact "
+            "shadow context while required is false; remove this exclusion when "
+            "the check is made required so STRICT_GATE_JOBS judges it."
+        ),
+        ticket="OMN-19451",
+        added="2026-09-29",
+        expires="2026-10-13",
     ),
 }
 
@@ -1627,9 +1642,46 @@ class JobState:
     completed_at: str | None = None
 
 
+def carries_failure_conclusion(state: JobState) -> bool:
+    """True when the row's conclusion is a failure-class verdict, whatever its status.
+
+    OMN-20077. GitHub can report ``status: in_progress`` beside a set
+    ``conclusion`` on the same row. Measured on omnibase_infra#4274 (head
+    4d61341048f70a3a890c3bac6e7087f253cf5936, check-run 109295007859,
+    "Integration Test Coverage"): status in_progress, conclusion failure,
+    completed_at set. Every layer read the status first, filed the row as
+    "still running (reported, not waited on)" and CI Summary concluded SUCCESS.
+
+    The set is derived from the two existing constants and adds none: any
+    conclusion that is neither :data:`GOOD_CONCLUSIONS` nor
+    :data:`NON_VERDICT_CONCLUSIONS` (failure, timed_out, cancelled,
+    action_required, stale, startup_failure). ``None`` is no verdict. A good or
+    non-verdict conclusion on a running row is NOT decided here: only a
+    ``completed`` row can pass, so this never widens what passes.
+    """
+
+    return state.conclusion is not None and state.conclusion not in (
+        GOOD_CONCLUSIONS | NON_VERDICT_CONCLUSIONS
+    )
+
+
+def is_decided(state: JobState) -> bool:
+    """True when a layer may judge the row's conclusion: completed, or already failed.
+
+    A running row with no conclusion, or with a good conclusion, stays in
+    flight exactly as before. A row that carries a failure-class conclusion is
+    judged like a completed one, so the failure and cancellation graces, the
+    replacement-run check and the exclusion registries all still apply to it.
+    """
+
+    return state.status == "completed" or carries_failure_conclusion(state)
+
+
 def _state_severity(job: JobState) -> int:
     """Rank same-attempt duplicate jobs by the most blocking state."""
 
+    if carries_failure_conclusion(job):
+        return 3
     if job.status != "completed":
         return 2
     if job.conclusion not in GOOD_CONCLUSIONS:
@@ -2056,9 +2108,12 @@ def evaluate_external_contexts(
     for context in expected:
         raw = rows.get(context)
         state = None if raw is None else _state_from_check_run(context, raw)
-        if raw is None or state is None or state.status != "completed":
+        if raw is None or state is None or not is_decided(state):
             unresolved.append(context)
-        elif state.conclusion in EXTERNAL_GOOD_CONCLUSIONS:
+        elif (
+            state.status == "completed"
+            and state.conclusion in EXTERNAL_GOOD_CONCLUSIONS
+        ):
             continue
         elif verdict_is_provisional(state, now) or replacement_run_in_flight(
             raw, workflow_runs
@@ -2090,7 +2145,7 @@ def provisional_external_verdicts(
         context
         for context in expected
         if (raw := rows.get(context)) is not None
-        and (state := _state_from_check_run(context, raw)).status == "completed"
+        and is_decided(state := _state_from_check_run(context, raw))
         and state.conclusion not in EXTERNAL_GOOD_CONCLUSIONS
         and (
             verdict_is_provisional(state, now)
@@ -2119,7 +2174,7 @@ def provisional_cancellations(
         context
         for context in expected
         if (state := latest.get(context)) is not None
-        and state.status == "completed"
+        and is_decided(state)
         and cancellation_is_provisional(state, now)
     )
 
@@ -2465,6 +2520,8 @@ def _sweep_failure_reason(name: str, state: JobState, now: datetime | None) -> s
     """
 
     if state.conclusion != "cancelled":
+        if state.status != "completed":
+            return f"{name} ({state.conclusion} while status is {state.status})"
         return f"{name} ({state.conclusion})"
     completed = _parse_timestamp(state.completed_at)
     if completed is None or now is None:
@@ -2499,7 +2556,9 @@ def evaluate_external_sweep(
     Returns ``(failures, in_flight, swept, excluded, provisional)``:
 
     * ``failures`` — one line per refusal. These FAIL the umbrella.
-    * ``in_flight`` — swept names still running. REPORTING ONLY; see below.
+    * ``in_flight`` — swept names still running with no failure-class conclusion
+      (OMN-20077: a running row that already carries one is judged, not filed
+      here). REPORTING ONLY; see below.
     * ``swept`` — every name this layer judged, so a clean run records what it
       looked at instead of printing nothing (rule 16).
     * ``excluded`` — swept-population names an active registry entry admitted,
@@ -2555,10 +2614,10 @@ def evaluate_external_sweep(
             continue
         swept.append(name)
         state = _state_from_check_run(name, raw)
-        if state.status != "completed":
+        if not is_decided(state):
             in_flight.append(name)
             continue
-        if state.conclusion in SWEEP_GOOD_CONCLUSIONS:
+        if state.status == "completed" and state.conclusion in SWEEP_GOOD_CONCLUSIONS:
             continue
         # OMN-19167 — the conditional arm, consulted only for a row that is
         # ALREADY about to red. It can never turn a red into a pass for a name
@@ -2689,7 +2748,7 @@ def evaluate(
         for g in strict_gates
         if (
             (st := latest.get(g)) is not None
-            and st.status == "completed"
+            and is_decided(st)
             and (
                 st.conclusion not in GOOD_CONCLUSIONS
                 if g in relaxed
@@ -2704,7 +2763,7 @@ def evaluate(
         for g in skippable_gates
         if (
             (st := latest.get(g)) is not None
-            and st.status == "completed"
+            and is_decided(st)
             and st.conclusion not in GOOD_CONCLUSIONS
         )
     )
@@ -2716,7 +2775,7 @@ def evaluate(
         if name != self_name
         and name not in gate_names
         and not _is_allowlisted(name, allowlist)
-        and j.status == "completed"
+        and is_decided(j)
         and j.conclusion not in GOOD_CONCLUSIONS
     )
 

@@ -204,6 +204,10 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # left dev red for every open pull request; recorded here rather than
     # routed around (OMN-18833 lane).
     "ProtocolDriftGuardVerdict": "cli/protocol_drift_guard_verdict.py",
+    "ProtocolExecutionBudget": "cli/protocol_execution_budget.py",  # [DI] OMN-19407 reads a task class's execution ceiling and delivery margin.
+    "ProtocolSelectionFallback": "cli/protocol_selection_fallback.py",  # [DI] OMN-19407 reads the fallback class for an unclaimed prompt.
+    "ProtocolTaskClassAuthority": "cli/protocol_task_class_authority.py",  # [DI] OMN-19407 reads the task-class authority contract.
+    "ProtocolTaskTypeResolution": "cli/protocol_task_type_resolution.py",  # [DI] OMN-19407 reads a resolved task type and decision rationale.
     # === [NODE] Bifrost shadow policy protocol ===
     # [NODE] DI boundary for shadow comparison policy — pluggable shadow policy interface (OMN-5570)
     "ProtocolShadowPolicy": "nodes/node_llm_inference_effect/handlers/bifrost/handler_bifrost_gateway.py",
