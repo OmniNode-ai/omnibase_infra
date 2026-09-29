@@ -26,11 +26,11 @@ contract_name: "node_board_probe_effect"
 node_name: "node_board_probe_effect"
 contract_version:
   major: 1
-  minor: 0
+  minor: 1
   patch: 0
 node_version:
   major: 1
-  minor: 0
+  minor: 1
   patch: 0
 node_type: "EFFECT_GENERIC"
 description: >
@@ -52,6 +52,16 @@ board_checks:
 capabilities:
   - name: "board_probe.forwarder_refused_topic"
     description: "Grade the lab lane's gateway forwarder for refused inbound topics"
+event_bus:
+  version: {major: 1, minor: 0, patch: 0}
+  subscribe_topics: []
+  publish_topics:
+    - &board_probe_result_topic "onex.evt.omnibase-infra.board-probe-result.v1"
+published_events:
+  - topic: *board_probe_result_topic
+    event_type: "ModelBoardProbeResultEvent"
+    message_category: "EVENT"
+    description: "One immutable, execution-scoped board probe verdict."
 # Top-level handler block: RuntimeLocal's single-shot execution path resolves
 # the handler and its input model from here, so
 # `onex node node_board_probe_effect --input <request.json>` runs the check
@@ -85,6 +95,18 @@ handler_routing:
         name: "ModelForwarderRefusedTopicRequest"
         module: "omnibase_infra.nodes.node_board_probe_effect.models.model_forwarder_refused_topic_request"
         description: "The forwarder to read and what its lane declares."
+    - operation: "board_probe.publish_result"
+      event_model:
+        name: "ModelBoardProbeResultEvent"
+        module: "omnibase_infra.nodes.node_board_probe_effect.models.model_board_probe_result_event"
+      handler:
+        name: "HandlerBoardProbeResultPublisher"
+        module: "omnibase_infra.nodes.node_board_probe_effect.handlers.handler_board_probe_result_publisher"
+      description: "Return one validated board-probe event through the runtime-owned effect publisher"
+      supported_operations:
+        - "board_probe.publish_result"
+      output_events:
+        - "ModelBoardProbeResultEvent"
 error_handling:
   retry_policy:
     max_retries: 0

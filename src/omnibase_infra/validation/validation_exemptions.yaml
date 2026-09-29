@@ -112,6 +112,27 @@ pattern_exemptions:
     documentation:
       - OMN-12700 PR description
     ticket: OMN-12700
+  # OMN-19937: the board probe result event is keyed by natural identities.
+  # check_id is a stable check name (forwarder_refused_topic, chain_canary) and
+  # execution_id is the run identity the producing surface supplies (a workflow
+  # run id or a probe correlation id). Neither is an ONEX entity with a UUID, and
+  # both are parts of the projection's deterministic upsert key on the wire.
+  - file_pattern: 'model_board_probe_result_event\.py'
+    violation_pattern: "Field 'check_id' should use UUID type instead of str"
+    reason: >
+      check_id is the stable board check name that keys the probe-result projection row; it is a name, not an entity identifier.
+
+    documentation:
+      - OMN-19937 PR description
+    ticket: OMN-19937
+  - file_pattern: 'model_board_probe_result_event\.py'
+    violation_pattern: "Field 'execution_id' should use UUID type instead of str"
+    reason: >
+      execution_id is the producing surface's run identity (a CI run id or a canary probe correlation id) and is part of the deterministic upsert key, so an old execution never answers for a new one; the surfaces do not all mint UUIDs.
+
+    documentation:
+      - OMN-19937 PR description
+    ticket: OMN-19937
   # OMN-19492: the GitHub webhook ingress observations are keyed by the PR's
   # natural identity. entity_id is the name the dispatch result applier reads
   # for the Kafka partition key (_resolve_partition_key), so every observation

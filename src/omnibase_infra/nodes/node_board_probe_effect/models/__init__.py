@@ -14,8 +14,15 @@ from omnibase_infra.nodes.node_board_probe_effect.models.enum_board_check_surfac
 from omnibase_infra.nodes.node_board_probe_effect.models.enum_board_probe_outcome import (
     EnumBoardProbeOutcome,
 )
+from omnibase_infra.nodes.node_board_probe_effect.models.enum_board_subject_kind import (
+    EnumBoardSubjectKind,
+)
 from omnibase_infra.nodes.node_board_probe_effect.models.model_board_probe_result import (
     ModelBoardProbeResult,
+)
+from omnibase_infra.nodes.node_board_probe_effect.models.model_board_probe_result_event import (
+    ModelBoardProbeResultEvent,
+    board_probe_result_event_from,
 )
 from omnibase_infra.nodes.node_board_probe_effect.models.model_forwarder_refused_topic_request import (
     ModelForwarderRefusedTopicRequest,
@@ -28,7 +35,10 @@ __all__ = [
     "EnumBoardCheckId",
     "EnumBoardCheckSurfaceClass",
     "EnumBoardProbeOutcome",
+    "EnumBoardSubjectKind",
     "ModelBoardProbeResult",
+    "ModelBoardProbeResultEvent",
     "ModelForwarderRefusedTopicRequest",
     "ModelForwarderStateObservation",
+    "board_probe_result_event_from",
 ]
