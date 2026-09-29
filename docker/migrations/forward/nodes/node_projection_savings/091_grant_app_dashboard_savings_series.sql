@@ -45,7 +45,7 @@
 -- ---------------------------------------------------------------------------
 -- 1. The read grant.
 -- ---------------------------------------------------------------------------
-GRANT SELECT ON TABLE public.projection_delegation_savings_series TO app_dashboard;
+GRANT SELECT ON public.projection_delegation_savings_series TO app_dashboard;
 
 -- ---------------------------------------------------------------------------
 -- 2. Assertion: fail the migration if the grant did not take.
