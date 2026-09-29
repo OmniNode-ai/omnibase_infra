@@ -259,6 +259,20 @@ pattern_exemptions:
       - OMN-1783 PR description
     ticket: OMN-1783
   # ==========================================================================
+  # onex.doctor entry-point contract (OMN-19453)
+  # ==========================================================================
+  # `run` is the abstract method omnibase_core.doctor.DoctorCheckBase declares and
+  # DoctorRegistry.run_all calls on every check discovered through the onex.doctor
+  # entry-point group. A check that renamed it would not be a check.
+  - file_pattern: 'doctor/checks/check_delegation_[a-z_]+\.py'
+    violation_pattern: "Function name 'run' is too generic"
+    reason: >
+      DoctorCheckBase.run is the entry point the onex.doctor registry calls; the name is fixed by the core contract.
+
+    documentation:
+      - omnibase_core doctor/doctor_check_base.py (DoctorCheckBase.run)
+    ticket: OMN-19453
+  # ==========================================================================
   # Protocol Plugin Architecture Exemptions
   # ==========================================================================
   # The 'execute' method name is a standard plugin architecture pattern.

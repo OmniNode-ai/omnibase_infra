@@ -18,6 +18,7 @@ class EnumBoardCheckId(StrEnum):
     """The stable id of one board check."""
 
     FORWARDER_REFUSED_TOPIC = "forwarder_refused_topic"
+    CONSUMER_FLOW = "consumer_flow"
 
 
 __all__ = ["EnumBoardCheckId"]
