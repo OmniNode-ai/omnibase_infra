@@ -14,6 +14,10 @@ from omnibase_infra.models.catalog import (
     ModelTopicCatalogQuery,
     ModelTopicCatalogResponse,
 )
+from omnibase_infra.models.delegation import (
+    ModelDelegationCohortKey,
+    ModelDelegationRetryBounds,
+)
 from omnibase_infra.models.dispatch import (
     EnumDispatchStatus,
     EnumTopicStandard,
@@ -127,6 +131,9 @@ __all__: list[str] = [
     "ModelOffsetPolicyConfig",
     # Backend result models
     "ModelBackendResult",
+    # Delegation evidence models
+    "ModelDelegationCohortKey",
+    "ModelDelegationRetryBounds",
     # Resilience models
     "ModelCircuitBreakerConfig",
     # RRH models
