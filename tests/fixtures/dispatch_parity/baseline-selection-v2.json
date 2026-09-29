@@ -123,6 +123,30 @@
       "package": "omnibase_infra",
       "type_scoped": true
     },
+    "dispatcher.auto.node_board_probe_effect.HandlerConsumerFlow.board_probe_consumer_flow_efcc3f5b": {
+      "category": "event",
+      "contract_name": "node_board_probe_effect",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_board_probe_effect.HandlerConsumerFlow.board_probe_consumer_flow_efcc3f5b",
+      "handler_module": "omnibase_infra.nodes.node_board_probe_effect.handlers.handler_consumer_flow",
+      "handler_name": "HandlerConsumerFlow",
+      "message_types": null,
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
+    "dispatcher.auto.node_board_probe_effect.HandlerDockerConsumerFlowTarget.board_probe_observe_consumer_flow_d945dbcd": {
+      "category": "event",
+      "contract_name": "node_board_probe_effect",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_board_probe_effect.HandlerDockerConsumerFlowTarget.board_probe_observe_consumer_flow_d945dbcd",
+      "handler_module": "omnibase_infra.nodes.node_board_probe_effect.handlers.handler_docker_consumer_flow_target",
+      "handler_name": "HandlerDockerConsumerFlowTarget",
+      "message_types": null,
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
     "dispatcher.auto.node_board_probe_effect.HandlerDockerForwarderStateReader.board_probe_read_forwarder_state_f62cca6d": {
       "category": "event",
       "contract_name": "node_board_probe_effect",
@@ -3765,7 +3789,7 @@
       "discovery_errors": 0,
       "distinct_subscribe_topics": 106,
       "probe_count": 1146,
-      "registered_dispatchers": 134,
+      "registered_dispatchers": 136,
       "registered_routes": 123,
       "type_scoped_dispatchers": 79
     },
@@ -3807,7 +3831,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-09-29T12:39:33.513919+00:00",
+    "generated_at_utc": "2026-09-29T23:16:22.638665+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.24",
       "omnibase-infra": "0.38.60",
