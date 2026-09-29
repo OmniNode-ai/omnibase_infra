@@ -48,6 +48,9 @@
 #   memswap_limit: 12g - bounded swap headroom for large CI spikes
 #   cpus: "2.0"       - per-runner CFS quota (not a reservation); 60 runners
 #                       share the host's 32 vCPUs (over-subscription tolerated)
+#                       nproc still reports the host's cores; the runner
+#                       entrypoint exports this quota to jobs (OMN-19960,
+#                       docker/runners/cgroup-cpu-env.sh).
 #   pids_limit: 4096  - prevents fork bombs from runaway test processes
 #   cgroup_parent: omnirunners.slice - OMN-19077. Puts the whole general pool
 #                       in ONE systemd slice whose AGGREGATE MemoryHigh /

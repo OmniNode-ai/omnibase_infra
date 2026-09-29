@@ -48,7 +48,9 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
-SCHEMA_VERSION = "1.0.0"
+# 1.1.0 (OMN-19958): every row gains `oom_kill_total` and `oom_kill_delta`.
+# Additive: every 1.0.0 key keeps its name and type.
+SCHEMA_VERSION = "1.1.0"
 EVENT_TYPE = "runner-fleet-observation"
 
 # The label classes that partition this fleet operationally. Which class is down
@@ -145,6 +147,30 @@ def _resolve_status(runner: Mapping[str, Any]) -> str:
     return STATUS_OFFLINE
 
 
+def _counter(value: Any) -> int | None:
+    """Return a non-negative integer counter, or None for anything else.
+
+    OMN-19958. NULL means "not measured": another host's runner, or a counter
+    the monitor could not read. A malformed value is NULL too, never coerced,
+    because a string or a negative number coerced to an int would publish a
+    measurement nobody took. `bool` is refused explicitly since it is an int
+    subclass in Python.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _oom_kill_counters(
+    oom_kill_by_runner: Mapping[str, Any], name: str
+) -> tuple[int | None, int | None]:
+    """Resolve one runner's (total, delta) from the monitor's counter map."""
+    entry = oom_kill_by_runner.get(name)
+    if not isinstance(entry, Mapping):
+        return None, None
+    return _counter(entry.get("total")), _counter(entry.get("delta"))
+
+
 def _parse_name_prefixes(name_prefix: str) -> tuple[str, ...]:
     """Split a comma-separated prefix set into its non-empty members.
 
@@ -168,6 +194,7 @@ def build_event(
     runner_group: str,
     topic: str,
     job_by_runner: Mapping[str, Any] | None = None,
+    oom_kill_by_runner: Mapping[str, Any] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Construct one fleet-observation event from the org runners payload.
@@ -178,6 +205,11 @@ def build_event(
     `name_prefix` is a comma-separated SET of prefixes (OMN-19842), matched
     with startswith-any; a plain single prefix (no comma) behaves exactly as
     it always has.
+
+    `oom_kill_by_runner` (OMN-19958) maps a runner name to
+    `{"total": int | None, "delta": int | None}`: the runner container's cgroup
+    `memory.events` `oom_kill` counter and its rise since the monitor's
+    previous pass. A runner absent from the map carries NULL for both.
     """
     now = now or datetime.now(UTC)
     observed_at = now.isoformat()
@@ -200,6 +232,7 @@ def build_event(
         )
 
     jobs: Mapping[str, Any] = job_by_runner or {}
+    oom_kills: Mapping[str, Any] = oom_kill_by_runner or {}
     name_prefixes = _parse_name_prefixes(name_prefix)
 
     rows: list[dict[str, Any]] = []
@@ -228,6 +261,7 @@ def build_event(
                 current_job_id = str(resolved)
 
         runner_id = runner.get("id")
+        oom_kill_total, oom_kill_delta = _oom_kill_counters(oom_kills, name)
         rows.append(
             {
                 "runner_name": name,
@@ -244,6 +278,11 @@ def build_event(
                 "observing_host": host,
                 "status": status,
                 "current_job_id": current_job_id,
+                # OMN-19958: the runner container's cgroup OOM-kill counter
+                # and its rise since the previous pass. NULL is "not
+                # measured", which is a different fact from zero kills.
+                "oom_kill_total": oom_kill_total,
+                "oom_kill_delta": oom_kill_delta,
                 "observed_at": observed_at,
             }
         )
@@ -321,6 +360,19 @@ def main() -> int:
         if isinstance(decoded, dict):
             job_by_runner = decoded
 
+    oom_kill_by_runner: dict[str, Any] = {}
+    raw_oom = os.environ.get("RUNNER_OOM_KILL_MAP_JSON", "").strip()
+    if raw_oom:
+        try:
+            decoded_oom = json.loads(raw_oom)
+        except json.JSONDecodeError:
+            # An unparseable map publishes every counter as NULL ("not
+            # measured"), never zero; the monitor has already logged and
+            # alerted on the counters it could not read.
+            decoded_oom = {}
+        if isinstance(decoded_oom, dict):
+            oom_kill_by_runner = decoded_oom
+
     event = build_event(
         runners_payload=runners_payload,
         host=os.environ["RUNNER_FLEET_HOST"],
@@ -328,6 +380,7 @@ def main() -> int:
         runner_group=os.environ.get("RUNNER_GROUP", ""),
         topic=os.environ["TOPIC"],
         job_by_runner=job_by_runner,
+        oom_kill_by_runner=oom_kill_by_runner,
     )
     json.dump(event, sys.stdout)
     sys.stdout.write("\n")

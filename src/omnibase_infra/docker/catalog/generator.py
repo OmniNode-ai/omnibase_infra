@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -15,6 +16,26 @@ from omnibase_infra.docker.catalog.resolver import DEFAULT_PROJECT, ResolvedStac
 _RUNTIME_IMAGE_BUILD_SERVICE = "omninode-runtime"
 _RUNTIME_IMAGE = "runtime:latest"
 _DEFAULT_NETWORK = "omnibase-infra-network"
+
+
+def _override_defaults(value: str, overrides: Mapping[str, str]) -> str:
+    """Replace the default of each ``${VAR:-default}`` named in ``overrides``.
+
+    OMN-19972: a bundle may need a different default than the shared manifest
+    carries (the laptop profile must not render the lab's LAN address). Only
+    the ``:-`` default form is rewritten; a ``${VAR:?...}`` requirement and a
+    value the operator sets in the env file both keep their meaning.
+    """
+    for var, default in overrides.items():
+        replacement = f"${{{var}:-{default}}}"
+        # A function replacement, so ``$``, ``{`` or ``\`` in the default is
+        # inserted literally rather than read as a group reference.
+        value = re.sub(
+            rf"\$\{{{re.escape(var)}:-[^}}]*\}}",
+            lambda _match: replacement,  # noqa: B023 - used before the loop moves on
+            value,
+        )
+    return value
 
 
 def _scoped(project: str, name: str) -> str:
@@ -177,7 +198,16 @@ def generate_compose(
 
         # Command
         if manifest.command:
-            svc["command"] = manifest.command
+            if resolved.env_default_overrides:
+                overrides = resolved.env_default_overrides
+                if isinstance(manifest.command, str):
+                    svc["command"] = _override_defaults(manifest.command, overrides)
+                else:
+                    svc["command"] = [
+                        _override_defaults(part, overrides) for part in manifest.command
+                    ]
+            else:
+                svc["command"] = manifest.command
 
         # Environment
         env: dict[str, str] = {}
@@ -194,12 +224,23 @@ def generate_compose(
         if manifest.layer == EnumInfraLayer.RUNTIME:
             env.update(resolved.injected_env)
 
+        if resolved.env_default_overrides:
+            env = {
+                k: _override_defaults(v, resolved.env_default_overrides)
+                for k, v in env.items()
+            }
+
         if env:
             svc["environment"] = env
 
-        # Ports
+        # Ports. A bundle's publish host binds every published port to that
+        # address (OMN-19972); without one, the historical form binds all
+        # interfaces.
         if manifest.ports:
-            svc["ports"] = [f"{manifest.ports.external}:{manifest.ports.internal}"]
+            port = f"{manifest.ports.external}:{manifest.ports.internal}"
+            if resolved.publish_host:
+                port = f"{resolved.publish_host}:{port}"
+            svc["ports"] = [port]
 
         # Volumes
         volumes = list(manifest.volumes)

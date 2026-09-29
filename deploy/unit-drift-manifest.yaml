@@ -1,0 +1,110 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-20037: declare installed copies so a tracked fix cannot hide stale units.
+# dev-200 health port 42098 was read from the installed LaunchAgent plist.
+units:
+  - name: deploy-agent-dev.service
+    tracked: scripts/deploy-agent/deploy/deploy-agent-dev.service
+    installed: ~/.config/systemd/user/deploy-agent-dev.service
+    hosts:
+      - omninode-pc
+  - name: deploy-agent.service
+    tracked: scripts/deploy-agent/deploy/deploy-agent.service
+    installed: ~/.config/systemd/user/deploy-agent.service
+    hosts:
+      - omninode-pc
+  - name: onex-disk-gc.service
+    tracked: deploy/disk-gc/onex-disk-gc.service
+    installed: ~/.config/systemd/user/onex-disk-gc.service
+    hosts:
+      - omninode-pc
+  - name: onex-disk-gc.timer
+    tracked: deploy/disk-gc/onex-disk-gc.timer
+    installed: ~/.config/systemd/user/onex-disk-gc.timer
+    hosts:
+      - omninode-pc
+  - name: onex-buildx-orphan-sweep.service
+    tracked: deploy/disk-gc/onex-buildx-orphan-sweep.service
+    installed: ~/.config/systemd/user/onex-buildx-orphan-sweep.service
+    hosts:
+      - omninode-pc
+  - name: onex-buildx-orphan-sweep.timer
+    tracked: deploy/disk-gc/onex-buildx-orphan-sweep.timer
+    installed: ~/.config/systemd/user/onex-buildx-orphan-sweep.timer
+    hosts:
+      - omninode-pc
+  - name: onex-runner-disk-guard.service
+    tracked: deploy/disk-gc/onex-runner-disk-guard.service
+    installed: ~/.config/systemd/user/onex-runner-disk-guard.service
+    hosts:
+      - omninode-pc
+  - name: onex-runner-disk-guard.timer
+    tracked: deploy/disk-gc/onex-runner-disk-guard.timer
+    installed: ~/.config/systemd/user/onex-runner-disk-guard.timer
+    hosts:
+      - omninode-pc
+  - name: onex-worktree-prune.service
+    tracked: deploy/disk-gc/onex-worktree-prune.service
+    installed: ~/.config/systemd/user/onex-worktree-prune.service
+    hosts:
+      - omninode-pc
+  - name: onex-worktree-prune.timer
+    tracked: deploy/disk-gc/onex-worktree-prune.timer
+    installed: ~/.config/systemd/user/onex-worktree-prune.timer
+    hosts:
+      - omninode-pc
+  - name: onex-log-monitor.service
+    tracked: deploy/systemd/onex-log-monitor.service
+    installed: ~/.config/systemd/user/onex-log-monitor.service
+    hosts:
+      - omninode-pc
+  - name: onex-build-loop.service
+    tracked: scripts/systemd/onex-build-loop.service
+    installed: ~/.config/systemd/user/onex-build-loop.service
+    hosts:
+      - omninode-pc
+  - name: onex-build-loop.timer
+    tracked: scripts/systemd/onex-build-loop.timer
+    installed: ~/.config/systemd/user/onex-build-loop.timer
+    hosts:
+      - omninode-pc
+  - name: onex-nightly-sweep.service
+    tracked: scripts/systemd/onex-nightly-sweep.service
+    installed: ~/.config/systemd/user/onex-nightly-sweep.service
+    hosts:
+      - omninode-pc
+  - name: onex-nightly-sweep.timer
+    tracked: scripts/systemd/onex-nightly-sweep.timer
+    installed: ~/.config/systemd/user/onex-nightly-sweep.timer
+    hosts:
+      - omninode-pc
+  - name: omninode-git-mirror-daemon.service
+    tracked: docker/runners/systemd/omninode-git-mirror-daemon.service
+    installed: /etc/systemd/system/omninode-git-mirror-daemon.service
+    hosts:
+      - omninode-pc
+  - name: omninode-git-mirror-refresh.service
+    tracked: docker/runners/systemd/omninode-git-mirror-refresh.service
+    installed: /etc/systemd/system/omninode-git-mirror-refresh.service
+    hosts:
+      - omninode-pc
+  - name: omninode-git-mirror-refresh.timer
+    tracked: docker/runners/systemd/omninode-git-mirror-refresh.timer
+    installed: /etc/systemd/system/omninode-git-mirror-refresh.timer
+    hosts:
+      - omninode-pc
+  - name: deploy-agent-dev-202.service
+    tracked: scripts/deploy-agent/deploy/deploy-agent-dev-202.service
+    installed: ~/.config/systemd/user/deploy-agent-dev-202.service
+    hosts:
+      - omnipc2
+  - name: ai.omninode.deploy-agent-dev-200.plist
+    tracked: scripts/deploy-agent/deploy/launchd/deploy-agent-instance.plist.template
+    installed: ~/Library/LaunchAgents/ai.omninode.deploy-agent-dev-200.plist
+    hosts:
+      - Stickybeatz-Studio
+    render_script: scripts/deploy-agent/deploy/launchd/render-deploy-agent-plist.sh
+    render_args:
+      - dev-200
+      - '42098'
+      - '{home}/onex-lanes/dev-200'
