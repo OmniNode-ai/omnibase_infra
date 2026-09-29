@@ -420,3 +420,93 @@ class TestMultiHostNamePrefixSet:
         )
         assert event["runner_count"] == 1
         assert event["runners"][0]["runner_name"] == "omninode-runner-1"
+
+
+@pytest.mark.unit
+class TestOomKillCountersOmn19958:
+    """OMN-19958 -- each runner row carries its cgroup OOM-kill counters.
+
+    The monitor reads each runner container's cgroup `memory.events`
+    `oom_kill` counter and hands the builder a map of name to total and
+    delta. The row carries both. A runner the observing host could not
+    measure (another host's runner, or an unreadable counter) carries NULL,
+    never zero: zero would claim a measurement that did not happen.
+    """
+
+    ROW_KEYS_BEFORE_OMN19958 = {
+        "runner_name": str,
+        "runner_id": int,
+        "label_class": str,
+        "labels": list,
+        "host": str,
+        "observing_host": str,
+        "status": str,
+        "observed_at": str,
+    }
+
+    def test_a_measured_runner_carries_total_and_delta(self) -> None:
+        event = _build(
+            [_runner("omninode-runner-1")],
+            oom_kill_by_runner={"omninode-runner-1": {"total": 7, "delta": 1}},
+        )
+        row = event["runners"][0]
+        assert row["oom_kill_total"] == 7
+        assert row["oom_kill_delta"] == 1
+
+    def test_a_runner_the_observer_did_not_measure_is_null_not_zero(self) -> None:
+        event = _build(
+            [_runner("omninode-runner-1"), _runner("omninode-runner-2")],
+            oom_kill_by_runner={"omninode-runner-1": {"total": 0, "delta": 0}},
+        )
+        rows = {r["runner_name"]: r for r in event["runners"]}
+        assert rows["omninode-runner-1"]["oom_kill_total"] == 0
+        assert rows["omninode-runner-2"]["oom_kill_total"] is None
+        assert rows["omninode-runner-2"]["oom_kill_delta"] is None
+
+    def test_an_unreadable_counter_is_null_not_zero(self) -> None:
+        event = _build(
+            [_runner("omninode-runner-1")],
+            oom_kill_by_runner={"omninode-runner-1": {"total": None, "delta": None}},
+        )
+        row = event["runners"][0]
+        assert row["oom_kill_total"] is None
+        assert row["oom_kill_delta"] is None
+
+    def test_a_malformed_counter_is_null_never_coerced(self) -> None:
+        event = _build(
+            [_runner("omninode-runner-1")],
+            oom_kill_by_runner={"omninode-runner-1": {"total": "7", "delta": -1}},
+        )
+        row = event["runners"][0]
+        assert row["oom_kill_total"] is None
+        assert row["oom_kill_delta"] is None
+
+    def test_the_schema_bump_is_additive(self) -> None:
+        event = _build(
+            [_runner("omninode-runner-1", runner_id=3)],
+            oom_kill_by_runner={"omninode-runner-1": {"total": 7, "delta": 1}},
+        )
+        assert event["schema_version"] == "1.1.0"
+        row = event["runners"][0]
+        for key, kind in self.ROW_KEYS_BEFORE_OMN19958.items():
+            assert isinstance(row[key], kind), (key, row[key])
+        assert "current_job_id" in row
+
+    def test_main_reads_the_counter_map_from_the_environment(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        import io
+
+        payload = {"total_count": 1, "runners": [_runner("omninode-runner-1")]}
+        monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+        monkeypatch.setenv("RUNNER_FLEET_HOST", HOST)
+        monkeypatch.setenv("TOPIC", TOPIC)
+        monkeypatch.setenv("RUNNER_NAME_PREFIX", "omninode-runner")
+        monkeypatch.setenv(
+            "RUNNER_OOM_KILL_MAP_JSON",
+            json.dumps({"omninode-runner-1": {"total": 12, "delta": 6}}),
+        )
+        assert mod.main() == 0
+        row = json.loads(capsys.readouterr().out)["runners"][0]
+        assert row["oom_kill_total"] == 12
+        assert row["oom_kill_delta"] == 6
