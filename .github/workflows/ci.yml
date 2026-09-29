@@ -4079,7 +4079,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: fa40689b11f296214d4f26920f1a769b951970c9
+          ref: 7a42607746cc5edc57195bed6ca5a0a9229fbd48
           path: .proof-dependencies/omninode-infra
           token: ${{ steps.app-token-proof.outputs.token }}
           persist-credentials: false
@@ -5367,6 +5367,7 @@ jobs:
         run: |
           uv run pytest \
             tests/integration/migrations/test_session_content_live_apply_omn19550.py \
+            tests/integration/migrations/test_delegation_updated_at_absorb_omn19561.py \
             -m ephemeral_pg \
             -v -rs --tb=short -p no:randomly
 

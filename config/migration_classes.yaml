@@ -118,6 +118,7 @@ migrations:
   forward/105_create_ledger_chain.sql: expand-only
   forward/106_add_delegation_workflow_state_traffic_class.sql: forward-only # DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT CK_DELEGATION_WORKFLOW_STATE_TRAFFIC_CLASS
   forward/108_create_pr_landing_workflow_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
+  forward/109_delegation_workflow_state_updated_at_only_on_transition.sql: forward-only # CREATE OR REPLACE FUNCTION on an existing trigger function
   forward/nodes/node_canary_score_reducer/0001_create_capability_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0002_capability_scores_tenant_id_and_rls.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN

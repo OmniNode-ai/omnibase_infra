@@ -362,6 +362,9 @@ _LIST_TARGET = re.compile(
     rf"(?P<name>{_SQL_IDENTIFIER})",
     re.IGNORECASE,
 )
+_DISTINCT_FROM_OPERATOR = re.compile(
+    r"(\bis\s+(?:not\s+)?distinct\s+)from\b", re.IGNORECASE
+)
 _RELATION_LISTS: tuple[tuple[re.Pattern[str], bool, bool], ...] = (
     (
         re.compile(
@@ -2360,7 +2363,10 @@ def _analyze_sql_fragment(
         is not None
     )
     for variant in variants:
-        masked_variant = _mask_sql_string_bodies(variant)
+        masked_variant = _DISTINCT_FROM_OPERATOR.sub(
+            r"\1    ", _mask_sql_string_bodies(variant)
+        )
+        # DISTINCT FROM compares expressions; its FROM is not a relation target.
         for pattern, permits_ephemeral, permits_system_read in _RELATION_TARGETS:
             if permits_ephemeral and is_privilege_statement:
                 # GRANT/REVOKE FROM names principals, not relation read targets.
@@ -2398,11 +2404,15 @@ def _analyze_sql_fragment(
                 target_locations=target_locations,
             )
 
+    # The comma-list FROM scan must ignore the same comparison operators.
+    masked_relation_lists = _DISTINCT_FROM_OPERATOR.sub(
+        r"\1    ", masked_target_fragment
+    )
     for pattern, permits_ephemeral, permits_system_read in _RELATION_LISTS:
         if permits_ephemeral and is_privilege_statement:
             # REVOKE ... FROM names principals, not relation read targets.
             continue
-        for list_match in pattern.finditer(masked_target_fragment):
+        for list_match in pattern.finditer(masked_relation_lists):
             targets = _split_top_level_commas(list_match.group("targets"))
             for target in targets:
                 target_match = _LIST_TARGET.match(target)
