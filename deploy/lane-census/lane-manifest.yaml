@@ -152,6 +152,14 @@
 #   and includes `projection-delegation-writer` among 11 services (OMN-15359).
 #   This attests compose-to-manifest source parity only; live .201 deployment is
 #   not claimed and remains a separate approved action after this PR merges.
+# verified: 2026-09-28T19:17Z via local `docker compose -p omnibase-infra-lakshman
+#   --env-file docker/runtime-policy.env --env-file docker/lakshman.env.example
+#   -f docker/docker-compose.lakshman.yml --profile lakshman config` with render-only
+#   values in tests/integration/infra/test_lakshman_compose_render.py (10 passing
+#   checks). The four OMN-15359 tenant-path containers below are declared ahead
+#   of deployment. The last read-only .201 inventory is recorded in
+#   workflow/records/plans/OMN-15359/reports/20260928T190441Z-codex-01a0e3cf.md;
+#   a fresh SSH inventory timed out at 19:17Z, so no live-presence claim is made.
 # (OMN-13034 attestation: any edit to this file must carry a fresh verified: line in the same PR)
 #
 # THE CLASS FIX. We kept regressing the same way — nothing reconciled desired vs
@@ -599,6 +607,16 @@ lanes:
         kind: service
         replicas: 1
       - name: omnimarket-lakshman-projection-delegation-writer
+        kind: service
+        replicas: 1
+      - name: omnibase-infra-lakshman-cloud-migration-files
+        kind: oneshot
+      - name: omnibase-infra-lakshman-cloud-migration
+        kind: oneshot
+      - name: onex-api-lakshman
+        kind: service
+        replicas: 1
+      - name: omnimarket-lakshman-projection-tenant-registry-writer
         kind: service
         replicas: 1
   # ---------------------------------------------------------------------------

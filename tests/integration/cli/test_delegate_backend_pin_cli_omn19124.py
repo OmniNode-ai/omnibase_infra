@@ -43,13 +43,6 @@ _RESULT_MODEL = (
     "model_delegate_skill_response.ModelDelegateSkillCompleted"
 )
 _GLM_BACKEND = "cloud-glm"
-_STAND_IN_TASK_CLASS_CONTRACT = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "delegation"
-    / "omn18305"
-    / "task_class_contracts_vocabulary.yaml"
-)
 
 
 def _invoke(args: list[str]) -> Result:
@@ -217,9 +210,6 @@ event_bus:
     def _resolve_contract(_: str) -> Path:
         return contract
 
-    def _resolve_task_contract() -> Path:
-        return _STAND_IN_TASK_CLASS_CONTRACT
-
     def _fake_receipt_mode(**kwargs: object) -> int:
         """Call the real validator, then the real writer, as receipt mode does.
 
@@ -245,9 +235,6 @@ event_bus:
     monkeypatch.delenv("OMNI_HOME", raising=False)
     monkeypatch.setattr(cli_delegate, "check_omnimarket_drift", _no_drift)
     monkeypatch.setattr(cli_delegate, "_resolve_packaged_contract", _resolve_contract)
-    monkeypatch.setattr(
-        cli_delegate, "resolve_task_class_contract_path", _resolve_task_contract
-    )
     monkeypatch.setattr(cli_delegate, "run_receipt_mode", _fake_receipt_mode)
 
     exit_code = run_delegate(

@@ -30,20 +30,9 @@ from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_infra.cli import cli_delegate
 from omnibase_infra.cli.cli_delegate import delegate_command
-
-#: The committed stand-in task-class vocabulary (OMN-18305). This repo does not
-#: depend on omnimarket by layering, so the packaged task-class contract the CLI
-#: resolves is simply absent here and every delegation would refuse before
-#: reaching the code under test. ``tests/unit/cli/conftest.py`` neutralises this
-#: the same way for the same reason; it is pointed at from this module rather
-#: than from a new integration conftest so no other test in this directory
-#: acquires the substitution as a side effect.
-STAND_IN_TASK_CLASS_CONTRACT = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "delegation"
-    / "omn18305"
-    / "task_class_contracts_vocabulary.yaml"
+from tests.helpers.cli_registry_stand_in import (
+    use_stand_in_registry,
+    wiring_authority,
 )
 
 
@@ -57,11 +46,6 @@ def _no_ambient_workspace(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.delenv("OMNI_HOME", raising=False)
     monkeypatch.setattr(cli_delegate, "check_omnimarket_drift", lambda **_: None)
-    monkeypatch.setattr(
-        cli_delegate,
-        "resolve_task_class_contract_path",
-        lambda: STAND_IN_TASK_CLASS_CONTRACT,
-    )
 
 
 # A contract whose handler never returns inside any bound a test declares
@@ -118,18 +102,8 @@ class TestDelegateTimeoutIsTypedOnStdout:
             cli_delegate, "_resolve_packaged_contract", lambda _name: contract_path
         )
         monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
-        task_class_contract_path = tmp_path / "task_class_contract.yaml"
-        task_class_contract_path.write_text(
-            STAND_IN_TASK_CLASS_CONTRACT.read_text(encoding="utf-8").replace(
-                "terminal_delivery_margin_seconds: 60",
-                "terminal_delivery_margin_seconds: 1",
-            ),
-            encoding="utf-8",
-        )
-        monkeypatch.setattr(
-            cli_delegate,
-            "resolve_task_class_contract_path",
-            lambda: task_class_contract_path,
+        use_stand_in_registry(
+            monkeypatch, wiring_authority(terminal_delivery_margin_seconds=1)
         )
         # Shrink the grace window so the bound under test is seconds, not the
         # production ten. The fixture also declares a one-second delivery

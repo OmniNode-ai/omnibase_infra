@@ -314,6 +314,10 @@ class _Harness:
                 "PATH": f"{self.bindir}:{os.environ.get('PATH', '')}",
                 "HOME": str(self.tmp),
                 "RUNNER_FLEET_CONFIG_PATH": str(self.fleet_config),
+                # OMN-19958: this harness stages no cgroup tree, so the OOM-kill
+                # counter scan is off here; test_runner_monitor_oom_kill_delta.py
+                # drives it against a fixture tree.
+                "RUNNER_MONITOR_OOM_KILL_SCAN": "false",
                 "SLACK_BOT_TOKEN": "xoxb-test",  # pragma: allowlist secret
                 "SLACK_CHANNEL_ID": "C-test",
                 "RUNNER_GITHUB_TOKEN": "ghp-test",  # pragma: allowlist secret

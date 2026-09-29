@@ -11,6 +11,12 @@ import pytest
 import yaml
 
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.runtime.models.enum_bifrost_endpoint_probe_failure_kind import (
+    EnumBifrostEndpointProbeFailureKind,
+)
+from omnibase_infra.runtime.models.model_bifrost_endpoint_probe_failure import (
+    ModelBifrostEndpointProbeFailure,
+)
 from omnibase_infra.runtime.render_bifrost_delegation_contract import (
     render_bifrost_delegation_contract,
 )
@@ -327,13 +333,16 @@ def test_endpoint_probe_requires_advertised_served_id(tmp_path: Path) -> None:
 
     def rejected_probe(
         endpoint_url: str, model_name: str, timeout: float
-    ) -> str | None:
+    ) -> ModelBifrostEndpointProbeFailure | None:
         assert (endpoint_url, model_name) in {
             (_ENDPOINT, "Qwen3.8-27B"),
             (_DS_V4_ENDPOINT, "deepseek-v4-flash"),
         }
         assert timeout > 0
-        return f"model endpoint did not advertise {model_name}"
+        return ModelBifrostEndpointProbeFailure(
+            kind=EnumBifrostEndpointProbeFailureKind.REFUSED,
+            detail=f"model endpoint did not advertise {model_name}",
+        )
 
     with pytest.raises(ProtocolConfigurationError, match="failed verification"):
         render_bifrost_delegation_contract(

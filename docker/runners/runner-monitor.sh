@@ -88,6 +88,13 @@ ALERT_DWELL_CYCLES="${RUNNER_MONITOR_ALERT_DWELL_CYCLES:-3}"
 if ! [[ "${ALERT_DWELL_CYCLES}" =~ ^[0-9]+$ ]] || [[ "${ALERT_DWELL_CYCLES}" -lt 1 ]]; then
     ALERT_DWELL_CYCLES=3
 fi
+# OMN-19958: per-container cgroup OOM-kill counters. See the "Runner OOM-kill
+# counters" block below for why State.OOMKilled alone never saw the 2026-09-28
+# .202 kills. The last counter value per container id lives beside STATE_FILE,
+# in its own file, so the dwell state above never has to carry it.
+RUNNER_MONITOR_OOM_KILL_SCAN="${RUNNER_MONITOR_OOM_KILL_SCAN:-true}"
+RUNNER_MONITOR_CGROUP_ROOT="${RUNNER_MONITOR_CGROUP_ROOT:-/sys/fs/cgroup}"
+OOM_KILL_STATE_FILE="${RUNNER_MONITOR_OOM_KILL_STATE_FILE:-$(dirname "${STATE_FILE}")/runner-monitor-oom-kill-state.json}"
 COMPOSE_DIR="$HOME/.omnibase/runners/docker"
 COMPOSE_FILE="${COMPOSE_DIR}/docker-compose.runners.yml"
 RUNNER_FLEET_CONFIG_PATH="${RUNNER_FLEET_CONFIG_PATH:-$HOME/.omnibase/runners/config/runner_fleet.yaml}"
@@ -925,6 +932,308 @@ if [[ "${github_api_failed}" != true ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Fleet prefix set (OMN-18768, OMN-19842)
+# ---------------------------------------------------------------------------
+# The fleet observation is scoped BROADER than the detection loop, deliberately.
+# RUNNER_NAME_PREFIX is `omninode-runner`, which scopes the crash-loop/wedge
+# checks to the interchangeable general pool. The FLEET question is "what
+# runners are running", and measured live on 2026-09-18 the org pool held 69
+# runners of which exactly one was offline: `omninode-air-runner-1`, on .105 —
+# a name the detection prefix does not match. Emitting on the narrow prefix
+# would have dropped the only runner that was down, which is precisely the
+# false-green AC4 exists to refuse.
+#
+# OMN-19842: the default is now every `runner_name_prefix` declared under
+# `hosts:` in the fleet config, comma-joined, rather than the single literal
+# "omninode-" this used to hardcode. That literal covered four of the five
+# declared hosts by coincidence of a shared substring and silently excluded
+# the fifth (.202's `omnipc2-verify-runner`, added by OMN-19507 with no
+# matching edit here) forever. A config with no `hosts:` block (pre-OMN-17477)
+# makes config_host_prefixes print nothing, so the fallback below preserves
+# today's behavior unchanged.
+#
+# The declared set is ADDED to "omninode-", never substituted for it. The
+# role runners on .201 (omninode-verify-runner-N, omninode-deploy-runner,
+# omninode-prod-deploy-runner-N, omninode-customer-plane-runner-N) are not
+# declared under `hosts:`, so the declared set alone dropped seven observed
+# runners (measured on .201 against the live org runner list, 2026-09-27:
+# 69 -> 63). The union keeps every runner "omninode-" already covered and
+# adds each declared host whose prefix it does not reach (.202's
+# omnipc2-verify-runner), and still excludes a runner outside both, such as
+# the rootless-podman omnipc2-customer-N.
+RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG="$(config_host_prefixes)"
+RUNNER_FLEET_NAME_PREFIX="${RUNNER_FLEET_NAME_PREFIX:-omninode-${RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG:+,${RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG}}}"
+
+# ---------------------------------------------------------------------------
+# Runner OOM-kill counters (OMN-19958)
+# ---------------------------------------------------------------------------
+# State.OOMKilled (read above) is sticky and narrow: it stays true until the
+# container restarts, and it is set only when the container's INIT process is
+# killed. On 2026-09-28 .202 took 12 memcg kills inside two CI runners, every
+# one a CI job's child process (a pre-commit fan-out), with the runners left
+# running and their State.OOMKilled saying nothing about how many kills or
+# when. scripts/infra-signature-rerun.sh reruns a job that died with exit 137,
+# so the job's own red can turn green and nothing records the kill at all.
+#
+# The kernel counts every kill in the container's cgroup v2 memory.events
+# (`oom_kill N`). This block reads that counter for every runner container in
+# the fleet prefix set, keeps the last value per container id in
+# OOM_KILL_STATE_FILE, and:
+#
+#   * a RISE since the previous pass is an `OOM_KILL runner=<name> delta=<d>
+#     total=<t>` line and a Slack post IN THIS PASS. It bypasses the OMN-19169
+#     announcement dwell on purpose: a kill is an event that already happened,
+#     not a state that can flap, and it does not enter current_alert_count, so
+#     it cannot perturb the dwell either;
+#   * a FLAT counter is quiet. The dedup key is (host, container id, total):
+#     the same total is never announced twice;
+#   * a container id seen for the first time is a BASELINE, read and not
+#     alerted, so a recreated runner never replays its predecessor's history;
+#   * an UNREADABLE counter is an error finding, never a zero (FAIL-not-WARN).
+#     It adds ONE distinct finding to current_alert_count, like docker_ok, and
+#     the container's last good total is carried forward so the kills it
+#     missed are counted once the counter reads again.
+#
+# The per-runner totals and deltas ride on the fleet observation
+# (RUNNER_OOM_KILL_MAP_JSON -> scripts/runner_fleet_event.py). The sticky
+# State.OOMKilled check above is unchanged; this block is additive.
+declare -A oom_kill_total_by_runner=()
+declare -A oom_kill_delta_by_runner=()
+declare -A oom_error_names=()
+oom_kill_event_list=()
+oom_counter_error_list=()
+oom_scan_error_present=false
+RUNNER_OOM_KILL_MAP_JSON=""
+
+# oom_expand_systemd_slice <parent> -- systemd nests a dashed slice under each
+# of its prefixes ("a-b.slice" lives at "a.slice/a-b.slice"). A parent that is
+# not a slice (the cgroupfs driver's "/docker") is returned without its
+# leading slash.
+oom_expand_systemd_slice() {
+    local slice="${1}" stem part acc="" out=""
+    local -a parts=()
+    if [[ "${slice}" != *.slice ]]; then
+        printf '%s\n' "${slice#/}"
+        return 0
+    fi
+    stem="${slice%.slice}"
+    IFS='-' read -ra parts <<< "${stem}"
+    for part in "${parts[@]}"; do
+        acc="${acc:+${acc}-}${part}"
+        out="${out:+${out}/}${acc}.slice"
+    done
+    printf '%s\n' "${out}"
+}
+
+# oom_memory_events_path <container id> <cgroup parent> -- the container's
+# cgroup v2 memory.events, or return 1. The candidates cover the systemd
+# driver with an explicit CgroupParent (the .202 pool: omnirunners.slice),
+# the systemd driver's default system.slice, and the cgroupfs driver.
+oom_memory_events_path() {
+    local cid="${1}" parent="${2}" root="${RUNNER_MONITOR_CGROUP_ROOT%/}" expanded candidate
+    local -a candidates=()
+    if [[ -n "${parent}" ]]; then
+        expanded="$(oom_expand_systemd_slice "${parent}")"
+        candidates+=(
+            "${root}/${expanded}/docker-${cid}.scope/memory.events"
+            "${root}/${expanded}/${cid}/memory.events"
+        )
+    else
+        candidates+=(
+            "${root}/system.slice/docker-${cid}.scope/memory.events"
+            "${root}/docker/${cid}/memory.events"
+        )
+    fi
+    for candidate in "${candidates[@]}"; do
+        if [[ -r "${candidate}" ]]; then
+            printf '%s\n' "${candidate}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# oom_read_kill_total <memory.events path> -- the `oom_kill` counter, or
+# return 1. A missing line or a non-integer is unreadable, never zero.
+oom_read_kill_total() {
+    local value
+    value="$(awk '$1 == "oom_kill" { print $2; found = 1 } END { exit !found }' "${1}" 2>/dev/null)" || return 1
+    [[ "${value}" =~ ^[0-9]+$ ]] || return 1
+    printf '%s\n' "${value}"
+}
+
+# oom_record_error <runner name or ""> <message> -- one error finding.
+oom_record_error() {
+    local name="${1}" message="${2}"
+    oom_counter_error_list+=("${message}")
+    if [[ -n "${name}" ]]; then
+        oom_error_names["${name}"]=1
+    fi
+}
+
+if [[ "${RUNNER_MONITOR_OOM_KILL_SCAN}" != true ]]; then
+    log "OOM-kill counter scan DISABLED (RUNNER_MONITOR_OOM_KILL_SCAN=${RUNNER_MONITOR_OOM_KILL_SCAN}); runner OOM kills on ${RUNNER_HOST} are NOT watched this pass."
+else
+    # Two cron entries run this script against one state directory: the */3
+    # monitor pass and the */10 repair pass. The read-compare-write below holds
+    # an exclusive lock so the two can never both read the same previous total
+    # and announce one kill twice. A lock that cannot be taken is an error
+    # finding; the counters are left for the next pass, never skipped quietly.
+    oom_lock_ok=false
+    oom_lock_fd=""
+    if exec {oom_lock_fd}>>"${OOM_KILL_STATE_FILE}.lock"; then
+        if flock -w "${RUNNER_MONITOR_OOM_KILL_LOCK_WAIT_SECONDS:-30}" "${oom_lock_fd}"; then
+            oom_lock_ok=true
+        else
+            oom_record_error "" "OOM_STATE_LOCK_TIMEOUT file=${OOM_KILL_STATE_FILE}.lock host=${RUNNER_HOST}: another pass held the counter lock; counters are read on the next pass"
+        fi
+    else
+        oom_lock_fd=""
+        oom_record_error "" "OOM_STATE_LOCK_FAILED file=${OOM_KILL_STATE_FILE}.lock host=${RUNNER_HOST}: could not open the counter lock file; counters are not read this pass"
+    fi
+    if [[ "${oom_lock_ok}" == true ]]; then
+        # Previous totals, keyed by container id. A state file that exists and
+        # cannot be read is an error: every runner re-baselines, so a kill since
+        # the last good pass would otherwise vanish without a word.
+        oom_prev_json="{}"
+        if [[ -f "${OOM_KILL_STATE_FILE}" ]]; then
+            if ! oom_prev_json="$(jq -c '.containers // {} | if type == "object" then . else error("containers is not an object") end' "${OOM_KILL_STATE_FILE}" 2>&1)"; then
+                oom_record_error "" "OOM_STATE_UNREADABLE file=${OOM_KILL_STATE_FILE} host=${RUNNER_HOST}: $(tr '\n' ' ' <<< "${oom_prev_json}" | head -c 300) -- every runner re-baselines this pass, so a kill since the last good pass is not counted."
+                oom_prev_json="{}"
+            fi
+        fi
+
+        # The runner containers: every running container whose name starts with
+        # the detection prefix or any member of the fleet prefix set.
+        declare -A oom_seen=()
+        oom_names=()
+        IFS=',' read -ra oom_prefixes <<< "${RUNNER_NAME_PREFIX},${RUNNER_FLEET_NAME_PREFIX}"
+        for oom_prefix in "${oom_prefixes[@]}"; do
+            oom_prefix="${oom_prefix//[[:space:]]/}"
+            [[ -z "${oom_prefix}" ]] && continue
+            if ! oom_ps_out="$(docker ps --filter "name=${oom_prefix}" --format '{{.Names}}' 2>&1)"; then
+                oom_record_error "" "OOM_SCAN_FAILED prefix=${oom_prefix} host=${RUNNER_HOST}: docker ps failed: $(tr '\n' ' ' <<< "${oom_ps_out}" | head -c 300)"
+                continue
+            fi
+            while IFS= read -r oom_name; do
+                [[ -z "${oom_name}" || "${oom_name}" != "${oom_prefix}"* ]] && continue
+                [[ -n "${oom_seen[$oom_name]:-}" ]] && continue
+                oom_seen["$oom_name"]=1
+                oom_names+=("${oom_name}")
+            done <<< "${oom_ps_out}"
+        done
+
+        oom_state_lines=""
+        for oom_name in "${oom_names[@]}"; do
+            if ! oom_inspect="$(docker inspect --format '{{.Id}}|{{.HostConfig.CgroupParent}}' "${oom_name}" 2>&1)"; then
+                oom_record_error "${oom_name}" "OOM_COUNTER_UNREADABLE runner=${oom_name} host=${RUNNER_HOST}: docker inspect failed: $(tr '\n' ' ' <<< "${oom_inspect}" | head -c 300)"
+                continue
+            fi
+            oom_cid="${oom_inspect%%|*}"
+            oom_parent="${oom_inspect#*|}"
+            oom_parent="${oom_parent%%[[:space:]]}"
+            if [[ ! "${oom_cid}" =~ ^[0-9a-f]{64}$ ]]; then
+                oom_record_error "${oom_name}" "OOM_COUNTER_UNREADABLE runner=${oom_name} host=${RUNNER_HOST}: docker inspect returned no container id ('$(head -c 100 <<< "${oom_inspect}")')"
+                continue
+            fi
+            oom_cid_short="${oom_cid:0:12}"
+            if ! oom_events_path="$(oom_memory_events_path "${oom_cid}" "${oom_parent}")"; then
+                oom_record_error "${oom_name}" "OOM_COUNTER_UNREADABLE runner=${oom_name} container=${oom_cid_short} host=${RUNNER_HOST}: no readable memory.events for cgroup parent '${oom_parent:-<default>}' under ${RUNNER_MONITOR_CGROUP_ROOT}"
+                continue
+            fi
+            if ! oom_total="$(oom_read_kill_total "${oom_events_path}")"; then
+                oom_record_error "${oom_name}" "OOM_COUNTER_UNREADABLE runner=${oom_name} container=${oom_cid_short} host=${RUNNER_HOST}: no integer oom_kill line in ${oom_events_path}"
+                continue
+            fi
+            oom_prev="$(jq -r --arg id "${oom_cid}" '.[$id].total // empty' <<< "${oom_prev_json}" 2>/dev/null || true)"
+            oom_delta=0
+            if [[ ! "${oom_prev}" =~ ^[0-9]+$ ]]; then
+                log "OOM_BASELINE runner=${oom_name} total=${oom_total} container=${oom_cid_short} (first pass for this container id: read, not alerted)"
+            elif (( oom_total < oom_prev )); then
+                log "OOM_BASELINE runner=${oom_name} total=${oom_total} container=${oom_cid_short} (counter fell from ${oom_prev}: the cgroup was recreated under the same id, so this is a new baseline)"
+            else
+                oom_delta=$(( oom_total - oom_prev ))
+            fi
+            oom_kill_total_by_runner["$oom_name"]="${oom_total}"
+            oom_kill_delta_by_runner["$oom_name"]="${oom_delta}"
+            if (( oom_delta > 0 )); then
+                oom_kill_event_list+=("OOM_KILL runner=${oom_name} delta=${oom_delta} total=${oom_total} container=${oom_cid_short} host=${RUNNER_HOST}")
+            fi
+            oom_state_lines+="${oom_cid}"$'\t'"${oom_name}"$'\t'"${oom_total}"$'\n'
+        done
+
+        # Next pass's baseline: every counter read this pass, plus the last good
+        # total of any runner whose counter could not be read, so the kills it
+        # missed are counted (once) when it reads again.
+        oom_error_names_json="$(printf '%s\n' "${!oom_error_names[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+        oom_state_json=""
+        if ! oom_state_json="$(printf '%s' "${oom_state_lines}" | jq -Rnc \
+            --argjson prev "${oom_prev_json}" \
+            --argjson errs "${oom_error_names_json}" '
+                ($prev | with_entries(select(.value.runner as $r | ($errs | index($r)) != null))) as $carried
+                | reduce (inputs | select(length > 0) | split("\t")) as $p
+                    ($carried; . + {($p[0]): {runner: $p[1], total: ($p[2] | tonumber)}})
+                | {containers: .}
+            ' 2>&1)"; then
+            oom_record_error "" "OOM_STATE_WRITE_FAILED file=${OOM_KILL_STATE_FILE} host=${RUNNER_HOST}: could not serialize: $(tr '\n' ' ' <<< "${oom_state_json}" | head -c 300)"
+            oom_state_json=""
+        fi
+        if [[ -n "${oom_state_json}" ]]; then
+            oom_state_tmp="${OOM_KILL_STATE_FILE}.tmp.$$"
+            if ! { printf '%s\n' "${oom_state_json}" > "${oom_state_tmp}" && mv -f "${oom_state_tmp}" "${OOM_KILL_STATE_FILE}"; }; then
+                rm -f "${oom_state_tmp}" || true
+                oom_record_error "" "OOM_STATE_WRITE_FAILED file=${OOM_KILL_STATE_FILE} host=${RUNNER_HOST}: the next pass re-announces this pass's kills rather than losing them"
+            fi
+        fi
+    fi
+    if [[ -n "${oom_lock_fd}" ]]; then
+        exec {oom_lock_fd}>&-
+    fi
+
+    # The per-runner map the fleet observation carries. A runner absent from
+    # it (unreadable, or another host's) is published as NULL, never zero.
+    oom_map_lines=""
+    for oom_name in "${!oom_kill_total_by_runner[@]}"; do
+        oom_map_lines+="${oom_name}"$'\t'"${oom_kill_total_by_runner[$oom_name]}"$'\t'"${oom_kill_delta_by_runner[$oom_name]}"$'\n'
+    done
+    if ! RUNNER_OOM_KILL_MAP_JSON="$(printf '%s' "${oom_map_lines}" | jq -Rnc '
+            reduce (inputs | select(length > 0) | split("\t")) as $p
+                ({}; . + {($p[0]): {total: ($p[1] | tonumber), delta: ($p[2] | tonumber)}})
+        ')"; then
+        log "ERROR: OOM-kill counter map for the fleet observation failed to build; its counters publish as NULL this pass"
+        RUNNER_OOM_KILL_MAP_JSON=""
+    fi
+
+    for oom_line in "${oom_kill_event_list[@]}"; do
+        log "${oom_line}"
+        unhealthy_list+=("${oom_line}")
+    done
+    for oom_line in "${oom_counter_error_list[@]}"; do
+        log "ERROR: ${oom_line}"
+        unhealthy_list+=("${oom_line}")
+    done
+    if [[ "${#oom_counter_error_list[@]}" -gt 0 ]]; then
+        oom_scan_error_present=true
+    fi
+    log "OOM-kill counters: ${#oom_kill_total_by_runner[@]} runner(s) read, ${#oom_kill_event_list[@]} with new kills, ${#oom_counter_error_list[@]} error(s) (state ${OOM_KILL_STATE_FILE})."
+
+    if [[ "${#oom_kill_event_list[@]}" -gt 0 ]]; then
+        oom_msg="*[RUNNER OOM-KILL]* ${#oom_kill_event_list[@]} runner container(s) had a process OOM-killed since the previous pass. The kernel's cgroup counter rose, so the kill happened whatever the job's own result says (a 137 auto-rerun can turn it green). Posted in the pass that saw it; no dwell.
+
+\`\`\`
+$(printf '%s\n' "${oom_kill_event_list[@]}")
+\`\`\`
+
+Host: ${RUNNER_HOST}"
+        if slack_post "${oom_msg}" "danger"; then
+            log "OOM-KILL alert posted to Slack for ${#oom_kill_event_list[@]} runner(s)."
+        else
+            log "ERROR: OOM-KILL Slack post FAILED for ${#oom_kill_event_list[@]} runner(s); the OOM_KILL lines above are the record."
+        fi
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # SAFE remediation recipe (OMN-13109)
 # ---------------------------------------------------------------------------
 # Render the exact, copy-pasteable safe-bounce command for the affected
@@ -1260,6 +1569,14 @@ fi
 if [[ "${verify_runner_alert_present}" == true ]]; then
     current_alert_count=$((current_alert_count + 1))
 fi
+# OMN-19958: an unreadable OOM-kill counter (or an unreadable or unwritable
+# counter state file) is ONE distinct finding, never a zero. A counter RISE is
+# not counted here: it is an event, announced by its own Slack post in the pass
+# that saw it, and counting it would make the actionable count flap for one
+# pass and trip the dwell for nothing.
+if [[ "${oom_scan_error_present}" == true ]]; then
+    current_alert_count=$((current_alert_count + 1))
+fi
 
 # ---------------------------------------------------------------------------
 # Announcement dwell (OMN-19169)
@@ -1403,35 +1720,8 @@ fi
 # abort the run under `set -e`, and it dispatches no remediation. A broken bus
 # must never suppress a runner alert or a bounce.
 RUNNER_FLEET_TOPIC="${RUNNER_FLEET_TOPIC:-onex.evt.omnibase-infra.runner-fleet.v1}"
-# The fleet observation is scoped BROADER than the detection loop, deliberately.
-# RUNNER_NAME_PREFIX is `omninode-runner`, which scopes the crash-loop/wedge
-# checks to the interchangeable general pool. The FLEET question is "what
-# runners are running", and measured live on 2026-09-18 the org pool held 69
-# runners of which exactly one was offline: `omninode-air-runner-1`, on .105 —
-# a name the detection prefix does not match. Emitting on the narrow prefix
-# would have dropped the only runner that was down, which is precisely the
-# false-green AC4 exists to refuse.
-#
-# OMN-19842: the default is now every `runner_name_prefix` declared under
-# `hosts:` in the fleet config, comma-joined, rather than the single literal
-# "omninode-" this used to hardcode. That literal covered four of the five
-# declared hosts by coincidence of a shared substring and silently excluded
-# the fifth (.202's `omnipc2-verify-runner`, added by OMN-19507 with no
-# matching edit here) forever. A config with no `hosts:` block (pre-OMN-17477)
-# makes config_host_prefixes print nothing, so the fallback below preserves
-# today's behavior unchanged.
-#
-# The declared set is ADDED to "omninode-", never substituted for it. The
-# role runners on .201 (omninode-verify-runner-N, omninode-deploy-runner,
-# omninode-prod-deploy-runner-N, omninode-customer-plane-runner-N) are not
-# declared under `hosts:`, so the declared set alone dropped seven observed
-# runners (measured on .201 against the live org runner list, 2026-09-27:
-# 69 -> 63). The union keeps every runner "omninode-" already covered and
-# adds each declared host whose prefix it does not reach (.202's
-# omnipc2-verify-runner), and still excludes a runner outside both, such as
-# the rootless-podman omnipc2-customer-N.
-RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG="$(config_host_prefixes)"
-RUNNER_FLEET_NAME_PREFIX="${RUNNER_FLEET_NAME_PREFIX:-omninode-${RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG:+,${RUNNER_FLEET_NAME_PREFIX_FROM_CONFIG}}}"
+# RUNNER_FLEET_NAME_PREFIX, the fleet prefix set, is defined above the
+# "Runner OOM-kill counters" block, which scans the same set (OMN-19958).
 RUNNER_FLEET_EMIT="${RUNNER_FLEET_EMIT:-true}"
 # The dev lane's broker container on this host, and the names of the env
 # vars INSIDE it that carry its SASL pair. Names, never values: the monitor
@@ -1476,6 +1766,7 @@ emit_fleet_observation() {
         RUNNER_GROUP="${RUNNER_GROUP}" \
         TOPIC="${RUNNER_FLEET_TOPIC}" \
         RUNNER_JOB_MAP_JSON="${RUNNER_JOB_MAP_JSON:-}" \
+        RUNNER_OOM_KILL_MAP_JSON="${RUNNER_OOM_KILL_MAP_JSON}" \
         python3 "${RUNNER_FLEET_EVENT_BUILDER}" <<< "${github_json}" 2>/dev/null
     )" || {
         log "fleet emit FAILED to build event — continuing (alerting is unaffected)"

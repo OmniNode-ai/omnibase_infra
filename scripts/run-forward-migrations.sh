@@ -2486,11 +2486,17 @@ echo "[forward-migration] Re-asserting service-role database access..."
 # bootstrap's SERVICE_DB_MAP: only the principals this deployment actually owns
 # the credential for belong here, and
 # tests/unit/infra/test_service_role_db_access_omn18438.py pins the membership.
+# OMN-15359: the operator lane's existing role_omnidash is NOLOGIN. Its volume
+# predates ROLE_OMNIDASH_PASSWORD, so initdb cannot reassert that credential.
+# The same warm seam must provision this SERVICE_DB_MAP principal before the
+# lane-local onex-api starts; this is the bootstrap's existing role/database
+# pair, not a new grant to an RLS-governed runtime or tenant writer.
 if [ "$SLOT_ACTIVE" -eq 1 ]; then
   slot_skip_role_seam "service-role database access (OMN-18438)"
 else
   for service_role_entry in \
     "role_omninode:ROLE_OMNINODE_PASSWORD:omninode_cloud" \
+    "role_omnidash:ROLE_OMNIDASH_PASSWORD:omnidash_analytics" \
   ; do
     entry_service_role=${service_role_entry%%:*}
     entry_service_rest=${service_role_entry#*:}

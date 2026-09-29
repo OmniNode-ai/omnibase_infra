@@ -34,7 +34,6 @@ import inspect
 
 import pytest
 
-from omnibase_infra.cli.task_class_selection import DEFAULT_EXECUTION_BUDGET
 from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
     DEFAULT_EXECUTION_TIMEOUT_SECONDS,
     DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS,
@@ -108,25 +107,14 @@ class TestTheBudgetArgumentsAreOptional:
         assert bound.arguments["terminal_delivery_margin_seconds"] == 7
 
 
-class TestTheDefaultsAgreeWithTheContractDefault:
-    """One budget, two layers, no import between them.
+class TestTheDefaultsAgree:
+    """The port and its protocol declare one default, not two.
 
-    The runtime layer does not depend on the CLI layer, so these constants are
-    duplicated deliberately rather than shared. Duplicated constants drift;
-    this is the test that makes the drift loud instead of silent.
+    The CLI no longer carries a default budget of its own (OMN-19407): it
+    reads every class's budget from the task-class contract, which declares
+    one for every class. What is left to pin is that the runtime port and its
+    protocol cannot disagree with each other.
     """
-
-    def test_the_timeout_matches(self) -> None:
-        assert (
-            DEFAULT_EXECUTION_BUDGET.task_class_timeout_ceiling_seconds
-            == DEFAULT_EXECUTION_TIMEOUT_SECONDS
-        )
-
-    def test_the_margin_matches(self) -> None:
-        assert (
-            DEFAULT_EXECUTION_BUDGET.terminal_delivery_margin_seconds
-            == DEFAULT_TERMINAL_DELIVERY_MARGIN_SECONDS
-        )
 
     def test_the_port_and_the_protocol_agree(self) -> None:
         """A default on one and a different default on the other is worse than none."""

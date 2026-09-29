@@ -377,12 +377,12 @@ RULED_DROP_PROJECTIONS: dict[str, str] = {
 # `projection_pattern_learning`, `projection_routing_decision`) — they write
 # rows today and a writer container for them would be a second process
 # competing for the same partitions. OMN-15359 adds the delegation writer to
-# `lakshman`'s declared compose lane, reducing its uncovered count from 16 to
-# 15; live deployment remains a separate action.
+# `lakshman`'s declared compose lane and the tenant registry writer, reducing
+# its measured uncovered count from 16 to 14; live deployment is separate.
 LANE_UNCOVERED_RATCHET: dict[str, int] = {
     "dev": 10,
     "stability-test": 10,
-    "lakshman": 15,
+    "lakshman": 14,
     # Original measured dogfood scope does not start optional writers.
     "dogfood": 16,
 }

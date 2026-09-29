@@ -489,6 +489,10 @@ def _run_monitor(
         "PATH": f"{bindir}:{os.environ.get('PATH', '')}",
         "HOME": str(tmp_path),
         "RUNNER_FLEET_CONFIG_PATH": str(fleet_config),
+        # OMN-19958: this harness stages no cgroup tree, so the OOM-kill
+        # counter scan is off here; test_runner_monitor_oom_kill_delta.py
+        # drives it against a fixture tree.
+        "RUNNER_MONITOR_OOM_KILL_SCAN": "false",
         "RUNNER_MONITOR_STATE_FILE": str(state_file),
         "SLACK_BOT_TOKEN": "xoxb-test",
         "SLACK_CHANNEL_ID": "C-test",
