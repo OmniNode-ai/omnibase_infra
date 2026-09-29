@@ -341,6 +341,8 @@ migrations:
   forward/nodes/node_projection_tenant_registry/0001_grant_omninode_runtime_tenant_registry_mirror.sql: expand-only
   forward/nodes/node_projection_traces/0001_create_traces.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT TRACES_PKEY; ALTER TABLE ADD CONSTRAINT NON_NEGATIVE_TRACES_EVENT_COUNT; A
   forward/nodes/node_projection_traces/0002_grant_omninode_runtime_traces.sql: expand-only
+  forward/nodes/node_projection_usage_by_model_day/0000_create_usage_by_model_day.sql: forward-only # UNIQUE INDEX on an existing table (public.usage_by_model_day)
+  forward/nodes/node_projection_usage_by_model_day/0001_grant_usage_by_model_day.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_projection_voice_sessions/0001_create_voice_sessions.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT VOICE_SESSIONS_PKEY; ALTER TABLE ADD CONSTRAINT VOICE_SESSIONS_TOTAL_TURNS
   forward/nodes/node_projection_voice_sessions/0002_grant_omninode_runtime_voice_sessions.sql: expand-only
   forward/nodes/node_projection_work_events/0001_create_work_events.sql: expand-only
