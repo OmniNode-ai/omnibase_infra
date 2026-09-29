@@ -65,13 +65,28 @@ def _sources() -> tuple[dh.ModelVerdictSource, ...]:
     return dh.load_config(CONFIG).sources
 
 
+# A second source for the reader-behaviour tests. It is not configured: the
+# configured set is asserted separately below.
+_SECOND = dh.ModelVerdictSource(
+    name="second-verdict",
+    repo="OmniNode-ai/omnimarket",
+    workflow="second-verdict.yml",
+    branch="dev",
+    max_age_hours=8,
+    events=("schedule",),
+)
+
+
 def _check(
-    *, runtime: bool = True, labels: tuple[str, ...] = ()
+    *,
+    runtime: bool = True,
+    labels: tuple[str, ...] = (),
+    sources: tuple[dh.ModelVerdictSource, ...] | None = None,
 ) -> tuple[int, str, dict[str, Any]]:
     out = io.StringIO()
     record: dict[str, Any] = {}
     code = dh.evaluate_delegation_health(
-        _sources(),
+        _sources() if sources is None else sources,
         runtime_affecting=runtime,
         labels=labels,
         out=out,
@@ -91,9 +106,11 @@ class TestAC1RedVerdictFailsRuntimePRs:
         assert "35832924275" in output
         assert "delegation-regression-nightly" in output
 
-    def test_a_red_m4_verdict_fails_and_names_the_run(self, monkeypatch: Any) -> None:
-        _replay(monkeypatch, {"m4-customer-pass-verdict.yml": 777001})
-        code, output, _ = _check()
+    def test_a_red_second_source_fails_and_names_the_run(
+        self, monkeypatch: Any
+    ) -> None:
+        _replay(monkeypatch, {"second-verdict.yml": 777001})
+        code, output, _ = _check(sources=(*_sources(), _SECOND))
         assert code == 1
         assert "777001" in output
 
@@ -102,10 +119,10 @@ class TestAC1RedVerdictFailsRuntimePRs:
             monkeypatch,
             {
                 "delegation-regression-nightly.yml": 111,
-                "m4-c17-customer-surface-verdict.yml": 222,
+                "second-verdict.yml": 222,
             },
         )
-        code, output, _ = _check()
+        code, output, _ = _check(sources=(*_sources(), _SECOND))
         assert code == 1
         assert "111" in output
         assert "222" in output
@@ -130,15 +147,13 @@ class TestAC1RedVerdictFailsRuntimePRs:
         assert code == 1
         assert "unreadable" in output
 
-    def test_the_configured_sources_cover_the_nightly_and_every_m4_verdict(
+    def test_the_configured_sources_are_the_lab_nightly_and_no_held_staging_verdict(
         self,
     ) -> None:
-        names = {s.name for s in _sources()}
-        assert "delegation-regression-nightly" in names
-        assert {s.workflow for s in _sources() if s.name.startswith("m4-")} == {
-            "m4-customer-pass-verdict.yml",
-            "m4-c17-customer-surface-verdict.yml",
-        }
+        # RULING 2026-09-28T17:47:08Z holds the staging plane; a held plane as a
+        # source reddens every runtime PR on a failure no lane may work.
+        assert {s.name for s in _sources()} == {"delegation-regression-nightly"}
+        assert not [s for s in _sources() if s.repo == "OmniNode-ai/omninode_infra"]
 
 
 class TestAC2FixForwardLabel:

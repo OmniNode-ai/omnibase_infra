@@ -20,18 +20,15 @@ sources:
     max_age_hours: 26
     events: [schedule, workflow_dispatch]
     dispatch_title_contains: "lane=stability-test"
-  - name: m4-customer-pass-verdict
-    repo: OmniNode-ai/omninode_infra
-    workflow: m4-customer-pass-verdict.yml
-    branch: dev
-    max_age_hours: 8
-    events: [schedule]
-  - name: m4-c17-customer-surface-verdict
-    repo: OmniNode-ai/omninode_infra
-    workflow: m4-c17-customer-surface-verdict.yml
-    branch: dev
-    max_age_hours: 8
-    events: [schedule]
+# The two omninode_infra M4 staging verdicts (m4-customer-pass-verdict,
+# m4-c17-customer-surface-verdict) are NOT sources. They measure the cloud
+# staging plane, which is on hold (RULING 2026-09-28T17:47:08Z: M2 and its
+# staging-plane criteria are on hold, the cloud owner owns AWS and staging, and
+# most of staging may be shut down). A held, possibly shut-down plane as a
+# source turns every runtime PR here red on a failure no lane may work: on
+# 2026-09-29 the staging cli_delegation step (a secret-resolution failure on
+# dev.api.omninode.ai) reddened CI Summary on every omnibase_infra runtime PR.
+# Re-add them only when a ruling takes staging off hold.
 repos:
   omnibase_infra:
     shadow_started_at: "2026-09-29"

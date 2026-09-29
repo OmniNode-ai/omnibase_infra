@@ -4,8 +4,9 @@
 # delegation-health-reusable.yml -- OMN-19451 (epic OMN-19432, wave 2)
 #
 # The ONE authored surface of the delegation-health check on runtime PRs. A
-# runtime-affecting PR is reported red while the delegation regression nightly
-# (omnimarket) or an M4 verdict workflow (omninode_infra) is red. Auto-merge, the
+# runtime-affecting PR is reported red while a source in
+# config/delegation_health_check.yaml (the delegation regression nightly,
+# omnimarket; staging verdicts are not sources while staging is held) is red. Auto-merge, the
 # landing lane and humans already obey a check, so no skill needs to change.
 #
 # SHADOW FIRST. The check is reported, not required: a caller's job is NOT
