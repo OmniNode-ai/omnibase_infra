@@ -246,6 +246,8 @@ UNCOVERED_MODELS: dict[str, str] = {
     # OMN-12864: Bifrost lane overlay model — round-trip covered by
     # tests/unit/runtime/models/test_model_bifrost_lane_overlay.py
     "ModelBifrostLaneOverlay": "Typed deployment binding for Bifrost local endpoints; covered by test_model_bifrost_lane_overlay.py",
+    # OMN-19455: Probe-failure record covered by the boot served model-check integration test.
+    "ModelBifrostEndpointProbeFailure": "Frozen typed probe-failure record produced by the boot renderer; covered by test_bifrost_boot_served_model_check_omn19455.py",
     # OMN-17852: acceptance overlay is validated through its explicit loader
     # and fail-closed plugin fixture, not the generic round-trip factory set.
     "ModelRsdPostgresAcceptanceOverlay": "Typed operator overlay covered by test_rsd_postgres_acceptance_overlay.py",
