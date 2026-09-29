@@ -212,6 +212,8 @@ databases:
               - savings_estimates
               - skill_execution_snapshots
               - tenant_inference_credentials
+              - usage_by_model_day
+              - usage_by_model_day_calls
             privileges:
               - INSERT
               - SELECT
@@ -369,5 +371,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 1e5ec86cfb96fbb505f2042be8b145bd71eb937fb93cbca2df1719f15abd53a8
+  sha256: 5aa41477d80f4999335d23884a40c8cf5fc1a6c731b4e00e9b3dd0b74b36bd5d
 topology_instance: onex-dev

@@ -68,6 +68,15 @@ GRANT_FILE = (
     / "node_projection_delegation_inference_response"
     / "0004_grant_tenant_projection_writer.sql"
 )
+USAGE_BY_MODEL_DAY_GRANT_FILE = (
+    REPO_ROOT
+    / "docker"
+    / "migrations"
+    / "forward"
+    / "nodes"
+    / "node_projection_usage_by_model_day"
+    / "0001_grant_usage_by_model_day.sql"
+)
 EARLY_REASSERT_GRANT_FILE = (
     REPO_ROOT
     / "docker"
@@ -375,6 +384,23 @@ def _declared_table_objects(privilege: str) -> set[str]:
     }
 
 
+def _writable_grant_objects() -> set[str]:
+    """Return public relations granted the tenant writer's SIU triple."""
+    granted: set[str] = set()
+    for grant_file in (GRANT_FILE, USAGE_BY_MODEL_DAY_GRANT_FILE):
+        sql = _executable_text(grant_file)
+        for statement in re.findall(
+            r"GRANT\s+SELECT,\s*INSERT,\s*UPDATE\s+ON\s+(.+?)\s+TO\s+"
+            rf"{PRINCIPAL}\s*;",
+            sql,
+            re.IGNORECASE | re.DOTALL,
+        ):
+            granted.update(
+                re.findall(r"\bpublic\.([a-z0-9_]+)\b", statement, re.IGNORECASE)
+            )
+    return granted
+
+
 @pytest.mark.integration
 def test_grant_migration_matches_the_topology_declared_writable_table_set() -> None:
     """The grant list is a transcription of the topology, not a hand-picked set.
@@ -382,10 +408,10 @@ def test_grant_migration_matches_the_topology_declared_writable_table_set() -> N
     The topology's TABLE grants are themselves generated from node contract
     ``db_io.db_tables`` declarations by
     ``scripts/generate_application_database_table_grants.py --write``. If a
-    contract adds a tenant-classified relation it WRITES and this file is not
-    updated in the same change, the new table's writes are denied at runtime —
-    this test is what turns that into a red build instead of a silent zero-row
-    projection.
+    contract adds a tenant-classified relation it WRITES and its owner-lineage
+    migration is not included here, the new table's writes are denied at
+    runtime — this test is what turns that into a red build instead of a
+    silent zero-row projection.
 
     Scoped to the WRITABLE declarations (OMN-18159). The read-only half is not
     dropped: it is asserted immediately below, against the file that actually
@@ -393,13 +419,7 @@ def test_grant_migration_matches_the_topology_declared_writable_table_set() -> N
     """
     declared = _declared_table_objects("INSERT")
 
-    granted = set(
-        re.findall(
-            r"GRANT SELECT, INSERT, UPDATE ON public\.([a-z0-9_]+) "
-            rf"TO {PRINCIPAL}",
-            GRANT_FILE.read_text(),
-        )
-    )
+    granted = _writable_grant_objects()
 
     assert declared, "positive control: the topology declares writable tables"
     assert granted == declared, (
