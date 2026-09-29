@@ -40,6 +40,8 @@ class ResolvedStack:
     injected_env: dict[str, str]
     injected_volumes: list[str] = field(default_factory=list)
     project: str = DEFAULT_PROJECT
+    publish_host: str | None = None
+    env_default_overrides: dict[str, str] = field(default_factory=dict)
 
     @property
     def service_names(self) -> set[str]:
@@ -181,6 +183,8 @@ class CatalogResolver:
                     inject_required_env=bdef.get("inject_required_env", []),
                     inject_volumes=bdef.get("inject_volumes", []),
                     project=bdef.get("project"),
+                    publish_host=bdef.get("publish_host"),
+                    env_default_overrides=bdef.get("env_default_overrides", {}),
                 )
 
     def resolve(self, bundles: list[str]) -> ResolvedStack:
@@ -203,6 +207,9 @@ class CatalogResolver:
         bundle_required_env: set[str] = set()
         project: str | None = None
         project_owner = ""
+        publish_host: str | None = None
+        publish_host_owner = ""
+        env_default_overrides: dict[str, str] = {}
 
         for bundle_name in all_bundle_names:
             if bundle_name not in self._bundles:
@@ -251,6 +258,25 @@ class CatalogResolver:
                 project = bundle.project
                 project_owner = bundle_name
 
+            if bundle.publish_host is not None:
+                if publish_host is not None and publish_host != bundle.publish_host:
+                    raise ValueError(
+                        f"Publish host conflict: bundle '{publish_host_owner}' "
+                        f"publishes on '{publish_host}' and bundle '{bundle_name}' "
+                        f"on '{bundle.publish_host}'. One stack binds one address."
+                    )
+                publish_host = bundle.publish_host
+                publish_host_owner = bundle_name
+
+            for k, v in bundle.env_default_overrides.items():
+                if k in env_default_overrides and env_default_overrides[k] != v:
+                    raise ValueError(
+                        f"Env default conflict: {k} defaults to "
+                        f"'{env_default_overrides[k]}' by one bundle and '{v}' "
+                        f"by bundle '{bundle_name}'"
+                    )
+                env_default_overrides[k] = v
+
         # Transitively resolve service dependencies (BFS until no new deps found)
         pending: list[CatalogManifest] = list(selected_entries.values())
         while pending:
@@ -290,4 +316,6 @@ class CatalogResolver:
             injected_env=injected_env,
             injected_volumes=injected_volumes,
             project=project or DEFAULT_PROJECT,
+            publish_host=publish_host,
+            env_default_overrides=env_default_overrides,
         )

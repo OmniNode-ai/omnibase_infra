@@ -37,6 +37,8 @@ SOURCE_PR_RE = re.compile(
 )
 # OMN-19807: a merge-queue group ref, ``gh-readonly-queue/<base>/pr-<n>-<sha>``
 # (GitHub may send it with or without the ``refs/heads/`` prefix).
+# A squash-merged PR's commit subject ends "(#<n>)" (GitHub's own suffix).
+PUSH_HEAD_PR_RE = re.compile(r"\(#(?P<number>[1-9][0-9]*)\)\s*$")
 MERGE_GROUP_HEAD_REF_RE = re.compile(
     r"^(?:refs/heads/)?gh-readonly-queue/[^/]+(?:/[^/]+)*/pr-(?P<number>[1-9][0-9]*)-[0-9a-f]{40}$"
 )
@@ -56,7 +58,61 @@ def _body_from_event(path: str | None) -> str:
     merge_group = payload.get("merge_group")
     if isinstance(merge_group, dict):
         return _body_from_merge_group(payload, merge_group)
+    head_commit = payload.get("head_commit")
+    if isinstance(head_commit, dict) and isinstance(payload.get("after"), str):
+        return _body_from_push(payload, head_commit)
     return ""
+
+
+def _body_from_push(payload: dict[str, object], head_commit: dict[str, object]) -> str:
+    """Read the landed PR's live body for a ``push`` event (OMN-18863).
+
+    A vendoring PR's ``merge_group`` run resolves its paired omnimarket source
+    from the PR's trailers; before this, the push of the byte-identical tree to
+    ``dev`` resolved ``dev`` (the committed contract pin), whose ownership
+    manifest does not yet carry the vendored table's declaration, so the push
+    failed "requires exactly one ownership declaration" on a tree the queue had
+    just passed (omnibase_infra#4271 at 0669f6fc3, 2026-09-29). Reading the PR
+    that produced the push makes both events judge the SQL against one
+    declaration source.
+
+    Only the PR that produced THIS commit on THIS branch counts: its
+    ``merge_commit_sha`` must equal ``after`` and its base must be the pushed
+    branch. Anything else (a direct push, a release fast-forward of ``main``
+    whose head names a ``dev`` PR) keeps today's pin behavior. Like the
+    merge-group read, the head commit's PR is the one read. An unreadable PR
+    fails closed rather than falling back to the pin.
+    """
+    message = head_commit.get("message")
+    subject = message.split("\n", 1)[0] if isinstance(message, str) else ""
+    match = PUSH_HEAD_PR_RE.search(subject)
+    ref = payload.get("ref")
+    if match is None or not isinstance(ref, str) or not ref.startswith("refs/heads/"):
+        return ""
+    branch = ref.removeprefix("refs/heads/")
+    repository = payload.get("repository")
+    full_name = (
+        repository.get("full_name") if isinstance(repository, dict) else None
+    ) or os.environ.get("GITHUB_REPOSITORY")
+    if not isinstance(full_name, str) or "/" not in full_name:
+        raise ValueError("push event names no repository")
+    number = int(match["number"])
+    status, pr, detail = _api_get(f"{_GITHUB_API}/repos/{full_name}/pulls/{number}")
+    if status != 200 or pr is None:
+        raise ValueError(
+            "could not read the landed PR body for the push "
+            f"(fail-closed): {full_name}#{number}; {detail}"
+        )
+    base = pr.get("base")
+    if (
+        not pr.get("merged_at")
+        or pr.get("merge_commit_sha") != payload.get("after")
+        or not isinstance(base, dict)
+        or base.get("ref") != branch
+    ):
+        return ""
+    body = pr.get("body")
+    return body if isinstance(body, str) else ""
 
 
 def _body_from_merge_group(
