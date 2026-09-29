@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: MIT
 """Models for the GitHub webhook ingress effect node (OMN-19492)."""
 
+from omnibase_infra.nodes.node_github_webhook_ingress_effect.models.model_github_branch_head_observation import (
+    ModelGitHubBranchHeadObservation,
+)
 from omnibase_infra.nodes.node_github_webhook_ingress_effect.models.model_github_pr_merged_observation import (
     ModelGitHubPrMergedObservation,
 )
@@ -13,6 +16,7 @@ from omnibase_infra.nodes.node_github_webhook_ingress_effect.models.model_github
 )
 
 __all__: list[str] = [
+    "ModelGitHubBranchHeadObservation",
     "ModelGitHubPrMergedObservation",
     "ModelGitHubPrStateObservation",
     "ModelGitHubWebhookDelivery",
