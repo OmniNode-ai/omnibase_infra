@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-19399 vendor identity for the worktree reconcile projection migrations."""
+"""OMN-19861 vendor identity for the demo-readiness projection migrations."""
 
 from __future__ import annotations
 
@@ -15,17 +15,18 @@ pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[3]
 _FORWARD = _ROOT / "docker" / "migrations" / "forward"
-_NODE = "node_projection_worktree_reconcile"
+_NODE = "node_projection_demo_readiness"
 _VENDOR = _FORWARD / "nodes" / _NODE
 _MANIFEST = _FORWARD / "_ledger" / "application-migrations.tsv"
 _CLASSES = _ROOT / "config" / "migration_classes.yaml"
-_CREATE = "0000_create_worktree_reconcile_hosts.sql"
-_GRANT = "0001_grant_runtime_worktree_reconcile.sql"
+_CREATE = "0000_create_demo_readiness_latest.sql"
+_GRANT = "0001_grant_omninode_runtime_demo_readiness_latest.sql"
 _SHA256 = {
-    _CREATE: "2a8592e99489e1a6521bd15c74e2bd103895d0313e6613be3730b6ddb65f508a",
-    _GRANT: "15441b82c734228c3f0b2be6935e429c8cfff8fe840993f43534a8914de5e88a",
+    _CREATE: "702b6c6acde9170124ad7a81a4b54e50149c750724169f9506b5d84ce8049760",
+    _GRANT: "1373cc27ecd2e38f918d203b32b0427c07d81e38d62367986e11538556e95004",
 }
-_TABLES = ("worktree_reconcile_hosts",)
+_TABLE = "demo_readiness_latest"
+_CURSOR_SEQUENCE = "demo_readiness_latest_projection_cursor_seq"
 
 
 def _statements(filename: str) -> str:
@@ -60,22 +61,27 @@ def test_vendor_bytes_and_manifest_binding_are_exact(filename: str) -> None:
 
 def test_migration_classes_match_the_classifier() -> None:
     classes = yaml.safe_load(_CLASSES.read_text(encoding="utf-8"))["migrations"]
-    assert classes[f"forward/nodes/{_NODE}/{_CREATE}"] == "expand-only"
+    assert classes[f"forward/nodes/{_NODE}/{_CREATE}"] == "forward-only"
     assert classes[f"forward/nodes/{_NODE}/{_GRANT}"] == "expand-only"
 
 
 def test_table_and_exact_runtime_grants_are_present() -> None:
     create = _statements(_CREATE)
     grants = _statements(_GRANT)
-    for table in _TABLES:
-        assert re.search(
-            rf"CREATE TABLE IF NOT EXISTS omninode_internal\.{table}\s*\(", create
-        )
-        assert re.search(
-            rf"GRANT\s+SELECT,\s*INSERT,\s*UPDATE\s+"
-            rf"ON omninode_internal\.{table}\s+TO omninode_runtime;",
-            grants,
-        )
+    assert re.search(
+        rf"CREATE TABLE IF NOT EXISTS omninode_internal\.{_TABLE}\s*\(", create
+    )
+    assert re.search(
+        rf"GRANT\s+SELECT,\s*INSERT,\s*UPDATE\s+"
+        rf"ON omninode_internal\.{_TABLE}\s+TO omninode_runtime;",
+        grants,
+    )
+    assert re.search(
+        rf"GRANT\s+USAGE\s+ON SEQUENCE "
+        rf"omninode_internal\.{_CURSOR_SEQUENCE}\s+"
+        r"TO omninode_runtime;",
+        grants,
+    )
     assert "GRANT USAGE ON SCHEMA omninode_internal TO omninode_runtime;" in grants
     for sql in (create, grants):
         assert not re.search(
@@ -85,16 +91,19 @@ def test_table_and_exact_runtime_grants_are_present() -> None:
         )
 
 
-# The host-keyed projection needs table read/write and schema lookup only.
-# No generated cursor or sequence privilege is needed.
+# The writer's whole scope is SELECT, INSERT, and UPDATE on the latest-status
+# projection, USAGE on its BIGSERIAL cursor sequence for nextval(), and USAGE
+# on the schema so the role can resolve omninode_internal.*. Schema USAGE is
+# name lookup only; it confers no privilege on any relation in the schema. This
+# set is also exactly what the omninode_runtime principal receives in topology.
 _EXPECTED_GRANTS = frozenset(
     {
         ("USAGE", "SCHEMA omninode_internal"),
         *(
-            (privilege, f"omninode_internal.{table}")
-            for table in _TABLES
+            (privilege, f"omninode_internal.{_TABLE}")
             for privilege in ("SELECT", "INSERT", "UPDATE")
         ),
+        ("USAGE", f"SEQUENCE omninode_internal.{_CURSOR_SEQUENCE}"),
     }
 )
 
@@ -127,16 +136,6 @@ def test_the_grants_are_exactly_the_writer_scope() -> None:
     assert "WITH GRANT OPTION" not in _statements(_GRANT).upper()
 
 
-def test_runtime_table_grant_assertion_is_present() -> None:
-    grants = _statements(_GRANT)
-    assert "SELECT 1 / count(*) AS worktree_reconcile_grants_assertion" in grants
-    assert "table_schema = 'omninode_internal'" in grants
-    assert "table_name = 'worktree_reconcile_hosts'" in grants
-    assert "grantee = 'omninode_runtime'" in grants
-    assert "privilege_type IN ('SELECT', 'INSERT', 'UPDATE')" in grants
-    assert "HAVING count(DISTINCT privilege_type) = 3" in grants
-
-
 @pytest.mark.parametrize("filename", [_CREATE, _GRANT])
 @pytest.mark.parametrize(
     "profile", ["local", "onex-dev", "onex-prod", "stability-test"]
@@ -162,61 +161,7 @@ def test_the_sql_gate_is_live_positive_control() -> None:
 
     sql = (_VENDOR / _CREATE).read_text(encoding="utf-8")
     broken = sql.replace(
-        "omninode_internal.worktree_reconcile_hosts", "tenant.worktree_reconcile_hosts"
+        "omninode_internal.demo_readiness_latest", "tenant.demo_readiness_latest"
     )
     assert broken != sql
     assert lint_application_database_sql(broken, load_topology_profile("local")) != ()
-
-
-@pytest.mark.parametrize("profile", ["local", "onex-dev", "onex-prod"])
-def test_bridge_derives_the_shipped_runtime_grant(profile: str) -> None:
-    from omnibase_core.enums.enum_database_grant_object_type import (
-        EnumDatabaseGrantObjectType,
-    )
-    from omnibase_infra.topology import load_topology_profile
-    from omnibase_infra.topology.table_grant_derivation import (
-        LEGACY_MIGRATION_TABLE_DECLARATIONS,
-        derive_table_grants,
-    )
-
-    bridges = tuple(
-        entry
-        for entry in LEGACY_MIGRATION_TABLE_DECLARATIONS
-        if entry.table.name == "worktree_reconcile_hosts"
-    )
-    assert len(bridges) == 1
-    bridge = bridges[0]
-    assert bridge.table.access == "read_write"
-    assert bridge.table.schema == "omninode_internal"
-    assert bridge.table.database_ref == "application"
-    assert bridge.contract_path == (_VENDOR / _CREATE).relative_to(_ROOT)
-    derived = derive_table_grants(load_topology_profile(profile), bridges)
-    matching = tuple(
-        grant
-        for grant in derived.grants["omninode_runtime"]
-        if grant.object_type is EnumDatabaseGrantObjectType.TABLE
-        and grant.schema == "omninode_internal"
-        and "worktree_reconcile_hosts" in grant.objects
-    )
-    assert len(matching) == 1
-    assert {privilege.value for privilege in matching[0].privileges} == {
-        "SELECT",
-        "INSERT",
-        "UPDATE",
-    }
-    instance = yaml.safe_load(
-        (
-            _ROOT / "src/omnibase_infra/topology/instances" / f"{profile}.yaml"
-        ).read_text()
-    )
-    shipped = [
-        grant
-        for grant in instance["databases"]["application"]["principals"][
-            "omninode_runtime"
-        ]["grants"]
-        if grant["object_type"] == "TABLE"
-        and grant["schema"] == "omninode_internal"
-        and "worktree_reconcile_hosts" in grant["objects"]
-    ]
-    assert len(shipped) == 1
-    assert set(shipped[0]["privileges"]) == {"SELECT", "INSERT", "UPDATE"}
