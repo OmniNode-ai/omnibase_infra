@@ -332,3 +332,87 @@ def test_up_precleanup_removes_anonymous_volumes_of_removed_containers(
             "-v",
         ]
     ]
+
+
+# --- OMN-19972: the laptop profile publishes on loopback only and names no lab host.
+#
+# Failure modes these pin (spec, workflow/records/plans/OMN-19972):
+#   1. a published port binds all interfaces in the ``local`` render;
+#   2. a lab address (the .201 LAN IP, the tailnet domain, the lab hostname)
+#      appears anywhere in the ``local`` render;
+#   3. the loopback bind or the default override leaks into another bundle,
+#      which the lab lanes render from the same shared manifests.
+
+_LOOPBACK = "127.0.0.1"
+_LAB_HOST_MARKERS = ("192.168.86.", "tail75df5e", "omninode-pc")
+
+
+def _published_ports(compose: dict[str, object]) -> dict[str, list[str]]:
+    services = compose["services"]
+    assert isinstance(services, dict)
+    return {
+        name: [str(p) for p in svc["ports"]]
+        for name, svc in services.items()
+        if svc.get("ports")
+    }
+
+
+def _lab_host_hits(compose: dict[str, object]) -> list[str]:
+    text = yaml.safe_dump(compose, sort_keys=True)
+    return [marker for marker in _LAB_HOST_MARKERS if marker in text]
+
+
+def test_local_render_publishes_every_port_on_loopback_only() -> None:
+    compose = generate_compose(
+        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    )
+    published = _published_ports(compose)
+    # The five host ports the laptop guide names; a render that published none
+    # would pass the loopback check vacuously.
+    assert {
+        "postgres",
+        "redpanda",
+        "valkey",
+        "omninode-runtime",
+        "runtime-effects",
+    } <= set(published)
+    not_loopback = {
+        name: ports
+        for name, ports in published.items()
+        if any(not p.startswith(f"{_LOOPBACK}:") or p.count(":") != 2 for p in ports)
+    }
+    assert not_loopback == {}
+
+
+def test_local_render_names_no_lab_host() -> None:
+    compose = generate_compose(
+        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    )
+    assert _lab_host_hits(compose) == []
+
+
+def test_lab_host_check_can_fail() -> None:
+    """Positive control: the shared lab-facing render still carries the .201 default."""
+    compose = generate_compose(
+        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["core"])
+    )
+    assert "192.168." in "".join(_lab_host_hits(compose))
+
+
+@pytest.mark.parametrize("bundle", ["core", "runtime"])
+def test_other_bundles_keep_all_interface_ports_and_the_lab_advertise_default(
+    bundle: str,
+) -> None:
+    compose = generate_compose(
+        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve([bundle])
+    )
+    published = _published_ports(compose)
+    assert published
+    for ports in published.values():
+        for port in ports:
+            assert port.count(":") == 1, port
+            assert not port.startswith(f"{_LOOPBACK}:"), port
+    services = compose["services"]
+    assert isinstance(services, dict)
+    command = " ".join(services["redpanda"]["command"])
+    assert "${REDPANDA_ADVERTISE_HOST:-192.168.86.201}" in command
