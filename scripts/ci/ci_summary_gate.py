@@ -1164,13 +1164,13 @@ class SweepExclusion:
 # where the numbers are recorded, not here.
 SWEEP_EXCLUSION_MAX_DAYS: int = 90
 
-# TEN ENTRIES, one per name the measurement found non-green on ANY head over
+# The first TEN ENTRIES, one per name the measurement found non-green on ANY head over
 # the 16-PR window recorded above. OMN-18960 shipped this dict EMPTY beside a
 # weaker conclusion set; OMN-18979 replaced that pairing with the strict bar
 # and these entries, so every tolerance is now a named, dated, owned decision
 # rather than a silent one buried in a frozenset.
 #
-# They all expire on 2026-12-20, ninety days out, INCLUDING the ones whose
+# Those initial entries all expire on 2026-12-20, ninety days out, INCLUDING the ones whose
 # mechanism looks structural — a fork-only job, a main-branch-only job, a
 # manual-dispatch entrypoint. The cap is not a prediction that the mechanism
 # will change. It is what forces a premise that has held for a quarter to be
@@ -1326,6 +1326,21 @@ EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
         ticket="OMN-19218",
         added="2026-09-22",
         expires="2026-12-20",
+    ),
+    "Delegation Health Check (shadow) / Delegation Health Check (shadow)": SweepExclusion(
+        reason=(
+            "Measured on omnibase_infra#4289 head ec90d4ee6c and #4282 on "
+            "2026-09-29: this shadow check fails on runtime PRs when the newest "
+            "omninode_infra m4-customer-pass-verdict run is red for a browser-proof "
+            "reason outside this repository. The check is not in STRICT_GATE_JOBS "
+            "and is not a required context, but the default-deny external sweep "
+            "otherwise makes its failure block CI Summary. Exclude this exact "
+            "shadow context while required is false; remove this exclusion when "
+            "the check is made required so STRICT_GATE_JOBS judges it."
+        ),
+        ticket="OMN-19451",
+        added="2026-09-29",
+        expires="2026-10-13",
     ),
 }
 
