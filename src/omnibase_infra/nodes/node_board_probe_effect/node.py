@@ -4,9 +4,11 @@
 """NodeBoardProbeEffect — declarative effect node.
 
 Runs board checks against a lab or CI surface and grades each one PASS, FAIL
-or INDETERMINATE. It reads the surface and never mutates it.
+or INDETERMINATE. Consumer flow includes one marked malformed trigger and
+restored local negative-control mutations.
 
 Handlers:
+    - ``HandlerConsumerFlow``: consumer-flow request -> board probe result.
     - ``HandlerForwarderRefusedTopic``: forwarder request -> board probe result.
 
 All behavior is declared in ``contract.yaml``. No custom logic here.
