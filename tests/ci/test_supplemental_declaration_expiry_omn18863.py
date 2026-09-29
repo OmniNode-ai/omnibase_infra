@@ -112,6 +112,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "claude_agent_spans": "omnimarket#2956",
     "claude_hook_events": "omnimarket#2956",
     "lab_proof_receipts": "omnimarket#3043",
+    "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
 }
 
 _SKIP_REASON = (

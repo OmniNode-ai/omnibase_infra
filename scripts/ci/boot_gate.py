@@ -546,6 +546,24 @@ def render_topic_provision_job(
     Re-applying the committed name across runs fails with
     ``spec.template: Invalid value``.
 
+    CONTAINER-LEVEL securityContext, because THIS lane enforces the
+    ``restricted`` Pod Security Standard and onex-dev does not. The committed
+    manifest sets the POD-level fields (``runAsNonRoot``, ``runAsUser``,
+    ``seccompProfile``) and that is sufficient where it is applied. Under
+    ``restricted`` the container must ALSO declare
+    ``allowPrivilegeEscalation: false`` and ``capabilities.drop: ["ALL"]``, and
+    without them admission refuses every pod the Job creates:
+
+        pods "onex-topic-provision-..." is forbidden: violates PodSecurity
+        "restricted:latest": allowPrivilegeEscalation != false ...,
+        unrestricted capabilities ...
+
+    Measured on delivery run 36375068551: ten `FailedCreate` events over ten
+    minutes and then `DeadlineExceeded`, with no pod ever starting. These are
+    added only when absent, they are a strict tightening, and they are safe on
+    any lane -- so this adapts the Job to a stricter admission policy rather
+    than diverging from the committed manifest's intent.
+
     The image is pinned by DIGEST by the caller, so the Job provisions from the
     contracts of the image this gate is actually booting.
 
@@ -596,6 +614,14 @@ def render_topic_provision_job(
         print(f"::error::{manifest}'s container declares no image to rewrite.")
         return 1
     containers[0]["image"] = image
+
+    # Only the fields `restricted` requires at CONTAINER level, and only when
+    # absent, so a manifest that already declares them keeps its own values.
+    sc = containers[0].setdefault("securityContext", {})
+    sc.setdefault("allowPrivilegeEscalation", False)
+    caps = sc.setdefault("capabilities", {})
+    if "drop" not in caps:
+        caps["drop"] = ["ALL"]
 
     out.write_text(yaml.safe_dump(job, sort_keys=False))
     print(f"rendered {manifest} -> {out} as Job/{name} in {namespace} at {image}")

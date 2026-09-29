@@ -403,6 +403,31 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="pr_landing_transitions",
         ),
     ),
+    # OMN-19861: same infra-first window; this repo vendors
+    # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
+    # package that declares the relation. The source contract declares access
+    # read_write, role demo_readiness; 0001 grants omninode_runtime SELECT,
+    # INSERT, UPDATE. Retired by the omnimarket OMN-19861
+    # node_projection_demo_readiness pull request merging and the pin advancing
+    # past it; the expiry module names it.
+    ContractTableDeclaration(
+        node="legacy_migration:demo_readiness_latest",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_demo_readiness/"
+            "0000_create_demo_readiness_latest.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="demo_readiness_latest",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_demo_readiness/"
+                "0000_create_demo_readiness_latest.sql"
+            ),
+            access="read_write",
+            role="demo_readiness",
+        ),
+    ),
     # OMN-19513: infra vendors both Claude hook event projection tables before
     # omnimarket#2956 lands the node contract. Until the pin advances, these
     # interim declarations keep the shipped table grants derivable. The expiry
