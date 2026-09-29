@@ -26,11 +26,17 @@ from __future__ import annotations
 
 import os
 from collections.abc import Generator
-from pathlib import Path
 
 import pytest
 
 from omnibase_infra.cli import cli_delegate, cli_node
+from tests.helpers.cli_registry_stand_in import (
+    install_stand_in_registry,
+    wiring_authority,
+)
+from tests.helpers.cli_registry_stand_in.node_delegate_stand_in.model_stand_in_delegate_request import (
+    ModelStandInDelegateRequest,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -50,34 +56,20 @@ def _no_omnimarket_drift_guard_cli_node(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(cli_node, "check_omnimarket_drift", lambda **_: None)
 
 
-STAND_IN_TASK_CLASS_CONTRACT = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "delegation"
-    / "omn18305"
-    / "task_class_contracts_vocabulary.yaml"
-)
-
-
 @pytest.fixture(autouse=True)
-def stand_in_task_class_contract(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Point ``onex delegate`` task-class resolution at the committed stand-in.
+def stand_in_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give ``onex delegate`` stand-in registry entries (OMN-19407).
 
-    OMN-18305 made the CLI resolve its task class from omnimarket's packaged
-    task-class contract instead of a hardcoded keyword table. This repo does
-    not depend on omnimarket (layering), so in the ordinary test environment
-    that contract is simply absent and every delegation would refuse -- the
-    same reason this directory already neutralizes the omnimarket drift guard
-    above. The stand-in carries the real public vocabulary with inert
-    predicates, so CLI-wiring proofs stay hermetic and cannot accidentally
-    depend on a production selection rule. The production predicates are
-    asserted against the LIVE contract by the guarded tests in
-    ``test_cli_delegate.py``.
+    The CLI reads its task-class vocabulary, selection and budgets from the
+    ``onex.contracts:task_class_authority`` registry entry, and its request
+    vocabularies from the delegate contract's input model. omnibase_infra's
+    test environment has no omnimarket, so both are stand-ins: the authority
+    is ``wiring_authority()``, and the input model is the stand-in node's.
+    Neither is compared to a production list anywhere; the registry tests in
+    ``test_cli_registry_vocabulary.py`` assert the CLI offers whatever the
+    stand-in declares.
     """
+    install_stand_in_registry(monkeypatch, wiring_authority())
     monkeypatch.setattr(
-        cli_delegate,
-        "resolve_task_class_contract_path",
-        lambda: STAND_IN_TASK_CLASS_CONTRACT,
+        cli_delegate, "_delegate_request_model", lambda: ModelStandInDelegateRequest
     )

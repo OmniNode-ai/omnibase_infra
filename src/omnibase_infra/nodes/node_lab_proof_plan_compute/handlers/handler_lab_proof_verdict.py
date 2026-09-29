@@ -22,7 +22,7 @@ THE OUTCOME RULES (interim recipes common frame 8, plan section 6):
 ``restored`` (the zero-residue readback with its positive control) is reported
 beside the outcome and never changes it.
 
-Ticket: OMN-19572
+Tickets: OMN-19572, OMN-19941
 """
 
 from __future__ import annotations
@@ -43,6 +43,7 @@ from omnibase_infra.lab_proof.model_lab_proof_check_result import (
 from omnibase_infra.lab_proof.model_lab_proof_observation import (
     ModelLabProofObservation,
 )
+from omnibase_infra.lab_proof.model_lab_proof_plan import ModelLabProofPlan
 from omnibase_infra.lab_proof.model_lab_proof_result import ModelLabProofResult
 from omnibase_infra.lab_proof.model_lab_proof_run_report import (
     ModelLabProofRunReport,
@@ -144,7 +145,7 @@ class HandlerLabProofVerdict:
             base = None
         reasons: list[str] = []
         checks = tuple(
-            self._relative_to_base(self._check(check, report), base, reasons)
+            self._relative_to_base(self._check(check, plan, report), base, reasons)
             for check in request.mandatory_checks
         )
         failed = tuple(result.check for result in checks if not result.passed)
@@ -285,7 +286,10 @@ class HandlerLabProofVerdict:
         )
 
     def _check(
-        self, check: EnumLabProofCheck, report: ModelLabProofRunReport
+        self,
+        check: EnumLabProofCheck,
+        plan: ModelLabProofPlan,
+        report: ModelLabProofRunReport,
     ) -> ModelLabProofCheckResult:
         def result(passed: bool, detail: str) -> ModelLabProofCheckResult:
             return ModelLabProofCheckResult(check=check, passed=passed, detail=detail)
@@ -306,8 +310,12 @@ class HandlerLabProofVerdict:
         if check is _C.SUBJECT_HEAD_IDENTITY:
             return single(_ID.SUBJECT_REV)
         if check is _C.FOCUSED_TESTS:
-            if report.get(_ID.FOCUSED_TESTS) is None:
+            if not any(step.step_id is _ID.FOCUSED_TESTS for step in plan.steps):
                 return result(True, "n/a: the PR changes no test files")
+            if report.get(_ID.FOCUSED_TESTS) is None:
+                return result(
+                    False, "undecidable: planned focused_tests has no observation"
+                )
             return single(_ID.FOCUSED_TESTS)
         if check is _C.MIGRATION_GATE_HEALTHY:
             return single(_ID.HEALTH_MIGRATION_GATE)

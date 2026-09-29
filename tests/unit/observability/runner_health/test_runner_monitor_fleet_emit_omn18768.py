@@ -119,6 +119,10 @@ def _run(
         "HOME": str(tmp_path),
         "STATE_FILE": str(state_file),
         "RUNNER_FLEET_CONFIG_PATH": str(fleet_config),
+        # OMN-19958: this harness stages no cgroup tree, so the OOM-kill
+        # counter scan is off here; test_runner_monitor_oom_kill_delta.py
+        # drives it against a fixture tree.
+        "RUNNER_MONITOR_OOM_KILL_SCAN": "false",
         "SLACK_BOT_TOKEN": "xoxb-test",
         "SLACK_CHANNEL_ID": "C-test",
         "RUNNER_GITHUB_TOKEN": "ghp-test",
@@ -402,6 +406,10 @@ def test_the_monitor_publishes_via_the_hosts_broker_container(tmp_path: Path) ->
         "HOME": str(tmp_path),
         "STATE_FILE": str(state_file),
         "RUNNER_FLEET_CONFIG_PATH": str(fleet_config),
+        # OMN-19958: this harness stages no cgroup tree, so the OOM-kill
+        # counter scan is off here; test_runner_monitor_oom_kill_delta.py
+        # drives it against a fixture tree.
+        "RUNNER_MONITOR_OOM_KILL_SCAN": "false",
         "SLACK_BOT_TOKEN": "xoxb-test",
         "SLACK_CHANNEL_ID": "C-test",
         "RUNNER_GITHUB_TOKEN": "ghp-test",
