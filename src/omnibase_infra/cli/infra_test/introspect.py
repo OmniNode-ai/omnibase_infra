@@ -18,6 +18,7 @@ from uuid import uuid4
 import click
 from rich.console import Console
 
+from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_infra.cli.infra_test._helpers import get_broker
 from omnibase_infra.models.discovery.model_introspection_config import (
     DEFAULT_INTROSPECTION_TOPIC,
@@ -95,7 +96,10 @@ def _build_introspection_payload(
 @click.option("--node-id", default=None, help="Node UUID (auto-generated if omitted).")
 @click.option(
     "--node-type",
-    type=click.Choice(["EFFECT", "COMPUTE", "REDUCER", "ORCHESTRATOR"]),
+    # OMN-19407: the four node kinds are core's EnumNodeKind, not a copy.
+    type=click.Choice(
+        [kind.name for kind in EnumNodeKind if EnumNodeKind.is_core_node_type(kind)]
+    ),
     default="EFFECT",
     help="ONEX node type.",
     show_default=True,

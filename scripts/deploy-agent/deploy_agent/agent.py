@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import threading
 import time
 from collections.abc import Callable
@@ -117,8 +118,29 @@ from deploy_agent.routing import (
     build_router_from_env,
 )
 from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
+from deploy_agent.unit_drift import check_units, load_manifest, report
 
 logger = logging.getLogger(__name__)
+
+
+def _unit_drift_report() -> dict[str, object]:
+    """Expose stale installed units, or the reason observation failed (OMN-20037)."""
+    try:
+        repo_root = (
+            Path(os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR))
+            .resolve()
+            .parents[1]
+        )
+        hostname = socket.gethostname()
+        results = check_units(
+            load_manifest(repo_root / "deploy" / "unit-drift-manifest.yaml"),
+            repo_root=repo_root,
+            hostname=hostname,
+            home=Path.home(),
+        )
+        return report(results, hostname)
+    except Exception as exc:  # noqa: BLE001
+        return {"drift": None, "reason": str(exc)}
 
 
 def _runtime_container_for_lane(lane: EnumRuntimeLane) -> str:
@@ -609,6 +631,7 @@ class DeployAgent:
             get_agent_state=self._get_state,
             get_accept_backlog=self._accept_backlog.latest,
             get_control_topic_lag=self._lag_sampler.latest,
+            get_unit_drift=_unit_drift_report,
         )
         runner = web.AppRunner(health_app)
         await runner.setup()

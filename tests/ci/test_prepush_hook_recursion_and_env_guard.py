@@ -43,7 +43,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from tests.ci._prepush_lab_isolation import network_free_lab_env
+from tests.ci._prepush_lab_isolation import gh_offline_env, network_free_lab_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOK_SCRIPT = REPO_ROOT / "scripts" / "hooks" / "prepush_smart_tests.sh"
@@ -138,6 +138,7 @@ def _run_hook(
     # host, which now reaches the lab-dispatch leg. Keep it network-free -- a
     # unit test must not take a lab host's exclusive slot for an hour.
     env.update(network_free_lab_env())
+    env.update(gh_offline_env())
     if extra_env:
         env.update(extra_env)
 

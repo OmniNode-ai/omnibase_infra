@@ -1,0 +1,126 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 49 and seed 6946086088972096360 with 2 workers on 32 cores with 23552MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.0-34-generic amd64, Eclipse Adoptium 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /m/DeclaredStateReconcile.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module DeclaredStateReconcile
+Starting... (2026-09-29 01:45:44)
+Implied-temporal checking--satisfiability problem has 1 branches.
+Computing initial states...
+Computed 2 initial states...
+Computed 4 initial states...
+Finished computing initial states: 8 distinct states generated at 2026-09-29 01:45:45.
+Error: Invariant NoStaleApply is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ flipsLeft = 1
+/\ toRemove = (r1 :> {} @@ r2 :> {})
+/\ staleApplied = FALSE
+/\ lock = "none"
+/\ obsGrants = (r1 :> {} @@ r2 :> {})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 0
+/\ pc = (r1 :> "idle" @@ r2 :> "idle")
+/\ editsLeft = 2
+/\ toAdd = (r1 :> {} @@ r2 :> {})
+/\ grants = {g1}
+/\ expect = (r1 :> 0 @@ r2 :> 0)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 0 @@ r2 :> 0)
+
+State 2: <Observe line 84, col 5 to line 94, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 1
+/\ toRemove = (r1 :> {} @@ r2 :> {})
+/\ staleApplied = FALSE
+/\ lock = "none"
+/\ obsGrants = (r1 :> {g1} @@ r2 :> {})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 0
+/\ pc = (r1 :> "observed" @@ r2 :> "idle")
+/\ editsLeft = 2
+/\ toAdd = (r1 :> {} @@ r2 :> {})
+/\ grants = {g1}
+/\ expect = (r1 :> 0 @@ r2 :> 0)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 0 @@ r2 :> 0)
+
+State 3: <HandEdit line 56, col 5 to line 65, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 1
+/\ toRemove = (r1 :> {} @@ r2 :> {})
+/\ staleApplied = FALSE
+/\ lock = "none"
+/\ obsGrants = (r1 :> {g1} @@ r2 :> {})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 1
+/\ pc = (r1 :> "observed" @@ r2 :> "idle")
+/\ editsLeft = 1
+/\ toAdd = (r1 :> {} @@ r2 :> {})
+/\ grants = {}
+/\ expect = (r1 :> 0 @@ r2 :> 0)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 0 @@ r2 :> 0)
+
+State 4: <Plan line 105, col 5 to line 115, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 1
+/\ toRemove = (r1 :> {} @@ r2 :> {})
+/\ staleApplied = FALSE
+/\ lock = "none"
+/\ obsGrants = (r1 :> {g1} @@ r2 :> {})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 1
+/\ pc = (r1 :> "planned" @@ r2 :> "idle")
+/\ editsLeft = 1
+/\ toAdd = (r1 :> {g2} @@ r2 :> {})
+/\ grants = {}
+/\ expect = (r1 :> 0 @@ r2 :> 0)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 0 @@ r2 :> 0)
+
+State 5: <Acquire line 118, col 5 to line 126, col 69 of module DeclaredStateReconcile>
+/\ flipsLeft = 1
+/\ toRemove = (r1 :> {} @@ r2 :> {})
+/\ staleApplied = FALSE
+/\ lock = r1
+/\ obsGrants = (r1 :> {g1} @@ r2 :> {})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 1
+/\ pc = (r1 :> "applying" @@ r2 :> "idle")
+/\ editsLeft = 1
+/\ toAdd = (r1 :> {g2} @@ r2 :> {})
+/\ grants = {}
+/\ expect = (r1 :> 0 @@ r2 :> 0)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 0 @@ r2 :> 0)
+
+State 6: <ApplyAdd line 132, col 5 to line 144, col 56 of module DeclaredStateReconcile>
+/\ flipsLeft = 1
+/\ toRemove = (r1 :> {} @@ r2 :> {})
+/\ staleApplied = TRUE
+/\ lock = r1
+/\ obsGrants = (r1 :> {g1} @@ r2 :> {})
+/\ unobservableApplied = FALSE
+/\ removedNeeded = FALSE
+/\ ver = 2
+/\ pc = (r1 :> "applying" @@ r2 :> "idle")
+/\ editsLeft = 1
+/\ toAdd = (r1 :> {} @@ r2 :> {})
+/\ grants = {g2}
+/\ expect = (r1 :> 1 @@ r2 :> 0)
+/\ observable = TRUE
+/\ obsVer = (r1 :> 0 @@ r2 :> 0)
+
+4705 states generated, 2562 distinct states found, 1574 states left on queue.
+The depth of the complete state graph search is 6.
+The average outdegree of the complete state graph is 3 (minimum is 0, the maximum 6 and the 95th percentile is 6).
+Finished in 00s at (2026-09-29 01:45:45)

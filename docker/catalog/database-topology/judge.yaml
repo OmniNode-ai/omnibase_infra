@@ -83,6 +83,7 @@ databases:
               - demo_readiness_latest
               - dod_verify_runs
               - gateway_link_health
+              - lab_container_memory_window
               - lab_lane_health
               - live_events
               - log_entries
@@ -100,6 +101,7 @@ databases:
               - topic_activity
               - topic_produce_windows
               - work_events
+              - worktree_reconcile_hosts
             privileges:
               - INSERT
               - SELECT
@@ -367,5 +369,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 1d0a22107bc12d5041a5d73eb3b08b8a3b4f2c1d84726149489a3ad1d170d6c7
+  sha256: 5ac6e0ae3bf5657f960b94a2ca2149ce07b6442d08e3e44c8553a73f5c5553d0
 topology_instance: local
