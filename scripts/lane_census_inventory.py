@@ -52,12 +52,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
 import sys
+import tarfile
+import urllib.parse
+from collections.abc import Callable
+from datetime import UTC, datetime
 from http.client import HTTPConnection
-from typing import Any
+from pathlib import Path
+from typing import IO, Any, cast
 
 # Exit code for "inventory could not be observed". Distinct from the driver's
 # drift code (30) and its bad-args (2) / missing-deps (3) codes.
@@ -284,10 +290,484 @@ def build_envelope(
     }
 
 
+# ---------------------------------------------------------------------------
+# Memory observation (OMN-19959)
+#
+# Read in the same pass as the inventory, over the same Engine API socket, and
+# written to its own file so the planner's stdin envelope is unchanged. Every
+# read fails LOUD: an unreadable counter is an error, never a zero, because a
+# zero is exactly what a healthy container reports.
+# ---------------------------------------------------------------------------
+
+#: The memory observation could not be read. The inventory envelope on stdout is
+#: still valid, so the driver keeps its census; only the memory pass fails.
+EXIT_MEMORY_UNOBSERVABLE = 7
+
+DEFAULT_SYSFS_CGROUP_ROOT = "/sys/fs/cgroup"
+DEFAULT_PROC_ROOT = "/proc"
+#: The runner image's RUNNER_HOME is /home/runner/actions-runner
+#: (docker/runners/entrypoint.sh); the worker logs sit in its _diag directory.
+DEFAULT_RUNNER_DIAG_PATH = "/home/runner/actions-runner/_diag"
+DEFAULT_RUNNER_FLEET_CONFIG = "~/.omnibase/runners/config/runner_fleet.yaml"
+COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
+_MEMORY_FILES = ("memory.max", "memory.peak", "memory.events")
+
+
+class MemoryProbeError(RuntimeError):
+    """Raised when a memory counter or a runner worker log could not be read."""
+
+
+def api_stream[T](
+    socket_path: str, path: str, timeout: float, consume: Callable[[IO[bytes]], T]
+) -> T:
+    """GET a Docker Engine API path and hand the unread body to ``consume``.
+
+    Used for ``_diag`` archives, which run to about 20 MB per runner: the body is
+    parsed as it streams and never held whole.
+    """
+    conn = _UnixHTTPConnection(socket_path, timeout)
+    try:
+        conn.request("GET", path)
+        response = conn.getresponse()
+        if response.status != 200:
+            body = response.read(400)
+            raise MemoryProbeError(
+                f"Docker Engine API GET {path} returned HTTP {response.status}: "
+                f"{body.decode('utf-8', 'replace')}"
+            )
+        return consume(response)
+    finally:
+        conn.close()
+
+
+def lane_projects_from_manifest(manifest: dict[str, Any]) -> dict[str, str]:
+    """Map each lane's compose project to its lane name."""
+    projects: dict[str, str] = {}
+    for lane, spec in (manifest.get("lanes") or {}).items():
+        project = (spec or {}).get("compose_project")
+        if project:
+            projects[str(project)] = str(lane)
+    return projects
+
+
+def runner_prefixes_from_fleet_config(config: Any) -> list[str]:
+    """Every ``runner_name_prefix`` under the fleet config's ``hosts:`` block.
+
+    The same set ``runner-monitor.sh`` ``config_host_prefixes`` reads, including
+    the role pools nested under a host. Never a literal (OMN-19842).
+    """
+    found: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "runner_name_prefix" and isinstance(value, str) and value:
+                    found.add(value)
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    if isinstance(config, dict):
+        walk(config.get("hosts") or {})
+    return sorted(found)
+
+
+def _read_text(path: str | Path) -> str:
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise MemoryProbeError(f"cannot read {path}: {exc}") from exc
+
+
+def cgroup_dir_for_pid(pid: int, *, proc_root: str, sysfs_root: str) -> str:
+    """Resolve a process's cgroup v2 directory from ``/proc/<pid>/cgroup``.
+
+    Read from the process rather than assumed from the container id, so the
+    runner pool's ``CgroupParent=omnirunners.slice`` and the systemd and cgroupfs
+    drivers all resolve the same way.
+    """
+    text = _read_text(Path(proc_root) / str(pid) / "cgroup")
+    for line in text.splitlines():
+        if line.startswith("0::"):
+            return str(Path(sysfs_root) / line[3:].lstrip("/"))
+    raise MemoryProbeError(f"pid {pid} has no cgroup v2 entry: {text!r}")
+
+
+def boot_time_iso(proc_root: str) -> str:
+    """The host's boot time from ``/proc/stat`` ``btime``, as RFC 3339 UTC."""
+    for line in _read_text(Path(proc_root) / "stat").splitlines():
+        if line.startswith("btime "):
+            stamp = datetime.fromtimestamp(int(line.split()[1]), tz=UTC)
+            return stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+    raise MemoryProbeError(f"{proc_root}/stat carries no btime line")
+
+
+def _parse_worker_log() -> Callable[..., dict[str, str | None] | None]:
+    """The builder's worker-log parser, so collector and builder share one grammar."""
+    here = str(Path(__file__).resolve().parent)
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import lane_container_memory_event
+
+    return cast(
+        "Callable[..., dict[str, str | None] | None]",
+        lane_container_memory_event.parse_worker_log,
+    )
+
+
+def worker_runs_from_archive(
+    stream: IO[bytes], *, runner_name: str, since_epoch: float
+) -> tuple[list[dict[str, str | None]], list[dict[str, str]]]:
+    """CI runs from a streamed ``_diag`` archive, for logs written since ``since_epoch``.
+
+    A log's mtime is its last write, so a log older than the window's start
+    belongs to a job that finished before the window and is not read. Each log
+    is parsed and dropped before the next is read.
+
+    Returns ``(runs, unnamed)``. A completed log that names no repository and
+    run id is returned in ``unnamed`` rather than failing the pass: failing it
+    would hold the window open, and every later pass would re-read the same log
+    and fail again. The builder alerts on each unnamed log once.
+    """
+    parse = _parse_worker_log()
+    runs: list[dict[str, str | None]] = []
+    unnamed: list[dict[str, str]] = []
+    try:
+        with tarfile.open(fileobj=stream, mode="r|*") as tar:
+            for member in tar:
+                base = Path(member.name).name
+                if not member.isfile() or not base.startswith("Worker_"):
+                    continue
+                if member.mtime < int(since_epoch):
+                    continue
+                handle = tar.extractfile(member)
+                if handle is None:
+                    raise MemoryProbeError(f"{runner_name}: cannot read {member.name}")
+                try:
+                    run = parse(
+                        handle.read().decode("utf-8", "replace"),
+                        runner_name=runner_name,
+                        log_name=base,
+                    )
+                except ValueError:
+                    unnamed.append({"runner_name": runner_name, "log_name": base})
+                    continue
+                if run is not None:
+                    runs.append(run)
+    except tarfile.TarError as exc:
+        raise MemoryProbeError(
+            f"{runner_name}: unreadable _diag archive: {exc}"
+        ) from exc
+    return runs, unnamed
+
+
+def _state_lower_bound(state_path: str | None, boot_id: str, boot_time: str) -> float:
+    """Epoch lower bound for worker logs: the last published window's end, else boot."""
+    fallback = datetime.fromisoformat(boot_time.replace("Z", "+00:00")).timestamp()
+    if not state_path or not Path(state_path).exists():
+        return fallback
+    try:
+        with open(state_path, encoding="utf-8") as fh:
+            state = json.load(fh)
+    except (OSError, ValueError) as exc:
+        raise MemoryProbeError(f"unreadable memory state {state_path}: {exc}") from exc
+    if state.get("host_boot_id") != boot_id or not state.get("window_end"):
+        return fallback
+    end = str(state["window_end"]).replace("Z", "+00:00")
+    # Microsecond fractions are all fromisoformat needs here; the builder wrote it.
+    return datetime.fromisoformat(end).timestamp()
+
+
+#: A kernel OOM kill names the victim's cgroup. For a container that is the
+#: container's own cgroup: ``.../docker-<id>.scope`` under the systemd driver
+#: (any parent slice) or ``/docker/<id>`` under the cgroupfs driver.
+_OOM_KILL_MEMCG = re.compile(r"task_memcg=\S*?(?:docker-|/docker/)([0-9a-f]{64})")
+
+
+def read_journal_oom_kills(
+    *, since_epoch: float, until_epoch: float, timeout_s: float
+) -> dict[str, int]:
+    """Kernel OOM kills per container id in ``[since, until]``, from the kernel journal.
+
+    WHY THE JOURNAL AND NOT ONLY THE CGROUP. A lane container with a restart
+    policy that is OOM-killed comes back with a NEW cgroup whose counters start
+    at zero, so its own ``memory.events`` never shows the kill. Measured on
+    .202 on 2026-09-28: the sim-202 projection API, held at a 24 MiB limit, was
+    killed and restarted nine times in a minute and every pass-time read of its
+    counters said ``oom_kill 0``. The kernel logs each kill with the victim's
+    cgroup, which names the container id across restarts.
+
+    FAIL LOUD. A user without journal access gets no kernel lines and a zero
+    exit, which would read as "no kills". So an empty kernel journal is refused
+    before the OOM query is believed: the kernel logs from the first second of
+    a boot, so an empty read is a read that could not see.
+    """
+    if shutil.which("journalctl") is None:
+        raise MemoryProbeError(
+            "journalctl not found on PATH; kernel OOM kills unreadable"
+        )
+
+    def run(args: list[str]) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                ["journalctl", "-k", "-q", "--no-pager", "-o", "short-unix", *args],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout_s,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise MemoryProbeError(f"journalctl exceeded {timeout_s}s") from exc
+
+    probe = run(["-n", "1"])
+    if probe.returncode != 0 or not probe.stdout.strip():
+        raise MemoryProbeError(
+            "the kernel journal reads empty (exit "
+            f"{probe.returncode}: {probe.stderr.strip()[:200]}); the census user "
+            "needs journal access (group adm or systemd-journal)"
+        )
+    found = run(
+        [
+            # Microsecond bounds, so consecutive windows abut and a kill is
+            # counted in exactly one of them.
+            "--since",
+            f"@{since_epoch:.6f}",
+            "--until",
+            f"@{until_epoch:.6f}",
+            "--grep",
+            "oom-kill:",
+        ]
+    )
+    # journalctl --grep exits 1 when nothing matched; that is a real zero here,
+    # because the probe above has shown the kernel journal is readable.
+    if found.returncode not in (0, 1) or (
+        found.returncode == 1 and found.stderr.strip()
+    ):
+        raise MemoryProbeError(
+            f"journalctl --grep oom-kill: failed (exit {found.returncode}): "
+            f"{found.stderr.strip()[:200]}"
+        )
+    kills: dict[str, int] = {}
+    for line in found.stdout.splitlines():
+        match = _OOM_KILL_MEMCG.search(line)
+        if match:
+            kills[match.group(1)] = kills.get(match.group(1), 0) + 1
+    return kills
+
+
+def collect_memory_observation(
+    *,
+    socket_path: str,
+    api_timeout_s: float,
+    lane_projects: dict[str, str],
+    runner_prefixes: list[str],
+    proc_root: str,
+    sysfs_root: str,
+    runner_diag_path: str,
+    state_path: str | None,
+) -> dict[str, Any]:
+    """Read every lane container's memory counters and the runners' CI runs."""
+    boot_id = _read_text(Path(proc_root) / "sys/kernel/random/boot_id").strip()
+    if not boot_id:
+        raise MemoryProbeError("empty host boot id")
+    boot_time = boot_time_iso(proc_root)
+    since_epoch = _state_lower_bound(state_path, boot_id, boot_time)
+    try:
+        rows = api_get(socket_path, API_CONTAINERS_PATH, api_timeout_s)
+    except (OSError, InventoryProbeError, ValueError) as exc:
+        raise MemoryProbeError(f"container list unreadable: {exc}") from exc
+
+    # Every lane container in any state: an OOM-killed container that did not
+    # come back is stopped now, and its kill must still be named.
+    lane_ids: dict[str, tuple[str, str]] = {}
+    for row in rows:
+        row_names = row.get("Names") or []
+        row_name = (row_names[0] if row_names else "").lstrip("/").strip()
+        row_lane = lane_projects.get(
+            str((row.get("Labels") or {}).get(COMPOSE_PROJECT_LABEL) or "")
+        )
+        if row.get("Id") and row_name and row_lane is not None:
+            lane_ids[str(row["Id"])] = (row_name, row_lane)
+
+    # Pass 1: the lane containers' cgroup counters, back to back. The window
+    # closes (read_at) right after them and the journal is cut at the same
+    # instant, so a kill falls in the cgroup read or the journal window of one
+    # pass, not both. The runners' slower archive reads come after the cut.
+    containers: list[dict[str, Any]] = []
+    runners: list[tuple[str, str]] = []
+    for row in rows:
+        if str(row.get("State") or "") != "running":
+            continue
+        cid = str(row.get("Id") or "")
+        names = row.get("Names") or []
+        name = (names[0] if names else "").lstrip("/").strip()
+        if not cid or not name:
+            continue
+        labels = row.get("Labels") or {}
+        lane = lane_projects.get(str(labels.get(COMPOSE_PROJECT_LABEL) or ""))
+        if any(name.startswith(prefix) for prefix in runner_prefixes):
+            runners.append((cid, name))
+        if lane is None:
+            continue
+
+        try:
+            detail = api_get(socket_path, f"/containers/{cid}/json", api_timeout_s)
+        except (OSError, InventoryProbeError, ValueError) as exc:
+            raise MemoryProbeError(f"{name}: inspect failed: {exc}") from exc
+        state = detail.get("State") or {}
+        pid = int(state.get("Pid") or 0)
+        if not state.get("Running") or pid <= 0:
+            # Stopped between the list and the inspect: no cgroup to read.
+            continue
+        cgroup_dir = cgroup_dir_for_pid(pid, proc_root=proc_root, sysfs_root=sysfs_root)
+        files = {f: _read_text(Path(cgroup_dir) / f) for f in _MEMORY_FILES}
+        containers.append(
+            {
+                "container_id": cid,
+                "container_name": name,
+                "lane": lane,
+                "started_at": str(state.get("StartedAt") or ""),
+                "memory_max": files["memory.max"],
+                "memory_peak": files["memory.peak"],
+                "memory_events": files["memory.events"],
+            }
+        )
+
+    read_at_dt = datetime.now(tz=UTC)
+    read_at = read_at_dt.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    kills = read_journal_oom_kills(
+        since_epoch=since_epoch,
+        until_epoch=read_at_dt.timestamp(),
+        timeout_s=api_timeout_s,
+    )
+    journal_oom_kills = [
+        {
+            "container_id": cid,
+            "container_name": lane_ids[cid][0],
+            "lane": lane_ids[cid][1],
+            "count": count,
+        }
+        for cid, count in sorted(kills.items())
+        if cid in lane_ids
+    ]
+
+    # Pass 2: the runners' worker logs.
+    worker_runs: list[dict[str, str | None]] = []
+    unnamed: list[dict[str, str]] = []
+    query = urllib.parse.urlencode({"path": runner_diag_path})
+    for cid, name in runners:
+
+        def consume(
+            body: IO[bytes], runner_name: str = name
+        ) -> tuple[list[dict[str, str | None]], list[dict[str, str]]]:
+            return worker_runs_from_archive(
+                body, runner_name=runner_name, since_epoch=since_epoch
+            )
+
+        try:
+            runs, skipped = api_stream(
+                socket_path,
+                f"/containers/{cid}/archive?{query}",
+                api_timeout_s,
+                consume,
+            )
+        except (OSError, MemoryProbeError) as exc:
+            raise MemoryProbeError(f"{name}: _diag archive failed: {exc}") from exc
+        worker_runs.extend(runs)
+        unnamed.extend(skipped)
+
+    return {
+        "host_boot_id": boot_id,
+        "boot_time": boot_time,
+        "read_at": read_at,
+        "containers": sorted(containers, key=lambda c: str(c["container_name"])),
+        "journal_oom_kills": journal_oom_kills,
+        "worker_runs": sorted(
+            worker_runs,
+            key=lambda r: (str(r["runner_name"]), str(r["job_started_at"])),
+        ),
+        "unnamed_worker_logs": sorted(
+            unnamed, key=lambda u: (u["runner_name"], u["log_name"])
+        ),
+    }
+
+
+def _memory_inputs() -> tuple[dict[str, str], list[str]]:
+    """Lane projects from the lane manifest and runner prefixes from the fleet config.
+
+    The fleet config is required: an absent file would read as "no runners here"
+    and silently drop every CI job. A host with no runners says so explicitly
+    with ``LANE_MEMORY_RUNNER_FLEET_CONFIG=""``.
+    """
+    import yaml  # lazy: the inventory path itself needs no third-party import
+
+    manifest_path = os.environ.get("LANE_MANIFEST") or str(
+        Path(__file__).resolve().parent.parent
+        / "deploy"
+        / "lane-census"
+        / "lane-manifest.yaml"
+    )
+    try:
+        with open(manifest_path, encoding="utf-8") as fh:
+            manifest = yaml.safe_load(fh) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise MemoryProbeError(f"lane manifest unreadable: {exc}") from exc
+
+    fleet_path = os.environ.get("LANE_MEMORY_RUNNER_FLEET_CONFIG")
+    if fleet_path is None:
+        fleet_path = str(Path(DEFAULT_RUNNER_FLEET_CONFIG).expanduser())
+    if fleet_path == "":
+        return lane_projects_from_manifest(manifest), []
+    try:
+        with open(fleet_path, encoding="utf-8") as fh:
+            fleet = yaml.safe_load(fh) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise MemoryProbeError(
+            f"runner fleet config unreadable ({fleet_path}): {exc}. Set "
+            'LANE_MEMORY_RUNNER_FLEET_CONFIG="" on a host that runs no runners.'
+        ) from exc
+    return lane_projects_from_manifest(manifest), runner_prefixes_from_fleet_config(
+        fleet
+    )
+
+
+def write_memory_observation(
+    path: str, *, socket_path: str, api_timeout_s: float, state_path: str | None
+) -> None:
+    lane_projects, runner_prefixes = _memory_inputs()
+    observation = collect_memory_observation(
+        socket_path=socket_path,
+        api_timeout_s=api_timeout_s,
+        lane_projects=lane_projects,
+        runner_prefixes=runner_prefixes,
+        proc_root=os.environ.get("LANE_MEMORY_PROC_ROOT", DEFAULT_PROC_ROOT),
+        sysfs_root=os.environ.get("LANE_MEMORY_SYSFS_ROOT", DEFAULT_SYSFS_CGROUP_ROOT),
+        runner_diag_path=os.environ.get(
+            "LANE_MEMORY_RUNNER_DIAG_PATH", DEFAULT_RUNNER_DIAG_PATH
+        ),
+        state_path=state_path,
+    )
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(observation, fh, sort_keys=True)
+        fh.write("\n")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lane", default=os.environ.get("LANE") or None)
     parser.add_argument("--runtime-tag", default=os.environ.get("RUNTIME_TAG") or None)
+    parser.add_argument(
+        "--memory-out",
+        default=None,
+        help="also write the lane container memory observation here (OMN-19959)",
+    )
+    parser.add_argument(
+        "--memory-state",
+        default=None,
+        help="the memory pass's state file, read only for the worker-log lower bound",
+    )
     args = parser.parse_args(argv)
 
     socket_path = os.environ.get("LANE_CENSUS_DOCKER_SOCKET", DEFAULT_DOCKER_SOCKET)
@@ -327,6 +807,22 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout,
     )
     sys.stdout.write("\n")
+    sys.stdout.flush()
+
+    if args.memory_out:
+        try:
+            write_memory_observation(
+                args.memory_out,
+                socket_path=socket_path,
+                api_timeout_s=api_timeout_s,
+                state_path=args.memory_state,
+            )
+        except (OSError, MemoryProbeError, ValueError) as exc:
+            print(
+                f"lane container memory probe FAILED: {exc}",
+                file=sys.stderr,
+            )
+            return EXIT_MEMORY_UNOBSERVABLE
     return 0
 
 

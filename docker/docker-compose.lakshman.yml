@@ -29,8 +29,9 @@
 # tests/ci/test_lakshman_lane_governance_boundary.py pins all three, in both
 # directions — the lane must stay OUT, and the existing lanes must stay IN.
 #
-# NEVER A PROOF LANE. No synthetic integration evidence, no golden-chain receipt
-# and no `stability-proven` digest may be sourced from here.
+# This mutable lane can produce the OMN-15359 operator-first synthetic dev
+# replay receipt approved by Jonah. It cannot source a stability/prod grant or
+# a `stability-proven` digest.
 #
 # SHAPE
 # -----
@@ -407,6 +408,9 @@ services:
       # so the base file's copies of these lines do not reach this lane.
       OMNINODE_RUNTIME_PASSWORD: ${OMNINODE_RUNTIME_PASSWORD:-}
       TENANT_PROJECTION_WRITER_PASSWORD: ${TENANT_PROJECTION_WRITER_PASSWORD:-}
+      # Required for the cloud corpus on both cold and warm Postgres volumes.
+      ROLE_OMNINODE_PASSWORD: ${ROLE_OMNINODE_PASSWORD:?ROLE_OMNINODE_PASSWORD required for operator tenant path}
+      ROLE_OMNIDASH_PASSWORD: ${ROLE_OMNIDASH_PASSWORD:?ROLE_OMNIDASH_PASSWORD required for operator tenant path}
     volumes:
       - ../scripts/run-forward-migrations.sh:/run-forward-migrations.sh:ro
       - ../docker/migrations/forward:/migrations/forward:ro
@@ -648,6 +652,142 @@ services:
       - "com.omninode.ticket=OMN-17150"
       - "com.omninode.lane.class=collaborator"
       - "com.omninode.service=projection-api"
+  # OMN-15359: isolated control-plane provenance path. The corpus is copied
+  # into a lane-owned volume, applied as role_omninode, then the API creates
+  # tenant row + outbox entry in one transaction. No host port is published.
+  cloud-migration-files:
+    image: ${ONEX_CLOUD_MIGRATE_IMAGE:?ONEX_CLOUD_MIGRATE_IMAGE required for operator tenant path}
+    container_name: omnibase-infra-lakshman-cloud-migration-files
+    profiles: ["lakshman"]
+    networks: !override
+      - omnibase-infra-lakshman-network
+    restart: "no"
+    volumes:
+      - lakshman_cloud_migrations:/work
+    command:
+      - sh
+      - -c
+      - 'set -e; rm -rf /work/* /work/.[!.]* 2>/dev/null || true; cp -a /migrations/. /work/; touch /work/.corpus-ready'
+    logging: *logging-defaults
+  cloud-migration:
+    image: postgres:16
+    container_name: omnibase-infra-lakshman-cloud-migration
+    profiles: ["lakshman"]
+    networks: !override
+      - omnibase-infra-lakshman-network
+    restart: "no"
+    depends_on:
+      cloud-migration-files:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      forward-migration:
+        condition: service_completed_successfully
+    volumes:
+      - lakshman_cloud_migrations:/work
+      - ../docker/migrations/cloud/run-cloud-migrations.sh:/run-cloud-migrations.sh:ro
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_NAME: omninode_cloud
+      DB_USER: role_omninode
+      MIGRATION_DIR: /work
+      PGPASSWORD: ${ROLE_OMNINODE_PASSWORD:?ROLE_OMNINODE_PASSWORD required for operator tenant path}
+      PGCONNECT_TIMEOUT: "10"
+    command: ["bash", "/run-cloud-migrations.sh"]
+    logging: *logging-defaults
+  onex-api:
+    image: ${ONEX_API_IMAGE:?ONEX_API_IMAGE required for operator tenant path}
+    container_name: onex-api-lakshman
+    profiles: ["lakshman"]
+    networks: !override
+      - omnibase-infra-lakshman-network
+    restart: unless-stopped
+    depends_on:
+      cloud-migration:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    environment:
+      OMNINODE_CLOUD_DB_URL: "postgresql://role_omninode:${ROLE_OMNINODE_PASSWORD:?ROLE_OMNINODE_PASSWORD required}@postgres:5432/omninode_cloud"
+      OMNIDASH_ANALYTICS_DB_URL: "postgresql://role_omnidash:${ROLE_OMNIDASH_PASSWORD:?ROLE_OMNIDASH_PASSWORD required}@postgres:5432/omnidash_analytics"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      # The ACL provisioner otherwise defaults to the onex-dev Kubernetes
+      # broker address, which would cross this isolated lane on bootstrap.
+      REDPANDA_ADMIN_URL: "http://redpanda:9644"
+      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?VALKEY_PASSWORD required}
+      # Tenant bootstrap's per-IP limiter reads VALKEY_URL; without it the
+      # limiter tries localhost inside this container and fails closed.
+      VALKEY_URL: "redis://:${VALKEY_PASSWORD:?VALKEY_PASSWORD required}@valkey:6379"
+      WORKFLOW_RATE_LIMIT_VALKEY_URL: "redis://:${VALKEY_PASSWORD:?VALKEY_PASSWORD required}@valkey:6379"
+      ONEX_API_BASE_URL: "http://onex-api:8000"
+      ONEX_API_ALLOWED_ORIGINS: "https://onex-operator-lane-no-ingress.invalid"
+      STRIPE_CHECKOUT_SUCCESS_URL: "http://onex-operator-lane-no-ingress.invalid/billing/success"
+      STRIPE_CHECKOUT_CANCEL_URL: "http://onex-operator-lane-no-ingress.invalid/billing/cancel"
+      STRIPE_PORTAL_RETURN_URL: "http://onex-operator-lane-no-ingress.invalid/billing"
+      TRUST_PROXY_HEADERS: "false"
+      RATE_LIMIT_TRUSTED_PROXY_CIDRS: ""
+      BROKER_ACL_PROVIDER: "redpanda"
+      BROKER_QUOTA_PROVIDER: "deferred"
+      GATEWAY_P0B_PER_TENANT_CREDENTIALS: "disabled"
+      GATEWAY_ATTACH_TOKEN_EXCHANGE: "disabled"
+      GATEWAY_SIGNUP_TOPIC_PROVISIONING: "disabled"
+      GATEWAY_BRIDGED_TENANT_SLUGS: ""
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ""
+      TENANT_BOOTSTRAP_ADMIN_SECRET: ${TENANT_BOOTSTRAP_ADMIN_SECRET:?TENANT_BOOTSTRAP_ADMIN_SECRET required for operator tenant path}
+      STRIPE_API_KEY: ${STRIPE_API_KEY:?STRIPE_API_KEY must be a lane-local sentinel}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?STRIPE_WEBHOOK_SECRET must be a lane-local sentinel}
+      ONEX_ENVIRONMENT: lakshman
+      PYTHONUNBUFFERED: "1"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging: *logging-defaults
+    labels:
+      - "com.omninode.lane=lakshman"
+      - "com.omninode.ticket=OMN-15359"
+      - "com.omninode.service=onex-api"
+  projection-tenant-registry-writer:
+    !!merge <<: *runtime-base
+    container_name: omnimarket-lakshman-projection-tenant-registry-writer
+    command: ["python", "-m", "omnimarket.nodes.node_projection_tenant_registry.handlers.handler_tenant_registry_projection"]
+    depends_on:
+      cloud-migration:
+        condition: service_completed_successfully
+      migration-gate:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      redpanda-partition-cap:
+        condition: service_completed_successfully
+    environment:
+      OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD required}@postgres:5432/omnidash_analytics"
+      KAFKA_BROKERS: "redpanda:9092"
+      KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
+      KAFKA_CONSUMER_GROUP: "lakshman.omnimarket-projections.tenant-registry-writer.consume.v1"
+      OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY: /etc/onex/projection-runtime-binding.yaml
+      PROJECTION_RUNNER_HEALTH_PORT: "8098"
+      ONEX_ENVIRONMENT: lakshman
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./projection-runtime-binding/lakshman-tenant-registry-writer.yaml:/etc/onex/projection-runtime-binding.yaml:ro
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8098/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "com.omninode.lane=lakshman"
+      - "com.omninode.ticket=OMN-15359"
+      - "com.omninode.service=projection-tenant-registry-writer"
   # OMN-13772 / OMN-13581 defence-in-depth. This file is designed to be run
   # STANDALONE (`-f docker/docker-compose.lakshman.yml`), and no sanctioned tool
   # layers it — `scripts/deploy-runtime.sh` does not know this lane, deliberately
@@ -684,3 +824,5 @@ volumes:
     name: omninode-lakshman-effects-logs
   lakshman_effects_data:
     name: omninode-lakshman-effects-data
+  lakshman_cloud_migrations:
+    name: omnibase-infra-lakshman-cloud-migrations

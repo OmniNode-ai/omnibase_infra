@@ -395,3 +395,275 @@ def test_engine_api_is_used_when_the_socket_answers(
         assert not calllog.exists(), "docker CLI was invoked despite a live socket"
     finally:
         proc.kill()
+
+
+# ---------------------------------------------------------------------------
+# OMN-19959 — the memory observation, read in the same pass
+# ---------------------------------------------------------------------------
+
+_MEMORY_FIXTURES = (
+    Path(__file__).resolve().parent / "fixtures" / "lane_container_memory"
+)
+
+
+def _fake_engine() -> Any:
+    name = "fake_docker_engine_omn19959"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(
+            name, Path(__file__).resolve().parent / f"{name}.py"
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        # Registered before exec: a dataclass resolves its module by name.
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+def test_runner_prefixes_come_from_every_host_in_the_fleet_config(
+    inventory: Any,
+) -> None:
+    """The prefix set runner-monitor.sh reads, nested role pools included (OMN-19842)."""
+    import yaml
+
+    config = yaml.safe_load((_MEMORY_FIXTURES / "runner_fleet.yaml").read_text())
+    assert inventory.runner_prefixes_from_fleet_config(config) == [
+        "omninode-runner",
+        "omnipc2-ci-runner",
+        "omnipc2-customer-plane-runner",
+        "omnipc2-verify-runner",
+    ]
+
+
+def test_lane_projects_map_compose_projects_to_lane_names(inventory: Any) -> None:
+    import yaml
+
+    manifest = yaml.safe_load((_MEMORY_FIXTURES / "lane-manifest.yaml").read_text())
+    assert inventory.lane_projects_from_manifest(manifest) == {
+        "omnibase-infra-sim-202": "sim-202"
+    }
+
+
+def _memory_run(
+    tmp_path: Path, host: Any, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    out = tmp_path / "memory.json"
+    bin_dir = tmp_path / "journal-bin"
+    if not bin_dir.exists():
+        bin_dir.mkdir()
+        journal = tmp_path / "journal.txt"
+        if not journal.exists():
+            journal.write_text("")
+        _fake_engine().write_journalctl_stub(bin_dir, journal)
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}:{env['PATH']}"
+    env.update(host.env())
+    env["LANE_MANIFEST"] = str(_MEMORY_FIXTURES / "lane-manifest.yaml")
+    env["LANE_MEMORY_RUNNER_FLEET_CONFIG"] = str(_MEMORY_FIXTURES / "runner_fleet.yaml")
+    env.update(extra_env or {})
+    return subprocess.run(
+        [sys.executable, str(_INVENTORY_PATH), "--memory-out", str(out)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+        check=False,
+    )
+
+
+def _memory_host(tmp_path: Path, *, diag_readable: bool = True) -> Any:
+    fake = _fake_engine()
+    containers = [
+        fake.FakeContainer(
+            cid="a" * 64,
+            name="omnibase-infra-sim-202-redpanda",
+            pid=5101,
+            project=fake.SIM_PROJECT,
+        ),
+        fake.FakeContainer(
+            cid="b" * 64,
+            name="some-unrelated-container",
+            pid=5102,
+            project="not-a-lane",
+        ),
+        fake.FakeContainer(
+            cid="c" * 64,
+            name="omnipc2-ci-runner-13",
+            pid=5103,
+            project="omnipc2-ci-runner",
+            diag_readable=diag_readable,
+            worker_logs={
+                # Written after boot: read.
+                "Worker_20260928-185104-utc.log": (
+                    fake.worker_log(
+                        repo="OmniNode-ai/omnimarket",
+                        run_id="36454760449",
+                        started="2026-09-28 18:51:04Z",
+                        completed="2026-09-28 18:51:33Z",
+                    ),
+                    fake.BOOT_EPOCH + 3600,
+                ),
+                # Last written before this boot: not read.
+                "Worker_20260927-100000-utc.log": ("old\n", fake.BOOT_EPOCH - 3600),
+            },
+        ),
+    ]
+    return fake.FakeHost(tmp_path / "host", containers)
+
+
+def test_memory_observation_reads_lane_counters_and_runner_worker_logs(
+    tmp_path: Path,
+) -> None:
+    host = _memory_host(tmp_path)
+    try:
+        result = _memory_run(tmp_path, host)
+    finally:
+        host.close()
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["inventory_source"] == "engine_api", (
+        "the census envelope must still be printed unchanged"
+    )
+    observation = json.loads((tmp_path / "memory.json").read_text())
+    assert observation["host_boot_id"] == _fake_engine().BOOT_ID
+    assert observation["boot_time"] == "2026-09-28T12:10:00Z"
+    names = [c["container_name"] for c in observation["containers"]]
+    assert names == ["omnibase-infra-sim-202-redpanda"], (
+        "only lane containers carry a record; runners and unrelated containers do not"
+    )
+    redpanda = observation["containers"][0]
+    assert redpanda["lane"] == "sim-202"
+    assert redpanda["memory_max"].strip() == "max"
+    assert "oom_kill 0" in redpanda["memory_events"]
+    # The pre-boot log is not read: one run, parsed as the archive streamed.
+    assert observation["worker_runs"] == [
+        {
+            "repo": "OmniNode-ai/omnimarket",
+            "run_id": "36454760449",
+            "runner_name": "omnipc2-ci-runner-13",
+            "job_started_at": "2026-09-28T18:51:04.000000Z",
+            "job_completed_at": "2026-09-28T18:51:33.000000Z",
+        }
+    ]
+
+
+def test_an_unreadable_counter_exits_7_and_keeps_the_census_envelope(
+    tmp_path: Path, inventory: Any
+) -> None:
+    host = _memory_host(tmp_path)
+    try:
+        (host.sysfs_root / f"system.slice/docker-{'a' * 64}.scope/memory.peak").unlink()
+        result = _memory_run(tmp_path, host)
+    finally:
+        host.close()
+    assert result.returncode == inventory.EXIT_MEMORY_UNOBSERVABLE == 7
+    assert json.loads(result.stdout)["containers"], "the census envelope was lost"
+    assert "memory.peak" in result.stderr
+
+
+def test_an_unreadable_runner_diag_is_an_error_never_an_empty_list(
+    tmp_path: Path, inventory: Any
+) -> None:
+    host = _memory_host(tmp_path, diag_readable=False)
+    try:
+        result = _memory_run(tmp_path, host)
+    finally:
+        host.close()
+    assert result.returncode == inventory.EXIT_MEMORY_UNOBSERVABLE, result.stderr
+    assert "omnipc2-ci-runner-13" in result.stderr
+
+
+def test_an_absent_fleet_config_is_an_error_unless_declared_empty(
+    tmp_path: Path, inventory: Any
+) -> None:
+    host = _memory_host(tmp_path)
+    try:
+        absent = _memory_run(
+            tmp_path,
+            host,
+            {"LANE_MEMORY_RUNNER_FLEET_CONFIG": str(tmp_path / "no-such.yaml")},
+        )
+        declared = _memory_run(tmp_path, host, {"LANE_MEMORY_RUNNER_FLEET_CONFIG": ""})
+    finally:
+        host.close()
+    assert absent.returncode == inventory.EXIT_MEMORY_UNOBSERVABLE, absent.stderr
+    assert declared.returncode == 0, declared.stderr
+    observation = json.loads((tmp_path / "memory.json").read_text())
+    assert observation["worker_runs"] == []
+
+
+def test_journal_oom_kills_are_attributed_to_lane_containers_only(
+    tmp_path: Path,
+) -> None:
+    """A lane container's kill is named; a runner's belongs to the runner monitor."""
+    fake = _fake_engine()
+    host = _memory_host(tmp_path)
+    (tmp_path / "journal.txt").write_text(
+        fake.oom_kill_line("a" * 64, fake.BOOT_EPOCH + 60)
+        + fake.oom_kill_line("a" * 64, fake.BOOT_EPOCH + 61)
+        + fake.oom_kill_line("c" * 64, fake.BOOT_EPOCH + 62, "omnirunners.slice")
+    )
+    try:
+        result = _memory_run(tmp_path, host)
+    finally:
+        host.close()
+    assert result.returncode == 0, result.stderr
+    observation = json.loads((tmp_path / "memory.json").read_text())
+    assert observation["journal_oom_kills"] == [
+        {
+            "container_id": "a" * 64,
+            "container_name": "omnibase-infra-sim-202-redpanda",
+            "lane": "sim-202",
+            "count": 2,
+        }
+    ]
+
+
+def test_an_unreadable_kernel_journal_is_an_error_never_zero_kills(
+    tmp_path: Path, inventory: Any
+) -> None:
+    """A user without journal access reads nothing and exit 0; that is refused."""
+    host = _memory_host(tmp_path)
+    bin_dir = tmp_path / "journal-bin"
+    bin_dir.mkdir()
+    blind = bin_dir / "journalctl"
+    blind.write_text("#!/usr/bin/env bash\nexit 0\n")
+    blind.chmod(0o755)
+    try:
+        result = _memory_run(tmp_path, host)
+    finally:
+        host.close()
+    assert result.returncode == inventory.EXIT_MEMORY_UNOBSERVABLE, result.stderr
+    assert "kernel journal reads empty" in result.stderr
+
+
+def test_the_journal_names_a_container_under_either_cgroup_driver(
+    inventory: Any,
+) -> None:
+    systemd = "task_memcg=/system.slice/docker-" + "a" * 64 + ".scope,task=python"
+    cgroupfs = "task_memcg=/docker/" + "b" * 64 + ",task=python"
+    assert inventory._OOM_KILL_MEMCG.search(systemd).group(1) == "a" * 64
+    assert inventory._OOM_KILL_MEMCG.search(cgroupfs).group(1) == "b" * 64
+
+
+def test_a_completed_log_naming_no_job_is_reported_not_fatal(tmp_path: Path) -> None:
+    """Failing the pass would hold the window open and re-read the log forever."""
+    fake = _fake_engine()
+    host = _memory_host(tmp_path)
+    host.containers[2].worker_logs["Worker_20260928-183000-utc.log"] = (
+        "[2026-09-28 18:30:00Z INFO HostContext] start\n"
+        "[2026-09-28 18:31:00Z INFO Worker] Job completed.\n",
+        fake.BOOT_EPOCH + 7200,
+    )
+    try:
+        result = _memory_run(tmp_path, host)
+    finally:
+        host.close()
+    assert result.returncode == 0, result.stderr
+    observation = json.loads((tmp_path / "memory.json").read_text())
+    assert observation["unnamed_worker_logs"] == [
+        {
+            "runner_name": "omnipc2-ci-runner-13",
+            "log_name": "Worker_20260928-183000-utc.log",
+        }
+    ]
+    assert len(observation["worker_runs"]) == 1
