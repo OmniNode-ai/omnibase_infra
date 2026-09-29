@@ -75,6 +75,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - board_probe_results
               - ci_attempt_outcome
               - claude_agent_spans
               - claude_hook_events

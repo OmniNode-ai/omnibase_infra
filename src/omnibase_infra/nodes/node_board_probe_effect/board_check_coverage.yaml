@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# C28 remains opt-in for lab proof; only executable checks belong here.
+# Metadata keeps this adjacent YAML valid under the node contract scanner.
+contract_version: {major: 1, minor: 0, patch: 0}
+node_type: EFFECT_GENERIC
+description: Executable board-check coverage of board and lab-proof criteria.
+coverage:
+  - check_id: forwarder_refused_topic
+    surface_class: lab_hardware
+    criteria:
+      - S5
+      - lab_proof.forwarder_refused_topic
+  - check_id: consumer_flow
+    surface_class: lab_hardware
+    criteria:
+      - C28
