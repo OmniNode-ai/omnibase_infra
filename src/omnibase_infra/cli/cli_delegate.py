@@ -144,6 +144,10 @@ from omnibase_infra.cli.delegate_caller import (
     DELEGATE_CALLER_LANE_METADATA_KEY,
     resolve_delegate_caller,
 )
+from omnibase_infra.cli.delegate_env_config_overrides import (
+    env_config_overrides,
+    format_override_line,
+)
 from omnibase_infra.cli.delegate_lane import (
     DelegateLaneSelectionError,
     resolve_lane_target,
@@ -172,6 +176,9 @@ from omnibase_infra.cli.delegate_terminal_resolver import (
 )
 from omnibase_infra.cli.model_delegate_caller import ModelDelegateCaller
 from omnibase_infra.cli.model_delegate_default_bus import ModelDelegateDefaultBus
+from omnibase_infra.cli.model_delegate_env_config_override import (
+    ModelDelegateEnvConfigOverride,
+)
 from omnibase_infra.cli.model_delegate_locus_decision import (
     ModelDelegateLocusDecision,
 )
@@ -500,6 +507,15 @@ def _drift_guard_receipt_block(
     return {"drift_guard": drift_guard.as_receipt_fields()}
 
 
+def _config_overrides_receipt_block(
+    config_overrides: tuple[ModelDelegateEnvConfigOverride, ...],
+) -> dict[str, object]:
+    """Include environment override provenance only when overrides are present."""
+    if not config_overrides:
+        return {}
+    return {"config_overrides": [o.model_dump(mode="json") for o in config_overrides]}
+
+
 def _budget_outcome_receipt_block(result: ModelDelegateTerminal) -> dict[str, object]:
     """Copy only budget facts the terminal actually declared."""
     if result.budget_evidence is not None:
@@ -773,6 +789,7 @@ def _write_unattributed_run_files(
     task_type_resolution: str,
     addressing: ModelDelegateRunAddressing,
     drift_guard: ProtocolDriftGuardVerdict | None = None,
+    config_overrides: tuple[ModelDelegateEnvConfigOverride, ...] = (),
     requested_backend_id: str | None = None,
 ) -> None:
     """Persist a terminally-failed delegation that attributed no route.
@@ -828,6 +845,7 @@ def _write_unattributed_run_files(
                 # exactly why it cannot be inferred from anything else here.
                 **addressing.as_run_file_fields(),
                 **_drift_guard_receipt_block(drift_guard),
+                **_config_overrides_receipt_block(config_overrides),
             },
             indent=2,
             sort_keys=True,
@@ -1042,6 +1060,7 @@ def _write_local_run_files(
     addressing: ModelDelegateRunAddressing,
     task_type_resolution: str | None = None,
     drift_guard: ProtocolDriftGuardVerdict | None = None,
+    config_overrides: tuple[ModelDelegateEnvConfigOverride, ...] = (),
     require_budget_evidence: bool = False,
     require_contract_evidence: bool = False,
     requested_backend_id: str | None = None,
@@ -1163,6 +1182,7 @@ def _write_local_run_files(
             task_type_resolution=task_type_resolution,
             addressing=addressing,
             drift_guard=drift_guard,
+            config_overrides=config_overrides,
             requested_backend_id=requested_backend_id,
         )
         return
@@ -1219,6 +1239,7 @@ def _write_local_run_files(
                 # neither can be read against the other.
                 **addressing.as_run_file_fields(),
                 **_drift_guard_receipt_block(drift_guard),
+                **_config_overrides_receipt_block(config_overrides),
             },
             indent=2,
             sort_keys=True,
@@ -2392,6 +2413,10 @@ def run_delegate(
     except OmnimarketDriftError as exc:
         raise click.ClickException(str(exc)) from exc
 
+    overrides = env_config_overrides(os.environ)
+    for override in overrides:
+        click.echo(format_override_line(override), err=True)
+
     # OMN-18305: resolve the class from the CONTRACT, and say out loud which
     # class was chosen and how. A class chosen silently is how a prose task
     # ended up filed as `test`, with the prose quality checks disarmed and the
@@ -2746,6 +2771,7 @@ def run_delegate(
                         task_type_resolution=resolution,
                         addressing=addressing,
                         drift_guard=drift_guard_check,
+                        config_overrides=overrides,
                         # OMN-18956 residual: this is the SECOND site that
                         # arms the same refusal, and the first fix moved only
                         # the validator. The writer runs inside the receipt

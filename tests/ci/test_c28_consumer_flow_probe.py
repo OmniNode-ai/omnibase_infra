@@ -551,7 +551,8 @@ def test_the_workflow_runs_the_probe_beside_the_resolved_lane() -> None:
     assert "schedule" in triggers and "workflow_dispatch" in triggers
     assert "pull_request" not in triggers
     runs = "\n".join(str(s.get("run", "")) for s in job["steps"])
-    assert "scripts/ci/c28_consumer_flow_probe.py" in runs
+    assert "onex node node_board_probe_effect" in runs
+    assert "scripts/ci/c28_consumer_flow_probe.py" not in runs
     uploads = [
         s
         for s in job["steps"]

@@ -860,3 +860,9 @@ fenced_node_migrations:
     ticket: "OMN-18987"
   - id: "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql"
     ticket: "OMN-18987"
+  # OMN-19790: 0000 creates delegation_eval_items and enables FORCE ROW LEVEL
+  # SECURITY on it in the same file. It is fenced on arrival; its release is a
+  # separate operator-sequenced step that needs an operator ruling. No lane
+  # release is added here.
+  - id: "node:node_projection_delegation_eval:0000_create_delegation_eval_items.sql"
+    ticket: "OMN-19790"

@@ -22,7 +22,7 @@ _CLASSES = _ROOT / "config" / "migration_classes.yaml"
 _CREATE = "0000_create_delegation_eval_items.sql"
 _GRANT = "0001_grant_tenant_projection_writer_delegation_eval_items.sql"
 _SHA256 = {
-    _CREATE: "cc2f88c63762bc818e60f558fa7a91a0c7132b5d3c67700db5b354ed63782246",
+    _CREATE: "d874f5bef8f205b5411b361cef815a9e6e37a22f2a3aae5a78db25b514162855",
     _GRANT: "d363bc416cf0ca25062242a6b0343818e2d7e4c442167b3e0198dd71743c2688",
 }
 _TABLE = "delegation_eval_items"

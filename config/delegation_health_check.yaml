@@ -4,14 +4,21 @@
 # OMN-19451 -- the delegation-health check on runtime PRs.
 #
 # `sources` are the recurring measurements the check reads, each through the
-# workflow-verdict reader in scripts/ci/lab_pass_receipt.py (OMN-18866).
-# `repos` is the per-repository rollout state. A repository is in SHADOW while
-# `required` is false: the check runs and reports but is registered nowhere as a
-# required context. `required: true` is legal only once `shadow_started_at` is
-# at least `shadow_days_required` days old (AC3), and only omnibase_infra's
-# CI Summary registration can make it required;
-# scripts/ci/delegation_health_check.py `validate_rollout` is the falsifier.
-shadow_days_required: 7
+# workflow-verdict reader in scripts/ci/lab_pass_receipt.py (OMN-18866). A red,
+# stale, absent or unreadable newest run of any source fails the check on a
+# runtime-affecting PR, and the CI Summary default-deny external sweep turns that
+# failure into a blocked merge. There is no shadow or advisory state: every check
+# acts or blocks (operator ruling 2026-09-29T12:02:35Z, OMN-19998).
+#
+# WHAT A SOURCE MUST MEASURE. Only the delegation path this milestone ships: the
+# lab regression nightly and the M4 verdicts. M4 is LOCAL delegation (operator
+# ruling 2026-09-22T20:35:26Z, OMN-19174); the cloud-plane criteria C8, C9 and C10
+# moved to M4.5 (omninode_infra tools/beta_board/beta_board_data.py lists C9 in
+# bucket 'cloud'), and staging recovery is on hold (operator ruling
+# 2026-09-28T17:47:08Z). So `m4-customer-pass-verdict.yml`, which grades the C9
+# walk against the staging plane at dev.api.omninode.ai, is not a source here: a
+# staging outage no runtime PR can repair would otherwise block every runtime PR.
+# It returns to this list with M4.5.
 sources:
   - name: delegation-regression-nightly
     repo: OmniNode-ai/omnimarket
@@ -20,22 +27,9 @@ sources:
     max_age_hours: 26
     events: [schedule, workflow_dispatch]
     dispatch_title_contains: "lane=stability-test"
-  - name: m4-customer-pass-verdict
-    repo: OmniNode-ai/omninode_infra
-    workflow: m4-customer-pass-verdict.yml
-    branch: dev
-    max_age_hours: 8
-    events: [schedule]
   - name: m4-c17-customer-surface-verdict
     repo: OmniNode-ai/omninode_infra
     workflow: m4-c17-customer-surface-verdict.yml
     branch: dev
     max_age_hours: 8
     events: [schedule]
-repos:
-  omnibase_infra:
-    shadow_started_at: "2026-09-29"
-    required: false
-  omnimarket:
-    shadow_started_at: "2026-09-29"
-    required: false
