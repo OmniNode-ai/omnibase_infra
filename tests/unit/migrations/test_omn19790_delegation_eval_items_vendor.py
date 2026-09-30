@@ -25,7 +25,7 @@ _FORCE_RLS = "0002_force_rls_delegation_eval_items.sql"
 _SHA256 = {
     _CREATE: "133b6b8746404b36069778132e13c0f01f1edb053024c3cae4c9765ab368dad2",
     _GRANT: "d363bc416cf0ca25062242a6b0343818e2d7e4c442167b3e0198dd71743c2688",
-    _FORCE_RLS: "241d925141279f8c83670a1118f966aa8830c2a3e8b3a73c267b8b00ed3c6277",
+    _FORCE_RLS: "a317f7363fe8abbf0dbd380598fa6d694534b1de8998fc38c70d75d208ec2eca",
 }
 _TABLE = "delegation_eval_items"
 _CURSOR_SEQUENCE = "delegation_eval_items_projection_cursor_seq"
