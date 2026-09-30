@@ -78,8 +78,20 @@ class ModelDelegateRunAddressing(BaseModel):
         ),
     )
 
+    transport_authority: str | None = Field(
+        default=None,
+        description=(
+            "Which authority chose the transport and lane (OMN-19973): "
+            "``explicit --bus <bus>`` when the flag was typed, otherwise the "
+            "provenance the config authority returned -- e.g. the developer "
+            "lane binding in ``~/.onex/config.yaml``, a workspace runtime "
+            "config, or the shipped tier-0 default. Lets a reader tell a "
+            "profile-bound run from one whose flags chose the lane."
+        ),
+    )
+
     def as_run_file_fields(self) -> dict[str, str | None]:
-        """The four keys, as they appear in ``run.json`` and ``receipt.json``.
+        """The five keys, as they appear in ``run.json`` and ``receipt.json``.
 
         One spelling for both files. Two writers that each built their own
         dict is how the tier came to be called ``lane`` in one file and
@@ -90,4 +102,5 @@ class ModelDelegateRunAddressing(BaseModel):
             "bus": self.bus,
             "lane": self.lane,
             "dispatch_target": self.dispatch_target,
+            "transport_authority": self.transport_authority,
         }
