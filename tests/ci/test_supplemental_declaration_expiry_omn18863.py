@@ -108,6 +108,8 @@ _PINNED_CONTRACTS = _pinned_contracts_root(_PROOF_DEPENDENCIES)
 _INTERIM_ENTRIES: dict[str, str] = {
     "delegation_eval_items": "omnimarket#3059",
     "provider_quota_state": "omnimarket#3134",
+    "delegation_eval_item_verdicts": "omnimarket#3127",
+    "delegation_eval_results": "omnimarket#3127",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
 }
 
