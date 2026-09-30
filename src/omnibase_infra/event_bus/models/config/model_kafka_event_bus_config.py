@@ -518,6 +518,35 @@ class ModelKafkaEventBusConfig(BaseModel):
         ge=1,
         le=16,
     )
+    consumer_shutdown_drain_seconds: float = Field(
+        default=10.0,
+        description=(
+            "OMN-20117. Seconds close() waits for dispatches already running "
+            "to finish, with the producer still open, before it cancels them. "
+            "A handler that finishes inside this window publishes its terminal "
+            "and has its record committed; one that does not is cancelled. "
+            "Sized to fit, together with consumer_shutdown_cancel_grace_seconds, "
+            "inside what is left of the runtime's 30s shutdown grace once the "
+            "handler pools have stopped, and far inside the 90s container "
+            "stop_grace_period of every runtime service."
+        ),
+        ge=0.0,
+        le=300.0,
+    )
+    consumer_shutdown_cancel_grace_seconds: float = Field(
+        default=3.0,
+        description=(
+            "OMN-20117. Seconds close() waits, after cancelling the dispatches "
+            "still running at the end of consumer_shutdown_drain_seconds, for "
+            "them to settle. A handler that answers its cancellation with a "
+            "typed failure terminal publishes it here, while the producer is "
+            "still open, so its caller is told rather than left to time out. A "
+            "cancelled dispatch that returns nothing is never committed past and "
+            "is redelivered to the next consumer."
+        ),
+        ge=0.0,
+        le=60.0,
+    )
 
     # Kafka producer settings
     acks: EnumKafkaAcks = Field(
