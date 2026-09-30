@@ -111,6 +111,14 @@ ALLOWED_EMPTY_DEFAULTS = {
     # `:?` form would wedge compose render on every lane that does not run
     # the webhook door.
     "GITHUB_WEBHOOK_SECRET",
+    # OMN-20173: the GLM route refs are optional. The Coding Plan entitlement
+    # covers Claude Code only, so no lane may default to it; a system caller
+    # supplies a separately entitled endpoint explicitly. Empty is NOT a silent
+    # disable: the routing report shows the GLM refs as unresolved and the
+    # inference effect's resolver raises on them; nothing substitutes a default.
+    "LLM_GLM_URL",
+    "LLM_GLM_MODEL_NAME",
+    "LLM_GLM_API_KEY",
 }
 
 
