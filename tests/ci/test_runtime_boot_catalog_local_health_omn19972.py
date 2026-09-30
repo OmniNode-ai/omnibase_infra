@@ -52,7 +52,7 @@ case "$*" in
   *RestartCount*) echo 0 ;;
   *Health.Status*)
     if [ "$container" = "$STUB_UNHEALTHY" ]; then echo unhealthy;
-    elif [ "$container" = "$STUB_STARTING" ]; then echo starting;
+    elif [[ " $STUB_STARTING " == *" $container "* ]]; then echo starting;
     else echo healthy; fi ;;
   *) echo "stub docker: unexpected inspect $*" >&2; exit 2 ;;
 esac
@@ -76,11 +76,15 @@ def _write_executable(path: Path, text: str) -> None:
 
 def _run_step(
     tmp_path: Path, *, unhealthy: str = "", missing: str = "", starting: str = ""
-) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+) -> tuple[subprocess.CompletedProcess[str], list[str], int]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     _write_executable(bin_dir / "docker", _DOCKER_STUB)
-    _write_executable(bin_dir / "sleep", "#!/usr/bin/env bash\nexit 0\n")
+    sleeps = tmp_path / "sleeps.txt"
+    sleeps.write_text("", encoding="utf-8")
+    _write_executable(
+        bin_dir / "sleep", f'#!/usr/bin/env bash\necho "$1" >> {sleeps}\nexit 0\n'
+    )
     script = tmp_path / "step.sh"
     script.write_text(_step_script(), encoding="utf-8")
     seen = tmp_path / "seen.txt"
@@ -93,7 +97,7 @@ def _run_step(
         "STUB_SEEN": str(seen),
         "STUB_UNHEALTHY": f"{_PROJECT}-{unhealthy}" if unhealthy else "",
         "STUB_MISSING": f"{_PROJECT}-{missing}" if missing else "",
-        "STUB_STARTING": f"{_PROJECT}-{starting}" if starting else "",
+        "STUB_STARTING": " ".join(f"{_PROJECT}-{s}" for s in starting.split()),
     }
     # GitHub runs a `run:` block as `bash -e {0}`, from the repository root.
     result = subprocess.run(
@@ -105,7 +109,8 @@ def _run_step(
         timeout=180,
         check=False,
     )
-    return result, seen.read_text(encoding="utf-8").split()
+    polls = len(sleeps.read_text(encoding="utf-8").split())
+    return result, seen.read_text(encoding="utf-8").split(), polls
 
 
 def _show(result: subprocess.CompletedProcess[str]) -> str:
@@ -113,25 +118,38 @@ def _show(result: subprocess.CompletedProcess[str]) -> str:
 
 
 def test_step_passes_and_checks_every_added_service(tmp_path: Path) -> None:
-    result, seen = _run_step(tmp_path)
+    result, seen, _ = _run_step(tmp_path)
     assert result.returncode == 0, _show(result)
     for svc in _ADDED:
         assert f"{_PROJECT}-{svc}" in seen, (svc, seen)
 
 
 def test_step_fails_when_an_added_service_is_unhealthy(tmp_path: Path) -> None:
-    result, _ = _run_step(tmp_path, unhealthy="projection-api")
+    result, _, _ = _run_step(tmp_path, unhealthy="projection-api")
     assert result.returncode == 1, _show(result)
     assert "projection-api" in result.stdout
 
 
 def test_step_fails_when_an_added_service_never_started(tmp_path: Path) -> None:
-    result, _ = _run_step(tmp_path, missing="omnimarket-projection-llm-cost")
+    result, _, _ = _run_step(tmp_path, missing="omnimarket-projection-llm-cost")
     assert result.returncode == 1, _show(result)
     assert "omnimarket-projection-llm-cost" in result.stdout
 
 
 def test_step_fails_when_an_added_service_never_leaves_starting(tmp_path: Path) -> None:
-    result, _ = _run_step(tmp_path, starting="consumer-health-projection")
+    result, _, _ = _run_step(tmp_path, starting="consumer-health-projection")
     assert result.returncode == 1, _show(result)
     assert "consumer-health-projection" in result.stdout
+
+
+def test_two_stuck_services_share_one_wait_budget(tmp_path: Path) -> None:
+    """Hostile review (both models, two passes): each stuck service waited its own
+    90 x 10 s, so N stuck services cost N x 15 minutes of shared CI. One budget of
+    90 polls now covers the whole step."""
+    result, _, polls = _run_step(
+        tmp_path, starting="consumer-health-projection projection-api"
+    )
+    assert result.returncode == 1, _show(result)
+    assert "consumer-health-projection" in result.stdout
+    assert "projection-api" in result.stdout
+    assert polls <= 90, polls

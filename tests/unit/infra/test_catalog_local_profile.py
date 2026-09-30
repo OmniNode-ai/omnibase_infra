@@ -621,3 +621,107 @@ def test_two_bundles_overriding_one_service_port_differently_are_refused(
     bundles_file.write_text(yaml.safe_dump(bundles, sort_keys=False))
     with pytest.raises(ValueError, match=r"[Pp]ort override conflict"):
         CatalogResolver(catalog_dir=str(catalog)).resolve(["local", "other-laptop"])
+
+
+# The resolver's other override guards (hostile review, both models: each was
+# untested). Each test adds fixture bundles to a copy of the real catalog.
+
+
+def _catalog_with(tmp_path: Path, extra: dict[str, object]) -> CatalogResolver:
+    import shutil
+
+    catalog = tmp_path / "catalog"
+    shutil.copytree(_CATALOG_DIR, catalog)
+    bundles_file = catalog / "bundles.yaml"
+    bundles = yaml.safe_load(bundles_file.read_text())
+    bundles.update(extra)
+    bundles_file.write_text(yaml.safe_dump(bundles, sort_keys=False))
+    return CatalogResolver(catalog_dir=str(catalog))
+
+
+def test_two_bundles_waiting_differently_on_one_dependency_are_refused(
+    tmp_path: Path,
+) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "other-laptop": {
+                "description": "fixture: waits on the kernel as merely started",
+                "services": ["projection-api"],
+                "extra_depends_on": {
+                    "projection-api": {"omninode-runtime": "service_started"}
+                },
+            }
+        },
+    )
+    with pytest.raises(ValueError, match="Extra dependency conflict"):
+        resolver.resolve(["local", "other-laptop"])
+
+
+def test_extra_dependency_on_a_service_the_stack_does_not_run_is_refused(
+    tmp_path: Path,
+) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "probe": {
+                "description": "fixture: redpanda alone, waiting on postgres",
+                "services": ["redpanda"],
+                "extra_depends_on": {"redpanda": {"postgres": "service_healthy"}},
+            }
+        },
+    )
+    with pytest.raises(ValueError, match="Extra dependency names 'postgres'"):
+        resolver.resolve(["probe"])
+
+
+def test_port_override_for_a_service_the_stack_does_not_run_is_refused(
+    tmp_path: Path,
+) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "probe": {
+                "description": "fixture: overrides a service it does not run",
+                "services": ["redpanda"],
+                "port_overrides": {"projection-api": 3999},
+            }
+        },
+    )
+    with pytest.raises(ValueError, match="Port override for 'projection-api'"):
+        resolver.resolve(["probe"])
+
+
+def test_port_override_for_a_service_that_publishes_no_port_is_refused(
+    tmp_path: Path,
+) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "probe": {
+                "description": "fixture: overrides a writer that publishes no port",
+                "services": ["omnimarket-projection-llm-cost"],
+                "port_overrides": {"omnimarket-projection-llm-cost": 3999},
+            }
+        },
+    )
+    with pytest.raises(ValueError, match="publishes no port"):
+        resolver.resolve(["probe"])
+
+
+def test_unknown_dependency_condition_is_refused(tmp_path: Path) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "probe": {
+                "description": "fixture: a condition compose does not know",
+                "services": ["projection-api"],
+                "extra_depends_on": {"projection-api": {"redpanda": "service_happy"}},
+            }
+        },
+    )
+    # Resolved alone, so no other bundle's condition can conflict with it: only
+    # the condition check can refuse (with "local", the conflict guard answered
+    # first and this test passed with the condition check removed).
+    with pytest.raises(ValueError, match="'service_happy' is not a valid"):
+        resolver.resolve(["probe"])

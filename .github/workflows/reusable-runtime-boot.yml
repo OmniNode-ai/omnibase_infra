@@ -1094,10 +1094,15 @@ jobs:
             exit 1
           fi
           failed=()
+          # One budget of 90 polls x 10 s for the whole step, not per service: the
+          # services boot in parallel, so a service still starting when the budget
+          # is spent gets one last look and fails, instead of N stuck services
+          # costing N x 15 minutes of CI.
+          polls_left=90
           for svc in $services; do
             container="${LOCAL_PROJECT}-${svc}"
             status=""
-            for _ in $(seq 1 90); do
+            while :; do
               if ! status="$(docker inspect --format '{{.State.Health.Status}}' "$container" 2>/dev/null)"; then
                 status="missing"
                 break
@@ -1105,6 +1110,10 @@ jobs:
               if [ "$status" = "healthy" ] || [ "$status" = "unhealthy" ]; then
                 break
               fi
+              if [ "$polls_left" -le 0 ]; then
+                break
+              fi
+              polls_left=$((polls_left - 1))
               sleep 10
             done
             restarts="$(docker inspect --format '{{.RestartCount}}' "$container" 2>/dev/null || echo "?")"
