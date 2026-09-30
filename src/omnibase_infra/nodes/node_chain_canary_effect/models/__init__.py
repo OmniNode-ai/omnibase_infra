@@ -15,10 +15,14 @@ from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_req
 from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_result import (
     ModelChainCanaryResult,
 )
+from omnibase_infra.nodes.node_chain_canary_effect.models.model_chain_canary_result_event import (
+    chain_canary_result_event_from,
+)
 
 __all__ = [
     "EnumChainCanaryVerdict",
     "EnumQuarantineCheckStatus",
     "ModelChainCanaryRequest",
     "ModelChainCanaryResult",
+    "chain_canary_result_event_from",
 ]
