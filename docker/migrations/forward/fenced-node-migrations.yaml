@@ -860,17 +860,10 @@ fenced_node_migrations:
     ticket: "OMN-18987"
   - id: "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql"
     ticket: "OMN-18987"
-  # OMN-19790: 0000 creates delegation_eval_items and enables FORCE ROW LEVEL
-  # SECURITY on it in the same file. It is fenced on arrival; its release is a
-  # separate operator-sequenced step that needs an operator ruling. No lane
-  # release is added here.
-  - id: "node:node_projection_delegation_eval:0000_create_delegation_eval_items.sql"
-    ticket: "OMN-19790"
-  # OMN-19790: 0001 grants tenant_projection_writer on the table 0000 creates.
-  # It fences on arrival for the same reason and on the same terms as 0000: it
-  # is dead without 0000 (GRANT ... ON public.delegation_eval_items aborts
-  # with "relation does not exist" on any lane where 0000 has not run), so it
-  # cannot be released ahead of, or independently from, 0000's own
-  # operator-sequenced release.
-  - id: "node:node_projection_delegation_eval:0001_grant_tenant_projection_writer_delegation_eval_items.sql"
+  # OMN-19790: 0002 enables FORCE ROW LEVEL SECURITY on delegation_eval_items.
+  # It is split out of 0000 (the create) and fenced on arrival, so 0000 and the
+  # 0001 grants apply on a fresh database while only the FORCE step waits. Its
+  # release is a separate operator-sequenced step that needs an operator
+  # ruling. No lane release is added here.
+  - id: "node:node_projection_delegation_eval:0002_force_rls_delegation_eval_items.sql"
     ticket: "OMN-19790"

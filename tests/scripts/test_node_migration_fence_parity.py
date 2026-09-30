@@ -515,17 +515,15 @@ FENCED_OMN18987_IDS = (
     "node:node_projection_delegation:0043z_preflight_delegation_shadow_comparisons.sql",
     "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql",
 )
-# OMN-19790: delegation_eval_items enables FORCE ROW LEVEL SECURITY in its
-# create migration, so it is fenced on arrival. Its release is a separate
-# operator-sequenced step that needs an operator ruling; this fence addition
-# carries no lane release. 0001 (the tenant_projection_writer grant) fences
-# alongside it: GRANT ... ON public.delegation_eval_items aborts with
-# "relation does not exist" on any lane where 0000 has not run, so 0001 cannot
-# be released ahead of, or independently from, 0000.
+# OMN-19790: delegation_eval_items' FORCE ROW LEVEL SECURITY lives in its own
+# 0002 migration (split out of the create, the same split node_hook_event_capture
+# 0002 used), so only that step is fenced on arrival. 0000 (the create) and 0001
+# (the tenant_projection_writer grant) apply on every lane; a fence on either
+# would skip the CREATE TABLE or apply the grant against a missing relation. The
+# release of 0002 is a separate operator-sequenced step that needs an operator
+# ruling; this fence addition carries no lane release.
 FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS = (
-    "node:node_projection_delegation_eval:0000_create_delegation_eval_items.sql",
-    "node:node_projection_delegation_eval:"
-    "0001_grant_tenant_projection_writer_delegation_eval_items.sql",
+    "node:node_projection_delegation_eval:0002_force_rls_delegation_eval_items.sql",
 )
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS

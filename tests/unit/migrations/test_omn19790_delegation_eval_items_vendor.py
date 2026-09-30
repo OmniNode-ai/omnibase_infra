@@ -21,9 +21,11 @@ _MANIFEST = _FORWARD / "_ledger" / "application-migrations.tsv"
 _CLASSES = _ROOT / "config" / "migration_classes.yaml"
 _CREATE = "0000_create_delegation_eval_items.sql"
 _GRANT = "0001_grant_tenant_projection_writer_delegation_eval_items.sql"
+_FORCE_RLS = "0002_force_rls_delegation_eval_items.sql"
 _SHA256 = {
-    _CREATE: "d874f5bef8f205b5411b361cef815a9e6e37a22f2a3aae5a78db25b514162855",
+    _CREATE: "133b6b8746404b36069778132e13c0f01f1edb053024c3cae4c9765ab368dad2",
     _GRANT: "d363bc416cf0ca25062242a6b0343818e2d7e4c442167b3e0198dd71743c2688",
+    _FORCE_RLS: "241d925141279f8c83670a1118f966aa8830c2a3e8b3a73c267b8b00ed3c6277",
 }
 _TABLE = "delegation_eval_items"
 _CURSOR_SEQUENCE = "delegation_eval_items_projection_cursor_seq"
@@ -37,7 +39,7 @@ def _statements(filename: str) -> str:
     )
 
 
-@pytest.mark.parametrize("filename", [_CREATE, _GRANT])
+@pytest.mark.parametrize("filename", [_CREATE, _GRANT, _FORCE_RLS])
 def test_vendor_bytes_and_manifest_binding_are_exact(filename: str) -> None:
     artifact_path = f"nodes/{_NODE}/{filename}"
     assert (
@@ -63,15 +65,18 @@ def test_migration_classes_match_the_classifier() -> None:
     classes = yaml.safe_load(_CLASSES.read_text(encoding="utf-8"))["migrations"]
     assert classes[f"forward/nodes/{_NODE}/{_CREATE}"] == "forward-only"
     assert classes[f"forward/nodes/{_NODE}/{_GRANT}"] == "expand-only"
+    assert classes[f"forward/nodes/{_NODE}/{_FORCE_RLS}"] == "forward-only"
 
 
 def test_table_rls_and_exact_grants_are_present() -> None:
     create = _statements(_CREATE)
     grants = _statements(_GRANT)
+    force = _statements(_FORCE_RLS)
     assert re.search(rf"CREATE TABLE IF NOT EXISTS public\.{_TABLE}\s*\(", create)
     assert "projection_cursor BIGSERIAL" in create
     assert f"ALTER TABLE public.{_TABLE} ENABLE ROW LEVEL SECURITY;" in create
-    assert f"ALTER TABLE public.{_TABLE} FORCE ROW LEVEL SECURITY;" in create
+    assert f"ALTER TABLE public.{_TABLE} FORCE ROW LEVEL SECURITY;" not in create
+    assert f"ALTER TABLE public.{_TABLE} FORCE ROW LEVEL SECURITY;" in force
     assert re.search(
         rf"CREATE POLICY tenant_isolation ON public\.{_TABLE}\s+"
         r"FOR ALL\s+USING \(tenant_id = current_setting\('app.tenant_id', true\)::uuid\)\s+"
@@ -100,7 +105,7 @@ def test_table_rls_and_exact_grants_are_present() -> None:
         )
 
 
-@pytest.mark.parametrize("filename", [_CREATE, _GRANT])
+@pytest.mark.parametrize("filename", [_CREATE, _GRANT, _FORCE_RLS])
 @pytest.mark.parametrize(
     "profile", ["local", "onex-dev", "onex-prod", "stability-test"]
 )
