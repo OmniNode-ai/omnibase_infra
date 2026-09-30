@@ -325,6 +325,13 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # proof: the expiry module went red on the bot's pin-advance pull request
     # naming all seven, and the deletion rode that pull request.
     #
+    # OMN-19937 added board_probe_results, and it was DELETED here by the pin
+    # advance to fbf4f45c3a0c, which carries omnimarket#3061 -- the retiring
+    # pull request the entry named in its own comment. The node
+    # node_projection_board_probe_results now declares the relation with the
+    # same schema, access (read_write) and role (board_probe_results) the
+    # bridge carried. Same mechanism and same proof as the entries above.
+    #
     # If you add a bridge here for a new infra-first vendoring, add it to that
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
@@ -352,28 +359,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="demo_readiness",
-        ),
-    ),
-    # OMN-19937: infra vendors board_probe_results before omnimarket#3061
-    # lands its node contract. This bridge keeps the shipped grants derivable
-    # until the pin advances; the expiry test then requires its removal.
-    # Retired by: omnimarket#3061 merging and the pin advancing past it.
-    ContractTableDeclaration(
-        node="legacy_migration:board_probe_results",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_board_probe_results/"
-            "0000_create_board_probe_results.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="board_probe_results",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_board_probe_results/"
-                "0000_create_board_probe_results.sql"
-            ),
-            access="read_write",
-            role="board_probe_results",
         ),
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to
