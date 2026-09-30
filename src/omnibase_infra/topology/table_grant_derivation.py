@@ -411,6 +411,28 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="lab_proof_receipts",
         ),
     ),
+    # OMN-19999: infra vendors pr_state before omnimarket#3054 lands its node
+    # contract. This bridge keeps the shipped grants derivable until the pin
+    # advances; the expiry test then requires its removal.
+    # Retired by: omnimarket#3054 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:pr_state",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_pr_state/"
+            "0000_create_pr_state.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="pr_state",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_pr_state/"
+                "0000_create_pr_state.sql"
+            ),
+            access="read_write",
+            role="pr_state",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
