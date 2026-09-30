@@ -518,9 +518,14 @@ FENCED_OMN18987_IDS = (
 # OMN-19790: delegation_eval_items enables FORCE ROW LEVEL SECURITY in its
 # create migration, so it is fenced on arrival. Its release is a separate
 # operator-sequenced step that needs an operator ruling; this fence addition
-# carries no lane release.
+# carries no lane release. 0001 (the tenant_projection_writer grant) fences
+# alongside it: GRANT ... ON public.delegation_eval_items aborts with
+# "relation does not exist" on any lane where 0000 has not run, so 0001 cannot
+# be released ahead of, or independently from, 0000.
 FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS = (
     "node:node_projection_delegation_eval:0000_create_delegation_eval_items.sql",
+    "node:node_projection_delegation_eval:"
+    "0001_grant_tenant_projection_writer_delegation_eval_items.sql",
 )
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS

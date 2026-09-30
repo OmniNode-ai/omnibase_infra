@@ -142,6 +142,22 @@ SAVINGS_AGGREGATE_VIEWS_FILE = (
     / "node_projection_savings"
     / "089_savings_aggregate_views_per_tenant.sql"
 )
+# OMN-19790: delegation_eval_items is declared writable in the topology, but
+# GRANT_FILE cannot carry it -- 0004 already applied on real lanes and is
+# append-only (OMN-16705); a new table's grant lands in a NEW file, not an
+# edit of a frozen one. It rides in node_projection_delegation_eval's own
+# 0001, which is fenced on arrival alongside its creating 0000 (no lane has
+# either yet), so this is a static text assertion only -- the live-apply
+# proofs below correctly do NOT expect this grant to take effect anywhere.
+DELEGATION_EVAL_ITEMS_GRANT_FILE = (
+    REPO_ROOT
+    / "docker"
+    / "migrations"
+    / "forward"
+    / "nodes"
+    / "node_projection_delegation_eval"
+    / "0001_grant_tenant_projection_writer_delegation_eval_items.sql"
+)
 BOOTSTRAP_SCRIPT = (
     REPO_ROOT / "docker" / "migrations" / "forward" / "000_create_multiple_databases.sh"
 )
@@ -390,14 +406,20 @@ def test_grant_migration_matches_the_topology_declared_writable_table_set() -> N
     Scoped to the WRITABLE declarations (OMN-18159). The read-only half is not
     dropped: it is asserted immediately below, against the file that actually
     carries it, plus a refusal that it is never handed write privileges.
+
+    OMN-19790 added ``delegation_eval_items``, granted from
+    :data:`DELEGATION_EVAL_ITEMS_GRANT_FILE` rather than :data:`GRANT_FILE` --
+    the same "grant belongs with the relation it names" reason the read-only
+    test below unions a second source file, forced here by 0004 being
+    append-only. The two files are unioned for the same reason.
     """
     declared = _declared_table_objects("INSERT")
 
     granted = set(
         re.findall(
-            r"GRANT SELECT, INSERT, UPDATE ON public\.([a-z0-9_]+) "
+            r"GRANT SELECT, INSERT, UPDATE\s+ON public\.([a-z0-9_]+)\s+"
             rf"TO {PRINCIPAL}",
-            GRANT_FILE.read_text(),
+            GRANT_FILE.read_text() + DELEGATION_EVAL_ITEMS_GRANT_FILE.read_text(),
         )
     )
 
