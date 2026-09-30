@@ -337,7 +337,8 @@ def _only_step_running(marker: str) -> dict[str, Any]:
 
 
 def _contract_compliance_dod_step() -> dict[str, Any]:
-    return _only_step_running("run_contract_compliance_check.py")
+    # OMN-20135: the pinned runner is reached through the fail-closed wrapper.
+    return _only_step_running("run_contract_compliance_with_evidence.py")
 
 
 def test_dod_step_no_longer_vacuously_passes_on_an_empty_pr_number() -> None:
@@ -370,7 +371,16 @@ def test_dod_step_consumes_the_resolved_pr_not_the_raw_event_number() -> None:
     """The whole point: the executor runs against the RESOLVED scope."""
     resolver_id = _only_step_running("resolve_contract_compliance_pr.py").get("id", "")
     assert resolver_id, "the resolver step needs an `id:` so its output is addressable"
+    # OMN-20135: the DoD step reads the PR the evidence resolver returns, and
+    # the evidence resolver is handed this resolver's output -- one chain.
+    evidence = _only_step_running("resolve_contract_compliance_evidence.py")
+    evidence_pr = str(evidence.get("env", {}).get("PR_NUMBER", ""))
+    assert f"steps.{resolver_id}.outputs.pr_number" in evidence_pr
     dod_pr = str(_contract_compliance_dod_step().get("env", {}).get("PR_NUMBER", ""))
+    dod_pr = dod_pr.replace(
+        f"steps.{evidence.get('id', '')}.outputs.pr_number",
+        f"steps.{resolver_id}.outputs.pr_number",
+    )
     assert f"steps.{resolver_id}.outputs.pr_number" in dod_pr, (
         f"the DoD step still reads PR_NUMBER from the raw event ({dod_pr!r}). It "
         f"must consume steps.{resolver_id}.outputs.pr_number, or push and "
