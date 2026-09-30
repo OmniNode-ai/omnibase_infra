@@ -1054,6 +1054,18 @@ def _resolve_transport_bound() -> tuple[int, float]:
     return policy.total_attempts, policy.total_bound_seconds
 
 
+def _stdout_is_tty() -> bool:
+    """Whether stdout is a terminal, which picks the default output form (OMN-20124).
+
+    A pipe, a subprocess or CI keeps the one-JSON-line receipt every parsing
+    caller reads; only a person at a terminal gets the human form.
+    """
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 def _render_receipt_for_person(receipt: object, *, state_root: Path) -> bool:
     """Print the default, human form of one receipt and say whether it succeeded (OMN-20124).
 
@@ -2254,14 +2266,25 @@ def _timeout_receipt(
 )
 @click.option(
     "--json",
-    "json_output",
+    "force_json",
     is_flag=True,
     default=False,
     help=(
-        "Print the full typed receipt as ONE JSON line on stdout instead of "
-        "the answer text. For scripts and other programs that parse the "
-        "result; the default output is the answer on stdout and a one-line "
-        "summary on stderr (OMN-20124)."
+        "Force the full typed receipt as ONE JSON line on stdout, even on a "
+        "terminal. This is already the default whenever stdout is not a "
+        "terminal (pipes, subprocesses, CI) (OMN-20124)."
+    ),
+)
+@click.option(
+    "--human",
+    "force_human",
+    is_flag=True,
+    default=False,
+    help=(
+        "Force the human form (the answer on stdout, a one-line summary on "
+        "stderr) even when stdout is not a terminal. Without --json or "
+        "--human the form follows stdout: human on a terminal, the JSON "
+        "receipt otherwise (OMN-20124)."
     ),
 )
 @click.option(
@@ -2298,27 +2321,30 @@ def delegate_command(
     verbose: bool,
     emit_socket: Path | None,
     omnibase_path: Path | None,
-    json_output: bool,
+    force_json: bool,
+    force_human: bool,
     allow_omnimarket_drift: bool,
     ticket: str | None,
     caller_lane: str | None,
 ) -> None:
-    """Delegate PROMPT to a local LLM and print the answer.
+    """Delegate PROMPT to a local LLM and print the result.
 
-    stdout is the answer text. stderr carries a one-line summary (model, cost,
-    run id, where the full receipt is). On failure stdout is empty, stderr
-    names the cause, the reason and the run id, and the exit code is non-zero.
-
-    With --json, stdout instead carries exactly ONE
-    ``ModelSkillResult[ModelDelegateSkillResponse]`` JSON — the full LLM
-    response and metrics, never truncated — for programs that parse it.
-    RuntimeLocal logs go to a capture file + the content-addressed artifact
-    store, never to stdout.
+    Output form follows stdout (OMN-20124). When stdout is NOT a terminal
+    (a pipe, a subprocess, CI) stdout carries exactly ONE
+    ``ModelSkillResult[ModelDelegateSkillResponse]`` JSON, the full LLM
+    response and metrics, never truncated: the contract every program that
+    parses this command reads, unchanged. On a terminal stdout is the answer
+    text and stderr carries a one-line summary (model, cost, run id, where the
+    full receipt is); on failure stdout is empty and stderr names the cause,
+    the reason and the run id. ``--json`` forces the JSON form and ``--human``
+    the human form. Exits non-zero on failure in every form. RuntimeLocal logs
+    go to a capture file + the content-addressed artifact store, never to
+    stdout.
 
     \b
     Examples:
         onex delegate "explain what a calendar app needs"
-        onex delegate "say hello in one word" --json
+        onex delegate "say hello in one word" --json  # force JSON on a terminal
         onex delegate "write a Python HTTP server" --task-type code_generation
         onex delegate "analyze the routing architecture" --max-tokens 4096
         onex delegate "hand off from the external client" --source external-client
@@ -2330,6 +2356,9 @@ def delegate_command(
         # Run it here on purpose, and say so in the record:
         onex delegate "document the router" --bus kafka --lane dev --locus in-process
     """
+    if force_json and force_human:
+        raise click.UsageError("--json and --human are mutually exclusive.")
+    json_output = force_json or not (force_human or _stdout_is_tty())
     try:
         ticket_id, ticket_resolution = resolve_delegate_ticket(ticket, cwd=Path.cwd())
         caller = resolve_delegate_caller(
@@ -2394,7 +2423,7 @@ def run_delegate(
     ticket_id: str | None = None,
     ticket_resolution: str = "none",
     caller: ModelDelegateCaller | None = None,
-    json_output: bool = False,
+    json_output: bool = True,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 

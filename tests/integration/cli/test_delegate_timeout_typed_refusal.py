@@ -118,7 +118,6 @@ class TestDelegateTimeoutIsTypedOnStdout:
             delegate_command,
             [
                 "List the first five prime numbers",
-                "--json",
                 "--state-root",
                 str(tmp_path / "state"),
                 "--timeout",
@@ -226,11 +225,12 @@ class TestDelegateTimeoutIsTypedOnStdout:
     def test_default_output_is_a_plain_failure_line_with_the_run_id(
         self, tmp_path: Path
     ) -> None:
-        """OMN-20124: without --json a timeout is a line for a person, not JSON."""
+        """OMN-20124: with --human a timeout is a line for a person, not JSON."""
         result = CliRunner().invoke(
             delegate_command,
             [
                 "List the first five prime numbers",
+                "--human",
                 "--state-root",
                 str(tmp_path / "state"),
                 "--timeout",

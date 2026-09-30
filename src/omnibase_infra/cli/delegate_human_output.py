@@ -5,14 +5,16 @@
 
 ``onex delegate`` used to print one 10 KB receipt JSON line on stdout and
 nothing a person could read: the answer sat in a hidden run folder, and a
-failure's reason sat inside the JSON. The default output is now:
+failure's reason sat inside the JSON. On a terminal (or with ``--human``) the
+output is now:
 
 * success: the answer text on stdout, then one receipt-summary line on stderr
   (model, cost, run id, where the full receipt is);
 * failure: stdout empty, one plain line on stderr naming the cause, the reason
   and the run id, and a non-zero exit.
 
-The full receipt JSON is behind ``--json``. Pure functions only: they read the
+When stdout is not a terminal, or with ``--json``, the receipt JSON line is
+unchanged: programs in other repos parse it. Pure functions only: they read the
 serialized receipt and return text, so the same envelope the run-file writer
 reads is the one rendered here.
 
