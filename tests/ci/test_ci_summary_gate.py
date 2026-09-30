@@ -191,6 +191,62 @@ def _all_gates(conclusion: str = "success") -> list[dict[str, object]]:
     return [_job(g, conclusion) for g in (*STRICT_GATE_JOBS, *SKIPPABLE_GATE_JOBS)]
 
 
+class TestDelegationSeamGateOmn20183:
+    def test_seam_is_strict_and_success_passes(self) -> None:
+        assert "delegation-seam-gate" in STRICT_GATE_JOBS
+        assert "delegation-seam-gate" not in SOFT_ALLOWLIST
+        code, report = evaluate(_all_gates("success"))
+        assert code == EXIT_SUCCESS, report
+
+    @pytest.mark.parametrize(
+        "conclusion", ["failure", "skipped", "cancelled", "timed_out"]
+    )
+    def test_seam_non_success_fails(self, conclusion: str) -> None:
+        jobs = [j for j in _all_gates() if j["name"] != "delegation-seam-gate"]
+        code, report = evaluate(jobs + [_job("delegation-seam-gate", conclusion)])
+        assert code == EXIT_FAILURE
+        assert "delegation-seam-gate" in report
+
+    def test_absent_seam_is_pending(self) -> None:
+        jobs = [j for j in _all_gates() if j["name"] != "delegation-seam-gate"]
+        code, report = evaluate(jobs)
+        assert code == EXIT_PENDING
+        assert "delegation-seam-gate" in report
+
+    def test_seam_runs_unconditionally_in_main_ci(self) -> None:
+        workflow = _load_workflow(CI_WORKFLOW)
+        job = workflow["jobs"]["delegation-seam-gate"]
+        assert job["name"] == "delegation-seam-gate"
+        assert "if" not in job
+        assert "needs" not in job
+        assert job["runs-on"] == workflow["jobs"]["subscribe-wiring-health"]["runs-on"]
+        assert job["env"] == {
+            "ONEX_EVENT_BUS_TYPE": "inmemory",
+            "LLM_ENDPOINT_CIDR_ALLOWLIST": "10.0.0.0/8",
+        }
+        assert all("if" not in step for step in job["steps"])
+        assert any(
+            "uv run pytest tests/integration/runtime/test_s8_delegation_fsm_seam.py"
+            in step.get("run", "")
+            for step in job["steps"]
+        )
+        assert not (CI_WORKFLOW.parent / "delegation-seam-gate.yml").exists()
+        # Preserve the immediate poller; completeness is enforced by the strict tuple.
+        assert "needs" not in workflow["jobs"]["ci-summary"]
+
+    def test_stale_check_is_part_of_existing_validator_job(self) -> None:
+        job = _load_workflow(CI_WORKFLOW)["jobs"]["onex-validation"]
+        steps = [
+            step
+            for step in job["steps"]
+            if "scripts/validate.py unused_exemptions" in step.get("run", "")
+        ]
+        assert len(steps) == 1
+        assert "if" not in steps[0]
+        assert "continue-on-error" not in steps[0]
+        assert job["name"] in STRICT_GATE_JOBS
+
+
 class TestCiSummaryGate:
     def test_all_gates_success_is_success(self) -> None:
         code, _ = evaluate(_all_gates("success") + [_job("Detect Changes", "success")])
