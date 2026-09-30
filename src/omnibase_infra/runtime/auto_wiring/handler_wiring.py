@@ -51,7 +51,7 @@ from typing import (
     get_origin,
     runtime_checkable,
 )
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5
 from weakref import WeakKeyDictionary
 
 from pydantic import AliasChoices, AliasPath, BaseModel, ValidationError
@@ -1482,6 +1482,33 @@ def _coerce_uuid_or_none(value: object) -> object | None:
         except ValueError:
             return None
     return None
+
+
+# OMN-20127: the namespace of a wire correlation id derived from a state_io row
+# key that is not itself a UUID. Fixed forever: re-publishing a batch derives the
+# same id, and the envelope id seeded from it, so consumers deduplicate.
+_STATE_IO_DOMAIN_KEY_NAMESPACE = UUID("2b43f086-074b-4b46-971b-378f12dbdd17")
+
+
+def _state_io_wire_correlation_id(
+    row_key: str, payload: BaseModel | None = None
+) -> UUID:
+    """The correlation id an outbox emission is published under (OMN-20127).
+
+    The outbox records the state_io row KEY as each entry's ``correlation_id``.
+    That key is the transport correlation id only for a correlation-keyed
+    contract (delegation). A contract keyed on a domain field (OMN-16924) stores
+    a key such as ``owner/repo#123``, which no UUID parse accepts. Such a key
+    publishes under the emitted event's own correlation id when it carries one,
+    else under an id derived from the key, never a random one.
+    """
+    parsed = _coerce_uuid_or_none(row_key)
+    if isinstance(parsed, UUID):
+        return parsed
+    own = _coerce_uuid_or_none(getattr(payload, "correlation_id", None))
+    if isinstance(own, UUID):
+        return own
+    return uuid5(_STATE_IO_DOMAIN_KEY_NAMESPACE, row_key)
 
 
 def _ingress_correlation_id(message: object) -> UUID | None:
@@ -5803,13 +5830,15 @@ def _make_stateful_dispatch_callback(
             and not getattr(model, "tenant_id", None)
         ):
             updates["tenant_id"] = tenant_id
-        causation = entry.get("causation_envelope_id")
+        # OMN-20127: a causation seeded from a domain row key (the bound sweep
+        # seeds the row's own key) names no envelope, so it is not stamped.
+        causation = _coerce_uuid_or_none(entry.get("causation_envelope_id"))
         if (
-            causation
+            isinstance(causation, UUID)
             and "causation_id" in fields
             and not getattr(model, "causation_id", None)
         ):
-            updates["causation_id"] = UUID(str(causation))
+            updates["causation_id"] = causation
         return model.model_copy(update=updates) if updates else model
 
     async def _publish_outbox_batch(entries: list[dict[str, object]]) -> int:
@@ -5846,11 +5875,21 @@ def _make_stateful_dispatch_callback(
                     "handler_wiring: outbox recovery cannot resolve a topic for "
                     f"fan-out class {class_name!r} — no published_events mapping."
                 )
-            cid_uuid = UUID(str(entry["correlation_id"]))
-            causation = UUID(str(entry["causation_envelope_id"]))
-            idx = int(cast("int", entry["index"]))
-            envelope_id = uuid5(cid_uuid, f"{causation}:{class_name}:{idx}")
             payload = _rebuild_outbox_event(entry)
+            # OMN-20127: the row key is a UUID only for a correlation-keyed
+            # contract; a domain key (``owner/repo#123``) raised ValueError here
+            # and every batch of that contract failed to publish.
+            row_key = str(entry["correlation_id"])
+            cid_uuid = _state_io_wire_correlation_id(row_key, payload)
+            raw_causation = str(entry["causation_envelope_id"])
+            parsed_causation = _coerce_uuid_or_none(raw_causation)
+            causation = parsed_causation if isinstance(parsed_causation, UUID) else None
+            idx = int(cast("int", entry["index"]))
+            envelope_id = uuid5(
+                cid_uuid,
+                f"{causation if causation is not None else raw_causation}"
+                f":{class_name}:{idx}",
+            )
             # OMN-14743: stamp event_type from the resolved topic using the SAME
             # derivation the external applier uses (shared
             # ``derive_event_type_from_topic``). Without this the outbox emitted
@@ -5880,7 +5919,13 @@ def _make_stateful_dispatch_callback(
             # correlation id is not an envelope id, so recording it would
             # fabricate an edge that can never close. Absence is the honest
             # encoding of absence, the same rule `chain_replay` holds.
-            edge = None if causation == cid_uuid else causation
+            edge = (
+                None
+                if causation is None
+                or causation == cid_uuid
+                or raw_causation == row_key
+                else causation
+            )
             out_envelope: _Envelope[BaseModel] = _Envelope(
                 envelope_id=envelope_id,
                 payload=payload,
@@ -6220,7 +6265,7 @@ def _make_stateful_dispatch_callback(
             completed_at=datetime.now(UTC),
             output_count=len(events),
             output_events=events,
-            correlation_id=UUID(cid),
+            correlation_id=_state_io_wire_correlation_id(cid),
         )
 
     async def _load_handle_persist(
