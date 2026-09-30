@@ -263,7 +263,7 @@ def test_the_runtime_family_that_resolves_a_tenant_key_shares_one_credentials_st
     compose = generate_compose(resolved)
     services = compose["services"]
     assert isinstance(services, dict)
-    target = "/root/.omninode/delegation"
+    target = "/home/omniinfra/.omninode/delegation"
     owners = {
         name: [v for v in svc.get("volumes", []) if f":{target}" in v]
         for name, svc in services.items()
@@ -343,11 +343,16 @@ def test_secret_local_make_target_passes_only_provider_and_tenant_as_arguments()
     assert 'test -n "$$tenant"' in target
     # The key is registered only for the tenant the RUNNING runtime serves.
     assert "printenv ONEX_TENANT_ID" in target
-    commands = [line for line in target.splitlines() if "docker exec -i" in line]
+    commands = [
+        line
+        for line in target.splitlines()
+        if "docker exec -u" in line and " -i " in line
+    ]
     assert commands
     for command in commands:
         assert (
-            "docker exec -i $(LOCAL_PROJECT)-runtime-effects onex secret "
+            "docker exec -u omniinfra -e HOME=/home/omniinfra -i "
+            "$(LOCAL_PROJECT)-runtime-effects onex secret "
             'register-tenant-key "$(PROVIDER)" --tenant "$$tenant"'
         ) in command
         assert not re.search(r"\$[({][^)}]*(?:KEY|VALUE)[^)}]*[)}]", command)

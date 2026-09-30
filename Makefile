@@ -185,9 +185,9 @@ secret-local: _check-docker ## Laptop profile: register your tenant's provider k
 	  test "$$served" = "$$tenant" || { echo "ERROR: your runtime serves tenant '$$served', not '$$tenant'. Run make up-local so it serves $$tenant, then register the key." >&2; exit 2; }; \
 	  if [ -t 0 ]; then \
 	    bash -c 'read -r -s -p "Provider key (input hidden): " credential || exit 1; printf "\n" >&2; printf "%s" "$$credential"' \
-	      | docker exec -i $(LOCAL_PROJECT)-runtime-effects onex secret register-tenant-key "$(PROVIDER)" --tenant "$$tenant"; \
+	      | docker exec -u omniinfra -e HOME=/home/omniinfra -i $(LOCAL_PROJECT)-runtime-effects onex secret register-tenant-key "$(PROVIDER)" --tenant "$$tenant"; \
 	  else \
-	    docker exec -i $(LOCAL_PROJECT)-runtime-effects onex secret register-tenant-key "$(PROVIDER)" --tenant "$$tenant"; \
+	    docker exec -u omniinfra -e HOME=/home/omniinfra -i $(LOCAL_PROJECT)-runtime-effects onex secret register-tenant-key "$(PROVIDER)" --tenant "$$tenant"; \
 	  fi
 
 down-local: _check-docker ## Laptop profile: stop it (keeps its volumes)

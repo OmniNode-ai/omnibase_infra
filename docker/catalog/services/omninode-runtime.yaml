@@ -77,7 +77,7 @@ volumes:
   - runtime_logs:/app/logs
   - runtime_data:/app/data
   # The runtime-owned sqlite secret store, shared with runtime-effects (see there).
-  - delegation_credentials:/root/.omninode/delegation
+  - delegation_credentials:/home/omniinfra/.omninode/delegation
   - ../contracts:/app/contracts:ro
 tmpfs:
   - /run/onex-runtime:uid=1000,gid=1000,mode=0770
