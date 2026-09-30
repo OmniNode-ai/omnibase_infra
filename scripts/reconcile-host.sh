@@ -458,8 +458,11 @@ run_reconcile_step() { # step-name direct|as_owner command [args...]
   STEP_TIMED_OUT=0
 
   if [[ "$launch_mode" == "as_owner" ]]; then
+    # RUN_AS is empty when this process already is the owner. macOS ships
+    # bash 3.2, where "${RUN_AS[@]}" of an empty array is an unbound-variable
+    # error under set -u; the ${var+...} form expands to nothing instead.
     /usr/bin/perl -e 'setpgrp(0, 0) or die "setpgrp: $!\n"; exec @ARGV or die "exec: $!\n"' \
-      "${RUN_AS[@]}" "$@" &
+      ${RUN_AS[@]+"${RUN_AS[@]}"} "$@" &
   else
     /usr/bin/perl -e 'setpgrp(0, 0) or die "setpgrp: $!\n"; exec @ARGV or die "exec: $!\n"' "$@" &
   fi
