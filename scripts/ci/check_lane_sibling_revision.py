@@ -135,10 +135,14 @@ from scripts.ci.check_dev_lane_staleness import (
     EnumConvergenceOutcome,
     ModelAcceptanceProbe,
     ModelConvergenceBudget,
+    ModelJobEnd,
+    bind_generation_to_job_end,
     convergence_check_outcome,
     read_agent_acceptance,
+    read_compose_service,
+    wait_for_agent_job_end,
 )
-from scripts.ci.lab_pass_receipt import read_lane_generation
+from scripts.ci.lab_pass_receipt import ModelLaneGeneration, read_lane_generation
 
 #: The lane's effects container. Named AND fenced by its compose project below,
 #: so this guard can never read a governed lane (prod, stability-test, judge, or
@@ -656,6 +660,74 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+@dataclass(frozen=True)
+class ModelBoundGeneration:
+    """The generation this guard publishes, and the sentence saying why."""
+
+    generation: ModelLaneGeneration | None
+    evidence: str
+
+
+def bind_sibling_generation(
+    *,
+    container: str,
+    agent_url: str,
+    correlation_id: str,
+    deadline: datetime,
+    clock: Callable[[], datetime],
+    sleep: Callable[[float], None],
+    read_generation: Callable[[str], ModelLaneGeneration],
+    read_service: Callable[[str], str],
+    opener: Callable[[str, float], tuple[int, str]] | None = None,
+    request_timeout_seconds: float = 10.0,
+) -> ModelBoundGeneration:
+    """Bind the probe's generation after the deploy agent's job ENDS (OMN-20154).
+
+    The port of OMN-19374 to this guard. Convergence is satisfied by the
+    vendored provenance of the RUNNING container, which exists from create
+    time, minutes before the agent's own post-deploy verification, and that
+    verification may force-recreate the effects container once. Measured on
+    omnimarket run 36788681945: convergence read ``7b926d92febd`` at 23:12:36Z,
+    job ada00fdd recreated ``runtime-effects`` at 23:17:50Z and ended success
+    at 23:22:05Z, and the probe read ``e311dd332d91`` -- same image, same
+    revision -- and failed ``probe_generation_bound``.
+
+    The binding rule is ``bind_generation_to_job_end``'s, unchanged: only a
+    ``success`` job whose own record names a ``recovered`` recreate of this
+    container's compose service, leaving the same image and revision running,
+    rebinds. Anything else keeps the converged generation, and the probe fails
+    on it exactly as before. Never raises.
+    """
+
+    def _read() -> ModelLaneGeneration | None:
+        try:
+            return read_generation(container)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"::warning::lane generation unreadable: {exc}")
+            return None
+
+    converged = _read()
+    if converged is None:
+        return ModelBoundGeneration(generation=None, evidence="")
+    job_end: ModelJobEnd = wait_for_agent_job_end(
+        agent_url=agent_url,
+        correlation_id=correlation_id,
+        deadline=deadline,
+        clock=clock,
+        sleep=sleep,
+        request_timeout_seconds=request_timeout_seconds,
+        opener=opener,
+    )
+    generation: ModelLaneGeneration | None = converged
+    note = ""
+    if job_end.ended:
+        generation, note = bind_generation_to_job_end(
+            converged, _read(), job_end, service=read_service(container)
+        )
+    evidence = "; ".join(c for c in (job_end.evidence_clause(), note) if c)
+    return ModelBoundGeneration(generation=generation, evidence=evidence)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
 
@@ -727,6 +799,29 @@ def main(argv: list[str] | None = None) -> int:
     evidence = sibling_convergence_evidence(
         repo=args.repo, expected_revision=expected, result=result
     )
+
+    # OMN-20154: on a convergence, let the deploy agent FINISH the job before
+    # the generation is read, inside what is left of this step's wall clock,
+    # and rebind only on the job's own recorded in-job recreate.
+    bound: ModelBoundGeneration | None = None
+    if result.outcome is EnumConvergenceOutcome.OK:
+        bound = bind_sibling_generation(
+            container=args.container,
+            agent_url=args.agent_url,
+            correlation_id=args.correlation_id,
+            deadline=result.finished_at
+            - result.waited
+            + timedelta(seconds=args.wall_clock_seconds),
+            clock=lambda: datetime.now(UTC),
+            sleep=time.sleep,
+            read_generation=read_lane_generation,
+            read_service=read_compose_service,
+            request_timeout_seconds=args.agent_timeout_seconds,
+        )
+        if bound.evidence:
+            evidence = " ".join(
+                f"{evidence}; {bound.evidence}".translate(_EVIDENCE_UNSAFE).split()
+            )
     # The emit step reads these instead of re-deriving a verdict from the exit
     # status: the status has two values and this has three, and a mapping
     # written in a `run:` block is a mapping nothing tests.
@@ -740,7 +835,11 @@ def main(argv: list[str] | None = None) -> int:
     # receipt records green reads with nothing in it naming the container that
     # produced them. Written on all three outcomes, because "which container
     # answered" has an answer whichever verdict this reached.
-    _write_output_generation(args.container)
+    if bound is not None:
+        if bound.generation is not None:
+            _write_output("generation", bound.generation.to_json())
+    else:
+        _write_output_generation(args.container)
 
     budget = result.budget
     _summary(
