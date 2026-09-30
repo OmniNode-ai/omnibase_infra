@@ -247,6 +247,10 @@ migrations:
   forward/nodes/node_projection_delegation_eval/0000_create_delegation_eval_items.sql: forward-only # ALTER TABLE public.delegation_eval_items ENABLE ROW LEVEL (ROW LEVEL SECURITY); DROP
   forward/nodes/node_projection_delegation_eval/0001_grant_tenant_projection_writer_delegation_eval_items.sql: expand-only
   forward/nodes/node_projection_delegation_eval/0002_force_rls_delegation_eval_items.sql: forward-only # ALTER TABLE public.delegation_eval_items FORCE ROW LEVEL (ROW LEVEL SECURITY)
+  forward/nodes/node_projection_delegation_eval/0003_create_delegation_eval_item_verdicts.sql: forward-only
+  forward/nodes/node_projection_delegation_eval/0004_create_delegation_eval_results.sql: forward-only
+  forward/nodes/node_projection_delegation_eval/0005_grant_tenant_projection_writer_delegation_eval_run_tables.sql: expand-only
+  forward/nodes/node_projection_delegation_eval/0006_force_rls_delegation_eval_run_tables.sql: forward-only
   forward/nodes/node_projection_delegation_inference_response/0001_create_projection_delegation_inference_response_text.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PROJECTION_DELEGATION_INFERENCE_RESPONSE_TEXT_PKEY; ALTER TABLE ADD CONSTR
   forward/nodes/node_projection_delegation_inference_response/0002_inference_response_text_tenant_rekey.sql: forward-only # DROP; ALTER TABLE DROP CONSTRAINT; UPDATE
   forward/nodes/node_projection_delegation_inference_response/0003_inference_response_text_rls_tenant_isolation.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
@@ -348,6 +352,7 @@ migrations:
   forward/nodes/node_projection_savings/090_savings_aggregate_excludes_model_text.sql: forward-only # CREATE OR REPLACE
   forward/nodes/node_projection_savings/091_grant_app_dashboard_savings_series.sql: expand-only
   forward/nodes/node_projection_savings/091_savings_estimates_house_tenant_uuid_backfill.sql: forward-only # UPDATE (house slug -> house UUID); ALTER TABLE ALTER COLUMN SET DEFAULT; transaction-scoped CREATE/DROP POLICY inside one DO block
+  forward/nodes/node_projection_savings/092_restore_savings_views_security_invoker.sql: forward-only # ALTER VIEW
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab
   forward/nodes/node_projection_session_outcome/0022_grant_omninode_runtime_session_outcomes.sql: expand-only

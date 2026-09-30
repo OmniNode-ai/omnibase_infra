@@ -47,8 +47,8 @@ class ModelLlmInferenceRequest(BaseModel):
     fields into the provider-specific wire format.
 
     Attributes:
-        endpoint_url: The COMPLETE endpoint URL to POST to (e.g.
-            ``"https://api.z.ai/api/coding/paas/v4/chat/completions"``).
+        endpoint_url: The COMPLETE endpoint URL to POST to, as the routing
+            authority resolves it for the backend.
             OMN-12815: this is the contract endpoint posted VERBATIM — the handler
             performs no URL construction and appends no path. Required for every
             inference call; the routing authority resolves it complete.

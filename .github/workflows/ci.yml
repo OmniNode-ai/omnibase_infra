@@ -188,7 +188,7 @@ jobs:
   # evidence is missing or red, no runner-heavy validation jobs fan out.
   occ-preflight:
     # self-gating-ok: target is in omnibase_core, not a required check on omnibase_infra main
-    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@979c290a16f70fcd7e0b62600ac511140baab4a6
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@52851458622f368c3b596c82bf810bc6acce1d5e
     permissions:
       contents: read
       pull-requests: read
@@ -327,6 +327,14 @@ jobs:
 
       - name: Check shared enum ownership
         run: python scripts/check_shared_enum_ownership.py src/
+
+      # OMN-20173. Tracked config must not address the GLM Coding Plan endpoint.
+      # Same script as the `no-coding-plan-endpoint` pre-commit hook.
+      - name: Check tracked configuration has no GLM Coding Plan endpoint (OMN-20173)
+        run: uv run python scripts/check_no_coding_plan_endpoint.py
+
+      - name: Unit tests for endpoint guard (OMN-20173)
+        run: uv run pytest tests/unit/scripts/test_check_no_coding_plan_endpoint.py -q -p no:cacheprovider
 
       # OMN-18364. A hosted-runner step that invokes `uv` before its job
       # installs it exits 127, and where that step's outcome feeds a receipt
@@ -808,6 +816,9 @@ jobs:
           echo "================================================================"
           uv run python scripts/validate.py architecture_layers --verbose
 
+      - name: Reject unused validator exemptions
+        run: uv run python scripts/validate.py unused_exemptions --verbose
+
       - name: Run ONEX validators
         run: |
           uv run python scripts/validate.py all --verbose
@@ -858,6 +869,7 @@ jobs:
       # changed-node ratchet (pre-commit, blocking) stops regressions. Rides
       # OMN-12550 / OMN-13325 — same path as Signal A, not a fresh hook.
       - name: Run orchestration-monolith ratchet report (ARCH-004 Signal B)
+        # advisory-ok: OMN-13486 report-only ratchet while the baseline is above threshold; the changed-node ratchet in pre-commit is the blocking gate
         continue-on-error: true
         run: |
           echo "================================================================"
@@ -4369,6 +4381,37 @@ jobs:
           docker compose
           -f docker/legacy-rds-fixture/compose.yml
           down --volumes --remove-orphans --rmi local
+
+  # OMN-20183: always prove the local delegation FSM seam, including merge groups.
+  # CI Summary requires success via STRICT_GATE_JOBS in ci_summary_gate.py.
+  delegation-seam-gate:
+    name: delegation-seam-gate
+    # OMNI_RUNNER_SELECTOR_V1 — same selector as the other strict CI jobs.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
+    env:
+      ONEX_EVENT_BUS_TYPE: "inmemory"
+      LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Run delegation cross-boundary seam test
+        run: uv run pytest tests/integration/runtime/test_s8_delegation_fsm_seam.py -v
 
   ci-summary:
     name: CI Summary

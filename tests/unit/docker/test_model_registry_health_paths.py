@@ -13,7 +13,7 @@ _PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 _REGISTRY_PATH = _PROJECT_ROOT / "docker" / "catalog" / "model_registry.yaml"
 
 # Phase 2 primary and fallback model keys per OMN-8995 DoD.
-# glm-4.5 is a cloud endpoint: health_path="" means always-healthy per HandlerModelRouter.
+# OMN-20173: GLM HTTP pins retired; Coding Plan use is Claude Code only.
 #
 # OMN-16442 (2026-08-28): "deepseek-r1-14b" REMOVED from this expectation set.
 # Its entry was deleted from docker/catalog/model_registry.yaml because its
@@ -25,12 +25,14 @@ _REGISTRY_PATH = _PROJECT_ROOT / "docker" / "catalog" / "model_registry.yaml"
 _PHASE2_HEALTH_PATHS: dict[str, str] = {
     "deepseek-r1-32b": "/health",
     "qwen3-coder-30b": "/health",
-    "glm-4.5": "",
 }
 
 # OMN-16442: model_keys whose endpoint no longer exists on the fleet. Asserted
 # ABSENT so a future edit cannot reintroduce a row pointing at dead hardware.
-_RETIRED_MODEL_KEYS: frozenset[str] = frozenset({"deepseek-r1-14b", "qwen3-next-80b"})
+# OMN-20173: also refuse retired GLM HTTP routes (Claude Code only).
+_RETIRED_MODEL_KEYS: frozenset[str] = frozenset(
+    {"deepseek-r1-14b", "qwen3-next-80b", "glm-4.5", "glm-5", "glm-5.1"}
+)
 
 
 @pytest.fixture(scope="module")

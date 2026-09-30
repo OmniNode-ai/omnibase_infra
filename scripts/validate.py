@@ -18,6 +18,7 @@ Usage:
     python scripts/validate.py contracts
     python scripts/validate.py patterns
     python scripts/validate.py unions
+    python scripts/validate.py unused_exemptions
     python scripts/validate.py any_types
     python scripts/validate.py localhandler
     python scripts/validate.py declarative_nodes
@@ -39,6 +40,20 @@ from packaging.utils import InvalidName, canonicalize_name
 
 # Add src to path for local development
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+
+
+def run_unused_exemptions(verbose: bool = False) -> bool:
+    """Fail if any configured exemption matches no finding in an unfiltered scan."""
+    from omnibase_infra.validation.infra_validators import (
+        validate_infra_unused_exemptions,
+    )
+
+    result = validate_infra_unused_exemptions()
+    if verbose or not result.is_valid:
+        print(f"Unused exemptions: {'PASS' if result.is_valid else 'FAIL'}")
+        for error in result.errors:
+            print(f"  - {error}")
+    return bool(result.is_valid)
 
 
 def run_architecture(verbose: bool = False) -> bool:
@@ -1444,6 +1459,7 @@ def main() -> int:
         nargs="?",
         default="all",
         choices=[
+            "unused_exemptions",
             "all",
             "architecture",
             "architecture_layers",
@@ -1483,6 +1499,7 @@ def main() -> int:
     args = parser.parse_args()
 
     validator_map = {
+        "unused_exemptions": run_unused_exemptions,
         "architecture": run_architecture,
         "architecture_layers": run_architecture_layers,
         "migration_freeze": run_migration_freeze,
