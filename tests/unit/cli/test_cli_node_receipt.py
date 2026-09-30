@@ -11,7 +11,8 @@ Acceptance is STRUCTURAL, not size-based (plan Open Question 3 resolution):
 - the full capture log and handler result are content-addressed in the
   artifact store and hash-verified on retrieval;
 - ``artifact.captured`` + ``tool.output.captured`` are emitted via the emit
-  daemon socket, or spooled locally when the daemon is unreachable;
+  daemon socket; an unreachable daemon loses them silently (no spool, no
+  alternate path, no warning);
 - ONEX_ARTIFACT_STORE_ROOT defaults to ``<state_root>/artifacts`` when unset
   so durable capture succeeds without a pre-exported env var (OMN-13537);
 - a genuine (non-env) artifact-write failure prints the FULL output instead of
@@ -47,7 +48,6 @@ from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_infra.cli.cli_node import run_node_by_name
 from omnibase_infra.cli.receipt_mode import (
     CAPTURE_DIR_NAME,
-    SPOOL_DIR_NAME,
     WORKFLOW_RESULT_FILENAME,
     _explain_absent_receipt,
     _extract_correlation_id,
@@ -57,6 +57,9 @@ from omnibase_infra.cli.receipt_mode import (
 )
 
 pytestmark = pytest.mark.unit
+
+# OMN-20146: the receipt-mode emit spool was removed; nothing may recreate it.
+_RETIRED_SPOOL_DIR = "emit_spool"
 
 _PROOF_NOOP_CONTRACT = (
     "---\n"
@@ -281,38 +284,22 @@ class TestReceiptModeSuccess:
         assert capture_file.read_bytes() in blobs
         assert json.dumps(payload["result"]).encode("utf-8") in blobs
 
-    def test_events_spooled_when_daemon_unreachable(
+    def test_unreachable_daemon_leaves_no_spool_and_no_warning(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """OMN-20146: no daemon is the normal state of a fresh install.
+
+        The receipt still prints, nothing is written to a local outbox, and the
+        capture log carries no warning naming a spool.
+        """
         result, state_root = _invoke_receipt(tmp_path, monkeypatch)
         assert result.exit_code == 0
-        # Receipt still printed — telemetry failure never re-floods the caller.
         _parse_single_receipt(result.stdout)
 
-        spool_dir = state_root / SPOOL_DIR_NAME
-        artifact_events = sorted(spool_dir.glob("artifact-captured-*.json"))
-        tool_events = sorted(spool_dir.glob("tool-output-captured-*.json"))
-        assert len(artifact_events) == 2
-        assert len(tool_events) == 1
-
-        for spool_file in artifact_events:
-            record = json.loads(spool_file.read_text(encoding="utf-8"))
-            assert record["event_type"] == "artifact.captured"
-            for field in (
-                "artifact_ref",
-                "artifact_hash",
-                "artifact_size_bytes",
-                "artifact_kind",
-                "source_system",
-                "correlation_id",
-            ):
-                assert field in record["payload"], field
-
-        tool_record = json.loads(tool_events[0].read_text(encoding="utf-8"))
-        assert tool_record["event_type"] == "tool.output.captured"
-        for field in ("tool_name", "suppression_decision", "correlation_id"):
-            assert field in tool_record["payload"], field
-        assert tool_record["payload"]["suppression_decision"] == "receipt_mode"
+        assert not (state_root / _RETIRED_SPOOL_DIR).exists()
+        assert "spool" not in result.output.lower()
+        for capture_file in (state_root / CAPTURE_DIR_NAME).glob("*.log"):
+            assert "spool" not in capture_file.read_text(encoding="utf-8").lower()
 
     def test_events_emitted_when_daemon_available(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -371,8 +358,7 @@ class TestReceiptModeSuccess:
             "tool.output.captured",
         ]
         # Daemon accepted everything — nothing may be spooled.
-        spool_dir = state_root / SPOOL_DIR_NAME
-        assert not spool_dir.exists() or not list(spool_dir.iterdir())
+        assert not (state_root / _RETIRED_SPOOL_DIR).exists()
 
 
 class TestSkillLifecycleEvents:
@@ -488,36 +474,14 @@ class TestSkillLifecycleEvents:
         # Daemon accepted the started emit, so no orphan flag.
         assert completed["started_emit_failed"] is False
 
-    def test_lifecycle_events_spooled_when_daemon_unreachable(
+    def test_lifecycle_started_emit_failure_is_recorded_without_a_spool(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """No daemon ⇒ both lifecycle events spool locally (never lost)."""
+        """No daemon: the completed event's flag is the only trace of the loss."""
         result, state_root = _invoke_receipt(tmp_path, monkeypatch)
         assert result.exit_code == 0
         _parse_single_receipt(result.stdout)
-
-        spool_dir = state_root / SPOOL_DIR_NAME
-        started_files = sorted(
-            spool_dir.glob("onex-evt-omniclaude-skill-started-v1-*.json")
-        )
-        completed_files = sorted(
-            spool_dir.glob("onex-evt-omniclaude-skill-completed-v1-*.json")
-        )
-        assert len(started_files) == 1
-        assert len(completed_files) == 1
-
-        started = json.loads(started_files[0].read_text(encoding="utf-8"))
-        completed = json.loads(completed_files[0].read_text(encoding="utf-8"))
-        assert started["event_type"] == self._STARTED_TOPIC
-        assert completed["event_type"] == self._COMPLETED_TOPIC
-        # Even spooled, the shared invocation identity holds.
-        assert started["payload"]["run_id"] == completed["payload"]["run_id"]
-        assert (
-            started["payload"]["correlation_id"]
-            == completed["payload"]["correlation_id"]
-        )
-        # The started emit failed (no daemon), so the completed event records it.
-        assert completed["payload"]["started_emit_failed"] is True
+        assert not (state_root / _RETIRED_SPOOL_DIR).exists()
 
 
 class TestArtifactStoreRootDefault:
@@ -1420,8 +1384,7 @@ class TestReceiptModeInProcessIsolation:
             )
             assert f"only-{marker}" in artifact_text
             assert f"only-{other_marker}" not in artifact_text
-            spool_dir = state_roots[marker] / SPOOL_DIR_NAME
-            assert not spool_dir.exists() or not list(spool_dir.iterdir())
+            assert not (state_roots[marker] / _RETIRED_SPOOL_DIR).exists()
 
         event_correlation_ids = {
             str(record["payload"].get("correlation_id"))
