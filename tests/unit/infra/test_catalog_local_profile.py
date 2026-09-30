@@ -523,6 +523,9 @@ def test_override_leaves_a_non_string_command_part_untouched(tmp_path: Path) -> 
 #   4. a laptop-only override leaks into another bundle rendered from the same
 #      shared manifests;
 #   5. the llm-cost writer names an image no catalog render builds.
+#   6. the projection API is given no Kafka broker and exits at startup (measured in
+#      CI run 36729468068 attempt 2: "projection-api requires Kafka bootstrap
+#      servers", 16 restarts, never healthy).
 
 _PAGE_SERVICES = (
     "projection-api",
@@ -582,6 +585,12 @@ def test_other_bundles_do_not_gain_the_kernel_dependency() -> None:
     ]["depends_on"]
     assert isinstance(depends_on, dict)
     assert "omninode-runtime" not in depends_on
+
+
+def test_local_projection_api_is_given_the_compose_broker() -> None:
+    env = _services(_render("local"))["projection-api"]["environment"]
+    assert isinstance(env, dict)
+    assert env.get("KAFKA_BROKERS") == "redpanda:9092"
 
 
 def test_llm_cost_writer_builds_from_the_runtime_image_and_reports_ready() -> None:

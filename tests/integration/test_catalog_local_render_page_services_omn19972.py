@@ -90,6 +90,10 @@ def test_cli_local_render_writes_the_page_services_healthy_and_ordered(
     depends_on = services["projection-api"]["depends_on"]
     assert isinstance(depends_on, dict)
     assert depends_on.get("omninode-runtime") == {"condition": "service_healthy"}
+    # It is told where the broker is; without it the API exits at startup.
+    env = services["projection-api"]["environment"]
+    assert isinstance(env, dict)
+    assert env.get("KAFKA_BROKERS") == "redpanda:9092"
     # Every long-running service reports health, so the CI boot step can tell
     # a dead one from a live one.
     unwatched = sorted(
