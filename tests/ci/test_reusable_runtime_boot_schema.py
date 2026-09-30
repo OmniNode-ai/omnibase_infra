@@ -345,8 +345,9 @@ def test_boot_resolves_compose_frontend_for_runner_variants(
     assert "docker_compose_cmd" in all_text
     assert "docker compose version" in all_text
     assert "docker-compose" in all_text
-    assert "runtime_boot_skip_reason" in all_text
-    assert "compose runtime boot smoke skipped" in all_text
+    # OMN-20147: a runner with neither front end fails the boot, never skips.
+    assert "runtime_boot_skip_reason" not in all_text
+    assert "failing rather than skipping (omn-20147)" in all_text
     assert 'read -r -a compose_cmd <<< "${docker_compose_cmd}"' in all_text
     assert '"${compose_cmd[@]}" -p "${omnibase_infra_compose_project}"' in all_text
     assert (
@@ -356,10 +357,17 @@ def test_boot_resolves_compose_frontend_for_runner_variants(
     assert '"${docker_compose_cmd:-docker compose}"' not in all_text
 
 
-def test_compose_runtime_boot_skip_gates_compose_dependent_steps(
+def test_compose_runtime_boot_has_no_skip_path(
     workflow: Workflow,
 ) -> None:
-    """Missing runner Compose tooling must skip the smoke, not fail the PR."""
+    """Missing runner Compose tooling FAILS the smoke; nothing can skip it.
+
+    OMN-20147 made ``Runtime Boot Smoke (compose)`` strict in CI Summary on
+    merge_group, so the old skip variable (OMN-12563), which let the job
+    complete green having booted nothing (OMN-18811 AC4), is gone: the
+    compose-dependent steps are gated on the mode alone and the hard gates
+    carry no ``if:`` at all.
+    """
     steps = _boot_steps(workflow)
     compose_dependent_steps = [
         step
@@ -374,9 +382,9 @@ def test_compose_runtime_boot_skip_gates_compose_dependent_steps(
             "Launch runtime-effects (compose mode)",
         }
     ]
-    assert compose_dependent_steps, "compose-dependent steps missing"
+    assert len(compose_dependent_steps) == 6, "compose-dependent steps missing"
     for step in compose_dependent_steps:
-        assert "env.RUNTIME_BOOT_SKIP_REASON == ''" in str(step.get("if", ""))
+        assert step.get("if") == "inputs.mode == 'compose'"
 
     hard_gate_steps = [
         step
@@ -390,16 +398,16 @@ def test_compose_runtime_boot_skip_gates_compose_dependent_steps(
             "Assert runtime consumer groups are active",
         }
     ]
-    assert hard_gate_steps, "runtime hard-gate steps missing"
+    assert len(hard_gate_steps) == 5, "runtime hard-gate steps missing"
     for step in hard_gate_steps:
-        assert step.get("if") == "env.RUNTIME_BOOT_SKIP_REASON == ''"
+        assert "if" not in step
 
     artifact_step = next(
         step for step in steps if step.get("name") == "Emit smoke-result.json artifact"
     )
     artifact_text = _step_text(artifact_step)
-    assert "skipped:" in artifact_text
-    assert "skip_reason:" in artifact_text
+    assert "skipped:" not in artifact_text
+    assert "skip_reason" not in artifact_text
 
 
 def test_boot_health_wait_uses_jq_hard_gate(workflow: Workflow) -> None:

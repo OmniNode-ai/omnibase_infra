@@ -416,6 +416,45 @@ DOCS_ONLY_SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
 # Every job the completeness anchor must observe present+good for SUCCESS.
 GATE_JOBS: tuple[str, ...] = STRICT_GATE_JOBS + SKIPPABLE_GATE_JOBS
 
+# OMN-20147 — strict on ``merge_group`` ONLY.
+#
+# ``runtime-boot-smoke`` in ci.yml is the one CI job that boots a real ONEX
+# runtime and runtime-effects over compose Postgres and Redpanda, holds both
+# healthy for 60s, and runs the two runtime-backed suites (OMN-18795). Its
+# caller ``if:`` runs it on merge_group, workflow_dispatch and a main push, and
+# never on pull_request. Every omnibase_infra PR to ``dev`` lands through the
+# merge queue (ruleset 13269702, OMN-19697), so requiring it here requires a
+# green real-runtime boot on the exact commit that lands.
+#
+# The name is the reusable's INNER compose job, the row the jobs API reports
+# when the caller executes (``<caller> / <inner>``). A caller that skips leaves
+# only a bare ``Runtime Boot Smoke (compose)`` row, so this gate reads absent:
+# PENDING, then FAILURE at the poller's deadline, never SUCCESS. On merge_group
+# the caller skips only when ``occ-preflight`` or ``tests-gate`` did not
+# succeed, and both are STRICT, so that run fails on its own first. A runner
+# with no Docker Compose fails the inner job outright (OMN-18811 AC4).
+#
+# On every other event the job keeps its SOFT_ALLOWLIST reading below. That
+# entry is prefix-aware, but strict gates are judged before the allowlist is
+# consulted, so it cannot relax this tier on merge_group.
+RUNTIME_BOOT_SMOKE_COMPOSE_GATE = (
+    "Runtime Boot Smoke (compose) / runtime-boot (mode=compose)"
+)
+MERGE_GROUP_STRICT_GATE_JOBS: tuple[str, ...] = (RUNTIME_BOOT_SMOKE_COMPOSE_GATE,)
+
+
+def strict_gates_for_event(event_name: str) -> tuple[str, ...]:
+    """The strict gate tier for one GitHub event (OMN-20147).
+
+    ``merge_group`` adds :data:`MERGE_GROUP_STRICT_GATE_JOBS`; every other
+    event returns :data:`STRICT_GATE_JOBS` unchanged.
+    """
+
+    if event_name == "merge_group":
+        return STRICT_GATE_JOBS + MERGE_GROUP_STRICT_GATE_JOBS
+    return STRICT_GATE_JOBS
+
+
 # Jobs that do NOT gate merge today (verified against ci.yml ci-summary ``needs``
 # + the pass/fail condition, and against dev branch-protection required contexts
 # on 2026-07-07). The default-deny sweep ignores these so it never newly-wedges
@@ -433,7 +472,9 @@ SOFT_ALLOWLIST: frozenset[str] = frozenset(
         "Test-Failure Ratchet Gate",  # advisory (OMN-13867)
         "Version Pin Compliance",  # in needs, never checked in the condition
         # Not in ci-summary ``needs`` and not a required context:
-        "Runtime Boot Smoke (compose)",  # advisory (OMN-9120); reusable caller
+        # Advisory off merge_group only (OMN-9120); on merge_group its compose
+        # inner job is STRICT via MERGE_GROUP_STRICT_GATE_JOBS (OMN-20147).
+        "Runtime Boot Smoke (compose)",
         "Cross-Repo Migration Conflicts",  # migration-conflict-check; not required
         "Kafka Boundary Compat (OMN-3256)",  # advisory; carries xfail known-drift
         "AI-Slop Pattern Check (strict, PR diff)",  # aislop-sweep gates the tree
@@ -3199,6 +3240,8 @@ def main(argv: list[str] | None = None) -> int:
     code, report = evaluate(
         jobs,
         run_attempt=args.run_attempt,
+        # OMN-20147: merge_group adds the real-runtime boot to the strict tier.
+        strict_gates=strict_gates_for_event(args.event_name),
         check_runs=_load_check_runs(args.check_runs_file),
         external_contexts=external_contexts,
         pr_author=args.pr_author,
