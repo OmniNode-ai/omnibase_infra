@@ -250,7 +250,15 @@ def test_local_tenant_credentials_projection_runs_with_its_own_healthcheck() -> 
     }
 
 
-def test_only_runtime_effects_persists_the_canonical_credentials_store() -> None:
+def test_the_runtime_family_that_resolves_a_tenant_key_shares_one_credentials_store() -> (
+    None
+):
+    """The main runtime hosts the LLM call effect; runtime-effects hosts intake.
+
+    Measured on the lab (2026-09-30): with the store on runtime-effects alone,
+    the main runtime could not resolve the tenant's minted reference ("could
+    not be resolved from the secret store") and the tenant route failed.
+    """
     resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
     compose = generate_compose(resolved)
     services = compose["services"]
@@ -261,16 +269,15 @@ def test_only_runtime_effects_persists_the_canonical_credentials_store() -> None
         for name, svc in services.items()
         if any(f":{target}" in v for v in svc.get("volumes", []))
     }
-    assert owners == {"runtime-effects": [f"effects_credentials:{target}"]}
+    assert owners == {
+        "omninode-runtime": [f"delegation_credentials:{target}"],
+        "runtime-effects": [f"delegation_credentials:{target}"],
+    }
     volumes = compose["volumes"]
     assert isinstance(volumes, dict)
-    assert volumes["effects_credentials"] == {"name": f"{_PROJECT}-effects_credentials"}
-    assert all(
-        not v.startswith("effects_credentials:")
-        for name, svc in services.items()
-        if name != "runtime-effects"
-        for v in svc.get("volumes", [])
-    )
+    assert volumes["delegation_credentials"] == {
+        "name": f"{_PROJECT}-delegation_credentials"
+    }
 
 
 def _provider_credential_env_names(environment: Mapping[str, object]) -> list[str]:
@@ -334,8 +341,9 @@ def test_secret_local_make_target_passes_only_provider_and_tenant_as_arguments()
     assert "ONEX_TENANT_ID=" in target
     assert '"$(LOCAL_ENV_FILE)"' in target
     assert 'test -n "$$tenant"' in target
-    assert "ONEX_TENANT_ID is empty or absent" in target
-    commands = [line for line in target.splitlines() if "docker exec" in line]
+    # The key is registered only for the tenant the RUNNING runtime serves.
+    assert "printenv ONEX_TENANT_ID" in target
+    commands = [line for line in target.splitlines() if "docker exec -i" in line]
     assert commands
     for command in commands:
         assert (
@@ -346,8 +354,32 @@ def test_secret_local_make_target_passes_only_provider_and_tenant_as_arguments()
     assert "read -r -s" in target  # Terminal input must be hidden.
 
 
+def _make(target: str, env_file: Path, overlay_file: Path) -> None:
+    result = subprocess.run(
+        [
+            "make",
+            target,
+            f"LOCAL_ENV_FILE={env_file}",
+            f"LOCAL_OVERLAY_FILE={overlay_file}",
+        ],
+        cwd=_REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_local_env_leaves_the_runtime_without_a_tenant(tmp_path: Path) -> None:
+    """A tenant makes every delegation BYOK-only, so it is never the default."""
+    env_file = tmp_path / "local.env"
+    _make("local-env", env_file, tmp_path / "local.bifrost.yaml")
+    lines = env_file.read_text(encoding="utf-8").splitlines()
+    assert "ONEX_TENANT_ID=" in lines
+
+
 @pytest.mark.parametrize("existing_tenant", [None, "absent", "", "local-kept"])
-def test_local_env_generates_a_tenant_once(
+def test_tenant_local_generates_a_tenant_once(
     tmp_path: Path, existing_tenant: str | None
 ) -> None:
     env_file = tmp_path / "local.env"
@@ -357,16 +389,7 @@ def test_local_env_generates_a_tenant_once(
         if existing_tenant != "absent":
             contents += f"ONEX_TENANT_ID={existing_tenant}\n"
         env_file.write_text(contents, encoding="utf-8")
-    command = [
-        "make",
-        "local-env",
-        f"LOCAL_ENV_FILE={env_file}",
-        f"LOCAL_OVERLAY_FILE={overlay_file}",
-    ]
-    result = subprocess.run(
-        command, cwd=_REPO, capture_output=True, text=True, check=False
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
+    _make("tenant-local", env_file, overlay_file)
     tenant_lines = [
         line
         for line in env_file.read_text().splitlines()
@@ -378,10 +401,7 @@ def test_local_env_generates_a_tenant_once(
         assert tenant == existing_tenant
     else:
         assert re.fullmatch(r"local-[0-9a-f]{12}", tenant)
-    result = subprocess.run(
-        command, cwd=_REPO, capture_output=True, text=True, check=False
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
+    _make("tenant-local", env_file, overlay_file)
     assert tenant_lines[0] in env_file.read_text().splitlines()
 
 

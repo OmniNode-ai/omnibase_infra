@@ -95,9 +95,13 @@ healthcheck:
 volumes:
   - effects_logs:/app/logs
   - effects_data:/app/data
-  # Persist the canonical sqlite secret store shared by docker exec registration
-  # and the effects process (both run as root with HOME=/root).
-  - effects_credentials:/root/.omninode/delegation
+  # The runtime-owned sqlite secret store. Shared with omninode-runtime: the
+  # main runtime hosts the LLM call effect that resolves a tenant's minted
+  # credential reference, and this service is where `make secret-local` registers
+  # it (docker exec). All three run as root with HOME=/root. Measured on the lab
+  # (2026-09-30): with the volume on this service alone, the main runtime could
+  # not resolve the reference and the tenant route failed.
+  - delegation_credentials:/root/.omninode/delegation
   - ../contracts:/app/contracts:ro
   # OMN-13248 (epic OMN-13245): read-only OAuth credential bind-mounts for the
   # coding-agent EFFECT (node_coding_agent_invoke_effect). codex / claude read
