@@ -391,6 +391,27 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="delegation_eval_labels",
         ),
     ),
+    # OMN-20154: infra vendors provider_quota_state before omnimarket#3134
+    # lands its node contract. This bridge expires once the pin includes it.
+    # Retired by: omnimarket#3134 merging and the pin advancing past it.
+    ContractTableDeclaration(
+        node="legacy_migration:provider_quota_state",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_provider_quota/"
+            "0000_create_provider_quota_state.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="provider_quota_state",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_provider_quota/"
+                "0000_create_provider_quota_state.sql"
+            ),
+            access="read_write",
+            role="provider_quota_state",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
