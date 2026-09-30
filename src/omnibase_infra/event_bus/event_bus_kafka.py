@@ -4117,7 +4117,7 @@ class EventBusKafka(
                 }
                 try:
                     await consumer.commit(offsets)
-                except Exception as commit_error:  # noqa: BLE001 - retried by the next finish
+                except Exception as commit_error:  # noqa: BLE001 — boundary: logs warning and degrades
                     logger.warning(
                         "concurrent_commit_refused topic=%s group=%s offsets=%s "
                         "error=%s -- the position is retried on the next "
