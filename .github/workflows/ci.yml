@@ -328,6 +328,14 @@ jobs:
       - name: Check shared enum ownership
         run: python scripts/check_shared_enum_ownership.py src/
 
+      # OMN-20173. Tracked config must not address the GLM Coding Plan endpoint.
+      # Same script as the `no-coding-plan-endpoint` pre-commit hook.
+      - name: Check tracked configuration has no GLM Coding Plan endpoint (OMN-20173)
+        run: uv run python scripts/check_no_coding_plan_endpoint.py
+
+      - name: Unit tests for endpoint guard (OMN-20173)
+        run: uv run pytest tests/unit/scripts/test_check_no_coding_plan_endpoint.py -q -p no:cacheprovider
+
       # OMN-18364. A hosted-runner step that invokes `uv` before its job
       # installs it exits 127, and where that step's outcome feeds a receipt
       # check the receipt records the missing interpreter as a substantive

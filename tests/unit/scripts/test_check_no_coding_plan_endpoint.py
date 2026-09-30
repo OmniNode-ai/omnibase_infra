@@ -127,7 +127,6 @@ def test_gate_is_wired_to_precommit_and_ci() -> None:
     assert hook["entry"] == "uv run python scripts/check_no_coding_plan_endpoint.py"
     assert hook["pass_filenames"] is False
     assert hook["always_run"] is True
-    workflow = (_ROOT / ".github/workflows/no-coding-plan-endpoint.yml").read_text()
+    workflow = (_ROOT / ".github/workflows/ci.yml").read_text()
     assert hook["entry"] in workflow
     assert "tests/unit/scripts/test_check_no_coding_plan_endpoint.py" in workflow
-    assert "merge_group:" in workflow
