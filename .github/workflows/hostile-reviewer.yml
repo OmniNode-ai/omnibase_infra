@@ -88,7 +88,7 @@ jobs:
     # by this repo's only other caller of it, ci.yml. Those two are the complete
     # set of callers in this repository, and they must move together or the same
     # merge path ends up gated by two different revisions of the reusable.
-    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@979c290a16f70fcd7e0b62600ac511140baab4a6
+    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@52851458622f368c3b596c82bf810bc6acce1d5e
     permissions:
       contents: read
       pull-requests: read
