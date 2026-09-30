@@ -119,13 +119,21 @@ local-env: ## Write the laptop env file and model overlay from their templates (
 	  cp docker/lane-overlays/local.bifrost.example.yaml "$(LOCAL_OVERLAY_FILE)"; \
 	  echo "==> Wrote model overlay $(LOCAL_OVERLAY_FILE)"; \
 	fi
+	@command -v openssl > /dev/null 2>&1 || { echo "ERROR: openssl is required to generate the local passwords"; exit 1; }
 	@if [ -e "$(LOCAL_ENV_FILE)" ]; then \
 	  echo "==> Keeping existing env file $(LOCAL_ENV_FILE)"; \
+	  for var in OMNINODE_RUNTIME_PASSWORD TENANT_PROJECTION_WRITER_PASSWORD; do \
+	    grep -q "^$$var=" "$(LOCAL_ENV_FILE)" || { \
+	      printf '%s=%s\n' "$$var" "$$(openssl rand -hex 32)" >> "$(LOCAL_ENV_FILE)"; \
+	      echo "==> Added $$var to $(LOCAL_ENV_FILE) (generated)"; \
+	    }; \
+	  done; \
 	else \
-	  command -v openssl > /dev/null 2>&1 || { echo "ERROR: openssl is required to generate the local passwords"; exit 1; }; \
 	  umask 077; \
 	  sed -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$$(openssl rand -hex 32)|" \
 	      -e "s|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=$$(openssl rand -hex 32)|" \
+	      -e "s|^OMNINODE_RUNTIME_PASSWORD=.*|OMNINODE_RUNTIME_PASSWORD=$$(openssl rand -hex 32)|" \
+	      -e "s|^TENANT_PROJECTION_WRITER_PASSWORD=.*|TENANT_PROJECTION_WRITER_PASSWORD=$$(openssl rand -hex 32)|" \
 	      -e "s|^ONEX_LOCAL_BIFROST_OVERLAY=.*|ONEX_LOCAL_BIFROST_OVERLAY=$(LOCAL_OVERLAY_FILE)|" \
 	      docker/local.env.example > "$(LOCAL_ENV_FILE)"; \
 	  echo "==> Wrote env file $(LOCAL_ENV_FILE) (passwords generated)"; \

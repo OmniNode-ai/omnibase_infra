@@ -36,11 +36,14 @@ _OVERLAY_TEMPLATE = _REPO / "docker" / "lane-overlays" / "local.bifrost.example.
 _PROJECT = "omnibase-infra-local"
 _OVERLAY_PIN = "/app/config/delegation/local.bifrost.yaml"
 
-#: Every name the laptop profile may ask its operator for. Two local passwords
-#: and the path of the model overlay; nothing else.
+#: Every name the laptop profile may ask its operator for. Four local passwords
+#: (make local-env generates all four) and the path of the model overlay;
+#: nothing else.
 _LAPTOP_REQUIRED_ENV = {
     "POSTGRES_PASSWORD",
     "VALKEY_PASSWORD",
+    "OMNINODE_RUNTIME_PASSWORD",
+    "TENANT_PROJECTION_WRITER_PASSWORD",
     "ONEX_LOCAL_BIFROST_OVERLAY",
 }
 
@@ -62,7 +65,7 @@ _FORBIDDEN_FRAGMENTS = (
 )
 
 
-def test_laptop_required_env_is_two_passwords_and_the_overlay_path() -> None:
+def test_laptop_required_env_is_four_passwords_and_the_overlay_path() -> None:
     resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
     assert resolved.required_env == _LAPTOP_REQUIRED_ENV
 
@@ -168,6 +171,36 @@ def test_local_runtime_kernels_mount_and_pin_the_local_overlay() -> None:
     # Infrastructure entries never receive the runtime overlay mount.
     assert not any(
         v.endswith(_OVERLAY_PIN + ":ro") for v in services["postgres"]["volumes"]
+    )
+
+
+def test_local_projection_writer_binds_the_lab_principals_not_the_superuser() -> None:
+    """omnimarket's standalone writer attests the connected principal per binding.
+
+    With the superuser DSNs the laptop bundle used to inject, the delegation
+    writer crash-looped on a missing topology profile, then on principal
+    ``postgres`` where ``omninode_runtime`` was expected, and no
+    ``delegation_events`` row was ever written.
+    """
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    services = generate_compose(resolved)["services"]
+    assert isinstance(services, dict)
+    env = services["omnimarket-projection-delegation"]["environment"]
+    assert env["ONEX_DATABASE_TOPOLOGY_PROFILE"] == "local"
+    assert env["ONEX_TENANT_DB_URL"].startswith(
+        "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?"
+    )
+    assert env["OMNINODE_INTERNAL_DB_URL"].startswith(
+        "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?"
+    )
+    # forward-migration is what gives those principals a LOGIN credential.
+    migration_env = services["forward-migration"]["environment"]
+    assert (
+        migration_env["OMNINODE_RUNTIME_PASSWORD"] == "${OMNINODE_RUNTIME_PASSWORD:-}"
+    )
+    assert (
+        migration_env["TENANT_PROJECTION_WRITER_PASSWORD"]
+        == "${TENANT_PROJECTION_WRITER_PASSWORD:-}"
     )
 
 

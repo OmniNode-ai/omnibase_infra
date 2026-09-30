@@ -160,8 +160,11 @@ dependencies = [
     "a2a-sdk>=0.3.4,<2.0.0", # Real A2A client/server protocol support for remote-agent invocation
     # Security: CVE-2026-32597 (HIGH) - PyJWT <2.12.0 accepts unknown `crit` header extensions.
     # Security: CVE-2026-48526 (HIGH) - PyJWT <2.13.0 authentication bypass via forged tokens.
+    # Security: GHSA-9j54-fg26-wv3r, GHSA-9v7f-9g4p-ffgj, GHSA-ffc3-869f-jxw9 (CRITICAL),
+    # GHSA-p4g4-x82p-q773, GHSA-r6x4-923q-g947, GHSA-w2cx-738m-mc7w - PyJWT 2.13.0 key-confusion
+    # and JWKS bypasses; the lockfile CVE scan blocks every merge-group run until >=2.15.1 (OMN-17427).
     # Transitive dependency (via mcp/httpx/authlib). Explicitly declared to enforce minimum version.
-    "pyjwt>=2.13.0",
+    "pyjwt>=2.15.1",
     # Security: CVE-2026-53539 (HIGH) - python-multipart <0.0.30 streaming-parser vulnerability.
     # Transitive dependency (via fastapi/mcp). Explicitly declared to enforce the CVE-fixed minimum.
     "python-multipart>=0.0.30",

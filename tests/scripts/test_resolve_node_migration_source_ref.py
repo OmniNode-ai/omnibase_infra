@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -770,3 +771,107 @@ def test_push_of_a_landed_pr_without_trailers_still_resolves_dev(
 
     assert _run_push(tmp_path, monkeypatch, api_get, _push_event(tmp_path)) == 0
     assert capsys.readouterr().out.strip() == "dev"
+
+
+# OMN-17427: a paired omnimarket PR that moved forward after the vendor PR
+# declared it (a dev merge) resolves to its live head when the declared SHA is
+# an ancestor of that head; a diverged or unprovable history still fails closed.
+_DECLARED = "b75a8957806d918721a63a1bf72d67a1da162782"
+_LIVE_HEAD = "1bc352165aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+
+def _paired_event(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        json.dumps(
+            {
+                "pull_request": {
+                    "body": "\n".join(
+                        [
+                            "Node-Migration-Source-PR: omnimarket#3079",
+                            f"Node-Migration-Source-SHA: {_DECLARED}",
+                        ]
+                    )
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "github_output.txt"
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+    return output_path
+
+
+_ApiResult = tuple[int | None, dict[str, object] | None, str]
+
+
+def _moved_pr_api(
+    compare: _ApiResult,
+) -> tuple[Callable[[str], _ApiResult], list[str]]:
+    seen: list[str] = []
+
+    def api_get(url: str) -> _ApiResult:
+        seen.append(url)
+        if "/compare/" in url:
+            assert url.endswith(f"/omnimarket/compare/{_DECLARED}...{_LIVE_HEAD}")
+            return compare
+        return (
+            200,
+            {
+                "state": "open",
+                "draft": False,
+                "base": {"ref": "dev"},
+                "head": {
+                    "ref": "jonah/omn-19977-metering-summary",
+                    "sha": _LIVE_HEAD,
+                    "repo": {"full_name": "OmniNode-ai/omnimarket"},
+                },
+            },
+            "HTTP 200",
+        )
+
+    return api_get, seen
+
+
+def test_paired_source_that_descends_from_the_declared_sha_resolves_to_its_live_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    output_path = _paired_event(tmp_path, monkeypatch)
+    api_get, seen = _moved_pr_api((200, {"status": "ahead"}, "HTTP 200"))
+    monkeypatch.setattr(resolver, "_api_get", api_get)
+
+    assert resolver.main() == 0
+    assert capsys.readouterr().out.strip() == _LIVE_HEAD
+    assert output_path.read_text(encoding="utf-8") == f"ref={_LIVE_HEAD}\n"
+    assert any("/compare/" in u for u in seen)
+
+
+@pytest.mark.parametrize("compare_status", ["diverged", "behind", "identical"])
+def test_paired_source_whose_head_does_not_descend_from_the_declared_sha_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    compare_status: str,
+) -> None:
+    output_path = _paired_event(tmp_path, monkeypatch)
+    api_get, _ = _moved_pr_api((200, {"status": compare_status}, "HTTP 200"))
+    monkeypatch.setattr(resolver, "_api_get", api_get)
+
+    assert resolver.main() == 1
+    err = capsys.readouterr().err
+    assert "head SHA does not match" in err
+    assert compare_status in err
+    assert not output_path.exists()
+
+
+def test_paired_source_whose_ancestry_is_unreadable_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    output_path = _paired_event(tmp_path, monkeypatch)
+    api_get, _ = _moved_pr_api((None, None, "timeout"))
+    monkeypatch.setattr(resolver, "_api_get", api_get)
+
+    assert resolver.main() == 1
+    assert "fail-closed" in capsys.readouterr().err
+    assert not output_path.exists()

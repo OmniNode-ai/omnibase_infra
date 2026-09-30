@@ -78,6 +78,16 @@
 #               reads the same variable with the same default, so the wrapper
 #               and the reconciler cannot disagree about which venv is the
 #               composed one.
+#   ONEX_FLOOR_LOCK_WAIT_S (default 300), ONEX_FLOOR_LOCK_POLL_S (default 5)
+#               how long an evidence command below the floor waits for a PEER
+#               reconcile that holds the host lock, and how often it re-reads
+#               the floor meanwhile (OMN-20111). Waiting never lowers the bar:
+#               when the wait ends the floor is read again and the refusal
+#               below still fires unless it now reads OK.
+#   ONEX_RECONCILE_RECEIPT
+#               the last reconcile's receipt, read only to name the blocking
+#               surface in a refusal; same variable and default as
+#               reconcile-host.sh.
 #
 # ============================================================================
 # THE INVOCATION-TIME FLOOR (OMN-17309)
@@ -117,6 +127,9 @@ set -uo pipefail
 
 readonly EXIT_REFUSED=2
 readonly EXIT_BELOW_FLOOR=3
+# reconcile-host.sh's "a live peer holds the lock" status (OMN-18608). It is not
+# a verdict: the peer is reconciling right now, so the wrapper waits for it.
+readonly RECONCILE_EXIT_DECLINED=4
 
 # Subcommands that mint durable artifacts -- receipts, attestations, gate
 # verdicts, ledger writes, dispatched work whose output is quoted as evidence.
@@ -177,6 +190,8 @@ ENTRYPOINT="$DISPATCH_VENV/bin/onex"
 RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-workspace-venvs.sh"
 HOST_RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-host.sh"
 FLOOR_FILE="$OMNI_HOME/.onex-workspace-floor.json"
+RECONCILE_RECEIPT="${ONEX_RECONCILE_RECEIPT:-$OMNI_HOME/.onex-workspace-reconcile.json}"
+RECONCILE_LOCK_DIR="$OMNI_HOME/.onex-reconcile-host.lock"
 
 # --------------------------------------------------------------------------- #
 # Shadow warning
@@ -360,8 +375,79 @@ _floor_verdict() {
   ' "$FLOOR_FILE" -
 }
 
+# A peer reconcile holds the host lock (OMN-20111). Several hook ticks and
+# several lanes' wrappers fire at once, so this is the ordinary case, and the
+# peer is doing exactly the work that would clear the refusal. Wait for it, a
+# bounded time, re-reading the floor as it goes, instead of refusing while a
+# stamp is seconds away. Returns 0 only when the floor reads OK.
+_await_peer_reconcile() {
+  local budget="${ONEX_FLOOR_LOCK_WAIT_S:-300}" poll="${ONEX_FLOOR_LOCK_POLL_S:-5}"
+  local waited=0
+  [[ "$budget" =~ ^[0-9]+$ ]] || budget=300
+  [[ "$poll" =~ ^[1-9][0-9]*$ ]] || poll=5
+  _say "a peer reconcile holds $RECONCILE_LOCK_DIR; waiting up to ${budget}s for it before refusing."
+  while :; do
+    if [[ "$(_floor_verdict)" == "OK" ]]; then
+      _say "the peer reconcile proved the floor after ${waited}s; proceeding."
+      return 0
+    fi
+    [[ -d "$RECONCILE_LOCK_DIR" ]] || break
+    (( waited < budget )) || break
+    sleep "$poll"
+    waited=$(( waited + poll ))
+  done
+  if [[ -d "$RECONCILE_LOCK_DIR" ]]; then
+    _say "the peer reconcile still holds the lock after ${waited}s; not waiting longer."
+  else
+    _say "the peer reconcile finished after about ${waited}s without proving the floor."
+  fi
+  return 1
+}
+
+# Name what blocks the floor and the command that clears it (OMN-20111), from
+# the last reconcile's receipt. `reconcile-host.sh` writes one surface per line
+# with its verdict, whether it is part of the dispatch premise, and its remedy;
+# one awk reads them back. This runs only on the refusal path, so it costs the
+# hot path nothing.
+_explain_blocking_surfaces() {
+  if [[ ! -f "$RECONCILE_RECEIPT" ]]; then
+    _say "  blocking : unknown -- no reconcile receipt at $RECONCILE_RECEIPT"
+    return 0
+  fi
+  awk '
+    function field(line, key,   pat, v) {
+      pat = "\"" key "\": \"[^\"]*\""
+      if (!match(line, pat)) return ""
+      v = substr(line, RSTART, RLENGTH)
+      sub("^\"" key "\": \"", "", v)
+      sub("\"$", "", v)
+      return v
+    }
+    /"generated_at": "/ { at = field($0, "generated_at") }
+    /"surface": "/ {
+      v = field($0, "verdict")
+      if (v == "MOVED" || v == "ALREADY_AT_TARGET") next
+      s = field($0, "surface"); r = field($0, "remedy")
+      if ($0 ~ /"dispatch_premise": true/) { nb++; bs[nb] = s " " v; br[nb] = r }
+      else { no++; os[no] = s " " v }
+    }
+    END {
+      if (nb == 0) {
+        printf "[onex]   blocking : the last reconcile (%s) names no failing dispatch surface\n", at
+      }
+      for (i = 1; i <= nb; i++) {
+        printf "[onex]   blocking : %s (last reconcile %s)\n", bs[i], at
+        if (br[i] != "") printf "[onex]   clears by: %s\n", br[i]
+      }
+      for (i = 1; i <= no; i++) {
+        printf "[onex]   not blocking delegation: %s\n", os[i]
+      }
+    }
+  ' "$RECONCILE_RECEIPT" >&2
+}
+
 _enforce_floor() {
-  local result detail
+  local result detail rc
   result="$(_floor_verdict)"
   [[ "$result" == "OK" ]] && return 0
   detail="${result#*:}"
@@ -378,17 +464,22 @@ _enforce_floor() {
     # verdict is still not OK and the refusal below still fires.
     if [[ "${ONEX_WRAPPER_NO_RECONCILE:-0}" != "1" && -f "$HOST_RECONCILER" ]]; then
       _say "below the proven floor ($detail) — reconciling once before refusing."
-      bash "$HOST_RECONCILER" --omni-home "$OMNI_HOME" >&2
+      rc=0
+      bash "$HOST_RECONCILER" --omni-home "$OMNI_HOME" >&2 || rc=$?
+      if [[ "$rc" -eq "$RECONCILE_EXIT_DECLINED" ]]; then
+        _await_peer_reconcile && return 0
+      fi
       result="$(_floor_verdict)"
       [[ "$result" == "OK" ]] && return 0
       detail="${result#*:}"
     fi
     _say "REFUSED: this workspace is below the proven floor, and this command mints evidence."
     _say "  reason   : $detail"
+    _explain_blocking_surfaces
     _say "  floor    : $FLOOR_FILE"
     _say "  command  : onex $*"
     _say "  Running it would produce a receipt from a build nobody chose (OMN-16932)."
-    _say "  Reconcile, then retry:"
+    _say "  Clear the blocking surface above, or reconcile, then retry:"
     _say "    bash $HOST_RECONCILER --omni-home $OMNI_HOME"
     exit "$EXIT_BELOW_FLOOR"
   fi
