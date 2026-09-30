@@ -146,6 +146,10 @@ def _runtime_image_build(project: str = DEFAULT_PROJECT) -> dict[str, object]:
     unset value. Rendering ``${OMNI_HOME:-}`` here only handed the build a
     silent empty default; without it, the Dockerfile's workspace guard fails
     fast when the value is missing.
+
+    ``OMNIMARKET_REF`` is the git ref a ``BUILD_SOURCE=release`` build installs
+    omnimarket from. Its default is the Dockerfile's own (``dev``); rendering it
+    lets an env file pin the image to a tag instead of the moving dev tip.
     """
     return {
         "context": "..",
@@ -153,6 +157,7 @@ def _runtime_image_build(project: str = DEFAULT_PROJECT) -> dict[str, object]:
         "args": {
             "BUILD_SOURCE": "${BUILD_SOURCE:-release}",
             "EXPECTED_BUILD_SOURCE": "${EXPECTED_BUILD_SOURCE:-release}",
+            "OMNIMARKET_REF": "${OMNIMARKET_REF:-dev}",
             "RUNTIME_VERSION": "${RUNTIME_VERSION:-0.1.0}",
             "BUILD_DATE": "${BUILD_DATE:-}",
             "VCS_REF": "${VCS_REF:-}",
