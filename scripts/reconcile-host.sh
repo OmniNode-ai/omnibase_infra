@@ -66,11 +66,23 @@
 #
 # THE FLOOR
 # ----------------------------------------------------------------------------
-# On an all-ok run it stamps ${OMNI_HOME}/.onex-workspace-floor.json -- the
-# minimum installed state that has been PROVEN on this host. `scripts/onex`
+# It stamps ${OMNI_HOME}/.onex-workspace-floor.json -- the minimum installed
+# state of the DISPATCH venv that has been PROVEN on this host. `scripts/onex`
 # reads it at invocation (OMN-17309) and refuses to let an evidence-producing
-# command run below it. A failed run leaves the previous floor untouched, so the
-# floor never describes a state that was merely attempted.
+# command run below it. The floor never describes a state that was merely
+# attempted: it is stamped only when every surface the dispatch build is made
+# FROM verdicted ok (see is_dispatch_premise below), and otherwise the previous
+# floor is left untouched.
+#
+# Scoped to the dispatch premise, not to the whole host (OMN-20111). The floor
+# records nothing but dispatch-venv distributions and the omnimarket commit, so
+# withholding it over a surface that does not feed that build proves nothing
+# more and blocks every `onex delegate` on the host. On 2026-09-29 one canonical
+# clone (omnibase_core) carried staged files for about 90 minutes, every pass
+# ended FAILED on it alone, the dispatch venv had moved to a new omnimarket, and
+# the floor kept the old commit, so the wrapper refused all delegation. An
+# unrelated failure still fails the verdict, alerts and exits non-zero; it just
+# no longer freezes the floor.
 #
 # ----------------------------------------------------------------------------
 # Usage:
@@ -512,13 +524,70 @@ ${text}" '{channel:$channel,text:$text}')" >/dev/null 2>&1 || true
 # Verdict bookkeeping
 # --------------------------------------------------------------------------- #
 FAILURES=()
+DISPATCH_FAILURES=()
 SURFACE_LINES=()
+
+# Does the dispatch build depend on this surface? (OMN-20111)
+#
+# The dispatch venv is composed from exactly two sources: the lock layer, whose
+# targets are read from $CLI_LOCK inside the omnibase_infra clone, and the
+# omnimarket provider layer, installed at the omnimarket clone's HEAD. So the
+# premise is every dispatch-venv readback plus those two clones, plus either
+# delegate being absent (then nothing reconciles the build at all). Everything
+# else -- another sibling clone, the gate venv's purity, a PATH shadow of the
+# wrapper -- still fails the verdict, but says nothing about which build a
+# dispatch would run, so it may not hold the floor.
+#
+# An allowlist of what IS premise, not a list of what is not: a surface added
+# later is outside the premise until someone decides it feeds the build, and
+# the cost of that default is the pre-OMN-20111 behaviour for that one surface,
+# never a floor stamped over an unproven build.
+is_dispatch_premise() { # surface
+  case "$1" in
+    venv:gate-purity) return 1 ;;
+    venv:*|venv-surface|clone-surface) return 0 ;;
+    clone:omnibase_infra|clone:omnimarket) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# The command that clears a failing surface, printed here and written into the
+# receipt so `scripts/onex` can name it when it refuses (OMN-20111). A refusal
+# that names neither the blocking surface nor its repair is a dead end, and on
+# 2026-09-29 several lanes hand-wrote code for an hour rather than find it.
+surface_remedy() { # surface verdict
+  local rerun="bash $SCRIPT_DIR/reconcile-host.sh --omni-home $OMNI_HOME"
+  case "$1" in
+    clone:*)
+      if [[ "$2" == "UNHEALTHY" ]]; then
+        printf 'apply the repair named in the detail, then %s' "$rerun"
+      else
+        printf 'bash %s/omniclaude/scripts/converge-canonical-clone.sh %s --execute, then %s' \
+          "$OMNI_HOME" "${1#clone:}" "$rerun"
+      fi
+      ;;
+    venv:*)
+      printf 'bash %s/reconcile-workspace-venvs.sh --omni-home %s, then %s' \
+        "$SCRIPT_DIR" "$OMNI_HOME" "$rerun"
+      ;;
+    clone-surface|venv-surface)
+      printf 'restore the missing delegate named in the detail (git -C %s/omnibase_infra status), then %s' \
+        "$OMNI_HOME" "$rerun"
+      ;;
+    onex-path-shadow) printf 'uv tool uninstall omnibase-core, then %s' "$rerun" ;;
+    *) printf '%s' "$rerun" ;;
+  esac
+}
 
 record() { # surface verdict detail
   SURFACE_LINES+=("$1|$2|$3")
   case "$2" in
     MOVED|ALREADY_AT_TARGET) say "  $1: $2 ($3)" ;;
-    *) say "  $1: $2 ($3)"; FAILURES+=("$1: $2 — $3") ;;
+    *)
+      say "  $1: $2 ($3)"
+      FAILURES+=("$1: $2 — $3")
+      is_dispatch_premise "$1" && DISPATCH_FAILURES+=("$1: $2")
+      ;;
   esac
 }
 
@@ -879,7 +948,20 @@ path_onex_shadow_check
   sep=""
   for line in "${SURFACE_LINES[@]}"; do
     IFS='|' read -r s v d < <(printf '%s\n' "$line")
-    printf '%s    {"surface": "%s", "verdict": "%s", "detail": "%s"}' "$sep" "$s" "$v" "${d//\"/\'}"
+    premise=false
+    is_dispatch_premise "$s" && premise=true
+    remedy=""
+    case "$v" in
+      MOVED|ALREADY_AT_TARGET) ;;
+      *) remedy="$(surface_remedy "$s" "$v")" ;;
+    esac
+    # ONE LINE PER SURFACE, and the key order is a consumed contract:
+    # `scripts/onex` reads failing surfaces and their remedies back out of this
+    # file with awk when it refuses (OMN-20111), because its hot path starts no
+    # interpreter. Keep `surface`, `verdict`, `dispatch_premise` and `remedy`
+    # ahead of `detail` on the element's own line.
+    printf '%s    {"surface": "%s", "verdict": "%s", "dispatch_premise": %s, "remedy": "%s", "detail": "%s"}' \
+      "$sep" "$s" "$v" "$premise" "${remedy//\"/\'}" "${d//\"/\'}"
     # $'...' , not "..." (OMN-17800). Bash interprets \n only in ANSI-C quoting,
     # and this value is then handed to printf as a %s ARGUMENT, where printf does
     # not interpret escapes either -- so `sep=",\n"` wrote the literal three
@@ -889,7 +971,8 @@ path_onex_shadow_check
     # surface, and a separator is untested until something is separated.
     sep=$',\n'
   done
-  printf '\n  ],\n  "failures": %d\n}\n' "${#FAILURES[@]}"
+  printf '\n  ],\n  "failures": %d,\n  "dispatch_premise_failures": %d\n}\n' \
+    "${#FAILURES[@]}" "${#DISPATCH_FAILURES[@]}"
 } | as_owner tee "$RECEIPT" >/dev/null 2>&1 || \
   say "WARNING: could not write receipt to $RECEIPT"
 # `tee` rather than a `>` redirection: a redirect is performed by THIS shell, so
@@ -897,11 +980,53 @@ path_onex_shadow_check
 # though every other write here drops privileges — the same defect, one file
 # over, and the file an operator is most likely to want to delete (OMN-17366).
 
+# Stamp the floor from what the dispatch venv holds NOW. Called only on a
+# repair run where every dispatch-premise surface verdicted ok; see the header.
+stamp_floor() {
+  local name v mc
+  local -a floor_args=()
+  if [[ -n "$SP" ]]; then
+    for name in "${governed_dists[@]}"; do
+      v="$(observe_version "$SP" "${name//-/_}" || true)"
+      [[ -n "$v" ]] && floor_args+=(--distribution "${name//-/_}=$v")
+    done
+    mc="$(observe_commit "$SP" "omnimarket")"
+    [[ -n "$mc" ]] && floor_args+=(--omnimarket-commit "$mc")
+  fi
+  if [[ "${#floor_args[@]}" -gt 0 ]]; then
+    # As the owner: the floor lives inside $OMNI_HOME, and `scripts/onex` reads it
+    # on every invocation. A root-owned floor is one the operator's own reconcile
+    # can no longer restamp.
+    as_owner "$PYTHON_BIN" "$VERIFIER" floor --output "$FLOOR" --omni-home "$OMNI_HOME" "${floor_args[@]}" >&2
+  else
+    say "WARNING: nothing observable to stamp; floor left untouched."
+  fi
+}
+
 if [[ "${#FAILURES[@]}" -gt 0 ]]; then
   say "VERDICT: FAILED — ${#FAILURES[@]} surface(s) could not be proven at target."
-  for f in "${FAILURES[@]}"; do say "  $f"; done
+  for line in "${SURFACE_LINES[@]}"; do
+    IFS='|' read -r s v d < <(printf '%s\n' "$line")
+    case "$v" in
+      MOVED|ALREADY_AT_TARGET) continue ;;
+    esac
+    say "  $s: $v — $d"
+    say "    clears with: $(surface_remedy "$s" "$v")"
+  done
   say "  receipt: $RECEIPT"
-  say "  The floor marker was NOT stamped; $FLOOR keeps whatever was last proven."
+  if [[ "$MODE" == "repair" && "${#DISPATCH_FAILURES[@]}" -eq 0 ]]; then
+    # The dispatch premise is proven even though the host is not (OMN-20111).
+    stamp_floor
+    say "  The dispatch premise (dispatch venv, omnibase_infra and omnimarket clones) IS"
+    say "  proven, so $FLOOR was stamped: the failures above do not block onex delegate."
+  else
+    say "  The floor marker was NOT stamped; $FLOOR keeps whatever was last proven."
+    # The `+` form: macOS /bin/bash 3.2 treats an empty array as unbound under
+    # `set -u`, and a --check run with only unrelated failures has none.
+    for f in ${DISPATCH_FAILURES[@]+"${DISPATCH_FAILURES[@]}"}; do
+      say "  blocks onex delegate: $f"
+    done
+  fi
   alert "$(printf '%s\n' "${FAILURES[@]}")
 receipt: $RECEIPT
 host root: $OMNI_HOME"
@@ -913,23 +1038,7 @@ if [[ "$MODE" == "check" ]]; then
   exit "$EXIT_OK"
 fi
 
-floor_args=()
-if [[ -n "$SP" ]]; then
-  for name in "${governed_dists[@]}"; do
-    v="$(observe_version "$SP" "${name//-/_}" || true)"
-    [[ -n "$v" ]] && floor_args+=(--distribution "${name//-/_}=$v")
-  done
-  mc="$(observe_commit "$SP" "omnimarket")"
-  [[ -n "$mc" ]] && floor_args+=(--omnimarket-commit "$mc")
-fi
-if [[ "${#floor_args[@]}" -gt 0 ]]; then
-  # As the owner: the floor lives inside $OMNI_HOME, and `scripts/onex` reads it
-  # on every invocation. A root-owned floor is one the operator's own reconcile
-  # can no longer restamp.
-  as_owner "$PYTHON_BIN" "$VERIFIER" floor --output "$FLOOR" --omni-home "$OMNI_HOME" "${floor_args[@]}" >&2
-else
-  say "WARNING: nothing observable to stamp; floor left untouched."
-fi
+stamp_floor
 
 say "VERDICT: IN_SYNC — every surface proven at target."
 exit "$EXIT_OK"
