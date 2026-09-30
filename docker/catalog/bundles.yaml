@@ -83,6 +83,24 @@ local:
     # The delegation_events writer. It is a standalone projection runner, not
     # a kernel handler, on every lane that projects delegations.
     - omnimarket-projection-delegation
+    # OMN-19972 (plan T4.1, demo half): the six local pages read served
+    # exposures, so the laptop runs its own projection API, the LLM call and
+    # cost writer behind the Usage page, and the consumer-health projection.
+    - projection-api
+    - omnimarket-projection-llm-cost
+    - consumer-health-projection
+  # OMN-19972: 3002 is the lab lanes' projection API port. The laptop's own API
+  # answers on 3102 (loopback, by publish_host above).
+  port_overrides:
+    projection-api: 3102
+  # OMN-19972: the projection API refuses to start while any bus-backed
+  # exposure's topic is missing, and on a laptop the kernel's boot is what
+  # creates them (TopicProvisioner, from every installed contract). Measured on
+  # the lakshman lane 2026-09-30: started first, it waited 300 s, exited with
+  # "no partition metadata" and looped.
+  extra_depends_on:
+    projection-api:
+      omninode-runtime: service_healthy
   includes: []
   inject_env:
     ONEX_ENVIRONMENT: local

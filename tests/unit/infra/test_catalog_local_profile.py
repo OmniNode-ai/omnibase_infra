@@ -106,8 +106,11 @@ def test_local_bundle_runs_both_runtime_kernels_the_writer_and_the_migration_gat
         n for n, m in resolved.manifests.items() if m.layer == EnumInfraLayer.RUNTIME
     ]
     assert sorted(runtime) == [
+        "consumer-health-projection",
         "omnimarket-projection-delegation",
+        "omnimarket-projection-llm-cost",
         "omninode-runtime",
+        "projection-api",
         "runtime-effects",
     ]
 
@@ -505,3 +508,107 @@ def test_override_leaves_a_non_string_command_part_untouched(tmp_path: Path) -> 
     services = compose["services"]
     assert isinstance(services, dict)
     assert services["svc"]["command"] == ["sleep", 5, "--addr ${ADV:-localhost}"]
+
+
+# --- OMN-19972 demo half (plan T4.1): the services the six pages read ----------
+#
+# Failure modes these tests are written against, each shown failing on dev
+# 83fa0e0c3 before the change:
+#   1. an added service is missing from the laptop render, or runs with no
+#      health signal, so the CI boot cannot tell it is dead;
+#   2. the laptop's projection API keeps port 3002, the lab lanes' port;
+#   3. the projection API starts before the kernel has provisioned the exposure
+#      topics (measured on the lakshman lane 2026-09-30: it waits 300 s, exits
+#      with "no partition metadata" and loops);
+#   4. a laptop-only override leaks into another bundle rendered from the same
+#      shared manifests;
+#   5. the llm-cost writer names an image no catalog render builds.
+
+_PAGE_SERVICES = (
+    "projection-api",
+    "omnimarket-projection-llm-cost",
+    "consumer-health-projection",
+)
+_LAPTOP_PROJECTION_API_PORT = 3102
+
+
+def _render(*bundles: str) -> dict[str, object]:
+    return generate_compose(
+        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(list(bundles))
+    )
+
+
+def _services(compose: dict[str, object]) -> dict[str, dict[str, object]]:
+    services = compose["services"]
+    assert isinstance(services, dict)
+    return services
+
+
+def test_local_render_carries_the_services_the_pages_read() -> None:
+    assert set(_PAGE_SERVICES) <= set(_services(_render("local")))
+
+
+def test_every_long_running_local_service_has_a_healthcheck() -> None:
+    services = _services(_render("local"))
+    unwatched = sorted(
+        name
+        for name, svc in services.items()
+        if svc.get("restart") != "no" and "healthcheck" not in svc
+    )
+    assert unwatched == []
+
+
+def test_local_projection_api_publishes_a_laptop_port_not_the_lab_port() -> None:
+    ports = _services(_render("local"))["projection-api"]["ports"]
+    assert ports == [f"{_LOOPBACK}:{_LAPTOP_PROJECTION_API_PORT}:3002"]
+
+
+def test_other_bundles_keep_the_projection_api_on_3002() -> None:
+    ports = _services(_render("runtime-observability-projections"))["projection-api"][
+        "ports"
+    ]
+    assert ports == ["3002:3002"]
+
+
+def test_local_projection_api_waits_for_the_kernel_that_provisions_its_topics() -> None:
+    depends_on = _services(_render("local"))["projection-api"]["depends_on"]
+    assert isinstance(depends_on, dict)
+    assert depends_on.get("omninode-runtime") == {"condition": "service_healthy"}
+
+
+def test_other_bundles_do_not_gain_the_kernel_dependency() -> None:
+    depends_on = _services(_render("runtime-observability-projections"))[
+        "projection-api"
+    ]["depends_on"]
+    assert isinstance(depends_on, dict)
+    assert "omninode-runtime" not in depends_on
+
+
+def test_llm_cost_writer_builds_from_the_runtime_image_and_reports_ready() -> None:
+    for bundle in ("local", "omnimarket-projections"):
+        svc = _services(_render(bundle))["omnimarket-projection-llm-cost"]
+        assert "omnimarket-projection:latest" not in str(svc["image"]), bundle
+        test = svc["healthcheck"]["test"]  # type: ignore[index]
+        assert "/ready" in " ".join(test), bundle
+        env = svc["environment"]
+        assert isinstance(env, dict)
+        assert env.get("PROJECTION_RUNNER_HEALTH_PORT"), bundle
+
+
+def test_two_bundles_overriding_one_service_port_differently_are_refused(
+    tmp_path: Path,
+) -> None:
+    import shutil
+
+    catalog = tmp_path / "catalog"
+    shutil.copytree(_CATALOG_DIR, catalog)
+    bundles_file = catalog / "bundles.yaml"
+    bundles = yaml.safe_load(bundles_file.read_text())
+    bundles["other-laptop"] = {
+        "description": "fixture: a second bundle overriding the same port",
+        "services": ["projection-api"],
+        "port_overrides": {"projection-api": 3999},
+    }
+    bundles_file.write_text(yaml.safe_dump(bundles, sort_keys=False))
+    with pytest.raises(ValueError, match=r"[Pp]ort override conflict"):
+        CatalogResolver(catalog_dir=str(catalog)).resolve(["local", "other-laptop"])
