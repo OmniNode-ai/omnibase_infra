@@ -872,3 +872,18 @@ fenced_node_migrations:
   # ruling. No lane release is added here.
   - id: "node:node_projection_delegation_eval:0002_force_rls_delegation_eval_items.sql"
     ticket: "OMN-19790"
+  # OMN-20154: 0002 enables FORCE ROW LEVEL SECURITY on provider_quota_state.
+  # It is split out of 0000 (the create) and fenced on arrival, so 0000 and the
+  # 0001 grants apply on a fresh database while only the FORCE step waits. Its
+  # release is a separate operator-sequenced step that needs an operator
+  # ruling. No lane release is added here.
+  - id: "node:node_projection_provider_quota:0002_force_rls_provider_quota_state.sql"
+    ticket: "OMN-20154"
+  # OMN-19793: 0006 enables FORCE ROW LEVEL SECURITY on delegation_eval_item_verdicts
+  # and delegation_eval_results. It is split out of 0003 and 0004 (the creates)
+  # and fenced on arrival, so the creates and the 0005 grants apply on a fresh
+  # database while only the FORCE step waits. Its release is a separate
+  # operator-sequenced step that needs an operator ruling. No lane release is
+  # added here.
+  - id: "node:node_projection_delegation_eval:0006_force_rls_delegation_eval_run_tables.sql"
+    ticket: "OMN-19793"

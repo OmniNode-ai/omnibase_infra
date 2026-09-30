@@ -186,7 +186,7 @@ def test_a_base_backend_cannot_be_given_a_placement_by_a_lane(tmp_path: Path) ->
         {
             "tier": "local",
             "fallback_for": ["local-coder"],
-            "weight": 2,
+            "priority": 2,
             "max_context_tokens": 1,
         },
     ],

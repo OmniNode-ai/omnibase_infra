@@ -531,6 +531,19 @@ FENCED_USAGE_BY_MODEL_DAY_RLS_IDS = (
 FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS = (
     "node:node_projection_delegation_eval:0002_force_rls_delegation_eval_items.sql",
 )
+# OMN-20154: provider_quota_state's FORCE ROW LEVEL SECURITY lives in its own
+# 0002 migration, split out of the create exactly as delegation_eval_items' was,
+# so only that step is fenced on arrival. Its release is a separate
+# operator-sequenced step; this fence addition carries no lane release.
+FENCED_PROVIDER_QUOTA_STATE_RLS_IDS = (
+    "node:node_projection_provider_quota:0002_force_rls_provider_quota_state.sql",
+)
+# OMN-19793: the eval-run tables' FORCE ROW LEVEL SECURITY lives in 0006, split
+# out of the 0003/0004 creates for the same reason as 0002 above. Only that step
+# is fenced on arrival; the creates and the 0005 grant apply on every lane.
+FENCED_DELEGATION_EVAL_RUN_RLS_IDS = (
+    "node:node_projection_delegation_eval:0006_force_rls_delegation_eval_run_tables.sql",
+)
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS
     + FENCED_REGISTRATION_IDS
@@ -542,6 +555,8 @@ EXPECTED_FENCE = (
     + FENCED_OMN18987_IDS
     + FENCED_USAGE_BY_MODEL_DAY_RLS_IDS
     + FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS
+    + FENCED_PROVIDER_QUOTA_STATE_RLS_IDS
+    + FENCED_DELEGATION_EVAL_RUN_RLS_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -907,9 +922,14 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
         FENCED_BUDGET_STATE_RLS_IDS + FENCED_OMN18987_IDS
     ), "the post-conversion operator fence tail is not the expected ids"
     assert found[post_conversion_tail_end:] == (
-        FENCED_USAGE_BY_MODEL_DAY_RLS_IDS + FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS
+        FENCED_USAGE_BY_MODEL_DAY_RLS_IDS
+        + FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS
+        + FENCED_PROVIDER_QUOTA_STATE_RLS_IDS
+        + FENCED_DELEGATION_EVAL_RUN_RLS_IDS
     ), (
-        "the OMN-19978 usage_by_model_day and OMN-19790 delegation_eval_items RLS holds are not the expected ids"
+        "the OMN-19978 usage_by_model_day, OMN-19790 delegation_eval_items, "
+        "OMN-20154 provider_quota_state and OMN-19793 eval-run RLS holds are not "
+        "the expected ids"
     )
 
 

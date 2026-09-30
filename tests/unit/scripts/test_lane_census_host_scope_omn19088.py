@@ -73,6 +73,7 @@ _LANES_201 = {
     "prepr-1",
     "prepr-2",
     "ci-bus",
+    "principal-issuer",
 }
 
 # OMN-19339: the .202 host carries the sim-202 lane, and since OMN-19505 the

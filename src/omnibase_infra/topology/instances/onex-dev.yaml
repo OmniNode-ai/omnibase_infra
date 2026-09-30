@@ -195,7 +195,9 @@ databases:
               - capability_scores
               - context_roi_scores
               - delegation_budget_state
+              - delegation_eval_item_verdicts
               - delegation_eval_items
+              - delegation_eval_results
               - delegation_events
               - delegation_judge_verdict_events
               - delegation_routing_tenant_overlay
@@ -207,6 +209,7 @@ databases:
               - metering_summary
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
+              - provider_quota_state
               - savings_estimates
               - skill_execution_snapshots
               - tenant_inference_credentials

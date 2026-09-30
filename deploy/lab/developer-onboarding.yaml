@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# The lab addresses a developer machine is onboarded against (OMN-20150).
+#
+# Read by omniclaude's `lab-onboarding.sh` (the `/onex:lab_onboarding` skill)
+# after it clones this repository. That script is public and names no lab host,
+# so every lab address it needs is declared here and nowhere in it.
+#
+# FLAT ON PURPOSE: one `key: value` per line, no nesting. The script parses this
+# with sed before any Python exists on the machine.
+#
+# The dev lane's broker address is NOT repeated here: it is declared once, in
+# omnimarket `config/ci_bus_lanes.yaml` lane `dev`, and the script reads it there.
+schema: developer-onboarding.v1
+# MagicDNS suffix of the OmniNode tailnet. A machine signed in to another
+# tailnet is refused by the script's phase 3.
+tailnet_suffix: tail75df5e.ts.net
+# The lab lane a developer machine gets a bus identity on.
+lane: dev
+# docker/docker-compose.principal-issuer.yml, published on the tailnet by the lab
+# host's `tailscale serve` (see that file's header). Tailnet-only.
+principal_issuer_url: https://omninode-pc.tail75df5e.ts.net:8443
+# The lab model server, by its tailnet name so it answers on and off the office
+# LAN (local-dev walk D3). It serves the model id omnimarket's local rungs declare.
+lab_model_url: http://omnipc2.tail75df5e.ts.net:8000/v1/chat/completions
+lab_model_name: Qwen3.8-27B

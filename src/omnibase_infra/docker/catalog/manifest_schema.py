@@ -152,6 +152,17 @@ class Bundle:
     # (the laptop profile and the lab's LAN address) overrides it here instead
     # of editing the shared manifest.
     env_default_overrides: dict[str, str] = field(default_factory=dict)
+    # OMN-19972: a replacement external (host) port per entry name. The shared
+    # manifest's port is right for the lab lanes that render it; the laptop
+    # profile must not take the lab's projection API port, so it overrides the
+    # host side here and leaves the container port alone.
+    port_overrides: dict[str, int] = field(default_factory=dict)
+    # OMN-19972: extra start-order dependencies per entry name, as
+    # ``{entry: {dependency: condition}}``. On the laptop the projection API
+    # must wait for the kernel that provisions its exposure topics; other
+    # bundles that render the projection API may not run that kernel at all,
+    # so the dependency belongs to the bundle, not to the shared manifest.
+    extra_depends_on: dict[str, dict[str, str]] = field(default_factory=dict)
 
     def resolve_includes(
         self,

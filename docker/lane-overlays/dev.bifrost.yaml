@@ -85,3 +85,55 @@ backends:
         - local-heavy-reasoning
       max_context_tokens: 32768
       mode: spread
+  # OMN-19432: gpt-oss-120b on the .200 Mac Studio (llama.cpp, MXFP4 GGUF, keyless,
+  # 131072-token context pool shared by four slots). RULING 2026-09-30T15:07:51Z:
+  # no model is a fallback-only rung, so it is a SPREAD peer of local-heavy-reasoning
+  # and takes a share of that rung's first-choice traffic, a transport failure on
+  # the member picked first still retrying the others. It serves only the classes
+  # it was measured on, `use_for` below, never document or summarization, and never
+  # the code rungs. Its `weight` is its share against the rung's 1.0, set from
+  # measured capacity: the same 30 real tasks, two runs each, opus blind grade, in
+  # one session, gave Qwen 30/60 and gpt-oss 29/60 at medium effort and 36/60 at
+  # high, but p50 2.6 s against 16.9 s, about 2.5 times the tokens per answer, four
+  # slots, and a server shared with the orchestrating sessions, so about a seventh
+  # of a Qwen host's throughput per answer; 0.25 keeps it near a tenth of the group
+  # until a week of receipts says otherwise. The routing window is the rung's own
+  # 8192 tokens, not the 131072 the server holds: on ten real 9000 to 15500-token
+  # plans it had unsupported claims in 65 of 177 claims against 33 of 185 for Qwen.
+  # Report: reports/2026-09-30-gpt-oss-120b-delegation-placement.md in
+  # knowledge-base-internal. Probe recorded in
+  # tests/fixtures/bifrost_served_models_probe.json (2026-09-30T15:31:26Z, from
+  # inside omninode-runtime-effects). `use_for` and `weight` need the renderer keys
+  # of omnibase_infra#4358 and the engine of omnimarket#3120.
+  # onex-allow-internal-ip OMN-19432 reason="typed dev-lane delegation contract"
+  - backend_id: local-studio-planner
+    endpoint_url: "http://192.168.86.200:8130/v1/chat/completions"
+    served_model_id: "gpt-oss-120b"
+    parameter_count: "120B"
+    context_window: 131072
+    max_tokens: 16384
+    timeout_ms: 300000
+    provider: local
+    tier: local
+    credential:
+      kind: none
+    capabilities:
+      - deep_reasoning
+      - reasoning
+      - research
+      - classification
+      - documentation
+    placement:
+      tier: local
+      fallback_for:
+        - local-heavy-reasoning
+      max_context_tokens: 8192
+      mode: spread
+      weight: 0.25
+      use_for:
+        - review
+        - reasoning
+        - complex_reasoning
+        - planning
+        - research
+        - escalation
