@@ -8,6 +8,7 @@ The script imports this model back from the node (thin-CLI shim).
 
 from __future__ import annotations
 
+import json
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -39,6 +40,9 @@ class ModelDlqMessage(BaseModel):
         ..., description="Topic the message originally failed on."
     )
     original_key: str | None = Field(default=None, description="Original message key.")
+    original_message_id: UUID | None = Field(
+        default=None, description="Original message ID, when recoverable."
+    )
     original_value: str = Field(
         ...,
         description=(
@@ -140,10 +144,23 @@ class ModelDlqMessage(BaseModel):
 
         retry_count = cls._parse_retry_count(payload.get("retry_count", 0))
 
+        original_message_id: UUID | None = None
+        try:
+            original_message_id = UUID(str(original_message.get("message_id")))
+        except ValueError:
+            # OMN-19558: older DLQ rows may only carry identity in the body.
+            try:
+                body = json.loads(str(raw_original_value))
+                if isinstance(body, dict):
+                    original_message_id = UUID(str(body.get("envelope_id")))
+            except (ValueError, TypeError):
+                pass
+
         offset_value = original_message.get("offset")
         return cls(
             original_topic=str(payload.get("original_topic", "unknown")),
             original_key=original_message.get("key"),
+            original_message_id=original_message_id,
             original_value=str(raw_original_value),
             original_offset=str(offset_value) if offset_value is not None else None,
             original_partition=original_message.get("partition"),

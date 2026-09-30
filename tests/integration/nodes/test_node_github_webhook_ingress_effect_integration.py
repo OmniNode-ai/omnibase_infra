@@ -29,6 +29,7 @@ from omnibase_infra.nodes.node_github_webhook_ingress_effect.handlers import (
     handler_github_webhook_ingress as ingress_module,
 )
 from omnibase_infra.nodes.node_github_webhook_ingress_effect.models import (
+    ModelGitHubBranchHeadObservation,
     ModelGitHubPrMergedObservation,
     ModelGitHubPrStateObservation,
     ModelGitHubWebhookDelivery,
@@ -240,3 +241,103 @@ async def test_unmapped_lane_returns_none_and_refuses_before_folding(
         with pytest.raises(RuntimeHostError, match="no webhook secret configured"):
             await handler.handle(delivery)
         fold.assert_not_called()
+
+
+def _signed_delivery(
+    event: str, payload: dict[str, object], delivery_id: str
+) -> ModelGitHubWebhookDelivery:
+    body = json.dumps(payload).encode()
+    signature = hmac.new(_TEST_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    return ModelGitHubWebhookDelivery.model_validate(
+        {
+            "event": event,
+            "delivery_id": delivery_id,
+            "signature_256": f"sha256={signature}",
+            "body_b64": base64.b64encode(body).decode(),
+            "received_at": "2026-09-29T12:00:01Z",
+        }
+    )
+
+
+def _summary_check_run(head_branch: str) -> dict[str, object]:
+    return {
+        "action": "completed",
+        "repository": {"full_name": "OmniNode-ai/omnibase_infra"},
+        "check_run": {
+            "name": "CI Summary",
+            "status": "completed",
+            "conclusion": "success",
+            "head_sha": "d" * 40,
+            "completed_at": "2026-09-29T12:00:00Z",
+            "pull_requests": [],
+            "check_suite": {"head_branch": head_branch},
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_wired_handler_folds_a_watched_branch_push_to_a_ref_advance(
+    handler: HandlerGitHubWebhookIngress,
+) -> None:
+    delivery = _signed_delivery(
+        "push",
+        {
+            "ref": "refs/heads/dev",
+            "before": "b" * 40,
+            "after": "c" * 40,
+            "repository": {"full_name": "OmniNode-ai/omnibase_infra"},
+        },
+        "11111111-cc78-11e3-81ab-4c9367dc0958",
+    )
+    result = await handler.handle(delivery)
+    (observation,) = result.events
+    assert isinstance(observation, ModelGitHubBranchHeadObservation)
+    assert observation.kind == "branch-ref-advanced"
+    assert observation.entity_id == "OmniNode-ai/omnibase_infra@dev"
+    assert observation.sha == "c" * 40
+    assert observation.before_sha == "b" * 40
+
+    unwatched = _signed_delivery(
+        "push",
+        {
+            "ref": "refs/heads/jonah/some-feature",
+            "before": "b" * 40,
+            "after": "c" * 40,
+            "repository": {"full_name": "OmniNode-ai/omnibase_infra"},
+        },
+        "22222222-cc78-11e3-81ab-4c9367dc0958",
+    )
+    assert (await handler.handle(unwatched)).events == ()
+
+
+@pytest.mark.asyncio
+async def test_wired_handler_separates_branch_head_from_merge_group_verdicts(
+    handler: HandlerGitHubWebhookIngress,
+) -> None:
+    head = await handler.handle(
+        _signed_delivery(
+            "check_run",
+            _summary_check_run("dev"),
+            "33333333-cc78-11e3-81ab-4c9367dc0958",
+        )
+    )
+    (head_observation,) = head.events
+    assert isinstance(head_observation, ModelGitHubBranchHeadObservation)
+    assert head_observation.kind == "branch-head-status"
+    assert head_observation.ci_status == "SUCCESS"
+    assert head_observation.check_name == "CI Summary"
+    assert head_observation.merge_group_ref is None
+
+    queue_ref = "gh-readonly-queue/dev/pr-4286-" + "e" * 40
+    queued = await handler.handle(
+        _signed_delivery(
+            "check_run",
+            _summary_check_run(queue_ref),
+            "44444444-cc78-11e3-81ab-4c9367dc0958",
+        )
+    )
+    (queue_observation,) = queued.events
+    assert isinstance(queue_observation, ModelGitHubBranchHeadObservation)
+    assert queue_observation.kind == "merge-group-status"
+    assert queue_observation.branch == "dev"
+    assert queue_observation.merge_group_ref == queue_ref

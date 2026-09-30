@@ -118,6 +118,7 @@ migrations:
   forward/105_create_ledger_chain.sql: expand-only
   forward/106_add_delegation_workflow_state_traffic_class.sql: forward-only # DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT CK_DELEGATION_WORKFLOW_STATE_TRAFFIC_CLASS
   forward/108_create_pr_landing_workflow_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
+  forward/109_delegation_workflow_state_updated_at_only_on_transition.sql: forward-only # CREATE OR REPLACE FUNCTION on an existing trigger function
   forward/nodes/node_canary_score_reducer/0001_create_capability_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0002_capability_scores_tenant_id_and_rls.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
@@ -133,6 +134,7 @@ migrations:
   forward/nodes/node_delegation_routing_reducer/0003_grant_tenant_projection_writer_overlay_sequence.sql: expand-only
   forward/nodes/node_delegation_routing_reducer/0004_add_delegation_routing_tenant_overlay_provider.sql: forward-only # ALTER TABLE ADD CONSTRAINT DELEGATION_ROUTING_TENANT_OVERLAY_PROVIDER_TOKEN
   forward/nodes/node_delegation_routing_reducer/0005_backfill_delegation_routing_tenant_overlay_provider.sql: forward-only # UPDATE
+  forward/nodes/node_delegation_routing_reducer/0006_grant_app_dashboard_overlay.sql: expand-only
   forward/nodes/node_deployment_evidence_reducer/0001_create_deployment_evidence_projection_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT DEPLOYMENT_EVIDENCE_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT DEPLOYMENT
   forward/nodes/node_deployment_evidence_reducer/0002_grant_omninode_runtime_deployment_evidence_tables.sql: expand-only
   forward/nodes/node_evidence_dashboard_reducer/0001_create_evidence_dashboard_projection_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT EVIDENCE_DASHBOARD_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT EVIDENCE_CO
@@ -180,6 +182,7 @@ migrations:
   forward/nodes/node_projection_claude_hook_events/0001_grant_omninode_runtime_claude_hook_events.sql: expand-only
   forward/nodes/node_projection_claude_hook_events/0002_reject_empty_agent_id.sql: forward-only # ALTER TABLE ADD CONSTRAINT CHECK on existing tables (omninode_internal.claude_hook_events, omninode_internal.claude_agent_spans); DROP CONSTRAINT IF EXISTS for idempotent re-add
   forward/nodes/node_projection_claude_hook_events/0003_add_span_model_and_description.sql: expand-only
+  forward/nodes/node_projection_claude_hook_events/0004_null_hashed_span_lineage.sql: forward-only # UPDATE
   forward/nodes/node_projection_consumer_flow/0000_create_consumer_flow_windows.sql: forward-only # ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_consumer_flow/0001_add_projection_cursor.sql: forward-only # ALTER TABLE ALTER COLUMN; UNIQUE INDEX on an existing table
   forward/nodes/node_projection_consumer_flow/0001_reconcile_consumer_flow_window_columns.sql: forward-only # ALTER TABLE ALTER COLUMN
@@ -332,6 +335,7 @@ migrations:
   forward/nodes/node_projection_savings/089_savings_aggregate_views_per_tenant.sql: forward-only # CREATE OR REPLACE; ALTER VIEW
   forward/nodes/node_projection_savings/090_grant_tenant_projection_writer_savings_estimates.sql: expand-only
   forward/nodes/node_projection_savings/090_savings_aggregate_excludes_model_text.sql: forward-only # CREATE OR REPLACE
+  forward/nodes/node_projection_savings/091_grant_app_dashboard_savings_series.sql: expand-only
   forward/nodes/node_projection_savings/091_savings_estimates_house_tenant_uuid_backfill.sql: forward-only # UPDATE (house slug -> house UUID); ALTER TABLE ALTER COLUMN SET DEFAULT; transaction-scoped CREATE/DROP POLICY inside one DO block
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab

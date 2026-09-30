@@ -17,6 +17,8 @@
 #   - onex.evt.github.pr-merged.v1: one event per merge, for every repository
 #     the onexbot-pr-reader App is installed on, which omnimarket's
 #     node_pr_merged_projection materializes into pr_merged_events.
+#   - onex.evt.github.branch-head.v1: watched branch ref advances, branch-head
+#     summary CI verdicts and separate merge-group verdicts (OMN-19932).
 name: "node_github_webhook_ingress_effect"
 contract_name: "node_github_webhook_ingress_effect"
 node_name: "node_github_webhook_ingress_effect"
@@ -29,7 +31,7 @@ contract_version:
   patch: 1
 node_version: "0.1.1"
 description: >
-  Consumes signed GitHub webhook deliveries from onex.cmd.github.webhook-delivery.v1, re-verifies the X-Hub-Signature-256 HMAC over the exact received bytes in constant time, refuses (typed error, dead-lettered) any delivery it cannot verify or parse, and folds pull_request, pull_request_review and summary check_run deliveries into partial PR-state observations on onex.evt.github.pr-status.v1 plus one merged event per merge on onex.evt.github.pr-merged.v1. Refuses every delivery when no webhook secret is configured.
+  Consumes signed GitHub webhook deliveries from onex.cmd.github.webhook-delivery.v1, re-verifies the X-Hub-Signature-256 HMAC over the exact received bytes in constant time, refuses (typed error, dead-lettered) any delivery it cannot verify or parse, and folds pull_request, pull_request_review and summary check_run deliveries into partial PR-state observations on onex.evt.github.pr-status.v1 plus one merged event per merge on onex.evt.github.pr-merged.v1. Push and summary check_run deliveries also produce watched branch ref advances, branch-head CI verdicts and distinct merge-group verdicts on onex.evt.github.branch-head.v1. Refuses every delivery when no webhook secret is configured.
 
 input_model:
   name: "ModelGitHubWebhookDelivery"
@@ -45,6 +47,7 @@ event_bus:
   publish_topics:
     - "onex.evt.github.pr-status.v1"
     - "onex.evt.github.pr-merged.v1"
+    - "onex.evt.github.branch-head.v1"
     - "onex.evt.github.webhook-delivery-refused.v1"
 consumed_events:
   - topic: "onex.cmd.github.webhook-delivery.v1"
@@ -61,6 +64,9 @@ published_events:
   - topic: "onex.evt.github.webhook-delivery-refused.v1"
     event_type: "BoundaryFailureTerminal"
     description: "The failure terminal: one record per refused delivery (no secret, bad signature, malformed body), published by the consume boundary."
+  - topic: "onex.evt.github.branch-head.v1"
+    event_type: "GitHubBranchHeadObservation"
+    description: "Watched branch ref advances, branch-head summary CI verdicts and separate merge-group CI verdicts."
 # The FAILURE terminal. A refused delivery raises a typed error; the consume
 # boundary dead-letters the command and publishes its failure terminal HERE.
 # Without this declaration the boundary answers at the first output topic of
@@ -84,10 +90,11 @@ handler_routing:
         module: "omnibase_infra.nodes.node_github_webhook_ingress_effect.handlers.handler_github_webhook_ingress"
       supported_operations:
         - "github_webhook.ingest"
-      description: "Verify the delivery signature and fold it into PR-state and merge events."
+      description: "Verify the delivery signature and fold it into PR-state, merge and watched branch observations."
   execution_mode: "single"
   max_timeout_seconds: 30
 config:
+  watched_branches: [dev, main]
   # Check runs that stand for a PR's CI verdict. A lone check run is not a
   # verdict; the one required summary context is. Repositories without one of
   # these get their verdict from the reconciler (OMN-19493).

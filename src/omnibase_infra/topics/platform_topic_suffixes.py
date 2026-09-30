@@ -940,6 +940,15 @@ Producer: the consume boundary of NodeGitHubWebhookIngressEffect
 Consumer: none yet (operator-visible sink)
 """
 
+SUFFIX_GITHUB_BRANCH_HEAD: str = "onex.evt.github.branch-head.v1"
+"""Topic suffix for watched GitHub branch observations (OMN-19932).
+
+Carries branch ref advances, summary CI verdicts for branch heads, and distinct
+merge-group verdicts for candidates in the watched branch's merge queue.
+
+Producer: NodeGitHubWebhookIngressEffect
+"""
+
 SUFFIX_GITHUB_PR_STATUS: str = "onex.evt.github.pr-status.v1"
 """Topic suffix for GitHub PR triage status events (OMN-2656).
 
@@ -1136,6 +1145,15 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     # Refused GitHub webhook deliveries, the ingress failure terminal (OMN-19492)
     ModelTopicSpec(
         suffix=SUFFIX_GITHUB_WEBHOOK_DELIVERY_REFUSED,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Watched branch ref advances and CI verdicts (OMN-19932)
+    ModelTopicSpec(
+        suffix=SUFFIX_GITHUB_BRANCH_HEAD,
         partitions=1,
         kafka_config={
             "retention.ms": "604800000",

@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+board_checks:
+  - {check_id: forwarder_refused_topic, operation: board_probe.forwarder_refused_topic, surface_class: lab_hardware}
+coverage:
+  - {check_id: phantom, surface_class: lab_hardware, criteria: [C28]}

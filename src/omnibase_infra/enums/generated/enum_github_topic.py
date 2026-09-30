@@ -19,6 +19,7 @@ class EnumGithubTopic(str, Enum):
     Members are sorted by (kind, event_name, version).
     """
     CMD_WEBHOOK_DELIVERY_V1 = "onex.cmd.github.webhook-delivery.v1"  # onex.cmd.github.webhook-delivery.v1
+    EVT_BRANCH_HEAD_V1 = "onex.evt.github.branch-head.v1"  # onex.evt.github.branch-head.v1
     EVT_PR_MERGED_V1 = "onex.evt.github.pr-merged.v1"  # onex.evt.github.pr-merged.v1
     EVT_PR_STATUS_V1 = "onex.evt.github.pr-status.v1"  # onex.evt.github.pr-status.v1
     EVT_PR_WEBHOOK_V1 = "onex.evt.github.pr-webhook.v1"  # onex.evt.github.pr-webhook.v1
