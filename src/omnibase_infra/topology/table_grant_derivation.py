@@ -316,93 +316,19 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # request naming it, the deletion rode that pull request, and the
     # regeneration wrote nothing.
     #
+    # OMN-19550, OMN-19833, OMN-19961, OMN-19513 and OMN-19399 added seven more
+    # (session_content, pr_landing_state, pr_landing_transitions,
+    # lab_container_memory_window, claude_agent_spans, claude_hook_events and
+    # worktree_reconcile_hosts), and all seven were DELETED here by the pin
+    # advance to e01380bfde11, which carries the retiring omnimarket pull
+    # requests each entry named in its own comment. Same mechanism and same
+    # proof: the expiry module went red on the bot's pin-advance pull request
+    # naming all seven, and the deletion rode that pull request.
+    #
     # If you add a bridge here for a new infra-first vendoring, add it to that
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
     #
-    # OMN-19550: the same infra-first window, for session_content -- the full
-    # prompt, tool input, tool result and assistant reply captured for one
-    # session content chunk. This repository vendors the create migration
-    # BEFORE omnimarket lands the node package that declares the relation in
-    # its contract, because omnimarket's node-migration-vendor-parity gate
-    # refuses a node migration with no vendored counterpart here. So for one
-    # window the shipped topology instances declare a relation the PINNED
-    # contracts cannot derive.
-    #
-    # Regenerating against the pin instead of bridging would DELETE that
-    # declaration while the vendored migration still grants the relation,
-    # tripping the OMN-18768 reverse ratchet and refusing the projection
-    # binding at boot. This entry is SELF-EXPIRING: it is registered in
-    # _INTERIM_ENTRIES in
-    # tests/ci/test_supplemental_declaration_expiry_omn18863.py, which goes red
-    # on the pin advance that makes it redundant and says to delete it.
-    #
-    # Retired by: omnimarket#2905 merging and the pin advancing past it.
-    ContractTableDeclaration(
-        node="legacy_migration:session_content",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_session_content/"
-            "0001_create_session_content.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="session_content",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_session_content/"
-                "0001_create_session_content.sql"
-            ),
-            access="write",
-            role="session_content",
-        ),
-    ),
-    # OMN-19833: the two PR landing read models, the same infra-first window as
-    # the retired bridges above. This repo vendors
-    # node_projection_pr_landing/0000 and 0001 ahead of omnimarket#3000, whose
-    # node-migration-vendor-parity gate needs the vendored copy at dev tip
-    # before it can merge; the pin cannot declare either relation until it
-    # does. 0001 grants omninode_runtime SELECT, INSERT, UPDATE on
-    # pr_landing_state and SELECT, INSERT on pr_landing_transitions. Both
-    # entries carry the access and role the source contract declares, so the
-    # derivation reproduces the grants the instances already carry and writes
-    # no generated diff. Inert, then removable, once the pin advances past
-    # omnimarket#3000; the expiry module names both.
-    ContractTableDeclaration(
-        node="legacy_migration:pr_landing_state",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_pr_landing/"
-            "0000_create_pr_landing.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="pr_landing_state",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_pr_landing/"
-                "0000_create_pr_landing.sql"
-            ),
-            access="read_write",
-            role="pr_landing_state",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:pr_landing_transitions",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_pr_landing/"
-            "0000_create_pr_landing.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="pr_landing_transitions",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_pr_landing/"
-                "0000_create_pr_landing.sql"
-            ),
-            access="read_write",
-            role="pr_landing_transitions",
-        ),
-    ),
     # OMN-19861: same infra-first window; this repo vendors
     # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
     # package that declares the relation. The source contract declares access
@@ -428,94 +354,32 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="demo_readiness",
         ),
     ),
-    # OMN-19961: lab_container_memory_window, the same infra-first window as the
-    # bridges above. This repo vendors node_projection_lab_container_memory/0000
-    # and 0001 ahead of omnimarket#3051, whose node-migration-vendor-parity gate
-    # needs the vendored copy at dev tip before it can merge; the pin cannot
-    # declare the relation until it does. 0001 grants omninode_runtime SELECT,
-    # INSERT, UPDATE. The entry carries the access and role the source contract
-    # declares, so the derivation reproduces the grant the instances carry and
-    # writes no generated diff. Retired by omnimarket#3051 merging and the pin
-    # advancing past it; the expiry module names it.
+    # OMN-19566: infra vendors lab_proof_receipts before omnimarket#3043
+    # lands the node contract. Until the pin advances, this interim declaration
+    # keeps the shipped table grant derivable. The supplemental expiry test
+    # requires removal once omnimarket#3043 merges and the pin advances past it.
+    #
+    # OMN-19566 pin advance to 791c3b89970b (omnimarket#3066) retired the
+    # session_content, pr_landing_state, pr_landing_transitions,
+    # claude_agent_spans, claude_hook_events and worktree_reconcile_hosts
+    # bridges, whose retiring omnimarket pull requests (#2905, #3000, #2956,
+    # #3047) are all inside that pin.
     ContractTableDeclaration(
-        node="legacy_migration:lab_container_memory_window",
+        node="legacy_migration:lab_proof_receipts",
         contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_lab_container_memory/"
-            "0000_create_lab_container_memory_window.sql"
+            "docker/migrations/forward/nodes/node_projection_lab_proof_receipts/"
+            "0000_create_lab_proof_receipts.sql"
         ),
         table=ModelDbTableDeclaration(
-            name="lab_container_memory_window",
+            name="lab_proof_receipts",
             database_ref="application",
             schema="omninode_internal",
             migration=(
-                "docker/migrations/forward/nodes/node_projection_lab_container_memory/"
-                "0000_create_lab_container_memory_window.sql"
+                "docker/migrations/forward/nodes/node_projection_lab_proof_receipts/"
+                "0000_create_lab_proof_receipts.sql"
             ),
             access="read_write",
-            role="container_memory",
-        ),
-    ),
-    # OMN-19513: infra vendors both Claude hook event projection tables before
-    # omnimarket#2956 lands the node contract. Until the pin advances, these
-    # interim declarations keep the shipped table grants derivable. The expiry
-    # test tracks both entries and requires removal after the contract arrives.
-    # Retired by: omnimarket#2956 merging and the pin advancing past it.
-    ContractTableDeclaration(
-        node="legacy_migration:claude_agent_spans",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
-            "0000_create_claude_hook_events.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="claude_agent_spans",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
-                "0000_create_claude_hook_events.sql"
-            ),
-            access="read_write",
-            role="claude_agent_spans",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:claude_hook_events",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
-            "0000_create_claude_hook_events.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="claude_hook_events",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
-                "0000_create_claude_hook_events.sql"
-            ),
-            access="read_write",
-            role="claude_hook_events",
-        ),
-    ),
-    # OMN-19399: infra vendors worktree_reconcile_hosts before omnimarket#3047
-    # lands its node contract. This bridge keeps the shipped grants derivable
-    # until the pin advances; the expiry test then requires its removal.
-    # Retired by: omnimarket#3047 merging and the pin advancing past it.
-    ContractTableDeclaration(
-        node="legacy_migration:worktree_reconcile_hosts",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_worktree_reconcile/"
-            "0000_create_worktree_reconcile_hosts.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="worktree_reconcile_hosts",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_worktree_reconcile/"
-                "0000_create_worktree_reconcile_hosts.sql"
-            ),
-            access="read_write",
-            role="worktree_reconcile_hosts",
+            role="lab_proof_receipts",
         ),
     ),
     # OMN-19937: infra vendors board_probe_results before omnimarket#3061

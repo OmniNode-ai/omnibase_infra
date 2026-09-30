@@ -182,6 +182,7 @@ migrations:
   forward/nodes/node_projection_claude_hook_events/0001_grant_omninode_runtime_claude_hook_events.sql: expand-only
   forward/nodes/node_projection_claude_hook_events/0002_reject_empty_agent_id.sql: forward-only # ALTER TABLE ADD CONSTRAINT CHECK on existing tables (omninode_internal.claude_hook_events, omninode_internal.claude_agent_spans); DROP CONSTRAINT IF EXISTS for idempotent re-add
   forward/nodes/node_projection_claude_hook_events/0003_add_span_model_and_description.sql: expand-only
+  forward/nodes/node_projection_claude_hook_events/0004_null_hashed_span_lineage.sql: forward-only # UPDATE
   forward/nodes/node_projection_consumer_flow/0000_create_consumer_flow_windows.sql: forward-only # ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_consumer_flow/0001_add_projection_cursor.sql: forward-only # ALTER TABLE ALTER COLUMN; UNIQUE INDEX on an existing table
   forward/nodes/node_projection_consumer_flow/0001_reconcile_consumer_flow_window_columns.sql: forward-only # ALTER TABLE ALTER COLUMN
@@ -264,6 +265,8 @@ migrations:
   forward/nodes/node_projection_intent_classification/0003_grant_omninode_runtime_intent_classification_sequence.sql: expand-only
   forward/nodes/node_projection_lab_lane_health/0000_create_lab_lane_health.sql: forward-only # ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_lab_lane_health/0001_grant_omninode_runtime_lab_lane_health.sql: expand-only
+  forward/nodes/node_projection_lab_proof_receipts/0000_create_lab_proof_receipts.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.lab_proof_receipts)
+  forward/nodes/node_projection_lab_proof_receipts/0001_grant_omninode_runtime_lab_proof_receipts.sql: expand-only
   forward/nodes/node_projection_live_events/0000_create_live_events.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT LIVE_EVENTS_PKEY; ALTER TABLE ADD CONSTRAINT LIVE_EVENTS_EVENT_ID_KEY
   forward/nodes/node_projection_live_events/0001_reclassify_event_lifecycle_types.sql: forward-only # UPDATE
   forward/nodes/node_projection_live_events/0002_create_omninode_internal_live_events.sql: expand-only

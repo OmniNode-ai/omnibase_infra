@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""The active Claude hook-event bridge derives the grants it ships (OMN-19513)."""
+"""The active lab proof receipt bridge derives the grants it ships (OMN-19566)."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from omnibase_infra.topology.table_grant_derivation import (
 pytestmark = pytest.mark.integration
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_RELATIONS = ("claude_agent_spans", "claude_hook_events")
+_RELATIONS = ("lab_proof_receipts",)
 _SCHEMA = "omninode_internal"
 _DATABASE_REF = "application"
 _PRINCIPAL = "omninode_runtime"
@@ -31,12 +31,12 @@ _REQUIRED_PRIVILEGES = frozenset({"INSERT", "SELECT", "UPDATE"})
 _SHIPPED_INSTANCES = ("local", "onex-dev", "onex-prod")
 _VENDORED_MIGRATIONS = (
     Path(
-        "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
-        "0000_create_claude_hook_events.sql"
+        "docker/migrations/forward/nodes/node_projection_lab_proof_receipts/"
+        "0000_create_lab_proof_receipts.sql"
     ),
     Path(
-        "docker/migrations/forward/nodes/node_projection_claude_hook_events/"
-        "0001_grant_omninode_runtime_claude_hook_events.sql"
+        "docker/migrations/forward/nodes/node_projection_lab_proof_receipts/"
+        "0001_grant_omninode_runtime_lab_proof_receipts.sql"
     ),
 )
 
@@ -92,7 +92,7 @@ class TestTheActiveBridgeIsCommitted:
     ) -> None:
         assert (_REPO_ROOT / migration).is_file(), (
             f"{migration} is missing while {relation}'s interim bridge is "
-            "active. Restore both vendored Claude hook-event migration files; "
+            "active. Restore both vendored lab proof receipt migration files; "
             "the bridge declares relations that this migration lineage creates "
             "and grants."
         )

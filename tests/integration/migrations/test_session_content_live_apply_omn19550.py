@@ -10,9 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from omnibase_infra.topology.table_grant_derivation import (
-    LEGACY_MIGRATION_TABLE_DECLARATIONS,
-)
 from tests.integration.migrations.conftest import EphemeralPostgres
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -247,23 +244,3 @@ def test_session_content_apply_rejects_missing_runtime_role(
 
     assert result.returncode != 0
     assert not _table_exists(ephemeral_postgres)
-
-
-@pytest.mark.integration
-def test_session_content_legacy_declaration_points_at_vendored_migration() -> None:
-    """The temporary grant-derivation bridge identifies the file this applies."""
-    declarations = [
-        declaration
-        for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
-        if declaration.table.name == "session_content"
-    ]
-
-    assert len(declarations) == 1
-    declaration = declarations[0]
-    assert declaration.table.schema == "omninode_internal"
-    assert declaration.table.database_ref == "application"
-    assert declaration.table.access == "write"
-    assert declaration.table.migration is not None
-    assert REPO_ROOT / declaration.table.migration == MIGRATION_FILE
-    assert (REPO_ROOT / declaration.table.migration).is_file()
-    assert REPO_ROOT / declaration.contract_path == MIGRATION_FILE
