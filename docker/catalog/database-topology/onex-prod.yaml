@@ -86,6 +86,7 @@ databases:
               - gateway_link_health
               - lab_container_memory_window
               - lab_lane_health
+              - lab_proof_receipts
               - live_events
               - log_entries
               - open_obligations
@@ -371,5 +372,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: fee3477339f47bf3f74bcd8f016b1f9e13d4a4558f86c3b765ff52832f55f3ec
+  sha256: cb2931c294a44229a8d7307859a5f656a92cdce4cf0cf69a1ea1e587d1dc9f34
 topology_instance: onex-prod
