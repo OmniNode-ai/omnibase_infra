@@ -1069,6 +1069,8 @@ route:
         # OMN-19451: the delegation-health check, registered in
         # EXPECTED_EXTERNAL_CONTEXTS when its shadow mode was removed (OMN-19998).
         - delegation-health-check / Delegation Health Check
+        # OMN-20183: unconditional local FSM seam job, enforced by the CI Summary poller
+        - delegation-seam-gate
         - Demo Loop Gate
         - Dep Provenance Gate
         - Dep Provenance Lineage Gate (OMN-15604)

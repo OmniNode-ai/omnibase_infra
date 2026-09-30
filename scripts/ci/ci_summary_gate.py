@@ -126,6 +126,7 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "CI Tests Gate",  # tests-gate — aggregator over the split matrix
     "Lint",  # lint
     "ONEX Validators",  # onex-validation
+    "delegation-seam-gate",  # OMN-20183: unconditional local FSM seam
     "Infra Node Handler Ownership",  # infra-node-handler-ownership
     "Migration Freeze Check",  # migration-freeze
     "Fingerprint Check",  # fingerprint-check
