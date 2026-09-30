@@ -348,6 +348,7 @@ migrations:
   forward/nodes/node_projection_savings/090_savings_aggregate_excludes_model_text.sql: forward-only # CREATE OR REPLACE
   forward/nodes/node_projection_savings/091_grant_app_dashboard_savings_series.sql: expand-only
   forward/nodes/node_projection_savings/091_savings_estimates_house_tenant_uuid_backfill.sql: forward-only # UPDATE (house slug -> house UUID); ALTER TABLE ALTER COLUMN SET DEFAULT; transaction-scoped CREATE/DROP POLICY inside one DO block
+  forward/nodes/node_projection_savings/092_restore_savings_views_security_invoker.sql: forward-only # ALTER VIEW
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab
   forward/nodes/node_projection_session_outcome/0022_grant_omninode_runtime_session_outcomes.sql: expand-only
