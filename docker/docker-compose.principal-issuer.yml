@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20150 — issues each developer machine its own lab dev-lane bus principal.
+#
+# Runs on the lab host beside the dev lane, as its own compose project, so the
+# lane's catalog render is untouched. It joins the dev lane's network to reach
+# the broker's admin API and Kafka listener, and publishes ONE port on the host's
+# LOOPBACK only. It is reached from the tailnet through the host's Tailscale
+# Serve, which is what stamps each request with the caller's tailnet login:
+#
+#   docker compose -f docker/docker-compose.principal-issuer.yml \
+#     --env-file <the operator env file> up -d --build
+#   tailscale serve --bg --https=8443 http://127.0.0.1:19190
+#
+# The URL developer machines use is declared in deploy/lab/developer-onboarding.yaml.
+# The issuer authenticates to the broker as the lane's superuser principal, from
+# the same operator env file the dev lane's one-shots read, never inlined here.
+name: omnibase-infra-principal-issuer
+services:
+  principal-issuer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.principal-issuer
+    container_name: omnibase-infra-principal-issuer
+    environment:
+      RPK_USER: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set - the issuer creates principals as the dev lane's superuser (OMN-18012); resolved from the operator env file, never inlined here}
+      RPK_PASS: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set - the issuer creates principals as the dev lane's superuser (OMN-18012); resolved from the operator env file, never inlined here}
+      RPK_SASL_MECHANISM: SCRAM-SHA-256
+      RPK_BROKERS: redpanda:9092
+      RPK_ADMIN_HOSTS: redpanda:9644
+    ports:
+      # Loopback only: the tailnet reaches it through `tailscale serve`, never directly.
+      - "127.0.0.1:19190:8080"
+    volumes:
+      - principal-issuer-ledger:/data
+    networks:
+      - dev-lane
+    restart: unless-stopped
+    read_only: true
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "com.omninode.service=principal-issuer"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.ticket=OMN-20150"
+volumes:
+  principal-issuer-ledger:
+networks:
+  dev-lane:
+    # The dev lane's network as the lane manifest declares it (lane `dev`).
+    name: omnibase-infra_default
+    external: true

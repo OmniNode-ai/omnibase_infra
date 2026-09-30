@@ -620,6 +620,23 @@ lanes:
         kind: service
         replicas: 1
   # ---------------------------------------------------------------------------
+  # OMN-20150: the developer principal issuer. Issues each developer machine its
+  # own dev-lane bus principal (scripts/lab_principal_issuer.py). Its own compose
+  # project, so the dev lane's catalog render is untouched; it joins the dev
+  # lane's network to reach the broker. `optional: true` because it is declared
+  # ahead of the operator's first deploy: DECLARED-AHEAD-OF-STATE until then.
+  principal-issuer:
+    hosts: [lab-201]
+    compose_file: docker/docker-compose.principal-issuer.yml
+    compose_project: omnibase-infra-principal-issuer
+    network: omnibase-infra_default
+    image_tag_pattern: '.+'
+    optional: true
+    services:
+      - name: omnibase-infra-principal-issuer
+        kind: service
+        replicas: 1
+  # ---------------------------------------------------------------------------
   # Prospective OMN-18693 dogfood boundary: owner Codex; optional lane only.
   # No production or runtime evidence is asserted here; it is not deployed.
   # verified: 2026-09-25T01:20Z via read-only `docker ps -a --filter
