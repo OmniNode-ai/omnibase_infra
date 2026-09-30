@@ -1809,6 +1809,8 @@ class TestLocalRunArtifacts:
             "bus": "inmemory",
             "lane": None,
             "dispatch_target": None,
+            # OMN-19973: no --bus and no configured authority, so tier-0.
+            "transport_authority": None,
             "prompt": "research the route",
             "run_id": str(receipt.run_id),
             "task_type": "research",

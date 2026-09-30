@@ -124,6 +124,12 @@ WRITER_GRANT_FILES = {
         / "003_grant_tenant_projection_writer_tenant_inference_credentials.sql"
     ),
 }
+# OMN-19977: 0004 is an applied transcription that predates every relation a
+# vendored node migration adds later (metering_summary, usage_by_model_day). Such
+# a relation carries its tenant_projection_writer grant in its own node lineage,
+# in the grant migration vendored byte-identical from omnimarket, so the writer
+# grant set is read from every forward node migration, not from 0004 alone.
+FORWARD_NODES_ROOT = REPO_ROOT / "docker" / "migrations" / "forward" / "nodes"
 AGGREGATE_VIEWS_FILE = (
     REPO_ROOT
     / "docker"
@@ -141,22 +147,6 @@ SAVINGS_AGGREGATE_VIEWS_FILE = (
     / "nodes"
     / "node_projection_savings"
     / "089_savings_aggregate_views_per_tenant.sql"
-)
-# OMN-19790: delegation_eval_items is declared writable in the topology, but
-# GRANT_FILE cannot carry it -- 0004 already applied on real lanes and is
-# append-only (OMN-16705); a new table's grant lands in a NEW file, not an
-# edit of a frozen one. It rides in node_projection_delegation_eval's own
-# 0001, which is fenced on arrival alongside its creating 0000 (no lane has
-# either yet), so this is a static text assertion only -- the live-apply
-# proofs below correctly do NOT expect this grant to take effect anywhere.
-DELEGATION_EVAL_ITEMS_GRANT_FILE = (
-    REPO_ROOT
-    / "docker"
-    / "migrations"
-    / "forward"
-    / "nodes"
-    / "node_projection_delegation_eval"
-    / "0001_grant_tenant_projection_writer_delegation_eval_items.sql"
 )
 BOOTSTRAP_SCRIPT = (
     REPO_ROOT / "docker" / "migrations" / "forward" / "000_create_multiple_databases.sh"
@@ -178,6 +168,28 @@ def _executable_lines(path: Path) -> list[str]:
         for line in path.read_text().splitlines()
         if not line.lstrip().startswith("--")
     ]
+
+
+_WRITER_GRANT_STATEMENT = re.compile(
+    r"GRANT SELECT, INSERT, UPDATE ON "
+    r"(public\.[a-z0-9_]+(?:, public\.[a-z0-9_]+)*) "
+    rf"TO {PRINCIPAL}\b"
+)
+
+
+def _writer_grants_in(path: Path) -> set[str]:
+    """Relations one migration grants SELECT, INSERT, UPDATE to the writer.
+
+    Whitespace is collapsed first, so a statement split over several lines
+    (the usage_by_model_day grant names two relations in one GRANT) reads the
+    same as the one-line form 0004 uses inside its DO block.
+    """
+    text = " ".join(" ".join(_executable_lines(path)).split())
+    return {
+        name.strip().removeprefix("public.")
+        for match in _WRITER_GRANT_STATEMENT.finditer(text)
+        for name in match.group(1).split(",")
+    }
 
 
 def _executable_text(path: Path) -> str:
@@ -406,23 +418,19 @@ def test_grant_migration_matches_the_topology_declared_writable_table_set() -> N
     Scoped to the WRITABLE declarations (OMN-18159). The read-only half is not
     dropped: it is asserted immediately below, against the file that actually
     carries it, plus a refusal that it is never handed write privileges.
-
-    OMN-19790 added ``delegation_eval_items``, granted from
-    :data:`DELEGATION_EVAL_ITEMS_GRANT_FILE` rather than :data:`GRANT_FILE` --
-    the same "grant belongs with the relation it names" reason the read-only
-    test below unions a second source file, forced here by 0004 being
-    append-only. The two files are unioned for the same reason.
     """
     declared = _declared_table_objects("INSERT")
 
-    granted = set(
-        re.findall(
-            r"GRANT SELECT, INSERT, UPDATE\s+ON public\.([a-z0-9_]+)\s+"
-            rf"TO {PRINCIPAL}",
-            GRANT_FILE.read_text() + DELEGATION_EVAL_ITEMS_GRANT_FILE.read_text(),
+    transcribed = _writer_grants_in(GRANT_FILE)
+    granted: set[str] = set().union(
+        *(
+            _writer_grants_in(path)
+            for path in sorted(FORWARD_NODES_ROOT.glob("*/*.sql"))
         )
     )
 
+    assert transcribed, "positive control: 0004 transcribes writer grants"
+    assert transcribed <= granted
     assert declared, "positive control: the topology declares writable tables"
     assert granted == declared, (
         "grant migration drifted from the topology declaration: "

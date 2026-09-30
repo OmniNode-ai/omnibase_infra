@@ -201,6 +201,7 @@ databases:
               - hook_events
               - instruction_eval_aggregate_snapshots
               - llm_cost_aggregates
+              - metering_summary
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
               - savings_estimates

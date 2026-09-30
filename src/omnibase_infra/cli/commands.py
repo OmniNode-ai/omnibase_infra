@@ -767,5 +767,14 @@ from omnibase_infra.cli.cli_auth import auth_group
 cli.add_command(auth_group)
 
 
+# =============================================================================
+# Developer Profile Commands (bind-lane, unbind-lane, show) [OMN-19973]
+# =============================================================================
+
+from omnibase_infra.cli.cli_profile import profile_group
+
+cli.add_command(profile_group)
+
+
 if __name__ == "__main__":
     cli()

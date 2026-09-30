@@ -125,6 +125,7 @@ import click
 from pydantic import BaseModel, ValidationError
 
 from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
+from omnibase_core.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_infra.backends.auto_configure import (
     BUS_INMEMORY,
@@ -209,6 +210,7 @@ from omnibase_infra.cli.receipt_mode import (
     default_emit_socket_path,
     run_receipt_mode,
 )
+from omnibase_infra.cli.store_developer_profile import StoreDeveloperProfile
 from omnibase_infra.cli.task_class_registry import (
     TaskClassContractError,
     describe_task_classes,
@@ -1280,6 +1282,7 @@ def resolve_default_bus(
     *,
     kafka_bootstrap: str | None = None,
     workspace_root: Path | None = None,
+    developer_lane_binding: str | None = None,
 ) -> ModelDelegateDefaultBus:
     """Resolve the bus ``--bus`` defaults to when the flag is omitted (OMN-17304).
 
@@ -1339,7 +1342,8 @@ def resolve_default_bus(
     from omnibase_infra.runtime.service_kernel import resolve_embedded_runtime_config
 
     config, config_source = resolve_embedded_runtime_config(
-        workspace_root=workspace_root
+        workspace_root=workspace_root,
+        developer_lane_binding=developer_lane_binding,
     )
     bus, reason = resolve_bus_type(
         config_bus=str(config.event_bus.type),
@@ -2464,7 +2468,18 @@ def run_delegate(
                 "an explicit bootstrap override — pass --bus kafka too)."
             )
         try:
-            default_bus = resolve_default_bus(workspace_root=omni_home)
+            # OMN-19973: the developer's own lane binding, read here and
+            # handed to the one config authority, which decides where it
+            # ranks. An unreadable binding refuses rather than being skipped.
+            lane_binding = StoreDeveloperProfile(
+                onex_home=Path.home() / ".onex"
+            ).lane_binding()
+        except ModelOnexError as exc:
+            raise click.ClickException(str(exc)) from exc
+        try:
+            default_bus = resolve_default_bus(
+                workspace_root=omni_home, developer_lane_binding=lane_binding
+            )
         except (EventBusResolutionAmbiguousError, ProtocolConfigurationError) as exc:
             # OMN-16678: an indeterminate probe is a REFUSAL, not a fallback.
             # OMN-19193: so is a bound workspace root that declares no runtime
@@ -2473,6 +2488,7 @@ def run_delegate(
             # traceback or a silently chosen transport.
             raise click.ClickException(str(exc)) from exc
         bus, reason = default_bus.bus, default_bus.reason
+        transport_authority = reason
         if bus == "kafka" and lane is None and default_bus.lane is not None:
             # OMN-19193: the configuration that chose the shared bus also names
             # which declared lane it is. Taken only on this branch, where the
@@ -2522,6 +2538,13 @@ def run_delegate(
             "config surface, env override, or broker probe was consulted",
             bus,
         )
+        transport_authority = f"explicit --bus {bus}"
+    # OMN-19973: say on stderr which authority chose the transport and lane,
+    # so a profile-bound run is never mistaken for one whose flags chose it.
+    click.echo(
+        f"transport: bus={bus} lane={lane or 'none'} ({transport_authority})",
+        err=True,
+    )
     # OMN-16871: the broker ADDRESS comes from the lane the caller selected,
     # read out of the checked-in lane declaration. It is never taken from
     # ``KAFKA_BOOTSTRAP_SERVERS`` -- on the launching host that variable names
@@ -2676,6 +2699,7 @@ def run_delegate(
                     bus=bus,
                     lane=lane_target.lane if lane_target is not None else None,
                     dispatch_target=None,
+                    transport_authority=transport_authority,
                 ),
             )
             if lane_target is not None:
@@ -2692,7 +2716,7 @@ def run_delegate(
                 ) from exc
             raise click.ClickException(str(exc)) from exc
 
-        # OMN-18810: the four addressing facts the two written files record,
+        # OMN-18810: the five addressing facts the two written files record,
         # built from the decision that was just PROVEN viable rather than
         # from the raw flags. ``--lane dev`` that resolved to no broker never
         # reaches here (``resolve_delegate_locus`` refuses first), so a file
@@ -2706,6 +2730,7 @@ def run_delegate(
                 if locus_decision.locus is EnumDelegateLocus.DEPLOYED_LANE
                 else None
             ),
+            transport_authority=transport_authority,
         )
 
         # OMN-18956: derive ONCE, before the receipt layer is wired, so the
