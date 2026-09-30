@@ -383,6 +383,49 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="metering_summary",
         ),
     ),
+    # OMN-19978: this repo vendors node_projection_usage_by_model_day/0000 and
+    # 0001 ahead of omnimarket#3073. The pin cannot declare either public
+    # TENANT relation until that pull request merges, while the migration
+    # vendor-parity gate requires these bytes at the dev tip first. Both source
+    # contract declarations are read_write and map to tenant_projection_writer.
+    # Keep this bridge only until omnimarket#3073 merges and the pin advances;
+    # the expiry module names both relations so that handover removes it.
+    ContractTableDeclaration(
+        node="legacy_migration:usage_by_model_day_calls",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_usage_by_model_day/"
+            "0000_create_usage_by_model_day.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="usage_by_model_day_calls",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_usage_by_model_day/"
+                "0000_create_usage_by_model_day.sql"
+            ),
+            access="read_write",
+            role="usage_by_model_day_calls",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:usage_by_model_day",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_usage_by_model_day/"
+            "0000_create_usage_by_model_day.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="usage_by_model_day",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_usage_by_model_day/"
+                "0000_create_usage_by_model_day.sql"
+            ),
+            access="read_write",
+            role="usage_by_model_day",
+        ),
+    ),
     # OMN-19566: infra vendors lab_proof_receipts before omnimarket#3043
     # lands the node contract. Until the pin advances, this interim declaration
     # keeps the shipped table grant derivable. The supplemental expiry test

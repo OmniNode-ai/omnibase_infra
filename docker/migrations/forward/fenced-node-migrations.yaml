@@ -860,3 +860,8 @@ fenced_node_migrations:
     ticket: "OMN-18987"
   - id: "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql"
     ticket: "OMN-18987"
+  # OMN-19978: 0001 enables FORCE ROW LEVEL SECURITY on new TENANT tables. It
+  # is fenced on arrival; its release is a separate operator-sequenced step
+  # that needs an operator ruling. No lane release is added here.
+  - id: "node:node_projection_usage_by_model_day:0001_grant_usage_by_model_day.sql"
+    ticket: "OMN-19978"

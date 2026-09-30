@@ -966,3 +966,29 @@ def test_alter_default_privileges_is_not_read_as_a_named_delivery() -> None:
     delivered = delivered_grants(REPO_ROOT / "docker/migrations/forward")
     for key in delivered:
         assert key.table.upper() != "TABLES"
+
+
+@pytest.mark.unit
+def test_one_grant_statement_naming_several_relations_delivers_each(
+    tmp_path: Path,
+) -> None:
+    """``GRANT ... ON a, b TO role`` delivers both relations (OMN-19978).
+
+    The vendored usage_by_model_day 0001 grants the tenant writer its two
+    relations in one statement. The single-relation pattern read only the
+    first, so the second (and, before the pattern anchored on ``TO``, the whole
+    statement) surfaced as an undelivered topology grant.
+    """
+    corpus = tmp_path / "forward"
+    corpus.mkdir()
+    (corpus / "0001_grant_two.sql").write_text(
+        "GRANT SELECT, INSERT, UPDATE\n"
+        "    ON public.first_rel, public.second_rel\n"
+        "    TO some_writer;\n"
+        "GRANT SELECT ON ALL TABLES IN SCHEMA public TO some_reader;\n",
+        encoding="utf-8",
+    )
+    delivered = delivered_grants(corpus)
+    assert GrantKey("some_writer", "public", "first_rel") in delivered
+    assert GrantKey("some_writer", "public", "second_rel") in delivered
+    assert not any(key.table.upper() == "ALL" for key in delivered)
