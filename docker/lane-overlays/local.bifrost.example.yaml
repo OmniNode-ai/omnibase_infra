@@ -1,16 +1,18 @@
 # Laptop profile model overlay TEMPLATE (OMN-19496). Not mounted as-is.
 #
 # `make local-env` copies this file to ~/.omnibase/local.bifrost.yaml and
-# points ONEX_LOCAL_BIFROST_OVERLAY at the copy. Then set the ONE line below
-# marked `model_endpoint` to the OpenAI-compatible chat-completions URL of the
-# model you want your runtime to delegate to, and run `make up-local`.
+# points ONEX_LOCAL_BIFROST_OVERLAY at the copy. Set the line below marked
+# `model_endpoint` to your OpenAI-compatible chat-completions URL, and set each
+# served_model_id to whatever your endpoint serves. Replace the example URL,
+# model ids, parameter counts, context windows, token limits and timeouts below
+# with your endpoint's values; they are placeholders. Then run `make up-local`.
 #
 # Rules the renderer enforces (src/omnibase_infra/runtime/
 # render_bifrost_delegation_contract.py):
 # - the URL is complete and ends in /v1/chat/completions;
-# - served_model_id must equal the model_name omnimarket's routing contract
-#   (omnimarket/configs/bifrost_delegation.yaml) declares for each backend,
-#   today Qwen3.8-27B for both rungs, so the server must serve that model id;
+# - served_model_id is the operator's choice and overrides the base contract's
+#   model_name; omnimarket's dispatch-time probe_served_models guards that the
+#   endpoint serves the chosen id;
 # - a `lab` locale lane binds every local rung the contract routes to, which is
 #   why both rungs below exist and share the one endpoint.
 # The endpoint is read from this typed file, never from an environment
