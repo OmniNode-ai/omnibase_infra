@@ -1066,6 +1066,64 @@ jobs:
             done
           done
 
+      # OMN-19972: every long-running service of the laptop profile reports
+      # healthy, not only the two kernels. The list is derived from the `local`
+      # render (a healthcheck and not a one-shot), so a service added to the
+      # bundle is covered without editing this step, and a service that never
+      # started fails it rather than being skipped. The regression test
+      # tests/ci/test_runtime_boot_catalog_local_health_omn19972.py runs this
+      # step's own text against a stub Docker.
+      - name: Every health-checked laptop service reports healthy
+        run: |
+          set -euo pipefail
+          services="$(uv run python - <<'PY'
+          from omnibase_infra.docker.catalog.generator import generate_compose
+          from omnibase_infra.docker.catalog.resolver import CatalogResolver
+
+          compose = generate_compose(CatalogResolver(catalog_dir="docker/catalog").resolve(["local"]))
+          for name, svc in compose["services"].items():
+              if "healthcheck" in svc and svc.get("restart") != "no":
+                  print(name)
+          PY
+          )"
+          if [ -z "$services" ]; then
+            echo "::error::the local render lists no health-checked service"
+            exit 1
+          fi
+          failed=()
+          # One budget of 90 polls x 10 s for the whole step, not per service: the
+          # services boot in parallel, so a service still starting when the budget
+          # is spent gets one last look and fails, instead of N stuck services
+          # costing N x 15 minutes of CI.
+          polls_left=90
+          for svc in $services; do
+            container="${LOCAL_PROJECT}-${svc}"
+            status=""
+            while :; do
+              if ! status="$(docker inspect --format '{{.State.Health.Status}}' "$container" 2>/dev/null)"; then
+                status="missing"
+                break
+              fi
+              if [ "$status" = "healthy" ] || [ "$status" = "unhealthy" ]; then
+                break
+              fi
+              if [ "$polls_left" -le 0 ]; then
+                break
+              fi
+              polls_left=$((polls_left - 1))
+              sleep 10
+            done
+            restarts="$(docker inspect --format '{{.RestartCount}}' "$container" 2>/dev/null || echo "?")"
+            echo "${svc}: ${status:-none} restarts=${restarts}"
+            if [ "$status" != "healthy" ]; then
+              failed+=("${svc}=${status:-none}")
+            fi
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::laptop services not healthy: ${failed[*]}"
+            exit 1
+          fi
+
       - name: Delegate-skill command topic has a live consumer group
         run: |
           set -euo pipefail
@@ -1109,7 +1167,7 @@ jobs:
         if: always()
         run: |
           docker ps -a --filter "name=${LOCAL_PROJECT}" --format 'table {{.Names}}\t{{.Status}}' || true
-          for svc in omninode-runtime runtime-effects migration-gate forward-migration redpanda-partition-cap; do
+          for svc in omninode-runtime runtime-effects migration-gate forward-migration redpanda-partition-cap projection-api omnimarket-projection-llm-cost consumer-health-projection; do
             echo "::group::${svc} logs (tail)"
             docker logs --tail 120 "${LOCAL_PROJECT}-${svc}" 2>&1 || true
             echo "::endgroup::"

@@ -1,6 +1,10 @@
 name: omnimarket-projection-llm-cost
 description: Kafka-to-DB projection consumer for LLM cost events (OMN-7610)
-image: omnimarket-projection:latest
+# OMN-19972: built from docker/Dockerfile.runtime, which installs omnimarket, as
+# omnimarket-projection-delegation is (OMN-19496). The former
+# omnimarket-projection:latest image was built only in the omnimarket repo, so
+# no catalog render could start this service.
+image: runtime:latest
 layer: runtime
 container_name: omnimarket-projection-llm-cost
 required_env:
@@ -13,12 +17,24 @@ required_env:
   - ONEX_TENANT_DB_URL
 hardcoded_env:
   KAFKA_BROKERS: redpanda:9092
+  KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
   PYTHONUNBUFFERED: "1"
+  # The shared projection runner's /ready server (BaseProjectionRunner); 8097
+  # so it cannot collide with the delegation writer's 8099 or the consumer
+  # health projection's 8098.
+  PROJECTION_RUNNER_HEALTH_PORT: "8097"
 operational_defaults:
-  KAFKA_CONSUMER_GROUP: omnimarket-projections-v1
+  # A group of its own, as the delegation writer has, so this writer's offsets
+  # are not shared with another consumer of the same topics.
+  KAFKA_CONSUMER_GROUP: local.omnimarket-projections.llm-cost-writer.consume.v1
   ONEX_LOG_LEVEL: INFO
 ports: null
-healthcheck: null
+healthcheck:
+  test: curl -sf http://localhost:8097/ready
+  interval_s: 30
+  timeout_s: 10
+  retries: 3
+  start_period_s: 60
 volumes: []
 depends_on:
   - service: redpanda

@@ -257,7 +257,8 @@ def generate_compose(
         # address (OMN-19972); without one, the historical form binds all
         # interfaces.
         if manifest.ports:
-            port = f"{manifest.ports.external}:{manifest.ports.internal}"
+            external = resolved.port_overrides.get(name, manifest.ports.external)
+            port = f"{external}:{manifest.ports.internal}"
             if resolved.publish_host:
                 port = f"{resolved.publish_host}:{port}"
             svc["ports"] = [port]
@@ -353,10 +354,12 @@ def generate_compose(
             svc["labels"] = manifest.labels
 
         # Depends on
-        if manifest.depends_on:
-            deps: dict[str, dict[str, str]] = {}
-            for dep in manifest.depends_on:
-                deps[dep.service] = {"condition": dep.condition.value}
+        deps: dict[str, dict[str, str]] = {}
+        for dep in manifest.depends_on:
+            deps[dep.service] = {"condition": dep.condition.value}
+        for dep_name, condition in resolved.extra_depends_on.get(name, {}).items():
+            deps[dep_name] = {"condition": condition}
+        if deps:
             svc["depends_on"] = deps
 
         services[name] = svc

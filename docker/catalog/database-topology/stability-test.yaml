@@ -216,6 +216,7 @@ databases:
               - metering_summary
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
+              - provider_quota_state
               - savings_estimates
               - skill_execution_snapshots
               - tenant_inference_credentials
@@ -378,5 +379,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: f53d293624b31ff130fd564caddc2a39626b5e0cd6d1f988fba40453c114b3f5
+  sha256: b16d03171a5696c4a0aa11b3b52844a3b3fe2b26057e01f343c4473f8a908d8c
 topology_instance: local

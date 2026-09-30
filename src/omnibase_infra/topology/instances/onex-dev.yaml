@@ -207,6 +207,7 @@ databases:
               - metering_summary
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
+              - provider_quota_state
               - savings_estimates
               - skill_execution_snapshots
               - tenant_inference_credentials
