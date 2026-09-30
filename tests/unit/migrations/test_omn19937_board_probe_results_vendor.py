@@ -165,41 +165,19 @@ def test_the_sql_gate_is_live_positive_control() -> None:
 
 
 @pytest.mark.parametrize("profile", ["local", "onex-dev", "onex-prod"])
-def test_bridge_derives_the_shipped_runtime_grant(profile: str) -> None:
-    from omnibase_core.enums.enum_database_grant_object_type import (
-        EnumDatabaseGrantObjectType,
-    )
-    from omnibase_infra.topology import load_topology_profile
+def test_the_shipped_runtime_grant_is_the_writer_scope(profile: str) -> None:
+    # The interim LEGACY_MIGRATION_TABLE_DECLARATIONS bridge for this relation
+    # was retired when the omnimarket contract pin reached omnimarket#3061, which
+    # declares it (tests/integration/topology/
+    # test_board_probe_results_bridge_retired_omn19937.py). What must not change
+    # is the grant each shipped topology instance carries.
     from omnibase_infra.topology.table_grant_derivation import (
         LEGACY_MIGRATION_TABLE_DECLARATIONS,
-        derive_table_grants,
     )
 
-    bridges = tuple(
-        entry
-        for entry in LEGACY_MIGRATION_TABLE_DECLARATIONS
-        if entry.table.name == _TABLE
+    assert not any(
+        entry.table.name == _TABLE for entry in LEGACY_MIGRATION_TABLE_DECLARATIONS
     )
-    assert len(bridges) == 1
-    bridge = bridges[0]
-    assert bridge.table.access == "read_write"
-    assert bridge.table.schema == "omninode_internal"
-    assert bridge.table.database_ref == "application"
-    assert bridge.contract_path == (_VENDOR / _CREATE).relative_to(_ROOT)
-    derived = derive_table_grants(load_topology_profile(profile), bridges)
-    matching = tuple(
-        grant
-        for grant in derived.grants["omninode_runtime"]
-        if grant.object_type is EnumDatabaseGrantObjectType.TABLE
-        and grant.schema == "omninode_internal"
-        and _TABLE in grant.objects
-    )
-    assert len(matching) == 1
-    assert {privilege.value for privilege in matching[0].privileges} == {
-        "SELECT",
-        "INSERT",
-        "UPDATE",
-    }
     instance = yaml.safe_load(
         (
             _ROOT / "src/omnibase_infra/topology/instances" / f"{profile}.yaml"
