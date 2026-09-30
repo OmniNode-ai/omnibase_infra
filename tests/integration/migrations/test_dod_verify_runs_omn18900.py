@@ -58,6 +58,9 @@ GRANT_FILE = NODE_DIR / "0001_grant_omninode_runtime_dod_verify_runs.sql"
 DELEGATION_CORRELATION_FILE = (
     NODE_DIR / "0002_dod_verify_runs_delegation_correlation_id.sql"
 )
+#: Added by OMN-20025: the goal verdict column migration. Listed with the
+#: other files this node vendors so the ledger check below counts it.
+GOAL_FILE = NODE_DIR / "0003_dod_verify_runs_goal.sql"
 LEDGER = (
     REPO_ROOT
     / "docker"
@@ -261,12 +264,18 @@ def test_the_vendored_pair_matches_the_checksum_the_ledger_records() -> None:
     test proves nothing -- the skip-count ratchet said so by name. This one
     executes everywhere.
 
-    The node vendors three files as of OMN-19514 (#4102): the original create
-    and grant pair from OMN-18900, plus the delegation_correlation_id column
-    migration. "The pair" in this test's name is historical; the ledger check
-    below covers everything this node vendors, not a fixed count of two.
+    The node vendors four files as of OMN-20025: the original create and grant
+    pair from OMN-18900, the delegation_correlation_id column migration
+    (OMN-19514, #4102), and the goal verdict column migration. "The pair" in
+    this test's name is historical; the ledger check below covers everything
+    this node vendors, not a fixed count of two.
     """
-    vendored_files = (CREATE_FILE, GRANT_FILE, DELEGATION_CORRELATION_FILE)
+    vendored_files = (
+        CREATE_FILE,
+        GRANT_FILE,
+        DELEGATION_CORRELATION_FILE,
+        GOAL_FILE,
+    )
     recorded = _ledger_digests()
     assert set(recorded) == {path.name for path in vendored_files}, (
         "the ledger does not carry exactly the rows this node vendors; "

@@ -297,3 +297,17 @@ evidence_artifacts:
       - zombie-detector-report.json
     rationale: >-
       The per-run record of which repos the zombie detector read (runs read and active pull-request runs per repo), what it would or did force-cancel, and every read or cancel error. A blind detector and a quiet one look identical from a green run without it.
+  # --- Contract Compliance Check's deferral record (OMN-20135) ------------
+  #
+  # CI Summary judges the deferred test_passes DoD items from this record.
+  # A success of Contract Compliance Check with no record fails CI Summary, so
+  # the record's existence is itself the claim that the DoD items were read.
+  - id: contract-compliance-deferred
+    workflow: .github/workflows/ci.yml
+    job: contract-compliance
+    producer_step: "Run DoD contract compliance against the product tree (OMN-20135)"
+    artifact_name: contract-compliance-deferred
+    required_paths:
+      - contract-compliance-deferred/record.json
+    rationale: >-
+      The list of test_passes DoD items the Contract Compliance Check deferred to CI Summary, one per item with the PR and repo it names, or an empty list when none applied or the declared dependency-bot exemption ran. An absent record beside a green compliance job would let CI Summary pass without judging items it was handed.
