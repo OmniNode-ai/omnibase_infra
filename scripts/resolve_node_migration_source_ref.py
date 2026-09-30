@@ -243,7 +243,10 @@ def _require_paired_source_ref(ref: str | None, pr_number: int, sha: str) -> str
     compare against a still-unmerged omnimarket migration before the product PR
     can land. This is not a durable pin: it is only the CI source tree for the
     infra PR. Keep it constrained to an open omnimarket PR whose current head
-    branch and current head SHA match explicit trailers in the infra PR body.
+    branch matches the explicit trailers in the infra PR body and whose current
+    head SHA either equals the declared SHA or descends from it (OMN-17427: a
+    dev merge on the paired PR no longer turns every vendor PR red on stale
+    metadata; the resolved ref is then the live head).
     """
     status, body, detail = _api_get(_paired_pr_url(pr_number))
     if status != 200 or body is None:
@@ -280,12 +283,46 @@ def _require_paired_source_ref(ref: str | None, pr_number: int, sha: str) -> str
             "node-migration source PR head ref does not match declared source: "
             f"omnimarket#{pr_number} head={head.get('ref')!r} declared={ref!r}"
         )
-    if head.get("sha") != sha:
-        raise ValueError(
-            "node-migration source PR head SHA does not match declared source SHA: "
-            f"omnimarket#{pr_number} head={head.get('sha')!r} declared={sha!r}"
-        )
-    return sha
+    head_sha = head.get("sha")
+    if head_sha == sha:
+        return sha
+    if isinstance(head_sha, str) and SHA40_RE.match(head_sha):
+        verdict = _declared_is_ancestor_of_head(sha, head_sha)
+        if verdict is None:
+            # OMN-17427: the paired omnimarket PR moved forward (a dev merge,
+            # an unrelated fix) after the vendor PR declared it. The declared
+            # commit is still in the head's history, so the head is the same
+            # PR's newer tree: resolve to the LIVE head and let the vendor-sync
+            # and domain gates judge the vendored bytes against it. A changed
+            # migration still fails there, on content, not on stale metadata.
+            return head_sha
+        detail = f"; {verdict}"
+    else:
+        detail = ""
+    raise ValueError(
+        "node-migration source PR head SHA does not match declared source SHA "
+        "and the declared SHA is not proven an ancestor of the head: "
+        f"omnimarket#{pr_number} head={head_sha!r} declared={sha!r}{detail}"
+    )
+
+
+def _declared_is_ancestor_of_head(declared: str, head: str) -> str | None:
+    """None when ``declared`` is an ancestor of ``head`` in omnimarket, else why not.
+
+    GitHub's ``compare/{declared}...{head}`` reports ``ahead`` when ``head``
+    descends from ``declared``. Every other status (``behind``, ``diverged``,
+    a force-push that dropped the declared commit) and every unreadable
+    response fails closed.
+    """
+    status, body, detail = _api_get(
+        f"{_GITHUB_API}/repos/{_ORG}/omnimarket/compare/{declared}...{head}"
+    )
+    if status != 200 or body is None:
+        return f"could not compare declared...head (fail-closed): {detail}"
+    compare_status = body.get("status")
+    if compare_status == "ahead":
+        return None
+    return f"compare declared...head = {compare_status!r}"
 
 
 def _resolve_declared_ref(body: str) -> str:

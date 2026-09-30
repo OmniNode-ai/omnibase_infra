@@ -308,9 +308,11 @@ def write_floor(
 ) -> Path:
     """Stamp the proven floor.
 
-    Only ever called on a reconcile where every surface verdicted ok, so the
-    floor always describes a state that was once *proven* rather than one that
-    was merely attempted. A failed reconcile leaves the previous floor in place.
+    Only ever called on a reconcile where every surface the dispatch build is
+    made from verdicted ok (``is_dispatch_premise`` in reconcile-host.sh,
+    OMN-20111), so the floor always describes a state that was once *proven*
+    rather than one that was merely attempted. A failure on any of those
+    surfaces leaves the previous floor in place.
 
     The emitted shape is a consumed contract, not an implementation detail:
     ``scripts/onex`` parses this in awk with no JSON parser, so the indentation

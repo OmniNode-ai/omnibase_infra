@@ -25,7 +25,6 @@ FRESH_DEPLOY_FITNESS_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "fresh-deploy-fitness.yml"
 )
 RUNTIME_DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile.runtime"
-ENV_PARITY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "env-parity.yml"
 ARTIFACT_RECONCILIATION_WEBHOOK_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "artifact-reconciliation-webhook.yml"
 )
@@ -407,14 +406,6 @@ def test_short_gates_can_disable_uv_cache_cleanup() -> None:
         assert len(setup_steps) == 1
         setup_step = setup_steps[0]
         assert setup_step["with"]["cache-enabled"] == "false"
-
-    env_parity_workflow = _load_yaml(ENV_PARITY_WORKFLOW)
-    setup_step = next(
-        step
-        for step in env_parity_workflow["jobs"]["env-parity"]["steps"]
-        if step.get("uses") == "./omnibase_infra/.github/actions/setup-python-uv"
-    )
-    assert setup_step["with"]["cache-enabled"] == "false"
 
     sibling_workflow = _load_yaml(
         REPO_ROOT / ".github" / "workflows" / "check-sibling-compat.yml"
