@@ -149,6 +149,7 @@ from omnibase_infra.cli.delegate_env_config_overrides import (
     env_config_overrides,
     format_override_line,
 )
+from omnibase_infra.cli.delegate_human_output import render_delegate_outcome
 from omnibase_infra.cli.delegate_lane import (
     DelegateLaneSelectionError,
     resolve_lane_target,
@@ -1051,6 +1052,41 @@ def _resolve_transport_bound() -> tuple[int, float]:
         attempt_timeout_seconds=float(bus_config.timeout_seconds),
     )
     return policy.total_attempts, policy.total_bound_seconds
+
+
+def _stdout_is_tty() -> bool:
+    """Whether stdout is a terminal, which picks the default output form (OMN-20124).
+
+    A pipe, a subprocess or CI keeps the one-JSON-line receipt every parsing
+    caller reads; only a person at a terminal gets the human form.
+    """
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _render_receipt_for_person(receipt: object, *, state_root: Path) -> bool:
+    """Print the default, human form of one receipt and say whether it succeeded (OMN-20124).
+
+    The answer goes to stdout, the one-line summary or failure line to stderr.
+    A receipt that is not a delegation is printed as JSON rather than dropped.
+    """
+    dump = getattr(receipt, "model_dump", None)
+    envelope = dump(mode="json") if callable(dump) else None
+    outcome = (
+        render_delegate_outcome(envelope, state_root=state_root)
+        if isinstance(envelope, dict)
+        else None
+    )
+    if outcome is None:
+        click.echo(receipt.model_dump_json())  # type: ignore[attr-defined]
+        return True
+    if outcome.stdout:
+        click.echo(outcome.stdout)
+    for line in outcome.stderr:
+        click.echo(line, err=True)
+    return outcome.succeeded
 
 
 def _write_local_run_files(
@@ -2181,8 +2217,8 @@ def _timeout_receipt(
     default=None,
     help=(
         "Unix socket of the emit daemon for capture events (default: "
-        "~/.claude/emit.sock). Unreachable daemon => events spool under "
-        "<state-root>/emit_spool/ for later replay."
+        "~/.claude/emit.sock). Unreachable daemon => events are "
+        "dropped."
     ),
 )
 @click.option(
@@ -2229,6 +2265,29 @@ def _timeout_receipt(
     ),
 )
 @click.option(
+    "--json",
+    "force_json",
+    is_flag=True,
+    default=False,
+    help=(
+        "Force the full typed receipt as ONE JSON line on stdout, even on a "
+        "terminal. This is already the default whenever stdout is not a "
+        "terminal (pipes, subprocesses, CI) (OMN-20124)."
+    ),
+)
+@click.option(
+    "--human",
+    "force_human",
+    is_flag=True,
+    default=False,
+    help=(
+        "Force the human form (the answer on stdout, a one-line summary on "
+        "stderr) even when stdout is not a terminal. Without --json or "
+        "--human the form follows stdout: human on a terminal, the JSON "
+        "receipt otherwise (OMN-20124)."
+    ),
+)
+@click.option(
     "--allow-omnimarket-drift",
     "allow_omnimarket_drift",
     is_flag=True,
@@ -2262,20 +2321,30 @@ def delegate_command(
     verbose: bool,
     emit_socket: Path | None,
     omnibase_path: Path | None,
+    force_json: bool,
+    force_human: bool,
     allow_omnimarket_drift: bool,
     ticket: str | None,
     caller_lane: str | None,
 ) -> None:
-    """Delegate PROMPT to a local LLM and print exactly one typed result.
+    """Delegate PROMPT to a local LLM and print the result.
 
-    stdout carries exactly ONE ``ModelSkillResult[ModelDelegateSkillResponse]``
-    JSON — the full LLM response and metrics, never truncated. RuntimeLocal
-    logs go to a capture file + the content-addressed artifact store, never to
-    stdout. Exits non-zero on failure.
+    Output form follows stdout (OMN-20124). When stdout is NOT a terminal
+    (a pipe, a subprocess, CI) stdout carries exactly ONE
+    ``ModelSkillResult[ModelDelegateSkillResponse]`` JSON, the full LLM
+    response and metrics, never truncated: the contract every program that
+    parses this command reads, unchanged. On a terminal stdout is the answer
+    text and stderr carries a one-line summary (model, cost, run id, where the
+    full receipt is); on failure stdout is empty and stderr names the cause,
+    the reason and the run id. ``--json`` forces the JSON form and ``--human``
+    the human form. Exits non-zero on failure in every form. RuntimeLocal logs
+    go to a capture file + the content-addressed artifact store, never to
+    stdout.
 
     \b
     Examples:
         onex delegate "explain what a calendar app needs"
+        onex delegate "say hello in one word" --json  # force JSON on a terminal
         onex delegate "write a Python HTTP server" --task-type code_generation
         onex delegate "analyze the routing architecture" --max-tokens 4096
         onex delegate "hand off from the external client" --source external-client
@@ -2287,6 +2356,9 @@ def delegate_command(
         # Run it here on purpose, and say so in the record:
         onex delegate "document the router" --bus kafka --lane dev --locus in-process
     """
+    if force_json and force_human:
+        raise click.UsageError("--json and --human are mutually exclusive.")
+    json_output = force_json or not (force_human or _stdout_is_tty())
     try:
         ticket_id, ticket_resolution = resolve_delegate_ticket(ticket, cwd=Path.cwd())
         caller = resolve_delegate_caller(
@@ -2320,6 +2392,7 @@ def delegate_command(
             ticket_id=ticket_id,
             ticket_resolution=ticket_resolution,
             caller=caller,
+            json_output=json_output,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -2350,6 +2423,7 @@ def run_delegate(
     ticket_id: str | None = None,
     ticket_resolution: str = "none",
     caller: ModelDelegateCaller | None = None,
+    json_output: bool = True,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -2765,6 +2839,15 @@ def run_delegate(
                     # the receipt was the wrong one's.
                     host_handlers=locus_decision.locus is EnumDelegateLocus.IN_PROCESS,
                     locus_decision=locus_decision,
+                    # OMN-20124: the default output is for a person. --json keeps
+                    # the one-receipt-JSON-line contract for programs.
+                    receipt_renderer=(
+                        None
+                        if json_output
+                        else functools.partial(
+                            _render_receipt_for_person, state_root=state_root
+                        )
+                    ),
                     # OMN-17295 / OMN-14872: the receipt layer cannot select by an
                     # identity it was never told. Handing it the id this CLI just
                     # minted is what lets it refuse another run's terminal
@@ -2844,6 +2927,13 @@ def run_delegate(
                 consumer_groups=locus_decision.lane_consumer_groups,
             )
             click.echo(f"{exc} Queue: {queue_depth.describe()}.", err=True)
+            if not json_output:
+                click.echo(
+                    f"onex delegate failed: timed out waiting for the result "
+                    f"(run {run_id}; pass --json for the typed timeout receipt)",
+                    err=True,
+                )
+                return 1
             click.echo(
                 _timeout_receipt(
                     correlation_id=correlation_id,

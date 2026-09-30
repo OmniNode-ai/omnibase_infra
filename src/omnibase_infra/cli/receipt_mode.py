@@ -45,9 +45,9 @@ Failure asymmetry (capture vs telemetry):
   default) ⇒ the FULL output is printed instead of the receipt
   (no hidden loss — parent invariant 1; no silent fallback).
 - Artifact write success but event emission failure ⇒ the receipt still
-  prints; the event is spooled to a local outbox under the state root for
-  later replay. A transient emit-daemon outage never re-floods the caller
-  when the artifact exists.
+  prints; the event is dropped (no spool, no alternate path, no warning:
+  OMN-20146). A missing or transient emit-daemon outage never re-floods the
+  caller when the artifact exists.
 
 .. versionadded:: OMN-13094
 .. versionchanged:: OMN-13537
@@ -102,7 +102,6 @@ from omnibase_infra.topics import (
 __all__ = [
     "CAPTURE_DIR_NAME",
     "RUNS_DIR_NAME",
-    "SPOOL_DIR_NAME",
     "capture_log_path",
     "default_emit_socket_path",
     "run_receipt_mode",
@@ -110,10 +109,9 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# Capture logs and the emission spool live under the node's state root
-# (matching the workflow_result.json convention — plan Open Question 4).
+# Capture logs live under the node's state root (matching the
+# workflow_result.json convention — plan Open Question 4).
 CAPTURE_DIR_NAME = "captures"
-SPOOL_DIR_NAME = "emit_spool"
 
 # Per-invocation subtree of the state root (OMN-16533). ``RuntimeLocal``
 # serialises its workflow result to ``<its state_root>/workflow_result.json``
@@ -195,8 +193,7 @@ def default_emit_socket_path() -> Path:
 
     ``~/.claude/emit.sock`` — the same default as omniclaude's emit client
     wrapper. This is the daemon's published address; nothing is ever written
-    there by this module (emission failures spool under the node's state
-    root instead). Override per-invocation via ``onex node --emit-socket``.
+    there by this module. Override per-invocation via ``onex node --emit-socket``.
     """
     return Path.home() / ".claude" / "emit.sock"
 
@@ -206,7 +203,7 @@ def _emit_via_socket(
 ) -> None:
     """Send one event to the emit daemon (newline-delimited JSON protocol).
 
-    Raises on any failure — the caller decides whether to spool.
+    Raises on any failure — the caller decides what a lost emit means.
     """
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(_EMIT_TIMEOUT_SECONDS)
@@ -238,24 +235,24 @@ def _emit_via_socket(
         sock.close()
 
 
-def _emit_or_spool(
+def _emit_best_effort(
     event_type: str,
     payload: dict[str, JsonValue],
     *,
-    spool_dir: Path,
-    spool_stem: str,
     socket_path: Path,
 ) -> bool:
-    """Emit ``event_type`` via the daemon socket; spool locally on failure.
+    """Emit ``event_type`` via the daemon socket; a lost emit is not an error.
 
     Telemetry asymmetry (plan Phase 2 item 1): once the artifact exists, an
-    emission failure must never re-flood the caller — the event is recorded
-    to a local outbox file for later replay and the receipt still prints.
+    emission failure must never re-flood the caller, and it has no alternate
+    path: no local outbox and no warning (OMN-20146). An install with no emit
+    daemon is the normal state of a fresh machine, so an unreachable daemon is
+    logged at DEBUG only.
 
     Returns:
-        ``True`` when the daemon accepted the event, ``False`` when it was
-        spooled locally. Callers that need to record whether an upstream emit
-        succeeded (e.g. ``skill_executions.started_emit_failed``) read this.
+        ``True`` when the daemon accepted the event, ``False`` when it did not.
+        Callers that need to record whether an upstream emit succeeded (e.g.
+        ``skill_executions.started_emit_failed``) read this.
     """
     try:
         _emit_via_socket(socket_path, event_type, payload)
@@ -263,21 +260,11 @@ def _emit_or_spool(
     except (OSError, ValueError, RuntimeError) as exc:
         # OSError covers socket/connection/timeout failures; ValueError covers
         # malformed daemon JSON; RuntimeError covers daemon rejections.
-        # Spool-on-failure is the contract here — never raise past this point.
-        spool_dir.mkdir(parents=True, exist_ok=True)
-        spool_path = spool_dir / f"{event_type.replace('.', '-')}-{spool_stem}.json"
-        spool_record = {
-            "event_type": event_type,
-            "payload": payload,
-            "spooled_at_utc": datetime.now(UTC).isoformat(),
-            "spool_reason": f"{type(exc).__name__}: {exc}",
-        }
-        spool_path.write_text(json.dumps(spool_record, indent=2), encoding="utf-8")
-        logger.warning(
-            "receipt_mode: emit of %s failed (%s); spooled to %s",
+        # Never raise past this point.
+        logger.debug(
+            "receipt_mode: emit of %s not delivered (%s)",
             event_type,
             type(exc).__name__,
-            spool_path,
         )
         return False
 
@@ -367,9 +354,8 @@ def _close_capture_logging(capture_handler: logging.Handler) -> None:
     """Flush and close all root handlers, then install a ``NullHandler``.
 
     The ``NullHandler`` prevents Python's ``lastResort`` handler from leaking
-    post-capture log records (e.g. spool warnings) to stderr — receipt mode
-    allows nothing but the receipt on stdout/stderr. Spool records carry
-    their own ``spool_reason``, so the dropped log line loses nothing.
+    post-capture log records to stderr — receipt mode allows nothing but the
+    receipt on stdout/stderr.
     """
     root = logging.getLogger()
     root.removeHandler(capture_handler)
@@ -503,7 +489,7 @@ def resolve_run_state_root(state_root: Path, run_id: uuid.UUID) -> Path:
     nothing to lock, and no window between the write and the read.
 
     The caller's own ``state_root`` is unchanged for everything the CLI owns
-    — captures, the emission spool, the artifact store, ``ONEX_STATE_DIR`` —
+    — captures, the artifact store, ``ONEX_STATE_DIR`` —
     so a caller still finds one place to look.
     """
     return state_root / RUNS_DIR_NAME / str(run_id)
@@ -840,6 +826,7 @@ def run_receipt_mode(
     receipt_callback: Callable[[object], None] | None = None,
     host_handlers: bool = True,
     locus_decision: ModelDelegateLocusDecision | None = None,
+    receipt_renderer: Callable[[object], bool] | None = None,
 ) -> int:
     """Serialize receipt mode and restore its process-global state on exit."""
     with _RECEIPT_MODE_LOCK_STATE.lock:
@@ -865,6 +852,7 @@ def run_receipt_mode(
                 receipt_callback=receipt_callback,
                 host_handlers=host_handlers,
                 locus_decision=locus_decision,
+                receipt_renderer=receipt_renderer,
             )
         except BaseException as exc:
             operation_error = exc
@@ -921,6 +909,7 @@ def _run_receipt_mode(
     receipt_callback: Callable[[object], None] | None = None,
     host_handlers: bool = True,
     locus_decision: ModelDelegateLocusDecision | None = None,
+    receipt_renderer: Callable[[object], bool] | None = None,
 ) -> int:
     """Execute the node and print exactly one ``ModelSkillResult`` JSON.
 
@@ -947,6 +936,10 @@ def _run_receipt_mode(
     receipt JSON line. Callback failures propagate so required durable files
     cannot be mistaken for successful dispatch evidence.
 
+    ``receipt_renderer`` (OMN-20124) replaces the stdout receipt JSON line. It
+    prints its own output and returns whether the run succeeded. ``None`` keeps
+    the one-JSON-line contract every other caller relies on.
+
     Returns the process exit code (the runtime's exit code; 1 when the
     runtime raised before producing a workflow result).
     """
@@ -958,7 +951,6 @@ def _run_receipt_mode(
     lifecycle_correlation_id = uuid.uuid4()
     session_id = os.environ.get(_SESSION_ID_ENV) or None
     capture_path = capture_log_path(state_root, node_name, str(run_id))
-    spool_dir = state_root / SPOOL_DIR_NAME
     # OMN-16533: the root the RUNTIME writes into is this run's own, so its
     # fixed-name workflow result is keyed by the run that produced it.
     run_state_root = resolve_run_state_root(state_root, run_id)
@@ -966,9 +958,9 @@ def _run_receipt_mode(
 
     # --- Skill lifecycle: skill-started (before the body runs) -------------
     # Emitted through the SAME emit daemon socket as the capture events; the
-    # daemon accept/spool outcome feeds started_emit_failed on the completed
+    # daemon accept outcome feeds started_emit_failed on the completed
     # event so consumers can detect orphaned completions.
-    started_emit_ok = _emit_or_spool(
+    started_emit_ok = _emit_best_effort(
         SUFFIX_OMNICLAUDE_SKILL_STARTED,
         _skill_started_payload(
             run_id=run_id,
@@ -977,8 +969,6 @@ def _run_receipt_mode(
             contract_path=contract_path,
             session_id=session_id,
         ),
-        spool_dir=spool_dir,
-        spool_stem=f"{run_id}-started",
         socket_path=emit_socket,
     )
 
@@ -1132,7 +1122,7 @@ def _run_receipt_mode(
     # Emitted before the artifact-capture block so it always fires, even when a
     # genuine artifact-write failure short-circuits to the full-output path.
     # Shares run_id + correlation_id with the started event above.
-    _emit_or_spool(
+    _emit_best_effort(
         SUFFIX_OMNICLAUDE_SKILL_COMPLETED,
         _skill_completed_payload(
             run_id=run_id,
@@ -1144,8 +1134,6 @@ def _run_receipt_mode(
             started_emit_failed=not started_emit_ok,
             session_id=session_id,
         ),
-        spool_dir=spool_dir,
-        spool_stem=f"{run_id}-completed",
         socket_path=emit_socket,
     )
 
@@ -1206,17 +1194,15 @@ def _run_receipt_mode(
         )
         return exit_code
 
-    # --- Telemetry: emit or spool (never re-floods the caller) -----------
+    # --- Telemetry: emit best-effort (never re-floods the caller) -----------
     socket_path = emit_socket
     for index, event_payload in enumerate(artifact_payloads):
-        _emit_or_spool(
+        _emit_best_effort(
             "artifact.captured",
             event_payload,
-            spool_dir=spool_dir,
-            spool_stem=f"{run_id}-{index}",
             socket_path=socket_path,
         )
-    _emit_or_spool(
+    _emit_best_effort(
         "tool.output.captured",
         {
             "tool_name": "onex_node",
@@ -1229,8 +1215,6 @@ def _run_receipt_mode(
             "artifact_refs": [ref.ref for ref in artifact_refs],
             "capture_log_bytes": len(capture_text.encode("utf-8")),
         },
-        spool_dir=spool_dir,
-        spool_stem=str(run_id),
         socket_path=socket_path,
     )
 
@@ -1377,7 +1361,12 @@ def _run_receipt_mode(
     # may be able to suppress it. Any callback failure is reported and folded
     # into the exit code instead.
     try:
-        click.echo(receipt.model_dump_json())
+        if receipt_renderer is None:
+            click.echo(receipt.model_dump_json())
+        elif not receipt_renderer(receipt) and exit_code == 0:
+            # OMN-20124: a renderer that reported a failure line must not sit
+            # beside a zero exit.
+            exit_code = 1
     except ValidationError as exc:  # pragma: no cover - construction validates
         click.echo(f"receipt mode: receipt serialization failed: {exc}", err=True)
         return 1
