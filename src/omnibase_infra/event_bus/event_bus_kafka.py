@@ -236,6 +236,7 @@ from omnibase_infra.errors import (
     ProjectionWedgeExhaustedError,
     ProtocolConfigurationError,
 )
+from omnibase_infra.event_bus.concurrent_commit_ledger import ConcurrentCommitLedger
 from omnibase_infra.event_bus.consumer_health_emitter import ConsumerHealthEmitter
 from omnibase_infra.event_bus.consumer_rejoin_policy import (
     ModelConsumerRejoinPolicy,
@@ -598,6 +599,19 @@ class EventBusKafka(
         # the ``subscribe`` that starts the loop; read once when the loop
         # starts.
         self._consume_concurrency: dict[tuple[str, str], int] = {}
+
+        # OMN-20117: every subscriber dispatch that has not settled, on every
+        # path. ``close()`` waits for these with the producer still open, so a
+        # handler that finishes during shutdown can still publish its terminal,
+        # and cancels the ones left at the end of the drain so a
+        # cancellation-aware handler can answer its caller before the bus
+        # refuses publishes.
+        self._live_dispatches: set[asyncio.Future[None]] = set()
+        # OMN-20117: the concurrent driver's per-record tasks, which own the
+        # finish-and-commit accounting for a settled dispatch. ``close()``
+        # waits for them after settling the dispatches so the commit lands
+        # before the consumers stop.
+        self._record_tasks: set[asyncio.Task[None]] = set()
 
         # OMN-19355: dispatches abandoned at their deadline that have not
         # returned yet, oldest first, with what they were dispatching. A Python
@@ -1093,8 +1107,18 @@ class EventBusKafka(
             if self._shutdown:
                 # Already shutting down or shutdown
                 return
-            self._closing = True
+            # OMN-20117: stop taking records FIRST, and only that. The consume
+            # loops stop dispatching on ``_shutdown``; publishing stays open
+            # until the dispatches already running have settled, because a
+            # handler that finishes during shutdown still owes its caller a
+            # terminal. Refusing publishes here, as this method used to, sent
+            # six delegate-skill terminals to the DLQ on one dev-lane restart.
             self._shutdown = True
+
+        await self._settle_live_dispatches()
+
+        async with self._lock:
+            self._closing = True
             self._started = False
             tasks_to_cancel = list(
                 {
@@ -1164,6 +1188,63 @@ class EventBusKafka(
             "EventBusKafka closed",
             extra={"environment": self._environment},
         )
+
+    async def _settle_live_dispatches(self) -> None:
+        """Let running dispatches finish, then cancel the rest (OMN-20117).
+
+        Runs with the producer open. First waits up to
+        ``consumer_shutdown_drain_seconds`` for every live subscriber dispatch
+        to return, so a handler that finishes in that window publishes its
+        terminal and has its record committed. Then cancels whatever is still
+        running and waits up to ``consumer_shutdown_cancel_grace_seconds`` for
+        those to settle: a handler that answers its cancellation with a typed
+        failure terminal publishes it here, so its caller is told instead of
+        waiting out its window. A cancelled dispatch that returns nothing is
+        never committed past, so the next consumer redelivers its record.
+
+        Only the INNER dispatch futures are cancelled, never the consume
+        tasks awaiting them. Those tasks see the dispatch settle through their
+        own ``asyncio.wait`` and account for it exactly as for any other
+        outcome: a returned dispatch is finished and committed, a cancelled
+        one is not.
+        """
+        live = {dispatch for dispatch in self._live_dispatches if not dispatch.done()}
+        drain = self._config.consumer_shutdown_drain_seconds
+        grace = self._config.consumer_shutdown_cancel_grace_seconds
+        if live:
+            logger.info(
+                "shutdown_drain_started live_dispatches=%d drain_seconds=%.1f "
+                "-- publishing stays open until they settle (OMN-20117)",
+                len(live),
+                drain,
+            )
+            if drain > 0:
+                _, live = await asyncio.wait(live, timeout=drain)
+        if live:
+            logger.warning(
+                "shutdown_drain_expired cancelling=%d cancel_grace_seconds=%.1f "
+                "-- a handler may answer its cancellation with a failure "
+                "terminal; a record whose handler does not is left uncommitted "
+                "and is redelivered to the next consumer (OMN-20117)",
+                len(live),
+                grace,
+            )
+            for dispatch in live:
+                dispatch.cancel()
+            if grace > 0:
+                _, unsettled = await asyncio.wait(live, timeout=grace)
+                if unsettled:
+                    logger.warning(
+                        "shutdown_cancel_grace_expired unsettled=%d -- these "
+                        "dispatches ignored cancellation; their records stay "
+                        "uncommitted (OMN-20117)",
+                        len(unsettled),
+                    )
+        # Let the record tasks awaiting the settled dispatches run their
+        # accounting (finish, commit) before the consumers are stopped.
+        accounting = {task for task in self._record_tasks if not task.done()}
+        if accounting:
+            await asyncio.wait(accounting, timeout=max(grace, 1.0))
 
     async def publish(
         self,
@@ -2248,6 +2329,8 @@ class EventBusKafka(
         effective_group_id: str,
         group_instance_id: str,
         auto_offset_reset: str,
+        *,
+        group_id: str,
     ) -> AIOKafkaConsumer:
         """Construct (but do not start) a consumer for one topic and group.
 
@@ -2261,10 +2344,18 @@ class EventBusKafka(
             effective_group_id: Group id after instance/topic discrimination.
             group_instance_id: Static membership id (KIP-345).
             auto_offset_reset: Offset reset policy for this consumer.
+            group_id: The SUBSCRIPTION group id, the key the declared consume
+                concurrency is stored under.
 
         Returns:
             An unstarted ``AIOKafkaConsumer``.
         """
+        # OMN-20117: a subscription that declared consume concurrency commits
+        # its own low watermark (``ConcurrentCommitLedger``). Auto-commit would
+        # commit the fetch position instead, which is past every record still
+        # in flight, so a restart would resume past them and they would never
+        # be redelivered.
+        concurrent = self._consume_concurrency.get((topic, group_id), 1) > 1
         return AIOKafkaConsumer(
             # PHYSICAL name. Every other use of ``topic`` in this class -- the
             # ``_group_consumers`` key, the ``_consume_loop`` argument, the
@@ -2276,7 +2367,7 @@ class EventBusKafka(
             group_id=effective_group_id,
             group_instance_id=group_instance_id,
             auto_offset_reset=auto_offset_reset,
-            enable_auto_commit=self._config.enable_auto_commit,
+            enable_auto_commit=self._config.enable_auto_commit and not concurrent,
             session_timeout_ms=self._config.session_timeout_ms,
             heartbeat_interval_ms=self._config.heartbeat_interval_ms,
             max_poll_interval_ms=self._config.max_poll_interval_ms,
@@ -2357,6 +2448,7 @@ class EventBusKafka(
             effective_group_id,
             resolved_group_instance_id,
             resolved_auto_offset_reset,
+            group_id=group_id,
         )
 
         # Redpanda (and Kafka) can return UnknownTopicOrPartitionError,
@@ -2476,6 +2568,7 @@ class EventBusKafka(
                     effective_group_id,
                     resolved_group_instance_id,
                     resolved_auto_offset_reset,
+                    group_id=group_id,
                 )
 
             except TimeoutError as e:
@@ -2761,6 +2854,8 @@ class EventBusKafka(
         started_at = loop.time()
         deadline = self._config.effective_dispatch_deadline_seconds
         dispatch = asyncio.ensure_future(callback(event_message))
+        self._live_dispatches.add(dispatch)
+        dispatch.add_done_callback(self._live_dispatches.discard)
         try:
             if on_slow_dispatch is None:
                 done, _ = await asyncio.wait({dispatch}, timeout=deadline)
@@ -3468,6 +3563,7 @@ class EventBusKafka(
             effective_group_id,
             resolved_group_instance_id,
             self._config.auto_offset_reset,
+            group_id=group_id,
         )
         await asyncio.wait_for(consumer.start(), timeout=self._timeout_seconds)
         self._group_consumers[(topic, group_id)] = consumer
@@ -3834,6 +3930,7 @@ class EventBusKafka(
 
         for index, (partition, partition_records) in enumerate(partitions):
             for position, msg in enumerate(partition_records):
+                coordinate = _record_coordinate(msg)
                 if self._shutdown:
                     logger.debug(
                         f"Consumer loop shutdown signal received for topic {topic}",
@@ -3842,9 +3939,22 @@ class EventBusKafka(
                             "correlation_id": str(correlation_id),
                         },
                     )
+                    # OMN-20117: the rest of this batch was fetched but never
+                    # processed. Under auto-commit the fetch position is past
+                    # all of it, and the consumer commits that position when
+                    # it stops, so pin it at the first unprocessed record of
+                    # every partition left or the restart resumes past them.
+                    remaining = (
+                        [] if coordinate is None else [(partition, coordinate[1])]
+                    )
+                    for later_partition, later_records in partitions[index + 1 :]:
+                        later = _record_coordinate(later_records[0])
+                        if later is not None:
+                            remaining.append((later_partition, later[1]))
+                    if remaining:
+                        SerialBatchWithhold(consumer, remaining).engage()
                     return
 
-                coordinate = _record_coordinate(msg)
                 if coordinate is None:
                     # No offset to pin or resume from: dispatched as before,
                     # under the deadline alone.
@@ -3978,13 +4088,52 @@ class EventBusKafka(
         rewind_pending = asyncio.Event()
         task_errors: list[BaseException] = []
         poll_task: asyncio.Task[ModelConsumerPollBatch] | None = None
+        # OMN-20117: this subscription's consumer is built without auto-commit
+        # (``_build_consumer``); the ledger is the position it commits
+        # instead, and it is never past a record that has not finished.
+        ledger = ConcurrentCommitLedger()
+        commit_lock = asyncio.Lock()
 
         async def _drain() -> None:
             """Wait for every dispatched record to finish."""
             while in_flight:
                 await asyncio.gather(*list(in_flight), return_exceptions=True)
 
+        async def _commit_low_watermark(physical_topic: str) -> None:
+            """Commit every partition whose finished prefix moved (OMN-20117).
+
+            A refused commit (a rebalance revoked the partition, the group is
+            rejoining) is logged and left for the next finish to retry with a
+            position at least as high. Delivery stays at-least-once either
+            way: the worst case is a redelivery, never a skip.
+            """
+            async with commit_lock:
+                moved = ledger.advanced(rewind_floors=rewind_requests)
+                if not moved:
+                    return
+                offsets = {
+                    TopicPartition(physical_topic, partition): position
+                    for partition, position in moved.items()
+                }
+                try:
+                    await consumer.commit(offsets)
+                except Exception as commit_error:  # noqa: BLE001 — boundary: logs warning and degrades
+                    logger.warning(
+                        "concurrent_commit_refused topic=%s group=%s offsets=%s "
+                        "error=%s -- the position is retried on the next "
+                        "finished record; unfinished records stay uncommitted "
+                        "(OMN-20117)",
+                        topic,
+                        group_id,
+                        moved,
+                        commit_error,
+                    )
+                    return
+                for partition, position in moved.items():
+                    ledger.committed(partition, position)
+
         async def _dispatch_one(msg: object) -> None:
+            coordinate = _record_coordinate(msg)
             try:
                 await self._process_consumed_record(
                     msg,
@@ -3994,7 +4143,15 @@ class EventBusKafka(
                     consumer,
                     rewind_sink=rewind_requests,
                 )
+                if coordinate is not None:
+                    # Settled: returned, quarantined, or asked for a rewind
+                    # (the rewind floor caps the commit below it). Only now
+                    # may the position move past it.
+                    ledger.finished(*coordinate)
+                    await _commit_low_watermark(str(getattr(msg, "topic", topic)))
             except asyncio.CancelledError:
+                # Not finished: the record keeps the position pinned at or
+                # below it, so the next consumer is handed it again.
                 raise
             except BaseException as task_error:  # noqa: BLE001 - re-raised by the driver
                 # Mirror the serial path: an unexpected error reaches
@@ -4017,6 +4174,8 @@ class EventBusKafka(
                 correlation_id=correlation_id,
                 rewind_requests=rewind_requests,
             )
+            for partition, offset in rewind_requests.items():
+                ledger.rebase(partition, offset)
             rewind_requests.clear()
             rewind_pending.clear()
 
@@ -4071,9 +4230,14 @@ class EventBusKafka(
                         # handlers, so the bound is an upper bound on
                         # concurrency rather than a target.
                         await semaphore.acquire()
+                        coordinate = _record_coordinate(msg)
+                        if coordinate is not None:
+                            ledger.dispatched(*coordinate)
                         task = asyncio.create_task(_dispatch_one(msg))
                         in_flight.add(task)
                         task.add_done_callback(in_flight.discard)
+                        self._record_tasks.add(task)
+                        task.add_done_callback(self._record_tasks.discard)
 
                 if task_errors:
                     break
@@ -4095,6 +4259,8 @@ class EventBusKafka(
                     correlation_id=correlation_id,
                     rewind_requests=rewind_requests,
                 )
+                for partition, offset in rewind_requests.items():
+                    ledger.rebase(partition, offset)
                 rewind_requests.clear()
 
         if task_errors:

@@ -50,9 +50,8 @@ required_services:
       - "INTEGRATION_POSTGRES_HOST"
       - "PostgreSQL: MISSING"
       - "Postgres not reachable"
-# The per-test RUNTIME_E2E_* feature flags are the one legitimately optional
-# class here. Consul is gone from the product (OMN-3540 removed the backend),
-# so the Consul-registration tests cannot pass and are not enabled; that skip is
-# recognised rather than silently tolerated, and it is the only one.
-allowed_optional_skip_patterns:
-  - "Runtime Consul registration tests require explicit opt-in"
+# No skip is legitimate in these suites: the runtime is booted and proven
+# healthy before they run, so any skip is a false green. The one optional skip
+# they used to carry (Consul dual registration, OMN-4857) was deleted with the
+# test (OMN-20147, OMN-18811 AC2).
+allowed_optional_skip_patterns: []

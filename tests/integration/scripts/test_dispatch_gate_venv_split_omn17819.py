@@ -171,7 +171,14 @@ def test_reconciler_routes_provider_to_dispatch_venv_and_purifies_gate_venv(
     dispatch_syncs = [
         call
         for call in uv_calls
-        if "sync" in call and "--check" not in call and f"env={dispatch_venv} " in call
+        if "sync" in call
+        and "--check" not in call
+        and (
+            f"env={dispatch_venv} " in call
+            # OMN-19432: writing passes now run against the sibling staging
+            # venv and are swapped in atomically, so the sync targets it.
+            or f"env={dispatch_venv}.rebuilding " in call
+        )
     ]
     gate_syncs = [
         call

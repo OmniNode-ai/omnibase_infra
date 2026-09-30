@@ -141,7 +141,7 @@ def _bus_names(topic: str) -> tuple[str, tuple[str, ...]]:
     with patch(
         "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer"
     ) as consumer_cls:
-        bus._build_consumer(topic, "group", "instance", "earliest")
+        bus._build_consumer(topic, "group", "instance", "earliest", group_id="group")
     transport = KafkaTransport(
         config=ModelKafkaEventBusConfig(bootstrap_servers=BOOTSTRAP),
         topics=(topic,),

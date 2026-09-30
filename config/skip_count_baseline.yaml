@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 584
+    max_skips: 583
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -489,7 +489,6 @@ suites:
       - tests.integration.registration.e2e.test_full_orchestrator_flow.TestPipelineLifecycle::test_consumer_handles_shutdown_gracefully
       - tests.integration.registration.e2e.test_full_orchestrator_flow.TestPipelineLifecycle::test_consumer_starts_and_receives_messages
       - tests.integration.registration.e2e.test_runtime_e2e.TestRuntimeE2EFlow::test_introspection_event_processed_by_runtime
-      - tests.integration.registration.e2e.test_runtime_e2e.TestRuntimeE2EFlow::test_runtime_dual_registration_creates_consul_entry
       - tests.integration.registration.e2e.test_runtime_e2e.TestRuntimeE2EFlow::test_runtime_handles_multiple_events_sequentially
       - tests.integration.registration.e2e.test_runtime_e2e.TestRuntimeE2EFlow::test_runtime_health_endpoint
       - tests.integration.registration.e2e.test_runtime_e2e.TestRuntimeErrorHandling::test_runtime_handles_malformed_message

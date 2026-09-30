@@ -723,11 +723,8 @@ jobs:
           # Event processing and output events are asserted rather than opted
           # out of: the steps above have already proved the runtime is consuming
           # and writing registration projections, so a timeout here is a real
-          # regression. Consul stays off -- OMN-3540 removed that backend, so
-          # those tests cannot pass and their skip is the one this job's guard
-          # config recognises as legitimately optional.
+          # regression. The guard below tolerates no skip at all (OMN-20147).
           RUNTIME_E2E_PROCESSING_ENABLED: "true"
-          RUNTIME_E2E_CONSUL_ENABLED: "false"
         run: |
           INTEGRATION_POSTGRES_PASSWORD="$(uv run python - <<'PY'
           import os

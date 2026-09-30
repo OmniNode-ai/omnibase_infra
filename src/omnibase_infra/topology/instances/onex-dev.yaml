@@ -195,6 +195,7 @@ databases:
               - capability_scores
               - context_roi_scores
               - delegation_budget_state
+              - delegation_eval_items
               - delegation_events
               - delegation_judge_verdict_events
               - delegation_routing_tenant_overlay
