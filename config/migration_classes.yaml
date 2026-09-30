@@ -296,6 +296,9 @@ migrations:
   forward/nodes/node_projection_pr_state/0001_grant_omninode_runtime_pr_state.sql: expand-only # additive
   forward/nodes/node_projection_prod_promotion_gate/0000_create_prod_promotion_gate_decisions.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_prod_promotion_gate/0001_grant_omninode_runtime_prod_promotion_gate_decisions.sql: expand-only
+  forward/nodes/node_projection_provider_quota/0000_create_provider_quota_state.sql: forward-only # ALTER TABLE public.provider_quota_state ENABLE ROW LEVEL (ROW LEVEL SECURITY); DROP
+  forward/nodes/node_projection_provider_quota/0001_grant_tenant_projection_writer_provider_quota_state.sql: expand-only
+  forward/nodes/node_projection_provider_quota/0002_force_rls_provider_quota_state.sql: forward-only # ALTER TABLE public.provider_quota_state FORCE ROW LEVEL (ROW LEVEL SECURITY)
   forward/nodes/node_projection_receipt_gate/0000_create_receipt_gate_projection_table.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT RECEIPT_GATE_ROWS_PKEY
   forward/nodes/node_projection_receipt_gate/0001_grant_omninode_runtime_receipt_gate_rows.sql: expand-only
   forward/nodes/node_projection_receipt_gate/0002_grant_omninode_runtime_receipt_gate_sequence.sql: expand-only
