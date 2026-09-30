@@ -124,6 +124,23 @@ WRITER_GRANT_FILES = {
         / "003_grant_tenant_projection_writer_tenant_inference_credentials.sql"
     ),
 }
+# OMN-19977: a relation whose node migrations are vendored byte-identical from
+# omnimarket carries its tenant_projection_writer grant in its own vendored
+# grant migration, which runs after the CREATE in the same node lineage. 0004
+# predates the relation and is an applied migration, so it is not edited. The
+# vendored file follows the omnimarket grant shape (a 1/count postcondition),
+# not the WRITER_GRANT_FILES owner-lineage shape, so it is listed separately.
+VENDORED_WRITER_GRANT_FILES = {
+    "metering_summary": (
+        REPO_ROOT
+        / "docker"
+        / "migrations"
+        / "forward"
+        / "nodes"
+        / "node_projection_metering_summary"
+        / "0001_grant_tenant_projection_writer_metering_summary.sql"
+    ),
+}
 AGGREGATE_VIEWS_FILE = (
     REPO_ROOT
     / "docker"
@@ -400,6 +417,18 @@ def test_grant_migration_matches_the_topology_declared_writable_table_set() -> N
             GRANT_FILE.read_text(),
         )
     )
+    for relation, grant_file in VENDORED_WRITER_GRANT_FILES.items():
+        vendored = set(
+            re.findall(
+                r"GRANT SELECT, INSERT, UPDATE ON public\.([a-z0-9_]+) "
+                rf"TO {PRINCIPAL}",
+                "\n".join(_executable_lines(grant_file)),
+            )
+        )
+        assert vendored == {relation}, (
+            f"{grant_file.name} must grant exactly public.{relation}: {vendored!r}"
+        )
+        granted |= vendored
 
     assert declared, "positive control: the topology declares writable tables"
     assert granted == declared, (
