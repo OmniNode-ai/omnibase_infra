@@ -403,28 +403,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="demo_readiness",
         ),
     ),
-    # OMN-19977: infra vendors metering_summary ahead of omnimarket#3079, whose
-    # node contract is not yet in the pinned contract tree. The source contract
-    # declares the public application table as read_write for metering_summary;
-    # retire this bridge when the pin advances past that pull request.
-    ContractTableDeclaration(
-        node="legacy_migration:metering_summary",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_metering_summary/"
-            "0000_create_metering_summary.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="metering_summary",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_metering_summary/"
-                "0000_create_metering_summary.sql"
-            ),
-            access="read_write",
-            role="metering_summary",
-        ),
-    ),
     # OMN-19978: this repo vendors node_projection_usage_by_model_day/0000 and
     # 0001 ahead of omnimarket#3073. The pin cannot declare either public
     # TENANT relation until that pull request merges, while the migration
@@ -468,34 +446,14 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="usage_by_model_day",
         ),
     ),
-    # OMN-19566: infra vendors lab_proof_receipts before omnimarket#3043
-    # lands the node contract. Until the pin advances, this interim declaration
-    # keeps the shipped table grant derivable. The supplemental expiry test
-    # requires removal once omnimarket#3043 merges and the pin advances past it.
-    #
-    # OMN-19566 pin advance to 791c3b89970b (omnimarket#3066) retired the
-    # session_content, pr_landing_state, pr_landing_transitions,
-    # claude_agent_spans, claude_hook_events and worktree_reconcile_hosts
-    # bridges, whose retiring omnimarket pull requests (#2905, #3000, #2956,
-    # #3047) are all inside that pin.
-    ContractTableDeclaration(
-        node="legacy_migration:lab_proof_receipts",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_lab_proof_receipts/"
-            "0000_create_lab_proof_receipts.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="lab_proof_receipts",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_lab_proof_receipts/"
-                "0000_create_lab_proof_receipts.sql"
-            ),
-            access="read_write",
-            role="lab_proof_receipts",
-        ),
-    ),
+    # OMN-19977 and OMN-19566 added metering_summary and lab_proof_receipts, and
+    # both were DELETED here by the pin advance to 532ec1f53834, which carries
+    # omnimarket#3079 and omnimarket#3043 -- the retiring pull requests each
+    # entry named in its own comment. The nodes now declare the relations with
+    # the same schema, access (read_write) and role the bridges carried. Same
+    # mechanism and same proof as the entries above: the expiry module went red
+    # on the bot's pin-advance pull request naming both entries, and the
+    # regeneration wrote nothing.
     # OMN-19999: infra vendors pr_state before omnimarket#3054 lands its node
     # contract. This bridge keeps the shipped grants derivable until the pin
     # advances; the expiry test then requires its removal.
