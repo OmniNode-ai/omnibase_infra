@@ -77,6 +77,21 @@
       "max_model_len": 8192,
       "control": "Negative control in the same session with the same curl invocation: http://192.168.86.201:8003/v1/models returns curl exit 7, http=000 in 0.069s. So the http=200 in 0.016s on :8002 is that port answering, not a proxy answering everything. Separately, http://192.168.86.201:8002/v1/chat/completions returns http=404 (this endpoint is embedding-only) while a POST to http://192.168.86.201:8002/v1/embeddings returns real 1024-dimensional vectors, which is why the dev overlay binds the /v1/embeddings path rather than /v1/chat/completions.",
       "revalidation_note": "OMN-17099. The endpoint has been live and reachable the whole time (matches the OMN-16442 base-contract note verbatim: same owned_by, same root, same max_model_len); the gap was that no lane overlay ever bound it, so every render shipped endpoint_url: null regardless. This entry is what lets the dev lane bind it for the first time."
+    },
+    {
+      "endpoint": "http://192.168.86.200:8130/v1/models",
+      "probed_at": "2026-09-30T15:39:58Z",
+      "command": "docker exec -i omninode-runtime-effects python (urllib.request.urlopen('http://192.168.86.200:8130/v1/models', timeout=8)) run on 192.168.86.201, dev lane compose project omnibase-infra, so the reachability recorded is the runtime's own",
+      "http_status": 200,
+      "reachable": true,
+      "served_model_ids": [
+        "gpt-oss-120b"
+      ],
+      "owned_by": "llamacpp",
+      "max_model_len": 131072,
+      "max_model_len_source": "llama.cpp reports the context as data[].meta.n_ctx rather than max_model_len; the value is that field (n_ctx_train is also 131072)",
+      "control": "Negative control in the same process with the same call: http://192.168.86.200:8131/v1/models raised URLError Errno 111 Connection refused in 0.003s, so the http=200 in 0.015s on :8130 is that port answering. Keyless: no Authorization header sent.",
+      "revalidation_note": "OMN-19432. Mac Studio (.200) gpt-oss-120b, llama.cpp, four slots of 131072. Recorded so the dev lane overlay may bind it and place it as a spread peer of local-heavy-reasoning for the long-thinking classes (RULING 2026-09-30T15:07:51Z, no model reserved as a fallback rung)."
     }
   ]
 }

@@ -85,3 +85,47 @@ backends:
         - local-heavy-reasoning
       max_context_tokens: 32768
       mode: spread
+  # OMN-19432 (RULING 2026-09-30T15:07:51Z: no model is reserved as a fallback
+  # rung). The Mac Studio at .200 serves gpt-oss-120b under llama.cpp on :8130,
+  # keyless, 131072-token context, four slots (GET /slots readback 2026-09-30).
+  # Graded on the delegate's own quality gate (judge off) over 29 delegated tasks
+  # on 2026-09-30: 27 of 29 passed, against 23 for .201 and 21 for .202, and it
+  # passed every one of the five `review` tasks where both Qwen hosts passed one.
+  # It is slow: p50 69 s and p90 115 s against 3.4 s and 10 s on .201, so it is
+  # placed only for the classes that read long and think before answering, where
+  # a minute is normal, and its weight is 1.0, one member of an equal split.
+  # Short prose classes (document, summarization) stay on the Qwen hosts. The
+  # `.200:8130` endpoint was probed from inside omninode-runtime-effects
+  # (tests/fixtures/bifrost_served_models_probe.json).
+  # onex-allow-internal-ip OMN-19432 reason="typed dev-lane delegation contract"
+  - backend_id: local-studio-planner
+    endpoint_url: "http://192.168.86.200:8130/v1/chat/completions"
+    served_model_id: "gpt-oss-120b"
+    parameter_count: "120B"
+    context_window: 131072
+    max_tokens: 16384
+    timeout_ms: 300000
+    provider: local
+    tier: local
+    credential:
+      kind: none
+    capabilities:
+      - deep_reasoning
+      - reasoning
+      - research
+      - classification
+      - documentation
+    placement:
+      tier: local
+      fallback_for:
+        - local-heavy-reasoning
+      max_context_tokens: 131072
+      mode: spread
+      use_for:
+        - review
+        - reasoning
+        - complex_reasoning
+        - planning
+        - research
+        - escalation
+      weight: 1.0
