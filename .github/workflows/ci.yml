@@ -3928,6 +3928,11 @@ jobs:
       - name: Resolve omnimarket migration source ref
         id: resolve-omnimarket-ref
         shell: bash
+        # OMN-17427: the resolver reads the paired omnimarket PR over the REST API
+        # and fails closed on an error; anonymous reads share a 60/hour limit per
+        # runner IP and ejected omnibase_infra#4304 from the merge queue.
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python3 scripts/resolve_node_migration_source_ref.py
 
       - name: Resolve pinned omnimarket contract SHA

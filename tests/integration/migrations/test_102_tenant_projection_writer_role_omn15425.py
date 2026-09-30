@@ -68,15 +68,6 @@ GRANT_FILE = (
     / "node_projection_delegation_inference_response"
     / "0004_grant_tenant_projection_writer.sql"
 )
-USAGE_BY_MODEL_DAY_GRANT_FILE = (
-    REPO_ROOT
-    / "docker"
-    / "migrations"
-    / "forward"
-    / "nodes"
-    / "node_projection_usage_by_model_day"
-    / "0001_grant_usage_by_model_day.sql"
-)
 EARLY_REASSERT_GRANT_FILE = (
     REPO_ROOT
     / "docker"
@@ -133,6 +124,12 @@ WRITER_GRANT_FILES = {
         / "003_grant_tenant_projection_writer_tenant_inference_credentials.sql"
     ),
 }
+# OMN-19977: 0004 is an applied transcription that predates every relation a
+# vendored node migration adds later (metering_summary, usage_by_model_day). Such
+# a relation carries its tenant_projection_writer grant in its own node lineage,
+# in the grant migration vendored byte-identical from omnimarket, so the writer
+# grant set is read from every forward node migration, not from 0004 alone.
+FORWARD_NODES_ROOT = REPO_ROOT / "docker" / "migrations" / "forward" / "nodes"
 AGGREGATE_VIEWS_FILE = (
     REPO_ROOT
     / "docker"
@@ -171,6 +168,28 @@ def _executable_lines(path: Path) -> list[str]:
         for line in path.read_text().splitlines()
         if not line.lstrip().startswith("--")
     ]
+
+
+_WRITER_GRANT_STATEMENT = re.compile(
+    r"GRANT SELECT, INSERT, UPDATE ON "
+    r"(public\.[a-z0-9_]+(?:, public\.[a-z0-9_]+)*) "
+    rf"TO {PRINCIPAL}\b"
+)
+
+
+def _writer_grants_in(path: Path) -> set[str]:
+    """Relations one migration grants SELECT, INSERT, UPDATE to the writer.
+
+    Whitespace is collapsed first, so a statement split over several lines
+    (the usage_by_model_day grant names two relations in one GRANT) reads the
+    same as the one-line form 0004 uses inside its DO block.
+    """
+    text = " ".join(" ".join(_executable_lines(path)).split())
+    return {
+        name.strip().removeprefix("public.")
+        for match in _WRITER_GRANT_STATEMENT.finditer(text)
+        for name in match.group(1).split(",")
+    }
 
 
 def _executable_text(path: Path) -> str:
@@ -384,23 +403,6 @@ def _declared_table_objects(privilege: str) -> set[str]:
     }
 
 
-def _writable_grant_objects() -> set[str]:
-    """Return public relations granted the tenant writer's SIU triple."""
-    granted: set[str] = set()
-    for grant_file in (GRANT_FILE, USAGE_BY_MODEL_DAY_GRANT_FILE):
-        sql = _executable_text(grant_file)
-        for statement in re.findall(
-            r"GRANT\s+SELECT,\s*INSERT,\s*UPDATE\s+ON\s+(.+?)\s+TO\s+"
-            rf"{PRINCIPAL}\s*;",
-            sql,
-            re.IGNORECASE | re.DOTALL,
-        ):
-            granted.update(
-                re.findall(r"\bpublic\.([a-z0-9_]+)\b", statement, re.IGNORECASE)
-            )
-    return granted
-
-
 @pytest.mark.integration
 def test_grant_migration_matches_the_topology_declared_writable_table_set() -> None:
     """The grant list is a transcription of the topology, not a hand-picked set.
@@ -408,10 +410,10 @@ def test_grant_migration_matches_the_topology_declared_writable_table_set() -> N
     The topology's TABLE grants are themselves generated from node contract
     ``db_io.db_tables`` declarations by
     ``scripts/generate_application_database_table_grants.py --write``. If a
-    contract adds a tenant-classified relation it WRITES and its owner-lineage
-    migration is not included here, the new table's writes are denied at
-    runtime — this test is what turns that into a red build instead of a
-    silent zero-row projection.
+    contract adds a tenant-classified relation it WRITES and this file is not
+    updated in the same change, the new table's writes are denied at runtime —
+    this test is what turns that into a red build instead of a silent zero-row
+    projection.
 
     Scoped to the WRITABLE declarations (OMN-18159). The read-only half is not
     dropped: it is asserted immediately below, against the file that actually
@@ -419,8 +421,16 @@ def test_grant_migration_matches_the_topology_declared_writable_table_set() -> N
     """
     declared = _declared_table_objects("INSERT")
 
-    granted = _writable_grant_objects()
+    transcribed = _writer_grants_in(GRANT_FILE)
+    granted: set[str] = set().union(
+        *(
+            _writer_grants_in(path)
+            for path in sorted(FORWARD_NODES_ROOT.glob("*/*.sql"))
+        )
+    )
 
+    assert transcribed, "positive control: 0004 transcribes writer grants"
+    assert transcribed <= granted
     assert declared, "positive control: the topology declares writable tables"
     assert granted == declared, (
         "grant migration drifted from the topology declaration: "
