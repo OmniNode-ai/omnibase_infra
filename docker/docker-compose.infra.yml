@@ -428,11 +428,11 @@ x-runtime-env: &runtime-env
   LLM_CODER_FAST_URL: ${LLM_CODER_FAST_URL:?LLM_CODER_FAST_URL required for PluginLlm activation}
   LLM_EMBEDDING_URL: ${LLM_EMBEDDING_URL:?LLM_EMBEDDING_URL required for PluginLlm activation}
   LLM_DEEPSEEK_R1_URL: ${LLM_DEEPSEEK_R1_URL:?LLM_DEEPSEEK_R1_URL required for PluginLlm activation}
-  # Cloud-tier GLM route refs are optional at boot but must be present in the
-  # container env when routing authority selects api_key_ref=LLM_GLM_API_KEY.
-  LLM_GLM_URL: ${LLM_GLM_URL:?LLM_GLM_URL is required for GLM escalation routing}
-  LLM_GLM_MODEL_NAME: ${LLM_GLM_MODEL_NAME:?LLM_GLM_MODEL_NAME is required for GLM escalation routing}
-  LLM_GLM_API_KEY: ${LLM_GLM_API_KEY:?LLM_GLM_API_KEY is required for GLM escalation routing}
+  # OMN-20173: GLM variables are optional; Coding Plan use is Claude Code only.
+  # System callers must supply a separately entitled endpoint explicitly.
+  LLM_GLM_URL: ${LLM_GLM_URL:-}
+  LLM_GLM_MODEL_NAME: ${LLM_GLM_MODEL_NAME:-}
+  LLM_GLM_API_KEY: ${LLM_GLM_API_KEY:-}
   # Gemini/Google ADK hackathon lane: the routing authority declares
   # api_key_ref=llm.gemini.api_key for cloud-gemini-flash. The secret resolver
   # maps that ref to GEMINI_API_KEY, so runtime containers must receive the key.

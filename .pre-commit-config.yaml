@@ -2051,6 +2051,13 @@ repos:
   # never be run against just the staged files.
   - repo: local
     hooks:
+      - id: no-coding-plan-endpoint
+        name: Refuse Coding Plan endpoints in configuration (OMN-20173)
+        entry: uv run python scripts/check_no_coding_plan_endpoint.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       - id: subscribe-wiring-health
         name: Subscribe wiring health + allowlist hygiene (OMN-16795)
         entry: uv run python scripts/check_subscribe_wiring_health.py
