@@ -361,6 +361,28 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="demo_readiness",
         ),
     ),
+    # OMN-19977: infra vendors metering_summary ahead of omnimarket#3079, whose
+    # node contract is not yet in the pinned contract tree. The source contract
+    # declares the public application table as read_write for metering_summary;
+    # retire this bridge when the pin advances past that pull request.
+    ContractTableDeclaration(
+        node="legacy_migration:metering_summary",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_metering_summary/"
+            "0000_create_metering_summary.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="metering_summary",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_metering_summary/"
+                "0000_create_metering_summary.sql"
+            ),
+            access="read_write",
+            role="metering_summary",
+        ),
+    ),
     # OMN-19566: infra vendors lab_proof_receipts before omnimarket#3043
     # lands the node contract. Until the pin advances, this interim declaration
     # keeps the shipped table grant derivable. The supplemental expiry test

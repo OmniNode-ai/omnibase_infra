@@ -209,6 +209,7 @@ databases:
               - hook_events
               - instruction_eval_aggregate_snapshots
               - llm_cost_aggregates
+              - metering_summary
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
               - savings_estimates
@@ -371,5 +372,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: d4c890226a2d67c9f98c453e97cde6ca1a956b6c7fd03dd69113f865e09cbc43
+  sha256: cb2931c294a44229a8d7307859a5f656a92cdce4cf0cf69a1ea1e587d1dc9f34
 topology_instance: onex-prod

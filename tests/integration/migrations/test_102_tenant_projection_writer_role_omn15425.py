@@ -124,6 +124,12 @@ WRITER_GRANT_FILES = {
         / "003_grant_tenant_projection_writer_tenant_inference_credentials.sql"
     ),
 }
+# OMN-19977: 0004 is an applied transcription that predates every relation a
+# vendored node migration adds later (metering_summary, usage_by_model_day). Such
+# a relation carries its tenant_projection_writer grant in its own node lineage,
+# in the grant migration vendored byte-identical from omnimarket, so the writer
+# grant set is read from every forward node migration, not from 0004 alone.
+FORWARD_NODES_ROOT = REPO_ROOT / "docker" / "migrations" / "forward" / "nodes"
 AGGREGATE_VIEWS_FILE = (
     REPO_ROOT
     / "docker"
@@ -162,6 +168,28 @@ def _executable_lines(path: Path) -> list[str]:
         for line in path.read_text().splitlines()
         if not line.lstrip().startswith("--")
     ]
+
+
+_WRITER_GRANT_STATEMENT = re.compile(
+    r"GRANT SELECT, INSERT, UPDATE ON "
+    r"(public\.[a-z0-9_]+(?:, public\.[a-z0-9_]+)*) "
+    rf"TO {PRINCIPAL}\b"
+)
+
+
+def _writer_grants_in(path: Path) -> set[str]:
+    """Relations one migration grants SELECT, INSERT, UPDATE to the writer.
+
+    Whitespace is collapsed first, so a statement split over several lines
+    (the usage_by_model_day grant names two relations in one GRANT) reads the
+    same as the one-line form 0004 uses inside its DO block.
+    """
+    text = " ".join(" ".join(_executable_lines(path)).split())
+    return {
+        name.strip().removeprefix("public.")
+        for match in _WRITER_GRANT_STATEMENT.finditer(text)
+        for name in match.group(1).split(",")
+    }
 
 
 def _executable_text(path: Path) -> str:
@@ -393,14 +421,16 @@ def test_grant_migration_matches_the_topology_declared_writable_table_set() -> N
     """
     declared = _declared_table_objects("INSERT")
 
-    granted = set(
-        re.findall(
-            r"GRANT SELECT, INSERT, UPDATE ON public\.([a-z0-9_]+) "
-            rf"TO {PRINCIPAL}",
-            GRANT_FILE.read_text(),
+    transcribed = _writer_grants_in(GRANT_FILE)
+    granted: set[str] = set().union(
+        *(
+            _writer_grants_in(path)
+            for path in sorted(FORWARD_NODES_ROOT.glob("*/*.sql"))
         )
     )
 
+    assert transcribed, "positive control: 0004 transcribes writer grants"
+    assert transcribed <= granted
     assert declared, "positive control: the topology declares writable tables"
     assert granted == declared, (
         "grant migration drifted from the topology declaration: "
