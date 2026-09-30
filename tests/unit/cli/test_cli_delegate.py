@@ -577,6 +577,7 @@ class TestSingleReceiptOnStdout:
             delegate_command,
             [
                 "implement an HTTP server",
+                "--json",
                 "--state-root",
                 str(state_root),
                 "--emit-socket",
@@ -1310,6 +1311,7 @@ class TestOfflineStandaloneGolden:
                 delegate_command,
                 [
                     "research the routing architecture",
+                    "--json",
                     "--state-root",
                     str(state_root),
                     "--emit-socket",
@@ -1722,6 +1724,7 @@ class TestCorrelationReachesTheReceipt:
             delegate_command,
             [
                 "research the routing architecture",
+                "--json",
                 "--state-root",
                 str(state_root),
                 "--emit-socket",
@@ -2227,6 +2230,7 @@ class TestFailedDelegationIsRendered:
             delegate_command,
             [
                 "summarise the coordination ledger",
+                "--json",
                 "--state-root",
                 str(tmp_path / "state"),
                 "--emit-socket",
@@ -2524,6 +2528,7 @@ class TestUnresolvableTerminalFailsLoudly:
             delegate_command,
             [
                 "List the first five prime numbers",
+                "--json",
                 "--state-root",
                 str(tmp_path / "state"),
                 "--emit-socket",

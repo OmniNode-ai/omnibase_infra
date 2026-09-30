@@ -161,6 +161,7 @@ def _invoke(tmp_path: Path, *extra: str) -> tuple[Result, Path]:
                 "inmemory",
                 "--locus",
                 "in-process",
+                "--json",
                 "--state-root",
                 str(state_root),
                 "--emit-socket",

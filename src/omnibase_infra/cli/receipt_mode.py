@@ -840,6 +840,7 @@ def run_receipt_mode(
     receipt_callback: Callable[[object], None] | None = None,
     host_handlers: bool = True,
     locus_decision: ModelDelegateLocusDecision | None = None,
+    receipt_renderer: Callable[[object], bool] | None = None,
 ) -> int:
     """Serialize receipt mode and restore its process-global state on exit."""
     with _RECEIPT_MODE_LOCK_STATE.lock:
@@ -865,6 +866,7 @@ def run_receipt_mode(
                 receipt_callback=receipt_callback,
                 host_handlers=host_handlers,
                 locus_decision=locus_decision,
+                receipt_renderer=receipt_renderer,
             )
         except BaseException as exc:
             operation_error = exc
@@ -921,6 +923,7 @@ def _run_receipt_mode(
     receipt_callback: Callable[[object], None] | None = None,
     host_handlers: bool = True,
     locus_decision: ModelDelegateLocusDecision | None = None,
+    receipt_renderer: Callable[[object], bool] | None = None,
 ) -> int:
     """Execute the node and print exactly one ``ModelSkillResult`` JSON.
 
@@ -946,6 +949,10 @@ def _run_receipt_mode(
     customer-facing run files without parsing stdout, which must remain one
     receipt JSON line. Callback failures propagate so required durable files
     cannot be mistaken for successful dispatch evidence.
+
+    ``receipt_renderer`` (OMN-20124) replaces the stdout receipt JSON line. It
+    prints its own output and returns whether the run succeeded. ``None`` keeps
+    the one-JSON-line contract every other caller relies on.
 
     Returns the process exit code (the runtime's exit code; 1 when the
     runtime raised before producing a workflow result).
@@ -1377,7 +1384,12 @@ def _run_receipt_mode(
     # may be able to suppress it. Any callback failure is reported and folded
     # into the exit code instead.
     try:
-        click.echo(receipt.model_dump_json())
+        if receipt_renderer is None:
+            click.echo(receipt.model_dump_json())
+        elif not receipt_renderer(receipt) and exit_code == 0:
+            # OMN-20124: a renderer that reported a failure line must not sit
+            # beside a zero exit.
+            exit_code = 1
     except ValidationError as exc:  # pragma: no cover - construction validates
         click.echo(f"receipt mode: receipt serialization failed: {exc}", err=True)
         return 1
