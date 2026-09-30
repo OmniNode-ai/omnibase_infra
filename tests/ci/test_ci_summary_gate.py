@@ -667,11 +667,18 @@ class TestExternalContextAssertion:
     def test_main_merge_group_succeeds_without_check_runs_file(
         self, tmp_path: Path
     ) -> None:
-        """A green queue run has no PR-scoped external check-run payload."""
+        """A green queue run has no PR-scoped external check-run payload.
+
+        OMN-20147: a green queue run also carries the real-runtime boot, which
+        is strict on merge_group only.
+        """
         from scripts.ci import ci_summary_gate
 
+        jobs = _all_gates("success") + [
+            _job(ci_summary_gate.RUNTIME_BOOT_SMOKE_COMPOSE_GATE, "success")
+        ]
         jobs_file = tmp_path / "jobs.json"
-        jobs_file.write_text(json.dumps(_all_gates("success")), encoding="utf-8")
+        jobs_file.write_text(json.dumps(jobs), encoding="utf-8")
 
         code = ci_summary_gate.main(
             [
