@@ -92,40 +92,33 @@ def test_tenant_tables_and_writer_grants_are_exact() -> None:
 
 
 @pytest.mark.parametrize("profile", ["local", "onex-dev", "onex-prod"])
-def test_bridge_derives_the_shipped_tenant_writer_grants(profile: str) -> None:
-    from omnibase_core.enums.enum_database_grant_object_type import (
-        EnumDatabaseGrantObjectType,
-    )
-    from omnibase_infra.topology import load_topology_profile
+def test_the_shipped_tenant_writer_grants_are_read_write(profile: str) -> None:
+    # The interim LEGACY_MIGRATION_TABLE_DECLARATIONS bridges for these relations
+    # were retired when the omnimarket contract pin reached omnimarket#3073, which
+    # declares both (tests/integration/topology/
+    # test_vendored_bridges_retired_omn17292.py). What must not change is the
+    # grant each shipped topology instance carries.
     from omnibase_infra.topology.table_grant_derivation import (
         LEGACY_MIGRATION_TABLE_DECLARATIONS,
-        derive_table_grants,
     )
 
-    bridges = tuple(
-        entry
-        for entry in LEGACY_MIGRATION_TABLE_DECLARATIONS
-        if entry.table.name in _TABLES
+    assert not any(
+        entry.table.name in _TABLES for entry in LEGACY_MIGRATION_TABLE_DECLARATIONS
     )
-    assert {entry.table.name for entry in bridges} == set(_TABLES)
-    for bridge in bridges:
-        assert bridge.node == f"legacy_migration:{bridge.table.name}"
-        assert bridge.table.access == "read_write"
-        assert bridge.table.schema == "public"
-        assert bridge.table.database_ref == "application"
-        assert bridge.contract_path == (_VENDOR / _CREATE).relative_to(_ROOT)
-
-    derived = derive_table_grants(load_topology_profile(profile), bridges)
-    matching = tuple(
-        grant
-        for grant in derived.grants["tenant_projection_writer"]
-        if grant.object_type is EnumDatabaseGrantObjectType.TABLE
-        and grant.schema == "public"
-        and set(grant.objects) == set(_TABLES)
+    instance = yaml.safe_load(
+        (
+            _ROOT / "src/omnibase_infra/topology/instances" / f"{profile}.yaml"
+        ).read_text()
     )
-    assert len(matching) == 1
-    assert {privilege.value for privilege in matching[0].privileges} == {
-        "SELECT",
-        "INSERT",
-        "UPDATE",
-    }
+    for table in _TABLES:
+        shipped = [
+            grant
+            for grant in instance["databases"]["application"]["principals"][
+                "tenant_projection_writer"
+            ]["grants"]
+            if grant["object_type"] == "TABLE"
+            and grant["schema"] == "public"
+            and table in grant["objects"]
+        ]
+        assert len(shipped) == 1
+        assert set(shipped[0]["privileges"]) == {"SELECT", "INSERT", "UPDATE"}
