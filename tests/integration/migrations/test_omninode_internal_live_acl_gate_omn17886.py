@@ -366,6 +366,20 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
     )
     assert memory_window_live == memory_window_declared
     assert "DELETE" not in memory_window_live
+    # OMN-19513: 0001 from omnimarket#3050 explicitly grants the runtime
+    # SELECT/INSERT/UPDATE on both work-ledger tables, with no DELETE.
+    for work_ledger_table in ("work_ledger_rows", "work_ledger_state"):
+        work_ledger_declared = {
+            privilege
+            for principal, relation, privilege in declared_acl(
+                load_topology_profile(PROFILE)
+            ).table_grants
+            if principal == _RUNTIME and relation == work_ledger_table
+        }
+        assert work_ledger_declared == {"SELECT", "INSERT", "UPDATE"}, work_ledger_table
+        work_ledger_live = _live_privileges(fresh_build, work_ledger_table, _RUNTIME)
+        assert work_ledger_live == work_ledger_declared, work_ledger_table
+        assert "DELETE" not in work_ledger_live, work_ledger_table
 
     # OMN-19999: the PR state projection grants exactly the runtime writer's
     # SELECT/INSERT/UPDATE privileges, with no DELETE or sequence.

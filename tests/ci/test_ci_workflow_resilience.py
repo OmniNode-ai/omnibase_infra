@@ -510,15 +510,18 @@ def test_contract_compliance_uv_sync_is_bounded_and_retried() -> None:
 
     assert job["timeout-minutes"] == 20
     steps = job["steps"]
-    checkout_occ = next(
-        step for step in steps if step.get("name") == "Checkout onex_change_control"
-    )
-    # OMN-16373: CROSS_REPO_PAT retired in favor of a minted
-    # onexbot-occ-writer App installation token.
-    assert (
-        checkout_occ["with"]["token"]
-        == "${{ steps.app-token.outputs.token || github.token }}"
-    )
+    # OMN-20135: two change-control checkouts, the pinned checker and the
+    # evidence data. OMN-16373: both read with the minted onexbot-occ-writer
+    # App installation token (CROSS_REPO_PAT retired), github.token fallback.
+    for name in (
+        "Checkout onex_change_control checker (pinned code)",
+        "Checkout onex_change_control evidence data (OMN-20135)",
+    ):
+        checkout_occ = next(step for step in steps if step.get("name") == name)
+        assert (
+            checkout_occ["with"]["token"]
+            == "${{ steps.app-token.outputs.token || github.token }}"
+        )
 
     setup_uv = next(
         step for step in steps if step.get("uses") == "astral-sh/setup-uv@v7"
@@ -527,7 +530,9 @@ def test_contract_compliance_uv_sync_is_bounded_and_retried() -> None:
     assert "cache-dependency-glob" not in setup_uv["with"]
 
     install_step = next(
-        step for step in steps if step.get("name") == "Install onex_change_control"
+        step
+        for step in steps
+        if step.get("name") == "Install onex_change_control checker"
     )
     run_script = install_step["run"]
     assert 'export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"' in run_script

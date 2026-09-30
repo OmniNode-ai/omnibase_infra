@@ -64,7 +64,7 @@ from typing import Any
 from uuid import UUID
 
 from kafka import KafkaConsumer, TopicPartition
-from kafka.errors import CorruptRecordError, UnsupportedCodecError
+from kafka.errors import CommitFailedError, CorruptRecordError, UnsupportedCodecError
 from kafka.structs import OffsetAndMetadata
 
 from deploy_agent.auth import verify_command
@@ -750,7 +750,25 @@ class DeployConsumer:
 
         # Step 9: Commit offset. The runner's offset is at or past every
         # superseded record's, so one commit covers the whole group.
-        self._commit_through(runner_msg)
+        #
+        # OMN-20133: the job is already on disk as accepted, so a refused
+        # commit must not escape. Raising here killed the process, the
+        # replacement recovered the job as crashed with every phase skipped,
+        # and refused the redelivered command as a duplicate: nothing was
+        # deployed (job 7b970ab9, 2026-09-30). The job runs instead. The
+        # uncommitted record is redelivered after the group rejoin and is then
+        # refused as the duplicate it really is.
+        try:
+            self._commit_through(runner_msg)
+        except CommitFailedError as e:
+            logger.error(  # noqa: TRY400
+                "Accepted command %s but its offset commit was refused, "
+                "running it anyway; its redelivery after the group rejoin "
+                "will be refused as a duplicate: %s "
+                "friction_type=accept_commit_failed",
+                runner_cmd.correlation_id,
+                e,
+            )
 
         # Step 10: Return accepted command
         logger.info(

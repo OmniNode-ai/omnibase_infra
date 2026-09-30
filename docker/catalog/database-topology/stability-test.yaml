@@ -104,6 +104,8 @@ databases:
               - topic_activity
               - topic_produce_windows
               - work_events
+              - work_ledger_rows
+              - work_ledger_state
               - worktree_reconcile_hosts
             privileges:
               - INSERT
@@ -376,5 +378,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: b3f03467507c421e7f17454736807ce86fc398876620107f6c3026ed40e060ba
+  sha256: f53d293624b31ff130fd564caddc2a39626b5e0cd6d1f988fba40453c114b3f5
 topology_instance: local

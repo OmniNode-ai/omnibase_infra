@@ -2998,6 +2998,27 @@ jobs:
     if: needs.occ-preflight.result == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push')
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # OMN-20135: the one declared case in which this job evaluates nothing.
+      # A ticketless dependency-bot bump carries no ticket by doctrine's
+      # PR-title rule, so it has no contract and no evidence reference. The
+      # predicate is ci_summary_gate's own (OMN-19167), composed from the same
+      # helpers; everything else is evaluated and fails closed. Pinned by
+      # tests/ci/test_run_contract_compliance_with_evidence.py.
+      - name: Classify the declared ticketless dependency-bot exemption (OMN-20135)
+        id: dep-scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          python3 -m scripts.ci.classify_contract_compliance_scope \
+            --event-name "${EVENT_NAME}" \
+            --pr-author "${PR_AUTHOR:-}" \
+            --pr-title "${PR_TITLE:-}" \
+            --pr-head-ref "${PR_HEAD_REF:-}" \
+            --github-output "$GITHUB_OUTPUT"
       # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
       # onexbot-occ-writer App installation token, scoped to the one
       # sibling repo this job reads.
@@ -3007,12 +3028,14 @@ jobs:
       # private-key resolve empty), and create-github-app-token hard-fails
       # the step ("Input required and not supplied: app-id") when that
       # happens. Without this guard the job died right here even though the
-      # checkout step below already had a `|| github.token` fallback -- dead
+      # checkout steps below already had a `|| github.token` fallback -- dead
       # code until this line let the step fail soft. onex_change_control is
       # PUBLIC (verified via `gh api repos/OmniNode-ai/onex_change_control
       # --jq .private`), so github.token is sufficient to read it.
       - name: Mint onexbot-occ-writer app token
         id: app-token
+        if: steps.dep-scope.outputs.exempt != 'true'
+        # advisory-ok: OMN-16414 token mint fails soft on fork PRs (no org secrets); both checkouts fall back to github.token, and the gate verdict is the run step below
         continue-on-error: true
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
@@ -3021,24 +3044,38 @@ jobs:
           owner: OmniNode-ai
           repositories: onex_change_control
           permission-contents: write
-      - name: Checkout onex_change_control
+      # OMN-20135: TWO change-control checkouts, never one.
+      #
+      # The CHECKER (runner code) stays at an immutable pin -- OMN-14436's
+      # reason still holds: an unpinned checker makes this gate a function of
+      # whatever change-control's dev happens to be. The pin is 91f5b691, the
+      # one omnibase_core's job has run on since 2026-07-24 (OMN-14887); it is
+      # the first that ships the importable contract_compliance_check module
+      # the wrapper and the driver below load.
+      #
+      # The CONTRACTS are read from a second checkout at the commit the PR's
+      # evidence reference resolves to. Reading them from the checker pin was
+      # the defect: the old pin (7352cb2d, 2026-07-12) predates every contract
+      # created after it, so the pinned runner's missing-contract branch passed
+      # every such PR with nothing executed (omnibase_infra#4325, job
+      # 109722692581).
+      - name: Checkout onex_change_control checker (pinned code)
+        if: steps.dep-scope.outputs.exempt != 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/onex_change_control
-          # OMN-14436: PINNED. The unpinned default-branch clone is what caused the
-          # original incident (the executor was "missing" only because the repo's
-          # default branch lagged behind the branch that had it). An unpinned OCC
-          # checkout makes this gate a function of whatever OCC's dev happens to be.
-          ref: 7352cb2dc634a7223877bfbbf3498303c9662700
-          path: onex_change_control
+          ref: 91f5b69104366c2d86e4bb21de67c3c497702111
+          path: onex_change_control_checker
           token: ${{ steps.app-token.outputs.token || github.token }}
 
       - uses: astral-sh/setup-uv@v7
+        if: steps.dep-scope.outputs.exempt != 'true'
         with:
           enable-cache: false
 
-      - name: Install onex_change_control
-        working-directory: onex_change_control
+      - name: Install onex_change_control checker
+        if: steps.dep-scope.outputs.exempt != 'true'
+        working-directory: onex_change_control_checker
         run: |
           set -euo pipefail
           export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
@@ -3078,13 +3115,6 @@ jobs:
       # as a PROVABLE pass. A green gate that checked nothing never prompts
       # investigation the way a red one does.
       #
-      # Live surface: `on.push.branches` here is [main], so this never fired on a
-      # dev commit -- the two real events are push-to-main (release-synced
-      # fast-forwards) and merge_group. merge_group is unexercised today (no repo
-      # in the registry has a queue on dev as of 2026-08-24) but is the more
-      # dangerous half: it would vacate this gate on the merge path itself the
-      # instant a queue is re-enabled, with zero further code change.
-      #
       # The fix is RESOLUTION, not narrowing. Excluding push/merge_group with a
       # job-level `if:` would publish a `skipped` check run, which branch
       # protection counts as passing -- the same skip-vector class the
@@ -3114,27 +3144,102 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           MERGE_GROUP_REF: ${{ github.event.merge_group.head_ref }}
 
-      - name: Run DoD contract compliance against the product tree (OMN-14436)
-        working-directory: onex_change_control
-        run: |
-          set -euo pipefail
-          if [ -z "${PR_NUMBER:-}" ]; then
-            # Unreachable via the resolver step above, which already exits 1 on an
-            # unresolvable scope. Kept as a defence-in-depth fail-closed floor:
-            # never run this gate to a green conclusion without a PR whose
-            # check_values were actually evaluated (OMN-16508).
-            echo "::error::No PR number resolved (event=${{ github.event_name }}); DoD check_values are PR-scoped. Failing closed."
-            exit 1
-          fi
-          uv run python scripts/ci/run_contract_compliance_check.py \
-            --pr "$PR_NUMBER" \
-            --repo "${{ github.repository }}" \
-            --contracts-dir "$GITHUB_WORKSPACE/onex_change_control/contracts" \
-            --workspace "$GITHUB_WORKSPACE" \
-            --legacy-allowlist "$GITHUB_WORKSPACE/onex_change_control/scripts/ci/dod_runner_legacy_allowlist.txt"
+      # OMN-20135 (mirrors omnibase_core OMN-18157): resolve the exact
+      # change-control commit the resolved PR's evidence reference names -- an
+      # OPEN companion's head, a MERGED companion's merge commit, or a durable
+      # commit sha. A missing, malformed or closed-unmerged reference exits 1.
+      # There is no fallback to the checker pin or to a default branch.
+      - name: Resolve contract-compliance evidence data (OMN-20135)
+        id: resolve_contract_compliance_evidence
+        if: steps.dep-scope.outputs.exempt != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.dod-pr.outputs.pr_number }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/resolve_contract_compliance_evidence.py \
+            --repo "${{ github.repository }}" \
+            --event-name "${{ github.event_name }}" \
+            --commit-sha "${{ github.sha }}" \
+            --pr-number "${PR_NUMBER}" \
+            --merge-group-head-ref "${MERGE_GROUP_HEAD_REF:-}" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Checkout onex_change_control evidence data (OMN-20135)
+        if: steps.dep-scope.outputs.exempt != 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/onex_change_control
+          ref: ${{ steps.resolve_contract_compliance_evidence.outputs.occ_sha }}
+          path: onex_change_control_evidence
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      # OMN-20135: the producer of the deferral record on both branches.
+      #
+      # Exempt (the declared dependency-bot case above): no contract applies,
+      # so an empty record is written and nothing is run.
+      #
+      # Evaluated: run_contract_compliance_with_evidence.py resolves the ticket
+      # with the pinned runner's own precedence and FAILS CLOSED when it cannot,
+      # or when the evidence checkout has no contracts/<ticket>.yaml -- the
+      # pinned runner's own missing-contract branch (a warning and exit 0) is
+      # therefore unreachable. It then runs the pinned runner through
+      # defer_test_passes_driver.py, which (a) executes only this PR's items and
+      # items bound to no PR, reporting an item bound to another PR as WARN
+      # without running it (OMN-20130), and (b) records each test_passes item
+      # for CI Summary instead of judging it here, where the check set always
+      # contains this job, still running (OMN-18157). Both scripts are ports of
+      # omnibase_core's, run in the pinned checker's environment.
+      - name: Run DoD contract compliance against the product tree (OMN-20135)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXEMPT: ${{ steps.dep-scope.outputs.exempt }}
+          PR_NUMBER: ${{ steps.resolve_contract_compliance_evidence.outputs.pr_number }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/contract-compliance-deferred"
+          if [ "${EXEMPT}" = "true" ]; then
+            echo "Declared ticketless dependency-bot bump: no ticket contract applies, no DoD item was run." >> "$GITHUB_STEP_SUMMARY"
+            printf '%s\n' '{"schema": 1, "deferred": []}' > "$GITHUB_WORKSPACE/contract-compliance-deferred/record.json"
+          else
+            if [ -z "${PR_NUMBER:-}" ]; then
+              # Unreachable via the two resolver steps above, which exit 1 on
+              # an unresolvable scope. Kept as a fail-closed floor (OMN-16508).
+              echo "::error::No PR number resolved (event=${{ github.event_name }}); DoD check_values are PR-scoped. Failing closed."
+              exit 1
+            fi
+            cd "$GITHUB_WORKSPACE/onex_change_control_checker"
+            uv run python "$GITHUB_WORKSPACE/scripts/ci/run_contract_compliance_with_evidence.py" \
+              --pr "${PR_NUMBER}" \
+              --repo "${{ github.repository }}" \
+              --checker-dir "$GITHUB_WORKSPACE/onex_change_control_checker" \
+              --evidence-contracts-dir "$GITHUB_WORKSPACE/onex_change_control_evidence/contracts" \
+              --workspace "$GITHUB_WORKSPACE" \
+              --legacy-allowlist "$GITHUB_WORKSPACE/onex_change_control_checker/scripts/ci/dod_runner_legacy_allowlist.txt" \
+              --deferred-record "$GITHUB_WORKSPACE/contract-compliance-deferred/record.json"
+          fi
+
+      # OMN-20135: the record is a declared evidence artifact
+      # (config/ci_evidence_policy.yaml, id contract-compliance-deferred). CI
+      # Summary's deferred step reads it; a success of this job with no record
+      # fails CI Summary.
+      - name: Assert the deferral record is present and non-empty
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/assert_evidence_artifact.py \
+            --artifact contract-compliance-deferred \
+            --require contract-compliance-deferred/record.json
+
+      - name: Upload deferred test_passes record (OMN-20135)
+        uses: actions/upload-artifact@v7
+        with:
+          name: contract-compliance-deferred
+          path: contract-compliance-deferred/record.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
 
   # ============================================================================
   # Test-Failure Ratchet Gate (OMN-13027, retro A-8)
@@ -3386,6 +3491,11 @@ jobs:
   # `tests-gate` reachable), so someone can prove the boot green on demand.
   # Enabling it on a `dev` push is a separate change that owes exactly that one
   # green run, and it is a one-clause edit when someone has it.
+  #
+  # OMN-20147: `dev` now has a merge queue (ruleset 13269702, OMN-19697), so
+  # this job executes on every `merge_group` entry, and CI Summary requires its
+  # compose inner job `success` there (MERGE_GROUP_STRICT_GATE_JOBS in
+  # scripts/ci/ci_summary_gate.py). On every other event it stays advisory.
   runtime-boot-smoke:
     name: Runtime Boot Smoke (compose)
     needs: [occ-preflight, tests-gate]
@@ -4317,11 +4427,16 @@ jobs:
       # OMN-15496: the poll step reads commits/<head>/check-runs to enforce the
       # cross-workflow contexts included in the fail-closed verdict.
       checks: read
+      # OMN-20135: the deferred test_passes evaluation reads the recorded PR's
+      # head on push runs.
+      pull-requests: read
     # Hard backstop above the internal poll deadline (DEADLINE_MINUTES below).
     # Kept under any run-cancellation window so the required context ALWAYS posts
     # a terminal state first, and comfortably above the tests-gate 30m budget plus
     # self-hosted queueing so a slow-but-valid matrix is not failed prematurely.
-    timeout-minutes: 100
+    # OMN-20135: 100 -> 145 for the deferred test_passes step (up to its 40m
+    # deadline) after the 90m poll.
+    timeout-minutes: 145
     steps:
       - name: Checkout (gate script)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4441,6 +4556,40 @@ jobs:
             esac
             sleep "${POLL_INTERVAL_SECONDS}"
           done
+
+      # OMN-20135 (port of omnibase_core OMN-18157): Contract Compliance Check
+      # records each test_passes DoD item instead of judging it in-job, where
+      # the check set always contains that job itself, still running, so such
+      # an item could never pass there. They are judged here, once the CI
+      # Summary verdict above is SUCCESS: every Actions check-run on the head
+      # (CI Summary excluded) must be success, skipped or neutral, the pinned
+      # runner's own pass set. No `if:`: this step runs only when the poll step
+      # succeeded. A pending check is polled up to the 40m deadline, then fails
+      # closed. On push the recorded PR's head is judged.
+      - name: Evaluate deferred test_passes DoD items (OMN-20135)
+        working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          rm -rf deferred-record
+          # A missing artifact is not an error here: the gate decides from the
+          # Contract Compliance Check conclusion whether a record is required.
+          if ! gh run download "${RUN_ID}" --repo "${GH_REPO}" --name contract-compliance-deferred --dir deferred-record; then
+            echo "::notice::no contract-compliance-deferred artifact in run ${RUN_ID}"
+          fi
+          python3 -m scripts.ci.deferred_test_passes_gate \
+            --jobs-file jobs.json \
+            --run-attempt "${RUN_ATTEMPT}" \
+            --record deferred-record/record.json \
+            --head-sha "${HEAD_SHA}" \
+            --current-run-id "${RUN_ID}" \
+            --deadline-seconds 2400 \
+            --poll-interval-seconds 60
 
   ci-cascade-reason-graph:
     name: CI cascade reason-graph (report-only)

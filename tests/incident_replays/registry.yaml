@@ -1497,3 +1497,37 @@ cases:
     discriminator: tests/ci/test_incident_replay_omn19451.py::test_the_same_check_admits_the_real_green_nightly
     why: >-
       Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green being replaced is an ABSENCE: the delegation regression nightly concluded failure in run 35832924275 (2026-09-23, five hard breaks against the stability-test lane) and nothing slowed runtime merges while it stood red, because auto-merge, the landing lane and humans read no delegation verdict; only staging delivery did (OMN-19311). The artifact is that run exactly as the REST API returned it, and the replay drives the real check over it and requires a refusal naming the run id. THE DISCRIMINATOR IS MANDATORY: the newest green scheduled nightly at capture time, run 36394450393, captured the same way, is admitted by the same code path, so a check that refused everything cannot satisfy this case. NO MODIFICATIONS: both fixtures are the exact bytes the REST API returned; the only e-mail addresses in them are GitHub bot noreply addresses.
+  - id: omn20135-contract-compliance-passed-a-pr-whose-contract-it-never-read
+    guard: scripts/ci/run_contract_compliance_with_evidence.py
+    incident: OMN-20135
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn20135.py::test_the_same_guard_runs_the_contract_the_evidence_commit_carries
+    artifact:
+      fixture: tests/fixtures/omn20135/contract-compliance-job-109722692581.log.captured
+      sha256: 43959a0b14035aedddeb3d04ea31b5031cbbb50c8f438865a18cef918a9181c5
+    capture:
+      method: gh-api
+      source: gh-api:repos/OmniNode-ai/omnibase_infra/actions/jobs/109722692581/logs
+      captured_at: '2026-09-30T06:05:00Z'
+      captured_by: lane infra-compliance-failopen-0525 (OMN-20135)
+    test: tests/ci/test_incident_replay_omn20135.py::test_the_real_guard_refuses_the_pr_the_pinned_checkout_passed
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is A COMPLIANCE CHECK THAT PASSED A PR WHOSE CONTRACT IT NEVER READ. On 2026-09-30 the Contract Compliance Check on omnibase_infra#4325 (job 109722692581) resolved OMN-17427, looked for its contract in the change-control checkout pinned at 7352cb2d (2026-07-12), found none because the contract is newer than the pin, logged that the PR was not blocked and passed with nothing executed; every ticket created after the pin passed the same way. THE ARTIFACT IS that job's log as the jobs API serves it, committed unmodified, 49722 bytes; the test reads the ticket and the contract path from it. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every PR would replay this perfectly, so the same guard is handed the contract as the PR's evidence commit carries it (contracts/OMN-17427.yaml at change-control 67e79ddf, fixture OMN-17427.yaml.captured, sha256 75b09826) and must go on to run the checks.
+  - id: omn20135-evidence-reference-to-a-closed-companion
+    guard: scripts/ci/resolve_contract_compliance_evidence.py
+    incident: OMN-15214
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn20135.py::test_the_same_resolver_resolves_a_merged_companion_to_its_merge_commit
+    artifact:
+      fixture: tests/fixtures/omn20135/onex_change_control-pulls-5012.json.captured
+      sha256: 5fc6d1f1e2fbc56221ed9668c61b8bf6323d511878d8e0a66a10ea912a27ac4a
+    capture:
+      method: gh-api
+      source: gh-api:repos/OmniNode-ai/onex_change_control/pulls/5012
+      captured_at: '2026-09-30T06:05:00Z'
+      captured_by: lane infra-compliance-failopen-0525 (OMN-20135)
+    test: tests/ci/test_incident_replay_omn20135.py::test_the_real_resolver_refuses_the_closed_companion_a_merged_pr_cited
+    why: >-
+      Newly wired enforcement (OMN-20135 ports it into this repo's Contract Compliance Check), so default-deny demands a real case. The false_green is A PR MERGED ON EVIDENCE THAT WAS NEVER MERGED. On 2026-07-26 a change-control hygiene sweep closed five companion PRs whose product PRs had already merged (OMN-15214); omniintelligence#817 merged citing OCC#5012, which is closed and unmerged, and a compliance check that read contracts from a fixed pin could not see it. THE ARTIFACTS ARE both PRs as the REST API serves them, committed unmodified (the product PR is fixture omniintelligence-pulls-817.json.captured, sha256 9d61f37e, from gh-api:repos/OmniNode-ai/omniintelligence/pulls/817); the test derives the evidence reference from the product body and the companion state from the companion document. THE DISCRIMINATOR IS LOAD-BEARING: a resolver that refused every reference would replay this, so omnibase_infra#4325 and its merged companion OCC#11857 (fixtures omnibase_infra-pulls-4325 and onex_change_control-pulls-11857) must resolve to the merge commit 67e79ddf.
