@@ -106,8 +106,11 @@ def test_local_bundle_runs_both_runtime_kernels_the_writer_and_the_migration_gat
         n for n, m in resolved.manifests.items() if m.layer == EnumInfraLayer.RUNTIME
     ]
     assert sorted(runtime) == [
+        "consumer-health-projection",
         "omnimarket-projection-delegation",
+        "omnimarket-projection-llm-cost",
         "omninode-runtime",
+        "projection-api",
         "runtime-effects",
     ]
 
@@ -505,3 +508,220 @@ def test_override_leaves_a_non_string_command_part_untouched(tmp_path: Path) -> 
     services = compose["services"]
     assert isinstance(services, dict)
     assert services["svc"]["command"] == ["sleep", 5, "--addr ${ADV:-localhost}"]
+
+
+# --- OMN-19972 demo half (plan T4.1): the services the six pages read ----------
+#
+# Failure modes these tests are written against, each shown failing on dev
+# 83fa0e0c3 before the change:
+#   1. an added service is missing from the laptop render, or runs with no
+#      health signal, so the CI boot cannot tell it is dead;
+#   2. the laptop's projection API keeps port 3002, the lab lanes' port;
+#   3. the projection API starts before the kernel has provisioned the exposure
+#      topics (measured on the lakshman lane 2026-09-30: it waits 300 s, exits
+#      with "no partition metadata" and loops);
+#   4. a laptop-only override leaks into another bundle rendered from the same
+#      shared manifests;
+#   5. the llm-cost writer names an image no catalog render builds.
+#   6. the projection API is given no Kafka broker and exits at startup (measured in
+#      CI run 36729468068 attempt 2: "projection-api requires Kafka bootstrap
+#      servers", 16 restarts, never healthy).
+
+_PAGE_SERVICES = (
+    "projection-api",
+    "omnimarket-projection-llm-cost",
+    "consumer-health-projection",
+)
+_LAPTOP_PROJECTION_API_PORT = 3102
+
+
+def _render(*bundles: str) -> dict[str, object]:
+    return generate_compose(
+        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(list(bundles))
+    )
+
+
+def _services(compose: dict[str, object]) -> dict[str, dict[str, object]]:
+    services = compose["services"]
+    assert isinstance(services, dict)
+    return services
+
+
+def test_local_render_carries_the_services_the_pages_read() -> None:
+    assert set(_PAGE_SERVICES) <= set(_services(_render("local")))
+
+
+def test_every_long_running_local_service_has_a_healthcheck() -> None:
+    services = _services(_render("local"))
+    unwatched = sorted(
+        name
+        for name, svc in services.items()
+        if svc.get("restart") != "no" and "healthcheck" not in svc
+    )
+    assert unwatched == []
+
+
+def test_local_projection_api_publishes_a_laptop_port_not_the_lab_port() -> None:
+    ports = _services(_render("local"))["projection-api"]["ports"]
+    assert ports == [f"{_LOOPBACK}:{_LAPTOP_PROJECTION_API_PORT}:3002"]
+
+
+def test_other_bundles_keep_the_projection_api_on_3002() -> None:
+    ports = _services(_render("runtime-observability-projections"))["projection-api"][
+        "ports"
+    ]
+    assert ports == ["3002:3002"]
+
+
+def test_local_projection_api_waits_for_the_kernel_that_provisions_its_topics() -> None:
+    depends_on = _services(_render("local"))["projection-api"]["depends_on"]
+    assert isinstance(depends_on, dict)
+    assert depends_on.get("omninode-runtime") == {"condition": "service_healthy"}
+
+
+def test_other_bundles_do_not_gain_the_kernel_dependency() -> None:
+    depends_on = _services(_render("runtime-observability-projections"))[
+        "projection-api"
+    ]["depends_on"]
+    assert isinstance(depends_on, dict)
+    assert "omninode-runtime" not in depends_on
+
+
+def test_local_projection_api_is_given_the_compose_broker() -> None:
+    env = _services(_render("local"))["projection-api"]["environment"]
+    assert isinstance(env, dict)
+    assert env.get("KAFKA_BROKERS") == "redpanda:9092"
+
+
+def test_llm_cost_writer_builds_from_the_runtime_image_and_reports_ready() -> None:
+    for bundle in ("local", "omnimarket-projections"):
+        svc = _services(_render(bundle))["omnimarket-projection-llm-cost"]
+        assert "omnimarket-projection:latest" not in str(svc["image"]), bundle
+        test = svc["healthcheck"]["test"]  # type: ignore[index]
+        assert "/ready" in " ".join(test), bundle
+        env = svc["environment"]
+        assert isinstance(env, dict)
+        assert env.get("PROJECTION_RUNNER_HEALTH_PORT"), bundle
+
+
+def test_two_bundles_overriding_one_service_port_differently_are_refused(
+    tmp_path: Path,
+) -> None:
+    import shutil
+
+    catalog = tmp_path / "catalog"
+    shutil.copytree(_CATALOG_DIR, catalog)
+    bundles_file = catalog / "bundles.yaml"
+    bundles = yaml.safe_load(bundles_file.read_text())
+    bundles["other-laptop"] = {
+        "description": "fixture: a second bundle overriding the same port",
+        "services": ["projection-api"],
+        "port_overrides": {"projection-api": 3999},
+    }
+    bundles_file.write_text(yaml.safe_dump(bundles, sort_keys=False))
+    with pytest.raises(ValueError, match=r"[Pp]ort override conflict"):
+        CatalogResolver(catalog_dir=str(catalog)).resolve(["local", "other-laptop"])
+
+
+# The resolver's other override guards (hostile review, both models: each was
+# untested). Each test adds fixture bundles to a copy of the real catalog.
+
+
+def _catalog_with(tmp_path: Path, extra: dict[str, object]) -> CatalogResolver:
+    import shutil
+
+    catalog = tmp_path / "catalog"
+    shutil.copytree(_CATALOG_DIR, catalog)
+    bundles_file = catalog / "bundles.yaml"
+    bundles = yaml.safe_load(bundles_file.read_text())
+    bundles.update(extra)
+    bundles_file.write_text(yaml.safe_dump(bundles, sort_keys=False))
+    return CatalogResolver(catalog_dir=str(catalog))
+
+
+def test_two_bundles_waiting_differently_on_one_dependency_are_refused(
+    tmp_path: Path,
+) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "other-laptop": {
+                "description": "fixture: waits on the kernel as merely started",
+                "services": ["projection-api"],
+                "extra_depends_on": {
+                    "projection-api": {"omninode-runtime": "service_started"}
+                },
+            }
+        },
+    )
+    with pytest.raises(ValueError, match="Extra dependency conflict"):
+        resolver.resolve(["local", "other-laptop"])
+
+
+def test_extra_dependency_on_a_service_the_stack_does_not_run_is_refused(
+    tmp_path: Path,
+) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "probe": {
+                "description": "fixture: redpanda alone, waiting on postgres",
+                "services": ["redpanda"],
+                "extra_depends_on": {"redpanda": {"postgres": "service_healthy"}},
+            }
+        },
+    )
+    with pytest.raises(ValueError, match="Extra dependency names 'postgres'"):
+        resolver.resolve(["probe"])
+
+
+def test_port_override_for_a_service_the_stack_does_not_run_is_refused(
+    tmp_path: Path,
+) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "probe": {
+                "description": "fixture: overrides a service it does not run",
+                "services": ["redpanda"],
+                "port_overrides": {"projection-api": 3999},
+            }
+        },
+    )
+    with pytest.raises(ValueError, match="Port override for 'projection-api'"):
+        resolver.resolve(["probe"])
+
+
+def test_port_override_for_a_service_that_publishes_no_port_is_refused(
+    tmp_path: Path,
+) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "probe": {
+                "description": "fixture: overrides a writer that publishes no port",
+                "services": ["omnimarket-projection-llm-cost"],
+                "port_overrides": {"omnimarket-projection-llm-cost": 3999},
+            }
+        },
+    )
+    with pytest.raises(ValueError, match="publishes no port"):
+        resolver.resolve(["probe"])
+
+
+def test_unknown_dependency_condition_is_refused(tmp_path: Path) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "probe": {
+                "description": "fixture: a condition compose does not know",
+                "services": ["projection-api"],
+                "extra_depends_on": {"projection-api": {"redpanda": "service_happy"}},
+            }
+        },
+    )
+    # Resolved alone, so no other bundle's condition can conflict with it: only
+    # the condition check can refuse (with "local", the conflict guard answered
+    # first and this test passed with the condition check removed).
+    with pytest.raises(ValueError, match="'service_happy' is not a valid"):
+        resolver.resolve(["probe"])
