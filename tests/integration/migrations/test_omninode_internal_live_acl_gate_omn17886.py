@@ -408,6 +408,18 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
         fresh_build, "delegation_eval_items", "app_dashboard", schema="public"
     ) == {"SELECT"}
 
+    # OMN-19793: the eval-run tables follow the same grants as the label table.
+    for eval_run_table in ("delegation_eval_item_verdicts", "delegation_eval_results"):
+        assert _live_privileges(
+            fresh_build,
+            eval_run_table,
+            "tenant_projection_writer",
+            schema="public",
+        ) == {"SELECT", "INSERT", "UPDATE"}
+        assert _live_privileges(
+            fresh_build, eval_run_table, "app_dashboard", schema="public"
+        ) == {"SELECT"}
+
     # OMN-19937: the board probe results projection grants exactly the runtime
     # writer's SELECT/INSERT/UPDATE privileges, with no DELETE.
     board_probe_results_declared = {
