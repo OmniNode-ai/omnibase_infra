@@ -11,6 +11,11 @@ hardcoded_env:
   POSTGRES_DB: omnibase_infra
   NODE_POSTGRES_DB: omnidash_analytics
   MIGRATIONS_DIR: /migrations/forward
+  # Login-only principal credentials, asserted by run-forward-migrations.sh
+  # section 0 (OMN-16993). Empty skips the role, so a bundle whose env file
+  # does not carry them is unchanged; the `local` bundle requires both.
+  OMNINODE_RUNTIME_PASSWORD: ${OMNINODE_RUNTIME_PASSWORD:-}
+  TENANT_PROJECTION_WRITER_PASSWORD: ${TENANT_PROJECTION_WRITER_PASSWORD:-}
 operational_defaults:
   POSTGRES_USER: postgres
 ports: null

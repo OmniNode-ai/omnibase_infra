@@ -72,9 +72,8 @@ APPLICATION_PHYSICAL_DB = "omnidash_analytics"
 # but is DELIBERATELY not covered here. It is a standalone, ephemeral CI lane
 # that layers nothing and runs a narrower service set — it sets neither
 # OMNIDASH_ANALYTICS_DB_URL nor OMNINODE_INTERNAL_DB_URL, so its application
-# bindings are unwired as a matter of design, not drift (the same
-# classification `tests/ci/test_env_parity.py` already applies to it in the
-# reverse-walk docstring). Wiring that lane needs its own credential
+# bindings are unwired as a matter of design, not drift. Wiring that lane
+# needs its own credential
 # provisioning on a fresh volume and is tracked separately; asserting against
 # it here would report design as a defect.
 PROJECTION_LANE_COMPOSE_FILES = (BASE_COMPOSE, JUDGE_COMPOSE)
