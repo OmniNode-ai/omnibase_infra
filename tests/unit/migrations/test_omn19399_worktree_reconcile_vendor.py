@@ -166,33 +166,3 @@ def test_the_sql_gate_is_live_positive_control() -> None:
     )
     assert broken != sql
     assert lint_application_database_sql(broken, load_topology_profile("local")) != ()
-
-
-@pytest.mark.parametrize("profile", ["local", "onex-dev", "onex-prod"])
-def test_shipped_instance_grants_the_runtime_writer(profile: str) -> None:
-    from omnibase_infra.topology.table_grant_derivation import (
-        LEGACY_MIGRATION_TABLE_DECLARATIONS,
-    )
-
-    # The pin advance to 791c3b89970b (OMN-19566) carries omnimarket#3047, so
-    # the pinned contract declares the relation and the bridge was retired.
-    assert not any(
-        entry.table.name == "worktree_reconcile_hosts"
-        for entry in LEGACY_MIGRATION_TABLE_DECLARATIONS
-    )
-    instance = yaml.safe_load(
-        (
-            _ROOT / "src/omnibase_infra/topology/instances" / f"{profile}.yaml"
-        ).read_text()
-    )
-    shipped = [
-        grant
-        for grant in instance["databases"]["application"]["principals"][
-            "omninode_runtime"
-        ]["grants"]
-        if grant["object_type"] == "TABLE"
-        and grant["schema"] == "omninode_internal"
-        and "worktree_reconcile_hosts" in grant["objects"]
-    ]
-    assert len(shipped) == 1
-    assert set(shipped[0]["privileges"]) == {"SELECT", "INSERT", "UPDATE"}

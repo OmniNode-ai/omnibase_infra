@@ -706,6 +706,33 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # Admitted under POST_FIXTURE_WINDOW_CONTEXTS, which carries the admission
     # argument, and placed at the tail for the reason the entry above states.
     "pypi-pin-resolvability",
+    # OMN-19451 / OMN-19998: the delegation-health check. It fails a runtime
+    # change while a delegation verdict it reads (config/
+    # delegation_health_check.yaml) is red, stale or unreadable. It ran as a
+    # "(shadow)" job and then under a sweep exclusion (#4312), which is the
+    # observe-only mode the 2026-09-29T12:02:35Z operator ruling removed: every
+    # check acts or blocks. Registered here for the OMN-16878 reason the
+    # kb-doc-gate note above gives -- `dev` requires exactly ONE context, so
+    # this tuple IS the external enforcement surface on this repo.
+    #
+    # ADMISSION IS BY CONSTRUCTION, on the argument recorded for
+    # `exposure-reader-coverage`:
+    #   * The caller (.github/workflows/delegation-health-check.yml) declares
+    #     `pull_request` AND `merge_group`, and its one job carries no `needs:`,
+    #     no job-level `if:` and no path filter, so it cannot skip-as-passed and
+    #     cannot leave a queue head waiting. The reusable derives the changed
+    #     files and labels for both events itself and fails on an unresolved
+    #     input.
+    #   * It is proven able to FAIL on real input: on 2026-09-29 it failed
+    #     omnibase_infra#4303, #4265 and #3991 naming omninode_infra
+    #     m4-customer-pass-verdict runs 36615744209 and 36572408773.
+    #   * It is proven able to PASS: the same reader passed the
+    #     delegation-regression-nightly (run 36538536307) and
+    #     m4-c17-customer-surface-verdict (run 36576684190) sources in those
+    #     same runs.
+    # Admitted under POST_FIXTURE_WINDOW_CONTEXTS and placed at the tail for
+    # the reason the `Governed helper primitive gate` entry states.
+    "delegation-health-check / Delegation Health Check",
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -728,6 +755,9 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
 # finding, not a fixture convenience.
 POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
     {
+        # OMN-19451: registered 2026-09-29, after both fixture windows closed.
+        # Comes out at the next fixture re-capture.
+        "delegation-health-check / Delegation Health Check",
         # Landed with its validator in the same PR (Rule 5) on 2026-08-30; both
         # fixture windows (#2546…#2567, #2705…#2720) close well before that.
         "exposure-reader-coverage",
@@ -1326,21 +1356,6 @@ EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
         ticket="OMN-19218",
         added="2026-09-22",
         expires="2026-12-20",
-    ),
-    "Delegation Health Check (shadow) / Delegation Health Check (shadow)": SweepExclusion(
-        reason=(
-            "Measured on omnibase_infra#4289 head ec90d4ee6c and #4282 on "
-            "2026-09-29: this shadow check fails on runtime PRs when the newest "
-            "omninode_infra m4-customer-pass-verdict run is red for a browser-proof "
-            "reason outside this repository. The check is not in STRICT_GATE_JOBS "
-            "and is not a required context, but the default-deny external sweep "
-            "otherwise makes its failure block CI Summary. Exclude this exact "
-            "shadow context while required is false; remove this exclusion when "
-            "the check is made required so STRICT_GATE_JOBS judges it."
-        ),
-        ticket="OMN-19451",
-        added="2026-09-29",
-        expires="2026-10-13",
     ),
 }
 

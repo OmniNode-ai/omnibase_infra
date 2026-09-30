@@ -316,26 +316,18 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # request naming it, the deletion rode that pull request, and the
     # regeneration wrote nothing.
     #
+    # OMN-19550, OMN-19833, OMN-19961, OMN-19513 and OMN-19399 added seven more
+    # (session_content, pr_landing_state, pr_landing_transitions,
+    # lab_container_memory_window, claude_agent_spans, claude_hook_events and
+    # worktree_reconcile_hosts), and all seven were DELETED here by the pin
+    # advance to e01380bfde11, which carries the retiring omnimarket pull
+    # requests each entry named in its own comment. Same mechanism and same
+    # proof: the expiry module went red on the bot's pin-advance pull request
+    # naming all seven, and the deletion rode that pull request.
+    #
     # If you add a bridge here for a new infra-first vendoring, add it to that
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
-    #
-    # OMN-19550: the same infra-first window, for session_content -- the full
-    # prompt, tool input, tool result and assistant reply captured for one
-    # session content chunk. This repository vendors the create migration
-    # BEFORE omnimarket lands the node package that declares the relation in
-    # its contract, because omnimarket's node-migration-vendor-parity gate
-    # refuses a node migration with no vendored counterpart here. So for one
-    # window the shipped topology instances declare a relation the PINNED
-    # contracts cannot derive.
-    #
-    # Regenerating against the pin instead of bridging would DELETE that
-    # declaration while the vendored migration still grants the relation,
-    # tripping the OMN-18768 reverse ratchet and refusing the projection
-    # binding at boot. This entry is SELF-EXPIRING: it is registered in
-    # _INTERIM_ENTRIES in
-    # tests/ci/test_supplemental_declaration_expiry_omn18863.py, which goes red
-    # on the pin advance that makes it redundant and says to delete it.
     #
     # OMN-19861: same infra-first window; this repo vendors
     # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
@@ -360,33 +352,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="demo_readiness",
-        ),
-    ),
-    # OMN-19961: lab_container_memory_window, the same infra-first window as the
-    # bridges above. This repo vendors node_projection_lab_container_memory/0000
-    # and 0001 ahead of omnimarket#3051, whose node-migration-vendor-parity gate
-    # needs the vendored copy at dev tip before it can merge; the pin cannot
-    # declare the relation until it does. 0001 grants omninode_runtime SELECT,
-    # INSERT, UPDATE. The entry carries the access and role the source contract
-    # declares, so the derivation reproduces the grant the instances carry and
-    # writes no generated diff. Retired by omnimarket#3051 merging and the pin
-    # advancing past it; the expiry module names it.
-    ContractTableDeclaration(
-        node="legacy_migration:lab_container_memory_window",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_lab_container_memory/"
-            "0000_create_lab_container_memory_window.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="lab_container_memory_window",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_lab_container_memory/"
-                "0000_create_lab_container_memory_window.sql"
-            ),
-            access="read_write",
-            role="container_memory",
         ),
     ),
     # OMN-19566: infra vendors lab_proof_receipts before omnimarket#3043
