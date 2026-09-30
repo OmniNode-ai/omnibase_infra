@@ -224,7 +224,8 @@ import yaml
 # the direction that fails closed.
 _GRANT_RE = re.compile(
     r"GRANT\s+(?P<privs>[A-Za-z][A-Za-z ,\n\r\t]*?)\s+ON\s+(?:TABLE\s+)?"
-    r"(?P<relation>[A-Za-z0-9_.\"]+)\s+TO\s+(?P<role>[A-Za-z0-9_\"]+)",
+    r"(?P<relation>[A-Za-z0-9_.\"]+(?:\s*,\s*[A-Za-z0-9_.\"]+)*)"
+    r"\s+TO\s+(?P<role>[A-Za-z0-9_\"]+)",
     re.IGNORECASE,
 )
 
@@ -583,19 +584,36 @@ def delivered_grants(corpus_root: Path) -> dict[GrantKey, list[str]]:
     for sql_path in sorted(corpus_root.rglob("*.sql")):
         text = sql_path.read_text(encoding="utf-8", errors="replace")
         for match in _GRANT_RE.finditer(text):
-            schema, table = _split_relation(match.group("relation"))
-            # `GRANT ... ON ALL TABLES IN SCHEMA x` parses here with a relation
-            # of `ALL`; it grants no NAMED relation and must not be read as
-            # delivering one. `TABLES` is the same class one statement over:
-            # `ALTER DEFAULT PRIVILEGES ... GRANT ... ON TABLES TO <role>`
-            # (099_create_omninode_internal_live_events.sql) names a future
-            # default, not a relation, and reading it as `public.TABLES` put a
-            # phantom pair in the delivered set (OMN-18768).
-            if table.upper() in {"ALL", "SCHEMA", "DATABASE", "SEQUENCE", "TABLES"}:
-                continue
-            key = GrantKey(_unquote(match.group("role")), schema, table)
-            delivered.setdefault(key, []).append(sql_path.name)
+            # One statement may name several relations
+            # (`GRANT SELECT, INSERT ON public.a, public.b TO role`, the shape
+            # the vendored usage_by_model_day 0001 uses, OMN-19978); each is a
+            # delivery of its own.
+            for relation in match.group("relation").split(","):
+                _record_delivered_grant(
+                    delivered, sql_path.name, relation.strip(), match.group("role")
+                )
     return delivered
+
+
+def _record_delivered_grant(
+    delivered: dict[GrantKey, list[str]],
+    file_name: str,
+    relation: str,
+    role: str,
+) -> None:
+    """Add one relation-level GRANT to ``delivered``, skipping non-relations."""
+    schema, table = _split_relation(relation)
+    # `GRANT ... ON ALL TABLES IN SCHEMA x` parses here with a relation
+    # of `ALL`; it grants no NAMED relation and must not be read as
+    # delivering one. `TABLES` is the same class one statement over:
+    # `ALTER DEFAULT PRIVILEGES ... GRANT ... ON TABLES TO <role>`
+    # (099_create_omninode_internal_live_events.sql) names a future
+    # default, not a relation, and reading it as `public.TABLES` put a
+    # phantom pair in the delivered set (OMN-18768).
+    if table.upper() in {"ALL", "SCHEMA", "DATABASE", "SEQUENCE", "TABLES"}:
+        return
+    key = GrantKey(_unquote(role), schema, table)
+    delivered.setdefault(key, []).append(file_name)
 
 
 def declared_sequences(repo_root: Path) -> set[SequenceKey]:

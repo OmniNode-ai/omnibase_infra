@@ -92,6 +92,7 @@ databases:
               - open_obligations
               - pr_landing_state
               - pr_landing_transitions
+              - pr_state
               - prod_promotion_gate_decisions
               - projection_watermarks
               - runner_fleet_liveness
@@ -216,6 +217,8 @@ databases:
               - savings_estimates
               - skill_execution_snapshots
               - tenant_inference_credentials
+              - usage_by_model_day
+              - usage_by_model_day_calls
             privileges:
               - INSERT
               - SELECT
@@ -373,5 +376,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: d635947440c95437226f398144c9a0c8cdefccfb608333412410371481dcdad7
+  sha256: b808d9bc8c5eb15827171e19fa86b8d4a67267903e7dad87c9f0bf6282131ab6
 topology_instance: onex-prod
