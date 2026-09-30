@@ -1531,3 +1531,20 @@ cases:
     test: tests/ci/test_incident_replay_omn20135.py::test_the_real_resolver_refuses_the_closed_companion_a_merged_pr_cited
     why: >-
       Newly wired enforcement (OMN-20135 ports it into this repo's Contract Compliance Check), so default-deny demands a real case. The false_green is A PR MERGED ON EVIDENCE THAT WAS NEVER MERGED. On 2026-07-26 a change-control hygiene sweep closed five companion PRs whose product PRs had already merged (OMN-15214); omniintelligence#817 merged citing OCC#5012, which is closed and unmerged, and a compliance check that read contracts from a fixed pin could not see it. THE ARTIFACTS ARE both PRs as the REST API serves them, committed unmodified (the product PR is fixture omniintelligence-pulls-817.json.captured, sha256 9d61f37e, from gh-api:repos/OmniNode-ai/omniintelligence/pulls/817); the test derives the evidence reference from the product body and the companion state from the companion document. THE DISCRIMINATOR IS LOAD-BEARING: a resolver that refused every reference would replay this, so omnibase_infra#4325 and its merged companion OCC#11857 (fixtures omnibase_infra-pulls-4325 and onex_change_control-pulls-11857) must resolve to the merge commit 67e79ddf.
+  - id: omn20173-compose-default-addressed-the-glm-coding-plan-endpoint
+    guard: scripts/check_no_coding_plan_endpoint.py
+    incident: OMN-20173
+    regression_class: false_green
+    guard_verdict_on_artifact: reject
+    discriminator: tests/ci/test_incident_replay_omn20173.py::test_the_same_guard_accepts_the_tracked_tree_on_the_fixing_branch
+    artifact:
+      fixture: tests/fixtures/omn20173/docker-compose.judge.yml.captured
+      sha256: 8b13e93fe66e7ffe3fb87efc5c09ebeb25eb2b6861a60f58d45091e2ef1eacfd
+    capture:
+      method: git-object
+      source: git-object:OmniNode-ai/omnibase_infra@3a12fa83d32ed235cf2883ba8894dbc5254df3e7:docker/docker-compose.judge.yml
+      captured_at: '2026-09-30T20:10:00Z'
+      captured_by: lane glm-direct-off (OMN-20173)
+    test: tests/ci/test_incident_replay_omn20173.py::test_the_real_guard_refuses_the_compose_default_that_addressed_the_coding_plan
+    why: >-
+      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is A COMPOSE DEFAULT THAT SENT SYSTEM TRAFFIC TO THE GLM CODING PLAN ENDPOINT while the only test that named the path pinned every committed z.ai URL to it. On 2026-09-30 the terms report found that the Coding Plan bars directly invoking the model API from our own systems, and the judge, dogfood and lakshman compose files each defaulted LLM_GLM_URL to the Coding Plan path. THE ARTIFACT IS docker-compose.judge.yml at dev 3a12fa83d read from the git object and committed unmodified, 31664 bytes, re-fetchable at the recorded locator; line 145 carries the default and the real guard refuses it by file and line. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every compose file would replay this perfectly, so the same guard is run over the tracked tree on the fixing branch and must accept it.

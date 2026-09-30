@@ -130,51 +130,7 @@ models:
       - documentation
     context_window: 1000000
     tier: frontier_api
-  - model_key: "glm-4.5"
-    provider: zhipu
-    transport: http
-    base_url_env: LLM_GLM_URL
-    api_key_env: LLM_GLM_API_KEY
-    health_path: ""
-    # OMN-19129: measured live from omninode-runtime-effects 2026-09-21.
-    # Authenticated GET .../v4/models -> 200 with the model list; GET
-    # .../v4/health and .../v4/v1/models -> 404. health_path stays "" so the
-    # omnimarket router does not poll a metered surface.
-    probe_path: "/models"
-    capabilities:
-      - code_generation
-      - refactoring
-      - reasoning
-      - documentation
-    context_window: 128000
-    tier: frontier_api
-  - model_key: "glm-5"
-    provider: zhipu
-    transport: http
-    base_url_env: LLM_GLM_URL
-    api_key_env: LLM_GLM_API_KEY
-    probe_path: "/models"
-    capabilities:
-      - code_generation
-      - deep_reasoning
-      - refactoring
-    context_window: 128000
-    concurrency_limit: 2
-    tier: frontier_api
-  - model_key: "glm-5.1"
-    provider: zhipu
-    transport: http
-    base_url_env: LLM_GLM_URL
-    api_key_env: LLM_GLM_API_KEY
-    probe_path: "/models"
-    capabilities:
-      - code_generation
-      - deep_reasoning
-      - refactoring
-      - documentation
-    context_window: 128000
-    concurrency_limit: 1
-    tier: frontier_api
+  # OMN-20173: GLM HTTP entries retired; Coding Plan use is Claude Code only.
   - model_key: "glm-5v-turbo"
     provider: zhipu
     transport: sdk

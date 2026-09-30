@@ -48,11 +48,11 @@ def registry(tmp_path: Path) -> Path:
                 transport: http
                 base_url_env: LLM_CODER_URL
                 probe_path: /health
-              - model_key: glm-4.5
-                provider: zhipu
+              - model_key: openrouter
+                provider: openrouter
                 transport: http
-                base_url_env: LLM_GLM_URL
-                api_key_env: LLM_GLM_API_KEY
+                base_url_env: LLM_OPENROUTER_URL
+                api_key_env: OPENROUTER_API_KEY
                 probe_path: /models
               - model_key: glm-5v-turbo
                 provider: zhipu
@@ -69,7 +69,7 @@ def registry(tmp_path: Path) -> Path:
 def test_auth_env_map_is_derived_from_the_registry(registry: Path) -> None:
     """Only HTTP entries that declare an api_key_env are auth-gated."""
     auth_env, _ = _registry_declarations(registry)
-    assert auth_env == {"LLM_GLM_URL": "LLM_GLM_API_KEY"}
+    assert auth_env == {"LLM_OPENROUTER_URL": "OPENROUTER_API_KEY"}
 
 
 @pytest.mark.unit
@@ -78,7 +78,7 @@ def test_probe_paths_are_derived_from_the_registry(registry: Path) -> None:
     _, probe_paths = _registry_declarations(registry)
     assert probe_paths == {
         "LLM_CODER_URL": "/health",
-        "LLM_GLM_URL": "/models",
+        "LLM_OPENROUTER_URL": "/models",
     }
 
 
@@ -98,9 +98,9 @@ def test_malformed_registry_degrades_to_no_auth_requirements(tmp_path: Path) -> 
 
 _ENDPOINTS = {
     "LLM_CODER_URL": "http://192.168.86.201:8000",
-    "LLM_GLM_URL": "https://api.z.ai/api/coding/paas/v4",
+    "LLM_OPENROUTER_URL": "https://openrouter.ai/api/v1",
 }
-_AUTH_MAP = {"LLM_GLM_URL": "LLM_GLM_API_KEY"}
+_AUTH_MAP = {"LLM_OPENROUTER_URL": "OPENROUTER_API_KEY"}
 
 
 @pytest.mark.unit
@@ -113,7 +113,7 @@ def test_partition_routes_unresolved_secret_out_of_the_probe_set() -> None:
     )
 
     assert probeable == {"coder": "http://192.168.86.201:8000"}
-    assert unauthenticated == {"glm": "https://api.z.ai/api/coding/paas/v4"}
+    assert unauthenticated == {"openrouter": "https://openrouter.ai/api/v1"}
     # An endpoint that is never probed needs no credential wiring.
     assert auth_env == {}
 
@@ -124,14 +124,14 @@ def test_partition_keeps_endpoint_probeable_when_secret_resolves() -> None:
     probeable, unauthenticated, auth_env = _partition_endpoints_by_auth(
         endpoints=_ENDPOINTS,
         auth_env_by_url_env=_AUTH_MAP,
-        secret_resolver=_resolver({"LLM_GLM_API_KEY": "resolved"}),
+        secret_resolver=_resolver({"OPENROUTER_API_KEY": "resolved"}),
     )
 
-    assert set(probeable) == {"coder", "glm"}
+    assert set(probeable) == {"coder", "openrouter"}
     assert unauthenticated == {}
     # OMN-19129: the credential's NAME must reach the probe, or the endpoint
     # is probed anonymously and 401s forever on a key that is perfectly good.
-    assert auth_env == {"glm": "LLM_GLM_API_KEY"}
+    assert auth_env == {"openrouter": "OPENROUTER_API_KEY"}
 
 
 @pytest.mark.unit
@@ -151,31 +151,21 @@ def test_partition_classifies_auth_gated_endpoints_dead_without_a_resolver() -> 
     )
 
     assert probeable == {"coder": "http://192.168.86.201:8000"}
-    assert unauthenticated == {"glm": "https://api.z.ai/api/coding/paas/v4"}
+    assert unauthenticated == {"openrouter": "https://openrouter.ai/api/v1"}
     assert auth_env == {}
 
 
 @pytest.mark.unit
-def test_live_registry_declares_glm_as_auth_gated() -> None:
-    """Guard the live contract: the GLM entries must stay auth-gated.
-
-    This is the entry that produced 5+ days of 401s on .201. If a future
-    catalog edit drops `api_key_env` from the zhipu entries, the health service
-    silently returns to hammering them, so pin it here. Read-only — this test
-    never writes to the catalog (OMN-16442 owns that surface).
-    """
+def test_live_registry_retires_glm_and_keeps_openrouter_auth() -> None:
+    """OMN-20173 retires GLM pins; keep coverage of an auth-gated HTTP route."""
     live_registry = (
         Path(__file__).parents[4] / "docker" / "catalog" / "model_registry.yaml"
     )
-    if not live_registry.exists():  # pragma: no cover - clone-only path
-        pytest.skip("operational docker/ tree not present in this layout")
-
     auth_env, probe_paths = _registry_declarations(live_registry)
-    assert auth_env.get("LLM_GLM_URL") == "LLM_GLM_API_KEY"
-    # OMN-19129: and it must declare a path the coding-plan surface serves.
-    # Measured live 2026-09-21: authenticated GET .../v4/models -> 200, while
-    # .../v4/health and .../v4/v1/models -> 404.
-    assert probe_paths.get("LLM_GLM_URL") == "/models"
+    assert "LLM_GLM_URL" not in auth_env
+    assert "LLM_GLM_URL" not in probe_paths
+    assert auth_env["LLM_OPENROUTER_URL"] == "OPENROUTER_API_KEY"
+    assert probe_paths["LLM_OPENROUTER_URL"] == "/models"
 
 
 @pytest.mark.unit

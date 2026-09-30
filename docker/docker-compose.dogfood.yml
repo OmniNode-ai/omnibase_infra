@@ -115,7 +115,8 @@ x-dogfood-runtime-env: &dogfood-runtime-env
   # billing fact. Authority for this URL is omnimarket's routing contract; this
   # default only keeps the lane off the wrong product. Guarded by
   # tests/test_glm_endpoint_surface_omn6790.py.
-  LLM_GLM_URL: ${LLM_GLM_URL:-https://api.z.ai/api/coding/paas/v4}
+  # OMN-20173: Coding Plan use is Claude Code only; no system endpoint default.
+  LLM_GLM_URL: ${LLM_GLM_URL:-}
   LLM_GLM_MODEL_NAME: ${LLM_GLM_MODEL_NAME:-glm-4.5}
   # Correction (b): every cloud model credential below is OPTIONAL. The lane
   # must reach a healthy /health with none of them set; wiring a model backend
