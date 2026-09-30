@@ -79,5 +79,10 @@ tables:
     reason: >
       Flat producer (063_create_session_outcomes.sql) declares correlation_id, which the node producer (node_projection_session_outcome/0021_session_outcomes.sql) does not carry; the node side instead declares created_at and updated_at, which the flat side does not carry. This is a genuine column-set divergence in both directions between the two DBs, not a formatting artifact. Convergence not attempted in this ticket.
 
+  pr_state:
+    status: accepted_divergence
+    reason: >
+      Two different tables that share a name, in different schemas and databases. The flat producer (091_pr_state.sql + 092_pr_state_add_is_draft.sql, OMN-14375) declares public.pr_state in the omnibase_infra DB: the webhook/poller triage projection (triage_state, ci_status, review_decision, mergeable, merge_state_status, merge_queue_state, base_ref, source, correlation_id, as_of, projected_at). The node producer (node_projection_pr_state/0000_create_pr_state.sql, OMN-19999, vendored from omnimarket#3054) declares omninode_internal.pr_state for the pr-watcher digest projection (state, head_sha, base, draft, author, author_is_bot, labels, armed, queued, watcher_class, ci_verdict, red_contexts, pending_contexts, ci_read_at, merged_at, observed_at, digest, last_digest; title VARCHAR(200)). Neither is a drifted copy of the other, so there is no shared shape to converge; retiring the flat table is a separate decision. This entry exists so drift on top of the current gap is caught.
+
 
 # end of ledger

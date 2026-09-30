@@ -92,6 +92,7 @@ databases:
               - open_obligations
               - pr_landing_state
               - pr_landing_transitions
+              - pr_state
               - prod_promotion_gate_decisions
               - projection_watermarks
               - runner_fleet_liveness
@@ -374,5 +375,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 03c6d11289e0b7633548882d36990605d356744e0a48dd442f509a6aa9465ffe
+  sha256: 1c4e9bf139c998a885d2b886b2aad488f439cca219d23d7b3f3f1c5ac14b8ee9
 topology_instance: onex-prod
