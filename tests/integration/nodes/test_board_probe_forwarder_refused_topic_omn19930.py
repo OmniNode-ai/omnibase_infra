@@ -14,6 +14,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_infra.nodes.node_board_probe_effect.handlers.handler_board_probe_result_publisher import (
+    HandlerBoardProbeResultPublisher,
+)
 from omnibase_infra.nodes.node_board_probe_effect.handlers.handler_docker_forwarder_state_reader import (
     HandlerDockerForwarderStateReader,
 )
@@ -23,7 +26,9 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers.handler_forwarder_ref
 from omnibase_infra.nodes.node_board_probe_effect.models import (
     EnumBoardCheckSurfaceClass,
     EnumBoardProbeOutcome,
+    EnumBoardSubjectKind,
     ModelForwarderRefusedTopicRequest,
+    board_probe_result_event_from,
 )
 
 NOW = datetime(2026, 9, 28, 16, 10, tzinfo=UTC)
@@ -152,7 +157,7 @@ def test_docker_observation_is_graded_by_the_board_probe(
 
 
 @pytest.mark.integration
-def test_contract_routing_lists_both_board_probe_handlers() -> None:
+def test_contract_routing_lists_all_board_probe_handlers() -> None:
     contract_path = (
         Path(__file__).resolve().parents[3]
         / "src/omnibase_infra/nodes/node_board_probe_effect/contract.yaml"
@@ -166,5 +171,39 @@ def test_contract_routing_lists_both_board_probe_handlers() -> None:
     for operation, handler in (
         ("board_probe.forwarder_refused_topic", HandlerForwarderRefusedTopic),
         ("board_probe.read_forwarder_state", HandlerDockerForwarderStateReader),
+        ("board_probe.publish_result", HandlerBoardProbeResultPublisher),
     ):
         assert (operation, handler.__module__, handler.__name__) in routes
+
+
+@pytest.mark.integration
+def test_graded_probe_result_reaches_the_effect_publish_output() -> None:
+    request = ModelForwarderRefusedTopicRequest(
+        subject_lane="dev",
+        forwarder_container="omninode-gateway-forwarder",
+        declared_cloud_broker=DECLARED,
+        cloud_broker_ref="gateway.cloud.kafka.broker",
+        retry_interval_seconds=300,
+    )
+    result = asyncio.run(
+        HandlerForwarderRefusedTopic(
+            reader=HandlerDockerForwarderStateReader(
+                runner=_Runner(logs="", inspect_rc=0), now=lambda: NOW
+            )
+        ).handle(request)
+    )
+    event = board_probe_result_event_from(
+        result,
+        subject_kind=EnumBoardSubjectKind.LANE,
+        repo="OmniNode-ai/omnibase_infra",
+        sha="a" * 40,
+        surface_instance="compose-dev",
+        execution_id="integration-run-omn19937",
+        finished_at=NOW,
+    )
+
+    output = asyncio.run(HandlerBoardProbeResultPublisher().handle(event))
+
+    assert output.events == (event,)
+    assert event.outcome is EnumBoardProbeOutcome.PASS
+    assert event.partition_key == "dev"
