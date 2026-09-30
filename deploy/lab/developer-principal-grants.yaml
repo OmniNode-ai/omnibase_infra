@@ -12,6 +12,10 @@
 # THE MINIMUM FOR ONE LANE DELEGATION (`onex delegate --bus kafka --lane dev`):
 #   * produce the delegate command;
 #   * read the two terminal events it waits for;
+#   * write those same two terminals: a machine that runs a harness task
+#     (`/omni:harness-delegate`) publishes its own delegate-skill terminal event to
+#     the lane, so it must not relay the emit through the lane runtime over ssh.
+#     Literal names only, never a prefix or `*`;
 #   * describe consumer groups, because the CLI refuses to publish unless a live
 #     lab consumer is bound to the command topic (delegate_locus.live_consumer_groups);
 #   * read under the CLI's own terminal consumer group. That group is
@@ -43,11 +47,11 @@ grants:
   - resource: topic
     name: onex.evt.omnimarket.delegate-skill-completed.v1
     pattern: literal
-    operations: [read, describe]
+    operations: [read, write, describe]
   - resource: topic
     name: onex.evt.omnimarket.delegate-skill-failed.v1
     pattern: literal
-    operations: [read, describe]
+    operations: [read, write, describe]
   - resource: group
     name: local.omnibase_core.runtime_local_
     pattern: prefixed
