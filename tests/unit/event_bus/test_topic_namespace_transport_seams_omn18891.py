@@ -60,7 +60,7 @@ def test_bus_consumer_subscribes_to_the_canonical_topic_when_unset(
     with patch(
         "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer"
     ) as consumer_cls:
-        _bus()._build_consumer(CANONICAL, "g", "gi", "earliest")
+        _bus()._build_consumer(CANONICAL, "g", "gi", "earliest", group_id="g")
     assert consumer_cls.call_args.args[0] == CANONICAL
 
 
@@ -71,7 +71,7 @@ def test_bus_consumer_subscribes_to_the_physical_topic_when_set(
     with patch(
         "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer"
     ) as consumer_cls:
-        _bus()._build_consumer(CANONICAL, "g", "gi", "earliest")
+        _bus()._build_consumer(CANONICAL, "g", "gi", "earliest", group_id="g")
     assert consumer_cls.call_args.args[0] == f"{SLOT}.{CANONICAL}"
 
 
