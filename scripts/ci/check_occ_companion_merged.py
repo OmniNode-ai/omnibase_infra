@@ -76,9 +76,15 @@ OCC_REPO_DEFAULT = "OmniNode-ai/onex_change_control"
 # Branches on which an OCC commit SHA counts as durable evidence.
 OCC_DURABLE_BRANCHES: tuple[str, ...] = ("dev", "main")
 
-# Mirrors occ-preflight's OMN-13762 dependency-bot exemption
-# (validator_receipt_gate.DEPENDENCY_BOT_AUTHORS): bot-authored dependency
-# bumps structurally cannot cite OCC evidence.
+# Two author sets, deliberately separate (OMN-20161):
+#
+# * DEPENDENCY_BOT_AUTHORS -- mirrors occ-preflight's OMN-13762 dependency-bot
+#   exemption (validator_receipt_gate.DEPENDENCY_BOT_AUTHORS): bot-authored
+#   dependency bumps structurally cannot cite OCC evidence. UNCONDITIONAL.
+# * OCC_WRITER_BOT_AUTHORS -- the occ-writer app. Exempt ONLY when the
+#   producer's outcome for the current head SHA proves the diff is
+#   dependency-pin-only (see _writer_pin_only_proven); otherwise it is gated
+#   exactly like a human author.
 DEPENDENCY_BOT_AUTHORS: frozenset[str] = frozenset(
     {
         "dependabot[bot]",
@@ -87,6 +93,14 @@ DEPENDENCY_BOT_AUTHORS: frozenset[str] = frozenset(
         "renovate[bot]",
         "app/renovate",
         "renovate",
+    }
+)
+
+OCC_WRITER_BOT_AUTHORS: frozenset[str] = frozenset(
+    {
+        "app/onexbot-occ-writer",
+        "onexbot-occ-writer[bot]",
+        "onexbot-occ-writer",
     }
 )
 
@@ -391,6 +405,31 @@ def _terminal_autobind_outcome(
     return None
 
 
+def _writer_pin_only_proven(fetcher: GhFetcher, repo: str, head_sha: str) -> str | None:
+    """The producer's pin-only ``reason`` for *head_sha*, or ``None``.
+
+    OMN-20161. Reads the head-SHA-bound outcome with this file's own reader and
+    accepts only ``DECLINED`` with :func:`is_no_companion_required`. FAIL-CLOSED:
+    a missing head SHA, an unreadable list, an absent outcome, ``MINTED``,
+    ``ERROR`` or any other reason all return ``None``, so the caller applies the
+    ordinary gate.
+    """
+    if not head_sha:
+        return None
+    check_runs = fetcher.check_runs(repo, head_sha)
+    if check_runs is None:
+        return None
+    parsed = read_autobind_outcome(check_runs)
+    if parsed is None:
+        return None
+    outcome, reason = parsed
+    if outcome.upper() == AUTOBIND_OUTCOME_DECLINED and is_no_companion_required(
+        reason
+    ):
+        return reason
+    return None
+
+
 def evaluate_once(
     fetcher: GhFetcher,
     *,
@@ -436,6 +475,19 @@ def evaluate_once(
             )
 
         head_sha = str(pr_data.get("headRefOid") or "")
+
+        if author in OCC_WRITER_BOT_AUTHORS:
+            # OMN-20161: applies before the Evidence-Source stamp is consulted.
+            pin_only_reason = _writer_pin_only_proven(fetcher, repo, head_sha)
+            if pin_only_reason is not None:
+                return Verdict(
+                    EXIT_PASS,
+                    f"OCC writer app '{author}' needs no OCC companion on "
+                    f"{repo}#{pr_number}: the occ-autobind producer classified "
+                    f"this head's diff as dependency-pin-only ({pin_only_reason}). "
+                    "Bound to this head SHA -- a new commit re-opens the gate "
+                    "(OMN-20161).",
+                )
 
         try:
             evidence_source = parse_evidence_source(str(pr_data.get("body") or ""))
