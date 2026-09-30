@@ -63,6 +63,7 @@ _COMPOSE_LANES = (
     "dev-202",
     "dev-200",
     "dev-105",
+    "lab-tenant",
 )
 
 
@@ -260,7 +261,16 @@ def test_runtime_worker_declared_in_every_runtime_lane() -> None:
         assert worker_spec.get("replicas", 1) >= 1, (
             f"lane {lane!r} runtime-worker must require at least one replica"
         )
-    assert no_worker_lanes == {"dev", "dogfood", "judge", "lakshman", "sim-202"}, (
+    # lab-tenant (OMN-20207) inherits the dogfood lane's runtime pair, which runs
+    # no worker, and adds nothing to it.
+    assert no_worker_lanes == {
+        "dev",
+        "dogfood",
+        "judge",
+        "lab-tenant",
+        "lakshman",
+        "sim-202",
+    }, (
         "a runtime lane without a runtime-worker must be explicitly accounted "
         f"for; got {sorted(no_worker_lanes)}"
     )
