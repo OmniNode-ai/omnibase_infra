@@ -179,7 +179,7 @@ jobs:
 
       # OMN-18026: the recipient set is private. Mint a short-lived
       # onexbot-occ-writer installation token scoped to the one repository that
-      # holds it -- the same pattern as env-parity.yml and
+      # holds it -- the same pattern as
       # deliver-dev-candidate-to-staging.yml, so no new credential exists.
       - name: Mint onexbot-occ-writer app token (roster source)
         id: roster-token
