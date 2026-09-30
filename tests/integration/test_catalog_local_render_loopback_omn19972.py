@@ -29,6 +29,13 @@ _OVERLAY_TEMPLATE = (
     REPO_ROOT / "docker" / "lane-overlays" / "local.bifrost.example.yaml"
 )
 _LAB_HOST_MARKERS = ("192.168.86.", "tail75df5e", "omninode-pc")
+# Any private-range IPv4 HOST literal, not only today's lab markers, so a new lab
+# address leaking into the laptop render is caught too. A CIDR (``/<bits>``)
+# such as the model-egress allowlist is a range, not a host, and is allowed.
+_PRIVATE_IPV4_HOST = re.compile(
+    r"(?<![\d.])(10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}"
+    r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(?![\d/])"
+)
 
 
 def _render(bundle: str, tmp_path: Path) -> tuple[dict[str, object], str]:
@@ -87,6 +94,7 @@ def test_cli_local_render_binds_loopback_and_names_no_lab_host(tmp_path: Path) -
     assert all(p.startswith("127.0.0.1:") and p.count(":") == 2 for p in ports), ports
 
     assert [m for m in _LAB_HOST_MARKERS if m in rendered] == []
+    assert _PRIVATE_IPV4_HOST.findall(rendered) == []
     services = compose["services"]
     assert isinstance(services, dict)
     advertise = " ".join(services["redpanda"]["command"])
@@ -105,3 +113,5 @@ def test_cli_core_render_keeps_all_interface_ports_and_the_lab_default(
     # Positive control for the lab-host check above: the shared manifest's
     # lab default is still in a lab-facing render.
     assert "${REDPANDA_ADVERTISE_HOST:-192.168.86.201}" in rendered
+    # Positive control for the generic private-host check above.
+    assert "192.168.86.201" in _PRIVATE_IPV4_HOST.findall(rendered)
