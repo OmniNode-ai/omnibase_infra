@@ -638,7 +638,7 @@ def _run_forward_migrations(pg: EphemeralPostgres) -> subprocess.CompletedProces
 
 
 @pytest.mark.integration
-@pytest.mark.postgres
+@pytest.mark.ephemeral_pg
 @pytest.mark.parametrize("legacy", [False, True], ids=("fresh", "legacy"))
 def test_owner_lineage_grants_complete_the_real_forward_runner(
     ephemeral_postgres: EphemeralPostgres, legacy: bool

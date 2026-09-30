@@ -57,6 +57,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     DLQ_SKILL_V1 = "onex.dlq.omnibase-infra.skill.v1"  # onex.dlq.omnibase-infra.skill.v1
     EVT_AGENT_TASK_LIFECYCLE_V1 = "onex.evt.omnibase-infra.agent-task-lifecycle.v1"  # onex.evt.omnibase-infra.agent-task-lifecycle.v1
     EVT_BASELINES_COMPUTED_V1 = "onex.evt.omnibase-infra.baselines-computed.v1"  # onex.evt.omnibase-infra.baselines-computed.v1
+    EVT_BOARD_PROBE_RESULT_V1 = "onex.evt.omnibase-infra.board-probe-result.v1"  # onex.evt.omnibase-infra.board-probe-result.v1
     EVT_BUILD_LOOP_APPENDED_V1 = "onex.evt.omnibase-infra.build-loop-appended.v1"  # onex.evt.omnibase-infra.build-loop-appended.v1
     EVT_CHAIN_LEARN_COMPLETE_V1 = "onex.evt.omnibase-infra.chain-learn-complete.v1"  # onex.evt.omnibase-infra.chain-learn-complete.v1
     EVT_CHAIN_LEARN_FAILED_V1 = "onex.evt.omnibase-infra.chain-learn-failed.v1"  # onex.evt.omnibase-infra.chain-learn-failed.v1
