@@ -3491,6 +3491,11 @@ jobs:
   # `tests-gate` reachable), so someone can prove the boot green on demand.
   # Enabling it on a `dev` push is a separate change that owes exactly that one
   # green run, and it is a one-clause edit when someone has it.
+  #
+  # OMN-20147: `dev` now has a merge queue (ruleset 13269702, OMN-19697), so
+  # this job executes on every `merge_group` entry, and CI Summary requires its
+  # compose inner job `success` there (MERGE_GROUP_STRICT_GATE_JOBS in
+  # scripts/ci/ci_summary_gate.py). On every other event it stays advisory.
   runtime-boot-smoke:
     name: Runtime Boot Smoke (compose)
     needs: [occ-preflight, tests-gate]
