@@ -27,11 +27,21 @@ def _override_defaults(value: str, overrides: Mapping[str, str]) -> str:
     value the operator sets in the env file both keep their meaning.
     """
     for var, default in overrides.items():
+        pattern = rf"\$\{{{re.escape(var)}:-([^}}]*)\}}"
+        # A nested default (``${A:-${B:-x}}``) cannot be rewritten by a
+        # match that stops at the first ``}``: half of it would survive and
+        # compose would reject the file. Refuse it instead of rendering it.
+        for match in re.finditer(pattern, value):
+            if "${" in match.group(1):
+                raise ValueError(
+                    f"env_default_overrides cannot rewrite {var}: its default in "
+                    f"{value!r} is a nested ${{...}} reference"
+                )
         replacement = f"${{{var}:-{default}}}"
-        # A function replacement, so ``$``, ``{`` or ``\`` in the default is
-        # inserted literally rather than read as a group reference.
+        # A function replacement, so ``\`` in the default is inserted literally
+        # rather than read as a group reference.
         value = re.sub(
-            rf"\$\{{{re.escape(var)}:-[^}}]*\}}",
+            pattern,
             lambda _match: replacement,  # noqa: B023 - used before the loop moves on
             value,
         )
@@ -208,8 +218,13 @@ def generate_compose(
                 if isinstance(manifest.command, str):
                     svc["command"] = _override_defaults(manifest.command, overrides)
                 else:
+                    # YAML can load a numeric argument; only text can carry a
+                    # ``${VAR:-default}`` reference, so anything else passes through.
                     svc["command"] = [
-                        _override_defaults(part, overrides) for part in manifest.command
+                        _override_defaults(part, overrides)
+                        if isinstance(part, str)
+                        else part
+                        for part in manifest.command
                     ]
             else:
                 svc["command"] = manifest.command

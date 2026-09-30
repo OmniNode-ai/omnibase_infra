@@ -110,6 +110,8 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
     "usage_by_model_day_calls": "omnimarket#3073",
     "usage_by_model_day": "omnimarket#3073",
+    "work_ledger_rows": "omnimarket#3050",
+    "work_ledger_state": "omnimarket#3050",
 }
 
 _SKIP_REASON = (
@@ -149,6 +151,22 @@ class TestTheMapMatchesTheManifest:
             "LEGACY_MIGRATION_TABLE_DECLARATIONS entry. Either the bridge was "
             "deleted and the map was not, or the name is misspelled"
         )
+
+    @pytest.mark.parametrize("table", ["work_ledger_rows", "work_ledger_state"])
+    def test_work_ledger_bridge_matches_the_paired_contract(self, table: str) -> None:
+        declarations = [
+            declaration
+            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+            if declaration.table.name == table
+        ]
+        assert len(declarations) == 1
+        declaration = declarations[0]
+        assert _INTERIM_ENTRIES[table] == "omnimarket#3050"
+        assert declaration.table.database_ref == "application"
+        assert declaration.table.schema == "omninode_internal"
+        assert declaration.table.access == "write"
+        assert declaration.table.role == "work_ledger"
+        assert (_REPO_ROOT / declaration.contract_path).is_file()
 
 
 class TestTheRootIsThePinAndNotTheTrailerTree:

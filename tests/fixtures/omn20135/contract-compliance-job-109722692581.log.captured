@@ -1,0 +1,646 @@
+﻿2026-09-30T02:41:47.6621044Z Current runner version: '2.337.0'
+2026-09-30T02:41:47.6643261Z ##[group]Runner Image Provisioner
+2026-09-30T02:41:47.6644334Z Hosted Compute Agent
+2026-09-30T02:41:47.6645156Z Version: 20260828.587
+2026-09-30T02:41:47.6646023Z Commit: abac92662cab4cc7352de4f9f9d2e2419aad9c29
+2026-09-30T02:41:47.6647135Z Build Date: 2026-08-28T16:44:25Z
+2026-09-30T02:41:47.6648123Z Worker ID: {3df9cf0b-217d-477e-9392-312408a10b59}
+2026-09-30T02:41:47.6649072Z Azure Region: westcentralus
+2026-09-30T02:41:47.6649864Z ##[endgroup]
+2026-09-30T02:41:47.6651624Z ##[group]Operating System
+2026-09-30T02:41:47.6652459Z Ubuntu
+2026-09-30T02:41:47.6653175Z 24.04.5
+2026-09-30T02:41:47.6653949Z LTS
+2026-09-30T02:41:47.6654734Z ##[endgroup]
+2026-09-30T02:41:47.6655486Z ##[group]Runner Image
+2026-09-30T02:41:47.6656314Z Image: ubuntu-24.04
+2026-09-30T02:41:47.6657325Z Version: 20260920.314.1
+2026-09-30T02:41:47.6658695Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260920.314/images/ubuntu/Ubuntu2404-Readme.md
+2026-09-30T02:41:47.6660369Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260920.314
+2026-09-30T02:41:47.6661512Z ##[endgroup]
+2026-09-30T02:41:47.6662992Z ##[group]GITHUB_TOKEN Permissions
+2026-09-30T02:41:47.6664889Z Contents: read
+2026-09-30T02:41:47.6665654Z Metadata: read
+2026-09-30T02:41:47.6666743Z Packages: read
+2026-09-30T02:41:47.6667676Z ##[endgroup]
+2026-09-30T02:41:47.6669625Z Secret source: Actions
+2026-09-30T02:41:47.6670928Z Cache mode: write
+2026-09-30T02:41:47.6671953Z Prepare workflow directory
+2026-09-30T02:41:47.7340060Z Prepare all required actions
+2026-09-30T02:41:47.7379262Z Getting action download info
+2026-09-30T02:41:48.0239668Z Download action repository 'actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0' (SHA:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0)
+2026-09-30T02:41:48.1097787Z Download action repository 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1' (SHA:bcd2ba49218906704ab6c1aa796996da409d3eb1)
+2026-09-30T02:41:48.6389988Z Download action repository 'astral-sh/setup-uv@v7' (SHA:37802adc94f370d6bfd71619e3f0bf239e1f3b78)
+2026-09-30T02:41:49.5229960Z Complete job name: Contract Compliance Check
+2026-09-30T02:41:49.6030244Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+2026-09-30T02:41:49.6032126Z with:
+2026-09-30T02:41:49.6033232Z   repository: OmniNode-ai/omnibase_infra
+2026-09-30T02:41:49.6040720Z   token: ***
+2026-09-30T02:41:49.6041780Z   ssh-strict: true
+2026-09-30T02:41:49.6042851Z   ssh-user: git
+2026-09-30T02:41:49.6043943Z   persist-credentials: true
+2026-09-30T02:41:49.6045095Z   clean: true
+2026-09-30T02:41:49.6046206Z   sparse-checkout-cone-mode: true
+2026-09-30T02:41:49.6047528Z   fetch-depth: 1
+2026-09-30T02:41:49.6048589Z   fetch-tags: false
+2026-09-30T02:41:49.6049664Z   show-progress: true
+2026-09-30T02:41:49.6050764Z   lfs: false
+2026-09-30T02:41:49.6051814Z   submodules: false
+2026-09-30T02:41:49.6052900Z   set-safe-directory: true
+2026-09-30T02:41:49.6054104Z   allow-unsafe-pr-checkout: false
+2026-09-30T02:41:49.6055581Z env:
+2026-09-30T02:41:49.6056575Z   UV_VERSION: 0.6.14
+2026-09-30T02:41:49.6057791Z   PYTHON_VERSION: 3.12
+2026-09-30T02:41:49.6058948Z   CACHE_VERSION: 0.6.0
+2026-09-30T02:41:49.6060063Z   SHELLCHECK_VERSION: v0.10.0
+2026-09-30T02:41:49.6061264Z   OMNI_CI_SHARED_ENV_ENABLED: true
+2026-09-30T02:41:49.6062640Z   OMNI_CI_ENV_ROOT: /home/runner/.cache/omni/ci-envs
+2026-09-30T02:41:49.6064049Z   GIT_CONFIG_COUNT: 1
+2026-09-30T02:41:49.6065177Z   GIT_CONFIG_KEY_0: http.version
+2026-09-30T02:41:49.6066423Z   GIT_CONFIG_VALUE_0: HTTP/1.1
+2026-09-30T02:41:49.6067851Z   UV_HTTP_TIMEOUT: 600
+2026-09-30T02:41:49.6068980Z   ONEX_EVENT_BUS_TYPE: inmemory
+2026-09-30T02:41:49.6070225Z   POSTGRES_DATABASE: omnibase_infra
+2026-09-30T02:41:49.6071526Z   LLM_ENDPOINT_CIDR_ALLOWLIST: 10.0.0.0/8
+2026-09-30T02:41:49.6072805Z ##[endgroup]
+2026-09-30T02:41:49.6896444Z Syncing repository: OmniNode-ai/omnibase_infra
+2026-09-30T02:41:49.6899594Z ##[group]Getting Git version info
+2026-09-30T02:41:49.6901545Z Working directory is '/home/runner/work/omnibase_infra/omnibase_infra'
+2026-09-30T02:41:49.6903904Z [command]/usr/bin/git version
+2026-09-30T02:41:49.6927090Z git version 2.55.0
+2026-09-30T02:41:49.6943408Z ##[endgroup]
+2026-09-30T02:41:49.6951169Z Temporarily overriding HOME='/home/runner/work/_temp/321a1808-76ff-4557-9f14-ea339504a3cd' before making global git config changes
+2026-09-30T02:41:49.6954203Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-30T02:41:49.6957367Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/omnibase_infra/omnibase_infra
+2026-09-30T02:41:49.6991024Z Deleting the contents of '/home/runner/work/omnibase_infra/omnibase_infra'
+2026-09-30T02:41:49.6994858Z ##[group]Determining repository object format
+2026-09-30T02:41:49.6998068Z ##[endgroup]
+2026-09-30T02:41:49.7000727Z ##[group]Initializing the repository
+2026-09-30T02:41:49.7003769Z [command]/usr/bin/git init /home/runner/work/omnibase_infra/omnibase_infra
+2026-09-30T02:41:49.7066007Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-30T02:41:49.7068925Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-30T02:41:49.7070933Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-30T02:41:49.7072550Z hint: call:
+2026-09-30T02:41:49.7073554Z hint:
+2026-09-30T02:41:49.7074762Z hint: 	git config --global init.defaultBranch <name>
+2026-09-30T02:41:49.7076197Z hint:
+2026-09-30T02:41:49.7077691Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-30T02:41:49.7079653Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-30T02:41:49.7081250Z hint:
+2026-09-30T02:41:49.7082271Z hint: 	git branch -m <name>
+2026-09-30T02:41:49.7083381Z hint:
+2026-09-30T02:41:49.7088894Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-30T02:41:49.7092138Z Initialized empty Git repository in /home/runner/work/omnibase_infra/omnibase_infra/.git/
+2026-09-30T02:41:49.7100096Z [command]/usr/bin/git remote add origin https://github.com/OmniNode-ai/omnibase_infra
+2026-09-30T02:41:49.7139739Z ##[endgroup]
+2026-09-30T02:41:49.7142545Z ##[group]Disabling automatic garbage collection
+2026-09-30T02:41:49.7144786Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-30T02:41:49.7170629Z ##[endgroup]
+2026-09-30T02:41:49.7173852Z ##[group]Setting up auth
+2026-09-30T02:41:49.7175634Z Removing SSH command configuration
+2026-09-30T02:41:49.7178206Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-30T02:41:49.7208350Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-30T02:41:49.7521382Z Removing HTTP extra header
+2026-09-30T02:41:49.7526508Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-30T02:41:49.7552617Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-30T02:41:49.7730678Z Removing includeIf entries pointing to credentials config files
+2026-09-30T02:41:49.7733927Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-30T02:41:49.7758575Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-30T02:41:49.7941851Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-dd8901a4-6e48-442b-b3de-427132062d46.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-30T02:41:49.7972321Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/.git.path /home/runner/work/_temp/git-credentials-dd8901a4-6e48-442b-b3de-427132062d46.config
+2026-09-30T02:41:49.7998643Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-dd8901a4-6e48-442b-b3de-427132062d46.config
+2026-09-30T02:41:49.8026394Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-dd8901a4-6e48-442b-b3de-427132062d46.config
+2026-09-30T02:41:49.8051923Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-dd8901a4-6e48-442b-b3de-427132062d46.config
+2026-09-30T02:41:49.8075247Z ##[endgroup]
+2026-09-30T02:41:49.8077171Z ##[group]Fetching the repository
+2026-09-30T02:41:49.8080077Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +5c2c1c9fcfd6b84ed32b47d20e23824504e2697c:refs/remotes/pull/4325/merge
+2026-09-30T02:41:51.4602647Z From https://github.com/OmniNode-ai/omnibase_infra
+2026-09-30T02:41:51.4603458Z  * [new ref]         5c2c1c9fcfd6b84ed32b47d20e23824504e2697c -> pull/4325/merge
+2026-09-30T02:41:51.4606427Z ##[endgroup]
+2026-09-30T02:41:51.4607247Z ##[group]Determining the checkout info
+2026-09-30T02:41:51.4607977Z ##[endgroup]
+2026-09-30T02:41:51.4612775Z [command]/usr/bin/git sparse-checkout disable
+2026-09-30T02:41:51.4653975Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-30T02:41:51.4678015Z ##[group]Checking out the ref
+2026-09-30T02:41:51.4680731Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/4325/merge
+2026-09-30T02:41:52.0044790Z Note: switching to 'refs/remotes/pull/4325/merge'.
+2026-09-30T02:41:52.0045595Z 
+2026-09-30T02:41:52.0046147Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-09-30T02:41:52.0047253Z changes and commit them, and you can discard any commits you make in this
+2026-09-30T02:41:52.0048195Z state without impacting any branches by switching back to a branch.
+2026-09-30T02:41:52.0048681Z 
+2026-09-30T02:41:52.0049346Z If you want to create a new branch to retain commits you create, you may
+2026-09-30T02:41:52.0050056Z do so (now or later) by using -c with the switch command. Example:
+2026-09-30T02:41:52.0050451Z 
+2026-09-30T02:41:52.0050656Z   git switch -c <new-branch-name>
+2026-09-30T02:41:52.0050954Z 
+2026-09-30T02:41:52.0051167Z Or undo this operation with:
+2026-09-30T02:41:52.0051416Z 
+2026-09-30T02:41:52.0051547Z   git switch -
+2026-09-30T02:41:52.0052757Z 
+2026-09-30T02:41:52.0053000Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-09-30T02:41:52.0053303Z 
+2026-09-30T02:41:52.0053637Z HEAD is now at 5c2c1c9 Merge 84310433bc8f752dfaac7eb301e92c71dac2a3ab into b27e9d65db1577373c1ae595d063a5964bc24793
+2026-09-30T02:41:52.0065900Z ##[endgroup]
+2026-09-30T02:41:52.0105397Z [command]/usr/bin/git log -1 --format=%H
+2026-09-30T02:41:52.0126100Z 5c2c1c9fcfd6b84ed32b47d20e23824504e2697c
+2026-09-30T02:41:52.0423252Z ##[warning]Input 'app-id' has been deprecated with message: Use 'client-id' instead.
+2026-09-30T02:41:52.0466495Z ##[group]Run actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
+2026-09-30T02:41:52.0467063Z with:
+2026-09-30T02:41:52.0467462Z   app-id: ***
+2026-09-30T02:41:52.0473014Z   private-key: ***
+
+2026-09-30T02:41:52.0473319Z   owner: OmniNode-ai
+2026-09-30T02:41:52.0473623Z   repositories: onex_change_control
+2026-09-30T02:41:52.0474000Z   permission-contents: write
+2026-09-30T02:41:52.0474307Z   skip-token-revoke: false
+2026-09-30T02:41:52.0474658Z   github-api-url: https://api.github.com
+2026-09-30T02:41:52.0475008Z env:
+2026-09-30T02:41:52.0475272Z   UV_VERSION: 0.6.14
+2026-09-30T02:41:52.0475555Z   PYTHON_VERSION: 3.12
+2026-09-30T02:41:52.0475843Z   CACHE_VERSION: 0.6.0
+2026-09-30T02:41:52.0476148Z   SHELLCHECK_VERSION: v0.10.0
+2026-09-30T02:41:52.0476465Z   OMNI_CI_SHARED_ENV_ENABLED: true
+2026-09-30T02:41:52.0476852Z   OMNI_CI_ENV_ROOT: /home/runner/.cache/omni/ci-envs
+2026-09-30T02:41:52.0477477Z   GIT_CONFIG_COUNT: 1
+2026-09-30T02:41:52.0477768Z   GIT_CONFIG_KEY_0: http.version
+2026-09-30T02:41:52.0478085Z   GIT_CONFIG_VALUE_0: HTTP/1.1
+2026-09-30T02:41:52.0478379Z   UV_HTTP_TIMEOUT: 600
+2026-09-30T02:41:52.0478656Z   ONEX_EVENT_BUS_TYPE: inmemory
+2026-09-30T02:41:52.0478968Z   POSTGRES_DATABASE: omnibase_infra
+2026-09-30T02:41:52.0479309Z   LLM_ENDPOINT_CIDR_ALLOWLIST: 10.0.0.0/8
+2026-09-30T02:41:52.0479634Z ##[endgroup]
+2026-09-30T02:41:52.1071357Z Inputs 'owner' and 'repositories' are set. Creating token for the following repositories:
+2026-09-30T02:41:52.1071890Z - OmniNode-ai/onex_change_control
+2026-09-30T02:41:52.9071002Z ##[group]Run actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+2026-09-30T02:41:52.9071433Z with:
+2026-09-30T02:41:52.9071742Z   repository: OmniNode-ai/onex_change_control
+2026-09-30T02:41:52.9072112Z   ref: 7352cb2dc634a7223877bfbbf3498303c9662700
+2026-09-30T02:41:52.9072455Z   path: onex_change_control
+2026-09-30T02:41:52.9074855Z   token: ***
+2026-09-30T02:41:52.9075141Z   ssh-strict: true
+2026-09-30T02:41:52.9075421Z   ssh-user: git
+2026-09-30T02:41:52.9075701Z   persist-credentials: true
+2026-09-30T02:41:52.9075998Z   clean: true
+2026-09-30T02:41:52.9076290Z   sparse-checkout-cone-mode: true
+2026-09-30T02:41:52.9076602Z   fetch-depth: 1
+2026-09-30T02:41:52.9076963Z   fetch-tags: false
+2026-09-30T02:41:52.9077246Z   show-progress: true
+2026-09-30T02:41:52.9077525Z   lfs: false
+2026-09-30T02:41:52.9077781Z   submodules: false
+2026-09-30T02:41:52.9078061Z   set-safe-directory: true
+2026-09-30T02:41:52.9078730Z   allow-unsafe-pr-checkout: false
+2026-09-30T02:41:52.9079330Z env:
+2026-09-30T02:41:52.9079762Z   UV_VERSION: 0.6.14
+2026-09-30T02:41:52.9080260Z   PYTHON_VERSION: 3.12
+2026-09-30T02:41:52.9080788Z   CACHE_VERSION: 0.6.0
+2026-09-30T02:41:52.9081258Z   SHELLCHECK_VERSION: v0.10.0
+2026-09-30T02:41:52.9081831Z   OMNI_CI_SHARED_ENV_ENABLED: true
+2026-09-30T02:41:52.9082416Z   OMNI_CI_ENV_ROOT: /home/runner/.cache/omni/ci-envs
+2026-09-30T02:41:52.9082932Z   GIT_CONFIG_COUNT: 1
+2026-09-30T02:41:52.9083457Z   GIT_CONFIG_KEY_0: http.version
+2026-09-30T02:41:52.9098338Z   GIT_CONFIG_VALUE_0: HTTP/1.1
+2026-09-30T02:41:52.9098837Z   UV_HTTP_TIMEOUT: 600
+2026-09-30T02:41:52.9099214Z   ONEX_EVENT_BUS_TYPE: inmemory
+2026-09-30T02:41:52.9099598Z   POSTGRES_DATABASE: omnibase_infra
+2026-09-30T02:41:52.9099948Z   LLM_ENDPOINT_CIDR_ALLOWLIST: 10.0.0.0/8
+2026-09-30T02:41:52.9100285Z ##[endgroup]
+2026-09-30T02:41:52.9754073Z Syncing repository: OmniNode-ai/onex_change_control
+2026-09-30T02:41:52.9756783Z ##[group]Getting Git version info
+2026-09-30T02:41:52.9757792Z Working directory is '/home/runner/work/omnibase_infra/omnibase_infra/onex_change_control'
+2026-09-30T02:41:52.9786006Z [command]/usr/bin/git version
+2026-09-30T02:41:52.9816249Z git version 2.55.0
+2026-09-30T02:41:52.9830821Z ##[endgroup]
+2026-09-30T02:41:52.9838441Z Temporarily overriding HOME='/home/runner/work/_temp/8b8c50c9-d1c9-4808-9a66-83e99430b191' before making global git config changes
+2026-09-30T02:41:52.9839629Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-30T02:41:52.9843235Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/omnibase_infra/omnibase_infra/onex_change_control
+2026-09-30T02:41:52.9868786Z ##[group]Determining repository object format
+2026-09-30T02:41:52.9870340Z ##[endgroup]
+2026-09-30T02:41:52.9871021Z ##[group]Initializing the repository
+2026-09-30T02:41:52.9874474Z [command]/usr/bin/git init /home/runner/work/omnibase_infra/omnibase_infra/onex_change_control
+2026-09-30T02:41:52.9908524Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-09-30T02:41:52.9909597Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-09-30T02:41:52.9910211Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-09-30T02:41:52.9910873Z hint: call:
+2026-09-30T02:41:52.9911255Z hint:
+2026-09-30T02:41:52.9911958Z hint: 	git config --global init.defaultBranch <name>
+2026-09-30T02:41:52.9912515Z hint:
+2026-09-30T02:41:52.9913050Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-09-30T02:41:52.9913850Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-09-30T02:41:52.9914509Z hint:
+2026-09-30T02:41:52.9914907Z hint: 	git branch -m <name>
+2026-09-30T02:41:52.9915348Z hint:
+2026-09-30T02:41:52.9915912Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-09-30T02:41:52.9917318Z Initialized empty Git repository in /home/runner/work/omnibase_infra/omnibase_infra/onex_change_control/.git/
+2026-09-30T02:41:52.9919063Z [command]/usr/bin/git remote add origin https://github.com/OmniNode-ai/onex_change_control
+2026-09-30T02:41:52.9946013Z ##[endgroup]
+2026-09-30T02:41:52.9946728Z ##[group]Disabling automatic garbage collection
+2026-09-30T02:41:52.9949126Z [command]/usr/bin/git config --local gc.auto 0
+2026-09-30T02:41:52.9973477Z ##[endgroup]
+2026-09-30T02:41:52.9974151Z ##[group]Setting up auth
+2026-09-30T02:41:52.9974646Z Removing SSH command configuration
+2026-09-30T02:41:52.9978496Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-30T02:41:53.0002974Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-30T02:41:53.0181219Z Removing HTTP extra header
+2026-09-30T02:41:53.0184989Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-30T02:41:53.0210569Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-30T02:41:53.0384978Z Removing includeIf entries pointing to credentials config files
+2026-09-30T02:41:53.0389848Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-30T02:41:53.0414996Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-30T02:41:53.0599115Z [command]/usr/bin/git config --file /home/runner/work/_temp/git-credentials-3ccd60a9-11d5-44f3-b8a0-fb23a9d2ce71.config http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-09-30T02:41:53.0627936Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/onex_change_control/.git.path /home/runner/work/_temp/git-credentials-3ccd60a9-11d5-44f3-b8a0-fb23a9d2ce71.config
+2026-09-30T02:41:53.0653156Z [command]/usr/bin/git config --local includeIf.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/onex_change_control/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-3ccd60a9-11d5-44f3-b8a0-fb23a9d2ce71.config
+2026-09-30T02:41:53.0678473Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/onex_change_control/.git.path /github/runner_temp/git-credentials-3ccd60a9-11d5-44f3-b8a0-fb23a9d2ce71.config
+2026-09-30T02:41:53.0704211Z [command]/usr/bin/git config --local includeIf.gitdir:/github/workspace/onex_change_control/.git/worktrees/*.path /github/runner_temp/git-credentials-3ccd60a9-11d5-44f3-b8a0-fb23a9d2ce71.config
+2026-09-30T02:41:53.0726571Z ##[endgroup]
+2026-09-30T02:41:53.0727309Z ##[group]Fetching the repository
+2026-09-30T02:41:53.0732210Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin 7352cb2dc634a7223877bfbbf3498303c9662700
+2026-09-30T02:41:54.7401103Z From https://github.com/OmniNode-ai/onex_change_control
+2026-09-30T02:41:54.7401665Z  * branch              7352cb2dc634a7223877bfbbf3498303c9662700 -> FETCH_HEAD
+2026-09-30T02:41:54.7410544Z [command]/usr/bin/git rev-parse --verify --quiet 7352cb2dc634a7223877bfbbf3498303c9662700^{object}
+2026-09-30T02:41:54.7433405Z 7352cb2dc634a7223877bfbbf3498303c9662700
+2026-09-30T02:41:54.7438292Z ##[endgroup]
+2026-09-30T02:41:54.7438962Z ##[group]Determining the checkout info
+2026-09-30T02:41:54.7439698Z ##[endgroup]
+2026-09-30T02:41:54.7442749Z [command]/usr/bin/git sparse-checkout disable
+2026-09-30T02:41:54.7477298Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-09-30T02:41:54.7501092Z ##[group]Checking out the ref
+2026-09-30T02:41:54.7505140Z [command]/usr/bin/git checkout --progress --force 7352cb2dc634a7223877bfbbf3498303c9662700
+2026-09-30T02:41:55.8284392Z Updating files:  57% (10426/18149)
+2026-09-30T02:41:55.8388546Z Updating files:  58% (10527/18149)
+2026-09-30T02:41:55.8494833Z Updating files:  59% (10708/18149)
+2026-09-30T02:41:55.8601966Z Updating files:  60% (10890/18149)
+2026-09-30T02:41:55.8706131Z Updating files:  61% (11071/18149)
+2026-09-30T02:41:55.8810599Z Updating files:  62% (11253/18149)
+2026-09-30T02:41:55.8916618Z Updating files:  63% (11434/18149)
+2026-09-30T02:41:55.9024791Z Updating files:  64% (11616/18149)
+2026-09-30T02:41:55.9128069Z Updating files:  65% (11797/18149)
+2026-09-30T02:41:55.9238060Z Updating files:  66% (11979/18149)
+2026-09-30T02:41:55.9347144Z Updating files:  67% (12160/18149)
+2026-09-30T02:41:55.9466517Z Updating files:  68% (12342/18149)
+2026-09-30T02:41:55.9582121Z Updating files:  69% (12523/18149)
+2026-09-30T02:41:55.9695809Z Updating files:  70% (12705/18149)
+2026-09-30T02:41:55.9812196Z Updating files:  71% (12886/18149)
+2026-09-30T02:41:55.9918903Z Updating files:  72% (13068/18149)
+2026-09-30T02:41:56.0032048Z Updating files:  73% (13249/18149)
+2026-09-30T02:41:56.0142891Z Updating files:  74% (13431/18149)
+2026-09-30T02:41:56.0252390Z Updating files:  75% (13612/18149)
+2026-09-30T02:41:56.0361329Z Updating files:  76% (13794/18149)
+2026-09-30T02:41:56.0473668Z Updating files:  77% (13975/18149)
+2026-09-30T02:41:56.4317169Z Updating files:  78% (14157/18149)
+2026-09-30T02:41:56.4433360Z Updating files:  79% (14338/18149)
+2026-09-30T02:41:56.4548920Z Updating files:  80% (14520/18149)
+2026-09-30T02:41:56.4654807Z Updating files:  81% (14701/18149)
+2026-09-30T02:41:56.4760235Z Updating files:  82% (14883/18149)
+2026-09-30T02:41:56.4862295Z Updating files:  83% (15064/18149)
+2026-09-30T02:41:56.4949821Z Updating files:  84% (15246/18149)
+2026-09-30T02:41:56.5045675Z Updating files:  85% (15427/18149)
+2026-09-30T02:41:56.5148126Z Updating files:  86% (15609/18149)
+2026-09-30T02:41:56.5235813Z Updating files:  87% (15790/18149)
+2026-09-30T02:41:56.5327545Z Updating files:  88% (15972/18149)
+2026-09-30T02:41:56.5431580Z Updating files:  89% (16153/18149)
+2026-09-30T02:41:56.5536183Z Updating files:  90% (16335/18149)
+2026-09-30T02:41:56.5642296Z Updating files:  91% (16516/18149)
+2026-09-30T02:41:56.5742234Z Updating files:  92% (16698/18149)
+2026-09-30T02:41:56.5840356Z Updating files:  93% (16879/18149)
+2026-09-30T02:41:56.5938279Z Updating files:  94% (17061/18149)
+2026-09-30T02:41:56.6027279Z Updating files:  95% (17242/18149)
+2026-09-30T02:41:56.6130711Z Updating files:  96% (17424/18149)
+2026-09-30T02:41:56.6261941Z Updating files:  97% (17605/18149)
+2026-09-30T02:41:56.6336563Z Updating files:  98% (17787/18149)
+2026-09-30T02:41:56.6430649Z Updating files:  99% (17968/18149)
+2026-09-30T02:41:56.6431128Z Updating files: 100% (18149/18149)
+2026-09-30T02:41:56.6431582Z Updating files: 100% (18149/18149), done.
+2026-09-30T02:41:56.6682785Z Note: switching to '7352cb2dc634a7223877bfbbf3498303c9662700'.
+2026-09-30T02:41:56.6683215Z 
+2026-09-30T02:41:56.6683538Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-09-30T02:41:56.6684163Z changes and commit them, and you can discard any commits you make in this
+2026-09-30T02:41:56.6684684Z state without impacting any branches by switching back to a branch.
+2026-09-30T02:41:56.6684966Z 
+2026-09-30T02:41:56.6685176Z If you want to create a new branch to retain commits you create, you may
+2026-09-30T02:41:56.6685650Z do so (now or later) by using -c with the switch command. Example:
+2026-09-30T02:41:56.6685923Z 
+2026-09-30T02:41:56.6686308Z   git switch -c <new-branch-name>
+2026-09-30T02:41:56.6686499Z 
+2026-09-30T02:41:56.6686636Z Or undo this operation with:
+2026-09-30T02:41:56.6686815Z 
+2026-09-30T02:41:56.6687135Z   git switch -
+2026-09-30T02:41:56.6687296Z 
+2026-09-30T02:41:56.6687528Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-09-30T02:41:56.6687824Z 
+2026-09-30T02:41:56.6688086Z HEAD is now at 7352cb2d evidence(OMN-14450): bind omnimarket uv lock reachability gate (#4026)
+2026-09-30T02:41:56.6699506Z ##[endgroup]
+2026-09-30T02:41:56.6739890Z [command]/usr/bin/git log -1 --format=%H
+2026-09-30T02:41:56.6761217Z 7352cb2dc634a7223877bfbbf3498303c9662700
+2026-09-30T02:41:56.6917347Z ##[group]Run astral-sh/setup-uv@v7
+2026-09-30T02:41:56.6917723Z with:
+2026-09-30T02:41:56.6917999Z   enable-cache: false
+2026-09-30T02:41:56.6918311Z   activate-environment: false
+2026-09-30T02:41:56.6918717Z   working-directory: /home/runner/work/omnibase_infra/omnibase_infra
+2026-09-30T02:41:56.6920771Z   github-token: ***
+2026-09-30T02:41:56.6921344Z   cache-dependency-glob: **/*requirements*.txt
+**/*requirements*.in
+**/*constraints*.txt
+**/*constraints*.in
+**/pyproject.toml
+**/uv.lock
+**/*.py.lock
+
+2026-09-30T02:41:56.6921926Z   restore-cache: true
+2026-09-30T02:41:56.6922211Z   save-cache: true
+2026-09-30T02:41:56.6922491Z   prune-cache: true
+2026-09-30T02:41:56.6922763Z   cache-python: false
+2026-09-30T02:41:56.6923062Z   ignore-nothing-to-cache: false
+2026-09-30T02:41:56.6923380Z   ignore-empty-workdir: false
+2026-09-30T02:41:56.6923689Z   add-problem-matchers: true
+2026-09-30T02:41:56.6924004Z   resolution-strategy: highest
+2026-09-30T02:41:56.6924294Z env:
+2026-09-30T02:41:56.6924582Z   UV_VERSION: 0.6.14
+2026-09-30T02:41:56.6924861Z   PYTHON_VERSION: 3.12
+2026-09-30T02:41:56.6925146Z   CACHE_VERSION: 0.6.0
+2026-09-30T02:41:56.6925425Z   SHELLCHECK_VERSION: v0.10.0
+2026-09-30T02:41:56.6925741Z   OMNI_CI_SHARED_ENV_ENABLED: true
+2026-09-30T02:41:56.6926099Z   OMNI_CI_ENV_ROOT: /home/runner/.cache/omni/ci-envs
+2026-09-30T02:41:56.6926452Z   GIT_CONFIG_COUNT: 1
+2026-09-30T02:41:56.6926746Z   GIT_CONFIG_KEY_0: http.version
+2026-09-30T02:41:56.6927289Z   GIT_CONFIG_VALUE_0: HTTP/1.1
+2026-09-30T02:41:56.6927593Z   UV_HTTP_TIMEOUT: 600
+2026-09-30T02:41:56.6927880Z   ONEX_EVENT_BUS_TYPE: inmemory
+2026-09-30T02:41:56.6928195Z   POSTGRES_DATABASE: omnibase_infra
+2026-09-30T02:41:56.6928537Z   LLM_ENDPOINT_CIDR_ALLOWLIST: 10.0.0.0/8
+2026-09-30T02:41:56.6928867Z ##[endgroup]
+2026-09-30T02:41:56.8305318Z Trying to find version for uv in: /home/runner/work/omnibase_infra/omnibase_infra/uv.toml
+2026-09-30T02:41:56.8305985Z Could not find file: /home/runner/work/omnibase_infra/omnibase_infra/uv.toml
+2026-09-30T02:41:56.8306545Z Trying to find version for uv in: /home/runner/work/omnibase_infra/omnibase_infra/pyproject.toml
+2026-09-30T02:41:56.8337983Z Could not determine uv version from uv.toml or pyproject.toml. Falling back to latest.
+2026-09-30T02:41:56.8339436Z Fetching version data from https://raw.githubusercontent.com/astral-sh/versions/main/v1/uv.ndjson ...
+2026-09-30T02:41:56.9650136Z Downloading uv from "https://releases.astral.sh/github/uv/releases/download/0.12.21/uv-x86_64-unknown-linux-gnu.tar.gz" ...
+2026-09-30T02:41:57.3243405Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/40061750-a9a7-4409-8870-6a94b6cb6f47 -f /home/runner/work/_temp/f94c5e04-ae8e-498f-83da-c9c4784443c7
+2026-09-30T02:41:57.8861803Z Added /home/runner/.local/bin to the path
+2026-09-30T02:41:57.8864278Z Added /opt/hostedtoolcache/uv/0.12.21/x86_64 to the path
+2026-09-30T02:41:57.8865472Z Set UV_PYTHON_INSTALL_DIR to /home/runner/work/_temp/uv-python-dir
+2026-09-30T02:41:57.8866165Z Added /home/runner/work/_temp/uv-python-dir to the path
+2026-09-30T02:41:57.8885147Z Successfully installed uv version 0.12.21
+2026-09-30T02:41:58.0368811Z ##[group]Run set -euo pipefail
+2026-09-30T02:41:58.0369225Z [36;1mset -euo pipefail[0m
+2026-09-30T02:41:58.0369587Z [36;1mexport UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"[0m
+2026-09-30T02:41:58.0370137Z [36;1mattempt=1[0m
+2026-09-30T02:41:58.0370423Z [36;1mmax_attempts=3[0m
+2026-09-30T02:41:58.0370709Z [36;1mdelay=10[0m
+2026-09-30T02:41:58.0371021Z [36;1muntil uv sync --no-cache --all-extras; do[0m
+2026-09-30T02:41:58.0371386Z [36;1m  status=$?[0m
+2026-09-30T02:41:58.0371705Z [36;1m  if [[ "$attempt" -ge "$max_attempts" ]]; then[0m
+2026-09-30T02:41:58.0372185Z [36;1m    echo "::error::uv sync onex_change_control failed after ${attempt} attempt(s)"[0m
+2026-09-30T02:41:58.0372624Z [36;1m    exit "$status"[0m
+2026-09-30T02:41:58.0372910Z [36;1m  fi[0m
+2026-09-30T02:41:58.0373424Z [36;1m  echo "::warning::uv sync onex_change_control attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"[0m
+2026-09-30T02:41:58.0374030Z [36;1m  sleep "$delay"[0m
+2026-09-30T02:41:58.0374337Z [36;1m  attempt=$((attempt + 1))[0m
+2026-09-30T02:41:58.0374655Z [36;1mdone[0m
+2026-09-30T02:41:58.0575155Z shell: /usr/bin/bash -e {0}
+2026-09-30T02:41:58.0575484Z env:
+2026-09-30T02:41:58.0575751Z   UV_VERSION: 0.6.14
+2026-09-30T02:41:58.0576037Z   PYTHON_VERSION: 3.12
+2026-09-30T02:41:58.0576318Z   CACHE_VERSION: 0.6.0
+2026-09-30T02:41:58.0576597Z   SHELLCHECK_VERSION: v0.10.0
+2026-09-30T02:41:58.0577107Z   OMNI_CI_SHARED_ENV_ENABLED: true
+2026-09-30T02:41:58.0577458Z   OMNI_CI_ENV_ROOT: /home/runner/.cache/omni/ci-envs
+2026-09-30T02:41:58.0577819Z   GIT_CONFIG_COUNT: 1
+2026-09-30T02:41:58.0578108Z   GIT_CONFIG_KEY_0: http.version
+2026-09-30T02:41:58.0578416Z   GIT_CONFIG_VALUE_0: HTTP/1.1
+2026-09-30T02:41:58.0578720Z   UV_HTTP_TIMEOUT: 600
+2026-09-30T02:41:58.0579003Z   ONEX_EVENT_BUS_TYPE: inmemory
+2026-09-30T02:41:58.0579319Z   POSTGRES_DATABASE: omnibase_infra
+2026-09-30T02:41:58.0579650Z   LLM_ENDPOINT_CIDR_ALLOWLIST: 10.0.0.0/8
+2026-09-30T02:41:58.0580048Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-09-30T02:41:58.0580425Z ##[endgroup]
+2026-09-30T02:41:58.1079979Z Using CPython 3.12.3 interpreter at: /usr/bin/python3
+2026-09-30T02:41:58.1080460Z Creating virtual environment at: .venv
+2026-09-30T02:41:58.1101968Z Resolved 62 packages in 0.77ms
+2026-09-30T02:41:58.1212124Z    Building onex-change-control @ file:///home/runner/work/omnibase_infra/omnibase_infra/onex_change_control
+2026-09-30T02:41:58.2582736Z Downloading pygments (1.2MiB)
+2026-09-30T02:41:58.2607886Z Downloading asyncpg (3.4MiB)
+2026-09-30T02:41:58.2609264Z Downloading cryptography (4.3MiB)
+2026-09-30T02:41:58.2611934Z Downloading psycopg2-binary (4.0MiB)
+2026-09-30T02:41:58.2614383Z Downloading mypy (13.0MiB)
+2026-09-30T02:41:58.2617360Z Downloading ruff (10.8MiB)
+2026-09-30T02:41:58.2618333Z Downloading confluent-kafka (3.8MiB)
+2026-09-30T02:41:58.2623293Z Downloading aiokafka (1.1MiB)
+2026-09-30T02:41:58.2625917Z Downloading virtualenv (5.6MiB)
+2026-09-30T02:41:58.2629425Z Downloading pydantic-core (2.0MiB)
+2026-09-30T02:41:58.2630775Z Downloading dependency-injector (1.8MiB)
+2026-09-30T02:41:58.2637109Z Downloading omnibase-core (6.1MiB)
+2026-09-30T02:41:58.8547651Z  Downloaded aiokafka
+2026-09-30T02:41:58.8678884Z  Downloaded pygments
+2026-09-30T02:41:58.8937561Z  Downloaded pydantic-core
+2026-09-30T02:41:58.8947925Z  Downloaded dependency-injector
+2026-09-30T02:41:58.9764771Z  Downloaded asyncpg
+2026-09-30T02:41:58.9848339Z  Downloaded confluent-kafka
+2026-09-30T02:41:58.9928122Z  Downloaded psycopg2-binary
+2026-09-30T02:41:58.9952173Z  Downloaded cryptography
+2026-09-30T02:41:59.0060726Z  Downloaded virtualenv
+2026-09-30T02:41:59.0442991Z  Downloaded omnibase-core
+2026-09-30T02:41:59.0851491Z  Downloaded ruff
+2026-09-30T02:41:59.1577784Z  Downloaded mypy
+2026-09-30T02:41:59.3887095Z       Built onex-change-control @ file:///home/runner/work/omnibase_infra/omnibase_infra/onex_change_control
+2026-09-30T02:41:59.3895805Z Prepared 62 packages in 1.27s
+2026-09-30T02:41:59.4663727Z Installed 62 packages in 76ms
+2026-09-30T02:41:59.4664309Z  + aiokafka==0.14.0
+2026-09-30T02:41:59.4664780Z  + annotated-types==0.7.0
+2026-09-30T02:41:59.4665223Z  + anyio==4.13.0
+2026-09-30T02:41:59.4665852Z  + async-timeout==5.0.1
+2026-09-30T02:41:59.4666320Z  + asyncpg==0.31.0
+2026-09-30T02:41:59.4666718Z  + attrs==26.1.0
+2026-09-30T02:41:59.4667262Z  + blake3==1.0.8
+2026-09-30T02:41:59.4667667Z  + certifi==2026.4.22
+2026-09-30T02:41:59.4668081Z  + cffi==2.0.0
+2026-09-30T02:41:59.4668476Z  + cfgv==3.5.0
+2026-09-30T02:41:59.4668857Z  + click==8.3.3
+2026-09-30T02:41:59.4669267Z  + colorama==0.4.6
+2026-09-30T02:41:59.4669679Z  + confluent-kafka==2.14.0
+2026-09-30T02:41:59.4670118Z  + coverage==7.13.4
+2026-09-30T02:41:59.4670535Z  + cryptography==46.0.7
+2026-09-30T02:41:59.4670966Z  + deepdiff==9.0.0
+2026-09-30T02:41:59.4671381Z  + dependency-injector==4.49.0
+2026-09-30T02:41:59.4671820Z  + distlib==0.4.0
+2026-09-30T02:41:59.4672219Z  + filelock==3.25.1
+2026-09-30T02:41:59.4672693Z  + h11==0.16.0
+2026-09-30T02:41:59.4673067Z  + httpcore==1.0.9
+2026-09-30T02:41:59.4673446Z  + httpx==0.28.1
+2026-09-30T02:41:59.4673835Z  + identify==2.6.17
+2026-09-30T02:41:59.4674226Z  + idna==3.13
+2026-09-30T02:41:59.4674631Z  + iniconfig==2.3.0
+2026-09-30T02:41:59.4675038Z  + jsonschema==4.26.0
+2026-09-30T02:41:59.4675500Z  + jsonschema-specifications==2025.9.1
+2026-09-30T02:41:59.4676012Z  + kafka-python==2.3.0
+2026-09-30T02:41:59.4676433Z  + librt==0.8.1
+2026-09-30T02:41:59.4676859Z  + mypy==1.19.1
+2026-09-30T02:41:59.4677439Z  + mypy-extensions==1.1.0
+2026-09-30T02:41:59.4677964Z  + nodeenv==1.10.0
+2026-09-30T02:41:59.4678542Z  + omnibase-core==0.46.7
+2026-09-30T02:41:59.4679322Z  + onex-change-control==0.5.1 (from file:///home/runner/work/omnibase_infra/omnibase_infra/onex_change_control)
+2026-09-30T02:41:59.4680080Z  + orderly-set==5.5.0
+2026-09-30T02:41:59.4680524Z  + packaging==26.0
+2026-09-30T02:41:59.4680921Z  + pathspec==1.0.4
+2026-09-30T02:41:59.4681322Z  + platformdirs==4.9.4
+2026-09-30T02:41:59.4681644Z  + pluggy==1.6.0
+2026-09-30T02:41:59.4681939Z  + pre-commit==4.5.1
+2026-09-30T02:41:59.4682270Z  + psycopg2-binary==2.9.11
+2026-09-30T02:41:59.4682594Z  + pycparser==3.0
+2026-09-30T02:41:59.4682894Z  + pydantic==2.12.5
+2026-09-30T02:41:59.4683222Z  + pydantic-core==2.41.5
+2026-09-30T02:41:59.4683562Z  + pygments==2.19.2
+2026-09-30T02:41:59.4683868Z  + pytest==9.0.2
+2026-09-30T02:41:59.4684164Z  + pytest-cov==7.0.0
+2026-09-30T02:41:59.4684484Z  + pytest-split==0.11.0
+2026-09-30T02:41:59.4684795Z  + python-discovery==1.1.2
+2026-09-30T02:41:59.4685130Z  + pyyaml==6.0.3
+2026-09-30T02:41:59.4685440Z  + referencing==0.37.0
+2026-09-30T02:41:59.4685743Z  + rpds-py==0.30.0
+2026-09-30T02:41:59.4686013Z  + ruamel-yaml==0.19.1
+2026-09-30T02:41:59.4686336Z  + ruff==0.15.6
+2026-09-30T02:41:59.4686631Z  + tomli-w==1.2.0
+2026-09-30T02:41:59.4687380Z  + tree-sitter==0.25.2
+2026-09-30T02:41:59.4687804Z  + tree-sitter-python==0.25.0
+2026-09-30T02:41:59.4688197Z  + types-colorama==0.4.15.20250801
+2026-09-30T02:41:59.4688536Z  + types-pyyaml==6.0.12.20250915
+2026-09-30T02:41:59.4688851Z  + typing-extensions==4.15.0
+2026-09-30T02:41:59.4689161Z  + typing-inspection==0.4.2
+2026-09-30T02:41:59.4689456Z  + virtualenv==21.2.0
+2026-09-30T02:41:59.5663839Z ##[group]Run set -euo pipefail
+2026-09-30T02:41:59.5664223Z [36;1mset -euo pipefail[0m
+2026-09-30T02:41:59.5664645Z [36;1mRESOLVED_PR="$(python3 scripts/ci/resolve_contract_compliance_pr.py \[0m
+2026-09-30T02:41:59.5665130Z [36;1m  --repo "OmniNode-ai/omnibase_infra" \[0m
+2026-09-30T02:41:59.5665511Z [36;1m  --pr-number "${PR_NUMBER:-}" \[0m
+2026-09-30T02:41:59.5665893Z [36;1m  --merge-group-ref "${MERGE_GROUP_REF:-}" \[0m
+2026-09-30T02:41:59.5666296Z [36;1m  --sha "5c2c1c9fcfd6b84ed32b47d20e23824504e2697c" \[0m
+2026-09-30T02:41:59.5666686Z [36;1m  --event-name "pull_request")"[0m
+2026-09-30T02:41:59.5667539Z [36;1mecho "pr_number=${RESOLVED_PR}" >> "$GITHUB_OUTPUT"[0m
+2026-09-30T02:41:59.5668080Z [36;1mecho "Contract-compliance DoD scope resolved to PR #${RESOLVED_PR}." >> "$GITHUB_STEP_SUMMARY"[0m
+2026-09-30T02:41:59.5722213Z shell: /usr/bin/bash -e {0}
+2026-09-30T02:41:59.5722529Z env:
+2026-09-30T02:41:59.5722794Z   UV_VERSION: 0.6.14
+2026-09-30T02:41:59.5723270Z   PYTHON_VERSION: 3.12
+2026-09-30T02:41:59.5723568Z   CACHE_VERSION: 0.6.0
+2026-09-30T02:41:59.5723863Z   SHELLCHECK_VERSION: v0.10.0
+2026-09-30T02:41:59.5724183Z   OMNI_CI_SHARED_ENV_ENABLED: true
+2026-09-30T02:41:59.5724542Z   OMNI_CI_ENV_ROOT: /home/runner/.cache/omni/ci-envs
+2026-09-30T02:41:59.5724902Z   GIT_CONFIG_COUNT: 1
+2026-09-30T02:41:59.5725187Z   GIT_CONFIG_KEY_0: http.version
+2026-09-30T02:41:59.5725498Z   GIT_CONFIG_VALUE_0: HTTP/1.1
+2026-09-30T02:41:59.5725800Z   UV_HTTP_TIMEOUT: 600
+2026-09-30T02:41:59.5726091Z   ONEX_EVENT_BUS_TYPE: inmemory
+2026-09-30T02:41:59.5726396Z   POSTGRES_DATABASE: omnibase_infra
+2026-09-30T02:41:59.5726729Z   LLM_ENDPOINT_CIDR_ALLOWLIST: 10.0.0.0/8
+2026-09-30T02:41:59.5727297Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-09-30T02:41:59.5729445Z   GH_TOKEN: ***
+2026-09-30T02:41:59.5729734Z   PR_NUMBER: 4325
+2026-09-30T02:41:59.5730010Z   MERGE_GROUP_REF: 
+2026-09-30T02:41:59.5730295Z ##[endgroup]
+2026-09-30T02:41:59.6138012Z ##[group]Run set -euo pipefail
+2026-09-30T02:41:59.6138405Z [36;1mset -euo pipefail[0m
+2026-09-30T02:41:59.6138726Z [36;1mif [ -z "${PR_NUMBER:-}" ]; then[0m
+2026-09-30T02:41:59.6139169Z [36;1m  # Unreachable via the resolver step above, which already exits 1 on an[0m
+2026-09-30T02:41:59.6139686Z [36;1m  # unresolvable scope. Kept as a defence-in-depth fail-closed floor:[0m
+2026-09-30T02:41:59.6140176Z [36;1m  # never run this gate to a green conclusion without a PR whose[0m
+2026-09-30T02:41:59.6140621Z [36;1m  # check_values were actually evaluated (OMN-16508).[0m
+2026-09-30T02:41:59.6141191Z [36;1m  echo "::error::No PR number resolved (event=pull_request); DoD check_values are PR-scoped. Failing closed."[0m
+2026-09-30T02:41:59.6141704Z [36;1m  exit 1[0m
+2026-09-30T02:41:59.6141992Z [36;1mfi[0m
+2026-09-30T02:41:59.6142350Z [36;1muv run python scripts/ci/run_contract_compliance_check.py \[0m
+2026-09-30T02:41:59.6142759Z [36;1m  --pr "$PR_NUMBER" \[0m
+2026-09-30T02:41:59.6143135Z [36;1m  --repo "OmniNode-ai/omnibase_infra" \[0m
+2026-09-30T02:41:59.6143591Z [36;1m  --contracts-dir "$GITHUB_WORKSPACE/onex_change_control/contracts" \[0m
+2026-09-30T02:41:59.6144032Z [36;1m  --workspace "$GITHUB_WORKSPACE" \[0m
+2026-09-30T02:41:59.6144559Z [36;1m  --legacy-allowlist "$GITHUB_WORKSPACE/onex_change_control/scripts/ci/dod_runner_legacy_allowlist.txt"[0m
+2026-09-30T02:41:59.6195805Z shell: /usr/bin/bash -e {0}
+2026-09-30T02:41:59.6196123Z env:
+2026-09-30T02:41:59.6196394Z   UV_VERSION: 0.6.14
+2026-09-30T02:41:59.6196686Z   PYTHON_VERSION: 3.12
+2026-09-30T02:41:59.6197114Z   CACHE_VERSION: 0.6.0
+2026-09-30T02:41:59.6197423Z   SHELLCHECK_VERSION: v0.10.0
+2026-09-30T02:41:59.6197744Z   OMNI_CI_SHARED_ENV_ENABLED: true
+2026-09-30T02:41:59.6198110Z   OMNI_CI_ENV_ROOT: /home/runner/.cache/omni/ci-envs
+2026-09-30T02:41:59.6198472Z   GIT_CONFIG_COUNT: 1
+2026-09-30T02:41:59.6198766Z   GIT_CONFIG_KEY_0: http.version
+2026-09-30T02:41:59.6199089Z   GIT_CONFIG_VALUE_0: HTTP/1.1
+2026-09-30T02:41:59.6199387Z   UV_HTTP_TIMEOUT: 600
+2026-09-30T02:41:59.6199689Z   ONEX_EVENT_BUS_TYPE: inmemory
+2026-09-30T02:41:59.6200007Z   POSTGRES_DATABASE: omnibase_infra
+2026-09-30T02:41:59.6200350Z   LLM_ENDPOINT_CIDR_ALLOWLIST: 10.0.0.0/8
+2026-09-30T02:41:59.6200742Z   UV_PYTHON_INSTALL_DIR: /home/runner/work/_temp/uv-python-dir
+2026-09-30T02:41:59.6202819Z   GH_TOKEN: ***
+2026-09-30T02:41:59.6203112Z   PR_NUMBER: 4325
+2026-09-30T02:41:59.6203397Z ##[endgroup]
+2026-09-30T02:42:03.5122775Z [INFO] Ticket: OMN-17427, PR: #4325, Repo: OmniNode-ai/omnibase_infra
+2026-09-30T02:42:03.5123597Z [WARN] No contract at /home/runner/work/omnibase_infra/omnibase_infra/onex_change_control/contracts/OMN-17427.yaml. Backfill pending (OMN-8637). PR not blocked.
+2026-09-30T02:42:03.7903689Z Post job cleanup.
+2026-09-30T02:42:03.8825650Z UV_PYTHON_INSTALL_DIR is already set to /home/runner/work/_temp/uv-python-dir
+2026-09-30T02:42:03.8945531Z Post job cleanup.
+2026-09-30T02:42:03.9656370Z [command]/usr/bin/git version
+2026-09-30T02:42:03.9687536Z git version 2.55.0
+2026-09-30T02:42:03.9715290Z Temporarily overriding HOME='/home/runner/work/_temp/40732d80-e580-46b1-aadc-12587a81a806' before making global git config changes
+2026-09-30T02:42:03.9716430Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-30T02:42:03.9718910Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/omnibase_infra/omnibase_infra/onex_change_control
+2026-09-30T02:42:03.9742592Z Removing SSH command configuration
+2026-09-30T02:42:03.9747664Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-30T02:42:03.9774333Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-30T02:42:03.9991882Z Removing HTTP extra header
+2026-09-30T02:42:03.9996226Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-30T02:42:04.0040614Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-30T02:42:04.0236563Z Removing includeIf entries pointing to credentials config files
+2026-09-30T02:42:04.0241392Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-30T02:42:04.0264300Z includeif.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/onex_change_control/.git.path
+2026-09-30T02:42:04.0265197Z includeif.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/onex_change_control/.git/worktrees/*.path
+2026-09-30T02:42:04.0265794Z includeif.gitdir:/github/workspace/onex_change_control/.git.path
+2026-09-30T02:42:04.0266369Z includeif.gitdir:/github/workspace/onex_change_control/.git/worktrees/*.path
+2026-09-30T02:42:04.0271017Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/onex_change_control/.git.path
+2026-09-30T02:42:04.0288670Z /home/runner/work/_temp/git-credentials-3ccd60a9-11d5-44f3-b8a0-fb23a9d2ce71.config
+2026-09-30T02:42:04.0296283Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/onex_change_control/.git.path /home/runner/work/_temp/git-credentials-3ccd60a9-11d5-44f3-b8a0-fb23a9d2ce71.config
+2026-09-30T02:42:04.0324072Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/onex_change_control/.git/worktrees/*.path
+2026-09-30T02:42:04.0348502Z /home/runner/work/_temp/git-credentials-3ccd60a9-11d5-44f3-b8a0-fb23a9d2ce71.config
+2026-09-30T02:42:04.0355910Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/onex_change_control/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-3ccd60a9-11d5-44f3-b8a0-fb23a9d2ce71.config
+2026-09-30T02:42:04.0383952Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/onex_change_control/.git.path
+2026-09-30T02:42:04.0401873Z /github/runner_temp/git-credentials-3ccd60a9-11d5-44f3-b8a0-fb23a9d2ce71.config
+2026-09-30T02:42:04.0408169Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/onex_change_control/.git.path /github/runner_temp/git-credentials-3ccd60a9-11d5-44f3-b8a0-fb23a9d2ce71.config
+2026-09-30T02:42:04.0433808Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/onex_change_control/.git/worktrees/*.path
+2026-09-30T02:42:04.0450770Z /github/runner_temp/git-credentials-3ccd60a9-11d5-44f3-b8a0-fb23a9d2ce71.config
+2026-09-30T02:42:04.0457424Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/onex_change_control/.git/worktrees/*.path /github/runner_temp/git-credentials-3ccd60a9-11d5-44f3-b8a0-fb23a9d2ce71.config
+2026-09-30T02:42:04.0483606Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-30T02:42:04.0693175Z Removing credentials config '/home/runner/work/_temp/git-credentials-3ccd60a9-11d5-44f3-b8a0-fb23a9d2ce71.config'
+2026-09-30T02:42:04.0844260Z ##[warning]Input 'app-id' has been deprecated with message: Use 'client-id' instead.
+2026-09-30T02:42:04.0876777Z Post job cleanup.
+2026-09-30T02:42:04.4550124Z Token revoked
+2026-09-30T02:42:04.4911697Z Post job cleanup.
+2026-09-30T02:42:04.5617267Z [command]/usr/bin/git version
+2026-09-30T02:42:04.5652660Z git version 2.55.0
+2026-09-30T02:42:04.5678204Z Temporarily overriding HOME='/home/runner/work/_temp/017e885a-ff32-43b3-a1ad-ae498bbe2cdf' before making global git config changes
+2026-09-30T02:42:04.5679080Z Adding repository directory to the temporary git global config as a safe directory
+2026-09-30T02:42:04.5681927Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/omnibase_infra/omnibase_infra
+2026-09-30T02:42:04.5731637Z Removing SSH command configuration
+2026-09-30T02:42:04.5737403Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-09-30T02:42:04.5765103Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-09-30T02:42:04.5963941Z Removing HTTP extra header
+2026-09-30T02:42:04.5967968Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-09-30T02:42:04.5993949Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-09-30T02:42:04.6187935Z Removing includeIf entries pointing to credentials config files
+2026-09-30T02:42:04.6193630Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-09-30T02:42:04.6213685Z includeif.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/.git.path
+2026-09-30T02:42:04.6214378Z includeif.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/.git/worktrees/*.path
+2026-09-30T02:42:04.6214949Z includeif.gitdir:/github/workspace/.git.path
+2026-09-30T02:42:04.6215552Z includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-30T02:42:04.6220303Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/.git.path
+2026-09-30T02:42:04.6238147Z /home/runner/work/_temp/git-credentials-dd8901a4-6e48-442b-b3de-427132062d46.config
+2026-09-30T02:42:04.6246005Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/.git.path /home/runner/work/_temp/git-credentials-dd8901a4-6e48-442b-b3de-427132062d46.config
+2026-09-30T02:42:04.6275470Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/.git/worktrees/*.path
+2026-09-30T02:42:04.6299771Z /home/runner/work/_temp/git-credentials-dd8901a4-6e48-442b-b3de-427132062d46.config
+2026-09-30T02:42:04.6307593Z [command]/usr/bin/git config --local --unset includeif.gitdir:/home/runner/work/omnibase_infra/omnibase_infra/.git/worktrees/*.path /home/runner/work/_temp/git-credentials-dd8901a4-6e48-442b-b3de-427132062d46.config
+2026-09-30T02:42:04.6339488Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git.path
+2026-09-30T02:42:04.6363301Z /github/runner_temp/git-credentials-dd8901a4-6e48-442b-b3de-427132062d46.config
+2026-09-30T02:42:04.6369648Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git.path /github/runner_temp/git-credentials-dd8901a4-6e48-442b-b3de-427132062d46.config
+2026-09-30T02:42:04.6454693Z [command]/usr/bin/git config --local --get-all includeif.gitdir:/github/workspace/.git/worktrees/*.path
+2026-09-30T02:42:04.6472672Z /github/runner_temp/git-credentials-dd8901a4-6e48-442b-b3de-427132062d46.config
+2026-09-30T02:42:04.6479565Z [command]/usr/bin/git config --local --unset includeif.gitdir:/github/workspace/.git/worktrees/*.path /github/runner_temp/git-credentials-dd8901a4-6e48-442b-b3de-427132062d46.config
+2026-09-30T02:42:04.6537476Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-09-30T02:42:04.6733013Z Removing credentials config '/home/runner/work/_temp/git-credentials-dd8901a4-6e48-442b-b3de-427132062d46.config'
+2026-09-30T02:42:04.6858188Z Cleaning up orphan processes

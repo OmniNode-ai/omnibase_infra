@@ -269,6 +269,14 @@ class CatalogResolver:
                 publish_host_owner = bundle_name
 
             for k, v in bundle.env_default_overrides.items():
+                # The value is spliced into ``${VAR:-<value>}``; a ``$``, ``{``
+                # or ``}`` in it would end or re-open the reference and compose
+                # would read a different default, or none.
+                if any(ch in v for ch in "${}"):
+                    raise ValueError(
+                        f"env_default_overrides value for {k} in bundle "
+                        f"'{bundle_name}' contains '$', '{{' or '}}': {v!r}"
+                    )
                 if k in env_default_overrides and env_default_overrides[k] != v:
                     raise ValueError(
                         f"Env default conflict: {k} defaults to "

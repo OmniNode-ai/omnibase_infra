@@ -331,6 +331,11 @@ class _TerminalFacts:
 #: worked around here.
 REJECTION_PUBLISH_MAX_BLOCK_MS = 10_000
 
+#: OMN-20133: kafka-python's default ``max_poll_interval_ms`` (the consumer
+#: does not override it). A pre-accept settle wait at least this long has let
+#: the coordinator drop the member, which is reported rather than discovered.
+SETTLE_WAIT_EVICTION_WARN_SECONDS = 300.0
+
 
 class DeployAgent:
     def __init__(self, *, skip_self_update: bool = False):
@@ -868,10 +873,27 @@ class DeployAgent:
         """
 
         def _before_reexec() -> None:
-            # Wait first, then rewind: the rewind must be the last thing before
-            # the process image is replaced (OMN-16442).
-            self._await_settle_before_reexec()
+            # Rewind first, then wait (OMN-20133). The settle wait does not
+            # call poll(), and a lab-overlay settle routinely runs past
+            # kafka-python's max_poll_interval_ms (300 s): job 7b970ab9 waited
+            # 6m43s, the coordinator dropped the member, and a rewind made
+            # AFTER the wait raised CommitFailedError, so no re-exec happened
+            # and the command was lost. Committed while the member is live, the
+            # rewind holds whatever the wait does to the membership, because
+            # nothing on this thread commits between here and the re-exec.
             rewind_offset()
+            started = time.monotonic()
+            self._await_settle_before_reexec()
+            waited = time.monotonic() - started
+            if waited >= SETTLE_WAIT_EVICTION_WARN_SECONDS:
+                logger.warning(
+                    "self_update[boundary=pre_accept]: the settle wait took %.0fs, "
+                    "past the consumer's poll interval, so the group has likely "
+                    "dropped this member; the command's offset was rewound "
+                    "before the wait, so the replacement process re-reads it "
+                    "friction_type=self_update_settle_outlasted_poll_interval",
+                    waited,
+                )
 
         self.executor.self_update(
             boundary=EnumSelfUpdateBoundary.PRE_ACCEPT,
