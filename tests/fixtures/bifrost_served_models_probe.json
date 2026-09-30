@@ -33,7 +33,7 @@
       "root": "/data/inference/hf-cache/Qwen3.8-27B-NVFP4-RTX5090",
       "max_model_len": 131072,
       "control": "Negative control run in the same session with the same curl invocation: http://192.168.86.201:8001/v1/models returns curl exit 7, http=000 in 0.035s. So the http=200 in 0.012s on :8000 is that port answering, not a proxy answering everything.",
-      "revalidation_note": "OMN-18626. THE THIRD FLIP, and the second one to leave the local tier dark. The operator swapped the served model on 2026-09-17 at about 15:24Z, roughly four hours after OMN-18570 recorded the readback this entry replaces. /v1/models now returns exactly one id, Qwen3.8-27B, rooted at the NVFP4 weight set that OMN-18570 found staged on disk and loaded by nothing. The flip was found by a real delegation, not by this file: run 95df150b-21cc-4b0e-afc6-9e25fbeb3735 at 19:52Z had its local rung refused with HTTP 404 'The model `Qwen3.6-35B-A3B` does not exist.' and climbed to a metered cheap_cloud rung. That is the cost of this record going stale — a recorded readback cannot notice that the thing it recorded has moved, so the binding table it pins stays confidently wrong until something calls the endpoint for real."
+      "revalidation_note": "OMN-18626. THE THIRD FLIP, and the second one to leave the local tier dark. The operator swapped the served model on 2026-09-17 at about 15:24Z, roughly four hours after OMN-18570 recorded the readback this entry replaces. /v1/models now returns exactly one id, Qwen3.8-27B, rooted at the NVFP4 weight set that OMN-18570 found staged on disk and loaded by nothing. The flip was found by a real delegation, not by this file: run 95df150b-21cc-4b0e-afc6-9e25fbeb3735 at 19:52Z had its local rung refused with HTTP 404 'The model `Qwen3.6-35B-A3B` does not exist.' and climbed to a metered cheap_cloud rung. That is the cost of this record going stale \u2014 a recorded readback cannot notice that the thing it recorded has moved, so the binding table it pins stays confidently wrong until something calls the endpoint for real."
     },
     {
       "endpoint": "http://192.168.86.200:8101/v1/models",
@@ -77,6 +77,21 @@
       "max_model_len": 8192,
       "control": "Negative control in the same session with the same curl invocation: http://192.168.86.201:8003/v1/models returns curl exit 7, http=000 in 0.069s. So the http=200 in 0.016s on :8002 is that port answering, not a proxy answering everything. Separately, http://192.168.86.201:8002/v1/chat/completions returns http=404 (this endpoint is embedding-only) while a POST to http://192.168.86.201:8002/v1/embeddings returns real 1024-dimensional vectors, which is why the dev overlay binds the /v1/embeddings path rather than /v1/chat/completions.",
       "revalidation_note": "OMN-17099. The endpoint has been live and reachable the whole time (matches the OMN-16442 base-contract note verbatim: same owned_by, same root, same max_model_len); the gap was that no lane overlay ever bound it, so every render shipped endpoint_url: null regardless. This entry is what lets the dev lane bind it for the first time."
+    },
+    {
+      "endpoint": "http://192.168.86.200:8130/v1/models",
+      "probed_at": "2026-09-30T15:31:26Z",
+      "command": "docker exec omninode-runtime-effects curl -sS -m 10 -w '\\nhttp=%{http_code} t=%{time_total}\\n' http://192.168.86.200:8130/v1/models (run on 192.168.86.201, dev lane compose project omnibase-infra, so the reachability recorded is the runtime's own)",
+      "http_status": 200,
+      "reachable": true,
+      "served_model_ids": [
+        "gpt-oss-120b"
+      ],
+      "owned_by": "llamacpp",
+      "max_model_len": 131072,
+      "max_model_len_source": "llama.cpp reports the context as data[].meta.n_ctx rather than max_model_len; the value is that field. The server runs --parallel 4 --kv-unified -c 131072, so the 131072 tokens are one pool shared by the four slots, not 131072 per slot.",
+      "control": "Negative control in the same container with the same curl: http://192.168.86.200:8131/v1/models returned curl exit 7, http=000 in 0.003s (could not connect), so the http=200 in 0.006s on :8130 is that port answering. Keyless (no Authorization header sent).",
+      "revalidation_note": "OMN-19432. gpt-oss-120b (MXFP4 GGUF, llama.cpp, Metal) on the .200 Mac Studio, the always-on planner also used by the orchestrating sessions. Recorded so the dev lane overlay may bind it as a long-context local fallback (OMN-17099); binding it is a lane-overlay change, not a product change."
     }
   ]
 }
