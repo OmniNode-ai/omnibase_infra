@@ -255,6 +255,7 @@ migrations:
   forward/nodes/node_projection_dod_verdict/0000_create_dod_verify_runs.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_dod_verdict/0001_grant_omninode_runtime_dod_verify_runs.sql: expand-only
   forward/nodes/node_projection_dod_verdict/0002_dod_verify_runs_delegation_correlation_id.sql: expand-only
+  forward/nodes/node_projection_dod_verdict/0003_dod_verify_runs_goal.sql: expand-only # additive
   forward/nodes/node_projection_event_chain/0001_create_event_chain.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PK_EVENT_CHAIN; ALTER TABLE ADD CONSTRAINT NON_NEGATIVE_EVENT_CHAIN_SEQUEN
   forward/nodes/node_projection_event_chain/0002_grant_omninode_runtime_event_chain.sql: expand-only
   forward/nodes/node_projection_instruction_eval/0001_create_instruction_eval_aggregate_snapshots.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT INSTRUCTION_EVAL_AGGREGATE_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT UQ_I
