@@ -146,8 +146,8 @@ def _resolve_packaged_contract(node_name: str) -> Path:
     default=None,
     help=(
         "Unix socket of the emit daemon for receipt-mode capture events "
-        "(default: ~/.claude/emit.sock). Unreachable daemon => events spool "
-        "under <state-root>/emit_spool/ for later replay."
+        "(default: ~/.claude/emit.sock). Unreachable daemon => events are "
+        "dropped."
     ),
 )
 @click.option(

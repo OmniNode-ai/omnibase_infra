@@ -2217,8 +2217,8 @@ def _timeout_receipt(
     default=None,
     help=(
         "Unix socket of the emit daemon for capture events (default: "
-        "~/.claude/emit.sock). Unreachable daemon => events spool under "
-        "<state-root>/emit_spool/ for later replay."
+        "~/.claude/emit.sock). Unreachable daemon => events are "
+        "dropped."
     ),
 )
 @click.option(
