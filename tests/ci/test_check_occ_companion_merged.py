@@ -37,9 +37,11 @@ import pytest
 from scripts.ci.check_occ_companion_merged import (
     AUTOBIND_OUTCOME_CHECK_NAME,
     AUTOBIND_OUTCOME_MARKER_PREFIX,
+    DEPENDENCY_BOT_AUTHORS,
     EXIT_FAIL,
     EXIT_PASS,
     EXIT_PENDING,
+    OCC_WRITER_BOT_AUTHORS,
     evaluate_once,
     main,
     parse_evidence_source,
@@ -654,6 +656,184 @@ class TestDependencyPinOnlyExemption:
             )
         )
         assert verdict.code == EXIT_FAIL
+
+
+class _SpyFetcher(FakeFetcher):
+    """FakeFetcher that records which head SHAs had their check-runs read."""
+
+    def __init__(self, **kwargs: object) -> None:
+        super().__init__(**kwargs)  # type: ignore[arg-type]
+        self.check_run_reads: list[str] = []
+
+    def check_runs(self, repo: str, head_sha: str) -> list[dict[str, object]] | None:
+        self.check_run_reads.append(head_sha)
+        return super().check_runs(repo, head_sha)
+
+
+class TestOccWriterAppPinOnlyExemption:
+    """OMN-20161 -- the writer app is exempt ONLY when pin-only is proven.
+
+    The proof is the producer's DECLINED outcome for the CURRENT head SHA
+    carrying the no-companion-required token, read by the file's own reader
+    and predicate. The writer logins are a SEPARATE set from
+    DEPENDENCY_BOT_AUTHORS, which stays unconditional.
+    """
+
+    HEAD = "7c4d1a9b8e35f0c26ad71b4e9f3082cd5a6e1b74"
+    STALE = "1111111111111111111111111111111111111111"
+    WRITERS = (
+        "app/onexbot-occ-writer",
+        "onexbot-occ-writer[bot]",
+        "onexbot-occ-writer",
+    )
+    NEAR_MISS = (
+        "onexbot-occ-writer-fork",
+        "app/onexbot-occ-writerx",
+        "xonexbot-occ-writer",
+        "onexbot-occ-writer[bot]x",
+    )
+    PIN_ONLY = "skip:DEPENDENCY_PIN_ONLY dependency-pin-only diff (pin keys only)"
+
+    def _run(self, outcome: str, reason: str) -> dict[str, object]:
+        summary = (
+            f"{AUTOBIND_OUTCOME_MARKER_PREFIX} {outcome} repo={PRODUCT_REPO} "
+            f"pr=2500 correlation_id=4f0d5c2a-7b91-4a0e-9d33-2c8f61ae55b0 "
+            f"reason={reason}\n"
+        )
+        return {
+            "name": AUTOBIND_OUTCOME_CHECK_NAME,
+            "status": "completed",
+            "completed_at": "2026-09-30T16:36:00Z",
+            "output": {"title": f"{outcome}: x", "summary": summary},
+        }
+
+    def _fetcher(
+        self,
+        author: str,
+        runs: list[dict[str, object]] | None,
+        *,
+        runs_sha: str | None = None,
+        body: str = "",
+    ) -> _SpyFetcher:
+        return _SpyFetcher(
+            prs={
+                (PRODUCT_REPO, "2500"): _product_pr(
+                    body, author=author, head_sha=self.HEAD
+                )
+            },
+            check_runs={(PRODUCT_REPO, runs_sha or self.HEAD): runs},
+        )
+
+    def test_writer_set_is_exactly_the_three_logins(self) -> None:
+        assert frozenset(self.WRITERS) == OCC_WRITER_BOT_AUTHORS
+
+    def test_dependency_bot_set_is_unchanged_and_disjoint(self) -> None:
+        assert (
+            frozenset(
+                {
+                    "dependabot[bot]",
+                    "app/dependabot",
+                    "dependabot",
+                    "renovate[bot]",
+                    "app/renovate",
+                    "renovate",
+                }
+            )
+            == DEPENDENCY_BOT_AUTHORS
+        )
+        assert not (DEPENDENCY_BOT_AUTHORS & OCC_WRITER_BOT_AUTHORS)
+
+    @pytest.mark.parametrize("author", WRITERS)
+    def test_writer_with_pin_only_outcome_is_exempt(self, author: str) -> None:
+        verdict = _evaluate(
+            self._fetcher(author, [self._run("DECLINED", self.PIN_ONLY)])
+        )
+        assert verdict.code == EXIT_PASS
+
+    def test_writer_pin_only_is_exempt_even_with_a_stamp_already_cited(self) -> None:
+        body = "chore: bump\n\nEvidence-Source: OmniNode-ai/onex_change_control#1\n"
+        verdict = _evaluate(
+            self._fetcher(
+                "app/onexbot-occ-writer",
+                [self._run("DECLINED", self.PIN_ONLY)],
+                body=body,
+            )
+        )
+        assert verdict.code == EXIT_PASS
+        assert "writer app" in verdict.reason
+
+    @pytest.mark.parametrize(
+        "runs",
+        [
+            pytest.param(None, id="unreadable"),
+            pytest.param([], id="absent"),
+        ],
+    )
+    def test_writer_without_a_readable_outcome_is_not_exempt(
+        self, runs: list[dict[str, object]] | None
+    ) -> None:
+        verdict = _evaluate(self._fetcher("app/onexbot-occ-writer", runs))
+        assert verdict.code == EXIT_PENDING
+
+    def test_writer_with_a_minted_outcome_is_not_exempt(self) -> None:
+        verdict = _evaluate(
+            self._fetcher("app/onexbot-occ-writer", [self._run("MINTED", "minted")])
+        )
+        assert verdict.code == EXIT_PENDING
+
+    def test_writer_with_another_decline_reason_is_not_exempt(self) -> None:
+        verdict = _evaluate(
+            self._fetcher(
+                "app/onexbot-occ-writer",
+                [self._run("DECLINED", "skip:NO_RED_DERIVABLE_CHECK none")],
+            )
+        )
+        assert verdict.code == EXIT_FAIL
+
+    def test_writer_with_a_pin_only_outcome_for_another_head_is_not_exempt(
+        self,
+    ) -> None:
+        verdict = _evaluate(
+            self._fetcher(
+                "app/onexbot-occ-writer",
+                [self._run("DECLINED", self.PIN_ONLY)],
+                runs_sha=self.STALE,
+            )
+        )
+        assert verdict.code == EXIT_PENDING
+
+    def test_writer_with_the_token_only_in_the_body_is_not_exempt(self) -> None:
+        verdict = _evaluate(
+            self._fetcher("app/onexbot-occ-writer", [], body=self.PIN_ONLY)
+        )
+        assert verdict.code == EXIT_PENDING
+
+    def test_human_with_a_pin_only_outcome_never_short_circuits_the_exemption(
+        self,
+    ) -> None:
+        """Human + pin-only outcome is decided by the pre-existing logic (the
+        producer verdict passes it there), not by the writer exemption, whose
+        verdict text is what this asserts is absent."""
+        fetcher = self._fetcher("jonahgabriel", [self._run("DECLINED", self.PIN_ONLY)])
+        verdict = _evaluate(fetcher)
+        assert "writer app" not in verdict.reason
+        # Pre-existing path reads the outcome only after the stamp check, once.
+        assert fetcher.check_run_reads == [self.HEAD]
+
+    @pytest.mark.parametrize("author", NEAR_MISS)
+    def test_near_miss_logins_are_not_exempt(self, author: str) -> None:
+        fetcher = self._fetcher(author, [], body="")
+        verdict = _evaluate(fetcher)
+        assert verdict.code == EXIT_PENDING
+        assert "writer app" not in verdict.reason
+
+    @pytest.mark.parametrize("author", ["dependabot[bot]", "renovate[bot]"])
+    def test_dependency_bots_stay_unconditionally_exempt_without_a_probe(
+        self, author: str
+    ) -> None:
+        fetcher = self._fetcher(author, [])
+        assert _evaluate(fetcher).code == EXIT_PASS
+        assert fetcher.check_run_reads == []
 
 
 class TestReadAutobindOutcome:

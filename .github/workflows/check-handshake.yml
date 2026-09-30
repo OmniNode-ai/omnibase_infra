@@ -34,8 +34,8 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_core
-                              # Auto-bumped by omnibase_core publish-downstream-pin-bump.yml to ad62c0b92876.
-          ref: ad62c0b928760958fb073a9e32621de53c4a9a1a
+                                        # Auto-bumped by omnibase_core publish-downstream-pin-bump.yml to 645ebea04116.
+          ref: 645ebea04116d45540ab3bff8ac0661ce08ad016
           path: omnibase_core
           # OMNIBASE_CORE_TOKEN is required when omnibase_core is private.
           # GITHUB_TOKEN only has read access to the current repo by default.
