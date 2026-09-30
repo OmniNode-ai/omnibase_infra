@@ -30,6 +30,7 @@ from collections.abc import Generator
 import pytest
 
 from omnibase_infra.cli import cli_delegate, cli_node
+from omnibase_infra.cli.store_developer_profile import StoreDeveloperProfile
 from tests.helpers.cli_registry_stand_in import (
     install_stand_in_registry,
     wiring_authority,
@@ -54,6 +55,24 @@ def _restore_process_environment_after_cli_test() -> Generator[None, None, None]
 def _no_omnimarket_drift_guard_cli_node(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OMNI_HOME", raising=False)
     monkeypatch.setattr(cli_node, "check_omnimarket_drift", lambda **_: None)
+
+
+@pytest.fixture(autouse=True)
+def _no_developer_lane_binding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """Keep ``onex delegate`` from reading the developer's real binding (OMN-19973).
+
+    A developer who ran ``onex profile bind-lane`` would otherwise see every
+    default-transport test here dispatch to their lab lane. Tests of the
+    binding itself patch the real store class back in.
+    """
+    empty_home = tmp_path_factory.mktemp("no-developer-profile")
+    monkeypatch.setattr(
+        cli_delegate,
+        "StoreDeveloperProfile",
+        lambda *, onex_home: StoreDeveloperProfile(onex_home=empty_home),
+    )
 
 
 @pytest.fixture(autouse=True)

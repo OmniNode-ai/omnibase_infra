@@ -97,6 +97,7 @@ if TYPE_CHECKING:
 from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_core.enums.enum_event_bus_type import EnumEventBusType
 from omnibase_core.protocols.event_bus import ProtocolEventBusPublisher
 from omnibase_core.protocols.event_bus.protocol_event_bus_subscriber import (
     ProtocolEventBusSubscriber,
@@ -157,6 +158,7 @@ from omnibase_infra.runtime.models import (
     ModelRuntimeConfig,
     ModelSecurityConfig,
 )
+from omnibase_infra.runtime.models.model_event_bus_config import ModelEventBusConfig
 
 # Circular Import Note (OMN-529):
 # ---------------------------------
@@ -1301,6 +1303,7 @@ def resolve_embedded_runtime_config(
     correlation_id: UUID | None = None,
     *,
     workspace_root: Path | None = None,
+    developer_lane_binding: str | None = None,
 ) -> tuple[ModelRuntimeConfig, str]:
     """Resolve the per-runtime config for an EMBEDDED (CLI-hosted) runtime.
 
@@ -1313,7 +1316,14 @@ def resolve_embedded_runtime_config(
     1. ``ONEX_CONTRACTS_DIR`` (a BOOTSTRAP pointer — it names where config
        lives, never what the transport is) selects the contracts directory,
        and :func:`load_runtime_config` loads it exactly as the kernel would.
-    2. With no pointer, a bound WORKSPACE root answers with its tier-1
+    1a. With no pointer, a DEVELOPER LANE BINDING (``developer.lane_binding``
+       in ``~/.onex/config.yaml``, OMN-19973) answers with the shipped tier-0
+       config bound to that lane's shared bus. It is the per-developer tier-1
+       overlay of this same authority, not a CLI ladder beside it: the caller
+       passes the value in, and this function still decides. It outranks the
+       workspace config because it is one person's choice for their own
+       machine, where the workspace config is shared by every checkout.
+    2. With no pointer and no binding, a bound WORKSPACE root answers with its tier-1
        (self-hosted) runtime config,
        ``<workspace_root>/config/onex/runtime/runtime_config.yaml``
        (OMN-19193) -- the tier-1 overlay the OMN-17304 ruling composes on top
@@ -1352,6 +1362,25 @@ def resolve_embedded_runtime_config(
         return config, (
             f"shipped tier-0 default runtime config "
             f"({ENV_CONTRACTS_DIR}={pointer} has no {DEFAULT_RUNTIME_CONFIG})"
+        )
+    if developer_lane_binding is not None:
+        tier0 = _load_tier0_runtime_config(
+            correlation_id=correlation_id or generate_correlation_id(),
+            consumer_group_override=None,
+        )
+        # Validated, not model_copy'd field by field: the event-bus validator
+        # is what refuses a lane on a non-kafka transport.
+        event_bus = ModelEventBusConfig.model_validate(
+            {
+                **tier0.event_bus.model_dump(mode="json"),
+                "type": EnumEventBusType.KAFKA,
+                "lane": developer_lane_binding,
+            }
+        )
+        return tier0.model_copy(update={"event_bus": event_bus}), (
+            f"developer lane binding '{developer_lane_binding}' "
+            f"(developer.lane_binding in ~/.onex/config.yaml, OMN-19973) over "
+            f"the shipped tier-0 default runtime config"
         )
     if workspace_root is not None:
         workspace_contracts = workspace_root / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
