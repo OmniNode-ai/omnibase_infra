@@ -521,6 +521,16 @@ FENCED_OMN18987_IDS = (
 FENCED_USAGE_BY_MODEL_DAY_RLS_IDS = (
     "node:node_projection_usage_by_model_day:0001_grant_usage_by_model_day.sql",
 )
+# OMN-19790: delegation_eval_items' FORCE ROW LEVEL SECURITY lives in its own
+# 0002 migration (split out of the create, the same split node_hook_event_capture
+# 0002 used), so only that step is fenced on arrival. 0000 (the create) and 0001
+# (the tenant_projection_writer grant) apply on every lane; a fence on either
+# would skip the CREATE TABLE or apply the grant against a missing relation. The
+# release of 0002 is a separate operator-sequenced step that needs an operator
+# ruling; this fence addition carries no lane release.
+FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS = (
+    "node:node_projection_delegation_eval:0002_force_rls_delegation_eval_items.sql",
+)
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS
     + FENCED_REGISTRATION_IDS
@@ -531,6 +541,7 @@ EXPECTED_FENCE = (
     + FENCED_BUDGET_STATE_RLS_IDS
     + FENCED_OMN18987_IDS
     + FENCED_USAGE_BY_MODEL_DAY_RLS_IDS
+    + FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -895,8 +906,10 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
     assert found[uuid_conversion_end:post_conversion_tail_end] == (
         FENCED_BUDGET_STATE_RLS_IDS + FENCED_OMN18987_IDS
     ), "the post-conversion operator fence tail is not the expected ids"
-    assert found[post_conversion_tail_end:] == FENCED_USAGE_BY_MODEL_DAY_RLS_IDS, (
-        "the OMN-19978 usage_by_model_day RLS hold is not the expected id"
+    assert found[post_conversion_tail_end:] == (
+        FENCED_USAGE_BY_MODEL_DAY_RLS_IDS + FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS
+    ), (
+        "the OMN-19978 usage_by_model_day and OMN-19790 delegation_eval_items RLS holds are not the expected ids"
     )
 
 

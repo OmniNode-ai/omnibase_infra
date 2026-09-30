@@ -204,6 +204,7 @@ databases:
               - capability_scores
               - context_roi_scores
               - delegation_budget_state
+              - delegation_eval_items
               - delegation_events
               - delegation_judge_verdict_events
               - delegation_routing_tenant_overlay
@@ -377,5 +378,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 6ffea80a89e53a517683d6e10e0cfb136ac1295ff1bd88742b5bdbf0ac055334
+  sha256: ed30fe50f658536f76e7ee31820133f67b43fd39e9e47c8b453f75400559d93d
 topology_instance: onex-dev

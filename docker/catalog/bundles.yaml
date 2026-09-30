@@ -86,6 +86,12 @@ local:
   includes: []
   inject_env:
     ONEX_ENVIRONMENT: local
+    # OMN-19408: a lane-scoped node contract (omnimarket's lab projections and
+    # PR-landing nodes) fails closed on a runtime that cannot name its lane, and
+    # each such refusal is a discovery error that holds /health at `degraded`.
+    # A laptop is the dogfood shape (the lab's dogfood lane runs on laptops), a
+    # registered non-lab lane: the lab-scoped nodes are excluded without error.
+    ONEX_RUNTIME_LANE: dogfood
     ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: "1"
     ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
     # Wiring strictness is the dev lane's: unset, so a handler the resolver
