@@ -861,6 +861,7 @@ jobs:
       # changed-node ratchet (pre-commit, blocking) stops regressions. Rides
       # OMN-12550 / OMN-13325 — same path as Signal A, not a fresh hook.
       - name: Run orchestration-monolith ratchet report (ARCH-004 Signal B)
+        # advisory-ok: OMN-13486 report-only ratchet while the baseline is above threshold; the changed-node ratchet in pre-commit is the blocking gate
         continue-on-error: true
         run: |
           echo "================================================================"
