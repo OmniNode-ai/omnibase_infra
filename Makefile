@@ -29,6 +29,7 @@
 #     make up-local            # write ~/.omnibase/local.env + model overlay if absent, then boot
 #     make status-local        # migration gate, runtime /health bodies, delegate consumer group
 #     make delegate-local PROMPT="..."  # one delegation through your runtime on the local broker
+#     make secret-local PROVIDER=gemini # register your tenant's provider key from stdin or a hidden prompt
 #     make down-local          # stop the laptop profile (keeps its volumes)
 #     make down-local-volumes  # stop it and delete its volumes (local data)
 #
@@ -45,7 +46,7 @@
 
 .PHONY: help up up-auth up-runtime down down-auth down-runtime down-all status \
         seed-keycloak seed-infisical _check-docker _check-env-file \
-        local-env up-local status-local delegate-local down-local down-local-volumes
+        local-env up-local status-local delegate-local secret-local down-local down-local-volumes
 
 OMNIBASE_ENV_FILE ?= $(HOME)/.omnibase/.env
 LOCAL_ENV_FILE ?= $(HOME)/.omnibase/local.env
@@ -111,7 +112,7 @@ seed-infisical: _check-docker _check-env-file ## Seed Infisical from ONEX contra
 # Laptop profile (OMN-19496): catalog bundle `local`, docker/catalog/bundles.yaml
 # ----------------------------------------------------------------------------
 
-local-env: ## Write the laptop env file and model overlay from their templates (never overwrites)
+local-env: ## Write the laptop env file and model overlay; fill a missing or empty tenant ID
 	@mkdir -p "$(dir $(LOCAL_ENV_FILE))" "$(dir $(LOCAL_OVERLAY_FILE))"
 	@if [ -e "$(LOCAL_OVERLAY_FILE)" ]; then \
 	  echo "==> Keeping existing model overlay $(LOCAL_OVERLAY_FILE)"; \
@@ -138,6 +139,18 @@ local-env: ## Write the laptop env file and model overlay from their templates (
 	      docker/local.env.example > "$(LOCAL_ENV_FILE)"; \
 	  echo "==> Wrote env file $(LOCAL_ENV_FILE) (passwords generated)"; \
 	fi
+	@if ! grep -q '^ONEX_TENANT_ID=.' "$(LOCAL_ENV_FILE)"; then \
+	  tenant="local-$$(openssl rand -hex 6)" || exit 1; \
+	  if grep -q '^ONEX_TENANT_ID=' "$(LOCAL_ENV_FILE)"; then \
+	    env_tmp=$$(mktemp "$(LOCAL_ENV_FILE).XXXXXX") || exit 1; \
+	    sed "s|^ONEX_TENANT_ID=.*|ONEX_TENANT_ID=$$tenant|" "$(LOCAL_ENV_FILE)" > "$$env_tmp" \
+	      && cat "$$env_tmp" > "$(LOCAL_ENV_FILE)"; \
+	    result=$$?; rm -f "$$env_tmp"; [ "$$result" -eq 0 ] || exit "$$result"; \
+	  else \
+	    printf '\nONEX_TENANT_ID=%s\n' "$$tenant" >> "$(LOCAL_ENV_FILE)" || exit 1; \
+	  fi; \
+	  echo "==> Added ONEX_TENANT_ID to $(LOCAL_ENV_FILE) (generated)"; \
+	fi
 	@echo "==> Model endpoint: the line marked model_endpoint in $(LOCAL_OVERLAY_FILE)"
 
 up-local: _check-docker local-env ## Laptop profile: build the runtime image and boot the stack + your runtime
@@ -157,6 +170,18 @@ delegate-local: _check-docker ## Laptop profile: one delegation through your run
 	@test -n "$(PROMPT)" || { echo 'usage: make delegate-local PROMPT="Reply with exactly one word: hello"'; exit 2; }
 	docker exec $(LOCAL_PROJECT)-runtime-effects onex delegate "$(PROMPT)" \
 	  --bus kafka --kafka-bootstrap redpanda:9092 --locus deployed-lane
+
+secret-local: _check-docker ## Laptop profile: register your tenant's provider key (PROVIDER=gemini; stdin or hidden prompt)
+	@test -n "$(PROVIDER)" || { echo 'usage: make secret-local PROVIDER=gemini' >&2; exit 2; }
+	@test -f "$(LOCAL_ENV_FILE)" || { echo 'ERROR: local env file is missing; run make local-env first.' >&2; exit 2; }
+	@tenant=$$(sed -n 's/^ONEX_TENANT_ID=//p' "$(LOCAL_ENV_FILE)") || exit 1; \
+	  test -n "$$tenant" || { echo 'ERROR: ONEX_TENANT_ID is empty or absent; run make local-env first.' >&2; exit 2; }; \
+	  if [ -t 0 ]; then \
+	    bash -c 'read -r -s -p "Provider key (input hidden): " credential || exit 1; printf "\n" >&2; printf "%s" "$$credential"' \
+	      | docker exec -i $(LOCAL_PROJECT)-runtime-effects onex secret register-tenant-key "$(PROVIDER)" --tenant "$$tenant"; \
+	  else \
+	    docker exec -i $(LOCAL_PROJECT)-runtime-effects onex secret register-tenant-key "$(PROVIDER)" --tenant "$$tenant"; \
+	  fi
 
 down-local: _check-docker ## Laptop profile: stop it (keeps its volumes)
 	$(ONEX_CLI) down

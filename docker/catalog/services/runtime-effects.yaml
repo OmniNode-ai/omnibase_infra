@@ -95,6 +95,9 @@ healthcheck:
 volumes:
   - effects_logs:/app/logs
   - effects_data:/app/data
+  # Persist the canonical sqlite secret store shared by docker exec registration
+  # and the effects process (both run as root with HOME=/root).
+  - effects_credentials:/root/.omninode/delegation
   - ../contracts:/app/contracts:ro
   # OMN-13248 (epic OMN-13245): read-only OAuth credential bind-mounts for the
   # coding-agent EFFECT (node_coding_agent_invoke_effect). codex / claude read
