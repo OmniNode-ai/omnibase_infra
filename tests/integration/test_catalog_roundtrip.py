@@ -7,12 +7,19 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
+import yaml
 
 from omnibase_infra.docker.catalog.generator import generate_compose
 from omnibase_infra.docker.catalog.resolver import CatalogResolver
+from tests.helpers.compose_isolation import (
+    assert_compose_isolated,
+    isolated_project_name,
+    without_host_ports,
+)
 
 REPO_ROOT = str(Path(__file__).parent.parent.parent)
 CATALOG_DIR = str(Path(REPO_ROOT) / "docker" / "catalog")
@@ -27,9 +34,17 @@ _HAS_POSTGRES_PASSWORD = bool(os.environ.get("POSTGRES_PASSWORD"))
     not _HAS_DOCKER or not _HAS_POSTGRES_PASSWORD,
     reason="Requires Docker daemon and POSTGRES_PASSWORD env var",
 )
-def test_catalog_generates_and_starts_core_bundle() -> None:
-    """Resolve core bundle, generate compose, start, health check, stop."""
-    # Generate
+def test_catalog_generates_and_starts_core_bundle(tmp_path: Path) -> None:
+    """Resolve core bundle, generate compose, start, health check, stop.
+
+    OMN-17427: the stack runs under a compose project of its own, with every
+    container, volume and network scoped to that project and no host port
+    published. The earlier form ran the default ``omnibase-infra`` project with
+    the dev lane's container names, and on the .201 lab host its ``up``/``down``
+    removed the dev lane's postgres, redpanda, valkey, keycloak and infisical.
+    """
+    # The CLI still renders the core bundle; its output goes to a scratch path,
+    # never into the checkout's docker/ directory.
     result = subprocess.run(
         [
             "uv",
@@ -40,7 +55,7 @@ def test_catalog_generates_and_starts_core_bundle() -> None:
             "generate",
             "core",
             "--output",
-            "docker/docker-compose.generated.yml",
+            str(tmp_path / "cli-generated.yml"),
         ],
         capture_output=True,
         text=True,
@@ -49,16 +64,26 @@ def test_catalog_generates_and_starts_core_bundle() -> None:
     )
     assert result.returncode == 0, f"Generate failed: {result.stderr}"
 
+    project = isolated_project_name("catalog-roundtrip")
+    resolved = CatalogResolver(catalog_dir=CATALOG_DIR).resolve(["core"])
+    resolved.project = project
+    compose = without_host_ports(generate_compose(resolved, environment=os.environ))
+    assert_compose_isolated(compose)
+    services = compose["services"]
+    assert isinstance(services, dict)
+    postgres = str(services["postgres"]["container_name"])
+    redpanda = str(services["redpanda"]["container_name"])
+
+    compose_file = tmp_path / "compose.yml"
+    compose_file.write_text(
+        yaml.safe_dump(compose, default_flow_style=False, sort_keys=False),
+        encoding="utf-8",
+    )
+    command = ["docker", "compose", "-p", project, "-f", str(compose_file)]
+
     # Start -- wrap in try/finally immediately to ensure cleanup
     result = subprocess.run(
-        [
-            "docker",
-            "compose",
-            "-f",
-            "docker/docker-compose.generated.yml",
-            "up",
-            "-d",
-        ],
+        [*command, "up", "-d"],
         capture_output=True,
         text=True,
         cwd=REPO_ROOT,
@@ -67,55 +92,40 @@ def test_catalog_generates_and_starts_core_bundle() -> None:
 
     try:
         assert result.returncode == 0, f"Start failed: {result.stderr}"
-
-        # Health check postgres
-        result = subprocess.run(
+        assert _eventually(
             [
                 "docker",
                 "exec",
-                "omnibase-infra-postgres",
+                postgres,
                 "pg_isready",
                 "-U",
                 "postgres",
                 "-d",
                 "omnibase_infra",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
+            ]
+        ), f"{postgres} never reported ready"
+        assert _eventually(["docker", "exec", redpanda, "rpk", "cluster", "health"]), (
+            f"{redpanda} never reported healthy"
         )
-        assert result.returncode == 0
-
-        # Health check redpanda
-        result = subprocess.run(
-            [
-                "docker",
-                "exec",
-                "omnibase-infra-redpanda",
-                "rpk",
-                "cluster",
-                "health",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
-        assert result.returncode == 0
     finally:
         subprocess.run(
-            [
-                "docker",
-                "compose",
-                "-f",
-                "docker/docker-compose.generated.yml",
-                "down",
-            ],
+            [*command, "down", "--volumes", "--remove-orphans"],
             capture_output=True,
             cwd=REPO_ROOT,
             check=False,
         )
+
+
+def _eventually(argv: list[str], attempts: int = 30, delay_s: float = 2.0) -> bool:
+    """True once ``argv`` exits 0; a freshly started container needs a moment."""
+    for _ in range(attempts):
+        done = subprocess.run(
+            argv, capture_output=True, text=True, timeout=30, check=False
+        )
+        if done.returncode == 0:
+            return True
+        time.sleep(delay_s)
+    return False
 
 
 @pytest.mark.integration
