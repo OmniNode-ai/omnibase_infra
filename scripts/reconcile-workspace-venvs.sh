@@ -357,6 +357,10 @@ done
 if [[ -n "$OMNI_HOME_ARG" ]]; then
   OMNI_HOME="$OMNI_HOME_ARG"
 fi
+# Children (the lane-identity module refuses to run without it, rule 8) must see
+# the root this script resolved, not whatever the caller's shell happened to
+# export: a `--omni-home` run from a session with no OMNI_HOME (OMN-19432).
+export OMNI_HOME
 
 say() { printf '[reconcile] %s\n' "$*"; }
 trace() { [[ "$VERBOSE" -eq 1 ]] && printf '[reconcile]   $ %s\n' "$*"; return 0; }
