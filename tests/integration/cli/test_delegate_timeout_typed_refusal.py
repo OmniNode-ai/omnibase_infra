@@ -220,3 +220,28 @@ class TestDelegateTimeoutIsTypedOnStdout:
         result, _elapsed = self._invoke(tmp_path)
 
         assert "exceeded hard timeout" in result.stderr
+
+    @pytest.mark.usefixtures("blocking_contract")
+    def test_default_output_is_a_plain_failure_line_with_the_run_id(
+        self, tmp_path: Path
+    ) -> None:
+        """OMN-20124: with --human a timeout is a line for a person, not JSON."""
+        result = CliRunner().invoke(
+            delegate_command,
+            [
+                "List the first five prime numbers",
+                "--human",
+                "--state-root",
+                str(tmp_path / "state"),
+                "--timeout",
+                "1",
+                "--emit-socket",
+                str(tmp_path / "no-daemon.sock"),
+            ],
+            catch_exceptions=False,
+        )
+
+        assert result.exit_code == 1
+        assert result.stdout == ""
+        assert "onex delegate failed: timed out" in result.stderr
+        assert "(run " in result.stderr
