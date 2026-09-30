@@ -50,7 +50,7 @@ def test_fresh_install_run_prints_no_spool_warning_and_writes_no_outbox(
         if not key.startswith(("ONEX_", "OMNICLAUDE_"))
     }
     env["HOME"] = str(home)
-    env["PYTHONPATH"] = str(_REPO_ROOT)
+    env["PYTHONPATH"] = os.pathsep.join([str(_REPO_ROOT / "src"), str(_REPO_ROOT)])
     env["ONEX_ARTIFACT_STORE_ROOT"] = str(tmp_path / "artifacts")
 
     completed = subprocess.run(
