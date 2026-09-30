@@ -449,3 +449,59 @@ def test_other_bundles_keep_all_interface_ports_and_the_lab_advertise_default(
     assert isinstance(services, dict)
     command = " ".join(services["redpanda"]["command"])
     assert "${REDPANDA_ADVERTISE_HOST:-192.168.86.201}" in command
+
+
+# --- OMN-19972 hostile-review follow-ups: env_default_overrides must fail loudly
+# rather than render a broken compose file, and must not trip over a non-string
+# command part.
+
+
+def _override_catalog(
+    tmp_path: Path, command: list[object], overrides: dict[str, str]
+) -> CatalogResolver:
+    services = tmp_path / "services"
+    services.mkdir()
+    manifest = _fixture_manifest("svc", "infrastructure", [])
+    manifest["command"] = command
+    (services / "svc.yaml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    (tmp_path / "bundles.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "b": {
+                    "description": "b",
+                    "services": ["svc"],
+                    "env_default_overrides": overrides,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return CatalogResolver(catalog_dir=str(tmp_path))
+
+
+def test_override_of_a_nested_default_is_refused(tmp_path: Path) -> None:
+    """``${A:-${B:-x}}`` cannot be rewritten safely; a half-rewrite breaks compose."""
+    resolver = _override_catalog(
+        tmp_path, ["run", "--addr ${ADV:-${OTHER:-lab}}:1"], {"ADV": "localhost"}
+    )
+    with pytest.raises(ValueError, match="nested"):
+        generate_compose(resolver.resolve(["b"]))
+
+
+@pytest.mark.parametrize("bad", ["a}b", "a$b"])
+def test_override_value_that_would_break_interpolation_is_refused(
+    tmp_path: Path, bad: str
+) -> None:
+    resolver = _override_catalog(tmp_path, ["run"], {"ADV": bad})
+    with pytest.raises(ValueError, match="env_default_overrides"):
+        resolver.resolve(["b"])
+
+
+def test_override_leaves_a_non_string_command_part_untouched(tmp_path: Path) -> None:
+    resolver = _override_catalog(
+        tmp_path, ["sleep", 5, "--addr ${ADV:-lab}"], {"ADV": "localhost"}
+    )
+    compose = generate_compose(resolver.resolve(["b"]))
+    services = compose["services"]
+    assert isinstance(services, dict)
+    assert services["svc"]["command"] == ["sleep", 5, "--addr ${ADV:-localhost}"]
