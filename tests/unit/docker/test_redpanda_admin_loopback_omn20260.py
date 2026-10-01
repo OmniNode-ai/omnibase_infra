@@ -64,6 +64,33 @@ def test_admin_api_is_published_on_loopback_only() -> None:
     )
 
 
+# Lanes whose own compose source re-declares the redpanda admin publish
+# (``ports: !override`` or a full ports list). Each broker runs with
+# admin_api_require_auth false, so each publish must be loopback only too.
+# lakshman (docker-compose.lakshman.yml) is the collaborator's lane and is
+# deliberately not pinned here.
+LANE_COMPOSES = (
+    REPO_ROOT / "docker" / "docker-compose.ci-bus.yml",
+    REPO_ROOT / "docker" / "docker-compose.stability-test.yml",
+    REPO_ROOT / "docker" / "docker-compose.judge.yml",
+)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("compose_path", LANE_COMPOSES, ids=lambda p: p.name)
+def test_lane_admin_api_is_published_on_loopback_only(compose_path: Path) -> None:
+    publishes = _admin_publishes(compose_path)
+    assert publishes, (
+        f"{compose_path.name}: redpanda no longer publishes its admin port"
+    )
+    open_publishes = [p for p in publishes if not _is_loopback_publish(p)]
+    assert not open_publishes, (
+        f"{compose_path.name}: redpanda admin API published on all interfaces: "
+        f"{open_publishes}. admin_api_require_auth is false on this broker; bind "
+        "it to 127.0.0.1 (OMN-20260)."
+    )
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("publish", "loopback"),
