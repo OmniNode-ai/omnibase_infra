@@ -425,3 +425,16 @@ def test_urls_are_derived_from_the_container_not_spelled() -> None:
     )
     assert bench.published_url("[::]:9644\n", "/x") is None
     assert bench.published_url("", "/x") is None
+
+
+def test_min_uptime_marks_a_freshly_redeployed_dependency_lane() -> None:
+    from datetime import UTC, datetime
+
+    now = datetime(2026, 10, 1, 0, 11, 4, tzinfo=UTC)
+    stamps = [
+        "2026-09-30T20:55:00.123456789Z",  # infra, up hours
+        "2026-09-30T23:56:04.5Z",  # app tier, redeployed 15 minutes ago
+        "garbage",
+    ]
+    assert bench.min_uptime_s(stamps, now) == 900.0
+    assert bench.min_uptime_s([], now) is None

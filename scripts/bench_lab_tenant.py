@@ -46,10 +46,10 @@ WHAT IT WRITES (and removes)
 
 USAGE
   uv run python scripts/bench_lab_tenant.py --host h105 --arm local-stack \\
-      --reps 3 --out-dir bench/results/<UTC>
+      --reps 3 --out-dir benchmarks/lab-tenant/results/<UTC>
   uv run python scripts/bench_lab_tenant.py --dependency --host h201 \\
-      --arm local-stack --out-dir bench/results/<UTC>
-  uv run python scripts/bench_lab_tenant.py --summarize bench/results/<UTC>
+      --arm local-stack --out-dir benchmarks/lab-tenant/results/<UTC>
+  uv run python scripts/bench_lab_tenant.py --summarize benchmarks/lab-tenant/results/<UTC>
 
 Host names resolve through the lab host table (``ONEX_LAB_RUN_HOSTS``, else
 ``$OMNI_HOME/../omnibase_internal/src/omnibase_internal/lab_run_hosts.yaml``);
@@ -108,6 +108,7 @@ REMOTE_PATH = "$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH:/usr/sbin
 REMOTE_DIR = ".cache/omni-bench-lab-tenant"
 BREW_PYTHON = "/opt/homebrew/bin/python3.13"
 NTP_SERVER = "time.apple.com"
+NTP_SAMPLES = 4
 NTP_EPOCH_DELTA = 2208988800  # seconds from 1900-01-01 to 1970-01-01
 SSH_OPTS = (
     "-o",
@@ -405,6 +406,20 @@ def published_url(docker_port_output: str, path: str) -> str | None:
     return None
 
 
+def min_uptime_s(started_at: Iterable[str], now: datetime) -> float | None:
+    """Seconds since the most recently (re)started container: a dependency-side sample taken
+    minutes after a redeploy reads warm-up memory, and this is how the table says so."""
+    ages = []
+    for stamp in started_at:
+        m = re.match(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)", stamp or "")
+        if m:
+            when = datetime.strptime(m.group(1), "%Y-%m-%dT%H:%M:%S").replace(
+                tzinfo=UTC
+            )
+            ages.append((now - when).total_seconds())
+    return round(min(ages), 1) if ages else None
+
+
 def flatten_numeric(obj: Any, prefix: str = "") -> dict[str, float]:
     """Nested dict -> {dotted.key: number} for every int/float leaf (bools skipped)."""
     out: dict[str, float] = {}
@@ -548,9 +563,18 @@ def clock_offset(server: str = NTP_SERVER) -> dict[str, Any]:
     """This host's clock offset: an in-process SNTP query, else the OS's own tool (``sntp`` on
     macOS, ``timedatectl`` on systemd Linux). A satellite's firewall can drop the reply to an
     unsigned interpreter, which is why the fallback exists."""
-    first = sntp_offset(server)
-    if first.get("offset_ms") is not None:
-        return {**first, "method": "sntp-inprocess"}
+    samples = [sntp_offset(server) for _ in range(NTP_SAMPLES)]
+    good = [x for x in samples if x.get("offset_ms") is not None]
+    first = samples[0]
+    if good:
+        # The sample with the least network delay carries the least asymmetry error.
+        best = min(good, key=lambda x: float(x["delay_ms"]))
+        return {
+            **best,
+            "method": "sntp-inprocess",
+            "samples": len(good),
+            "offsets_ms": [x["offset_ms"] for x in good],
+        }
     rc, text = text_of(["sntp", "-t", "3", server], timeout=15)
     parsed = parse_sntp_cli(text) if rc == 0 else None
     if parsed is not None:
@@ -1276,9 +1300,28 @@ def remote_dependency(args: argparse.Namespace) -> dict[str, Any]:
                 "cpu_percent": parse_percent(s.get("CPUPerc", "")),
             }
         )
+    started: dict[str, str] = {}
+    if lane:
+        _, inspect = text_of(
+            [
+                docker,
+                "inspect",
+                "--format",
+                "{{.Name}} {{.State.StartedAt}}",
+                *sorted(lane),
+            ],
+            timeout=60,
+        )
+        for line in inspect.splitlines():
+            parts = line.split()
+            if len(parts) == 2:
+                started[parts[0].lstrip("/")] = parts[1]
+    for row in lane_rows:
+        row["started_at"] = started.get(str(row["name"]))
     out["dev_lane_containers"] = {
         "project": args.dep_compose_project,
         "count": len(lane_rows),
+        "min_uptime_s": min_uptime_s(started.values(), datetime.now(UTC)),
         "mem_total_gb": round(
             sum(r["mem_used_bytes"] or 0 for r in lane_rows) / GIB, 3
         ),
@@ -1305,7 +1348,7 @@ def dependency_metrics(dep: Mapping[str, Any]) -> dict[str, float]:
     for k, v in ((dep.get("redpanda") or {}).get("rates_per_s") or {}).items():
         out[f"redpanda.{k}_per_s"] = float(v)
     lane = dep.get("dev_lane_containers") or {}
-    for k in ("mem_total_gb", "cpu_percent_total", "count"):
+    for k in ("mem_total_gb", "cpu_percent_total", "count", "min_uptime_s"):
         if isinstance(lane.get(k), (int, float)):
             out[f"dev_lane.{k}"] = float(lane[k])
     return out
@@ -1492,18 +1535,25 @@ def controller(args: argparse.Namespace) -> dict[str, Any]:
     }
     try:
         if args.dependency:
-            dep = remote_json(
-                target, args.lane, rel, python,
-                ["--remote-dependency", "--dep-postgres-container", args.dep_postgres_container,
-                 "--dep-redpanda-container", args.dep_redpanda_container,
-                 *(["--dep-redpanda-metrics-url", args.dep_redpanda_metrics_url]
-                   if args.dep_redpanda_metrics_url else []),
-                 "--dep-compose-project", args.dep_compose_project,
-                 "--dep-rate-seconds", str(args.dep_rate_seconds)],
-                timeout=300,
-            )  # fmt: skip
-            result["reps"].append({"rep": 1, "dependency": dep})
-            result["summary"] = aggregate([dependency_metrics(dep)])
+            dep_args = [
+                "--remote-dependency", "--dep-postgres-container", args.dep_postgres_container,
+                "--dep-redpanda-container", args.dep_redpanda_container,
+                "--dep-compose-project", args.dep_compose_project,
+                "--dep-rate-seconds", str(args.dep_rate_seconds),
+            ]  # fmt: skip
+            if args.dep_redpanda_metrics_url:
+                dep_args += [
+                    "--dep-redpanda-metrics-url",
+                    args.dep_redpanda_metrics_url,
+                ]
+            for i in range(1, args.reps + 1):
+                dep = remote_json(target, args.lane, rel, python, dep_args, timeout=300)
+                result["reps"].append({"rep": i, "dependency": dep})
+                if i < args.reps:
+                    time.sleep(args.rep_gap)
+            result["summary"] = aggregate(
+                [dependency_metrics(r["dependency"]) for r in result["reps"]]
+            )
             return result
         modules = (
             {k: Path(v) for k, v in (m.split("=", 1) for m in args.placement_module)}
@@ -1637,7 +1687,8 @@ def render_summary(results: Sequence[Mapping[str, Any]]) -> str:
         lines.append("")
     for r in deps:
         lines.append(
-            f"Dependency side: {r['host']} while satellites are {r['arm']} ({r['started_at']})"
+            f"Dependency side: {r['host']} while satellites are {r['arm']} "
+            f"({r['started_at']}, n={len(r.get('reps') or [])})"
         )
         lines.append("")
         lines.append("| metric | value |")
