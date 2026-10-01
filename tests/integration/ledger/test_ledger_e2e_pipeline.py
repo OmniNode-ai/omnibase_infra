@@ -39,7 +39,7 @@ from __future__ import annotations
 import base64
 import json
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
 
@@ -139,7 +139,7 @@ class TestLedgerE2EPipeline:
         )
         # The engine hands dispatchers this dict despite DispatcherFunc naming
         # ModelEventEnvelope (message_dispatch_engine.py dispatch phase).
-        dispatch_result = await callback(materialized)  # type: ignore[arg-type]
+        dispatch_result = await callback(cast("Any", materialized))
         assert dispatch_result is not None
         assert len(dispatch_result.output_intents) == 1
         intent = dispatch_result.output_intents[0]
