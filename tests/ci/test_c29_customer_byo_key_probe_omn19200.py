@@ -290,6 +290,13 @@ def test_the_registration_is_the_one_the_product_prints() -> None:
 
 
 @pytest.mark.unit
+def test_both_beta_providers_are_known_to_the_probe() -> None:
+    """Gemini and OpenRouter are the beta customer key providers (OMN-19200)."""
+    assert probe.PROVIDERS["gemini"].host == "generativelanguage.googleapis.com"
+    assert probe.PROVIDERS["openrouter"].host == "openrouter.ai"
+
+
+@pytest.mark.unit
 def test_a_run_with_no_key_supplied_is_an_input_failure_not_a_verdict(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

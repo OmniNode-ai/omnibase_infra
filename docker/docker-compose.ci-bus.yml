@@ -157,8 +157,12 @@ services:
       - "${CI_BUS_REDPANDA_EXTERNAL_PORT:-21092}:21092"
       # Admin API. `rpk security user` and `rpk cluster config` talk to this, and
       # so does the healthcheck; it is NOT gated by `enable_sasl`, which is the
-      # only reason the phase-2 SASL flip below is performable at all.
-      - "${CI_BUS_REDPANDA_ADMIN_PORT:-21644}:9644"
+      # only reason the phase-2 SASL flip below is performable at all. Published
+      # on the host loopback ONLY (OMN-20260): admin_api_require_auth is false,
+      # so an all-interfaces publish let any LAN or tailnet host create SCRAM
+      # users and rewrite cluster config. Every one-shot below reaches
+      # redpanda:9644 on the compose network.
+      - "127.0.0.1:${CI_BUS_REDPANDA_ADMIN_PORT:-21644}:9644"
     volumes:
       - ci_bus_redpanda_data:/var/lib/redpanda/data
     networks:

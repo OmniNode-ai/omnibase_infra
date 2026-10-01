@@ -14,7 +14,8 @@ event stream. The request now says who asked:
 Lane resolution, most explicit first: the ``--caller-lane`` flag; then the lane
 environment variables the gh shim and the PR-ownership guard already read, in
 their order; then the lane registered for the ``omni_worktrees/<ticket>/<dir>``
-worktree the command runs from; otherwise none. A malformed flag is a usage
+worktree the command runs from; otherwise a derived name (OMN-20299, see
+``test_cli_delegate_caller_never_null.py``). A malformed flag is a usage
 error; a malformed environment value is skipped and named, never guessed.
 """
 
@@ -191,20 +192,29 @@ def test_the_registry_root_falls_back_to_the_workspace_state_dir(
 def test_an_unregistered_worktree_or_other_directory_names_no_lane(
     tmp_path: Path,
 ) -> None:
+    """No rule names a lane, so the host fallback does (OMN-20299), never None."""
     worktree = tmp_path / "omni_worktrees" / "OMN-1" / "omnimarket"
     worktree.mkdir(parents=True)
     for cwd in (worktree, tmp_path):
         caller = resolve_delegate_caller(
-            None, cwd=cwd, environ={"ONEX_LANE_REGISTRY_ROOT": str(tmp_path)}
+            None,
+            cwd=cwd,
+            environ={"ONEX_LANE_REGISTRY_ROOT": str(tmp_path)},
+            host="h201",
         )
-        assert (caller.lane, caller.lane_source) == (None, "none")
+        assert (caller.lane, caller.lane_source) == (
+            "unattributed:h201",
+            "fallback host",
+        )
 
 
 def test_no_registry_root_names_no_lane_and_never_raises() -> None:
     caller = resolve_delegate_caller(
-        None, cwd=Path("/work/omni_worktrees/OMN-1/omnimarket"), environ={}
+        None, cwd=Path("/work/omni_worktrees/OMN-1/omnimarket"), environ={}, host="h"
     )
-    assert caller == ModelDelegateCaller.unattributed()
+    assert caller == ModelDelegateCaller(
+        lane="unattributed:h", lane_source="fallback host"
+    )
 
 
 def test_the_harness_session_is_the_session() -> None:

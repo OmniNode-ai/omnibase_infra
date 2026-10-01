@@ -28,6 +28,7 @@ def _contract_topic(name: str) -> str:
 
 # ---- the subject, as the readback named it ---------------------------------
 EXPOSURE_TOPIC: Final[str] = "onex.snapshot.projection.consumer-flow.v1"
+CURSOR_FIELD: Final[str] = "projection_cursor"
 DEFAULT_BASE_URL: Final[str] = "http://host.docker.internal:3002"
 LIVE_WINDOW_MINUTES: Final[int] = 10
 LIVE_WINDOW_SQL: Final[str] = (

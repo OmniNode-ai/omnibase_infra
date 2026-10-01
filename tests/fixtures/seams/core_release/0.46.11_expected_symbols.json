@@ -12,9 +12,10 @@
     "OMN-19408: bumped 0.47.22 -> 0.47.23 (omnibase_infra#4077) to pick up ModelRuntimeLaneScope. The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged.",
     "OMN-19749: bumped 0.47.23 -> 0.47.24 (released, carries omnibase_core#1786/be874b620) when the LO5a temporary git-rev override was replaced by the released pin. The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged.",
     "OMN-20024: bumped 0.47.24 -> 0.47.25 by the dependency cascade (omnibase_infra#4317). The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged.",
-    "OMN-18595: bumped 0.47.25 -> 0.47.27 by the dependency cascade (omnibase_infra#4355). The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged."
+    "OMN-18595: bumped 0.47.25 -> 0.47.27 by the dependency cascade (omnibase_infra#4355). The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged.",
+    "OMN-18595: bumped 0.47.27 -> 0.47.28 by the dependency cascade (omnibase_infra#4414). The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged."
   ],
-  "core_version": "0.47.27",
+  "core_version": "0.47.28",
   "source": "pypi",
   "modules": {
     "omnibase_core.models.delegation.wire": [
