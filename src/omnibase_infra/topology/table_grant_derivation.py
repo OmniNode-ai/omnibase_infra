@@ -391,6 +391,7 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="provider_quota_state",
         ),
     ),
+    # OMN-20242: infra vendors the disposition table before the omnimarket
     # node_projection_delegation_disposition contract lands. This bridge expires
     # when that source change merges and the pin advances to declare the table.
     ContractTableDeclaration(
