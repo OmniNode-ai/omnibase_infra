@@ -10,12 +10,17 @@ Each acceptance criterion of OMN-18812 has its falsifier here:
 * AC3 -- the heal cannot loop: a run at the attempt ceiling is refused.
 * AC4 -- the workflow is not, and declares no, required status context, and
   carries no ``continue-on-error`` that would let a broken heal read green.
+
+OMN-20319 adds the re-run window: a failed run GitHub will no longer re-run
+(created more than 30 days ago) is never selected, and a refusal for that
+reason is a named skip rather than a failed pass.
 """
 
 from __future__ import annotations
 
 import json
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -30,12 +35,14 @@ from scripts.ci.occ_companion_merge_heal import (
     _OPEN_PR_LIMIT,
     MAX_HEAL_RUN_ATTEMPT,
     PREFLIGHT_JOB_MARKERS,
+    RERUN_WINDOW,
     EnumCompanionHealOutcome,
     EnumCompanionState,
     GhCli,
     GhPort,
     HealDecision,
     PrHealInput,
+    RerunWindowExpiredError,
     RunSnapshot,
     _build_parser,
     collect_decisions,
@@ -392,6 +399,7 @@ def test_ac4_the_write_grant_is_scoped_to_the_one_job_that_mutates() -> None:
         "actions": "write",
         "contents": "read",
         "pull-requests": "read",
+        "checks": "read",
     }
 
 
@@ -808,3 +816,162 @@ def test_a_nested_caller_eligibility_failure_is_counted() -> None:
         failed_preflight_check_count_in_payload(payload, markers=PREFLIGHT_JOB_MARKERS)
         == 1
     )
+
+
+# --------------------------------------------------------------------------
+# OMN-20319: GitHub refuses to re-run a run created more than 30 days ago.
+# Heal run 36871003284 selected five such runs on PR #2658 (head 4dde47fc08e9),
+# every `gh run rerun --failed` was refused with "created over a month ago",
+# and the pass exited 1 as "every re-run attempt failed".
+# --------------------------------------------------------------------------
+
+_NOW = datetime(2026, 10, 1, 13, 45, tzinfo=UTC)
+
+
+def test_a_run_past_the_rerun_window_is_not_selected() -> None:
+    decision = decide_companion_heal(
+        _pr(
+            now=_NOW,
+            failed_runs=(
+                RunSnapshot(
+                    run_id=30973856360,
+                    run_attempt=1,
+                    created_at=_NOW - RERUN_WINDOW - timedelta(days=1),
+                ),
+            ),
+        )
+    )
+    assert decision.outcome is EnumCompanionHealOutcome.RERUN_WINDOW_EXPIRED
+    assert decision.rerun is False
+    assert decision.run_ids == ()
+    assert "30973856360" in decision.detail
+
+
+def test_the_window_filters_per_run_rather_than_refusing_the_pr() -> None:
+    decision = decide_companion_heal(
+        _pr(
+            now=_NOW,
+            failed_runs=(
+                RunSnapshot(run_id=1, run_attempt=1, created_at=_NOW - RERUN_WINDOW),
+                RunSnapshot(
+                    run_id=2, run_attempt=1, created_at=_NOW - timedelta(days=1)
+                ),
+            ),
+        )
+    )
+    assert decision.outcome is EnumCompanionHealOutcome.RERUN_REQUIRED
+    assert decision.run_ids == (2,)
+
+
+def test_a_run_with_no_creation_time_is_not_presumed_expired() -> None:
+    decision = decide_companion_heal(
+        _pr(now=_NOW, failed_runs=(RunSnapshot(run_id=7, run_attempt=1),))
+    )
+    assert decision.run_ids == (7,)
+
+
+def test_the_run_creation_time_is_read_from_the_runs_payload() -> None:
+    payload = {
+        "workflow_runs": [
+            {
+                "id": 1,
+                "conclusion": "failure",
+                "run_attempt": 1,
+                "name": "CI",
+                "created_at": "2026-08-20T10:00:00Z",
+            },
+            {"id": 2, "conclusion": "failure", "run_attempt": 1, "name": "CI"},
+            {
+                "id": 3,
+                "conclusion": "failure",
+                "run_attempt": 1,
+                "name": "CI",
+                "created_at": "not a time",
+            },
+        ]
+    }
+    assert failed_runs_in_payload(payload) == (
+        RunSnapshot(
+            run_id=1,
+            run_attempt=1,
+            name="CI",
+            created_at=datetime(2026, 8, 20, 10, 0, tzinfo=UTC),
+        ),
+        RunSnapshot(run_id=2, run_attempt=1, name="CI"),
+        RunSnapshot(run_id=3, run_attempt=1, name="CI"),
+    )
+
+
+def test_main_issues_nothing_and_exits_zero_when_every_run_is_expired() -> None:
+    gh = _stub(
+        runs=(
+            RunSnapshot(
+                run_id=30973856360,
+                run_attempt=1,
+                created_at=datetime.now(UTC) - RERUN_WINDOW - timedelta(days=1),
+            ),
+        )
+    )
+    assert main(["--repo", "OmniNode-ai/omnibase_infra"], gh=gh) == 0
+    assert gh.reran == []
+
+
+class RerunWindowRefusedGh(StubGh):
+    def rerun_failed(self, *, repo: str, run_id: int) -> None:
+        raise RerunWindowExpiredError(f"run {run_id} created over a month ago")
+
+
+def test_a_rerun_refused_for_the_window_is_a_skip_not_a_failure(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The run crossed the boundary between the read and the re-run."""
+    gh = RerunWindowRefusedGh(
+        prs=((2658, "4dde47fc08e9" + "0" * 28, "Evidence-Source: OCC#6083\n"),),
+        failed_checks=5,
+        state=EnumCompanionState.MERGED,
+        runs=(RunSnapshot(run_id=1, run_attempt=1),),
+    )
+    assert main(["--repo", "OmniNode-ai/omnibase_infra"], gh=gh) == 0
+    assert "rerun_window_expired" in capsys.readouterr().out
+
+
+def test_ghcli_names_a_rerun_window_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The exact stderr heal run 36871003284 recorded for run 30973856360."""
+
+    def fake_run(argv: list[str], **kwargs: Any) -> _FakeCompleted:
+        return _FakeCompleted(
+            returncode=1,
+            stderr=(
+                "run 30973856360 cannot be rerun; Unable to retry this "
+                "workflow run because it was created over a month ago"
+            ),
+        )
+
+    monkeypatch.setattr(heal_module.subprocess, "run", fake_run)
+    with pytest.raises(RerunWindowExpiredError):
+        GhCli().rerun_failed(repo="OmniNode-ai/omnibase_infra", run_id=30973856360)
+
+
+def test_ghcli_any_other_rerun_refusal_is_not_a_window_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _record_gh(monkeypatch, returncode=1)
+    with pytest.raises(RuntimeError) as excinfo:
+        GhCli().rerun_failed(repo="OmniNode-ai/omnibase_infra", run_id=42)
+    assert not isinstance(excinfo.value, RerunWindowExpiredError)
+
+
+def test_collect_decisions_applies_the_window_against_its_clock() -> None:
+    gh = _stub(
+        runs=(
+            RunSnapshot(run_id=1, run_attempt=1, created_at=_NOW - timedelta(days=31)),
+        )
+    )
+    decisions = collect_decisions(
+        gh, repo="OmniNode-ai/omnibase_infra", occ_repo="x/y", now=_NOW
+    )
+    assert [d.outcome for d in decisions] == [
+        EnumCompanionHealOutcome.RERUN_WINDOW_EXPIRED
+    ]
