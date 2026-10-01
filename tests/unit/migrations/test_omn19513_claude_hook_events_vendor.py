@@ -22,10 +22,12 @@ _CLASSES = _ROOT / "config" / "migration_classes.yaml"
 _CREATE = "0000_create_claude_hook_events.sql"
 _GRANT = "0001_grant_omninode_runtime_claude_hook_events.sql"
 _GOAL = "0005_add_goal_id.sql"
+_FIELDS = "0006_add_lane_model_host_exit_code.sql"
 _SHA256 = {
     _CREATE: "388faf7f8d683a28341b306a5d67dc208b98aaf5b8f39789b97361cba4ed72ae",
     _GRANT: "c69298981a4a481d394c0f9cbf9c5374904644981073afa84ce87ae4ae4182d0",
     _GOAL: "14f1c5e67a51e1d30da1b21c5267de497e0bec7d2e443471a45d905b7de3708f",
+    _FIELDS: "ec509c4d99d8daaf831c2ea4eebec209f64bfd45e57410b5916739c1e91b078b",
 }
 _TABLES = ("claude_agent_spans", "claude_hook_events")
 
@@ -38,7 +40,7 @@ def _statements(filename: str) -> str:
     )
 
 
-@pytest.mark.parametrize("filename", [_CREATE, _GRANT, _GOAL])
+@pytest.mark.parametrize("filename", [_CREATE, _GRANT, _GOAL, _FIELDS])
 def test_vendor_bytes_and_manifest_binding_are_exact(filename: str) -> None:
     artifact_path = f"nodes/{_NODE}/{filename}"
     assert (
@@ -65,6 +67,7 @@ def test_migration_classes_match_the_classifier() -> None:
     assert classes[f"forward/nodes/{_NODE}/{_CREATE}"] == "forward-only"
     assert classes[f"forward/nodes/{_NODE}/{_GRANT}"] == "expand-only"
     assert classes[f"forward/nodes/{_NODE}/{_GOAL}"] == "expand-only"
+    assert classes[f"forward/nodes/{_NODE}/{_FIELDS}"] == "expand-only"
 
 
 def test_the_goal_migration_adds_nullable_uuid_columns_and_a_partial_index() -> None:
@@ -181,7 +184,7 @@ def test_every_issued_privilege_is_asserted_including_schema_usage() -> None:
         assert f"AS {table}_cursor_sequence_usage_assertion" in grants
 
 
-@pytest.mark.parametrize("filename", [_CREATE, _GRANT, _GOAL])
+@pytest.mark.parametrize("filename", [_CREATE, _GRANT, _GOAL, _FIELDS])
 @pytest.mark.parametrize(
     "profile", ["local", "onex-dev", "onex-prod", "stability-test"]
 )
@@ -210,3 +213,20 @@ def test_the_sql_gate_is_live_positive_control() -> None:
     )
     assert broken != sql
     assert lint_application_database_sql(broken, load_topology_profile("local")) != ()
+
+
+def test_the_fields_migration_adds_four_nullable_columns() -> None:
+    """OMN-17427: the omnimarket 0006, vendored byte for byte, declares its shape."""
+    sql = _statements(_FIELDS)
+    for column, kind in (
+        ("lane", "TEXT"),
+        ("model", "TEXT"),
+        ("host", "TEXT"),
+        ("exit_code", "INTEGER"),
+    ):
+        assert re.search(
+            rf"ALTER TABLE omninode_internal\.claude_hook_events\s+"
+            rf"ADD COLUMN IF NOT EXISTS {column} {kind};",
+            sql,
+        )
+    assert _grants(sql) == set()
