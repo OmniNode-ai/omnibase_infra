@@ -220,7 +220,6 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
-              - delegation_disposition_usage
               - projection_cost_savings_overview
               - projection_delegation_model_routing
               - projection_delegation_quality_gate

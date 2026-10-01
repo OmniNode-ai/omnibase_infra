@@ -22,21 +22,17 @@ _CLASSES = _ROOT / "config" / "migration_classes.yaml"
 _CREATE = "0000_create_delegation_dispositions.sql"
 _GRANT = "0001_grant_tenant_projection_writer_delegation_dispositions.sql"
 _FORCE_RLS = "0002_force_rls_delegation_dispositions.sql"
-_VIEW = "0003_create_delegation_disposition_usage.sql"
 _SHA256 = {
     _CREATE: "3d180c385033e2ab29dbafdf84798c47b2274bbfd607fa828235a19801a73ebb",
     _GRANT: "24d3fe38a9ad8d1efcebd0d745c2242fa65000daebe488208590bc41bec9e149",
     _FORCE_RLS: "0c8f29714eb1441be4ab49e45d0ecade4ce7f2da441552708c346f859dedfb03",
-    _VIEW: "f6893dcbef202351a2a0e1fb6bf0f86e67d4baf881dbf958c3c66287ef1512e8",
 }
 _EXPECTED_CLASSES = {
     _CREATE: "forward-only",
     _GRANT: "expand-only",
     _FORCE_RLS: "forward-only",
-    _VIEW: "forward-only",
 }
 _TABLE = "delegation_dispositions"
-_VIEW_NAME = "delegation_disposition_usage"
 
 
 def _statements(filename: str) -> str:
@@ -70,6 +66,7 @@ def test_vendor_bytes_and_manifest_binding_are_exact(filename: str) -> None:
 
 
 def test_migration_classes_match_the_classifier() -> None:
+    assert {path.name for path in _VENDOR.glob("*.sql")} == set(_SHA256)
     classes = yaml.safe_load(_CLASSES.read_text(encoding="utf-8"))["migrations"]
     for filename, expected in _EXPECTED_CLASSES.items():
         assert classes[f"forward/nodes/{_NODE}/{filename}"] == expected
@@ -116,38 +113,6 @@ def test_table_rls_and_exact_grants_are_present() -> None:
         )
 
 
-def test_usage_view_reads_both_tenant_relations_as_the_invoker() -> None:
-    sql = _statements(_VIEW)
-    assert re.search(
-        rf"CREATE OR REPLACE VIEW public\.{_VIEW_NAME}\s+"
-        r"WITH \(security_invoker = true\) AS",
-        sql,
-    )
-    assert "FROM public.delegation_events e" in sql
-    assert f"LEFT JOIN public.{_TABLE} d" in sql
-    assert "d.tenant_id::text = e.tenant_id::text" in sql
-    assert "d.delegation_correlation_id::text = e.correlation_id::text" in sql
-    for principal in ("app_dashboard", "tenant_projection_writer"):
-        assert f"GRANT SELECT ON public.{_VIEW_NAME} TO {principal};" in sql
-    assert "ROW LEVEL SECURITY" not in sql
-    migration_order = sorted((_FORWARD / "nodes").glob("*/*.sql"))
-    view_index = migration_order.index(_VENDOR / _VIEW)
-    fenced_ids = {
-        entry["id"]
-        for entry in yaml.safe_load(
-            (_FORWARD / "fenced-node-migrations.yaml").read_text(encoding="utf-8")
-        )["fenced_node_migrations"]
-    }
-    for filename in (
-        "0007_delegation_events.sql",
-        "0022_delegation_events_tenant_id.sql",
-        "0048_delegation_events_caller_lane.sql",
-    ):
-        dependency = _FORWARD / "nodes" / "node_projection_delegation" / filename
-        assert migration_order.index(dependency) < view_index
-        assert f"node:node_projection_delegation:{filename}" not in fenced_ids
-
-
 @pytest.mark.parametrize("filename", _SHA256)
 @pytest.mark.parametrize(
     "profile", ["local", "onex-dev", "onex-prod", "stability-test"]
@@ -165,7 +130,7 @@ def test_migrations_pass_the_application_database_sql_gate(
     assert violations == (), f"{profile}/{filename}: {violations}"
 
 
-@pytest.mark.parametrize("filename", [_CREATE, _VIEW])
+@pytest.mark.parametrize("filename", [_CREATE])
 def test_the_sql_gate_is_live_positive_control(filename: str) -> None:
     from omnibase_infra.topology.application_database import load_topology_profile
     from omnibase_infra.validation.application_database_domain_enforcement import (
@@ -183,7 +148,6 @@ def test_the_sql_gate_is_live_positive_control(filename: str) -> None:
     ("relation", "filename", "access", "privileges"),
     [
         (_TABLE, _CREATE, "read_write", {"SELECT", "INSERT", "UPDATE"}),
-        (_VIEW_NAME, _VIEW, "read", {"SELECT"}),
     ],
 )
 def test_bridge_derives_the_shipped_grant(

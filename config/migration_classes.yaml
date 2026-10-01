@@ -247,7 +247,6 @@ migrations:
   forward/nodes/node_projection_delegation_disposition/0000_create_delegation_dispositions.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT; ROW LEVEL SECURITY; DROP
   forward/nodes/node_projection_delegation_disposition/0001_grant_tenant_projection_writer_delegation_dispositions.sql: expand-only
   forward/nodes/node_projection_delegation_disposition/0002_force_rls_delegation_dispositions.sql: forward-only # ENABLE/FORCE ROW LEVEL SECURITY; DROP
-  forward/nodes/node_projection_delegation_disposition/0003_create_delegation_disposition_usage.sql: forward-only # CREATE OR REPLACE (replaces an existing object)
   forward/nodes/node_projection_delegation_eval/0000_create_delegation_eval_items.sql: forward-only # ALTER TABLE public.delegation_eval_items ENABLE ROW LEVEL (ROW LEVEL SECURITY); DROP
   forward/nodes/node_projection_delegation_eval/0001_grant_tenant_projection_writer_delegation_eval_items.sql: expand-only
   forward/nodes/node_projection_delegation_eval/0002_force_rls_delegation_eval_items.sql: forward-only # ALTER TABLE public.delegation_eval_items FORCE ROW LEVEL (ROW LEVEL SECURITY)

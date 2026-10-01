@@ -391,10 +391,8 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="provider_quota_state",
         ),
     ),
-    # OMN-20242: infra vendors the disposition table and usage view before the
-    # omnimarket node_projection_delegation_disposition contract lands.
-    # Both bridges expire when that source change merges and the pin advances
-    # to declare these relations (including the view's access: read entry).
+    # node_projection_delegation_disposition contract lands. This bridge expires
+    # when that source change merges and the pin advances to declare the table.
     ContractTableDeclaration(
         node="legacy_migration:delegation_dispositions",
         contract_path=Path(
@@ -411,24 +409,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="delegation_dispositions",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:delegation_disposition_usage",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation_disposition/"
-            "0003_create_delegation_disposition_usage.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_disposition_usage",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation_disposition/"
-                "0003_create_delegation_disposition_usage.sql"
-            ),
-            access="read",
-            role="delegation_disposition_usage",
         ),
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to
