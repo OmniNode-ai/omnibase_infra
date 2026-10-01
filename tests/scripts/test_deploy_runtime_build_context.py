@@ -14,6 +14,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
 DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile.runtime"
@@ -440,8 +444,12 @@ def test_deploy_runtime_rsync_manifest_covers_every_dockerfile_copy_source() -> 
 def _init_git_repo(path: Path, marker: str) -> str:
     path.mkdir(parents=True)
     (path / "marker.txt").write_text(marker, encoding="utf-8")
-    subprocess.run(["git", "init", "-q"], cwd=path, check=True)
-    subprocess.run(["git", "add", "marker.txt"], cwd=path, check=True)
+    subprocess.run(
+        ["git", "init", "-q"], cwd=path, check=True, env=scrub_git_location_env()
+    )
+    subprocess.run(
+        ["git", "add", "marker.txt"], cwd=path, check=True, env=scrub_git_location_env()
+    )
     subprocess.run(
         [
             "git",
@@ -456,11 +464,13 @@ def _init_git_repo(path: Path, marker: str) -> str:
         ],
         cwd=path,
         check=True,
+        env=scrub_git_location_env(),
     )
     result = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=path,
         check=True,
+        env=scrub_git_location_env(),
         capture_output=True,
         text=True,
     )
@@ -591,7 +601,11 @@ def test_deploy_runtime_uses_current_lock_pin_preflight_interface() -> None:
 
     # The consuming repo's omnimarket uv.lock is the pin authority, and every
     # vendored sibling must be passed as a --repo PACKAGE=PATH entry.
-    assert 'lock_path="${omni_home}/omnimarket/uv.lock"' in deploy_script
+    # OMN-20263: read from the tree RT-1 staged omnimarket from.
+    assert (
+        'lock_path="$(sibling_source_path "${omni_home}" omnimarket)/uv.lock"'
+        in deploy_script
+    )
     for package in (
         "omnibase-infra",
         "omnibase-core",

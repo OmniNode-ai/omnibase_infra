@@ -46,6 +46,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CUT_LAB_REF = REPO_ROOT / "scripts" / "runtime_build" / "cut-lab-ref.sh"
 STAGE_WORKSPACE = REPO_ROOT / "scripts" / "runtime_build" / "stage_workspace.sh"
@@ -76,7 +80,7 @@ def _git(repo: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        env={**scrub_git_location_env(), "GIT_TERMINAL_PROMPT": "0"},
     ).stdout.strip()
 
 
@@ -246,15 +250,21 @@ def test_cut_lab_ref_execute_overwrites_collision_and_runs_rt1_checkout(
             # OMN-16442: pin the expected-refs manifest outside both the build
             # context and the runner's real HOME.
             "DEPLOY_SOURCE_REFS_OUT": str(tmp_path / "refs-state" / "cut-lab-ref.json"),
+            # OMN-20263: RT-1's pinned worktrees, kept out of the real HOME.
+            "DEPLOY_SOURCE_WORKTREE_ROOT": str(tmp_path / "source-trees"),
         },
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "--force" in result.stderr
     assert "stub: RT-1 staging complete" in result.stderr
 
-    # RT-1 actually ran and moved the sibling clone to the NEW (advanced) SHA --
-    # a no-op checkout would have left it detached at old_sha.
-    assert _git(omni_home / "omnimarket", "rev-parse", "HEAD") == new_sha
+    # RT-1 actually ran and checked the NEW (advanced) SHA out in its own
+    # worktree -- a no-op checkout would have staged old_sha -- and left the
+    # canonical clone where it was (OMN-20263).
+    assert (
+        _git(tmp_path / "source-trees" / "omnimarket", "rev-parse", "HEAD") == new_sha
+    )
+    assert _git(omni_home / "omnimarket", "rev-parse", "HEAD") == old_sha
 
     expected_refs = tmp_path / "refs-state" / "cut-lab-ref.json"
     provenance = deploy_target / "workspace" / "sibling-vcs-provenance.json"

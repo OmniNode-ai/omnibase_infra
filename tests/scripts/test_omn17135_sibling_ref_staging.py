@@ -32,6 +32,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 STAGE_SCRIPT = REPO_ROOT / "scripts" / "runtime_build" / "stage_workspace.sh"
 
@@ -55,7 +59,7 @@ def _git(repo: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        env={**scrub_git_location_env(), "GIT_TERMINAL_PROMPT": "0"},
     )
     return result.stdout.strip()
 
@@ -115,6 +119,8 @@ def _run_stage(
         "OMNI_HOME": str(omni_home),
         "CONSUMER_LOCK": str(omni_home / "omnimarket" / "uv.lock"),
         "DEPLOY_SOURCE_REFS_OUT": str(_refs_out(build_ctx)),
+        # OMN-20263: RT-1's pinned worktrees, kept out of the real HOME.
+        "DEPLOY_SOURCE_WORKTREE_ROOT": str(build_ctx.parent / "source-trees"),
         "DEPLOY_REF": deploy_ref,
     }
     env.pop("DEPLOY_HOTPATCH", None)
@@ -154,6 +160,7 @@ def _infra_only_sha(omni_home: Path) -> str:
             capture_output=True,
             text=True,
             check=False,
+            env=scrub_git_location_env(),
         )
         assert probe.returncode != 0, f"{repo} unexpectedly resolves the infra SHA"
     return sha
