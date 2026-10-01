@@ -83,6 +83,8 @@ local:
     # The delegation_events writer. It is a standalone projection runner, not
     # a kernel handler, on every lane that projects delegations.
     - omnimarket-projection-delegation
+    # Projects registered credential references into the tenant routing overlay.
+    - omnimarket-projection-tenant-credentials
     # OMN-19972 (plan T4.1, demo half): the six local pages read served
     # exposures, so the laptop runs its own projection API, the LLM call and
     # cost writer behind the Usage page, and the consumer-health projection.
@@ -104,6 +106,8 @@ local:
   includes: []
   inject_env:
     ONEX_ENVIRONMENT: local
+    # Non-secret lane identity; empty means this runtime has no lane tenant.
+    ONEX_TENANT_ID: "${ONEX_TENANT_ID:-}"
     # OMN-19408: a lane-scoped node contract (omnimarket's lab projections and
     # PR-landing nodes) fails closed on a runtime that cannot name its lane, and
     # each such refusal is a discovery error that holds /health at `degraded`.

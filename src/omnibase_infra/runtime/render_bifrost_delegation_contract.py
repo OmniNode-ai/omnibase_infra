@@ -11,6 +11,9 @@ added backend is appended to the rendered contract after every base backend, so
 it never displaces a rung the base declared. A binding that names an undeclared
 backend without that declaration, or a base backend WITH it, fails the render —
 never a silent drop and never a default.
+The overlay's served model always wins over the base contract's model. Cloud
+overlays may rebind or add non-local backends while every local rung stays
+disabled (OMN-17502).
 """
 
 from __future__ import annotations
@@ -47,6 +50,7 @@ from omnibase_infra.runtime.models.model_bifrost_endpoint_probe_failure import (
     ModelBifrostEndpointProbeFailure,
 )
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
+    LOCAL_TIER,
     NEW_BACKEND_DECLARATION_FIELDS,
     ModelBifrostLaneBackendBinding,
 )
@@ -64,8 +68,6 @@ _CHAT_COMPLETIONS_PATH_SUFFIX = "/chat/completions"
 _EMBEDDINGS_PATH_SUFFIX = "/embeddings"
 _COMPLETE_ENDPOINT_SUFFIXES = (_CHAT_COMPLETIONS_PATH_SUFFIX, _EMBEDDINGS_PATH_SUFFIX)
 _DEFAULT_ENDPOINT_PROBE_TIMEOUT_SECONDS = 3.0
-#: The base contract's own declaration that a backend is served from the lab.
-_LOCAL_TIER = "local"
 #: OMN-19432: the base contract's own declaration that a backend answers TYPED
 #: DECISIONS on its provider's own schema (TypeSafe Jev's System One API)
 #: rather than OpenAI chat completions. Such a backend is never a rung: no
@@ -242,7 +244,7 @@ def _index_base_backends(base: dict[str, object]) -> dict[str, dict[object, obje
 
 def _is_local_backend(backend: dict[object, object]) -> bool:
     """Whether the contract declares this backend as lab-served (its ``tier``)."""
-    return backend.get("tier") == _LOCAL_TIER
+    return backend.get("tier") == LOCAL_TIER
 
 
 def _is_typed_decision_backend(backend: dict[object, object]) -> bool:
@@ -411,6 +413,7 @@ def _merge_lane_overlay(
     added: list[dict[object, object]] = []
     for binding in overlay.backends:
         backend = by_id.get(binding.backend_key)
+        base_model: object = None
         if backend is None:
             if not binding.declares_new_backend:
                 raise ProtocolConfigurationError(
@@ -436,18 +439,26 @@ def _merge_lane_overlay(
                     f"Bifrost base backend {binding.backend_key!r} must declare model_name"
                 )
             base_model = backend["model_name"]
-            if base_model is not None and base_model != binding.advertised_model:
-                raise ProtocolConfigurationError(
-                    f"Bifrost base backend {binding.backend_key!r} model_name {base_model!r} "
-                    f"does not match overlay served_model_id {binding.advertised_model!r}"
-                )
+        if overlay.locale is EnumBifrostLaneLocale.CLOUD and _is_local_backend(backend):
+            raise ProtocolConfigurationError(
+                f"Bifrost lane overlay for lane {overlay.lane!r} declares locale "
+                f"{EnumBifrostLaneLocale.CLOUD.value!r} but binds local-tier "
+                f"backend {binding.backend_key!r}: a cloud lane must reach no "
+                "lab endpoint (OMN-17502)."
+            )
+        if base_model is not None and base_model != binding.advertised_model:
+            sys.stdout.write(
+                f"[entrypoint] Bifrost backend {binding.backend_key!r} "
+                f"model_name {base_model!r} overridden by lane overlay "
+                f"{overlay.lane!r} served_model_id {binding.advertised_model!r}\n"
+            )
         if not binding.serving:
             # OMN-16999: a DECLARED-but-dark rung. Write the disabled shape —
             # the same ``endpoint_url: null`` a cloud lane's local backends get
             # — so ``_load_bifrost_endpoints`` skips it and routing never offers
             # it, while ``routing_rules``/``default_backends`` naming this
-            # backend stay resolvable. model_name is still asserted above and
-            # still written below, so the binding survives in the artifact and
+            # backend stay resolvable. The overlay's served model is written
+            # below, so the binding survives in the artifact and
             # the rung is restored by flipping one flag, not by reconstructing
             # it. The probe is skipped for the obvious reason: probing an
             # endpoint already proven dark would only fail the render.
@@ -564,8 +575,9 @@ def render_bifrost_delegation_contract(
     The overlay's execution locale decides what "merged" means (OMN-17502): a
     ``lab`` lane binds every local backend the base contract routes to and may
     add fully declared backends of its own (OMN-17099), while a ``cloud``
-    lane declares none and renders the base contract's cloud backends with every
-    local rung explicitly disabled.
+    lane may rebind base cloud backends or add fully declared non-local backends
+    with every local rung explicitly disabled. Each binding's served model
+    overrides the base model in either locale.
     """
     env = environ if environ is not None else os.environ
     target = _resolve_target_path(target_path=target_path, env=env)
