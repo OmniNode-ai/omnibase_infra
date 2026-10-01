@@ -1,0 +1,225 @@
+# Baseline for check-direct-model-call (OMN-20295).
+# A model call must sit inside a sanctioned delegation
+# node package (omnibase_core nodes/node_direct_model_call_check_compute/policy.yaml).
+#
+# RULE: entries only leave. A site not listed here fails. An entry that no
+# longer matches a site fails until it is removed. An entry past its expiry no
+# longer covers its site. CI and the pre-commit hook refuse a change whose copy
+# of this file carries an entry, a later expiry or another ticket that its
+# base did not. Crush sites name OMN-20290 for their removal.
+#
+# Regenerate only to SHRINK it:
+#   python -m omnibase_core.nodes.node_direct_model_call_check_effect.runtime_direct_model_call \
+#     --repo <repo> --baseline <this file> --write-baseline
+schema_version: 1
+entries:
+  - path: scripts/caia-watchdog.sh
+    kind: cli_exec
+    symbol: <script>
+    target: claude
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: scripts/caia-watchdog.sh
+    kind: cli_exec
+    symbol: <script>
+    target: claude
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: scripts/check_llm_endpoints.sh
+    kind: http
+    symbol: _probe
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: scripts/ci/c13_customer_local_probe.py
+    kind: http
+    symbol: observe_live
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: scripts/ci/c13_customer_local_probe.py
+    kind: http
+    symbol: observe_live
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: scripts/ci/c13_customer_local_probe.py
+    kind: http
+    symbol: observe_live
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: scripts/ci/c13_customer_local_probe.py
+    kind: http
+    symbol: observe_live
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: scripts/ci/c13_customer_local_probe.py
+    kind: http
+    symbol: served_model_ids
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: scripts/ci/c13_customer_local_probe.py
+    kind: http
+    symbol: tokens_predicted
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: scripts/edge_delegation_worker/cli.py
+    kind: call_via
+    symbol: _amain
+    target: scripts/edge_delegation_worker/worker_cycle.py::run_worker_loop
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: scripts/edge_delegation_worker/local_model_bridge.py
+    kind: http
+    symbol: run_chat_completion
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: scripts/edge_delegation_worker/worker_cycle.py
+    kind: call_via
+    symbol: run_single_cycle
+    target: scripts/edge_delegation_worker/local_model_bridge.py::run_chat_completion
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: src/omnibase_infra/nodes/node_vector_store_effect/handlers/handler_vector_search.py
+    kind: http
+    symbol: HandlerVectorSearch._generate_embeddings
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: src/omnibase_infra/nodes/node_vector_store_effect/handlers/handler_vector_upsert.py
+    kind: http
+    symbol: HandlerVectorUpsert._generate_embeddings
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: src/omnibase_infra/services/service_auto_eval_runner.py
+    kind: http
+    symbol: ServiceAutoEvalRunner._call_llm
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: src/omnibase_infra/services/session_registry/decision_embedder.py
+    kind: http
+    symbol: EmbeddingClient.embed
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: src/omnibase_infra/services/session_registry/decision_search.py
+    kind: http
+    symbol: DecisionSearchClient._embed
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/ci/test_c13_customer_local_probe_omn19179.py
+    kind: call_via
+    symbol: test_a_public_model_host_exits_could_not_run
+    target: scripts/ci/c13_customer_local_probe.py::main
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/ci/test_c13_customer_local_probe_omn19179.py
+    kind: call_via
+    symbol: test_exit_codes_distinguish_pass_fail_and_could_not_run
+    target: scripts/ci/c13_customer_local_probe.py::main
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/ci/test_c13_customer_local_probe_omn19179.py
+    kind: call_via
+    symbol: test_exit_codes_distinguish_pass_fail_and_could_not_run
+    target: scripts/ci/c13_customer_local_probe.py::main
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/ci/test_c13_customer_local_probe_omn19179.py
+    kind: call_via
+    symbol: test_exit_codes_distinguish_pass_fail_and_could_not_run
+    target: scripts/ci/c13_customer_local_probe.py::main
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/integration/adapters/llm/test_adapter_documentation_generation_integration.py
+    kind: http
+    symbol: <module>
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/unit/runtime/test_dogfood_delegation_fault_provider_omn18931.py
+    kind: http
+    symbol: test_fault_provider_serves_the_declared_http_status
+    target: http
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/unit/scripts/edge_delegation_worker/test_local_model_bridge.py
+    kind: call_via
+    symbol: test_run_chat_completion_4xx_raises_request_rejected
+    target: scripts/edge_delegation_worker/local_model_bridge.py::run_chat_completion
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/unit/scripts/edge_delegation_worker/test_local_model_bridge.py
+    kind: call_via
+    symbol: test_run_chat_completion_5xx_raises_protocol_error
+    target: scripts/edge_delegation_worker/local_model_bridge.py::run_chat_completion
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/unit/scripts/edge_delegation_worker/test_local_model_bridge.py
+    kind: call_via
+    symbol: test_run_chat_completion_missing_choices_fails_closed
+    target: scripts/edge_delegation_worker/local_model_bridge.py::run_chat_completion
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/unit/scripts/edge_delegation_worker/test_local_model_bridge.py
+    kind: call_via
+    symbol: test_run_chat_completion_success
+    target: scripts/edge_delegation_worker/local_model_bridge.py::run_chat_completion
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/unit/scripts/edge_delegation_worker/test_local_model_bridge.py
+    kind: call_via
+    symbol: test_run_chat_completion_unreachable_host_raises_unavailable
+    target: scripts/edge_delegation_worker/local_model_bridge.py::run_chat_completion
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/unit/scripts/edge_delegation_worker/test_worker_cycle.py
+    kind: call_via
+    symbol: test_run_single_cycle_model_failure_publishes_failed_and_nacks
+    target: scripts/edge_delegation_worker/worker_cycle.py::run_single_cycle
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/unit/scripts/edge_delegation_worker/test_worker_cycle.py
+    kind: call_via
+    symbol: test_run_single_cycle_returns_false_on_empty_queue
+    target: scripts/edge_delegation_worker/worker_cycle.py::run_single_cycle
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/unit/scripts/edge_delegation_worker/test_worker_cycle.py
+    kind: call_via
+    symbol: test_run_single_cycle_success_publishes_completed_and_acks
+    target: scripts/edge_delegation_worker/worker_cycle.py::run_single_cycle
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/unit/scripts/edge_delegation_worker/test_worker_cycle.py
+    kind: call_via
+    symbol: test_run_single_cycle_unusable_payload_publishes_failed_and_nacks
+    target: scripts/edge_delegation_worker/worker_cycle.py::run_single_cycle
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/unit/scripts/edge_delegation_worker/test_worker_cycle.py
+    kind: call_via
+    symbol: test_run_worker_loop_end_to_end_bounded
+    target: scripts/edge_delegation_worker/worker_cycle.py::run_worker_loop
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/unit/scripts/edge_delegation_worker/test_worker_cycle.py
+    kind: call_via
+    symbol: test_run_worker_loop_rejects_unsupported_renewal_mode
+    target: scripts/edge_delegation_worker/worker_cycle.py::run_worker_loop
+    ticket: OMN-20295
+    expires: '2026-12-31'
+  - path: tests/unit/scripts/edge_delegation_worker/test_worker_cycle.py
+    kind: call_via
+    symbol: test_run_worker_loop_stops_on_terminated_heartbeat
+    target: scripts/edge_delegation_worker/worker_cycle.py::run_worker_loop
+    ticket: OMN-20295
+    expires: '2026-12-31'
