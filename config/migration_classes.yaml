@@ -285,6 +285,7 @@ migrations:
   forward/nodes/node_projection_llm_cost/0001_create_llm_call_metrics.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT LLM_CALL_METRICS_PKEY; ALTER TABLE ADD CONSTRAINT NON_NEGATIVE_PROMPT_TOKE
   forward/nodes/node_projection_llm_cost/0002_grant_omninode_runtime_llm_call_metrics.sql: expand-only
   forward/nodes/node_projection_llm_cost/0002_llm_call_metrics_input_hash_full_unique.sql: forward-only # DROP; UNIQUE INDEX on an existing table (public.llm_call_metrics)
+  forward/nodes/node_projection_llm_cost/0003_usage_source_shared_vocabulary.sql: forward-only # RENAME; ALTER TYPE (other than ADD VALUE); ALTER TABLE public.llm_call_metrics ALTER COLUMN (ALTER COLUMN USAGE_SOURCE)
   forward/nodes/node_projection_llm_routing/0000_create_llm_routing_decisions.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT LLM_ROUTING_DECISIONS_LLM_CONFIDENCE_CHECK; ALTER TABLE ADD CONSTRAINT LLM
   forward/nodes/node_projection_llm_routing/0001_create_routing_dashboard_projection_view.sql: forward-only # CREATE OR REPLACE
   forward/nodes/node_projection_llm_routing/0002_grant_omninode_runtime_llm_routing_decisions.sql: expand-only
