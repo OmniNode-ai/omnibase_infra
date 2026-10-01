@@ -1056,6 +1056,9 @@ route:
         - Bus ACL Boundary (OMN-19928)
         - call-reject-skip-token / scan / reject-skip-gate-token
         - Canonical Handler-Shape Gate (OMN-20298)
+        # OMN-20304: the canonical-file-shape ratchet, registered STRICT in
+        # STRICT_GATE_JOBS and enforced by the CI Summary poller.
+        - Canonical File Shape (OMN-20304)
         - Canonical Inference Gate
         - CI Evidence Policy (OMN-18247)
         - CI Summary
