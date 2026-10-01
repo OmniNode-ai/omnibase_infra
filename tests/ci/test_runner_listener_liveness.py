@@ -1469,6 +1469,44 @@ def _canary_runners_payload(online: int, offline: int) -> dict[str, object]:
     return {"total_count": len(runners), "runners": runners}
 
 
+def _declared_action_pools() -> dict[str, int]:
+    """prefix -> expected count for every declared pool carrying the action class.
+
+    A host row is a pool of its own prefix; its ``pools:`` list adds more. Read
+    from the real config so the test follows the declaration, not a copy of it.
+    """
+    config = yaml.safe_load(FLEET_CONFIG.read_text(encoding="utf-8"))
+    pools: dict[str, int] = {}
+    for host in config["hosts"]:
+        rows = [host, *host.get("pools", [])]
+        for row in rows:
+            if "action" in row["classes"]:
+                pools[row["runner_name_prefix"]] = row["expected_count"]
+    return pools
+
+
+def _multi_pool_payload(counts: dict[str, int], offline: int = 0) -> dict[str, object]:
+    """Registry with ``counts[prefix]`` online action runners per prefix."""
+    runners = []
+    for prefix, count in counts.items():
+        for i in range(1, count + 1):
+            runners.append(
+                {
+                    "name": f"{prefix}-{i}",
+                    "status": "online",
+                    "busy": False,
+                    "labels": [
+                        {"name": "self-hosted"},
+                        {"name": "omnibase-ci"},
+                        {"name": "linux"},
+                    ],
+                }
+            )
+    for runner in runners[:offline]:
+        runner["status"] = "offline"
+    return {"total_count": len(runners), "runners": runners}
+
+
 class _StubHandler(http.server.BaseHTTPRequestHandler):
     payload: bytes = b"{}"
 
@@ -1522,14 +1560,43 @@ class TestFleetCanaryFunctional:
     """DoD: canary alerts on a synthetic offline fleet without any Docker change."""
 
     def test_canary_passes_on_healthy_fleet(self) -> None:
-        expected = yaml.safe_load(FLEET_CONFIG.read_text(encoding="utf-8"))[
-            "expected_count"
-        ]
-        result = _run_canary(_canary_runners_payload(online=expected, offline=0))
+        result = _run_canary(_multi_pool_payload(_declared_action_pools()))
         assert result.returncode == 0, (
             f"healthy fleet must pass: rc={result.returncode} "
             f"out={result.stdout} err={result.stderr}"
         )
+
+    def test_canary_sums_every_declared_action_pool(self) -> None:
+        """OMN-20308: 44 on the primary host + 16 on .202 read as 60 of 60.
+
+        The canary used to count only the top-level ``omninode-runner`` prefix,
+        so 16 healthy runners registered as ``omnipc2-ci-runner-N`` read as
+        missing and the run failed at 44 of 60.
+        """
+        pools = _declared_action_pools()
+        assert sum(pools.values()) == 60, pools
+        result = _run_canary(_multi_pool_payload(pools))
+        assert "expected=60 registered=60" in result.stdout, result.stdout
+        assert "missing=0" in result.stdout, result.stdout
+        assert result.returncode == 0, result.stderr
+
+    def test_canary_fails_when_a_pool_loses_registrations(self) -> None:
+        """A shortfall in the second pool is real loss and must still fail."""
+        pools = _declared_action_pools()
+        short = {
+            prefix: (count - 4 if prefix == "omnipc2-ci-runner" else count)
+            for prefix, count in pools.items()
+        }
+        result = _run_canary(_multi_pool_payload(short))
+        assert result.returncode != 0, result.stdout
+        assert "missing=4" in result.stdout, result.stdout
+
+    def test_canary_ignores_non_action_pools(self) -> None:
+        """Verify and customer-plane runners carry no action capacity."""
+        pools = _declared_action_pools()
+        extra = {**pools, "omnipc2-verify-runner": 1, "omninode-verify-runner": 3}
+        result = _run_canary(_multi_pool_payload(extra))
+        assert "registered=60" in result.stdout, result.stdout
 
     def test_canary_fails_on_incident_shape_fleet(self) -> None:
         """The exact 2026-07-03 incident shape: 11 online / 37 offline."""

@@ -588,8 +588,21 @@ def append_ledger_note(ledger: Path, report: ModelRunReport, omni_home: Path) ->
     )
     result = _run(
         [
-            "python3",
-            str(omni_home / "scripts" / "ledger_lock.py"),
+            "env",
+            "-u",
+            "PYTHONPATH",
+            "uv",
+            "run",
+            "--project",
+            str(
+                Path(
+                    os.environ.get(
+                        "OMNIBASE_INTERNAL_HOME",
+                        str(omni_home.parent / "omnibase_internal"),
+                    )
+                )
+            ),
+            "onex-ledger",
             str(ledger),
             "--append",
             row,

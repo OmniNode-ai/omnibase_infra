@@ -139,6 +139,9 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "Writer-Migration Coupling Check",  # migration-required-check
     "Node Migration Declaration Check",  # node-migration-declaration-check (OMN-15717)
     "no-noncanonical-lifecycle-classes",  # OMN-14350 non-canonical lifecycle-class ratchet
+    "Canonical Handler-Shape Gate (OMN-20298)",  # canonical-handler-shape-gate — detector with no preflight dependency
+    "No Plugin Daemon Classes Gate (OMN-20298)",  # no-plugin-daemon-classes-gate — detector with no preflight dependency
+    "Shape-Gate Independence (OMN-20298)",  # shape-gate-independence — refuses a detector behind the preflight
     "Effect-Assertion Gate (RT-5)",  # OMN-14467 deploy-trigger fails closed on zero output
     "OCC Companion Merged Gate (OMN-15214)",  # occ-companion-merged — cited OCC evidence must be MERGED before product merge
     # OMN-16774: whole event chains driven through the REAL dispatch seam on the
@@ -333,6 +336,10 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "Validator Requirements Baseline One-way (OMN-19677) / anti-growth-baseline",
     "Runtime Profiles Allowlist One-way (OMN-19677) / anti-growth-baseline",
     "Skip Count Baseline One-way (OMN-19677) / anti-growth-baseline",
+    # OMN-20304: canonical-file-shape ratchet (no new scripts, plugins or
+    # exceptions). The job is unconditional in ci.yml (no needs/if), so a skip
+    # or absence fails closed here instead of reading green.
+    "Canonical File Shape (OMN-20304)",  # canonical-file-shape
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
@@ -1880,6 +1887,18 @@ def drop_superseded_non_verdicts(
         _supersession_partition_key(raw)
         for raw in check_runs
         if str(raw.get("name") or "") and not _is_non_verdict_row(raw)
+    }
+    # OMN-20275: a reusable-workflow caller job whose own ``if:`` is false
+    # writes its row under the BARE caller name (``deploy-gate``); when it runs
+    # it writes ``caller / reusable-job`` (``deploy-gate / deploy-gate``). The
+    # two never share a name, so a PR opened as a draft against dev keeps the
+    # draft-time ``deploy-gate`` skip on its head forever after the
+    # ready_for_review run reports success, and a rerun cannot clear it (it
+    # reuses the draft payload). A verdict row ``caller / job`` therefore also
+    # supersedes a non-verdict row for ``caller`` on the same head. One
+    # direction only: a bare-name verdict never clears a ``caller / job`` skip.
+    verdict_keys |= {
+        (name.split(" / ", 1)[0], head) for name, head in verdict_keys if " / " in name
     }
     return [
         raw

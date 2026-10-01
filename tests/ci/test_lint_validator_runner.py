@@ -508,7 +508,12 @@ def test_plugin_daemon_scope_fails_closed_on_an_unreadable_lockfile(
 
 
 def test_plugin_daemon_ci_yml_step_uses_the_scope_and_a_depth_two_checkout() -> None:
-    steps = _lint_steps()
+    workflow = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))
+    job = workflow["jobs"]["no-plugin-daemon-classes-gate"]
+    assert "needs" not in job and "if" not in job, (
+        "a shape-gate detector never waits on the preflight (OMN-20298)"
+    )
+    steps = job["steps"]
     checkout = steps[0]
     assert str(checkout.get("uses", "")).startswith("actions/checkout@")
     assert checkout.get("with", {}).get("fetch-depth") == 2

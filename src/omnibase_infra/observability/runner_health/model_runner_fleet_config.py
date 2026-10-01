@@ -139,12 +139,14 @@ class ModelRunnerFleetConfig(BaseModel):
         if not self.hosts:
             return self
 
-        prefixes = [host.runner_name_prefix for host in self.hosts]
+        # OMN-19895: a host's pools carry prefixes too, and they collide with
+        # another host's (or pool's) prefix exactly the way two host prefixes do.
+        prefixes = [prefix for host in self.hosts for prefix in host.all_prefixes()]
         duplicates = {p for p in prefixes if prefixes.count(p) > 1}
         if duplicates:
             raise ValueError(
-                f"runner_name_prefix must be unique across hosts; duplicated: "
-                f"{sorted(duplicates)}"
+                f"runner_name_prefix must be unique across hosts and pools; "
+                f"duplicated: {sorted(duplicates)}"
             )
         # A prefix that is a prefix of another is the same collision one step
         # removed: `omninode-runner` matches `omninode-runner-101-1` under the
@@ -207,9 +209,20 @@ class ModelRunnerFleetConfig(BaseModel):
         if not self.hosts:
             # Pre-inventory config: one host, all classes, the scalar count.
             return self.expected_count
-        return sum(
-            host.expected_count for host in self.hosts if runner_class in host.classes
-        )
+        return sum(host.declared_count(runner_class) for host in self.hosts)
+
+    def host_of_runner(self, runner_name: str) -> ModelRunnerFleetHost | None:
+        """The declared host whose row or pool prefix names ``runner_name``.
+
+        ``<prefix>-<N>`` exactly; ``None`` for a name no declared prefix claims.
+        Non-nesting is enforced at validation, so at most one prefix matches.
+        """
+        for host in self.hosts:
+            for prefix in host.all_prefixes():
+                head, sep, tail = runner_name.rpartition("-")
+                if sep and head == prefix and tail.isdigit():
+                    return host
+        return None
 
     def hosts_for_arch(self, arch: str) -> tuple[ModelRunnerFleetHost, ...]:
         """Inventory rows on a given CPU architecture."""

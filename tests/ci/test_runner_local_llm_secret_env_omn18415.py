@@ -56,6 +56,13 @@ CIDR_ENV_VAR = "LLM_ENDPOINT_CIDR_ALLOWLIST"
 REQUIRED_REVIEWER_ENV_VARS = (SECRET_ENV_VAR, CIDR_ENV_VAR)
 # OMN-18411: fleet capped 88 -> 60.
 FLEET_SERVICE_COUNT = 60
+# OMN-19895: the 60 are spread across two hosts -- 44 in the primary file and
+# 16 in .202's pool file -- and every one of them carries the same wiring, so
+# both files are read as one fleet here.
+POOL_COMPOSE_FILE = (
+    REPO_ROOT / "docker" / "docker-compose.runners-omnipc2-ci-runner.yml"
+)
+FLEET_PREFIXES = ("omninode-runner-", "omnipc2-ci-runner-")
 OUT_OF_SCOPE_SERVICES = (
     "omninode-deploy-runner",
     "omninode-customer-plane-runner-1",
@@ -70,6 +77,12 @@ ABSENT_CONTROL_ENV_VAR = "LLM_DEEPSEEK_R1_URL"
 def _load_compose() -> dict[str, Any]:
     loaded = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
     assert isinstance(loaded, dict)
+    pool = yaml.safe_load(POOL_COMPOSE_FILE.read_text(encoding="utf-8"))
+    assert isinstance(pool, dict)
+    overlap = set(loaded["services"]) & set(pool["services"])
+    assert not overlap, f"service names defined in both files: {sorted(overlap)}"
+    loaded["services"] = {**loaded["services"], **pool["services"]}
+    loaded["volumes"] = {**loaded.get("volumes", {}), **pool.get("volumes", {})}
     return loaded
 
 
@@ -77,10 +90,10 @@ def _fleet_services(compose: dict[str, Any]) -> dict[str, dict[str, Any]]:
     fleet = {
         name: svc
         for name, svc in compose["services"].items()
-        if name.startswith("omninode-runner-")
+        if name.startswith(FLEET_PREFIXES)
     }
     assert len(fleet) == FLEET_SERVICE_COUNT, (
-        f"expected {FLEET_SERVICE_COUNT} omninode-runner-N services, found "
+        f"expected {FLEET_SERVICE_COUNT} fleet services, found "
         f"{len(fleet)}: {sorted(fleet)}"
     )
     return fleet

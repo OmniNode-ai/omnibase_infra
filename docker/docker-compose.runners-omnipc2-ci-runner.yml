@@ -1,0 +1,346 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-19895 -- the .202 host's share of the action (omnibase-ci) fleet.
+#
+# WHY IT EXISTS. On 2026-09-28 all 60 omnibase-ci runners sat on the primary
+# host (.201), so every required CI context in every private repository stopped
+# whenever that one machine did, although no workflow names it (operator
+# rulings 2026-09-28T01:58:06Z and 01:58:17Z). The 60 are spread, not added to:
+# 44 stay on .201 (docker-compose.runners.yml) and these 16 run on .202. Operator
+# consent for the registrations: omni_home ROLLING_WORK_LEDGER.md:13156. Plan:
+# knowledge-base-internal beta/plans/2026-09-28-runner-fleet-spread-plan.md.
+#
+# SAME RUNNER, OTHER HOST. The anchor below is the primary pool's anchor with its
+# comments removed and nothing else changed: the same image, labels
+# (self-hosted,omnibase-ci,linux,x64,arch-amd64), runner group, per-runner limits,
+# environment (lab-ci-reader kubeconfig, the local-LLM signing key and CIDR
+# allowlist from this host's docker/.env, the uv stampede caps) and mounts. So
+# any job a .201 runner can take, one of these can take, and no workflow changes.
+# The rationale for each key is in docker-compose.runners.yml; it is not
+# restated here so the two cannot drift into different explanations.
+#
+# WHAT DIFFERS, each deliberate:
+#   - cgroup_parent names the same unit, omnirunners.slice, but on .202 that
+#     unit is installed from docker/runners/systemd/pools/omnipc2-ci-runner/
+#     omnirunners.slice, sized for THIS host: it serves the 4090 model
+#     (llama.cpp) and the dev-202 and sim-202 lanes, and CI must yield memory
+#     and CPU to them rather than compete as an equal. deploy-runners.sh
+#     installs and reads it back before any runner here is created.
+#   - its own container, runner and volume names (omnipc2-ci-runner-N), so no
+#     name collides with a .201 runner and the fleet probe can tell the hosts
+#     apart by prefix.
+#   - its own compose project (`-p omnipc2-ci-runner`), so it shares no project
+#     with omnipc2-verify-runner, which lives in the same directory on this host.
+#
+# WHAT NO JOB HERE CAN SEE. The container binds nothing from the host except
+# the docker socket, the three hook scripts, the disk-admission marker
+# directory, the read-only lab credentials directory and its own creds volume.
+# /data and every home directory on .202 are outside the container. The docker
+# socket is the same capability every .201 runner holds (jobs build and run
+# containers); it is recorded as the residual, not hidden.
+#
+# DEPLOYING. From a machine with ssh to .202 and org-admin gh:
+#   scripts/deploy-runners.sh --host=192.168.86.202 --pool=omnipc2-ci-runner [--limit=N]
+# which mints one short-lived org registration token, installs and reads back
+# the slice, and brings up omnipc2-ci-runner-1..N additively (a runner already
+# online is not touched at all). --limit=1 is the canary step.
+x-runner-base: &runner-base
+  image: omninode-runner:latest
+  restart: unless-stopped
+  mem_limit: 6g
+  memswap_limit: 12g
+  cpus: "2.0"
+  pids_limit: 4096
+  cgroup_parent: omnirunners.slice
+  environment: &runner-env
+    RUNNER_LABELS: self-hosted,omnibase-ci,linux,x64,arch-amd64
+    GITHUB_ORG_URL: https://github.com/OmniNode-ai
+    KUBECONFIG: /home/runner/.lab-credentials/lab-ci-reader.kubeconfig
+    LOCAL_LLM_SHARED_SECRET: ${LOCAL_LLM_SHARED_SECRET:?LOCAL_LLM_SHARED_SECRET must be set for the omnibase-ci fleet (runner host docker/.env, mode 600) - see scripts/deploy-runners.sh CONSOLIDATED REQUIRED ENV VARS}
+    LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST must be set for the omnibase-ci fleet (runner host docker/.env) - the LLM transport refuses to default its own trust boundary}
+    RUNNER_TOKEN: ${RUNNER_TOKEN}
+    RUNNER_GROUP: omnibase-ci
+    ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
+    UV_CONCURRENT_DOWNLOADS: "1"
+    UV_CONCURRENT_BUILDS: "1"
+    UV_CONCURRENT_INSTALLS: "1"
+    UV_HTTP_TIMEOUT: "600"
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock
+    - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+    - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+    - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+    - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+    - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+  group_add:
+    - "984" # .202 docker group GID (getent group docker, read 2026-09-28), the same value as the primary host
+  healthcheck:
+    test: ["CMD-SHELL", "/usr/local/bin/healthcheck.sh"]
+    interval: 30s
+    timeout: 12s
+    retries: 3
+    start_period: 120s
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+services:
+  omnipc2-ci-runner-1:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-1
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-1-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-2:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-2
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-2
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-2-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-3:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-3
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-3
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-3-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-4:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-4
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-4
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-4-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-5:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-5
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-5
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-5-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-6:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-6
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-6
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-6-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-7:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-7
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-7
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-7-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-8:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-8
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-8
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-8-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-9:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-9
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-9
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-9-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-10:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-10
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-10
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-10-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-11:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-11
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-11
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-11-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-12:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-12
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-12
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-12-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-13:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-13
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-13
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-13-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-14:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-14
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-14
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-14-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-15:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-15
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-15
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-15-creds:/home/runner/.runner-creds
+  omnipc2-ci-runner-16:
+    !!merge <<: *runner-base
+    container_name: omnipc2-ci-runner-16
+    environment:
+      !!merge <<: *runner-env
+      RUNNER_NAME: omnipc2-ci-runner-16
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
+      - ./runners/runner-job-started.sh:/usr/local/bin/runner-job-started.sh:ro
+      - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
+      - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
+      - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - omnipc2-ci-runner-16-creds:/home/runner/.runner-creds
+volumes:
+  omnipc2-ci-runner-1-creds:
+    name: omnipc2-ci-runner-1-creds
+  omnipc2-ci-runner-2-creds:
+    name: omnipc2-ci-runner-2-creds
+  omnipc2-ci-runner-3-creds:
+    name: omnipc2-ci-runner-3-creds
+  omnipc2-ci-runner-4-creds:
+    name: omnipc2-ci-runner-4-creds
+  omnipc2-ci-runner-5-creds:
+    name: omnipc2-ci-runner-5-creds
+  omnipc2-ci-runner-6-creds:
+    name: omnipc2-ci-runner-6-creds
+  omnipc2-ci-runner-7-creds:
+    name: omnipc2-ci-runner-7-creds
+  omnipc2-ci-runner-8-creds:
+    name: omnipc2-ci-runner-8-creds
+  omnipc2-ci-runner-9-creds:
+    name: omnipc2-ci-runner-9-creds
+  omnipc2-ci-runner-10-creds:
+    name: omnipc2-ci-runner-10-creds
+  omnipc2-ci-runner-11-creds:
+    name: omnipc2-ci-runner-11-creds
+  omnipc2-ci-runner-12-creds:
+    name: omnipc2-ci-runner-12-creds
+  omnipc2-ci-runner-13-creds:
+    name: omnipc2-ci-runner-13-creds
+  omnipc2-ci-runner-14-creds:
+    name: omnipc2-ci-runner-14-creds
+  omnipc2-ci-runner-15-creds:
+    name: omnipc2-ci-runner-15-creds
+  omnipc2-ci-runner-16-creds:
+    name: omnipc2-ci-runner-16-creds

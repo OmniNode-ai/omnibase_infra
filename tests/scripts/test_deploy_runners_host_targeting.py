@@ -117,3 +117,90 @@ def test_every_declared_non_primary_host_has_a_compose_file() -> None:
             f"host {row['host']} declares prefix {row['runner_name_prefix']} but "
             f"{compose.relative_to(REPO_ROOT)} does not exist"
         )
+
+
+# --- OMN-19895: --pool selects one of a host row's pools ---------------------
+
+POOL_HARNESS = r"""
+set -euo pipefail
+RUNNER_FLEET_CONFIG="$FLEET_CONFIG"
+eval "$(sed -n '/^runner_pool_field()/,/^}/p' "$SCRIPT_PATH")"
+"""
+
+
+def _pool_field(host: str, pool: str, field: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", "-c", POOL_HARNESS + f'runner_pool_field "{host}" "{pool}" "{field}"'],
+        env={
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+            "FLEET_CONFIG": str(FLEET_CONFIG),
+            "SCRIPT_PATH": str(SCRIPT),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_reads_a_pools_own_count_not_the_host_rows() -> None:
+    """.202's row declares one verify runner; its CI pool declares sixteen."""
+    assert _field("192.168.86.202", "expected_count").stdout.strip() == "1"
+    ci = _pool_field("192.168.86.202", "omnipc2-ci-runner", "expected_count")
+    assert ci.returncode == 0, ci.stderr
+    assert ci.stdout.strip() == "16"
+    cp = _pool_field(
+        "192.168.86.202", "omnipc2-customer-plane-runner", "expected_count"
+    )
+    assert cp.stdout.strip() == "1", cp.stderr
+
+
+def test_a_pool_is_read_under_its_own_host_only() -> None:
+    """The primary host's verify pool is not a pool of .202."""
+    result = _pool_field("192.168.86.202", "omninode-verify-runner", "expected_count")
+    assert result.returncode != 0, result.stdout
+    assert "omnipc2-ci-runner" in result.stderr, (
+        "the refusal must list the pools the host does declare"
+    )
+
+
+def _dry_run(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["bash", str(SCRIPT), "--dry-run", *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_pool_on_the_primary_host_is_refused() -> None:
+    result = _dry_run("--pool=omninode-verify-runner")
+    assert result.returncode != 0
+    assert "--add" in result.stderr, result.stderr
+
+
+def test_a_secondary_host_refuses_the_primary_only_modes() -> None:
+    for mode in (
+        "--rolling",
+        "--soft",
+        "--retire-surplus",
+        "--add=omninode-deploy-runner",
+    ):
+        result = _dry_run("--host=192.168.86.202", "--pool=omnipc2-ci-runner", mode)
+        assert result.returncode != 0, (mode, result.stdout)
+        assert "primary host's compose file" in result.stderr, (mode, result.stderr)
+
+
+def test_a_secondary_pool_dry_run_targets_only_its_own_runners() -> None:
+    result = _dry_run("--host=192.168.86.202", "--pool=omnipc2-ci-runner", "--limit=2")
+    assert result.returncode == 0, result.stderr
+    out = result.stdout
+    assert "Targets: omnipc2-ci-runner-1 omnipc2-ci-runner-2" in out
+    assert "omnipc2-ci-runner-3" not in out
+    assert "-p omnipc2-ci-runner" in out
+    assert "docker-compose.runners-omnipc2-ci-runner.yml" in out
+    assert "pools/omnipc2-ci-runner/omnirunners.slice" in out
+    # Never a primary-host verb on this path.
+    assert "--remove-orphans" not in out
+    assert "docker-compose.runners.yml up" not in out
+    # No cron is installed for a secondary host.
+    assert "crontab" not in out.lower()

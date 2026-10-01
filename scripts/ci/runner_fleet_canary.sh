@@ -60,6 +60,10 @@
 # 15-minute schedule on ubuntu-latest. A threshold breach fails the workflow
 # run (red X + owner notification). This is not an opt-in script.
 #
+# OMN-20308: the expected size is the sum of every action-class pool declared in
+# the `hosts:` inventory (host rows and their `pools:`), so a fleet spread across
+# hosts (OMN-19895) reads 60 of 60, not 44 of 60.
+#
 # Required env:
 #   RUNNER_FLEET_STATUS_TOKEN or CROSS_REPO_PAT — token able to read
 #     GET /orgs/{org}/actions/runners (classic PAT: admin:org read;
@@ -106,8 +110,40 @@ config_field() {
 
 RUNNER_ORG="$(config_field github_org)"
 RUNNER_GROUP="$(config_field runner_group)"
-RUNNER_NAME_PREFIX="$(config_field runner_name_prefix)"
-EXPECTED_RUNNERS="$(config_field expected_count)"
+
+# OMN-20308 -- the expected fleet is the SUM of every declared action-class
+# pool, not the primary host's scalar. OMN-19895 spread the 60 as 44 on the
+# primary host plus 16 `omnipc2-ci-runner` on .202; counting only the
+# `omninode-runner` prefix read that as 16 lost registrations (44 of 60) while
+# no runner was lost. A host row is a pool of its own prefix and its `pools:`
+# list adds more; only rows whose `classes:` carries `action` count, because a
+# verify or customer-plane runner cannot take an action job.
+declared_action_pools() {
+    [[ -f "${RUNNER_FLEET_CONFIG_PATH}" ]] || fail "runner fleet config not found: ${RUNNER_FLEET_CONFIG_PATH}"
+    awk '
+        function flush() {
+            if (prefix != "" && is_action) print prefix, count
+            prefix = ""; count = 0; is_action = 0
+        }
+        { sub(/[[:space:]]*#.*$/, "") }
+        /^hosts:[[:space:]]*$/ { in_hosts = 1; next }
+        in_hosts && /^[^[:space:]]/ { flush(); in_hosts = 0 }
+        !in_hosts { next }
+        /^[[:space:]]*-[[:space:]]*host:/ { flush(); next }
+        /^[[:space:]]*-[[:space:]]*runner_name_prefix:/ { flush() }
+        /runner_name_prefix:/ { v = $0; sub(/.*runner_name_prefix:[[:space:]]*/, "", v); gsub(/["[:space:]]/, "", v); prefix = v }
+        /expected_count:/ { v = $0; sub(/.*expected_count:[[:space:]]*/, "", v); gsub(/["[:space:]]/, "", v); count = v + 0 }
+        /classes:/ { is_action = ($0 ~ /[\[,[:space:]]action[],[:space:]]/) }
+        END { flush() }
+    ' "${RUNNER_FLEET_CONFIG_PATH}"
+}
+
+ACTION_POOLS="$(declared_action_pools)"
+[[ -n "${ACTION_POOLS}" ]] || fail "no action-class pool declared in ${RUNNER_FLEET_CONFIG_PATH}; a canary with nothing to count is red, not a skip"
+EXPECTED_RUNNERS="$(awk '{ total += $2 } END { print total + 0 }' <<< "${ACTION_POOLS}")"
+POOL_PREFIXES="$(awk '{ print $1 }' <<< "${ACTION_POOLS}" | paste -sd'|' -)"
+RUNNER_NAME_PREFIX="${POOL_PREFIXES}"
+POOL_DECLARATION="$(awk '{ printf "%s%s=%s", sep, $1, $2; sep = " " }' <<< "${ACTION_POOLS}")"
 
 # --- token selection (fail-closed: no token => red run, not a silent skip) --
 TOKEN="${RUNNER_FLEET_STATUS_TOKEN:-${CROSS_REPO_PAT:-}}"
@@ -144,7 +180,7 @@ done
 # --- classify the fleet (name prefix + runner-group label) -------------------
 fleet=$(jq --arg prefix "${RUNNER_NAME_PREFIX}" --arg group "${RUNNER_GROUP}" '
     [ .[]
-      | select(.name | startswith($prefix))
+      | select(.name | test("^(" + $prefix + ")-[0-9]+$"))
       | select(any(.labels[]; .name == $group))
     ]' <<< "${all_runners}")
 
@@ -167,6 +203,7 @@ mass_threshold=$(( EXPECTED_RUNNERS * RUNNER_CANARY_MASS_OFFLINE_PCT / 100 ))
 
 offline_names=$(jq -r '[ .[] | select(.status != "online") | .name ] | join(", ")' <<< "${fleet}")
 
+log "action pools: ${POOL_DECLARATION}"
 log "expected=${EXPECTED_RUNNERS} registered=${total_registered} online=${online_count} offline=${offline_count} offline_but_busy=${offline_busy_count} offline_idle=${offline_idle_count} missing=${missing_count} unreachable=${unreachable} warn_threshold=${RUNNER_CANARY_MAX_OFFLINE} fail_threshold=${mass_threshold}"
 
 summary() {
@@ -175,7 +212,7 @@ summary() {
 
 | Metric | Value |
 |--------|-------|
-| Expected fleet size | ${EXPECTED_RUNNERS} |
+| Expected fleet size (sum of action pools: ${POOL_DECLARATION}) | ${EXPECTED_RUNNERS} |
 | Registered (org API) | ${total_registered} |
 | Online | ${online_count} |
 | Offline (reported) | ${offline_count} |

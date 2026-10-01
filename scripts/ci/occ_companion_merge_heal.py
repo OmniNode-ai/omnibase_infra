@@ -89,6 +89,19 @@ whole reason the companion state is read before the re-run and not after.
 already at the ceiling is refused whatever its state. The merged-companion
 precondition is expected to do the actual work, because a healed run's
 preflight passes and stops appearing in the failed set at all.
+
+The re-run window (OMN-20319)
+-----------------------------
+GitHub re-runs a workflow run only within 30 days of its creation and refuses
+older ones with "Unable to retry this workflow run because it was created over
+a month ago". A PR whose head has not moved for a month keeps its failed runs
+in the selected set forever, so before this every pass that had no other PR to
+heal re-ran nothing and exited 1: heal run 36871003284 selected five such runs
+on ``omnibase_infra#2658`` and reported "every re-run attempt failed". A run
+past the window is now never selected (``RERUN_WINDOW_EXPIRED``), and a refusal
+for that reason at re-run time -- a run that crossed the boundary between the
+read and the write -- is a named skip. Any other refused re-run still counts as
+a failure of the pass.
 """
 
 from __future__ import annotations
@@ -99,6 +112,7 @@ import re
 import subprocess  # fixed argv, no shell, trusted gh binary
 import sys
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Final, Protocol
 
@@ -111,6 +125,14 @@ OCC_REPO_DEFAULT: Final[str] = "OmniNode-ai/onex_change_control"
 #: passes and leaves the failed set, so this ceiling is expected never to bind;
 #: it exists so that an unforeseen state cannot produce an unbounded re-run.
 MAX_HEAL_RUN_ATTEMPT: Final[int] = 5
+
+#: How long after its creation GitHub will still re-run a workflow run. Past
+#: it, ``gh run rerun`` is refused, so selecting such a run spends nothing and
+#: heals nothing (OMN-20319).
+RERUN_WINDOW: Final[timedelta] = timedelta(days=30)
+
+#: The phrase GitHub's refusal carries for a run past :data:`RERUN_WINDOW`.
+_RERUN_WINDOW_REFUSAL: Final[str] = "created over a month ago"
 
 #: Job-name markers for the preflight family, matched as case-insensitive
 #: SUBSTRINGS rather than as a prefix.
@@ -170,6 +192,7 @@ class EnumCompanionHealOutcome(StrEnum):
     COMPANION_CLOSED = "companion_closed"
     COMPANION_UNRESOLVED = "companion_unresolved"
     ATTEMPT_CEILING = "attempt_ceiling"
+    RERUN_WINDOW_EXPIRED = "rerun_window_expired"
     NO_FAILED_RUNS = "no_failed_runs"
 
 
@@ -194,6 +217,9 @@ class RunSnapshot:
     run_id: int
     run_attempt: int
     name: str = ""
+    #: ``None`` when the payload carried no readable creation time. Such a run
+    #: is not presumed expired: GitHub's own refusal still catches it.
+    created_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -207,6 +233,9 @@ class PrHealInput:
     companion_state: EnumCompanionState
     companion_number: int | None
     failed_runs: tuple[RunSnapshot, ...] = ()
+    #: The clock :data:`RERUN_WINDOW` is measured against. ``None`` expires
+    #: nothing; :func:`collect_decisions` always supplies it.
+    now: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -333,8 +362,29 @@ def decide_companion_heal(pr: PrHealInput) -> HealDecision:
             ),
         )
 
+    now = pr.now
+    expired = tuple(
+        run.run_id
+        for run in pr.failed_runs
+        if now is not None
+        and run.created_at is not None
+        and now - run.created_at >= RERUN_WINDOW
+    )
+    in_window = tuple(run for run in pr.failed_runs if run.run_id not in expired)
+    if not in_window:
+        return HealDecision(
+            outcome=EnumCompanionHealOutcome.RERUN_WINDOW_EXPIRED,
+            pr_number=pr.pr_number,
+            detail=(
+                f"{where}: companion OCC#{pr.companion_number} is merged but "
+                f"every failed run ({', '.join(map(str, expired))}) is older "
+                f"than GitHub's {RERUN_WINDOW.days}-day re-run window; only a "
+                "new push to this PR can produce a run to heal"
+            ),
+        )
+
     eligible = tuple(
-        run.run_id for run in pr.failed_runs if run.run_attempt < MAX_HEAL_RUN_ATTEMPT
+        run.run_id for run in in_window if run.run_attempt < MAX_HEAL_RUN_ATTEMPT
     )
     if not eligible:
         return HealDecision(
@@ -403,6 +453,17 @@ def failed_preflight_check_count_in_payload(
     return count
 
 
+def _parse_created_at(value: object) -> datetime | None:
+    """An Actions ``created_at`` timestamp, or ``None`` when unreadable."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
 def failed_runs_in_payload(payload: object) -> tuple[RunSnapshot, ...]:
     """The failed workflow runs in an Actions runs payload.
 
@@ -431,6 +492,7 @@ def failed_runs_in_payload(payload: object) -> tuple[RunSnapshot, ...]:
                 run_id=run_id,
                 run_attempt=attempt if isinstance(attempt, int) else 1,
                 name=name if isinstance(name, str) else "",
+                created_at=_parse_created_at(entry.get("created_at")),
             )
         )
     return tuple(out)
@@ -465,6 +527,10 @@ def run_failed_on_preflight(payload: object, *, markers: tuple[str, ...]) -> boo
         if is_preflight_job_name(name, markers=markers) and conclusion == "failure":
             return True
     return False
+
+
+class RerunWindowExpiredError(RuntimeError):
+    """GitHub refused a re-run because the run is past :data:`RERUN_WINDOW`."""
 
 
 class GhPort(Protocol):
@@ -614,6 +680,8 @@ class GhCli:
             check=False,
         )
         if completed.returncode != 0:
+            if _RERUN_WINDOW_REFUSAL in completed.stderr:
+                raise RerunWindowExpiredError(completed.stderr.strip())
             raise RuntimeError(
                 f"gh run rerun {run_id} --failed exited "
                 f"{completed.returncode}: {completed.stderr.strip()}"
@@ -621,13 +689,19 @@ class GhCli:
 
 
 def collect_decisions(
-    gh: GhPort, *, repo: str, occ_repo: str, only_pr: int | None = None
+    gh: GhPort,
+    *,
+    repo: str,
+    occ_repo: str,
+    only_pr: int | None = None,
+    now: datetime | None = None,
 ) -> list[HealDecision]:
     """One :class:`HealDecision` per open PR considered.
 
     Reads are ordered cheapest-first so the common case — an open PR with no
     failed preflight at all — costs one check-runs read and stops.
     """
+    clock = now if now is not None else datetime.now(UTC)
     decisions: list[HealDecision] = []
     for number, head_sha, body in gh.open_pull_requests(repo=repo):
         if only_pr is not None and number != only_pr:
@@ -657,6 +731,7 @@ def collect_decisions(
                     companion_state=state,
                     companion_number=companion_number,
                     failed_runs=runs,
+                    now=clock,
                 )
             )
         )
@@ -728,6 +803,12 @@ def main(argv: list[str] | None = None, *, gh: GhPort | None = None) -> int:
                 client.rerun_failed(repo=args.repo, run_id=run_id)
                 healed += 1
                 print(f"  re-ran failed jobs of run {run_id}")
+            except RerunWindowExpiredError as exc:
+                # Not a broken heal: GitHub will never re-run this run.
+                print(
+                    f"  {EnumCompanionHealOutcome.RERUN_WINDOW_EXPIRED.value}: "
+                    f"run {run_id}: {exc}"
+                )
             except RuntimeError as exc:
                 failures.append(f"run {run_id}: {exc}")
                 print(f"::warning::could not re-run run {run_id}: {exc}")

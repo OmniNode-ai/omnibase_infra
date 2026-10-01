@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
@@ -51,6 +52,19 @@ SOURCE = "rolling_work_ledger"
 EXIT_SECTION_CAP = 74
 EXIT_ROW_SHAPE = 76
 EXIT_UNRESOLVED = 3
+
+
+@pytest.fixture(autouse=True)
+def canonical_parser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise the watermark writer parser without requiring a private clone in CI."""
+    package = tmp_path / "canonical-internal" / "src" / "omnibase_internal"
+    ledger = package / "ledger"
+    ledger.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (ledger / "__init__.py").write_text("", encoding="utf-8")
+    shutil.copyfile(_LOCK, ledger / "lock.py")
+    monkeypatch.setenv("OMNIBASE_INTERNAL_HOME", str(package.parents[1]))
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path / "registry"))
 
 
 # --- OMN-18554: fixture rows are stamped from the LIVE clock ----------------

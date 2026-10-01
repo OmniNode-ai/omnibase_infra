@@ -17,6 +17,8 @@ advancing past unread rows.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +37,87 @@ SOURCE = "rolling_work_ledger"
 
 EXIT_UNRESOLVED = 3
 EXIT_SCHEMA = 4
+
+
+@pytest.fixture(autouse=True, params=[False, True])
+def canonical_parser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Path:
+    """Interim test fixture: the known stdlib parser at its new package boundary.
+
+    Runtime never falls back to this legacy source. The existing parser remains
+    in infra until its separate removal gate, so no private checkout is needed
+    to exercise watermark semantics in the generic infra CI split.
+    """
+    home = tmp_path / "registry"
+    home.mkdir()
+    package = tmp_path / "omnibase_internal" / "src" / "omnibase_internal"
+    ledger_package = package / "ledger"
+    ledger_package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (ledger_package / "__init__.py").write_text("", encoding="utf-8")
+    shutil.copyfile(_LOCK, ledger_package / "lock.py")
+    monkeypatch.setenv("OMNI_HOME", str(home))
+    monkeypatch.delenv("OMNIBASE_INTERNAL_HOME", raising=False)
+    if request.param:
+        physical = tmp_path / "physical" / "registry"
+        physical.mkdir(parents=True)
+        home.rmdir()
+        home.symlink_to(physical, target_is_directory=True)
+        monkeypatch.setenv("OMNIBASE_INTERNAL_HOME", str(package.parents[1]))
+    return home
+
+
+def test_parser_uses_canonical_package_even_with_a_broken_adjacent_copy(
+    tmp_path: Path,
+    canonical_parser: Path,
+) -> None:
+    isolated = tmp_path / "isolated"
+    isolated.mkdir()
+    script = isolated / _SCRIPT.name
+    shutil.copyfile(_SCRIPT, script)
+    (isolated / "ledger_lock.py").write_text(
+        'raise RuntimeError("OLD SIBLING LOCK WAS LOADED")\n', encoding="utf-8"
+    )
+    ledger = _ledger(tmp_path, 4)
+    state = _v2_state(tmp_path, ledger, {"anchor_heading": None, "anchor_digest": None})
+    result = _run(
+        [str(ledger), "--state", str(state), "--source", SOURCE, "--resolve"], script
+    )
+    assert _out(result)["unread_entries"] == 4
+
+
+def test_parser_refuses_without_registry_root(tmp_path: Path) -> None:
+    env = dict(os.environ)
+    env.pop("OMNI_HOME", None)
+    result = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--help"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+        timeout=60,
+    )
+    assert result.returncode != 0
+    assert "OMNI_HOME" in result.stderr
+
+
+def test_parser_refuses_missing_canonical_package(tmp_path: Path) -> None:
+    env = {
+        **os.environ,
+        "OMNI_HOME": str(tmp_path / "missing" / "registry"),
+        "OMNIBASE_INTERNAL_HOME": str(tmp_path / "absent-internal"),
+    }
+    result = subprocess.run(
+        [sys.executable, str(_SCRIPT), "--help"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+        timeout=60,
+    )
+    assert result.returncode != 0
+    assert "omnibase_internal" in result.stderr
 
 
 def _run(args: list[str], script: Path = _SCRIPT) -> subprocess.CompletedProcess[str]:
