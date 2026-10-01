@@ -175,6 +175,26 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # parent, inference-response.v1, has an in-repo publisher
     # (node_llm_inference_effect) and needs no entry.
     "onex.evt.omnibase-infra.quality-gate-result.v1": "Published by omnimarket node_delegation_quality_gate_reducer as its success terminal (contract.yaml:51), cross-repo; consumed by the OMN-18964 ledger projection | owner: jonah | expiry: 2026-12-01",
+    # OMN-17427: seven command topics whose only publisher is the runtime's own
+    # Pattern B broker. RuntimePatternBBroker publishes `route.command_topic`
+    # (service_pattern_b_broker.py, `_publish_worker_command`) for every node
+    # runtime_local_ingress.discover_runtime_local_ingress_routes discovers, and
+    # discovery takes each node's first `.cmd.` subscribe topic as its command
+    # topic. So `onex run-node <node>` and every runtime-backed skill client reach
+    # these nodes over the bus, with no publish_topics entry for this scan to read:
+    # the same shape as delegation-request (OMN-18419) and pattern-b-dispatch
+    # above. Each entry replaced an OMN-16795 short-leash baseline entry whose
+    # stated publisher ("intent routing", "not yet wired") was never confirmed.
+    # tests/unit/scripts/test_check_subscribe_wiring_health.py::
+    # TestPatternBRouteEntries re-derives the routes, so an entry whose node stops
+    # being a local-ingress route fails a test instead of waiting for its date.
+    "onex.cmd.omnibase-infra.pr-state-upsert.v1": "Published by RuntimePatternBBroker as the local-ingress route.command_topic of node_pr_state_write_effect (runtime_local_ingress discovery, OMN-17427); the in-process write path routes by intent | owner: jonah | expiry: 2026-12-01",
+    "onex.cmd.omnibase-infra.chain-learn.v1": "Published by RuntimePatternBBroker as the local-ingress route.command_topic of node_chain_orchestrator and node_chain_retrieval_effect (runtime_local_ingress discovery, OMN-17427) | owner: jonah | expiry: 2026-12-01",
+    "onex.cmd.omnibase-infra.llm-completion-request.v1": "Published by RuntimePatternBBroker as the local-ingress route.command_topic of node_llm_completion_effect (runtime_local_ingress discovery, OMN-17427) | owner: jonah | expiry: 2026-12-01",
+    "onex.cmd.omnibase-infra.llm-embedding-request.v1": "Published by RuntimePatternBBroker as the local-ingress route.command_topic of node_llm_embedding_effect (runtime_local_ingress discovery, OMN-17427) | owner: jonah | expiry: 2026-12-01",
+    "onex.cmd.omnibase-infra.llm-inference-request.v1": "Published by RuntimePatternBBroker as the local-ingress route.command_topic of node_llm_inference_effect (runtime_local_ingress discovery, OMN-17427) | owner: jonah | expiry: 2026-12-01",
+    "onex.cmd.omnibase-infra.vector-store-request.v1": "Published by RuntimePatternBBroker as the local-ingress route.command_topic of node_vector_store_effect (runtime_local_ingress discovery, OMN-17427) | owner: jonah | expiry: 2026-12-01",
+    "onex.cmd.omnibase-infra.remote-agent-invoke.v1": "Published by omnimarket node_delegation_orchestrator (publish_topics, contract.yaml:149), cross-repo, and by RuntimePatternBBroker as the local-ingress route.command_topic of node_remote_agent_invoke_effect (OMN-17427) | owner: jonah | expiry: 2026-12-01",
 }
 
 # ---------------------------------------------------------------------------
@@ -209,12 +229,23 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     # de-provisioned live topics and dropped generated enum members that
     # models/projection/projection_contract_registry.py imports. "No dispatcher"
     # and "no consumer" are different claims; only the second justifies deletion.
+    #
+    # OMN-17427 (2026-10-01) cleared the 22 entries whose OMN-16795 short leash
+    # ("prove the publisher or delete the subscribe declaration") lapsed that day.
+    # FIFTEEN event topics had no publisher anywhere in the fleet (every omni_home
+    # clone grepped): their subscribe declarations, and the handler_routing
+    # entries that owned them, are deleted from node_merge_sweep_workflow_orchestrator,
+    # node_scope_workflow_orchestrator, node_rsd_orchestrator,
+    # node_routing_orchestrator, node_chain_orchestrator, node_chain_store_effect and
+    # node_event_forward_effect, and the entries go with them. SEVEN command topics
+    # DO have a publisher, so they moved to _EXTERNAL_PUBLISHER_ALLOWLIST with the
+    # publisher named: RuntimePatternBBroker, through the node's discovered
+    # local-ingress route (and, for remote-agent-invoke, omnimarket too).
     # Coding-agent workflow external entrypoint — published by workflow clients
     # (the coding-agent CLI thin-publisher), not a contract-declared node (OMN-13247).
     "onex.cmd.omnibase-infra.coding-agent-invoke.v1": "Published by coding-agent workflow clients as the external entrypoint | owner: jonah | expiry: 2026-12-01",
     # Build loop cmd topics — triggered by CLI (claude -p), not Kafka publisher
     "onex.cmd.omnibase-infra.build-loop-append.v1": "Routed via intent from node_build_loop_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: stated in-repo publisher confirmed by non-enum source reference]",
-    "onex.cmd.omnibase-infra.pr-state-upsert.v1": "Routed via intent from node_pr_state_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1": "Routed via intent from node_gateway_link_health_projection_compute, not Kafka publish (OMN-15570) | owner: jonah | expiry: 2026-12-01",
     # Gateway heartbeat — published imperatively by ServiceGatewayForwarder.publish_heartbeat
     # (node_bus_forwarder_effect/services/service_gateway_forwarder.py), not via a
@@ -224,16 +255,9 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     # as a gap in that node's own contract, not something OMN-15570 introduces.
     "onex.evt.omnibase-infra.gateway-heartbeat.v1": "Published imperatively by ServiceGatewayForwarder.publish_heartbeat, not via contract publish_topics (OMN-15570 adds the first contract-declared consumer) | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omnibase-infra.validation-ledger-append.v1": "Routed via intent from node_validation_ledger_projection_compute, not Kafka publish | owner: jonah | expiry: 2026-12-01",
-    # Chain learning — publisher nodes not yet implemented
-    "onex.cmd.omnibase-infra.chain-learn.v1": "Chain learning publisher not yet wired | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # Topic migration — command issued by operator/runtime, not a contract-declared publisher (OMN-12623)
     "onex.cmd.omnibase-infra.topic-migration-execute.v1": "Migration command issued by operator/runtime (node_topic_migration_executor_effect), not Kafka publisher | owner: jonah | expiry: 2026-12-01",
     # Delegation — request comes from omniclaude hooks, not contract-declared
-    # LLM infrastructure — requests come from orchestrators via intents, not Kafka publish
-    "onex.cmd.omnibase-infra.llm-completion-request.v1": "LLM request via intent routing, not direct publish | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
-    "onex.cmd.omnibase-infra.llm-embedding-request.v1": "LLM embedding request via intent routing | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
-    "onex.cmd.omnibase-infra.llm-inference-request.v1": "LLM request via intent routing | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
-    "onex.cmd.omnibase-infra.vector-store-request.v1": "Vector store request via intent routing | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # Artifact reconciliation — triggered externally
     "onex.cmd.artifact.reconcile.v1": "Triggered by CI/webhook, not Kafka publisher | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis]",
     # Contract resolution — triggered by runtime, not Kafka publisher
@@ -249,16 +273,10 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     "onex.cmd.skill.merge-sweep.v1": "Triggered by /merge-sweep skill, not Kafka | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis]",
     "onex.cmd.skill.scope-check.v1": "Triggered by /scope-check skill | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis]",
     # Build loop events — classify and fill phases not yet publishing
-    # Chain events — replay/verify effect nodes pending
-    "onex.evt.omnibase-infra.chain-replay-result.v1": "Chain replay effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
-    "onex.evt.omnibase-infra.chain-verified.v1": "Chain verify effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # Infrastructure monitoring — published by runtime internals
     "onex.evt.omnibase-infra.consumer-health.v1": "Published by runtime health monitor, not contract | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: stated in-repo publisher confirmed by non-enum source reference]",
     "onex.evt.omnibase-infra.db-error.v1": "Published by DB error handler, not contract | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: stated in-repo publisher confirmed by non-enum source reference]",
     "onex.evt.omnibase-infra.runtime-error.v1": "Published by runtime error handler | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: stated in-repo publisher confirmed by non-enum source reference]",
-    "onex.evt.omnibase-infra.service-lifecycle.v1": "Published by service lifecycle manager | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
-    "onex.evt.omnibase-infra.system-alert.v1": "Published by alert system | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
-    "onex.evt.omnibase-infra.tool-update.v1": "Published by tool updater | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # Context audit DLQ — published by omniclaude hooks
     "onex.evt.omniclaude.context-audit-dlq.v1": "Published by omniclaude context audit | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis] [OMN-18013 2026-09-07: subscribe declaration KEPT — ContextAuditConsumer consumes this topic outside auto-wiring and this contract is where TopicProvisioner owns it]",
     # Contract lifecycle — published by contract management runtime, not contract-declared
@@ -267,27 +285,10 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     # Intent classification — published by omniintelligence, not in this scan
     # Merge gate — decision published by CI integration, not contract
     "onex.evt.platform.merge-gate-decision.v1": "Published by CI merge gate integration | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis]",
-    # Router events — published by routing runtime
-    "onex.evt.router.health-snapshot.v1": "Published by routing runtime | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
-    "onex.evt.router.scoring-decision.v1": "Published by routing runtime | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
-    # RSD events — effect nodes pending
-    "onex.evt.rsd.data-fetched.v1": "RSD data fetch effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
-    "onex.evt.rsd.scores-calculated.v1": "RSD scores compute pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # Runtime tick — published by runtime scheduler, not contract
-    # Merge sweep workflow events — effect nodes pending
-    "onex.evt.skill.merge-sweep-auto-merged.v1": "Merge sweep effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
-    "onex.evt.skill.merge-sweep-classified.v1": "Merge sweep classify effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
-    "onex.evt.skill.merge-sweep-pr-list.v1": "Merge sweep PR list effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
-    # Scope workflow events — effect nodes pending
-    "onex.evt.skill.scope-extracted.v1": "Scope extract effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
-    "onex.evt.skill.scope-file-read.v1": "Scope file read effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
-    "onex.evt.skill.scope-manifest-written.v1": "Scope manifest write effect pending | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
     # Gmail archive cleanup — runtime tick published by scheduler
     # Onboarding — triggered by omniclaude /onboarding skill, not Kafka publisher
     "onex.cmd.omnibase-infra.onboarding-start.v1": "Triggered by /onboarding skill via claude -p, not Kafka | owner: jonah | expiry: 2026-12-01",
-    # Remote-agent invoke — emitted by node_delegation_orchestrator (OMN-9620 epic);
-    # its contract addition is tracked separately and pending in another wave.
-    "onex.cmd.omnibase-infra.remote-agent-invoke.v1": "Publisher pending in delegation_orchestrator (OMN-9620 epic) | owner: jonah | expiry: 2026-10-01 [OMN-16795 2026-08-27: NOT verified — the topic appears only in its own topic enum, so the stated publisher could not be confirmed in this repo. Short leash: prove the publisher or delete the subscribe declaration]",
 }
 # fmt: on
 
