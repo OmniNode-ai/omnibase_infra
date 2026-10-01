@@ -19,7 +19,5 @@ class EnumRsdTopic(str, Enum):
     Members are sorted by (kind, event_name, version).
     """
     CMD_SCORE_V1 = "onex.cmd.rsd.score.v1"  # onex.cmd.rsd.score.v1
-    EVT_DATA_FETCHED_V1 = "onex.evt.rsd.data-fetched.v1"  # onex.evt.rsd.data-fetched.v1
     EVT_SCORE_COMPLETE_V1 = "onex.evt.rsd.score-complete.v1"  # onex.evt.rsd.score-complete.v1
     EVT_SCORE_FAILED_V1 = "onex.evt.rsd.score-failed.v1"  # onex.evt.rsd.score-failed.v1
-    EVT_SCORES_CALCULATED_V1 = "onex.evt.rsd.scores-calculated.v1"  # onex.evt.rsd.scores-calculated.v1
