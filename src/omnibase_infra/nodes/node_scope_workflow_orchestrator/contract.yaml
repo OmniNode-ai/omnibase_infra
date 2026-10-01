@@ -23,9 +23,21 @@ event_bus:
     patch: 0
   subscribe_topics:
     - "onex.cmd.skill.scope-check.v1"
-    - "onex.evt.skill.scope-file-read.v1"
-    - "onex.evt.skill.scope-extracted.v1"
-    - "onex.evt.skill.scope-manifest-written.v1"
+    # OMN-17427: `onex.evt.skill.scope-file-read.v1` DELETED from subscribe_topics. No contract and no
+    # runtime path anywhere in the fleet publishes it (grep of every omni_home
+    # clone, 2026-10-01), so the subscription only minted a permanently empty
+    # consumer group (OMN-16795). Re-add it with its publisher and its handler
+    # entry, in one diff (OMN-7897).
+    # OMN-17427: `onex.evt.skill.scope-extracted.v1` DELETED from subscribe_topics. No contract and no
+    # runtime path anywhere in the fleet publishes it (grep of every omni_home
+    # clone, 2026-10-01), so the subscription only minted a permanently empty
+    # consumer group (OMN-16795). Re-add it with its publisher and its handler
+    # entry, in one diff (OMN-7897).
+    # OMN-17427: `onex.evt.skill.scope-manifest-written.v1` DELETED from subscribe_topics. No contract and no
+    # runtime path anywhere in the fleet publishes it (grep of every omni_home
+    # clone, 2026-10-01), so the subscription only minted a permanently empty
+    # consumer group (OMN-16795). Re-add it with its publisher and its handler
+    # entry, in one diff (OMN-7897).
   publish_topics:
     - "onex.evt.skill.scope-check-complete.v1"
     - "onex.evt.skill.scope-check-failed.v1"
@@ -58,36 +70,6 @@ handler_routing:
         module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_check_initiate"
       output_events:
         - "ModelScopeFileReadRequest"
-    - event_model:
-        name: "ModelScopeFileReadResult"
-        module: "omnibase_infra.nodes.node_scope_file_read_effect.models.model_scope_file_read_result"
-      event_type: "skill.scope-file-read"
-      message_category: "EVENT"
-      handler:
-        name: "HandlerScopeFileReadComplete"
-        module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_file_read_complete"
-      output_events:
-        - "ModelScopeExtractInput"
-    - event_model:
-        name: "ModelScopeExtracted"
-        module: "omnibase_infra.nodes.node_scope_extract_compute.models.model_scope_extracted"
-      event_type: "skill.scope-extracted"
-      message_category: "EVENT"
-      handler:
-        name: "HandlerScopeExtractComplete"
-        module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_extract_complete"
-      output_events:
-        - "ModelScopeManifestWriteRequest"
-    - event_model:
-        name: "ModelScopeManifestWritten"
-        module: "omnibase_infra.nodes.node_scope_manifest_write_effect.models.model_scope_manifest_written"
-      event_type: "skill.scope-manifest-written"
-      message_category: "EVENT"
-      handler:
-        name: "HandlerScopeManifestWriteComplete"
-        module: "omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_manifest_write_complete"
-      output_events:
-        - "ModelScopeCheckResult"
 workflow_coordination:
   workflow_definition:
     workflow_metadata:

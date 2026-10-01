@@ -70,14 +70,8 @@ known_entrypointless:
     handler: HandlerRewardBinder
     module: omnibase_infra.nodes.node_reward_binder_effect.handlers.handler_reward_binder
   - contract: node_routing_orchestrator
-    handler: HandlerHealthComplete
-    module: omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_health_complete
-  - contract: node_routing_orchestrator
     handler: HandlerRoutingInitiate
     module: omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_routing_initiate
-  - contract: node_routing_orchestrator
-    handler: HandlerScoringComplete
-    module: omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_scoring_complete
   - contract: node_routing_score_reducer
     handler: HandlerUpdateScores
     module: omnibase_infra.nodes.node_routing_score_reducer.handlers.handler_update_scores
