@@ -10,8 +10,8 @@ the shape of the original defect — every layer was individually reasonable and
 the fact never travelled.
 
 So this walks the real chain: the PR-list EFFECT over a gh payload (the
-subprocess is the only thing faked), into the ORCHESTRATOR handler that builds
-the classify input, into the COMPUTE classifier. Occurrence OMN-18794,
+subprocess is the only thing faked), into the typed classify input, into the
+COMPUTE classifier. Occurrence OMN-18794,
 omniweb#423, squash-merged 2026-09-19T12:33:45Z.
 
 Every login here is synthetic. omnibase_infra is public and the real roster
@@ -32,11 +32,11 @@ from omnibase_infra.nodes.node_merge_sweep_classify_compute.handlers.handler_cla
 from omnibase_infra.nodes.node_merge_sweep_classify_compute.models.enum_classify_skip_reason import (
     EnumClassifySkipReason,
 )
+from omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_input import (
+    ModelClassifyInput,
+)
 from omnibase_infra.nodes.node_merge_sweep_pr_list_effect.handlers.handler_pr_list import (
     HandlerPRList,
-)
-from omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_pr_list_complete import (
-    HandlerPRListComplete,
 )
 
 pytestmark = pytest.mark.integration
@@ -80,11 +80,19 @@ async def _scan(prs: list[dict[str, object]]):
 
 
 async def _chain(prs: list[dict[str, object]], roster: tuple[str, ...] = _ROSTER):
-    """EFFECT -> ORCHESTRATOR -> COMPUTE, as the workflow wires them."""
+    """EFFECT -> COMPUTE, with the roster on the typed classify input.
+
+    OMN-17427 deleted the orchestrator's PR-list-complete handler: no node
+    published the event it consumed, so it was never reachable at runtime. The
+    hand-off it performed is the typed ModelClassifyInput itself, whose
+    collaborator_logins field is required, so the roster still cannot be dropped
+    on the way to the classifier.
+    """
     scanned = await _scan(prs)
-    classify_input = await HandlerPRListComplete().handle(
+    classify_input = ModelClassifyInput(
         correlation_id=scanned.correlation_id,
         prs=scanned.prs,
+        require_approval=True,
         collaborator_logins=roster,
     )
     return await HandlerClassifyPRs().handle(classify_input)
