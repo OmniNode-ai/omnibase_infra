@@ -19,7 +19,5 @@ class EnumRouterTopic(str, Enum):
     Members are sorted by (kind, event_name, version).
     """
     CMD_ROUTE_REQUEST_V1 = "onex.cmd.router.route-request.v1"  # onex.cmd.router.route-request.v1
-    EVT_HEALTH_SNAPSHOT_V1 = "onex.evt.router.health-snapshot.v1"  # onex.evt.router.health-snapshot.v1
     EVT_ROUTING_COMPLETE_V1 = "onex.evt.router.routing-complete.v1"  # onex.evt.router.routing-complete.v1
     EVT_ROUTING_FAILED_V1 = "onex.evt.router.routing-failed.v1"  # onex.evt.router.routing-failed.v1
-    EVT_SCORING_DECISION_V1 = "onex.evt.router.scoring-decision.v1"  # onex.evt.router.scoring-decision.v1

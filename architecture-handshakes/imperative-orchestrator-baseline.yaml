@@ -26,13 +26,13 @@ entries:
     owner_ticket: OMN-13488
   - repo: omnibase_infra
     node: node_chain_orchestrator
-    max_handler_path: src/omnibase_infra/nodes/node_chain_orchestrator/handlers/handler_chain_replay_complete.py
-    line_count: 70
+    max_handler_path: src/omnibase_infra/nodes/node_chain_orchestrator/handlers/handler_chain_retrieval_complete.py
+    line_count: 66
     risk_score: 2
     finding_codes:
       - H2
     owner_ticket: OMN-13489
-    accepted_rationale: 'Thin (70L) decision handler; stateless confidence-threshold branch returning a next-step action, no decorative FSM and no handler-driven _transition. Accepted as baseline.'
+    accepted_rationale: 'Thin (66L) decision handler; stateless confidence-threshold branch returning a next-step action, no decorative FSM and no handler-driven _transition. Accepted as baseline. OMN-17427 deleted the former max handler (handler_chain_replay_complete.py, no publisher for its topic), so the measurement moved to this one.'
   - repo: omnimarket
     node: node_delegation_orchestrator
     max_handler_path: src/omnimarket/nodes/node_delegation_orchestrator/handlers/handler_delegation_workflow.py
@@ -48,15 +48,6 @@ entries:
       - W4
     owner_ticket: OMN-13471
   - repo: omnibase_infra
-    node: node_merge_sweep_workflow_orchestrator
-    max_handler_path: src/omnibase_infra/nodes/node_merge_sweep_workflow_orchestrator/handlers/handler_auto_merge_complete.py
-    line_count: 90
-    risk_score: 2
-    finding_codes:
-      - H2
-    owner_ticket: OMN-13490
-    accepted_rationale: 'Thin (90L) decision handler evaluating an auto-merge-complete result and emitting the next step; no decorative FSM and no handler-driven _transition. Accepted as baseline.'
-  - repo: omnibase_infra
     node: node_registration_orchestrator
     max_handler_path: src/omnibase_infra/nodes/node_registration_orchestrator/handlers/handler_node_registration_acked.py
     line_count: 435
@@ -66,24 +57,6 @@ entries:
     owner_ticket: OMN-13491
     accepted_rationale: 'Large (435L) but I/O-bound: owns projection read + snapshot publish and DELEGATES the ack state decision to the pure-function RegistrationReducerService (self._reducer.decide_ack); not a decorative FSM driven by handler-side _transition. Accepted as baseline (not Class A).'
   - repo: omnibase_infra
-    node: node_routing_orchestrator
-    max_handler_path: src/omnibase_infra/nodes/node_routing_orchestrator/handlers/handler_health_complete.py
-    line_count: 70
-    risk_score: 2
-    finding_codes:
-      - H2
-    owner_ticket: OMN-13492
-    accepted_rationale: 'Thin (70L) decision handler evaluating a health-complete result and emitting the next step; no decorative FSM and no handler-driven _transition. Accepted as baseline.'
-  - repo: omnibase_infra
-    node: node_rsd_orchestrator
-    max_handler_path: src/omnibase_infra/nodes/node_rsd_orchestrator/handlers/handler_rsd_data_fetch_complete.py
-    line_count: 90
-    risk_score: 2
-    finding_codes:
-      - H2
-    owner_ticket: OMN-13493
-    accepted_rationale: 'Thin (90L) decision handler evaluating an RSD data-fetch-complete result and emitting the next step. The node declares an execution_graph, so traversal is executor-bound rather than handler-driven; no decorative FSM and no handler-side _transition. Accepted as baseline.'
-  - repo: omnibase_infra
     node: node_runner_fleet_maintain_orchestrator
     max_handler_path: src/omnibase_infra/nodes/node_runner_fleet_maintain_orchestrator/handlers/handler_runner_fleet_health_verdict_complete.py
     line_count: 65
@@ -92,15 +65,6 @@ entries:
       - H2
     owner_ticket: OMN-13942
     accepted_rationale: 'Thin (65L) decision handler evaluating a classified health verdict and emitting the terminal runner-fleet-maintain-completed event; no decorative FSM and no handler-driven _transition. Increment 1 (detection-only) has 3 payload/event hops (start, snapshot-complete, verdict-complete) with no mutation on any path. Accepted as baseline.'
-  - repo: omnibase_infra
-    node: node_scope_workflow_orchestrator
-    max_handler_path: src/omnibase_infra/nodes/node_scope_workflow_orchestrator/handlers/handler_scope_file_read_complete.py
-    line_count: 73
-    risk_score: 2
-    finding_codes:
-      - H2
-    owner_ticket: OMN-13494
-    accepted_rationale: 'Thin (73L) decision handler evaluating a scope file-read-complete result and emitting the next step; no decorative FSM and no handler-driven _transition. Accepted as baseline.'
   - repo: omnimarket
     node: pr_lifecycle_orchestrator
     max_handler_path: src/omnimarket/nodes/node_pr_lifecycle_orchestrator/handlers/handler_pr_lifecycle_orchestrator.py
