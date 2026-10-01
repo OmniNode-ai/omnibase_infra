@@ -110,6 +110,9 @@ def _apply(conn: psycopg2.extensions.connection, *, stop_after: str | None) -> N
             "THEN CREATE ROLE role_omnidash; END IF; "
             "END$$;"
         )
+        # omninode_internal is provisioned by omnibase_infra forward 098 on every
+        # lane; delegation 0051 asserts it rather than creating it.
+        cur.execute("CREATE SCHEMA IF NOT EXISTS omninode_internal")
         for path in sorted(DELEGATION.glob("*.sql")):
             if path.name in _FENCED:
                 continue
