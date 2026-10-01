@@ -35,7 +35,7 @@ from pathlib import Path
 
 import pytest
 from click.testing import CliRunner, Result
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
@@ -74,7 +74,9 @@ class ModelTimeoutlessDelegateRequest(BaseModel):
 
     Forbids extra fields and declares no ``requested_timeout_seconds``, which
     is the exact shape of ``omnimarket`` 0.4.185's ``ModelDelegateSkillRequest``
-    that refused every flagged run.
+    that refused every flagged run. It accepts ``metadata``, the map every
+    released request model declares, because the command always sends a
+    caller lane there (OMN-20299), even with every caller variable cleared.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -83,6 +85,7 @@ class ModelTimeoutlessDelegateRequest(BaseModel):
     prompt: str = ""
     task_type: str = ""
     source: str = ""
+    metadata: dict[str, str] = Field(default_factory=dict)
 
 
 class HandlerTimeoutlessNoop(HandlerCorrelatedNoop):
