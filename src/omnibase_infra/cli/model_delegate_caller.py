@@ -25,7 +25,10 @@ class ModelDelegateCaller(BaseModel):
 
     lane: str | None = Field(
         default=None,
-        description="The caller's ledger lane token; None when nothing named one",
+        description=(
+            "The caller's ledger lane token, or a derived kind-prefixed name; "
+            "resolve_delegate_caller never leaves it None (OMN-20299)"
+        ),
     )
     lane_source: str = Field(
         default="none",
