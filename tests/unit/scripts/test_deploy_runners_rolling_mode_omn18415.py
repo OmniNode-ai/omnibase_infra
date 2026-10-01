@@ -52,7 +52,9 @@ def script_text() -> str:
 def rolling_block(script_text: str) -> str:
     """The rolling mode's own functions, isolated from the batch deploy path."""
     start = script_text.index("fleet_services() {")
-    end = script_text.index("main() {")
+    # The secondary-host path (OMN-19895) follows the rolling functions and
+    # has its own, deliberately different, create-only compose call.
+    end = script_text.index("secondary_ssh() {")
     block = script_text[start:end]
     assert len(block) > 500, "rolling_deploy() body is suspiciously small"
     return block

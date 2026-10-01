@@ -84,6 +84,7 @@ _PRELUDE = [
     'RUNNER_NAME_PREFIX="omninode-runner"',
     'RUNNER_ORG="OmniNode-ai"',
     "DRY_RUN=false",
+    "SECONDARY_HOST=false",
     'TARGET_HOST=""',
     'log() { echo "LOG $*"; }',
     'warn() { echo "WARN $*" >&2; }',
