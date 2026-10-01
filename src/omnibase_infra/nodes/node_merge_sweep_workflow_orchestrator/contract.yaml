@@ -6,10 +6,13 @@
 # Coordinates: scan repos -> classify PRs -> enable auto-merge.
 #
 # Related Tickets:
-#   - OMN-18823: HandlerPRListComplete now resolves the collaborator roster and
-#     threads it onto ModelClassifyInput. The argument is required, so a caller
-#     that never resolved a roster cannot silently hand the classifier an empty
-#     one.
+#   - OMN-18823: the collaborator roster rides ModelClassifyInput as a required
+#     field, so a caller that never resolved a roster cannot silently hand the
+#     classifier an empty one.
+#   - OMN-17427: the three completion stages (pr-list, classified, auto-merged)
+#     are deleted -- subscriptions, handler entries and handler classes. No node
+#     published their events, so the bus never reached them. This orchestrator
+#     now owns only the initiating command.
 #
 name: "node_merge_sweep_workflow_orchestrator"
 node_type: "ORCHESTRATOR_GENERIC"
@@ -28,9 +31,21 @@ event_bus:
     patch: 0
   subscribe_topics:
     - "onex.cmd.skill.merge-sweep.v1"
-    - "onex.evt.skill.merge-sweep-pr-list.v1"
-    - "onex.evt.skill.merge-sweep-classified.v1"
-    - "onex.evt.skill.merge-sweep-auto-merged.v1"
+    # OMN-17427: `onex.evt.skill.merge-sweep-pr-list.v1` DELETED from subscribe_topics. No contract and no
+    # runtime path anywhere in the fleet publishes it (grep of every omni_home
+    # clone, 2026-10-01), so the subscription only minted a permanently empty
+    # consumer group (OMN-16795). Re-add it with its publisher and its handler
+    # entry, in one diff (OMN-7897).
+    # OMN-17427: `onex.evt.skill.merge-sweep-classified.v1` DELETED from subscribe_topics. No contract and no
+    # runtime path anywhere in the fleet publishes it (grep of every omni_home
+    # clone, 2026-10-01), so the subscription only minted a permanently empty
+    # consumer group (OMN-16795). Re-add it with its publisher and its handler
+    # entry, in one diff (OMN-7897).
+    # OMN-17427: `onex.evt.skill.merge-sweep-auto-merged.v1` DELETED from subscribe_topics. No contract and no
+    # runtime path anywhere in the fleet publishes it (grep of every omni_home
+    # clone, 2026-10-01), so the subscription only minted a permanently empty
+    # consumer group (OMN-16795). Re-add it with its publisher and its handler
+    # entry, in one diff (OMN-7897).
   publish_topics:
     - "onex.evt.skill.merge-sweep-complete.v1"
     - "onex.evt.skill.merge-sweep-failed.v1"
@@ -63,36 +78,6 @@ handler_routing:
         module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_merge_sweep_initiate"
       output_events:
         - "ModelPRListRequest"
-    - event_model:
-        name: "ModelPRListResult"
-        module: "omnibase_infra.nodes.node_merge_sweep_pr_list_effect.models.model_pr_list_result"
-      event_type: "skill.merge-sweep-pr-list"
-      message_category: "EVENT"
-      handler:
-        name: "HandlerPRListComplete"
-        module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_pr_list_complete"
-      output_events:
-        - "ModelClassifyInput"
-    - event_model:
-        name: "ModelClassifyResult"
-        module: "omnibase_infra.nodes.node_merge_sweep_classify_compute.models.model_classify_result"
-      event_type: "skill.merge-sweep-classified"
-      message_category: "EVENT"
-      handler:
-        name: "HandlerClassifyComplete"
-        module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_classify_complete"
-      output_events:
-        - "ModelAutoMergeRequest"
-    - event_model:
-        name: "ModelAutoMergeResult"
-        module: "omnibase_infra.nodes.node_merge_sweep_auto_merge_effect.models.model_auto_merge_result"
-      event_type: "skill.merge-sweep-auto-merged"
-      message_category: "EVENT"
-      handler:
-        name: "HandlerAutoMergeComplete"
-        module: "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_auto_merge_complete"
-      output_events:
-        - "ModelMergeSweepResult"
 workflow_coordination:
   workflow_definition:
     workflow_metadata:
