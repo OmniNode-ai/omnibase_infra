@@ -52,7 +52,7 @@ _UNDECLARED_SCHEMA_RULE = "unknown topology schema"
 _VENDORED = (
     (
         "0051_delegation_events_failed_outcome_backfill.sql",
-        "967f2160794d42da2949ac227e41889f3ce2fa8f4329e519fdedd7df1e596c08",
+        "4f4ab00d16e56d30992bd08951a910ec9fda6282156b91b875d090d8c43a40cc",
         "UPDATE delegation_events",
     ),
 )
