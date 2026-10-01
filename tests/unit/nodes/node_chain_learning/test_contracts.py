@@ -109,9 +109,11 @@ class TestEffectNodeContracts:
         contract = _load_contract(node_name)
         assert "event_bus" in contract, f"{node_name}: missing event_bus"
         bus = contract["event_bus"]
-        assert "subscribe_topics" in bus
         assert "publish_topics" in bus
-        for topic in bus["subscribe_topics"] + bus["publish_topics"]:
+        # OMN-17427: node_chain_store_effect declares no subscribe topic. Its only
+        # one, chain-verified.v1, had no publisher anywhere in the fleet and was
+        # deleted, so subscribe_topics is optional here.
+        for topic in bus.get("subscribe_topics", []) + bus["publish_topics"]:
             assert topic.startswith("onex."), f"Bad topic prefix: {topic}"
 
     @pytest.mark.parametrize(

@@ -20,14 +20,12 @@ from omnibase_infra.nodes.node_architecture_validator.validators.scanner_imperat
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _VALIDATE_PATH = _REPO_ROOT / "scripts/validate.py"
 
+# OMN-17427 took the merge-sweep, routing, rsd and scope orchestrators off the
+# ARCH-004 baseline: their completion handlers were deleted, so none hard-fails.
 _ACCEPTED_H2_NODES = {
     "node_chain_orchestrator",
-    "node_merge_sweep_workflow_orchestrator",
     "node_registration_orchestrator",
-    "node_routing_orchestrator",
-    "node_rsd_orchestrator",
     "node_runner_fleet_maintain_orchestrator",
-    "node_scope_workflow_orchestrator",
 }
 
 
@@ -84,7 +82,7 @@ def test_arch004_identity_uses_script_owned_root_from_nested_directory(
     assert validate_module.run_imperative_orchestrators(
         files=[
             "src/omnibase_infra/nodes/node_chain_orchestrator/handlers/"
-            "handler_chain_replay_complete.py"
+            "handler_chain_retrieval_complete.py"
         ]
     )
 
