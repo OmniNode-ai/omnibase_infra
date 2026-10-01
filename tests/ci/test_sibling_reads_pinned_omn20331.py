@@ -27,13 +27,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 PINS = yaml.safe_load((REPO_ROOT / ".github" / "sibling-pins.yaml").read_text())["pins"]
 
+# Deliberately live, not in PINNED_WORKFLOWS (measured red when pinned, PR #4449):
+# ci-bus-overlay-binding.yml binds the overlay to the branch the publisher reads at
+# merge time (its own test requires omnimarket ``dev``), and contract-validation.yml
+# runs onex_change_control's validate-contract composite action, whose inner
+# checkout fails when the action is addressed by a sha.
 PINNED_WORKFLOWS = (
     "ci.yml",
     "call-occ-autobind.yml",
     "call-occ-companion-effect.yml",
-    "ci-bus-overlay-binding.yml",
     "contract-topic-graph.yml",
-    "contract-validation.yml",
     "contractor-integration-note.yml",
     "delegation-consumer-kwarg-parity.yml",
     "dispatcher-route-coverage.yml",

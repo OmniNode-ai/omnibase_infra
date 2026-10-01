@@ -104,10 +104,10 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: b1b406d0c8a6f935fb84da27f0464882b6639ff0 # .github/sibling-pins.yaml
           # dev, because dev is the ref runtime-rebuild-trigger.yml itself
           # sparse-checks out at merge time. Binding against anything else
           # would validate a file the publisher never reads.
+          ref: dev
           path: .ci-bus-overlay
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           persist-credentials: false
