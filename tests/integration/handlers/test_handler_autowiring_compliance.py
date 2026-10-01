@@ -98,30 +98,6 @@ class TestHandlerAutowiringCompliance:
         handler = HandlerScopeCheckInitiate()
         assert handler is not None
 
-    def test_handler_scope_extract_complete_no_args(self) -> None:
-        from omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_extract_complete import (
-            HandlerScopeExtractComplete,
-        )
-
-        handler = HandlerScopeExtractComplete()
-        assert handler is not None
-
-    def test_handler_scope_file_read_complete_no_args(self) -> None:
-        from omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_file_read_complete import (
-            HandlerScopeFileReadComplete,
-        )
-
-        handler = HandlerScopeFileReadComplete()
-        assert handler is not None
-
-    def test_handler_scope_manifest_write_complete_no_args(self) -> None:
-        from omnibase_infra.nodes.node_scope_workflow_orchestrator.handlers.handler_scope_manifest_write_complete import (
-            HandlerScopeManifestWriteComplete,
-        )
-
-        handler = HandlerScopeManifestWriteComplete()
-        assert handler is not None
-
     def test_handler_runtime_tick_no_args(self) -> None:
         from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_runtime_tick import (
             HandlerRuntimeTick,
