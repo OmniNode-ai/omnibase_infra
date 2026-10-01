@@ -1055,6 +1055,7 @@ route:
         # STRICT in ci.yml and enforced by the CI Summary poller.
         - Bus ACL Boundary (OMN-19928)
         - call-reject-skip-token / scan / reject-skip-gate-token
+        - Canonical Handler-Shape Gate (OMN-20298)
         - Canonical Inference Gate
         - CI Evidence Policy (OMN-18247)
         - CI Summary
@@ -1104,6 +1105,7 @@ route:
         - merge-hold-gate / evaluate
         - Migration Freeze Check
         - Migration Integration Test
+        - No Plugin Daemon Classes Gate (OMN-20298)
         - no-noncanonical-lifecycle-classes
         - Node Migration Declaration Check
         # OMN-19677: the five shared shrink-only callers are strict CI Summary
@@ -1128,6 +1130,7 @@ route:
         # registered STRICT. Enforced by the CI Summary poller and absent from
         # branch protection, which is exactly the shape this list records.
         - Sanitized Legacy RDS Fixture Proof / PostgreSQL 16 Fresh + Legacy Fixture
+        - Shape-Gate Independence (OMN-20298)
         - Skip Count Baseline One-way (OMN-19677) / anti-growth-baseline
         - Skip Count Ratchet (OMN-18776)
         - Stale TODO Gate

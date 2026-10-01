@@ -303,13 +303,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          # OMN-19613: depth 2 brings in the pull_request merge commit's first
-          # parent (the base tip it was merged onto), which is what
-          # scripts/ci/precommit_diff_scope.py diffs against to scope the
-          # per-file Plugin* guard below. Without it the scope fails closed to
-          # the whole tree, which is correct but slower.
-          fetch-depth: 2
 
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
@@ -377,22 +370,6 @@ jobs:
 
       - name: Single-canonical in-memory event bus (OMN-13419)
         run: bash scripts/validation/check_no_infra_inmemory_import.sh
-
-      # OMN-19613: the guard is an AST check on each file's own classes, so a
-      # file the PR did not touch cannot turn it red. On pull_request it scans
-      # only the PR's files; it scans the whole tree on push (which proves the
-      # merged union on dev, OMN-18835), merge_group and dispatch, when the PR
-      # changes .pre-commit-config.yaml or this workflow, when the PR moves the
-      # omnibase-core pin in uv.lock (the validator's code lives in core), and
-      # whenever the base cannot be resolved. The step always runs; only the
-      # file list narrows, so the check never goes missing from a PR.
-      - name: Check Plugin* lifecycle class guard (OMN-13284, relocated to omnibase_core)
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          scope="$(uv run python scripts/ci/precommit_diff_scope.py --event-name "$EVENT_NAME")"
-          mapfile -t scope_args <<< "$scope"
-          uv run pre-commit run no-plugin-daemon-classes "${scope_args[@]}"
 
       # OMN-13030: Deployed-SHA claims in handoff/OCC/evidence docs must carry an
       # adjacent `docker exec <container> cat /app/build-provenance.json` probe.
@@ -603,34 +580,59 @@ jobs:
             --baseline config/validation/transport_mock_baseline.yaml \
             tests/
 
-      # Canonical handler-shape GROWTH RATCHET fan-out (OMN-14355/OMN-14368/OMN-14587).
-      # compliance_sweep checks handler hygiene but is blind to handler SHAPE, so a
-      # non-canonical handler passes green CI. This classifies each omnibase_infra
-      # node's contract-declared handler (definition B: typed-payload handle(request)
-      # -> response, adapted by the shared runtime, no envelope in the core), WARNs
-      # the committed baseline's debt (scripts/ci/canonical_handler_shape_baseline.py,
-      # OMN-14587: 92 non-canonical / 115 scanned), and HARD-FAILS a NEW non-canonical
-      # node or baseline-count growth. Sourced from the sibling omnibase_core checkout
-      # above (.ci/omnibase_core, already cloned for Transport-mock lint) since the
-      # classifier lives at omnibase_core's repo-root scripts/ci/, not the installed
-      # package. Runs --full (not the default --scope changed): the classifier's
-      # diff-scoped git-diff runs with cwd = the classifier's OWN repo
-      # (omnibase_core parents[2]), wrong for a fan-out invocation against this
-      # sibling checkout — --full is cheap here (~115 nodes, sub-second).
-      # No pre-commit mirror yet: same infeasibility already verified for the
-      # omnimarket fan-out (OMN-14372) — pre-commit's language:python remote-hook
-      # install only ships the installed src/omnibase_core/ package (classifier
-      # isn't importable that way) and language:script has no dependency isolation
-      # (needs pydantic/pyyaml); real fix is OMN-14563 (relocate the classifier into
-      # an installed omnibase_core module). CI-only matches the omnimarket precedent.
-      # --receipts-dir is mandatory here (OMN-14633 fix): the classifier's default
-      # for a non-core --package is a directory NEXT TO ITS OWN __file__ (i.e.
-      # inside the ephemeral .ci/omnibase_core sibling checkout above), which
-      # never contains this repo's committed receipts. Without this flag every
-      # proven flip (adequacy receipt + equivalence artifact committed under
-      # THIS repo's scripts/ci/adequacy_receipts/) reports as unproven and
-      # HARD-FAILS CI, defeating the whole flip-gate — caught while proving
-      # node_coding_agent_workspace_compute's first flip against this baseline.
+      - name: Run mypy type checking
+        # OMN-18640: scripts/deploy-agent/deploy_agent is IN the scope. It is
+        # the code that runs every deploy on the lab lane and it sat outside
+        # the type gate carrying ten errors, three of which were functions
+        # declared to return `str` while returning `Any`. Its tests have their
+        # own workflow because it is a standalone uv sub-project; its TYPES are
+        # checked here, with the root project's mypy, because that is where
+        # this repository declares type scope.
+        run: uv run mypy src/omnibase_infra scripts/deploy-agent/deploy_agent
+
+  # ===========================================================================
+  # Shape-gate detectors that run on every PR, whatever the preflight says
+  # (OMN-20298). Each job below has no `needs:` and no `if:`: the change-control
+  # preflight failing, or a skipped dependency, can never stop a detector from
+  # running. Every shape-gate failure in the 30 days before 2026-10-01 was the
+  # preflight failing first, so no detector produced a detection. These jobs
+  # were steps of `lint`, which waits on `occ-preflight`. Each is a STRICT
+  # CI Summary gate (scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS). The
+  # `shape-gate-independence` job refuses any detector job that comes back
+  # behind the preflight. No baseline, allowlist or suppression exists for it.
+  # ===========================================================================
+  canonical-handler-shape-gate:
+    name: Canonical Handler-Shape Gate (OMN-20298)
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Checkout omnibase_core validator source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_core
+          ref: dev
+          path: .ci/omnibase_core
+          token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
+
       - name: Canonical handler-shape ratchet (OMN-14355 fan-out, OMN-14587)
         run: |
           uv run python .ci/omnibase_core/scripts/ci/canonical_handler_shape.py \
@@ -672,15 +674,70 @@ jobs:
             --baseline scripts/ci/canonical_handler_shape_baseline.py \
             --receipts-dir scripts/ci/adequacy_receipts
 
-      - name: Run mypy type checking
-        # OMN-18640: scripts/deploy-agent/deploy_agent is IN the scope. It is
-        # the code that runs every deploy on the lab lane and it sat outside
-        # the type gate carrying ten errors, three of which were functions
-        # declared to return `str` while returning `Any`. Its tests have their
-        # own workflow because it is a standalone uv sub-project; its TYPES are
-        # checked here, with the root project's mypy, because that is where
-        # this repository declares type scope.
-        run: uv run mypy src/omnibase_infra scripts/deploy-agent/deploy_agent
+  no-plugin-daemon-classes-gate:
+    name: No Plugin Daemon Classes Gate (OMN-20298)
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 2
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      # OMN-19613: the guard is an AST check on each file's own classes, so a
+      # file the PR did not touch cannot turn it red. On pull_request it scans
+      # only the PR's files; it scans the whole tree on push (which proves the
+      # merged union on dev, OMN-18835), merge_group and dispatch, when the PR
+      # changes .pre-commit-config.yaml or this workflow, when the PR moves the
+      # omnibase-core pin in uv.lock (the validator's code lives in core), and
+      # whenever the base cannot be resolved. The step always runs; only the
+      # file list narrows, so the check never goes missing from a PR.
+      - name: Check Plugin* lifecycle class guard (OMN-13284, relocated to omnibase_core)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          scope="$(uv run python scripts/ci/precommit_diff_scope.py --event-name "$EVENT_NAME")"
+          mapfile -t scope_args <<< "$scope"
+          uv run pre-commit run no-plugin-daemon-classes "${scope_args[@]}"
+
+  shape-gate-independence:
+    name: Shape-Gate Independence (OMN-20298)
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.8.3"
+
+      - name: Refuse shape-gate detector jobs that depend on the preflight (OMN-20298)
+        run: |
+          uv run --no-project \
+            --with 'omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@5220ecf1758b4475c2963ec13171b6431fdc2224' \
+            python -m omnibase_core.validators.shape_gate_independence
 
   # RT-5 (OMN-14467): the deploy-trigger producer must fail closed on zero
   # output. Its RED-on-zero acceptance test and the anti-regression policy gate
