@@ -336,6 +336,10 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "Validator Requirements Baseline One-way (OMN-19677) / anti-growth-baseline",
     "Runtime Profiles Allowlist One-way (OMN-19677) / anti-growth-baseline",
     "Skip Count Baseline One-way (OMN-19677) / anti-growth-baseline",
+    # OMN-20304: canonical-file-shape ratchet (no new scripts, plugins or
+    # exceptions). The job is unconditional in ci.yml (no needs/if), so a skip
+    # or absence fails closed here instead of reading green.
+    "Canonical File Shape (OMN-20304)",  # canonical-file-shape
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries

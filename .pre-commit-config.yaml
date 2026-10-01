@@ -21,6 +21,17 @@
 #   pre-commit install --hook-type pre-push  # Install pre-push hooks
 #   pre-commit run --all-files            # Run all pre-commit hooks
 repos:
+  # OMN-20304: canonical-file-shape ratchet (operator ruling 2026-10-01). No
+  # new code file outside the canonical contract/node/handler/models/
+  # protocols/tests/docs locations, no new imperative lines in a SKILL.md, no
+  # new baseline, allowlist or suppression entry. Shrink-only baseline at
+  # .onex_ratchets/canonical_file_shape_baseline.txt. CI runs the same module
+  # at the same commit (job "Canonical File Shape (OMN-20304)").
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: a3b56675fda87a1ba8cf7e19d8e60a7d0ab6c4ee
+    hooks:
+      - id: canonical-file-shape
+        require_serial: true
   # Stub implementation detection + receipt-honesty gate + transport-mock lint —
   # sourced from omnibase_core. Rev bumped to OMN-13026 (transport-mock-lint
   # hook added); OMN-13281 wires receipt-honesty to this block.
