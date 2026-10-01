@@ -115,15 +115,51 @@ def lane_manifest() -> dict[str, Any]:
     return _load(LANE_MANIFEST)
 
 
+# Services that join the CI bus's network as a GUEST: their compose file declares
+# it `external: true`, so their `down` cannot remove it and the broker's fate is
+# not coupled to theirs. They are not lanes whose network the bus must avoid.
+CI_BUS_NETWORK_GUESTS = {
+    # OMN-20306: issues developer machines their CI-bus logins.
+    "principal-issuer-ci-bus": "docker/docker-compose.principal-issuer-ci-bus.yml",
+}
+
+
 def _lane_specs(lane_manifest: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Every manifest lane EXCEPT the CI bus entry itself."""
+    """Every manifest lane EXCEPT the CI bus entry itself and its network guests."""
     lanes = lane_manifest.get("lanes")
     assert isinstance(lanes, dict) and lanes, "lane manifest declares no lanes"
     return {
         name: spec
         for name, spec in lanes.items()
-        if name != CI_BUS_LANE_KEY and isinstance(spec, dict)
+        if name != CI_BUS_LANE_KEY
+        and name not in CI_BUS_NETWORK_GUESTS
+        and isinstance(spec, dict)
     }
+
+
+@pytest.mark.parametrize(
+    ("lane", "compose_file"), sorted(CI_BUS_NETWORK_GUESTS.items())
+)
+def test_a_ci_bus_network_guest_only_attaches_to_it(
+    ci_bus: dict[str, Any], lane_manifest: dict[str, Any], lane: str, compose_file: str
+) -> None:
+    """A guest may share the bus's network only as an external one it cannot remove."""
+    spec = lane_manifest["lanes"][lane]
+    assert spec["compose_file"] == compose_file
+    guest = yaml.safe_load((REPO_ROOT / compose_file).read_text(encoding="utf-8"))
+    bus_networks = {
+        str(net["name"])
+        for net in (ci_bus.get("networks") or {}).values()
+        if isinstance(net, dict)
+    }
+    for net in (guest.get("networks") or {}).values():
+        if net.get("name") in bus_networks:
+            assert net.get("external") is True, (
+                f"{compose_file} must declare {net['name']} external"
+            )
+    assert not any("ports" in svc for svc in (guest.get("services") or {}).values()), (
+        f"{compose_file} publishes a port"
+    )
 
 
 def _published_ports(compose: dict[str, Any]) -> set[str]:

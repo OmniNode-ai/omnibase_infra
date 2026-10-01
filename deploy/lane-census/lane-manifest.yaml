@@ -637,6 +637,23 @@ lanes:
         kind: service
         replicas: 1
   # ---------------------------------------------------------------------------
+  # OMN-20306: the CI-bus developer principal issuer. The same issuer, a second
+  # instance: issues each developer machine its own CI-bus login for lab work,
+  # from deploy/lab/developer-principal-grants.ci-bus.yaml. It joins the CI bus's
+  # network to reach that broker. `optional: true`: DECLARED-AHEAD-OF-STATE until
+  # the operator's first deploy.
+  principal-issuer-ci-bus:
+    hosts: [lab-201]
+    compose_file: docker/docker-compose.principal-issuer-ci-bus.yml
+    compose_project: omnibase-infra-principal-issuer-ci-bus
+    network: omninode-ci-bus-network
+    image_tag_pattern: '.+'
+    optional: true
+    services:
+      - name: omnibase-infra-principal-issuer-ci-bus
+        kind: service
+        replicas: 1
+  # ---------------------------------------------------------------------------
   # Prospective OMN-18693 dogfood boundary: owner Codex; optional lane only.
   # No production or runtime evidence is asserted here; it is not deployed.
   # verified: 2026-09-25T01:20Z via read-only `docker ps -a --filter

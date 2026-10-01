@@ -149,6 +149,15 @@ def test_only_the_delegate_command_and_its_terminals_are_writable(
         (
             {
                 "resource": "cluster",
+                "name": "kafka-cluster",
+                "pattern": "literal",
+                "operations": ["describe"],
+            },
+            "a cluster grant",
+        ),
+        (
+            {
+                "resource": "transactional_id",
                 "name": "k",
                 "pattern": "literal",
                 "operations": ["describe"],

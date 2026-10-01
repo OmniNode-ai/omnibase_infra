@@ -150,6 +150,9 @@ _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     # not a runtime lane: it has no runtime main/effects pair. It publishes no
     # port and serves a Unix socket reached only by the host's tailscale serve.
     "principal-issuer": _PORTS_NONE,
+    # OMN-20306 — the same issuer for the CI bus: a credential service, no
+    # runtime pair, no published port; a Unix socket behind tailscale serve.
+    "principal-issuer-ci-bus": _PORTS_NONE,
 }
 
 _LANE_BOUNDARY: dict[str, str] = {
@@ -221,6 +224,11 @@ _LANE_BOUNDARY: dict[str, str] = {
     # OMN-20150. Optional and declared ahead of the operator's first deploy.
     "principal-issuer": (
         "developer principal issuer — a credential service on the .201 dev lane "
+        "network, unix socket only, no published port; NOT a runtime lane, "
+        "never a proof lane, and never sourced for stability/prod grants"
+    ),
+    "principal-issuer-ci-bus": (
+        "developer CI-bus login issuer — a credential service on the .201 CI bus "
         "network, unix socket only, no published port; NOT a runtime lane, "
         "never a proof lane, and never sourced for stability/prod grants"
     ),

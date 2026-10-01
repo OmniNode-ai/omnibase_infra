@@ -21,6 +21,13 @@ lane: dev
 # docker/docker-compose.principal-issuer.yml, published on the tailnet by the lab
 # host's `tailscale serve` (see that file's header). Tailnet-only.
 principal_issuer_url: https://omninode-pc.tail75df5e.ts.net:8443
+# The CI bus that lab work runs on (omnimarket config/ci_bus_lanes.yaml lane
+# `ci-bus`), and the second issuer instance that gives a developer machine its
+# own login there (docker/docker-compose.principal-issuer-ci-bus.yml, OMN-20306).
+# The script requests this login only when the URL's /healthz answers, so it may
+# be declared ahead of the deploy.
+ci_bus_lane: ci-bus
+ci_bus_issuer_url: https://omninode-pc.tail75df5e.ts.net:8444
 # The lab model server, by its tailnet name so it answers on and off the office
 # LAN (local-dev walk D3). It serves the model id omnimarket's local rungs declare.
 lab_model_url: http://omnipc2.tail75df5e.ts.net:8000/v1/chat/completions

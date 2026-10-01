@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# What a developer machine's CI-bus principal may do (OMN-20306).
+#
+# Lab work runs on the CI bus (docker/docker-compose.ci-bus.yml), not the dev
+# lane. A developer machine sends a unit there with `onex lab-work run` (the omni
+# plugin's `onex_lab_run.py --via bus`) and waits for its receipt. Until now the
+# only login for that was the shared `ci-bus-labwork` principal (OMN-20213),
+# handed over by hand. A second issuer instance
+# (docker/docker-compose.principal-issuer-ci-bus.yml) applies exactly these
+# grants to each developer machine instead.
+#
+# THE MINIMUM FOR ONE LAB-WORK CALL (omnimarket lab_work/bus.py LabWorkCaller):
+#   * produce the unit request;
+#   * read the capacity advertisements, to place the unit, and its two terminals;
+#   * read under the caller's own consumer-group prefix,
+#     derive_service_group_id("lab_work_client", service="omnimarket") under the
+#     env token `local`, plus a random suffix per call;
+#   * IdempotentWrite on the cluster: EventBusKafka producers enable idempotence
+#     by default, and producer-id allocation needs it (as OMN-20213 found for the
+#     shared login). It reaches no topic.
+#
+# DELIBERATELY NOT GRANTED, though the shared lab-work login holds them:
+#   * write on the terminals or the capacity topic (only a pool host publishes them);
+#   * the pool hosts' groups (local.omnimarket.node_lab_work_unit_effect...);
+#   * focused test runs and push validation;
+#   * any CI topic.
+#
+# RULES the issuer enforces on this file are the same as the dev lane's
+# (developer-principal-grants.yaml), plus: a cluster grant carries
+# idempotent_write only.
+schema: developer-principal-grants.v1
+lane: ci-bus
+# The same <prefix><login>-<device> name the dev lane issues: one machine, one
+# name, on each broker that knows it.
+principal_prefix: dev-
+max_devices_per_login: 5
+allowed_login_domains: []
+grants:
+  - resource: topic
+    name: onex.cmd.omnimarket.lab-work-unit-requested.v1
+    pattern: literal
+    operations: [write, describe]
+  - resource: topic
+    name: onex.evt.omnimarket.lab-work-unit-completed.v1
+    pattern: literal
+    operations: [read, describe]
+  - resource: topic
+    name: onex.evt.omnimarket.lab-work-unit-failed.v1
+    pattern: literal
+    operations: [read, describe]
+  - resource: topic
+    name: onex.evt.omnimarket.lab-host-capacity-advertised.v1
+    pattern: literal
+    operations: [read, describe]
+  - resource: group
+    name: local.omnimarket.lab_work_client.consume.v1.
+    pattern: prefixed
+    operations: [read, describe]
+  - resource: cluster
+    name: kafka-cluster
+    pattern: literal
+    operations: [idempotent_write]

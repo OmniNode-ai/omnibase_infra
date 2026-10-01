@@ -24,8 +24,11 @@ WHO MAY ASK
     broker superuser password.
 
 WHAT IT GRANTS
-    Exactly the grants in ``deploy/lab/developer-principal-grants.yaml``, which
-    this module validates before serving (see :func:`load_declaration`). A
+    Exactly the grants in the file passed as ``--grants``, which this module
+    validates before serving (see :func:`load_declaration`). One instance serves
+    one lane: ``deploy/lab/developer-principal-grants.yaml`` for the dev lane, and
+    ``deploy/lab/developer-principal-grants.ci-bus.yaml`` for the CI bus that lab
+    work runs on (OMN-20306), each with its own socket, ledger and broker. A
     principal is named ``<prefix><login>-<device>``; a login may hold at most
     ``max_devices_per_login`` of them. Asking again for the same device ROTATES
     its password: the password is never stored here, so re-issue is the only way
@@ -83,7 +86,12 @@ SECURITY_PROTOCOL = "SASL_PLAINTEXT"
 PRINCIPAL_MAX_LEN = 63
 MIN_PREFIXED_READ_GROUP_LEN = 16
 ALLOWED_OPERATIONS = frozenset({"read", "write", "describe"})
-ALLOWED_RESOURCES = frozenset({"topic", "group"})
+ALLOWED_RESOURCES = frozenset({"topic", "group", "cluster"})
+# A Kafka producer with idempotence on (the EventBusKafka default) must allocate a
+# producer id, which needs IdempotentWrite on the cluster. That grant reaches no
+# topic, so it is the one cluster grant a declaration may carry (OMN-20306).
+CLUSTER_NAME = "kafka-cluster"
+CLUSTER_OPERATIONS = ("idempotent_write",)
 ALLOWED_PATTERNS = frozenset({"literal", "prefixed"})
 
 
@@ -172,6 +180,20 @@ def _grant(path: Path, index: int, raw: object) -> Grant:
         )
     if not isinstance(name, str) or not name:
         raise DeclarationError(f"{where}: name must be a non-empty string")
+    if resource == "cluster":
+        if (
+            name != CLUSTER_NAME
+            or pattern != "literal"
+            or not isinstance(operations, list)
+            or tuple(sorted(set(operations))) != CLUSTER_OPERATIONS
+        ):
+            raise DeclarationError(
+                f"{where}: a cluster grant is name {CLUSTER_NAME}, pattern literal and "
+                f"operations [idempotent_write] only (it reaches no topic)"
+            )
+        return Grant(
+            resource=resource, name=name, pattern=pattern, operations=CLUSTER_OPERATIONS
+        )
     if pattern not in ALLOWED_PATTERNS:
         raise DeclarationError(
             f"{where}: pattern must be one of {sorted(ALLOWED_PATTERNS)}"
@@ -284,12 +306,15 @@ class Broker:
             f"User:{principal}",
         ]
         argv += ["--operation", ",".join(grant.operations)]
-        argv += [
-            f"--{grant.resource}",
-            grant.name,
-            "--resource-pattern-type",
-            grant.pattern,
-        ]
+        if grant.resource == "cluster":
+            argv += ["--cluster"]
+        else:
+            argv += [
+                f"--{grant.resource}",
+                grant.name,
+                "--resource-pattern-type",
+                grant.pattern,
+            ]
         result = self._run(argv)
         if result.returncode != 0:
             raise IssuerError(

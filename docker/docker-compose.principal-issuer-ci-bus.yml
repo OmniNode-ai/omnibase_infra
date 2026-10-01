@@ -1,0 +1,64 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20306: issues each developer machine its own CI-bus login, for lab work.
+#
+# The second instance of the principal issuer (docker-compose.principal-issuer.yml
+# is the dev lane's). Same image, same code. It differs in four things:
+#   * the grants file is developer-principal-grants.ci-bus.yaml;
+#   * it joins the CI bus's network, to reach that broker's admin API and Kafka
+#     listener;
+#   * it authenticates as the CI bus's superuser (CI_BUS_KAFKA_SASL_*), from the
+#     same operator env file the CI bus's one-shots read;
+#   * it has its own ledger and socket volumes, published on its own tailscale
+#     serve port.
+#
+# Like the dev lane's issuer, it has no TCP listener and publishes no port. It
+# trusts the tailnet login header only from the kernel-attested root peer
+# (tailscale serve). Deploy it once, on the lab host, after the CI bus is up with
+# SASL on:
+#
+#   docker compose -f docker/docker-compose.principal-issuer-ci-bus.yml \
+#     --env-file <the operator env file> up -d --build
+#   tailscale serve --bg --https=8444 "unix:$(docker volume inspect -f '{{.Mountpoint}}' omnibase-infra-principal-issuer-ci-bus_principal-issuer-socket)/issuer.sock"
+#
+# The URL developer machines use is declared in deploy/lab/developer-onboarding.yaml
+# (ci_bus_issuer_url). Onboarding skips the CI-bus login until that URL answers.
+name: omnibase-infra-principal-issuer-ci-bus
+services:
+  principal-issuer-ci-bus:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.principal-issuer
+    container_name: omnibase-infra-principal-issuer-ci-bus
+    command: ["serve", "--grants", "/app/developer-principal-grants.ci-bus.yaml", "--ledger", "/data/issuances.jsonl", "--socket", "/run/principal-issuer/issuer.sock", "--proxy-uid", "0"]
+    environment:
+      RPK_USER: ${CI_BUS_KAFKA_SASL_USERNAME:?CI_BUS_KAFKA_SASL_USERNAME must be set - the issuer creates principals as the CI bus's superuser (OMN-18691); resolved from the operator env file, never inlined here}
+      RPK_PASS: ${CI_BUS_KAFKA_SASL_PASSWORD:?CI_BUS_KAFKA_SASL_PASSWORD must be set - the issuer creates principals as the CI bus's superuser (OMN-18691); resolved from the operator env file, never inlined here}
+      RPK_SASL_MECHANISM: SCRAM-SHA-256
+      RPK_BROKERS: redpanda:9092
+      RPK_ADMIN_HOSTS: redpanda:9644
+    volumes:
+      - principal-issuer-ledger:/data
+      - principal-issuer-socket:/run/principal-issuer
+    networks:
+      - ci-bus
+    restart: unless-stopped
+    read_only: true
+    healthcheck:
+      test: ["CMD", "python3", "scripts/lab_principal_issuer.py", "health", "--socket", "/run/principal-issuer/issuer.sock"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "com.omninode.service=principal-issuer-ci-bus"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.ticket=OMN-20306"
+volumes:
+  principal-issuer-ledger:
+  principal-issuer-socket:
+networks:
+  ci-bus:
+    # The network docker/docker-compose.ci-bus.yml declares for the CI bus's broker.
+    name: omninode-ci-bus-network
+    external: true
