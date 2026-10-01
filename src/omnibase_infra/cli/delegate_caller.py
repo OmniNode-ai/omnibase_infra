@@ -18,7 +18,13 @@ vocabulary. It is resolved most explicit first:
    command runs from, read from the registry omniclaude's ``lane_identity.py``
    writes (``$ONEX_LANE_REGISTRY_ROOT`` or ``$OMNI_HOME/.onex_state``, then
    ``lane_identity/<sha256(worktree)[:32]>.json``);
-4. otherwise none.
+4. otherwise a derived name, so a run never attributes to nobody (OMN-20299):
+   the launchd job label (``launchd:<label>``), the GitHub Actions workflow
+   (``gha:<repo>:<workflow>``), the Claude Code session
+   (``session:<uuid>``), and last ``unattributed:<host>``. Each carries a kind
+   prefix no ledger lane uses, so a derived name never counts as a lane's own
+   delegation, and a null ``caller_lane`` on the projection means a caller
+   that did not come through this CLI.
 
 The caller's SESSION is the Claude Code session id, else the session the
 worktree registration recorded. It is sent only as a UUID: the delegate-skill
@@ -35,6 +41,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import socket
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
@@ -66,6 +73,18 @@ CALLER_LANE_ENV_VARS: tuple[str, ...] = (
 _SESSION_ENV_VAR = "CLAUDE_CODE_SESSION_ID"
 _REGISTRY_ROOT_ENV_VAR = "ONEX_LANE_REGISTRY_ROOT"
 _WORKSPACE_ENV_VAR = "OMNI_HOME"
+
+#: A launchd job label in ``XPC_SERVICE_NAME``: reverse-DNS, as the operator
+#: machine's agents are named. Terminal and app sessions carry ``0`` or an
+#: ``application.`` name there, which name no job and are ignored.
+_LAUNCHD_LABEL_PATTERN = re.compile(r"^[A-Za-z0-9-]+(?:\.[A-Za-z0-9_-]+)+$")
+_LAUNCHD_ENV_VAR = "XPC_SERVICE_NAME"
+
+#: Characters a derived name keeps; everything else becomes ``-``.
+_SLUG_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+#: The longest lane token the ledger and the projection accept.
+_LANE_MAX = 128
 
 #: The worktree root of a per-ticket worktree path (Operating Rule 9).
 _WORKTREE_ROOT_PATTERN = re.compile(r"^(.*/omni_worktrees/[^/]+/[^/]+)(?:/|$)")
@@ -110,6 +129,38 @@ def _registry_record(cwd: Path, environ: Mapping[str, str]) -> dict[str, object]
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _slug(value: str) -> str:
+    """``value`` reduced to lane-token characters, lowercase, never empty."""
+    return _SLUG_UNSAFE.sub("-", value.strip().lower()).strip("-._") or "unknown"
+
+
+def _derived(kind: str, *parts: str) -> str:
+    """A ``<kind>:<part>[:<part>]`` lane token, cut to the token's length bound."""
+    return ":".join((kind, *(_slug(part) for part in parts)))[:_LANE_MAX]
+
+
+def _fallback_lane(
+    environ: Mapping[str, str], session: str | None, host: str
+) -> tuple[str, str]:
+    """The derived lane for a caller no rule named, and the rule that chose it."""
+    label = environ.get(_LAUNCHD_ENV_VAR, "").strip()
+    if _LAUNCHD_LABEL_PATTERN.fullmatch(label) and not label.startswith("application."):
+        return (
+            f"launchd:{label}"[:_LANE_MAX],
+            f"fallback env {_LAUNCHD_ENV_VAR}",
+        )
+    workflow = environ.get("GITHUB_WORKFLOW", "").strip()
+    if environ.get("GITHUB_ACTIONS", "").strip().lower() == "true" and workflow:
+        repository = environ.get("GITHUB_REPOSITORY", "").strip().rsplit("/", 1)[-1]
+        return (
+            _derived("gha", repository or "unknown", workflow),
+            "fallback env GITHUB_WORKFLOW",
+        )
+    if session is not None:
+        return f"session:{session}", "fallback session"
+    return _derived("unattributed", host), "fallback host"
+
+
 def _with_skipped(source: str, skipped: list[str]) -> str:
     return f"{source}; skipped {', '.join(skipped)}" if skipped else source
 
@@ -119,8 +170,13 @@ def resolve_delegate_caller(
     *,
     cwd: Path,
     environ: Mapping[str, str],
+    host: str | None = None,
 ) -> ModelDelegateCaller:
-    """Resolve the caller's lane and session, and say how each was chosen."""
+    """Resolve the caller's lane and session, and say how each was chosen.
+
+    The lane is never None: a caller no explicit rule names gets a derived
+    name (module docstring, rule 4). ``host`` defaults to this machine's name.
+    """
     record = _registry_record(cwd, environ)
 
     lane: str | None = None
@@ -148,7 +204,6 @@ def resolve_delegate_caller(
             registered = record.get("lane")
             if isinstance(registered, str) and _is_lane(registered):
                 lane, lane_source = registered, "registered worktree"
-    lane_source = _with_skipped(lane_source, skipped_lanes)
 
     session: str | None = None
     session_source = "none"
@@ -165,6 +220,12 @@ def resolve_delegate_caller(
         if registered_session is not None:
             session, session_source = registered_session, "registered worktree"
     session_source = _with_skipped(session_source, skipped_sessions)
+
+    if lane is None:
+        lane, lane_source = _fallback_lane(
+            environ, session, socket.gethostname() if host is None else host
+        )
+    lane_source = _with_skipped(lane_source, skipped_lanes)
 
     return ModelDelegateCaller(
         lane=lane,
