@@ -183,6 +183,7 @@ migrations:
   forward/nodes/node_projection_claude_hook_events/0002_reject_empty_agent_id.sql: forward-only # ALTER TABLE ADD CONSTRAINT CHECK on existing tables (omninode_internal.claude_hook_events, omninode_internal.claude_agent_spans); DROP CONSTRAINT IF EXISTS for idempotent re-add
   forward/nodes/node_projection_claude_hook_events/0003_add_span_model_and_description.sql: expand-only
   forward/nodes/node_projection_claude_hook_events/0004_null_hashed_span_lineage.sql: forward-only # UPDATE
+  forward/nodes/node_projection_claude_hook_events/0005_add_goal_id.sql: expand-only # additive: nullable uuid columns and a partial index
   forward/nodes/node_projection_consumer_flow/0000_create_consumer_flow_windows.sql: forward-only # ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_consumer_flow/0001_add_projection_cursor.sql: forward-only # ALTER TABLE ALTER COLUMN; UNIQUE INDEX on an existing table
   forward/nodes/node_projection_consumer_flow/0001_reconcile_consumer_flow_window_columns.sql: forward-only # ALTER TABLE ALTER COLUMN

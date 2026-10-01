@@ -7,6 +7,7 @@
 #
 name: "node_chain_orchestrator"
 node_type: "ORCHESTRATOR_GENERIC"
+runtime_profiles: [main]
 contract_version:
   major: 1
   minor: 0

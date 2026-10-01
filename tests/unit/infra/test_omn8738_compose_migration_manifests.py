@@ -46,7 +46,11 @@ OMNIDASH_MANIFESTS = [
 ]
 
 ALL_NEW_MANIFESTS = (
-    OMNIMEMORY_MANIFESTS + OMNIMARKET_PROJECTION_MANIFESTS + OMNIDASH_MANIFESTS
+    OMNIMEMORY_MANIFESTS
+    + OMNIMARKET_PROJECTION_MANIFESTS
+    + OMNIDASH_MANIFESTS
+    # OMN-17099: the local bundle also needs the standalone BYOK writer.
+    + ["omnimarket-projection-tenant-credentials"]
 )
 
 
