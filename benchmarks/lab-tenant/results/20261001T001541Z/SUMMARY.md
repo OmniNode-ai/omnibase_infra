@@ -70,9 +70,9 @@ Satellites: median (min-max) over repetitions
 | mem.container.omninode-dogfood-runtime_mib | 654.5 (654.5-654.8) | 676.4 (676.3-676.9) |
 | mem.container.omninode-mini-runner-1_mib | 417.1 (417.1-418.1) | - |
 
-Dependency side: h201 while satellites are local-stack (2026-10-01T00:18:28.741176Z, n=3)
+Dependency side, by the arm the satellites were in: median (min-max)
 
-| metric | value |
+| metric | h201 while local-stack (2026-10-01T00:18, n=3) |
 |---|---|
 | cpu.busy_cores | 10.56 (5.29-25.02) |
 | cpu.load1 | 35.38 (11.75-36.26) |

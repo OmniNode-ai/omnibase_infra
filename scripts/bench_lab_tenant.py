@@ -32,7 +32,7 @@ ONE FILE, FOUR ROLES
   --remote-dependency    runs on .201 and reads the dependency lane's side:
                          Postgres connections per database, CPU/load, Redpanda
                          produce/fetch rates, memory.
-  --summarize DIR        renders a markdown table from the result JSONs in DIR.
+  --summarize DIR...     renders one markdown table from the result JSONs in DIR(s).
 
 WHAT IT WRITES (and removes)
   It never starts, stops or reconfigures a container, except the timed restart
@@ -497,6 +497,9 @@ def rep_metrics(rep: Mapping[str, Any]) -> dict[str, float]:
                 out[f"{section}.{pct}"] = stats_[pct]
     if (probe.get("projection") or {}).get("timeouts") is not None:
         out["projection.timeouts"] = float(probe["projection"]["timeouts"])
+    cold = remote.get("cold_start") or {}
+    if isinstance(cold.get("pair_healthy_s"), (int, float)):
+        out["cold_start.pair_healthy_s"] = float(cold["pair_healthy_s"])
     ntp = remote.get("ntp") or {}
     if ntp.get("offset_ms") is not None:
         out["ntp.host_offset_ms"] = ntp["offset_ms"]
@@ -1140,6 +1143,9 @@ def remote_collect(args: argparse.Namespace) -> dict[str, Any]:
     out["runtime"] = inspect_runtime(docker, pair)
     if args.allow_restart and args.arm == "lab-tenant":
         out["cold_start"] = timed_restart(docker, pair, args.restart_timeout)
+        # Healthy is not settled: let consumers join before latency is timed.
+        time.sleep(args.post_restart_settle)
+        out["cold_start"]["settled_s"] = args.post_restart_settle
     else:
         out["cold_start"] = {
             "skipped": "timed restart runs only with --allow-restart on the lab-tenant arm",
@@ -1582,7 +1588,7 @@ def controller(args: argparse.Namespace) -> dict[str, Any]:
             ]  # fmt: skip
             if args.health_url:
                 role_args += ["--health-url", args.health_url]
-            if args.allow_restart:
+            if args.allow_restart and i <= args.restart_reps:
                 role_args.append("--allow-restart")
             remote = remote_json(
                 target,
@@ -1637,6 +1643,7 @@ SUMMARY_ROWS: tuple[tuple[str, str], ...] = (
     ("projection.p95_ms", "projection publish->row p95 ms"),
     ("projection.p99_ms", "projection publish->row p99 ms"),
     ("health.p50_ms", "health probe p50 ms"),
+    ("cold_start.pair_healthy_s", "cold start, runtime pair to healthy s"),
     ("ntp.host_offset_ms", "host NTP offset ms"),
 )
 
@@ -1649,12 +1656,19 @@ def _fmt(cell: Mapping[str, float] | None) -> str:
     return f"{cell['median']:g} ({cell['min']:g}-{cell['max']:g})"
 
 
+def _arm_order(arm: str) -> int:
+    return ARMS.index(arm) if arm in ARMS else len(ARMS)
+
+
 def render_summary(results: Sequence[Mapping[str, Any]]) -> str:
     sats = sorted(
         (r for r in results if r.get("kind") == "satellite"),
-        key=lambda r: (r["arm"], r["host"]),
+        key=lambda r: (r["host"], _arm_order(r["arm"])),
     )
-    deps = [r for r in results if r.get("kind") == "dependency"]
+    deps = sorted(
+        (r for r in results if r.get("kind") == "dependency"),
+        key=lambda r: (r["host"], _arm_order(r["arm"])),
+    )
     lines: list[str] = []
     if sats:
         lines.append("Satellites: median (min-max) over repetitions")
@@ -1695,16 +1709,27 @@ def render_summary(results: Sequence[Mapping[str, Any]]) -> str:
                 + " |"
             )
         lines.append("")
-    for r in deps:
+    if deps:
         lines.append(
-            f"Dependency side: {r['host']} while satellites are {r['arm']} "
-            f"({r['started_at']}, n={len(r.get('reps') or [])})"
+            "Dependency side, by the arm the satellites were in: median (min-max)"
         )
         lines.append("")
-        lines.append("| metric | value |")
-        lines.append("|---|---|")
-        for key, cell in sorted(r.get("summary", {}).items()):
-            lines.append(f"| {key} | {_fmt(cell)} |")
+        lines.append(
+            "| metric | "
+            + " | ".join(
+                f"{r['host']} while {r['arm']} ({str(r.get('started_at', ''))[:16]}, "
+                f"n={len(r.get('reps') or [])})"
+                for r in deps
+            )
+            + " |"
+        )
+        lines.append("|---|" + "---|" * len(deps))
+        for key in sorted({k for r in deps for k in r.get("summary", {})}):
+            lines.append(
+                f"| {key} | "
+                + " | ".join(_fmt(r.get("summary", {}).get(key)) for r in deps)
+                + " |"
+            )
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -1727,7 +1752,9 @@ def build_parser() -> argparse.ArgumentParser:
     role.add_argument(
         "--summarize",
         metavar="DIR",
-        help="render a markdown summary of the JSON results in DIR",
+        nargs="+",
+        help="render one markdown table of the JSON results in DIR(s); pass the BEFORE and "
+        "AFTER directories together for a side-by-side table",
     )
     role.add_argument(
         "--dependency",
@@ -1767,6 +1794,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--restart-timeout", type=float, default=900.0)
     p.add_argument(
+        "--restart-reps",
+        type=int,
+        default=1,
+        help="with --allow-restart: how many leading repetitions restart the pair",
+    )
+    p.add_argument("--post-restart-settle", type=float, default=60.0)
+    p.add_argument(
         "--placement-module", action="append", default=[], metavar="LABEL=PATH"
     )
     p.add_argument("--skip-placement", action="store_true")
@@ -1800,7 +1834,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.summarize:
         results = [
             json.loads(p.read_text())
-            for p in sorted(Path(args.summarize).glob("*.json"))
+            for d in args.summarize
+            for p in sorted(Path(d).glob("*.json"))
         ]
         print(render_summary(results), end="")
         return 0

@@ -361,6 +361,27 @@ def test_render_summary_has_one_column_per_host_arm() -> None:
     assert "| pg.connections_total | 90 |" in text
 
 
+def test_render_summary_puts_before_and_after_side_by_side() -> None:
+    before = bench.aggregate([bench.rep_metrics(_rep(7.0, 0.5, "mem"))])
+    after_rep = _rep(15.0, 4.0, None)
+    after_rep["remote"]["cold_start"] = {"pair_healthy_s": 42.0}  # type: ignore[index]
+    after = bench.aggregate([bench.rep_metrics(after_rep)])
+    results = [
+        {"kind": "satellite", "host": "h101", "arm": "lab-tenant", "reps": [{}], "summary": after},
+        {"kind": "satellite", "host": "h101", "arm": "local-stack", "reps": [{}], "summary": before},
+        {"kind": "dependency", "host": "h201", "arm": "lab-tenant", "started_at": "2026-10-02T00:00:00Z",
+         "reps": [{}], "summary": bench.aggregate([{"pg.connections_total": 60.0}])},
+        {"kind": "dependency", "host": "h201", "arm": "local-stack", "started_at": "2026-10-01T00:15:00Z",
+         "reps": [{}], "summary": bench.aggregate([{"pg.connections_total": 45.0}])},
+    ]  # fmt: skip
+    text = bench.render_summary(results)
+    # local-stack (BEFORE) is the left column of each host, lab-tenant (AFTER) the right.
+    assert "| h101 local-stack (n=1) | h101 lab-tenant (n=1) |" in text
+    assert "| bus round trip p50 ms | 0.5 | 4 |" in text
+    assert "| cold start, runtime pair to healthy s | - | 42 |" in text
+    assert "| pg.connections_total | 45 | 60 |" in text
+
+
 def test_dependency_metrics_flattening() -> None:
     dep = {
         "cpu": {"ncpu": 32, "load1": 10.5, "busy_cores": 6.4},
