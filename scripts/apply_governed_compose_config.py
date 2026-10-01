@@ -41,7 +41,14 @@ Canonical render: ``docker compose -p <project> [--env-file ...] -f ... [--profi
 with sorted keys and compact separators; ``sha256:`` + hex of that. Path
 resolution is off so the digest does not depend on where the checkout lives.
 Interpolation is on, so the digest binds the env values the apply will use;
-the rendered text is hashed and never printed.
+the rendered text is hashed and never printed. The env inputs are the same ones
+``deploy-runtime.sh`` interpolates with: the grant's repo env files (normally
+``docker/runtime-policy.env``), then the operator env file
+(``$OMNIBASE_OPERATOR_ENV_FILE``, default ``~/.omnibase/.env``), which lives
+outside the repo and is never named in a public grant. Run both ``digest`` and
+``apply`` from a clean shell on the lane host: an exported variable outranks an
+env file in compose interpolation, so a stray one changes the digest and the
+apply refuses (fail closed).
 
 Exit codes: 0 allowed / digest printed, 1 refused, 2 usage or environment error.
 """
@@ -93,11 +100,13 @@ def compose_argv(
     env_files: Sequence[str],
     profiles: Sequence[str],
     repo_root: Path,
+    operator_env: Path,
 ) -> list[str]:
     """The ``docker compose`` prefix for exactly these inputs, in grant order."""
     argv = ["docker", "compose", "-p", project]
     for env_file in env_files:
         argv += ["--env-file", str(repo_root / env_file)]
+    argv += ["--env-file", str(operator_env)]
     for compose_file in compose_files:
         argv += ["-f", str(repo_root / compose_file)]
     for profile in profiles:
@@ -236,6 +245,15 @@ def checkout_refusals(repo_root: Path, entry: dict[str, Any]) -> list[str]:
     return refusals
 
 
+def operator_env_file() -> Path:
+    """The operator env deploy-runtime.sh sources; required, never defaulted away."""
+    raw = os.environ.get("OMNIBASE_OPERATOR_ENV_FILE", "").strip()
+    path = Path(raw) if raw else Path.home() / ".omnibase" / ".env"
+    if not path.is_file():
+        raise ApplyUsageError(f"operator env file not found: {path}")
+    return path
+
+
 def _occ_repo(arg: str) -> Path:
     if arg:
         return Path(arg)
@@ -253,6 +271,7 @@ def cmd_digest(args: argparse.Namespace) -> int:
         env_files=args.env_file,
         profiles=args.profile,
         repo_root=repo_root,
+        operator_env=operator_env_file(),
     )
     print(
         json.dumps(
@@ -295,6 +314,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
             env_files=entry["env_files"],
             profiles=entry["profiles"],
             repo_root=repo_root,
+            operator_env=operator_env_file(),
         )
         local = render_digest(prefix)
         if local != entry["rendered_digest"]:

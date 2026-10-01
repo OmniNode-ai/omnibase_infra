@@ -76,6 +76,9 @@ def lab(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setenv("FAKE_RENDER", json.dumps(RENDER))
     monkeypatch.setenv("UP_LOG", str(up_log))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    operator_env = tmp_path / "operator.env"
+    operator_env.write_text("POSTGRES_PASSWORD=unused-in-test\n")
+    monkeypatch.setenv("OMNIBASE_OPERATOR_ENV_FILE", str(operator_env))
     return {"tmp": tmp_path, "checkout": checkout, "up_log": up_log}
 
 
@@ -268,3 +271,11 @@ def test_execute_is_also_gated_by_the_attribution_preflight(
     argv += ["--grant-id", GRANT_ID, "--occ-repo", str(occ), "--now", NOW, "--execute"]
     assert main(argv) == 1
     assert not lab["up_log"].exists()
+
+
+@pytest.mark.unit
+def test_missing_operator_env_is_a_usage_error(
+    lab: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OMNIBASE_OPERATOR_ENV_FILE", str(lab["tmp"] / "absent.env"))
+    assert _check(lab, [_entry(lab)]) == 2
