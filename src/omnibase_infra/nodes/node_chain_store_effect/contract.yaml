@@ -28,8 +28,14 @@ event_bus:
     major: 1
     minor: 0
     patch: 0
-  subscribe_topics:
-    - "onex.evt.omnibase-infra.chain-verified.v1"
+  # OMN-17427: `onex.evt.omnibase-infra.chain-verified.v1` DELETED from
+  # subscribe_topics -- it was this node's only subscription. No contract and no
+  # runtime path anywhere in the fleet publishes it (node_chain_verify_reducer,
+  # the intended producer, declares no event_bus; grep of every omni_home clone,
+  # 2026-10-01), so the subscription only minted a permanently empty consumer
+  # group (OMN-16795). The node keeps its unscoped operation_match entry, the
+  # same in-process shape as node_merge_sweep_pr_list_effect. Re-add the
+  # subscription with its publisher, in one diff (OMN-7897).
   publish_topics:
     - "onex.evt.omnibase-infra.chain-stored.v1"
 handler_routing:
