@@ -141,6 +141,22 @@ def test_handler_writes_self_contained_record_even_when_unreadable(
             ("cursor", "pages"),
             [{"row_count": 500, "row_limit": 500, "next_cursor": None}],
         ),
+        (
+            ("cursor", "pages"),
+            [
+                {
+                    "row_count": 500,
+                    "row_limit": 500,
+                    "next_cursor": None,
+                    "end_proof": {
+                        "since": "9",
+                        "beyond_row_count": 0,
+                        "reread_next_cursor": None,
+                        "proven": False,
+                    },
+                }
+            ],
+        ),
         (("negative", "clean", "returncode"), 1),
         (("negative", "clean", "outcomes"), {}),
         (("negative", "mutations", "raw_event_projection", "applied"), False),
@@ -168,3 +184,40 @@ def test_each_clause_preserves_script_failure_reasons(
     )
     assert result.outcome == "FAIL"
     assert result.reasons == tuple(script.grade(obs).failures)
+
+
+@pytest.mark.parametrize("proven", [True, False])
+def test_full_final_page_requires_measured_end_proof(proven: bool) -> None:
+    obs = json.loads(FIXTURE.read_text())
+    proof = {
+        "since": "9",
+        "beyond_row_count": 0,
+        "reread_next_cursor": None,
+        "proven": proven,
+    }
+    obs["cursor"]["pages"] = [
+        {
+            "row_count": 500,
+            "row_limit": 500,
+            "next_cursor": None,
+            "end_proof": proof,
+        }
+    ]
+    observation = ModelConsumerFlowObservation(read_ok=True, **obs)
+    assert observation.cursor["pages"][-1]["end_proof"] == proof
+    result = grade_consumer_flow(
+        ModelConsumerFlowRequest(subject_lane="dev"), observation
+    )
+    recorded = script.grade(obs)
+    check = next(
+        c for c in recorded.checks if c.name == "truncated_pages_carry_a_cursor"
+    )
+    assert check.ok is proven
+    assert result.outcome == ("PASS" if proven else "FAIL")
+    evidence = f"cursor/{check.name}: {check.evidence}"
+    assert evidence in result.evidence_items
+    assert check.evidence.endswith(
+        f"; full final page proven the end by a since= read past it: {proof}"
+    )
+    if not proven:
+        assert result.reasons == tuple(recorded.failures)

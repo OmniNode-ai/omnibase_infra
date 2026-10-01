@@ -208,6 +208,76 @@ def test_cursor_walk_uses_since_and_stops_on_repeated_cursor() -> None:
     assert urls[1].endswith("?since=same")
 
 
+@pytest.mark.parametrize(
+    ("case", "beyond_rows", "reread_cursor", "proven"),
+    [
+        ("empty_beyond", [], None, True),
+        ("silent_truncation", [{"projection_cursor": 10}], None, False),
+        ("late_rows", [{"projection_cursor": 10}], "9", True),
+        ("missing_cursor", [], None, False),
+    ],
+)
+def test_cursor_walk_measures_the_full_final_page_end(
+    case: str,
+    beyond_rows: list[dict[str, Any]],
+    reread_cursor: str | None,
+    proven: bool,
+) -> None:
+    from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_collection import (
+        walk,
+    )
+    from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane import (
+        ConsumerFlowLane,
+    )
+
+    first_rows = [{"projection_cursor": 1}, {"projection_cursor": 2}]
+    final_rows = (
+        [{"consumer_group": "a"}, {"consumer_group": "b"}]
+        if case == "missing_cursor"
+        else [{"projection_cursor": "9"}, {"projection_cursor": 3}]
+    )
+    responses = [
+        {"rows": first_rows, "row_count": 2, "row_limit": 2, "next_cursor": "2"},
+        {"rows": final_rows, "row_count": 2, "row_limit": 2, "next_cursor": None},
+        {"rows": beyond_rows},
+        {
+            "rows": final_rows,
+            "row_count": 2,
+            "row_limit": 2,
+            "next_cursor": reread_cursor,
+        },
+    ]
+    urls: list[str] = []
+
+    def http(url: str, **kwargs: Any) -> io.BytesIO:
+        urls.append(url)
+        return io.BytesIO(json.dumps(responses[len(urls) - 1]).encode())
+
+    observed = walk(
+        ConsumerFlowLane(
+            docker="unused", base_url="http://projection.test", urlopen=http
+        )
+    )
+    assert observed["terminated"]
+    assert len(observed["pages"]) == 2
+    assert observed["rows"] == first_rows + final_rows
+    assert "end_proof" not in observed["pages"][0]
+    assert observed["pages"][-1]["end_proof"] == {
+        "since": None if case == "missing_cursor" else "9",
+        "beyond_row_count": None if case == "missing_cursor" else len(beyond_rows),
+        "reread_next_cursor": reread_cursor,
+        "proven": proven,
+    }
+    assert urls[1].endswith("?since=2")
+    if case == "missing_cursor":
+        assert len(urls) == 2
+    else:
+        assert urls[2].endswith("?since=9")
+        assert len(urls) == (4 if beyond_rows else 3)
+        if beyond_rows:
+            assert urls[3] == urls[1]
+
+
 @pytest.mark.parametrize("always_changes", [False, True])
 def test_boot_change_retries_the_whole_observation(
     tmp_path: Path, always_changes: bool
