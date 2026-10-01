@@ -172,14 +172,21 @@ def test_compose_file_publishes_only_the_reserved_port_block() -> None:
     """
     reserved = {"58085", "58086", "45436", "46379", "55092", "55644", "53002"}
     raw = (ROOT / "docker" / "docker-compose.lakshman.yml").read_text(encoding="utf-8")
-    # Host-side of every published mapping: literal "HOST:CONTAINER" entries and
-    # `${VAR:-HOST}:CONTAINER` defaults alike.
-    published = set(re.findall(r'"(?:\$\{[A-Z_]+:[-?][^}]*\}|\d+):\d+"', raw))
+    # Host-side of every published mapping: literal "HOST:CONTAINER" entries,
+    # `${VAR:-HOST}:CONTAINER` defaults, and either shape behind a loopback bind
+    # ("127.0.0.1:HOST:CONTAINER", the redpanda admin publish since OMN-20260).
+    published = set(
+        re.findall(r'"(?:127\.0\.0\.1:)?(?:\$\{[A-Z_]+:[-?][^}]*\}|\d+):\d+"', raw)
+    )
     host_ports = {
         m.group(1)
         for entry in published
-        if (m := re.match(r'"?(?:\$\{[A-Z_]+:-)?(\d+)', entry))
+        if (m := re.match(r'"?(?:127\.0\.0\.1:)?(?:\$\{[A-Z_]+:-)?(\d+)', entry))
     }
+    assert "55644" in host_ports, (
+        "the redpanda admin publish fell out of this scrape; the reservation "
+        "check would pass without seeing it"
+    )
     # The two runtime ports come from the policy env, not a literal, so add the
     # contract's own values rather than pretending the scrape found them.
     profile = _contract().profiles[LANE]
