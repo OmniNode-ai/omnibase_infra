@@ -61,10 +61,8 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_BUILD_LOOP_APPENDED_V1 = "onex.evt.omnibase-infra.build-loop-appended.v1"  # onex.evt.omnibase-infra.build-loop-appended.v1
     EVT_CHAIN_LEARN_COMPLETE_V1 = "onex.evt.omnibase-infra.chain-learn-complete.v1"  # onex.evt.omnibase-infra.chain-learn-complete.v1
     EVT_CHAIN_LEARN_FAILED_V1 = "onex.evt.omnibase-infra.chain-learn-failed.v1"  # onex.evt.omnibase-infra.chain-learn-failed.v1
-    EVT_CHAIN_REPLAY_RESULT_V1 = "onex.evt.omnibase-infra.chain-replay-result.v1"  # onex.evt.omnibase-infra.chain-replay-result.v1
     EVT_CHAIN_RETRIEVAL_RESULT_V1 = "onex.evt.omnibase-infra.chain-retrieval-result.v1"  # onex.evt.omnibase-infra.chain-retrieval-result.v1
     EVT_CHAIN_STORED_V1 = "onex.evt.omnibase-infra.chain-stored.v1"  # onex.evt.omnibase-infra.chain-stored.v1
-    EVT_CHAIN_VERIFIED_V1 = "onex.evt.omnibase-infra.chain-verified.v1"  # onex.evt.omnibase-infra.chain-verified.v1
     EVT_CODING_AGENT_COMPLETED_V1 = "onex.evt.omnibase-infra.coding-agent-completed.v1"  # onex.evt.omnibase-infra.coding-agent-completed.v1
     EVT_CODING_AGENT_FAILED_V1 = "onex.evt.omnibase-infra.coding-agent-failed.v1"  # onex.evt.omnibase-infra.coding-agent-failed.v1
     EVT_CODING_AGENT_FSM_ADVANCE_V1 = "onex.evt.omnibase-infra.coding-agent-fsm-advance.v1"  # onex.evt.omnibase-infra.coding-agent-fsm-advance.v1
@@ -96,8 +94,5 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_RUNTIME_ERROR_V1 = "onex.evt.omnibase-infra.runtime-error.v1"  # onex.evt.omnibase-infra.runtime-error.v1
     EVT_RUNTIME_MANIFEST_PUBLISHED_V1 = "onex.evt.omnibase-infra.runtime-manifest-published.v1"  # onex.evt.omnibase-infra.runtime-manifest-published.v1
     EVT_SAVINGS_ESTIMATED_V1 = "onex.evt.omnibase-infra.savings-estimated.v1"  # onex.evt.omnibase-infra.savings-estimated.v1
-    EVT_SERVICE_LIFECYCLE_V1 = "onex.evt.omnibase-infra.service-lifecycle.v1"  # onex.evt.omnibase-infra.service-lifecycle.v1
-    EVT_SYSTEM_ALERT_V1 = "onex.evt.omnibase-infra.system-alert.v1"  # onex.evt.omnibase-infra.system-alert.v1
-    EVT_TOOL_UPDATE_V1 = "onex.evt.omnibase-infra.tool-update.v1"  # onex.evt.omnibase-infra.tool-update.v1
     EVT_TOPIC_MIGRATION_LIFECYCLE_V1 = "onex.evt.omnibase-infra.topic-migration-lifecycle.v1"  # onex.evt.omnibase-infra.topic-migration-lifecycle.v1
     EVT_VECTOR_STORE_COMPLETED_V1 = "onex.evt.omnibase-infra.vector-store-completed.v1"  # onex.evt.omnibase-infra.vector-store-completed.v1

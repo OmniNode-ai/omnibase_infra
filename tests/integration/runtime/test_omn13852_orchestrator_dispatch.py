@@ -8,10 +8,14 @@ Deterministic proof for the fix independent of the parity oracle:
   orchestrators now resolves to a non-empty subscribe-topic set, so a
   ``ModelDispatchRoute`` registers per handler. Before OMN-13852 the multi-handler
   ambiguity guard (``_topics_for_handler_entry`` -> ``()``) registered ZERO routes.
-* End-to-end dispatch: the exact live-proven P0-1 scenario — a real
-  ``ModelRsdScoreResult`` payload on ``onex.evt.rsd.scores-calculated.v1`` — now
-  DISPATCHES (status != NO_DISPATCHER) instead of falling through to a DLQ topic
-  that never existed.
+* End-to-end dispatch: a real event payload on a multi-handler orchestrator's
+  own EVENT topic DISPATCHES (status != NO_DISPATCHER) instead of falling through
+  to a DLQ topic. The live-proven P0-1 instance of the drop was
+  ``ModelRsdScoreResult`` on ``onex.evt.rsd.scores-calculated.v1``; OMN-17427
+  deleted that subscription because nothing in the fleet publishes the topic, so
+  the same property is now pinned on node_chain_orchestrator's
+  ``onex.evt.omnibase-infra.chain-retrieval-result.v1``, which
+  node_chain_retrieval_effect does publish.
 * DLQ integrity (defect 2): each contract declares ``event_bus.dlq_topics`` and the
   declared topic matches the DLQ topic the engine derives for that contract's
   event_type domain on a NO_DISPATCHER fall-through — so the dead-letter escape
@@ -92,37 +96,43 @@ def test_declares_matching_dlq_topic(
     )
 
 
-def test_live_p0_1_rsd_score_result_now_dispatches(
+def test_multi_handler_orchestrator_event_payload_dispatches(
     contracts_by_name: dict[str, object],
 ) -> None:
-    """The exact live-proven drop now dispatches.
+    """A real event payload on a multi-handler orchestrator's own topic dispatches.
 
-    Reproduces the 2026-07-02 stability-lane P0-1 probe deterministically in-process:
-    a real ``ModelRsdScoreResult`` on ``onex.evt.rsd.scores-calculated.v1`` was
-    logged as 'No dispatcher found ... routing to DLQ topic
-    onex.dlq.omnibase-infra.rsd.v1'. After the fix it must select a dispatcher.
+    The 2026-07-02 stability-lane P0-1 probe logged a real ``ModelRsdScoreResult``
+    on ``onex.evt.rsd.scores-calculated.v1`` as 'No dispatcher found ... routing to
+    DLQ topic onex.dlq.omnibase-infra.rsd.v1'. OMN-17427 deleted that subscription
+    (no contract and no runtime path in the fleet publishes the topic), so the same
+    regression is pinned on node_chain_orchestrator: three handler entries, one of
+    them an EVENT handler whose topic has a declared publisher
+    (node_chain_retrieval_effect). Before OMN-13852 the multi-handler ambiguity
+    guard registered zero routes here too.
     """
-    rsd = contracts_by_name["node_rsd_orchestrator"]
-    engine, _dispatcher_meta, _routes, _topics = harness._build_engine([rsd])
+    chain = contracts_by_name["node_chain_orchestrator"]
+    assert len(chain.handler_routing.handlers) > 1  # type: ignore[attr-defined]
+    engine, _dispatcher_meta, _routes, _topics = harness._build_engine([chain])
 
-    topic = "onex.evt.rsd.scores-calculated.v1"
-    # Build the real event_model instance HandlerRsdScoreComplete consumes.
+    topic = "onex.evt.omnibase-infra.chain-retrieval-result.v1"
+    # Build the real event_model instance HandlerChainRetrievalComplete consumes.
     instance, err = harness._model_construct_instance(
-        "omnibase_infra.nodes.node_rsd_score_compute.models.model_rsd_score_result",
-        "ModelRsdScoreResult",
+        "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_retrieval_result",
+        "ModelChainRetrievalResult",
     )
     assert err is None and instance is not None, f"could not construct payload: {err}"
 
     async def _run() -> ModelDispatchResult:
         envelope = harness._envelope(
-            event_type="rsd.scores-calculated", payload=instance
+            event_type="omnibase-infra.chain-retrieval-result", payload=instance
         )
         return await engine.dispatch(topic=topic, envelope=envelope)
 
     result = asyncio.run(_run())
     assert result.status != EnumDispatchStatus.NO_DISPATCHER, (
-        "node_rsd_orchestrator STILL drops the live P0-1 event to DLQ "
-        f"(dlq_topic={getattr(result, 'dlq_topic', None)}); the routing fix regressed."
+        "node_chain_orchestrator drops a real event payload to DLQ "
+        f"(dlq_topic={getattr(result, 'dlq_topic', None)}); the OMN-13852 routing "
+        "fix regressed."
     )
     assert result.status == EnumDispatchStatus.SUCCESS, (
         f"expected SUCCESS after routing fix, got {result.status}"
