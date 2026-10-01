@@ -420,6 +420,22 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
             fresh_build, eval_run_table, "app_dashboard", schema="public"
         ) == {"SELECT"}
 
+    # OMN-20242: the tenant writer writes dispositions and reads the invoker
+    # usage view. The dashboard holds SELECT on both the view and its base table.
+    assert _live_privileges(
+        fresh_build,
+        "delegation_dispositions",
+        "tenant_projection_writer",
+        schema="public",
+    ) == {"SELECT", "INSERT", "UPDATE"}
+    assert _live_privileges(
+        fresh_build, "delegation_dispositions", "app_dashboard", schema="public"
+    ) == {"SELECT"}
+    for principal in ("tenant_projection_writer", "app_dashboard"):
+        assert _live_privileges(
+            fresh_build, "delegation_disposition_usage", principal, schema="public"
+        ) == {"SELECT"}
+
     # OMN-19937: the board probe results projection grants exactly the runtime
     # writer's SELECT/INSERT/UPDATE privileges, with no DELETE.
     board_probe_results_declared = {

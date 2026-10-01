@@ -887,3 +887,10 @@ fenced_node_migrations:
   # added here.
   - id: "node:node_projection_delegation_eval:0006_force_rls_delegation_eval_run_tables.sql"
     ticket: "OMN-19793"
+  # OMN-20242: only 0002 forces RLS on delegation_dispositions and waits for
+  # an operator-sequenced release. 0000 (create), 0001 (writer grants), and
+  # 0003 (security_invoker usage view and SELECT grants) apply on every lane.
+  # The view does not enable or force RLS; its reads use the base-table policies.
+  # No lane release is added here.
+  - id: "node:node_projection_delegation_disposition:0002_force_rls_delegation_dispositions.sql"
+    ticket: "OMN-20242"

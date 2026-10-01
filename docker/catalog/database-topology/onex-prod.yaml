@@ -204,6 +204,7 @@ databases:
               - capability_scores
               - context_roi_scores
               - delegation_budget_state
+              - delegation_dispositions
               - delegation_eval_item_verdicts
               - delegation_eval_items
               - delegation_eval_results
@@ -231,6 +232,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - delegation_disposition_usage
               - projection_cost_savings_overview
               - projection_delegation_model_routing
               - projection_delegation_quality_gate
@@ -381,5 +383,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 5aaaac438307093ca3856b1fac2b752f3bb222e294fb9f7883c286defb16b98b
+  sha256: a1f568ed27476048d5be1443f72bdb86282a212192a749b2d02c4a7715c31eed
 topology_instance: onex-prod

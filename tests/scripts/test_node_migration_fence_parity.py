@@ -544,6 +544,11 @@ FENCED_PROVIDER_QUOTA_STATE_RLS_IDS = (
 FENCED_DELEGATION_EVAL_RUN_RLS_IDS = (
     "node:node_projection_delegation_eval:0006_force_rls_delegation_eval_run_tables.sql",
 )
+# OMN-20242: only the separate FORCE RLS step waits for an operator release.
+# The create, writer grants and security_invoker usage view apply on every lane.
+FENCED_DELEGATION_DISPOSITIONS_RLS_IDS = (
+    "node:node_projection_delegation_disposition:0002_force_rls_delegation_dispositions.sql",
+)
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS
     + FENCED_REGISTRATION_IDS
@@ -557,6 +562,7 @@ EXPECTED_FENCE = (
     + FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS
     + FENCED_PROVIDER_QUOTA_STATE_RLS_IDS
     + FENCED_DELEGATION_EVAL_RUN_RLS_IDS
+    + FENCED_DELEGATION_DISPOSITIONS_RLS_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -926,9 +932,11 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
         + FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS
         + FENCED_PROVIDER_QUOTA_STATE_RLS_IDS
         + FENCED_DELEGATION_EVAL_RUN_RLS_IDS
+        + FENCED_DELEGATION_DISPOSITIONS_RLS_IDS
     ), (
         "the OMN-19978 usage_by_model_day, OMN-19790 delegation_eval_items, "
-        "OMN-20154 provider_quota_state and OMN-19793 eval-run RLS holds are not "
+        "OMN-20154 provider_quota_state, OMN-19793 eval-run and OMN-20242 "
+        "delegation_dispositions RLS holds are not "
         "the expected ids"
     )
 

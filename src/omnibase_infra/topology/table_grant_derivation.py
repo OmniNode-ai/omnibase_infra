@@ -391,6 +391,46 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="provider_quota_state",
         ),
     ),
+    # OMN-20242: infra vendors the disposition table and usage view before the
+    # omnimarket node_projection_delegation_disposition contract lands.
+    # Both bridges expire when that source change merges and the pin advances
+    # to declare these relations (including the view's access: read entry).
+    ContractTableDeclaration(
+        node="legacy_migration:delegation_dispositions",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_delegation_disposition/"
+            "0000_create_delegation_dispositions.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="delegation_dispositions",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_delegation_disposition/"
+                "0000_create_delegation_dispositions.sql"
+            ),
+            access="read_write",
+            role="delegation_dispositions",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:delegation_disposition_usage",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_delegation_disposition/"
+            "0003_create_delegation_disposition_usage.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="delegation_disposition_usage",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_delegation_disposition/"
+                "0003_create_delegation_disposition_usage.sql"
+            ),
+            access="read",
+            role="delegation_disposition_usage",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
