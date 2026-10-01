@@ -34,6 +34,7 @@ class TypedDictConsumerFlowPage(TypedDict, total=False):
     next_cursor: JsonValue
     backing: JsonValue
     data_freshness: JsonValue
+    end_proof: JsonValue
 
 
 class TypedDictConsumerFlowResponse(TypedDictConsumerFlowPage):

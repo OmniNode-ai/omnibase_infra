@@ -172,16 +172,26 @@ class TestAnExplicitTicketReachesTheDispatchedRequest:
         assert result.exit_code == 0, result.stderr
         assert "ticket: OMN-19514 (explicit)" in result.stderr
         payload = _sole_payload(state_root)
-        assert payload["metadata"] == {DELEGATE_TICKET_METADATA_KEY: "OMN-19514"}
+        metadata = payload["metadata"]
+        assert isinstance(metadata, dict)
+        assert metadata[DELEGATE_TICKET_METADATA_KEY] == "OMN-19514"
+        # OMN-20299: every CLI run also names its caller lane, never None.
+        assert set(metadata) == {DELEGATE_TICKET_METADATA_KEY, "caller_lane"}
 
     def test_no_ticket_omits_the_metadata_key_entirely(self, tmp_path: Path) -> None:
-        """A caller who never named a ticket gets the pre-OMN-19514 payload shape."""
+        """A caller who never named a ticket sends no ticket key.
+
+        Since OMN-20299 the metadata map still carries the caller lane, which
+        the CLI never leaves unset, so the map is not absent; the ticket key is.
+        """
         result, state_root = _dispatch(tmp_path)
 
         assert result.exit_code == 0, result.stderr
         assert "ticket: none (none)" in result.stderr
         payload = _sole_payload(state_root)
-        assert "metadata" not in payload
+        metadata = payload["metadata"]
+        assert isinstance(metadata, dict)
+        assert set(metadata) == {"caller_lane"}
 
     def test_an_omitted_flag_is_resolved_from_a_ticket_worktree_cwd(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -196,7 +206,11 @@ class TestAnExplicitTicketReachesTheDispatchedRequest:
         assert result.exit_code == 0, result.stderr
         assert "ticket: OMN-19514 (worktree path)" in result.stderr
         payload = _sole_payload(state_root)
-        assert payload["metadata"] == {DELEGATE_TICKET_METADATA_KEY: "OMN-19514"}
+        metadata = payload["metadata"]
+        assert isinstance(metadata, dict)
+        assert metadata[DELEGATE_TICKET_METADATA_KEY] == "OMN-19514"
+        # OMN-20299: every CLI run also names its caller lane, never None.
+        assert set(metadata) == {DELEGATE_TICKET_METADATA_KEY, "caller_lane"}
 
     def test_an_explicit_ticket_wins_over_the_working_directory(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -210,4 +224,8 @@ class TestAnExplicitTicketReachesTheDispatchedRequest:
         assert result.exit_code == 0, result.stderr
         assert "ticket: OMN-19514 (explicit)" in result.stderr
         payload = _sole_payload(state_root)
-        assert payload["metadata"] == {DELEGATE_TICKET_METADATA_KEY: "OMN-19514"}
+        metadata = payload["metadata"]
+        assert isinstance(metadata, dict)
+        assert metadata[DELEGATE_TICKET_METADATA_KEY] == "OMN-19514"
+        # OMN-20299: every CLI run also names its caller lane, never None.
+        assert set(metadata) == {DELEGATE_TICKET_METADATA_KEY, "caller_lane"}

@@ -13,6 +13,9 @@ from typing import Any
 
 import pytest
 
+from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_collection import (
+    walk,
+)
 from omnibase_infra.nodes.node_board_probe_effect.handlers.handler_consumer_flow import (
     HandlerConsumerFlow,
 )
@@ -164,3 +167,43 @@ def test_recorded_lane_runs_collection_grading_and_receipt(tmp_path: Path) -> No
     assert lane.sample >= 2
     assert any("produce" in argv for argv in lane.calls)
     assert sum(argv[0] == "fake-pytest" for argv in lane.calls) == 3
+
+
+class _WindowLane:
+    """A projection API serving a fixed window of full pages, as the live lane does."""
+
+    def __init__(self, pages: int, row_limit: int) -> None:
+        self.rows = [
+            {"projection_cursor": str(i + 1), "consumer_group": f"g{i}"}
+            for i in range(pages * row_limit)
+        ]
+        self.row_limit = row_limit
+        self.queries: list[dict[str, str]] = []
+
+    def page(self, query: dict[str, str]) -> dict[str, Any]:
+        self.queries.append(query)
+        start = int(query.get("since", "0"))
+        rows = self.rows[start : start + self.row_limit]
+        more = start + self.row_limit < len(self.rows)
+        return {
+            "rows": rows,
+            "row_count": len(rows),
+            "row_limit": self.row_limit,
+            "next_cursor": str(start + self.row_limit) if more else None,
+        }
+
+
+def test_full_window_walk_proves_end_of_final_full_page() -> None:
+    lane = _WindowLane(pages=4, row_limit=500)
+
+    walked = walk(lane)  # type: ignore[arg-type]
+
+    assert len(walked["pages"]) == 4
+    assert len(walked["rows"]) == 2000
+    assert walked["pages"][-1].get("end_proof") == {
+        "since": "2000",
+        "beyond_row_count": 0,
+        "reread_next_cursor": None,
+        "proven": True,
+    }
+    assert lane.queries[-1] == {"since": "2000"}
