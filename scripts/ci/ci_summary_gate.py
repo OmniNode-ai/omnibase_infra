@@ -1881,6 +1881,18 @@ def drop_superseded_non_verdicts(
         for raw in check_runs
         if str(raw.get("name") or "") and not _is_non_verdict_row(raw)
     }
+    # OMN-20275: a reusable-workflow caller job whose own ``if:`` is false
+    # writes its row under the BARE caller name (``deploy-gate``); when it runs
+    # it writes ``caller / reusable-job`` (``deploy-gate / deploy-gate``). The
+    # two never share a name, so a PR opened as a draft against dev keeps the
+    # draft-time ``deploy-gate`` skip on its head forever after the
+    # ready_for_review run reports success, and a rerun cannot clear it (it
+    # reuses the draft payload). A verdict row ``caller / job`` therefore also
+    # supersedes a non-verdict row for ``caller`` on the same head. One
+    # direction only: a bare-name verdict never clears a ``caller / job`` skip.
+    verdict_keys |= {
+        (name.split(" / ", 1)[0], head) for name, head in verdict_keys if " / " in name
+    }
     return [
         raw
         for raw in check_runs
