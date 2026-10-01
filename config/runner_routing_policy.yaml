@@ -1049,6 +1049,7 @@ route:
         # poller via EXPECTED_EXTERNAL_CONTEXTS and absent from branch
         # protection, which is exactly the shape this list records.
         - advisory-job-gate / advisory-job-gate
+        - Direct Model Call Gate
         - Application Database Domain Enforcement (OMN-15361)
         - Arch Invariants (OMN-3343)
         # OMN-19928: the forwarder against a grant-enforcing broker, registered
