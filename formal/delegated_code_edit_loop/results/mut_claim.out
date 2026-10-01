@@ -1,0 +1,101 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Running breadth-first search Model-Checking with fp 54 and seed -159638505315220463 with 2 workers on 32 cores with 20926MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.0-34-generic amd64, Eclipse Adoptium 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /m/DelegatedCodeEditLoop.tla
+Parsing file /tmp/Naturals.tla
+Parsing file /tmp/FiniteSets.tla
+Parsing file /tmp/Sequences.tla
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module DelegatedCodeEditLoop
+Starting... (2026-10-01 12:03:52)
+Implied-temporal checking--satisfiability problem has 2 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-10-01 12:03:52.
+Error: Invariant OneReceipt is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ receipts = 0
+/\ lastFail = (r1 :> "none" @@ r2 :> "none")
+/\ pc = (r1 :> "start" @@ r2 :> "start")
+/\ claimed = FALSE
+/\ written = {}
+/\ turns = (r1 :> 0 @@ r2 :> 0)
+/\ ran = {}
+
+State 2: <ClaimCheck line 40, col 3 to line 43, col 67 of module DelegatedCodeEditLoop>
+/\ receipts = 0
+/\ lastFail = (r1 :> "none" @@ r2 :> "none")
+/\ pc = (r1 :> "claiming" @@ r2 :> "start")
+/\ claimed = FALSE
+/\ written = {}
+/\ turns = (r1 :> 0 @@ r2 :> 0)
+/\ ran = {}
+
+State 3: <ClaimCheck line 40, col 3 to line 43, col 67 of module DelegatedCodeEditLoop>
+/\ receipts = 0
+/\ lastFail = (r1 :> "none" @@ r2 :> "none")
+/\ pc = (r1 :> "claiming" @@ r2 :> "claiming")
+/\ claimed = FALSE
+/\ written = {}
+/\ turns = (r1 :> 0 @@ r2 :> 0)
+/\ ran = {}
+
+State 4: <ClaimSet line 45, col 3 to line 47, col 58 of module DelegatedCodeEditLoop>
+/\ receipts = 0
+/\ lastFail = (r1 :> "none" @@ r2 :> "none")
+/\ pc = (r1 :> "turn" @@ r2 :> "claiming")
+/\ claimed = TRUE
+/\ written = {}
+/\ turns = (r1 :> 0 @@ r2 :> 0)
+/\ ran = {}
+
+State 5: <Finish line 65, col 3 to line 73, col 45 of module DelegatedCodeEditLoop>
+/\ receipts = 0
+/\ lastFail = (r1 :> "none" @@ r2 :> "none")
+/\ pc = (r1 :> "accepted" @@ r2 :> "claiming")
+/\ claimed = TRUE
+/\ written = {}
+/\ turns = (r1 :> 1 @@ r2 :> 0)
+/\ ran = {"declared"}
+
+State 6: <Receipt line 82, col 3 to line 85, col 57 of module DelegatedCodeEditLoop>
+/\ receipts = 1
+/\ lastFail = (r1 :> "none" @@ r2 :> "none")
+/\ pc = (r1 :> "done_accepted" @@ r2 :> "claiming")
+/\ claimed = TRUE
+/\ written = {}
+/\ turns = (r1 :> 1 @@ r2 :> 0)
+/\ ran = {"declared"}
+
+State 7: <ClaimSet line 45, col 3 to line 47, col 58 of module DelegatedCodeEditLoop>
+/\ receipts = 1
+/\ lastFail = (r1 :> "none" @@ r2 :> "none")
+/\ pc = (r1 :> "done_accepted" @@ r2 :> "turn")
+/\ claimed = TRUE
+/\ written = {}
+/\ turns = (r1 :> 1 @@ r2 :> 0)
+/\ ran = {"declared"}
+
+State 8: <Finish line 65, col 3 to line 73, col 45 of module DelegatedCodeEditLoop>
+/\ receipts = 1
+/\ lastFail = (r1 :> "none" @@ r2 :> "none")
+/\ pc = (r1 :> "done_accepted" @@ r2 :> "accepted")
+/\ claimed = TRUE
+/\ written = {}
+/\ turns = (r1 :> 1 @@ r2 :> 1)
+/\ ran = {"declared"}
+
+State 9: <Receipt line 82, col 3 to line 85, col 57 of module DelegatedCodeEditLoop>
+/\ receipts = 2
+/\ lastFail = (r1 :> "none" @@ r2 :> "none")
+/\ pc = (r1 :> "done_accepted" @@ r2 :> "done_accepted")
+/\ claimed = TRUE
+/\ written = {}
+/\ turns = (r1 :> 1 @@ r2 :> 1)
+/\ ran = {"declared"}
+
+2620 states generated, 869 distinct states found, 380 states left on queue.
+The depth of the complete state graph search is 9.
+The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 7 and the 95th percentile is 5).
+Finished in 00s at (2026-10-01 12:03:53)
