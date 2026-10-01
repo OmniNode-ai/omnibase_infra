@@ -25,6 +25,7 @@ import pytest
 import yaml
 
 from omnibase_infra.backends.backend_probe import ConsumerGroupLivenessUnknownError
+from omnibase_infra.backends.model_consumer_group_owner import ModelConsumerGroupOwner
 from omnibase_infra.cli import delegate_locus
 from omnibase_infra.cli.delegate_locus import (
     REBIND_WINDOW_FAILURE_CLASS,
@@ -85,14 +86,18 @@ def _contract(tmp_path: Path) -> Path:
 
 def _answers(
     monkeypatch: pytest.MonkeyPatch, answers: list[tuple[str, ...]]
-) -> list[str]:
+) -> list[dict[str, object]]:
     """Answer successive probes from *answers*, repeating the last one."""
-    asked: list[str] = []
+    asked: list[dict[str, object]] = []
 
     def _fake(
-        *, topic: str, bootstrap_servers: str | None, timeout: float
+        *,
+        topic: str,
+        bootstrap_servers: str | None,
+        timeout: float,
+        owner: ModelConsumerGroupOwner | None = None,
     ) -> tuple[str, ...]:
-        asked.append(topic)
+        asked.append({"topic": topic, "owner": owner})
         return answers[min(len(asked), len(answers)) - 1]
 
     monkeypatch.setattr(delegate_locus, "live_consumer_groups", _fake)
@@ -115,7 +120,14 @@ class TestRebindWindowIsWaitedFor:
     ) -> None:
         asked = _answers(monkeypatch, [(_GROUP,)])
         decision = _resolve(tmp_path)
-        assert asked == [_COMMAND_TOPIC]
+        assert asked == [
+            {
+                "topic": _COMMAND_TOPIC,
+                "owner": ModelConsumerGroupOwner(
+                    service="omnimarket", node="node_delegate_skill_orchestrator"
+                ),
+            }
+        ]
         assert clock.sleeps == []
         assert decision.lane_consumer_groups == (_GROUP,)
         assert decision.consumer_bind_wait_seconds == 0.0

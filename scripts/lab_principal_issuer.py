@@ -11,14 +11,17 @@ THE DEFECT THIS CLOSES
     grants existed only on the broker (OMN-19799).
 
 WHO MAY ASK
-    The caller is identified by the TAILNET, never by anything it sends. This
-    service listens on the lab host's loopback only and is published on the
-    tailnet by the host's ``tailscale serve``, which sets ``Tailscale-User-Login``
-    to the connecting device's owner. Serve sets no user identity for a TAGGED
-    device (servers, CI runners), so those are refused. Nothing off the host can
-    reach the loopback port, so the header cannot be supplied by a remote caller.
-    A process ON the lab host could forge it, which is no new exposure: host
-    ``docker`` group membership is already root-equivalent there.
+    The service has no TCP listener on any network. It serves only a Unix socket,
+    mode 0600, owned by the issuer user, in a named Docker volume under the Docker
+    data root. Issuance is accepted only when the peer's kernel-attested uid
+    (SO_PEERCRED) equals ``--proxy-uid``: root on the lab host, where tailscaled
+    runs ``tailscale serve``. Serve strips client-supplied Tailscale-User-* headers
+    and sets ``Tailscale-User-Login`` to the connecting device's owner. It sets no
+    user identity for a TAGGED device (servers, CI runners), so those are refused.
+    A container on the dev-lane network cannot connect at all. A non-root host
+    process cannot open the socket and would be refused by uid even if it could.
+    Root and the host docker group remain trusted: they can already read the
+    broker superuser password.
 
 WHAT IT GRANTS
     Exactly the grants in ``deploy/lab/developer-principal-grants.yaml``, which
@@ -41,7 +44,8 @@ HOW IT TALKS TO THE BROKER
 Usage::
 
     lab_principal_issuer.py check --grants FILE
-    lab_principal_issuer.py serve --grants FILE --ledger FILE [--bind ADDR] [--port N]
+    lab_principal_issuer.py serve --grants FILE --ledger FILE --socket PATH --proxy-uid N
+    lab_principal_issuer.py health --socket PATH
 """
 
 from __future__ import annotations
@@ -55,6 +59,10 @@ import json
 import os
 import re
 import secrets
+import socket
+import socketserver
+import stat
+import struct
 import subprocess
 import sys
 import threading
@@ -62,7 +70,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Sequence
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 
 import yaml
@@ -397,9 +405,65 @@ class Issuer:
         }
 
 
-def make_handler(issuer: Issuer) -> type[BaseHTTPRequestHandler]:
+class UnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    """HTTP on an owner-only Unix socket, with no TCP listener."""
+
+    daemon_threads = True
+
+    def __init__(self, path: str | Path, handler: type[BaseHTTPRequestHandler]) -> None:
+        self._socket_path = Path(path)
+        super().__init__(str(path), handler)
+
+    def server_bind(self) -> None:
+        try:
+            mode = self._socket_path.lstat().st_mode
+        except FileNotFoundError:
+            pass
+        else:
+            if not stat.S_ISSOCK(mode):
+                raise SystemExit(
+                    f"lab_principal_issuer: refusing non-socket path {self._socket_path}"
+                )
+            self._socket_path.unlink()
+        previous_umask = os.umask(0o177)
+        try:
+            super().server_bind()
+            os.chmod(self._socket_path, 0o600)  # noqa: PTH101 - explicit socket mode enforcement
+        finally:
+            os.umask(previous_umask)
+
+
+def peer_uid(sock: socket.socket) -> int | None:
+    """Read Linux's kernel-attested peer uid; fail closed elsewhere or on error."""
+    if not hasattr(socket, "SO_PEERCRED"):
+        return None
+    try:
+        _, uid, _ = struct.unpack(
+            "3i",
+            sock.getsockopt(
+                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")
+            ),
+        )
+    except OSError:
+        return None
+    return int(uid)
+
+
+def make_handler(
+    issuer: Issuer,
+    proxy_uid: int,
+    peer_uid_of: Callable[[socket.socket], int | None] = peer_uid,
+) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "lab-principal-issuer/1"
+        _peer_uid: int | None = None
+
+        def handle_one_request(self) -> None:
+            self._peer_uid = peer_uid_of(self.connection)
+            super().handle_one_request()
+
+        def address_string(self) -> str:
+            return "unix"
 
         def _answer(self, status: HTTPStatus, payload: dict[str, str]) -> None:
             data = json.dumps(payload).encode()
@@ -419,6 +483,14 @@ def make_handler(issuer: Issuer) -> type[BaseHTTPRequestHandler]:
         def do_POST(self) -> None:
             if self.path != "/v1/principals":
                 self._answer(HTTPStatus.NOT_FOUND, {"error": "not found"})
+                return
+            if self._peer_uid is None or self._peer_uid != proxy_uid:
+                self._answer(
+                    HTTPStatus.FORBIDDEN,
+                    {
+                        "error": "request did not arrive through the lab host's tailscale serve"
+                    },
+                )
                 return
             length = int(self.headers.get("Content-Length") or 0)
             if length > MAX_BODY_BYTES:
@@ -443,11 +515,34 @@ def make_handler(issuer: Issuer) -> type[BaseHTTPRequestHandler]:
 
         def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - http.server's name
             # Request line and status only; bodies (which carry the password) are never logged.
+            identity = f"peer_uid={self._peer_uid}"
+            if self._peer_uid == proxy_uid and hasattr(self, "headers"):
+                identity = self.headers.get(LOGIN_HEADER, "-")
             sys.stderr.write(
-                f"{self.log_date_time_string()} {self.headers.get(LOGIN_HEADER, '-')} {format % args}\n"
+                f"{self.log_date_time_string()} {identity} {format % args}\n"
             )
 
     return Handler
+
+
+def health(path: Path) -> int:
+    """Check the Unix HTTP endpoint without requiring broker configuration."""
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(3)
+            client.connect(str(path))
+            client.sendall(b"GET /healthz HTTP/1.0\r\n\r\n")
+            with client.makefile("rb") as response:
+                status = response.readline(MAX_BODY_BYTES).split()
+        return (
+            0
+            if len(status) >= 2
+            and status[0] in {b"HTTP/1.0", b"HTTP/1.1"}
+            and status[1] == b"200"
+            else 1
+        )
+    except OSError:
+        return 1
 
 
 def _broker_from_environment() -> BrokerConfig:
@@ -474,13 +569,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     serve = sub.add_parser("serve", help="serve issuance requests")
     serve.add_argument("--grants", type=Path, required=True)
     serve.add_argument("--ledger", type=Path, required=True)
-    serve.add_argument(
-        "--bind",
-        required=True,
-        help="address to listen on; the compose file binds the container port",
+    serve.add_argument("--socket", type=Path, required=True)
+    serve.add_argument("--proxy-uid", type=int, required=True)
+    health_parser = sub.add_parser(
+        "health", help="check the Unix socket health endpoint"
     )
-    serve.add_argument("--port", type=int, default=8080)
+    health_parser.add_argument("--socket", type=Path, required=True)
     args = parser.parse_args(argv)
+
+    if args.command == "health":
+        return health(args.socket)
 
     try:
         declaration = load_declaration(args.grants)
@@ -496,12 +594,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     issuer = Issuer(
         declaration, Broker(_broker_from_environment()), Ledger(args.ledger)
     )
-    server = ThreadingHTTPServer((args.bind, args.port), make_handler(issuer))
-    print(
-        f"lab_principal_issuer: lane {declaration.lane} on {args.bind}:{args.port}",
-        file=sys.stderr,
-    )
-    server.serve_forever()
+    with UnixHTTPServer(args.socket, make_handler(issuer, args.proxy_uid)) as server:
+        print(
+            f"lab_principal_issuer: lane {declaration.lane} on {args.socket}",
+            file=sys.stderr,
+        )
+        server.serve_forever()
     return 0
 
 

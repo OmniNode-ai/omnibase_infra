@@ -63,6 +63,14 @@ THE FENCE, THE FINDING SHAPE AND THE VERDICT ARE IMPORTED, NOT RETYPED
 ``assert_lane_fence``, ``Finding`` and ``Verdict`` come from the sibling guard.
 Two copies of a lane fence are two places to disagree about which compose
 projects a CI job may read, and this one must never read a governed lane.
+
+THE GENERATION IS BOUND AFTER THE AGENT'S JOB ENDS (OMN-20154)
+----------------------------------------------------------
+
+Convergence can precede the agent's own verification recreate. Wait for that
+job to end within the remaining ``--wait-timeout``, then reuse the sibling
+guard's binding: only a successful job's recorded recovered recreate of this
+compose service, with the same image and revision, rebinds the probe generation.
 """
 
 from __future__ import annotations
@@ -74,7 +82,8 @@ import re
 import subprocess
 import sys
 import time
-from datetime import timedelta
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 _CI_DIR = Path(__file__).resolve().parent
@@ -84,6 +93,7 @@ sys.path.insert(0, str(_CI_DIR.parents[1]))
 # keep their types. A dynamic load returns `object` and every downstream access to
 # `verdict.ok` becomes an untyped attribute lookup -- which is how a refactor of
 # the shared shapes stops being a type error here and starts being a runtime one.
+from scripts.ci.check_dev_lane_staleness import read_compose_service
 from scripts.ci.check_lane_sibling_revision import (
     CARRIES_STATUSES,
     MISSING_STATUSES,
@@ -92,8 +102,9 @@ from scripts.ci.check_lane_sibling_revision import (
     _format_age,
     _parse_duration,
     assert_lane_fence,
+    bind_sibling_generation,
 )
-from scripts.ci.lab_pass_receipt import read_lane_generation
+from scripts.ci.lab_pass_receipt import ModelLaneGeneration, read_lane_generation
 
 #: The dev lane's onex-api container, and the compose project the fence pins it
 #: to. Named rather than derived so this guard can never read a governed lane.
@@ -266,7 +277,77 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--poll-interval", type=_parse_duration, default=DEFAULT_POLL_INTERVAL
     )
+    parser.add_argument(
+        "--agent-url",
+        default="",
+        help=(
+            "the deploy agent's HTTP surface, whose /job/<correlation_id> "
+            "endpoint serves the job-end record the probe generation is bound "
+            "to. Empty keeps the converged generation."
+        ),
+    )
+    parser.add_argument(
+        "--correlation-id",
+        default="",
+        help=(
+            "the redeploy correlation id this run published, as written by "
+            "scripts/trigger_rebuild_on_merge.py. Empty keeps the converged "
+            "generation."
+        ),
+    )
+    parser.add_argument(
+        "--agent-timeout-seconds",
+        type=float,
+        default=10.0,
+        help="per-request timeout for the deploy-agent job-end read",
+    )
     return parser
+
+
+def publish_onex_api_generation(
+    *,
+    verdict: Verdict,
+    container: str,
+    agent_url: str,
+    correlation_id: str,
+    deadline_monotonic: float,
+    monotonic: Callable[[], float],
+    clock: Callable[[], datetime],
+    sleep: Callable[[float], None],
+    read_generation: Callable[[str], ModelLaneGeneration],
+    read_service: Callable[[str], str],
+    opener: Callable[[str, float], tuple[int, str]] | None = None,
+    request_timeout_seconds: float = 10.0,
+) -> None:
+    """Publish the shared job-end binding and evidence, without extending the wait."""
+    evidence = "; ".join(verdict.notes) or "; ".join(
+        finding.render() for finding in verdict.findings
+    )
+    if verdict.ok:
+        # OMN-20154: spend only what remains of this guard's original wait
+        # window. The job ceiling and the probe's settle budget stay fixed.
+        bound = bind_sibling_generation(
+            container=container,
+            agent_url=agent_url,
+            correlation_id=correlation_id,
+            deadline=clock()
+            + timedelta(seconds=max(0.0, deadline_monotonic - monotonic())),
+            clock=clock,
+            sleep=sleep,
+            read_generation=read_generation,
+            read_service=read_service,
+            opener=opener,
+            request_timeout_seconds=request_timeout_seconds,
+        )
+        path = os.environ.get("GITHUB_OUTPUT")
+        if bound.generation is not None and path:
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(f"generation={bound.generation.to_json()}\n")
+        if bound.evidence:
+            evidence = "; ".join(part for part in (evidence, bound.evidence) if part)
+    else:
+        _write_output_generation(container)
+    _write_output_evidence(" ".join(evidence.split()))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -323,14 +404,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         time.sleep(args.poll_interval.total_seconds())
 
-    # The identity of the container this guard read, so the lab-pass probe that
-    # runs next can prove its HTTP reads came from the SAME generation. Written
-    # on both outcomes, because "which container answered" has an answer either
-    # way (OMN-18436).
-    _write_output_generation(args.container)
-    _write_output_evidence(
-        "; ".join(verdict.notes)
-        or "; ".join(finding.render() for finding in verdict.findings)
+    # OMN-20154: on convergence, bind after the agent's own job-end recreate;
+    # on a non-OK verdict, retain the existing generation read (OMN-18436).
+    publish_onex_api_generation(
+        verdict=verdict,
+        container=args.container,
+        agent_url=args.agent_url,
+        correlation_id=args.correlation_id,
+        deadline_monotonic=deadline,
+        monotonic=time.monotonic,
+        clock=lambda: datetime.now(UTC),
+        sleep=time.sleep,
+        read_generation=read_lane_generation,
+        read_service=read_compose_service,
+        request_timeout_seconds=args.agent_timeout_seconds,
     )
 
     for note in verdict.notes:

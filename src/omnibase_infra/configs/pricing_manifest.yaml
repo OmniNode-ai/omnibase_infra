@@ -45,6 +45,21 @@ models:
       min_samples: 20
       query: llm_call_metrics usage_source=API created_at>=now-7d
       authoritative: false
+  claude-sonnet-5-5:
+    input_cost_per_1k: 0.002
+    output_cost_per_1k: 0.010
+    effective_date: '2026-09-25'
+    confidence: LOW_CONFIDENCE
+    source: FALLBACK_PROVIDER_DOCUMENTATION
+    sample_count: 0
+    evidence:
+      generated_at: '2026-10-01T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
+      note: Claude API reference, Current Models table (cached 2026-09-25), $2.00 input / $10.00 output per million tokens, first-party API rate; OMN-19969 savings-baseline default
   claude-haiku-3-5:
     input_cost_per_1k: 0.0008
     output_cost_per_1k: 0.004

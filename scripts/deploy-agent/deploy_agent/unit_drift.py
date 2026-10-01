@@ -18,7 +18,7 @@ import socket
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 import yaml
@@ -27,7 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 INDETERMINATE_REASON = "no unit-drift provider is configured"
 
 
-class EnumUnitStatus(str, Enum):
+class EnumUnitStatus(StrEnum):
     """Observed relationship between a declared unit and its installed copy."""
 
     OK = "OK"

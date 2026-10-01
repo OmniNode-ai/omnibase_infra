@@ -3,6 +3,7 @@
 # Source: omnibase_core/contracts/runtime/runtime_orchestrator.yaml
 # Contract Metadata
 node_type: ORCHESTRATOR_GENERIC
+runtime_profiles: [main]
 name: node_runtime_orchestrator
 node_version: {major: 1, minor: 1, patch: 0}
 description: Self-hosted ONEX runtime orchestrator using 4-node architecture

@@ -1,0 +1,93 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+
+"""The delegation eval-run supplemental bridges were retired (OMN-19793 / OMN-18863).
+
+Infra vendored the ``delegation_eval_item_verdicts`` and
+``delegation_eval_results`` migrations before omnimarket#3127 landed the
+declaring node contract, so two hand-authored
+``LEGACY_MIGRATION_TABLE_DECLARATIONS`` entries carried them in the interim.
+The omnimarket contract pin advancing to 49ee50d5f1b0 carries omnimarket#3127,
+so the bridges are redundant and were deleted from ``table_grant_derivation.py``
+and ``_INTERIM_ENTRIES``.
+
+This module asserts that the deletion stuck and did not drop what it bridged:
+
+1. no supplemental bridge for either relation remains;
+2. the vendored migration lineage and the shipped topology instances still
+   grant both relations to ``tenant_projection_writer``.
+
+That the pinned contracts declare both relations is not asserted here: the
+generator's ``--check --prove`` already fails on a shipped grant no contract
+declares, and a test needing the pinned checkout would be collected and skipped
+in the split jobs.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+import yaml
+
+from omnibase_infra.topology.table_grant_derivation import (
+    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+)
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_PROFILES = ("local", "onex-dev", "onex-prod")
+_VENDOR = Path("docker/migrations/forward/nodes/node_projection_delegation_eval")
+_RELATIONS = {
+    "delegation_eval_item_verdicts": "0003_create_delegation_eval_item_verdicts.sql",
+    "delegation_eval_results": "0004_create_delegation_eval_results.sql",
+}
+
+
+class TestTheDelegationEvalRunBridgesWereRetired:
+    def test_no_supplemental_bridge_remains(self) -> None:
+        carried = {
+            declaration.table.name
+            for declaration in LEGACY_MIGRATION_TABLE_DECLARATIONS
+        }
+        lingering = sorted(set(_RELATIONS) & carried)
+        assert not lingering, (
+            f"{lingering} still have supplemental LEGACY_MIGRATION_TABLE_"
+            "DECLARATIONS entries, but the pinned omnimarket contracts "
+            "(49ee50d5f1b0, omnimarket#3127) declare them."
+        )
+
+    @pytest.mark.parametrize("filename", sorted(_RELATIONS.values()))
+    def test_the_migration_lineage_that_created_it_is_still_in_the_tree(
+        self, filename: str
+    ) -> None:
+        assert (_REPO_ROOT / _VENDOR / filename).is_file()
+
+    @pytest.mark.parametrize("relation", sorted(_RELATIONS))
+    @pytest.mark.parametrize("profile", _PROFILES)
+    def test_the_shipped_instance_still_grants_it(
+        self, profile: str, relation: str
+    ) -> None:
+        instance = yaml.safe_load(
+            (
+                _REPO_ROOT
+                / "src"
+                / "omnibase_infra"
+                / "topology"
+                / "instances"
+                / f"{profile}.yaml"
+            ).read_text(encoding="utf-8")
+        )
+        shipped = [
+            entry
+            for entry in instance["databases"]["application"]["principals"][
+                "tenant_projection_writer"
+            ]["grants"]
+            if entry["object_type"] == "TABLE"
+            and entry["schema"] == "public"
+            and relation in entry["objects"]
+        ]
+        assert len(shipped) == 1, (
+            f"{profile} no longer grants {relation} to tenant_projection_writer; "
+            "retiring the bridge must leave the shipped grant byte-identical"
+        )
+        assert set(shipped[0]["privileges"]) == {"SELECT", "INSERT", "UPDATE"}

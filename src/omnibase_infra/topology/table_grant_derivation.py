@@ -391,43 +391,25 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="provider_quota_state",
         ),
     ),
-    # OMN-19793: infra vendors the delegation eval-run tables before omnimarket#3127
-    # lands their node contract. This bridge expires once the pin includes it.
-    # Retired by: omnimarket#3127 merging and the pin advancing past it.
+    # OMN-20242: infra vendors the disposition table before the omnimarket
+    # node_projection_delegation_disposition contract lands. This bridge expires
+    # when that source change merges and the pin advances to declare the table.
     ContractTableDeclaration(
-        node="legacy_migration:delegation_eval_item_verdicts",
+        node="legacy_migration:delegation_dispositions",
         contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation_eval/"
-            "0003_create_delegation_eval_item_verdicts.sql"
+            "docker/migrations/forward/nodes/node_projection_delegation_disposition/"
+            "0000_create_delegation_dispositions.sql"
         ),
         table=ModelDbTableDeclaration(
-            name="delegation_eval_item_verdicts",
+            name="delegation_dispositions",
             database_ref="application",
             schema="public",
             migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation_eval/"
-                "0003_create_delegation_eval_item_verdicts.sql"
+                "docker/migrations/forward/nodes/node_projection_delegation_disposition/"
+                "0000_create_delegation_dispositions.sql"
             ),
             access="read_write",
-            role="delegation_eval_item_verdicts",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:delegation_eval_results",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation_eval/"
-            "0004_create_delegation_eval_results.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_eval_results",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation_eval/"
-                "0004_create_delegation_eval_results.sql"
-            ),
-            access="read_write",
-            role="delegation_eval_results",
+            role="delegation_dispositions",
         ),
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to

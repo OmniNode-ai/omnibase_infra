@@ -129,6 +129,7 @@ def test_laptop_env_file_alone_validates_and_renders_the_local_stack(
         "omninode-runtime",
         "runtime-effects",
         "omnimarket-projection-delegation",
+        "omnimarket-projection-tenant-credentials",
     } <= set(services)
 
     published: list[str] = []

@@ -4928,7 +4928,41 @@ class DeployExecutor:
 
         settled: list[ModelHealthCheck] = []
         pending_timeout: subprocess.TimeoutExpired | None = None
+        earlier_target_failed = False
         for service, port, check, timed_out in probes:
+            if check.status == "fail":
+                if earlier_target_failed:
+                    # OMN-20238: this reading was taken up front, BEFORE the
+                    # earlier target's failure was settled, and settling it
+                    # (a declared-start wait, a recreate) takes minutes. On the
+                    # dev-202 lane, 2026-09-30, every full deploy probed
+                    # runtime-effects seconds after it started, waited ~321s
+                    # on omninode-runtime, then recreated a runtime-effects
+                    # that had been answering healthy for over a minute, on
+                    # the stale reading. One fresh probe settles which it is;
+                    # a target still failing on it (the OMN-18640 wedge) goes
+                    # on to the wait and the single recreate exactly as
+                    # before. The rule is structural, not a clock: a target
+                    # with no earlier failure keeps its up-front reading.
+                    logger.info(
+                        "%s re-taking failed up-front reading after an earlier "
+                        "failed target was settled (OMN-20238)",
+                        check.endpoint,
+                    )
+                    check, timed_out = self._probe_runtime_health(
+                        service=service, port=port
+                    )
+                    if check.status == "pass":
+                        check = check.model_copy(
+                            update={
+                                "detail": (
+                                    "up-front reading was taken before an earlier "
+                                    "target's start wait and was re-taken "
+                                    "(OMN-20238)"
+                                )
+                            }
+                        )
+                earlier_target_failed = True
             if check.status == "fail" and lane in VERIFY_RECREATE_LANES:
                 check, timed_out = self._await_declared_start(
                     lane=lane,
