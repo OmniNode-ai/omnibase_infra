@@ -146,6 +146,9 @@ class ProviderSpec:
 PROVIDERS: Final[Mapping[str, ProviderSpec]] = {
     "glm": ProviderSpec("glm", "api.z.ai", "llm.glm.api_key"),
     "openrouter": ProviderSpec("openrouter", "openrouter.ai", "llm.openrouter.api_key"),
+    "gemini": ProviderSpec(
+        "gemini", "generativelanguage.googleapis.com", "llm.gemini.api_key"
+    ),
 }
 
 #: A name equal to, or under, one of these is OmniNode cloud.
