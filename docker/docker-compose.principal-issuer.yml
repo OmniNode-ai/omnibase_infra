@@ -51,6 +51,6 @@ volumes:
   principal-issuer-ledger:
 networks:
   dev-lane:
-    # The dev lane's network as the lane manifest declares it (lane `dev`).
-    name: omnibase-infra_default
+    # The network docker/docker-compose.infra.yml declares for the dev lane's broker.
+    name: omnibase-infra-network
     external: true
