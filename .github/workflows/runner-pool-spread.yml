@@ -77,7 +77,12 @@ jobs:
               sys.stdout.write(line + "\n")
 
           def declared_prefixes(text):
-              """host -> runner_name_prefix, from the `hosts:` list of runner_fleet.yaml."""
+              """runner_name_prefix -> host, from the `hosts:` list of runner_fleet.yaml.
+
+              Every prefix a host row declares counts toward that host: the row's own
+              prefix and each entry of its `pools:` list (OMN-19895), so one host can
+              carry several runner families.
+              """
               prefixes = {}
               in_hosts = False
               host = None
@@ -96,18 +101,18 @@ jobs:
                   if m:
                       host = m.group(1)
                       continue
-                  m = re.match(r"^\s+runner_name_prefix:\s*(\S+)\s*$", line)
+                  m = re.match(r"^\s+(?:-\s+)?runner_name_prefix:\s*(\S+)\s*$", line)
                   if m and host:
-                      prefixes[host] = m.group(1)
+                      prefixes[m.group(1)] = host
               return prefixes
 
           def host_of(name, prefixes):
               best = None
-              for host, prefix in prefixes.items():
+              for prefix in prefixes:
                   if re.fullmatch(re.escape(prefix) + r"-\d+", name):
-                      if best is None or len(prefix) > len(prefixes[best]):
-                          best = host
-              return best
+                      if best is None or len(prefix) > len(best):
+                          best = prefix
+              return prefixes[best] if best else None
 
           def fetch_runners():
               fixture = os.environ.get("RUNNER_POOL_RUNNERS_FILE")

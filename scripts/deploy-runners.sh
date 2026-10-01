@@ -10,6 +10,28 @@
 #   ./scripts/deploy-runners.sh [--dry-run] [--skip-build] [--soft] [--rolling [--limit=N] [--only=NAME]]
 #   ./scripts/deploy-runners.sh --add=<service>[,<service>...] [--dry-run] [--skip-build]
 #   ./scripts/deploy-runners.sh --retire-surplus [--dry-run]
+#   ./scripts/deploy-runners.sh --host=<declared host> [--pool=<pool prefix>] [--limit=N] [--dry-run] [--skip-build]
+#
+# --host=<non-primary host> mode (OMN-19895, secondary-host stand-up):
+#   1. Rsync runner artifacts, plus that host's (or pool's) compose file and,
+#      when the pool declares one, its slice unit
+#   2. Build the runner image on that host unless --skip-build
+#   3. Install and read back the pool's slice (docker/runners/systemd/pools/
+#      <prefix>/omnirunners.slice), when there is one
+#   4. Mint ONE org registration token, and for each <prefix>-1..N (N is the
+#      declared count, or --limit): a runner already online is not touched at
+#      all; any other is created or recreated
+#      (`up -d --no-deps --force-recreate`), under its own compose project
+#      (`-p <prefix>`) so it never shares one with another file in the same
+#      directory
+#   5. Wait until every targeted runner reads online, one registry read per poll
+#   Skips: every cron install (they belong to the primary host and a local
+#   crontab entry per host would replace the primary's), --remove-orphans, the
+#   stale report. Refuses --soft, --rolling, --retire-surplus and --add, which
+#   are written against the primary host's compose file.
+#   --pool=<prefix> selects one of the host row's `pools:` (config/runner_fleet.yaml)
+#   instead of the row's own prefix. Pools on the PRIMARY host live in the
+#   primary compose file and are stood up with --add, so --pool refuses it.
 #
 # What it does (in order):
 #   1. Fetch a fresh GitHub Actions registration token (valid 1 hour)
@@ -252,6 +274,51 @@ runner_host_field() {
     echo "${value}"
 }
 
+# OMN-19895 -- read one field of one pool under one host row. Anchored on the
+# host row, then on the pool's `- runner_name_prefix: <prefix>` item, and it
+# stops at the next pool item or the next host row. A pool nobody declared
+# fails closed and lists what the row does declare.
+runner_pool_field() {
+    local host="${1}" pool="${2}" field="${3}"
+    local value
+    value=$(awk -v want="${host}" -v pool="${pool}" -v key="${field}" '
+        /^  - host:[[:space:]]*/ {
+            split($0, parts, /:[[:space:]]*/)
+            gsub(/^[[:space:]"]+|[[:space:]"]+$/, "", parts[2])
+            inrow = (parts[2] == want)
+            inpool = 0
+            next
+        }
+        /^[^[:space:]]/ { inrow = 0; inpool = 0 }
+        inrow && /^      - runner_name_prefix:[[:space:]]*/ {
+            v = $0
+            sub(/^.*runner_name_prefix:[[:space:]]*/, "", v)
+            gsub(/^[[:space:]"]+|[[:space:]"]+$/, "", v)
+            inpool = (v == pool)
+            if (inpool && key == "runner_name_prefix") { print v; found = 1; exit }
+            next
+        }
+        inrow && inpool && $0 ~ "^        " key ":" {
+            sub("^[[:space:]]*" key ":[[:space:]]*", "")
+            gsub(/^[[:space:]"\[]+|[[:space:]"\]]+$/, "", $0)
+            print
+            found = 1
+            exit
+        }
+        END { if (!found) exit 1 }
+    ' "${RUNNER_FLEET_CONFIG}") || {
+        echo "[deploy-runners] ERROR: host ${host} declares no pool ${pool} with a ${field} in ${RUNNER_FLEET_CONFIG}" >&2
+        echo "[deploy-runners] pools declared under ${host}:" >&2
+        awk -v want="${host}" '
+            /^  - host:[[:space:]]*/ { split($0, p, /:[[:space:]]*/); gsub(/^[[:space:]"]+|[[:space:]"]+$/, "", p[2]); inrow = (p[2] == want); next }
+            /^[^[:space:]]/ { inrow = 0 }
+            inrow && /^      - runner_name_prefix:/ { sub(/^.*runner_name_prefix:[[:space:]]*/, ""); print "  " $0 }
+        ' "${RUNNER_FLEET_CONFIG}" >&2
+        exit 1
+    }
+    echo "${value}"
+}
+
 RUNNER_HOST="$(runner_config_field runner_host)"
 # Remote path on the CI host — NOT local $HOME (which differs between macOS and Linux)
 RUNNER_HOST_DIR="/home/jonah/.omnibase/runners"
@@ -350,6 +417,14 @@ ADD_SERVICES=""
 # PRIMARY host, which is what every pre-inventory invocation meant, so an
 # existing call site is unchanged.
 TARGET_HOST=""
+# OMN-19895: one of the target host row's `pools:`, by prefix. Empty means the
+# row's own prefix.
+TARGET_POOL=""
+# OMN-19895: true when --host names a host other than the primary. Such a host
+# is deployed by secondary_deploy and nothing else.
+SECONDARY_HOST=false
+# OMN-19895: the slice unit a pool declares, when it has one.
+POOL_SLICE_SOURCE=""
 # OMN-19274. Empty means no migration: --rolling skips (never recreates) a
 # runner whose CURRENT rendered label set has no matching credential-cache
 # entry. A path here opts a --rolling run into registering exactly those
@@ -369,6 +444,7 @@ for arg in "$@"; do
         --token-file=*) TOKEN_FILE="${arg#*=}" ;;
         --add=*)      ADD_SERVICES="${arg#*=}" ; ADD_SERVICES="${ADD_SERVICES//,/ }" ;;
         --host=*)     TARGET_HOST="${arg#*=}" ;;
+        --pool=*)     TARGET_POOL="${arg#*=}" ;;
         --help|-h)
             echo "Usage: $0 [--dry-run] [--skip-build] [--soft] [--rolling]"
             echo "  --dry-run     Print actions without executing remote commands"
@@ -404,7 +480,11 @@ for arg in "$@"; do
             echo "  --host=NAME   Target one declared host from config/runner_fleet.yaml's"
             echo "                hosts: inventory. Default: the primary host, which is"
             echo "                what every invocation meant before the fleet had more"
-            echo "                than one machine."
+            echo "                than one machine. A non-primary host is stood up"
+            echo "                additively (see the header): --limit=N brings up only"
+            echo "                <prefix>-1..N, which is the canary step."
+            echo "  --pool=PREFIX With a non-primary --host: target one of that host"
+            echo "                row's pools: instead of the row's own prefix."
             exit 0
             ;;
         *)
@@ -426,10 +506,22 @@ done
 # FAIL CLOSED ON AN UNKNOWN NAME. A typo that fell through to the primary host
 # would deploy to .201 while its operator believed they were deploying
 # elsewhere, which is the one outcome a host flag must never produce.
+if [[ -n "${TARGET_POOL}" && ( -z "${TARGET_HOST}" || "${TARGET_HOST}" == "${RUNNER_HOST}" ) ]]; then
+    echo "[deploy-runners] ERROR: --pool needs a non-primary --host. The primary host's pools are services in docker/docker-compose.runners.yml; stand them up with --add." >&2
+    exit 1
+fi
 if [[ -n "${TARGET_HOST}" && "${TARGET_HOST}" != "${RUNNER_HOST}" ]]; then
+    SECONDARY_HOST=true
     RUNNER_NAME_PREFIX="$(runner_host_field "${TARGET_HOST}" runner_name_prefix)"
     RUNNER_COUNT="$(runner_host_field "${TARGET_HOST}" expected_count)"
     RUNNER_HOST_ARCH="$(runner_host_field "${TARGET_HOST}" arch)"
+    if [[ -n "${TARGET_POOL}" ]]; then
+        RUNNER_NAME_PREFIX="$(runner_pool_field "${TARGET_HOST}" "${TARGET_POOL}" runner_name_prefix)"
+        RUNNER_COUNT="$(runner_pool_field "${TARGET_HOST}" "${TARGET_POOL}" expected_count)"
+        if [[ -f "${REPO_ROOT}/docker/runners/systemd/pools/${RUNNER_NAME_PREFIX}/omnirunners.slice" ]]; then
+            POOL_SLICE_SOURCE="${REPO_ROOT}/docker/runners/systemd/pools/${RUNNER_NAME_PREFIX}/omnirunners.slice"
+        fi
+    fi
     RUNNER_HOST="${TARGET_HOST}"
     # Each non-primary host brings its own compose file. The primary host's
     # file hand-writes 60 literal service blocks bound to its own container
@@ -658,9 +750,11 @@ readonly RUNNER_SLICE_SOURCE="${REPO_ROOT}/docker/runners/systemd/${RUNNER_SLICE
 
 runner_slice_expected() {
     # Echo "Key=Value" lines for every limit the unit file declares, in the
-    # form `systemctl show` prints them (sizes as bytes).
+    # form `systemctl show` prints them (sizes as bytes). OMN-19895: the source
+    # is an argument so a secondary pool's own slice file reads the same way.
+    local source="${1:-${RUNNER_SLICE_SOURCE}}"
     awk -F= '/^(MemoryHigh|MemoryMax|MemorySwapMax|CPUWeight)=/ {print $1"="$2}' \
-        "${RUNNER_SLICE_SOURCE}" | while IFS='=' read -r key value; do
+        "${source}" | while IFS='=' read -r key value; do
         case "${value}" in
             *G) value=$(( ${value%G} * 1024 * 1024 * 1024 )) ;;
             *M) value=$(( ${value%M} * 1024 * 1024 )) ;;
@@ -670,26 +764,34 @@ runner_slice_expected() {
 }
 
 install_runner_slice() {
-    if [[ -n "${TARGET_HOST}" && "${TARGET_HOST}" != "$(runner_config_field runner_host)" ]]; then
-        log "Runner slice: ${RUNNER_HOST} is not the primary host; nothing to install."
-        return 0
+    # OMN-19895: a secondary pool installs its OWN slice file under the same
+    # unit name; the remote copy lives beside the pool's name.
+    local source="${RUNNER_SLICE_SOURCE}"
+    local remote_source="${RUNNER_HOST_DIR}/docker/runners/systemd/${RUNNER_SLICE_NAME}"
+    if "${SECONDARY_HOST}"; then
+        if [[ -z "${POOL_SLICE_SOURCE}" ]]; then
+            log "Runner slice: ${RUNNER_NAME_PREFIX} on ${RUNNER_HOST} declares none; nothing to install."
+            return 0
+        fi
+        source="${POOL_SLICE_SOURCE}"
+        remote_source="${RUNNER_HOST_DIR}/docker/runners/systemd/pools/${RUNNER_NAME_PREFIX}/${RUNNER_SLICE_NAME}"
     fi
-    [[ -f "${RUNNER_SLICE_SOURCE}" ]] || err "missing ${RUNNER_SLICE_SOURCE}"
+    [[ -f "${source}" ]] || err "missing ${source}"
 
     local expected
-    expected=$(runner_slice_expected | sort)
-    [[ -n "${expected}" ]] || err "${RUNNER_SLICE_SOURCE} declares no limits; refusing to install an unbounded slice."
+    expected=$(runner_slice_expected "${source}" | sort)
+    [[ -n "${expected}" ]] || err "${source} declares no limits; refusing to install an unbounded slice."
 
     log "Installing ${RUNNER_SLICE_NAME} on ${RUNNER_HOST} ..."
     if "${DRY_RUN}"; then
-        log "[DRY RUN] would install ${RUNNER_HOST_DIR}/docker/runners/systemd/${RUNNER_SLICE_NAME} -> /etc/systemd/system/, daemon-reload, start, and read back:"
+        log "[DRY RUN] would install ${remote_source} -> /etc/systemd/system/${RUNNER_SLICE_NAME}, daemon-reload, start, and read back:"
         printf '%s\n' "${expected}" | sed 's/^/[DRY RUN]   /'
         return 0
     fi
 
     ssh "${RUNNER_HOST}" "
         set -euo pipefail
-        sudo -n install -m 0644 ${RUNNER_HOST_DIR}/docker/runners/systemd/${RUNNER_SLICE_NAME} /etc/systemd/system/${RUNNER_SLICE_NAME}
+        sudo -n install -m 0644 ${remote_source} /etc/systemd/system/${RUNNER_SLICE_NAME}
         sudo -n systemctl daemon-reload
         sudo -n systemctl start ${RUNNER_SLICE_NAME}
     " || err "could not install ${RUNNER_SLICE_NAME} on ${RUNNER_HOST} (needs passwordless sudo for install/systemctl)."
@@ -699,7 +801,7 @@ install_runner_slice() {
     live=$(ssh "${RUNNER_HOST}" "systemctl show ${RUNNER_SLICE_NAME} ${keys}" | sort) \
         || err "could not read ${RUNNER_SLICE_NAME} back from ${RUNNER_HOST}."
     if [[ "${live}" != "${expected}" ]]; then
-        err "${RUNNER_SLICE_NAME} on ${RUNNER_HOST} does not match ${RUNNER_SLICE_SOURCE}. Expected: $(echo ${expected}) -- live: $(echo ${live})"
+        err "${RUNNER_SLICE_NAME} on ${RUNNER_HOST} does not match ${source}. Expected: $(echo ${expected}) -- live: $(echo ${live})"
     fi
     log "Runner slice read back: $(echo ${live})"
 }
@@ -1745,6 +1847,183 @@ retire_surplus() {
     fi
 }
 
+# ---------------------------------------------------------------------------
+# Secondary-host stand-up (OMN-19895)
+# ---------------------------------------------------------------------------
+# Every other mode is written against the PRIMARY host's compose file: the
+# default path force-recreates its whole project and installs crons for it,
+# --rolling and --retire-surplus enumerate its general pool, --add validates
+# against it. Before this function a non-primary --host fell into those paths
+# with only the prefix and count re-pointed, so the .101, .105, .200 and .202
+# runners were each stood up by a hand-typed compose call on the host. This is
+# the fleet path for them.
+
+# Commands for a non-primary host run with the docker CLI's usual install
+# locations on PATH: a macOS host's non-interactive ssh shell has neither.
+#
+# And, when the host provides one, with a docker CLI config of its own. On a
+# Docker Desktop host the operator's ~/.docker/config.json names the `desktop`
+# credential store, which lives in the login keychain, and a non-interactive
+# ssh session may not open the keychain: every build and compose call then
+# fails "error getting credentials" before it reaches the daemon (measured on
+# .200, 2026-09-28). The fleet pulls public images only, so the host keeps a
+# config at ~/.omnibase/runners/docker-cli/config.json with no credential
+# store and cliPluginsExtraDirs naming Docker Desktop's plugin directory. It
+# must also carry one placeholder `auths` entry: a config with no auth entry at
+# all makes the CLI auto-detect a keychain store again on macOS. The .200 copy:
+#   {"auths": {"fleet-no-credential-store.invalid": {}},
+#    "cliPluginsExtraDirs": ["<home>/.docker/cli-plugins"]}
+# The operator's own config is not touched.
+SECONDARY_PATH_PREAMBLE='export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"; if [ -f "$HOME/.omnibase/runners/docker-cli/config.json" ]; then export DOCKER_CONFIG="$HOME/.omnibase/runners/docker-cli"; fi;'
+
+secondary_ssh() {
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] ssh ${RUNNER_HOST}: $1"
+        return 0
+    fi
+    # stdin from /dev/null: the per-runner loop below reads its targets from a
+    # here-string, and an ssh that inherits stdin swallows every line after the
+    # first (the first 16-runner run on .202 created one runner and waited on 15).
+    ssh "${RUNNER_HOST}" "${SECONDARY_PATH_PREAMBLE} $1" </dev/null
+}
+
+# The compose variables this file reads a registration token from. The .200 and
+# .202 verify files predate this function and each named their own; reading the
+# names from the file keeps them working without editing a live runner's file.
+secondary_token_vars() {
+    grep -oE 'RUNNER_TOKEN:[[:space:]]*\$\{[A-Z0-9_]+' "${REPO_ROOT}/${COMPOSE_FILE}" \
+        | sed -E 's/.*\$\{//' | sort -u
+}
+
+secondary_target_names() {
+    local count="${RUNNER_COUNT}" i
+    if [[ "${ROLL_LIMIT}" -gt 0 && "${ROLL_LIMIT}" -lt "${count}" ]]; then
+        count="${ROLL_LIMIT}"
+    fi
+    for i in $(seq 1 "${count}"); do
+        echo "${RUNNER_NAME_PREFIX}-${i}"
+    done
+}
+
+# One registry read, then "<name> <status>" per target name ("unknown" when the
+# registry has no runner of that name). One read per poll rather than one per
+# runner: a 16-runner wait at one read per runner per 10s is ~100 reads a
+# minute against the operator's shared GitHub quota.
+secondary_registry_states() {
+    local names_json
+    names_json=$(secondary_target_names | jq -R . | jq -s .)
+    gh api --paginate "/orgs/${RUNNER_ORG}/actions/runners?per_page=100" 2>/dev/null |
+        jq -rs --argjson names "${names_json}" '
+          ([.[].runners[]] | map({(.name): .status}) | add // {}) as $by
+          | $names[] | "\(.) \($by[.] // "unknown")"
+        '
+}
+
+# Called plainly from main, never under `||` or `if`: bash suspends errexit for
+# a whole function body in that position, which is how a failed image build
+# on .200 was followed by a token mint and a compose call (2026-09-28). Every
+# failure in here exits through errexit or through err.
+secondary_deploy() {
+    log "=== Secondary-host stand-up: ${RUNNER_NAME_PREFIX} on ${RUNNER_HOST} ==="
+    [[ -f "${REPO_ROOT}/${COMPOSE_FILE}" ]] || err "missing ${COMPOSE_FILE}"
+    local token_vars
+    token_vars=$(secondary_token_vars)
+    [[ -n "${token_vars}" ]] || err "${COMPOSE_FILE} reads no RUNNER_TOKEN variable; refusing to create runners that cannot register."
+
+    local names
+    names=$(secondary_target_names)
+    log "Targets: $(echo ${names})"
+
+    rsync_artifacts
+    if ! "${DRY_RUN}"; then
+        rsync -av --checksum "${REPO_ROOT}/${COMPOSE_FILE}" "${RUNNER_HOST}:${RUNNER_HOST_DIR}/docker/"
+        if [[ -n "${POOL_SLICE_SOURCE}" ]]; then
+            ssh "${RUNNER_HOST}" "mkdir -p ${RUNNER_HOST_DIR}/docker/runners/systemd/pools/${RUNNER_NAME_PREFIX}"
+            rsync -av --checksum "${POOL_SLICE_SOURCE}" \
+                "${RUNNER_HOST}:${RUNNER_HOST_DIR}/docker/runners/systemd/pools/${RUNNER_NAME_PREFIX}/"
+        fi
+    else
+        log "[DRY RUN] rsync ${COMPOSE_FILE}${POOL_SLICE_SOURCE:+ and ${POOL_SLICE_SOURCE#${REPO_ROOT}/}} -> ${RUNNER_HOST}:${RUNNER_HOST_DIR}/"
+    fi
+
+    if ! "${SKIP_BUILD}"; then
+        secondary_ssh "set -euo pipefail; cd ${RUNNER_HOST_DIR} && bash scripts/ci/build_runner_image.sh --tag omninode-runner:latest"
+    fi
+
+    install_runner_slice
+
+    local compose_cmd="docker compose -p ${RUNNER_NAME_PREFIX} -f ${RUNNER_HOST_DIR}/${COMPOSE_FILE}"
+
+    # Fail closed on the host's own variable contract (docker/.env beside the
+    # file, lab credentials) BEFORE a token is minted.
+    secondary_ssh "set -euo pipefail; $(for v in ${token_vars}; do printf 'export %s=preflight; ' "${v}"; done) ${compose_cmd} config -q" \
+        || err "${COMPOSE_FILE} does not render on ${RUNNER_HOST}; a required variable (docker/.env beside it) or file is missing there."
+
+    local states
+    if "${DRY_RUN}"; then
+        states=$(printf '%s unknown\n' ${names})
+    else
+        states=$(secondary_registry_states) || err "could not read the org runner registry"
+        [[ -n "${states}" ]] || err "the org runner registry read came back empty; refusing to decide what to create"
+    fi
+
+    local reg_handle token_b64 remote_token_b64
+    if "${DRY_RUN}"; then
+        reg_handle="dry-run-handle"
+    else
+        reg_handle="$(fetch_registration_token)"
+    fi
+    token_b64=$(encode_token "${reg_handle}")
+    remote_token_b64="${token_b64}"
+    "${DRY_RUN}" && remote_token_b64="<redacted-token-b64>"
+    local exports=""
+    local v
+    for v in ${token_vars}; do
+        exports="${exports} ${v}=\"\${handle}\"; export ${v};"
+    done
+
+    # An ONLINE runner is not handed to compose at all. `up -d` without
+    # --force-recreate still recreates a container whose rendered config
+    # changed, and the freshly minted token is part of the rendered env, so
+    # every call carries a changed config: on 2026-09-28 a "converge" of the
+    # online omnipc2-ci-runner-1 recreated it, which would have killed any job
+    # it was running. A registered, online runner needs nothing from this path.
+    local name status flags
+    while read -r name status; do
+        [[ -n "${name}" ]] || continue
+        if [[ "${status}" == "online" ]]; then
+            log "  ${name} is registered and online -- left untouched."
+            continue
+        fi
+        log "  ${name} is ${status} -- creating it so it registers with a fresh token."
+        flags="--no-deps --force-recreate"
+        secondary_ssh "
+            set -euo pipefail
+            handle=\$(echo '${remote_token_b64}' | base64 -d)
+            ${exports}
+            ${compose_cmd} up -d ${flags} ${name}
+        " || err "compose up failed for ${name} on ${RUNNER_HOST}"
+    done <<< "${states}"
+
+    if "${DRY_RUN}"; then
+        log "[DRY RUN] would wait for $(echo ${names}) to read online."
+        return 0
+    fi
+    local elapsed=0 pending
+    while true; do
+        pending=$(secondary_registry_states | awk '$2 != "online" {print $1}')
+        if [[ -z "${pending}" ]]; then
+            log "All targeted ${RUNNER_NAME_PREFIX} runners are online (~${elapsed}s)."
+            return 0
+        fi
+        if [[ "${elapsed}" -ge "${POLL_MAX_SECONDS}" ]]; then
+            err "Not online after ${POLL_MAX_SECONDS}s: $(echo ${pending}). Check \`docker logs\` on ${RUNNER_HOST}."
+        fi
+        sleep "${POLL_INTERVAL_SECONDS}"
+        elapsed=$((elapsed + POLL_INTERVAL_SECONDS))
+    done
+}
+
 main() {
     log "Starting deploy-runners.sh (dry_run=${DRY_RUN}, skip_build=${SKIP_BUILD}, soft=${SOFT_DEPLOY}, rolling=${ROLLING_DEPLOY}, retire_surplus=${RETIRE_SURPLUS}, add=${ADD_SERVICES:-<none>})"
     log "Target host: ${RUNNER_HOST} | Org: ${RUNNER_ORG} | Group: ${RUNNER_GROUP}"
@@ -1752,6 +2031,15 @@ main() {
 
     if "${DRY_RUN}"; then
         log "[DRY RUN MODE] No remote commands will be executed."
+    fi
+
+    if "${SECONDARY_HOST}"; then
+        if "${SOFT_DEPLOY}" || "${ROLLING_DEPLOY}" || "${RETIRE_SURPLUS}" || [[ -n "${ADD_SERVICES}" ]]; then
+            err "--soft, --rolling, --retire-surplus and --add are written against the primary host's compose file; a non-primary --host is stood up by the secondary path only (see the header)."
+        fi
+        secondary_deploy
+        log "=== deploy-runners.sh complete (${RUNNER_NAME_PREFIX} on ${RUNNER_HOST}) ==="
+        return 0
     fi
 
     if "${RETIRE_SURPLUS}"; then

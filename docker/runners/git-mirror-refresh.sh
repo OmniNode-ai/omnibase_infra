@@ -37,6 +37,9 @@ FETCH_TIMEOUT_SECONDS="${OMNI_GIT_MIRROR_FETCH_TIMEOUT:-600}"
 MIRROR_REPOS=(
     onex_change_control
     omnibase_infra
+    # OMN-19895: .201 had carried this entry as an undeclared hand edit since
+    # 2026-09-19; declared here so a fleet rsync keeps the mirror refreshed.
+    omninode_infra
     omnibase_core
     omnimarket
     omniclaude
