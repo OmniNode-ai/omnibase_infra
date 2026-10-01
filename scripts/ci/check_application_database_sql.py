@@ -158,6 +158,20 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_projection_usage_by_model_day/"
             "0001_grant_usage_by_model_day.sql"
         ),
+        # OMN-19968: this vendored file is byte-identical to omnimarket and
+        # renames the labels of the existing usage_source_type on the existing
+        # llm_call_metrics, both of which live in the legacy default schema
+        # (031_create_llm_call_metrics_and_cost_aggregates.sql is exempted
+        # below for the same reason). There is no accepted qualification form:
+        # unqualified is rejected, public. is prohibited for an application
+        # relation, and qualifying would also break omnimarket's own parity
+        # test, which applies this node's migrations in a throwaway schema
+        # through search_path. Exempting here, not editing the SQL, is the
+        # canonical fix, as for node_projection_delegation/0029 above.
+        Path(
+            "docker/migrations/forward/nodes/node_projection_llm_cost/"
+            "0003_usage_source_shared_vocabulary.sql"
+        ),
         # OMN-15655 also reconciles historical root migration shapes for
         # fixture parity. These are legacy default-schema repair paths, not new
         # application-database authority, and they must retain compatibility with
