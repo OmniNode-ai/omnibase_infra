@@ -247,8 +247,8 @@ class HandlerDlqReplay:
 
     async def handle(
         self, envelope: ModelEventEnvelope[ModelDlqReplayRunResult]
-    ) -> ModelHandlerOutput[ModelDlqReplayRunResult]:
-        """Canonical entry point: drain the DLQ and return the run result.
+    ) -> ModelHandlerOutput[None]:
+        """Canonical entry point: drain the DLQ and log the run result.
 
         The envelope carries the correlation context for the run. The payload
         type is the run result for causality typing; the run itself is driven
@@ -293,11 +293,28 @@ class HandlerDlqReplay:
             if envelope_id is None:
                 envelope_id = generated_id
         run_result = await self.run()
-        return ModelHandlerOutput.for_compute(
+        # OMN-20318: the run summary is logged, never returned as ``result``.
+        # A BaseModel ``result`` becomes an output event, and this contract's
+        # only publish topic is the quarantine sink, so every DLQ record (each
+        # one triggers a whole drain) wrote one empty summary onto the terminal
+        # quarantine topic: 182-194 arrivals per 30 minutes on the dev lane,
+        # ~190k records, none of them a quarantined message.
+        logger.info(
+            "DLQ replay run finished: topics=%s total=%d completed=%d "
+            "quarantined=%d failed=%d pending=%d dry_run=%s halted_partitions=%d",
+            ",".join(run_result.topics_drained),
+            run_result.total_processed,
+            run_result.completed,
+            run_result.quarantined,
+            run_result.failed,
+            run_result.pending,
+            run_result.dry_run,
+            len(run_result.halted_partitions),
+        )
+        return ModelHandlerOutput.for_effect(
             input_envelope_id=envelope_id,
             correlation_id=correlation_id,
             handler_id=HANDLER_ID_DLQ_REPLAY,
-            result=run_result,
         )
 
     async def run(self) -> ModelDlqReplayRunResult:
