@@ -37,6 +37,7 @@ Evidence-Ticket: OMN-17137
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections.abc import AsyncIterator
 from uuid import uuid4
@@ -177,7 +178,9 @@ class _NoopEffect:
         return None
 
 
-async def test_dispatch_returns_when_the_dependency_teardown_never_completes() -> None:
+async def test_dispatch_returns_when_the_dependency_teardown_never_completes(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """The property the outer consumer's liveness actually rests on.
 
     Pre-fix this hangs in ``_stop_runtime_dependencies``' unbounded
@@ -193,10 +196,11 @@ async def test_dispatch_returns_when_the_dependency_teardown_never_completes() -
     )
 
     started = time.monotonic()
-    output = await asyncio.wait_for(
-        handler.handle(_materialized_dispatch_dict()),  # type: ignore[arg-type]
-        timeout=_DISPATCH_DEADLINE_SECONDS,
-    )
+    with caplog.at_level(logging.INFO):
+        await asyncio.wait_for(
+            handler.handle(_materialized_dispatch_dict()),  # type: ignore[arg-type]
+            timeout=_DISPATCH_DEADLINE_SECONDS,
+        )
     elapsed = time.monotonic() - started
 
     assert consumer.stop_entered, "the teardown under test was never reached"
@@ -205,8 +209,12 @@ async def test_dispatch_returns_when_the_dependency_teardown_never_completes() -
         "would now be on its way to a max_poll_interval_ms eviction it can "
         "never rejoin from"
     )
-    assert output.result is not None
-    assert output.result.total_processed == consumer.yielded == 2
+    # OMN-20318: the run summary is logged, not returned as an output event.
+    assert consumer.yielded == 2
+    assert any(
+        "DLQ replay run finished" in r.message and "total=2" in r.message
+        for r in caplog.records
+    )
 
 
 async def test_repeated_dispatches_stay_bounded_so_the_loop_keeps_polling() -> None:

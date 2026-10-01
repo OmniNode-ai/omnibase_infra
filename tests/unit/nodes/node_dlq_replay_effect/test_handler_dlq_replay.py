@@ -21,6 +21,7 @@ the consumer / replay producer / quarantine producer / tracking service:
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
@@ -342,7 +343,9 @@ async def test_dry_run_publishes_nothing() -> None:
     assert consumer.commits == 0
 
 
-async def test_handle_envelope_returns_typed_output() -> None:
+async def test_handle_envelope_logs_the_run_summary_and_returns_no_result(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     msg = _make_message(retry_count=0, error_type="InfraConnectionError")
     handler, _consumer, _producer, _quarantine = _handler([msg], _config())
     correlation_id = uuid4()
@@ -359,9 +362,15 @@ async def test_handle_envelope_returns_typed_output() -> None:
         correlation_id=correlation_id,
     )
 
-    output = await handler.handle(envelope)
+    with caplog.at_level(logging.INFO):
+        output = await handler.handle(envelope)
 
     assert output.correlation_id == correlation_id
     assert output.input_envelope_id == envelope.envelope_id
-    assert isinstance(output.result, ModelDlqReplayRunResult)
-    assert output.result.completed == 1
+    # OMN-20318: the summary is logged, not returned -- a returned model is
+    # published onto the quarantine sink by the runtime.
+    assert output.result is None
+    assert any(
+        "DLQ replay run finished" in r.message and "completed=1" in r.message
+        for r in caplog.records
+    )
