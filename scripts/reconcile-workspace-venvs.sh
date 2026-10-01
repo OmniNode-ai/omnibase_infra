@@ -1053,6 +1053,26 @@ lock_layer_ok_in() {
   fi
 }
 
+# Apply omnibase_infra's lock to the dispatch venv being reconciled. Reads the
+# caller's `target_venv`, `dispatch_python_arg` and `intact_note` (bash's dynamic
+# scope): it is only ever called from the dispatch-venv pass, where those are set.
+apply_dispatch_lock() { # [why]
+  say "dispatch venv: applying $INFRA_DIR/uv.lock${1:+ ($1)}"
+  # --frozen: apply the lock, never re-resolve it -- a re-resolution here
+  #   would silently move the very pins the lock exists to hold.
+  # --inexact: do not remove the composed provider layer, which the lock
+  #   correctly does not mention and must not be asked to. This flag belongs
+  #   to THIS venv only; the gate venv is synced exact (OMN-17819).
+  trace "UV_PROJECT_ENVIRONMENT=$target_venv uv sync --frozen --inexact --project $INFRA_DIR ${dispatch_python_arg[*]}"
+  if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$target_venv" \
+      "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR" "${dispatch_python_arg[@]}"); then
+    fail "dispatch venv lock sync did not complete; $intact_note" \
+      "Run by hand and read the error:" \
+      "  cd $INFRA_DIR && env -u PYTHONPATH UV_PROJECT_ENVIRONMENT=$target_venv \\" \
+      "    uv sync --frozen --inexact"
+  fi
+}
+
 # Read from the DISPATCH venv (OMN-17819): that is where the provider layer
 # lives and where `scripts/onex` runs from, so it is the only interpreter whose
 # omnimarket commit answers "which build would a dispatch actually use".
@@ -1811,10 +1831,24 @@ run_repair() {
   if [[ "$need_lock" -eq 0 && "$need_provider" -eq 0 ]]; then
     say "dispatch venv: already in sync (omnimarket ${head:0:12})"
   else
-    # PROVIDER FIRST. The co-install can move lock-governed pins (OMN-16262:
-    # its hardcoded COMPAT_PIN downgrades omnibase-compat 0.5.6 -> 0.5.5 and
-    # breaks the `occ` CLI extension badly enough that `onex` will not start),
-    # so the lock pass has to come after it to undo that.
+    # A LOCK ALREADY BEHIND GOES FIRST (OMN-20231). The co-install ends with a
+    # readback of omnimarket's packaged floors, and omnimarket raises its
+    # omnibase-core floor in the same move that uv.lock raises the pin. With
+    # the provider pass first, that readback saw the OLD core, refused, and the
+    # run exited before the lock pass that installs the new core could run --
+    # and the remedy it printed was the same command. Measured 2026-09-30: an
+    # existing venv on core 0.47.25, the lock on 0.47.27 (#4355), omnimarket
+    # requiring >=0.47.27. Only a lock the pre-check already found behind is
+    # applied here, so the common tick (clone advanced, lock unchanged) does no
+    # extra sync. The pass after the co-install below still ends the run.
+    if [[ "$need_lock" -eq 1 && "$need_provider" -eq 1 ]]; then
+      apply_dispatch_lock "before the provider co-install, which reads its floors back"
+    fi
+
+    # PROVIDER BEFORE THE FINAL LOCK PASS. The co-install can move lock-governed
+    # pins (OMN-16262: its hardcoded COMPAT_PIN downgrades omnibase-compat
+    # 0.5.6 -> 0.5.5 and breaks the `occ` CLI extension badly enough that `onex`
+    # will not start), so the lock pass has to come after it to undo that.
     if [[ "$need_provider" -eq 1 ]]; then
       say "dispatch venv: reconciling provider layer to omnimarket ${head:0:12}"
       if [[ ! -x "$INSTALL_SCRIPT" ]]; then
@@ -1868,20 +1902,7 @@ run_repair() {
     fi
 
     if [[ "$need_lock" -eq 1 ]]; then
-      say "dispatch venv: applying $INFRA_DIR/uv.lock"
-      # --frozen: apply the lock, never re-resolve it -- a re-resolution here
-      #   would silently move the very pins the lock exists to hold.
-      # --inexact: do not remove the composed provider layer, which the lock
-      #   correctly does not mention and must not be asked to. This flag belongs
-      #   to THIS venv only; the gate venv below is synced exact (OMN-17819).
-      trace "UV_PROJECT_ENVIRONMENT=$target_venv uv sync --frozen --inexact --project $INFRA_DIR ${dispatch_python_arg[*]}"
-      if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$target_venv" \
-          "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR" "${dispatch_python_arg[@]}"); then
-        fail "dispatch venv lock sync did not complete; $intact_note" \
-          "Run by hand and read the error:" \
-          "  cd $INFRA_DIR && env -u PYTHONPATH UV_PROJECT_ENVIRONMENT=$target_venv \\" \
-          "    uv sync --frozen --inexact"
-      fi
+      apply_dispatch_lock
     fi
     say "dispatch venv: reconciled"
   fi

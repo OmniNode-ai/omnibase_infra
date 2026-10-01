@@ -561,6 +561,90 @@ def test_provider_coinstall_runs_before_the_lock_pass(ws: _Workspace) -> None:
     )
 
 
+def _make_install_shim_needing_the_lock(path: Path, dispatch_venv: Path) -> Path:
+    """A co-install whose readback refuses until the dispatch venv has had a lock sync.
+
+    OMN-20231. ``install-node-skill-package.sh`` ends with a readback of
+    omnimarket's packaged floors, so when omnimarket raises its
+    ``omnibase-core`` floor in the same move that ``omnibase_infra/uv.lock``
+    raises the pin, the readback refuses on the OLD core -- unless the lock
+    has already been applied to that venv. This shim refuses exactly then.
+    """
+    path.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "${OMNIMARKET_REF:-<unset>}" >> "$INSTALL_SHIM_LOG"\n'
+        'printf "%s\\n" "$*" >> "$INSTALL_ARGV_LOG"\n'
+        'printf "install %s\\n" "${OMNIMARKET_REF:-<unset>}" >> "$ORDER_LOG"\n'
+        f'if grep -E "^uv env={dispatch_venv}(\\.rebuilding)? " "$ORDER_LOG" 2>/dev/null'
+        ' | grep -v -- "--check" | grep -q " sync "; then exit 0; fi\n'
+        'echo "omnibase-core (floor from omnimarket): installed 0.47.25 != expected'
+        ' omnibase-core>=0.47.27 (MISMATCH)" >&2\n'
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return path
+
+
+def _dispatch_lock_syncs(ws: _Workspace) -> list[int]:
+    order = ws.ordered_calls()
+    return [
+        i
+        for i, (kind, call) in enumerate(order)
+        if kind == "uv"
+        and " sync " in f" {call} "
+        and "--check" not in call
+        and (
+            f"env={ws.dispatch_venv} " in call
+            or f"env={ws.dispatch_venv}.rebuilding " in call
+        )
+    ]
+
+
+def test_a_lock_already_behind_is_applied_before_the_provider_co_install(
+    ws: _Workspace,
+) -> None:
+    """OMN-20231: a core bump in the lock and in omnimarket's floor, together.
+
+    Measured 2026-09-30: an existing dispatch venv on omnibase-core 0.47.25,
+    the infra lock on 0.47.27 (#4355) and omnimarket requiring >=0.47.27. The
+    provider pass ran first, its readback refused on the old core, the run
+    exited, and the lock pass that would have installed 0.47.27 never ran.
+    A lock the pre-check already found behind is now applied FIRST, and the
+    post-co-install lock pass (OMN-16262) still ends the run.
+    """
+    ws.set_installed_commit("0" * _SHA_LEN)  # the provider layer is behind
+    _make_uv_shim(ws.bin_dir, check_exit=1)  # and so is the lock
+    _make_install_shim_needing_the_lock(ws.install_script, ws.dispatch_venv)
+
+    result = ws.run()
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+
+    order = ws.ordered_calls()
+    provider_at = next(i for i, (kind, _) in enumerate(order) if kind == "install")
+    locks = _dispatch_lock_syncs(ws)
+    assert any(i < provider_at for i in locks), (
+        f"no lock pass before the co-install: {order!r}"
+    )
+    assert any(i > provider_at for i in locks), (
+        f"no lock pass after the co-install: {order!r}"
+    )
+
+
+def test_a_lock_in_step_is_not_synced_before_the_provider_co_install(
+    ws: _Workspace,
+) -> None:
+    """OMN-20231 adds no work to the common tick: only a lock already behind goes first."""
+    ws.set_installed_commit("0" * _SHA_LEN)  # provider behind, lock conformant
+    assert ws.run().returncode == _EXIT_OK
+
+    order = ws.ordered_calls()
+    provider_at = next(i for i, (kind, _) in enumerate(order) if kind == "install")
+    locks = _dispatch_lock_syncs(ws)
+    assert not any(i < provider_at for i in locks), order
+    assert any(i > provider_at for i in locks), order
+
+
 def test_provider_layer_is_pinned_to_local_clone_head_not_remote_tip(
     ws: _Workspace,
 ) -> None:
