@@ -104,6 +104,17 @@ def build_private_ip_pattern() -> re.Pattern[str]:
 # Compiled pattern for use in tests
 PRIVATE_IP_PATTERN = build_private_ip_pattern()
 
+# A ports-list entry that publishes a container port on the host loopback only,
+# e.g. ``- "127.0.0.1:${REDPANDA_ADMIN_PORT:-9644}:9644"``. This is a bind
+# restriction, not a dependency on a host: every machine has 127.0.0.1, so it
+# costs no portability, and it is how an unauthenticated admin surface is kept
+# off the LAN (OMN-20260). Only this exact shape is exempt from the
+# private-IP scan; a loopback address anywhere else still fails it.
+LOOPBACK_PORT_PUBLISH_PATTERN = re.compile(
+    r'^[ \t]*-[ \t]*"127\.0\.0\.1:(?:\$\{[A-Z0-9_]+(?::-\d+)?\}|\d+):\d+(?:/(?:tcp|udp))?"[ \t]*$',
+    re.MULTILINE,
+)
+
 
 @pytest.mark.unit
 class TestEnvExampleSecurity:
@@ -626,7 +637,10 @@ class TestDockerNetworkSecurity:
         # localhost and link-local. See module-level docstring for details.
         # Note: Redpanda is now a local Docker service (OMN-3431). It uses the
         # Docker-internal hostname redpanda:9092, not a private IP address.
-        matches = PRIVATE_IP_PATTERN.findall(content)
+        # Loopback-only port publishes are bind restrictions, not host
+        # dependencies (OMN-20260); strip exactly that shape before scanning.
+        scanned = LOOPBACK_PORT_PUBLISH_PATTERN.sub("", content)
+        matches = PRIVATE_IP_PATTERN.findall(scanned)
         assert not matches, (
             f"Found hardcoded private IP addresses: {matches}\n"
             "Configuration should use Docker service names or environment variables "
