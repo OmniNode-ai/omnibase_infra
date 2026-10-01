@@ -47,6 +47,9 @@ DEFAULT_DECLARATION = (
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{1,61}[a-z0-9]$")
 _DB_SLOT_RE = re.compile(r"^[a-z][a-z0-9]{0,11}$")
 _NAMESPACE_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
+# The issued SCRAM login is the principal id (t-...), never the tenant slug.
+BUS_LOGIN_VAR = "LAB_TENANT_KAFKA_SASL_USERNAME"
+_BUS_LOGIN_RE = re.compile(r"^t-[a-z0-9]+$")
 _BOX_ID_RE = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 # The dev lane and the pre-PR slots own these Valkey indexes.
 _RESERVED_VALKEY_INDEXES = frozenset({0, 1, 2})
@@ -144,7 +147,6 @@ def render(doc: Mapping[str, Any], host: str) -> list[tuple[str, str]]:
         ("LAB_TENANT_SLUG", row["tenant_slug"]),
         ("LAB_TENANT_BOX_ID", box_id_for(row["hostname"])),
         ("LAB_TENANT_TOPIC_NAMESPACE", topic_namespace_for(row["tenant_slug"])),
-        ("LAB_TENANT_KAFKA_SASL_USERNAME", row["tenant_slug"]),
         ("LAB_TENANT_DB_SLOT", row["db_slot"]),
         ("LAB_TENANT_VALKEY_DB_INDEX", str(row["valkey_db_index"])),
         ("LAB_TENANT_DEPENDENCY_HOST", str(dep["host"])),
@@ -163,17 +165,32 @@ def render(doc: Mapping[str, Any], host: str) -> list[tuple[str, str]]:
     ]
 
 
-def env_file_keys(path: Path) -> set[str]:
-    """Names assigned a non-empty value in an env file; values are never kept."""
-    keys: set[str] = set()
+def _parse_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         name, _, value = stripped.removeprefix("export ").partition("=")
-        if value.strip().strip("'\""):
-            keys.add(name.strip())
-    return keys
+        value = value.strip().strip("'\"")
+        if value:
+            values[name.strip()] = value
+    return values
+
+
+def env_file_keys(path: Path) -> set[str]:
+    """Names assigned a non-empty value in an env file; values are never kept."""
+    return set(_parse_env_file(path))
+
+
+def bus_login(path: Path) -> str | None:
+    """The issued bus login (the tenant's principal id) from the operator env file.
+
+    The login is issued by onex-api at tenant create and is not derivable from
+    the declaration, so it is read from the host's secrets file. It is an
+    identifier, not a secret; the password beside it is never read here.
+    """
+    return _parse_env_file(path).get(BUS_LOGIN_VAR)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -203,6 +220,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if missing:
             print(f"REFUSED operator env file lacks {missing}", file=sys.stderr)
             return EXIT_SECRET_MISSING
+        login = bus_login(args.operator_env_file)
+        if login is None or not _BUS_LOGIN_RE.match(login):
+            print(
+                f"REFUSED {BUS_LOGIN_VAR} in the operator env file must be the "
+                "issued principal id (t-...), not a tenant slug",
+                file=sys.stderr,
+            )
+            return EXIT_SECRET_MISSING
+        pairs.append((BUS_LOGIN_VAR, login))
     if args.runtime_image:
         pairs.append(("LAB_TENANT_RUNTIME_IMAGE", args.runtime_image))
     if args.effects_image:

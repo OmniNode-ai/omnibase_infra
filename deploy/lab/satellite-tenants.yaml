@@ -65,6 +65,7 @@ tenants:
 # Variables every tenant host's operator env file must carry. Values never
 # appear in any repository, ledger row or log.
 secret_env:
+  - LAB_TENANT_KAFKA_SASL_USERNAME
   - LAB_TENANT_KAFKA_SASL_PASSWORD
   - LAB_TENANT_ROLE_OMNIBASE_PASSWORD
   - LAB_TENANT_ROLE_OMNIINTELLIGENCE_PASSWORD

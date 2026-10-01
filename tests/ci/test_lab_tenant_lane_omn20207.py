@@ -174,7 +174,9 @@ def test_rendered_prefixes_are_the_tenant_acl_prefixes(host: str) -> None:
     env = dict(render(doc, host))
     slug = env["LAB_TENANT_SLUG"]
     assert f"{env['LAB_TENANT_TOPIC_NAMESPACE']}." == TENANT_PREFIX.format(slug=slug)
-    assert env["LAB_TENANT_KAFKA_SASL_USERNAME"] == slug
+    assert "LAB_TENANT_KAFKA_SASL_USERNAME" not in env, (
+        "the login is issued, not declared"
+    )
     assert env["LAB_TENANT_BOX_ID"] != "omninode-pc"
     assert not any("PASSWORD" in key for key in env), "no secret is ever rendered"
 
@@ -212,5 +214,20 @@ def test_cli_exit_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> N
     )
     names = yaml.safe_load(DECLARATION_PATH.read_text(encoding="utf-8"))["secret_env"]
     secrets.write_text("".join(f"{n}=x\n" for n in names), encoding="utf-8")
+    # the username is the slug, not the issued principal id: refused
+    assert (
+        main(["--host", "lab-105", "--operator-env-file", str(secrets)])
+        == EXIT_SECRET_MISSING
+    )
+    capsys.readouterr()
+    secrets.write_text(
+        "".join(
+            f"{n}={'t-ecf6bdce01' if n.endswith('SASL_USERNAME') else 'sekret-x'}\n"
+            for n in names
+        ),
+        encoding="utf-8",
+    )
     assert main(["--host", "lab-105", "--operator-env-file", str(secrets)]) == EXIT_OK
-    assert "=x" not in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "LAB_TENANT_KAFKA_SASL_USERNAME=t-ecf6bdce01\n" in out
+    assert "sekret-x" not in out and "PASSWORD" not in out
