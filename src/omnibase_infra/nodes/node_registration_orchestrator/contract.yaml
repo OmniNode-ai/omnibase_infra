@@ -38,6 +38,7 @@ contract_version:
 node_version: "1.0.1"
 name: "node_registration_orchestrator"
 node_type: "ORCHESTRATOR_GENERIC"
+runtime_profiles: [main]
 description: "Registration workflow orchestrator that coordinates node lifecycle by calling reducer for intents and effect for execution. Contract patch 1 records handler-internal dataclass annotations only; workflow, topics, and payload semantics are unchanged."
 # MCP (Model Context Protocol) Configuration
 # Exposes this orchestrator as an AI-invocable tool via MCP server
