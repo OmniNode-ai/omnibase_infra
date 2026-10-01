@@ -19,6 +19,8 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -282,6 +284,40 @@ def _survey(
 ) -> list[Any]:
     states: list[Any] = pool.survey(CFG, FakeTransport(hosts), holds or {}, NOW, me=me)
     return states
+
+
+@pytest.mark.unit
+def test_survey_probes_concurrently_and_preserves_host_order() -> None:
+    class SlowTransport(FakeTransport):
+        def __init__(self, hosts: dict[str, FakeHost]) -> None:
+            super().__init__(hosts)
+            self.lock = threading.Lock()
+            self.in_flight = 0
+            self.max_in_flight = 0
+            self.probed: list[str] = []
+
+        def run(self, host: Any, command: str, timeout: float) -> tuple[int, str]:
+            if "CORES=$(getconf" not in command:
+                return super().run(host, command, timeout)
+            with self.lock:
+                self.in_flight += 1
+                self.max_in_flight = max(self.max_in_flight, self.in_flight)
+                self.probed.append(host.name)
+            try:
+                time.sleep(0.3)
+                return super().run(host, command, timeout)
+            finally:
+                with self.lock:
+                    self.in_flight -= 1
+
+    transport = SlowTransport({host.name: FakeHost() for host in CFG.hosts})
+    states = pool.survey(CFG, transport, {}, NOW)
+
+    assert transport.max_in_flight > 1
+    assert [state.host.name for state in states] == [host.name for host in CFG.hosts]
+    assert sorted(transport.probed) == sorted(
+        host.name for host in CFG.hosts if host.status != "excluded"
+    )
 
 
 def test_pick_takes_the_least_loaded_free_host_and_never_an_excluded_one() -> None:
