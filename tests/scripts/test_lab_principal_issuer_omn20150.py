@@ -92,9 +92,19 @@ def test_the_checked_in_grant_file_is_valid(declaration: lpi.Declaration) -> Non
     )
 
 
-def test_only_the_delegate_command_is_writable(declaration: lpi.Declaration) -> None:
-    writable = [g.name for g in declaration.grants if "write" in g.operations]
-    assert writable == ["onex.cmd.omnimarket.delegate-skill.v1"]
+def test_only_the_delegate_command_and_its_terminals_are_writable(
+    declaration: lpi.Declaration,
+) -> None:
+    # A machine that runs a harness task publishes the terminal event itself, so it
+    # holds write on the two delegate-skill terminals and on nothing else: literal
+    # names, no prefix or wildcard grant.
+    writable = [g for g in declaration.grants if "write" in g.operations]
+    assert {g.name for g in writable} == {
+        "onex.cmd.omnimarket.delegate-skill.v1",
+        "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
+    }
+    assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
 
 
 @pytest.mark.parametrize(
