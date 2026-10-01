@@ -52,12 +52,12 @@ _UNDECLARED_SCHEMA_RULE = "unknown topology schema"
 _VENDORED = (
     (
         "0051_delegation_events_failed_outcome_backfill.sql",
-        "75a49f73b13968fc4f104679e23cbb5ec0d865c60c56932ba256e296a8b525e0",
+        "967f2160794d42da2949ac227e41889f3ce2fa8f4329e519fdedd7df1e596c08",
         "UPDATE delegation_events",
     ),
 )
 _ROLLBACK = "rollback/rollback_node_projection_delegation_0051.sql"
-_ROLLBACK_SHA256 = "13f46eac04400da9dd45457343d112f9f8a80a1d3791523c1067f19810c6a928"
+_ROLLBACK_SHA256 = "4f6dca2c04e62df7dae954b48b5a6b596d1cadb6c59623ad0273d2cbd2f7ef14"
 _EXECUTIONS = _ROOT / "config" / "migration_down_executions.yaml"
 _IDS = [entry[0] for entry in _VENDORED]
 
@@ -104,9 +104,8 @@ def test_vendor_bytes_and_manifest_binding_are_exact(
 def test_declared_class_is_forward_only_as_the_checker_reads_it(
     filename: str, sha256: str, anchor: str
 ) -> None:
-    """0051 rewrites rows and toggles FORCE row-level security: not additive by
-    the checker's rules, so it is forward-only, a barrier lifted only by its
-    recorded down execution."""
+    """0051 rewrites rows: not additive by the checker's rules, so it is
+    forward-only, a barrier lifted only by its recorded down execution."""
     classes = yaml.safe_load(_CLASSES.read_text(encoding="utf-8"))["migrations"]
     assert classes[f"forward/nodes/{_NODE}/{filename}"] == "forward-only"
     assert _class_checker().destructive_findings(_sql(filename)) != []
