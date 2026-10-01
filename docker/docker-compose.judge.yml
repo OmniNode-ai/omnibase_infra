@@ -30,8 +30,12 @@ x-omninode-contract-overlay:
     advertised_kafka_addr: &judge_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://localhost:49092"
     kafka_port_publish: &judge_redpanda_kafka_port_publish "49092:19092"
     # Loopback only (OMN-20260): admin_api_require_auth is false on this broker,
-    # and every in-network consumer uses redpanda:9644.
-    admin_port_publish: &judge_redpanda_admin_port_publish "127.0.0.1:49644:9644"
+    # and every in-network consumer uses redpanda:9644. Host port 59644, not
+    # the 49644 this file used to declare: the live judge broker has published
+    # 59644 since it was brought up from a judge.201 override in the OMN-12926
+    # worktree, which has since been deleted. Source now carries the live port
+    # so a recreate from source keeps the address on-host tools already use.
+    admin_port_publish: &judge_redpanda_admin_port_publish "127.0.0.1:59644:9644"
   judge-model-secrets:
     required_secret_refs:
       - GEMINI_API_KEY

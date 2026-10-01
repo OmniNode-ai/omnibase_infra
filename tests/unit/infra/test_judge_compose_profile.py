@@ -280,7 +280,7 @@ def test_judge_profile_names_and_ports_do_not_reuse_dev_or_prod() -> None:
     assert services["postgres"]["ports"] == [
         "${JUDGE_POSTGRES_EXTERNAL_PORT:-35436}:5432"
     ]
-    assert services["redpanda"]["ports"] == ["49092:19092", "127.0.0.1:49644:9644"]
+    assert services["redpanda"]["ports"] == ["49092:19092", "127.0.0.1:59644:9644"]
     assert services["valkey"]["ports"] == ["${JUDGE_VALKEY_EXTERNAL_PORT:-56379}:6379"]
     assert services["omninode-runtime"]["ports"] == [
         "${JUDGE_RUNTIME_MAIN_PORT:?runtime policy contract must set JUDGE_RUNTIME_MAIN_PORT}:8085"

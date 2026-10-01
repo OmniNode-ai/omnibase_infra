@@ -83,7 +83,7 @@ OUT_OF_SCOPE_SERVICES = {
 }
 EXPECTED_PUBLISHED_PORTS = {
     "postgres": {"35436"},
-    "redpanda": {"49092", "49644"},
+    "redpanda": {"49092", "59644"},
     "redpanda-partition-cap": set(),
     "valkey": {"56379"},
     "forward-migration": set(),
