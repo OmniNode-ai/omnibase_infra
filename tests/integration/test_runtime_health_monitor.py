@@ -95,6 +95,9 @@ async def test_run_once_emits_to_kafka(kafka_consumer: AIOKafkaConsumer) -> None
         monitor = ServiceRuntimeHealthMonitor(
             event_bus=bus,
             bootstrap_servers=BOOTSTRAP_SERVERS,
+            # The default 120s boot grace (OMN-9551) suppresses every emit made
+            # right after construction; this test needs the first emit to land.
+            boot_grace_seconds=0.0,
         )
         await monitor.run_once()
 
@@ -115,11 +118,13 @@ async def test_run_once_emits_to_kafka(kafka_consumer: AIOKafkaConsumer) -> None
             pass
 
         assert record is not None, "Expected health-check event on Kafka topic"
-        payload = json.loads(record.value)
-        assert "status" in payload
+        # The monitor publishes a ModelEventEnvelope; the health event is its payload.
+        envelope = json.loads(record.value)
+        assert envelope["event_type"] == "runtime-health-check"
+        payload = envelope["payload"]
         assert payload["status"] in ("HEALTHY", "DEGRADED", "CRITICAL")
     finally:
-        await bus.stop()
+        await bus.close()
 
 
 def test_confluent_group_listing_ignores_binary_member_metadata(

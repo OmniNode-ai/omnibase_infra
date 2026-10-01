@@ -32,6 +32,7 @@ import pytest
 from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 from aiokafka.errors import TopicAlreadyExistsError
 
+from omnibase_infra.topics import SUFFIX_NODE_REGISTRATION
 from tests.helpers.util_kafka import check_host_reachability, validate_bootstrap_servers
 
 if TYPE_CHECKING:
@@ -79,6 +80,9 @@ pytestmark = [
 TEST_TIMEOUT_SECONDS = 30
 MESSAGE_DELIVERY_WAIT_SECONDS = 5.0
 EVENT_PROCESSING_WAIT_SECONDS = 3.0
+
+# The topic ServiceMCPToolSync subscribes to (ServiceMCPToolSync.TOPIC).
+REGISTRATION_TOPIC = SUFFIX_NODE_REGISTRATION
 
 
 # =============================================================================
@@ -322,9 +326,9 @@ async def registration_topic(
 ) -> AsyncGenerator[str, None]:
     """Ensure registration topic exists for tests.
 
-    Creates node.registration.v1 topic if it doesn't exist and yields the topic name.
+    Creates the node registration topic if it doesn't exist and yields its name.
     """
-    topic_name = "node.registration.v1"
+    topic_name = REGISTRATION_TOPIC
     await create_topic_if_not_exists(kafka_bootstrap_servers, topic_name)
     # Small delay to allow topic metadata to propagate
     await asyncio.sleep(0.5)
@@ -378,7 +382,7 @@ class TestServiceMCPToolSyncLifecycle:
 
         After calling start():
         - is_running should be True
-        - Service should be subscribed to node.registration.v1 topic
+        - Service should be subscribed to the node registration topic
         """
         # Initially not running
         assert mcp_tool_sync.is_running is False
@@ -443,8 +447,9 @@ class TestServiceMCPToolSyncLifecycle:
         # Before start
         info = mcp_tool_sync.describe()
         assert info["service_name"] == "ServiceMCPToolSync"
-        assert info["topic"] == "node.registration.v1"
-        assert info["group_id"] == "mcp-tool-sync"
+        assert info["topic"] == REGISTRATION_TOPIC
+        # OMN-1602: the consumer group is derived from ModelNodeIdentity.
+        assert info["group_id_derived"] is True
         assert info["is_running"] is False
 
         # After start
@@ -487,7 +492,7 @@ class TestServiceMCPToolSyncEventProcessing:
 
         # Publish event to registration topic
         await kafka_event_bus.publish(
-            "node.registration.v1",
+            REGISTRATION_TOPIC,
             None,
             json.dumps(event).encode("utf-8"),
         )
@@ -522,7 +527,7 @@ class TestServiceMCPToolSyncEventProcessing:
         )
 
         await kafka_event_bus.publish(
-            "node.registration.v1",
+            REGISTRATION_TOPIC,
             None,
             json.dumps(event).encode("utf-8"),
         )
@@ -555,7 +560,7 @@ class TestServiceMCPToolSyncEventProcessing:
         )
 
         await kafka_event_bus.publish(
-            "node.registration.v1",
+            REGISTRATION_TOPIC,
             None,
             json.dumps(event).encode("utf-8"),
         )
@@ -587,7 +592,7 @@ class TestServiceMCPToolSyncEventProcessing:
         )
 
         await kafka_event_bus.publish(
-            "node.registration.v1",
+            REGISTRATION_TOPIC,
             None,
             json.dumps(event).encode("utf-8"),
         )
@@ -622,7 +627,7 @@ class TestServiceMCPToolSyncEventProcessing:
         )
 
         await kafka_event_bus.publish(
-            "node.registration.v1",
+            REGISTRATION_TOPIC,
             None,
             json.dumps(event).encode("utf-8"),
         )
@@ -657,7 +662,7 @@ class TestServiceMCPToolSyncErrorHandling:
 
         # Publish invalid JSON
         await kafka_event_bus.publish(
-            "node.registration.v1",
+            REGISTRATION_TOPIC,
             None,
             b"this is not valid json {{{",
         )
@@ -672,7 +677,7 @@ class TestServiceMCPToolSyncErrorHandling:
         )
 
         await kafka_event_bus.publish(
-            "node.registration.v1",
+            REGISTRATION_TOPIC,
             None,
             json.dumps(valid_event).encode("utf-8"),
         )
@@ -708,7 +713,7 @@ class TestServiceMCPToolSyncErrorHandling:
         }
 
         await kafka_event_bus.publish(
-            "node.registration.v1",
+            REGISTRATION_TOPIC,
             None,
             json.dumps(event).encode("utf-8"),
         )
@@ -739,7 +744,7 @@ class TestServiceMCPToolSyncErrorHandling:
         )
 
         await kafka_event_bus.publish(
-            "node.registration.v1",
+            REGISTRATION_TOPIC,
             None,
             json.dumps(event).encode("utf-8"),
         )
@@ -791,7 +796,7 @@ class TestServiceMCPToolSyncIncompleteEvent:
         )
 
         await kafka_event_bus.publish(
-            "node.registration.v1",
+            REGISTRATION_TOPIC,
             None,
             json.dumps(event).encode("utf-8"),
         )
@@ -838,7 +843,7 @@ class TestServiceMCPToolSyncIdempotency:
         # Publish same event multiple times
         for _ in range(3):
             await kafka_event_bus.publish(
-                "node.registration.v1",
+                REGISTRATION_TOPIC,
                 None,
                 json.dumps(event).encode("utf-8"),
             )
@@ -891,7 +896,7 @@ class TestServiceMCPToolSyncConcurrency:
                 include_full_info=True,
             )
             await kafka_event_bus.publish(
-                "node.registration.v1",
+                REGISTRATION_TOPIC,
                 None,
                 json.dumps(event).encode("utf-8"),
             )

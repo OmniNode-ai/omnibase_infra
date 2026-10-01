@@ -29,12 +29,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from collections.abc import AsyncGenerator, Callable, Coroutine
+from collections.abc import AsyncGenerator
 from uuid import uuid4
 
 import pytest
 
-from tests.helpers.util_kafka import check_host_reachability, validate_bootstrap_servers
+from tests.helpers.util_kafka import (
+    KafkaTopicManager,
+    check_host_reachability,
+    validate_bootstrap_servers,
+)
 from tests.integration.event_bus.conftest import wait_for_consumer_ready
 
 # =============================================================================
@@ -80,22 +84,26 @@ def make_valid_contract_yaml(
     handler_id: str,
     name: str,
     *,
-    archetype: str = "compute",
     version: tuple[int, int, int] = (1, 0, 0),
     handler_class: str | None = None,
 ) -> str:
     """Generate valid handler contract YAML for testing.
 
+    The node archetype is taken from the handler_id prefix
+    (``effect.foo`` -> ``effect``): omnibase_core rejects a contract whose
+    handler_id prefix names a different archetype than its descriptor.
+
     Args:
-        handler_id: Unique handler identifier
+        handler_id: Unique handler identifier, prefixed with its archetype
+            (compute, effect, reducer, orchestrator)
         name: Human-readable handler name
-        archetype: Node archetype (compute, effect, reducer, orchestrator)
         version: Semantic version tuple (major, minor, patch)
         handler_class: Optional handler class path
 
     Returns:
         Valid YAML string for a handler contract
     """
+    archetype = handler_id.split(".", 1)[0]
     major, minor, patch = version
     yaml_content = f'''handler_id: "{handler_id}"
 name: "{name}"
@@ -175,17 +183,18 @@ async def kafka_event_bus(
 
 @pytest.fixture
 async def contract_topic(
-    ensure_test_topic: Callable[[str, int], Coroutine[None, None, str]],
+    kafka_bootstrap_servers: str,
     unique_topic_prefix: str,
-) -> str:
-    """Create a unique topic for contract events.
+) -> AsyncGenerator[str, None]:
+    """Create a unique topic for contract events and delete it after the test.
 
-    Returns:
+    Yields:
         The created topic name.
     """
     topic_name = f"{unique_topic_prefix}.contracts"
-    await ensure_test_topic(topic_name, 1)
-    return topic_name
+    async with KafkaTopicManager(kafka_bootstrap_servers) as manager:
+        await manager.create_topic(topic_name, partitions=1)
+        yield topic_name
 
 
 # =============================================================================
@@ -221,7 +230,7 @@ class TestKafkaContractSourceE2E:
 
         # Track when contract is processed
         contract_processed = asyncio.Event()
-        node_name = f"test.handler.{uuid4().hex[:8]}"
+        node_name = f"test.handler.n{uuid4().hex[:8]}"
         contract_yaml = make_valid_contract_yaml(
             handler_id=f"effect.{node_name}",
             name="Test Integration Handler",
@@ -248,8 +257,8 @@ class TestKafkaContractSourceE2E:
         # Subscribe to the contract topic
         unsubscribe = await kafka_event_bus.subscribe(
             contract_topic,
-            unique_group,
-            contract_event_handler,
+            group_id=unique_group,
+            on_message=contract_event_handler,
         )
 
         try:
@@ -312,7 +321,7 @@ class TestKafkaContractSourceE2E:
         from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
 
         source = KafkaContractSource(environment="integration-test")
-        node_name = f"test.dereg.{uuid4().hex[:8]}"
+        node_name = f"test.dereg.n{uuid4().hex[:8]}"
 
         # Pre-register a contract
         contract_yaml = make_valid_contract_yaml(
@@ -339,8 +348,8 @@ class TestKafkaContractSourceE2E:
 
         unsubscribe = await kafka_event_bus.subscribe(
             contract_topic,
-            unique_group,
-            deregistration_handler,
+            group_id=unique_group,
+            on_message=deregistration_handler,
         )
 
         try:
@@ -393,7 +402,7 @@ class TestKafkaContractSourceE2E:
         from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
 
         source = KafkaContractSource(environment="integration-test", graceful_mode=True)
-        node_name = f"test.invalid.{uuid4().hex[:8]}"
+        node_name = f"test.invalid.n{uuid4().hex[:8]}"
 
         error_collected = asyncio.Event()
 
@@ -417,8 +426,8 @@ class TestKafkaContractSourceE2E:
 
         unsubscribe = await kafka_event_bus.subscribe(
             contract_topic,
-            unique_group,
-            invalid_contract_handler,
+            group_id=unique_group,
+            on_message=invalid_contract_handler,
         )
 
         try:
@@ -489,7 +498,7 @@ class TestKafkaContractSourceTypedEvents:
         from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
 
         source = KafkaContractSource(environment="integration-test")
-        node_name = f"test.typed.{uuid4().hex[:8]}"
+        node_name = f"test.typed.n{uuid4().hex[:8]}"
 
         event_processed = asyncio.Event()
         contract_yaml = make_valid_contract_yaml(
@@ -523,8 +532,8 @@ class TestKafkaContractSourceTypedEvents:
 
         unsubscribe = await kafka_event_bus.subscribe(
             contract_topic,
-            unique_group,
-            typed_event_handler,
+            group_id=unique_group,
+            on_message=typed_event_handler,
         )
 
         try:
@@ -588,7 +597,7 @@ class TestKafkaContractSourceMultipleConsumers:
         source1 = KafkaContractSource(environment="integration-test")
         source2 = KafkaContractSource(environment="integration-test")
 
-        node_name = f"test.multi.{uuid4().hex[:8]}"
+        node_name = f"test.multi.n{uuid4().hex[:8]}"
         contract_yaml = make_valid_contract_yaml(
             handler_id=f"effect.{node_name}",
             name="Multi-Consumer Handler",
@@ -624,10 +633,10 @@ class TestKafkaContractSourceMultipleConsumers:
         group2 = f"source2-group-{uuid4().hex[:8]}"
 
         unsubscribe1 = await kafka_event_bus.subscribe(
-            contract_topic, group1, source1_handler
+            contract_topic, group_id=group1, on_message=source1_handler
         )
         unsubscribe2 = await kafka_event_bus.subscribe(
-            contract_topic, group2, source2_handler
+            contract_topic, group_id=group2, on_message=source2_handler
         )
 
         try:
@@ -733,7 +742,7 @@ class TestKafkaContractSourceEventOrdering:
         from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
 
         source = KafkaContractSource(environment="integration-test")
-        node_name = f"test.versioned.{uuid4().hex[:8]}"
+        node_name = f"test.versioned.n{uuid4().hex[:8]}"
 
         events_processed = 0
         all_processed = asyncio.Event()
@@ -755,8 +764,8 @@ class TestKafkaContractSourceEventOrdering:
 
         unsubscribe = await kafka_event_bus.subscribe(
             contract_topic,
-            unique_group,
-            version_handler,
+            group_id=unique_group,
+            on_message=version_handler,
         )
 
         try:
@@ -826,7 +835,7 @@ class TestKafkaContractSourceCorrelationId:
         from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
 
         source = KafkaContractSource(environment="integration-test")
-        node_name = f"test.corr.{uuid4().hex[:8]}"
+        node_name = f"test.corr.n{uuid4().hex[:8]}"
         event_correlation_id = uuid4()
 
         event_processed = asyncio.Event()
@@ -847,8 +856,8 @@ class TestKafkaContractSourceCorrelationId:
 
         unsubscribe = await kafka_event_bus.subscribe(
             contract_topic,
-            unique_group,
-            correlation_handler,
+            group_id=unique_group,
+            on_message=correlation_handler,
         )
 
         try:
