@@ -1461,6 +1461,13 @@ def default_placement_modules(home: Path) -> dict[str, Path]:
     return found
 
 
+def home_relative(path: Path) -> str:
+    """``~/...`` instead of an absolute home path, so a committed result names no machine path."""
+    home = str(Path.home())
+    text = str(path)
+    return "~" + text[len(home) :] if text.startswith(home + os.sep) else text
+
+
 def read_placement(host: str, modules: Mapping[str, Path], lane: str) -> dict[str, Any]:
     """Run each landing_placement copy's own read for ``host`` exactly as the controller does."""
     import importlib.util
@@ -1479,7 +1486,7 @@ def read_placement(host: str, modules: Mapping[str, Path], lane: str) -> dict[st
             if not pool:
                 out[label] = {
                     "error": f"{host} is not in this copy's pool",
-                    "path": str(path),
+                    "path": home_relative(path),
                 }
                 continue
             placed = (
@@ -1491,7 +1498,7 @@ def read_placement(host: str, modules: Mapping[str, Path], lane: str) -> dict[st
                 pool, placed=placed, lane=f"{lane} bench-placement"
             )[0]
             out[label] = {
-                "path": str(path),
+                "path": home_relative(path),
                 "describe": reading.describe(),
                 "slots": reading.slots,
                 "cap": reading.cap,
@@ -1504,7 +1511,10 @@ def read_placement(host: str, modules: Mapping[str, Path], lane: str) -> dict[st
                 "error": reading.error,
             }
         except Exception as exc:  # noqa: BLE001 - a failed read is data
-            out[label] = {"error": f"{type(exc).__name__}: {exc}", "path": str(path)}
+            out[label] = {
+                "error": f"{type(exc).__name__}: {exc}",
+                "path": home_relative(path),
+            }
     return out
 
 
@@ -1696,7 +1706,7 @@ def render_summary(results: Sequence[Mapping[str, Any]]) -> str:
         for key, cell in sorted(r.get("summary", {}).items()):
             lines.append(f"| {key} | {_fmt(cell)} |")
         lines.append("")
-    return "\n".join(lines)
+    return "\n".join(lines).rstrip() + "\n"
 
 
 # ---------------------------------------------------------------------------
@@ -1792,7 +1802,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             json.loads(p.read_text())
             for p in sorted(Path(args.summarize).glob("*.json"))
         ]
-        print(render_summary(results))
+        print(render_summary(results), end="")
         return 0
     if not args.host or not args.arm:
         build_parser().error("--host and --arm are required")

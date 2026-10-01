@@ -438,3 +438,9 @@ def test_min_uptime_marks_a_freshly_redeployed_dependency_lane() -> None:
     ]
     assert bench.min_uptime_s(stamps, now) == 900.0
     assert bench.min_uptime_s([], now) is None
+
+
+def test_home_relative_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    assert bench.home_relative(tmp_path / ".omninode" / "x.py") == "~/.omninode/x.py"
+    assert bench.home_relative(Path("/opt/elsewhere/x.py")) == "/opt/elsewhere/x.py"
