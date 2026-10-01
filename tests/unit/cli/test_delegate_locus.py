@@ -26,6 +26,7 @@ import pytest
 import yaml
 
 from omnibase_infra.backends.backend_probe import ConsumerGroupLivenessUnknownError
+from omnibase_infra.backends.model_consumer_group_owner import ModelConsumerGroupOwner
 from omnibase_infra.cli import delegate_locus
 from omnibase_infra.cli.delegate_locus import (
     DelegateLocusRefusedError,
@@ -69,9 +70,13 @@ def _stub_groups(
     asked: list[dict[str, object]] = []
 
     def _fake(
-        *, topic: str, bootstrap_servers: str | None, timeout: float
+        *,
+        topic: str,
+        bootstrap_servers: str | None,
+        timeout: float,
+        owner: ModelConsumerGroupOwner | None = None,
     ) -> tuple[str, ...]:
-        asked.append({"topic": topic, "bootstrap": bootstrap_servers})
+        asked.append({"topic": topic, "bootstrap": bootstrap_servers, "owner": owner})
         return groups
 
     monkeypatch.setattr(delegate_locus, "live_consumer_groups", _fake)
@@ -99,6 +104,77 @@ class TestContractCommandTopic:
         contract = _write_contract(tmp_path, subscribe_topics=None)
         with pytest.raises(DelegateLocusRefusedError, match="subscribe_topics"):
             contract_command_topic(contract)
+
+
+class TestContractOwner:
+    """The deployed gate asks about the identity shipped by the contract."""
+
+    @pytest.mark.parametrize(
+        "node_name", ["node_delegate_skill_orchestrator", "node_synthetic_orchestrator"]
+    )
+    def test_contract_owner_is_passed_from_the_contract_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, node_name: str
+    ) -> None:
+        contract = _write_contract(tmp_path, subscribe_topics=[_COMMAND_TOPIC])
+        contract.write_text(
+            yaml.safe_dump(
+                {"name": node_name, "event_bus": {"subscribe_topics": [_COMMAND_TOPIC]}}
+            ),
+            encoding="utf-8",
+        )
+        asked = _stub_groups(monkeypatch, (_LANE_GROUP,))
+        decision = resolve_delegate_locus(
+            requested=EnumDelegateLocus.DEPLOYED_LANE,
+            bus=_BUS_KAFKA,
+            kafka_bootstrap=_TEST_BROKER,
+            contract_path=contract,
+            shared_bus_value=_BUS_KAFKA,
+        )
+        assert decision.lane_consumer_groups == (_LANE_GROUP,)
+        assert asked == [
+            {
+                "topic": _COMMAND_TOPIC,
+                "bootstrap": _TEST_BROKER,
+                "owner": ModelConsumerGroupOwner(service="omnimarket", node=node_name),
+            }
+        ]
+
+    def test_contract_owner_missing_name_refuses_before_liveness(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        contract = tmp_path / "contract.yaml"
+        contract.write_text(
+            yaml.safe_dump({"event_bus": {"subscribe_topics": [_COMMAND_TOPIC]}}),
+            encoding="utf-8",
+        )
+        asked = _stub_groups(monkeypatch, (_LANE_GROUP,))
+        with pytest.raises(DelegateLocusRefusedError, match="name"):
+            resolve_delegate_locus(
+                requested=EnumDelegateLocus.DEPLOYED_LANE,
+                bus=_BUS_KAFKA,
+                kafka_bootstrap=_TEST_BROKER,
+                contract_path=contract,
+                shared_bus_value=_BUS_KAFKA,
+            )
+        assert asked == []
+
+    def test_contract_owner_is_named_in_no_consumer_refusal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        contract = _write_contract(tmp_path, subscribe_topics=[_COMMAND_TOPIC])
+        _stub_groups(monkeypatch, ())
+        with pytest.raises(DelegateLocusRefusedError) as caught:
+            resolve_delegate_locus(
+                requested=EnumDelegateLocus.DEPLOYED_LANE,
+                bus=_BUS_KAFKA,
+                kafka_bootstrap=_TEST_BROKER,
+                contract_path=contract,
+                shared_bus_value=_BUS_KAFKA,
+            )
+        message = str(caught.value)
+        assert "no live consumer group is bound to" in message
+        assert "omnimarket.node_delegate_skill_orchestrator" in message
+        assert delegate_locus.REBIND_WINDOW_FAILURE_CLASS in message
 
 
 class TestLocusResolution:

@@ -40,9 +40,10 @@ EVERY RUN IS RECORDED, INCLUDING THE QUIET ONES
 
 A silent run and a run that never happened are indistinguishable from outside,
 and telling them apart is half the point of a durable timer. So every run
-appends one record naming **all five** conditions (OMN-19091 added
-EFFECTS_HELD_BEHIND_RUNTIME and STALE_INDETERMINATE), their outcome and their
-evidence, whether or not anything fired.
+appends one record naming **all six** conditions (OMN-19091 added
+EFFECTS_HELD_BEHIND_RUNTIME and STALE_INDETERMINATE; OMN-20248 added
+WORK_LEDGER_PROJECTION_STALE), their outcome and their evidence, whether or
+not anything fired.
 
 THREE OUTCOMES, NOT TWO
 
@@ -168,10 +169,10 @@ _EVIDENCE_SAMPLES = 2
 
 
 class EnumAlarmCondition(StrEnum):
-    """Five conditions, each with a declared bound rather than a judgement.
+    """Six conditions, each with a declared bound rather than a judgement.
 
-    The first four watch the lab. The fifth, STALE_INDETERMINATE
-    (OMN-19091), watches the other four: an alarm that reads INDETERMINATE
+    The first five watch the lab. The sixth, STALE_INDETERMINATE
+    (OMN-19091), watches the other five: an alarm that reads INDETERMINATE
     on every sample forever is installed but not watching, and today that
     state was silent. It is a real condition, not a side channel -- evaluated
     every run, carrying its own evidence, subject to the same edge-triggered
@@ -188,12 +189,19 @@ class EnumAlarmCondition(StrEnum):
     a monitor -- ``omninode-runtime-effects`` sits ``State=created`` for
     minutes behind a slow runtime health gate while its docker CONTAINER
     status alone gives no signal that delegation itself cannot proceed.
+
+    WORK_LEDGER_PROJECTION_STALE (OMN-20248) compares the rolling ledger
+    file's newest canonical row against ``max(row_ts)`` in the work-ledger
+    projection table. The projection sat frozen for about 36 hours while its
+    consumer groups read Stable at lag 0, because nothing new reached the
+    topics -- a freeze no offset-based condition can see.
     """
 
     LAB_PASS_RECEIPT = "lab_pass_receipt"
     CONTAINER_RESTARTS = "container_restarts"
     CONSUMER_GROUP_LAG = "consumer_group_lag"
     EFFECTS_HELD_BEHIND_RUNTIME = "effects_held_behind_runtime"
+    WORK_LEDGER_PROJECTION_STALE = "work_ledger_projection_stale"
     STALE_INDETERMINATE = "stale_indeterminate"
 
 
@@ -236,11 +244,11 @@ def make_runner(docker_command: Sequence[str]) -> CommandRunner:
     out to a bare ``docker`` would therefore report every container unreadable,
     forever, on a healthy lane and an unhealthy one alike.
 
-    As of OMN-19091 this is used by ``container_restarts`` alone --
-    ``consumer_group_lag`` reads the broker in-process via aiokafka and needs
-    no docker transport at all. The transport still belongs here rather than
-    inside the one condition that uses it, so :class:`CommandRunner` stays the
-    seam that condition is tested through.
+    As of OMN-19091 ``consumer_group_lag`` reads the broker in-process via
+    aiokafka and needs no docker transport at all; ``container_restarts`` and
+    (OMN-20248) ``work_ledger_projection_stale`` use this one. The transport
+    belongs here rather than inside the conditions that use it, so
+    :class:`CommandRunner` stays the seam they are tested through.
 
     Remote arguments are shell-quoted because ssh concatenates them and hands
     the result to a remote shell, so an unquoted argument is a remote shell
@@ -318,7 +326,7 @@ class ModelConditionReport:
 
 @dataclass(frozen=True)
 class ModelAlarmRun:
-    """One tick. Carries all five conditions whether or not anything fired."""
+    """One tick. Carries all six conditions whether or not anything fired."""
 
     started_at: str
     finished_at: str
@@ -1299,6 +1307,239 @@ def evaluate_effects_held_behind_runtime(
 
 
 # ---------------------------------------------------------------------------
+# Condition 5 — the work-ledger projection behind the ledger file (OMN-20248)
+# ---------------------------------------------------------------------------
+#
+# Measured 2026-10-01: ``omninode_internal.work_ledger_rows`` sat frozen at
+# 424 rows from 2026-09-29T15:38Z for about 36 hours while the rolling ledger
+# grew by about 4,000 rows. The projection's consumer groups read Stable with
+# lag 0 the whole time, because nothing new reached the topics -- so every
+# offset-based surface, consumer_group_lag included, read green. The only
+# fact that sees that failure is the one compared here: the newest row in the
+# FILE against the newest row in the TABLE.
+
+#: The row types the projection carries. A stamped row of any other type is
+#: not something the projection is expected to hold, so it cannot make the
+#: projection look behind.
+WORK_LEDGER_CANONICAL_ROW_TYPES = (
+    "CLAIM",
+    "STATUS",
+    "TERMINAL",
+    "HOLD",
+    "RELEASE",
+    "MSG",
+    "ACK",
+    "RULING",
+    "OPERATOR-CONSENT",
+    "FRICTION",
+    "CORRECTION",
+)
+
+_WORK_LEDGER_ROW = re.compile(
+    r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z) \| "
+    rf"(?P<type>{'|'.join(re.escape(t) for t in WORK_LEDGER_CANONICAL_ROW_TYPES)}) \|",
+    re.MULTILINE,
+)
+
+#: The rolling ledger is tens of megabytes; its newest rows are at the end.
+#: 256 KiB holds hundreds of rows, far more than one hourly tick ever appends.
+WORK_LEDGER_TAIL_BYTES = 256 * 1024
+
+WORK_LEDGER_TABLE = "omninode_internal.work_ledger_rows"
+_WORK_LEDGER_MAX_ROW_TS_SQL = (
+    "select coalesce(max(row_ts)::text, '') from omninode_internal.work_ledger_rows"
+)
+
+
+def read_ledger_newest_canonical_row(
+    ledger_path: Path, *, tail_bytes: int = WORK_LEDGER_TAIL_BYTES
+) -> tuple[datetime, str]:
+    """Return ``(timestamp, row type)`` of the newest canonical row in the tail.
+
+    Raises:
+        ValueError: the file could not be read, or its tail holds no canonical
+            row. A ledger this alarm cannot date is not one the projection
+            matches -- the caller grades it INDETERMINATE, never OK.
+    """
+    try:
+        with ledger_path.open("rb") as handle:
+            size = handle.seek(0, os.SEEK_END)
+            start = max(0, size - tail_bytes)
+            handle.seek(start)
+            raw = handle.read()
+    except OSError as exc:
+        raise ValueError(f"ledger {ledger_path} could not be read: {exc}") from exc
+    text = raw.decode("utf-8", errors="replace")
+    if start > 0:
+        # The first line of a mid-file read is a fragment, not a row.
+        text = text.partition("\n")[2]
+
+    newest: tuple[datetime, str] | None = None
+    for match in _WORK_LEDGER_ROW.finditer(text):
+        stamp = datetime.strptime(match.group("ts"), "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=UTC
+        )
+        if newest is None or stamp > newest[0]:
+            newest = (stamp, match.group("type"))
+    if newest is None:
+        raise ValueError(
+            f"ledger {ledger_path} holds no canonical row in its last "
+            f"{tail_bytes} bytes"
+        )
+    return newest
+
+
+def read_projection_max_row_ts(
+    container: str,
+    database: str,
+    *,
+    runner: CommandRunner,
+    timeout_seconds: float = 30.0,
+) -> tuple[datetime | None, str]:
+    """Return ``(max(row_ts), raw text)``; ``None`` when the table is empty.
+
+    Read-only, through the same docker seam ``container_restarts`` uses.
+
+    Raises:
+        ValueError: docker or psql failed, timed out, or printed something
+            that is not a timestamp. Unread is not caught up.
+    """
+    argv = [
+        "docker",
+        "exec",
+        container,
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        database,
+        "-Atc",
+        _WORK_LEDGER_MAX_ROW_TS_SQL,
+    ]
+    try:
+        result = runner(argv, timeout=timeout_seconds)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise ValueError(
+            f"psql in {container} did not answer ({type(exc).__name__})"
+        ) from None
+    if result.returncode != 0:
+        raise ValueError(
+            f"psql in {container} exited {result.returncode}: "
+            f"{(result.stderr or '').strip()[:200]}"
+        )
+    raw = (result.stdout or "").strip()
+    if not raw:
+        return None, raw
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"max(row_ts) from {container} is not a timestamp: {raw[:80]!r}"
+        ) from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed, raw
+
+
+def evaluate_work_ledger_projection_stale(
+    *,
+    ledger_path: Path,
+    container: str,
+    database: str,
+    max_lag: timedelta,
+    runner: CommandRunner,
+    timeout_seconds: float = 30.0,
+) -> ModelConditionReport:
+    """ALARM when the ledger file's newest canonical row is more than
+    *max_lag* ahead of the projection's ``max(row_ts)``.
+
+    An empty table is infinitely behind. An unreadable ledger, a ledger tail
+    with no canonical row, and a psql call that fails, times out or prints
+    something unparseable are all INDETERMINATE, never OK.
+
+    What this does NOT measure: whether the emit path, the projection writer
+    or its consumer group is alive. It compares two timestamps -- file versus
+    table -- and the evidence says so, so a green reading cannot be quoted as
+    a liveness statement.
+    """
+    condition = EnumAlarmCondition.WORK_LEDGER_PROJECTION_STALE
+    read_fact = (
+        f"newest canonical row in the last {WORK_LEDGER_TAIL_BYTES} bytes of "
+        f"{ledger_path} vs. max(row_ts) of {WORK_LEDGER_TABLE} in {database} "
+        f"(read via psql in {container}); this measures file-vs-projection "
+        "freshness only and is not a liveness statement about the emit path "
+        "or the projection writer"
+    )
+    try:
+        file_newest, row_type = read_ledger_newest_canonical_row(ledger_path)
+    except ValueError as exc:
+        return ModelConditionReport(
+            condition=condition,
+            outcome=EnumConditionOutcome.INDETERMINATE,
+            evidence=f"{read_fact}; LEDGER UNREADABLE: {exc}. Undated is not current",
+        )
+    file_stamp = file_newest.strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        projection_max, projection_raw = read_projection_max_row_ts(
+            container, database, runner=runner, timeout_seconds=timeout_seconds
+        )
+    except ValueError as exc:
+        return ModelConditionReport(
+            condition=condition,
+            outcome=EnumConditionOutcome.INDETERMINATE,
+            evidence=(
+                f"{read_fact}; ledger newest {row_type} at {file_stamp}; "
+                f"PROJECTION UNREADABLE: {exc}. Unread is not caught up"
+            ),
+        )
+
+    if projection_max is None:
+        detail = (
+            f"the ledger's newest canonical row is {row_type} at {file_stamp} and "
+            f"{WORK_LEDGER_TABLE} holds no row at all -- the projection is "
+            "infinitely behind the ledger file"
+        )
+        return ModelConditionReport(
+            condition=condition,
+            outcome=EnumConditionOutcome.ALARM,
+            evidence=f"{read_fact}; {detail}",
+            alarms=(
+                ModelAlarm(
+                    condition=condition, subject=WORK_LEDGER_TABLE, detail=detail
+                ),
+            ),
+        )
+
+    lag = file_newest - projection_max
+    reading = (
+        f"ledger newest {row_type} at {file_stamp}, projection max(row_ts) "
+        f"{projection_raw}, lag {lag} (bound {max_lag})"
+    )
+    if lag > max_lag:
+        detail = (
+            f"{WORK_LEDGER_TABLE} is {lag} behind the ledger file, past its "
+            f"declared bound of {max_lag}: {reading}. Consumer-group lag can "
+            "read 0 through this -- nothing new reaching the topics looks "
+            "caught up from the broker's side"
+        )
+        return ModelConditionReport(
+            condition=condition,
+            outcome=EnumConditionOutcome.ALARM,
+            evidence=f"{read_fact}; {detail}",
+            alarms=(
+                ModelAlarm(
+                    condition=condition, subject=WORK_LEDGER_TABLE, detail=detail
+                ),
+            ),
+        )
+    return ModelConditionReport(
+        condition=condition,
+        outcome=EnumConditionOutcome.OK,
+        evidence=f"{read_fact}; {reading}; inside the bound",
+    )
+
+
+# ---------------------------------------------------------------------------
 # The consent gate a future sender must pass
 # ---------------------------------------------------------------------------
 
@@ -1651,7 +1892,7 @@ def evaluate_stale_indeterminate(
     one Operating Rule 16 exists to preserve -- so it gets its own condition
     rather than a silent gap in the other three.
 
-    This condition watches the OTHER THREE reports this same run produced; it
+    This condition watches the OTHER reports this same run produced; it
     never watches its own prior outcome, so it cannot go stale watching
     itself. Its own outcome is always OK or ALARM, never INDETERMINATE --
     "is a condition stuck" is always answerable from state plus the clock.
@@ -1767,6 +2008,11 @@ class ModelAlarmConfig:
     #: is a prefix/suffix match rather than one pinned literal.
     effects_group_prefix: str
     effects_group_suffix: str
+    #: OMN-20248: where the work-ledger projection lives, and how far it may
+    #: trail the ledger file before WORK_LEDGER_PROJECTION_STALE alarms.
+    work_ledger_db_container: str
+    work_ledger_database: str
+    work_ledger_max_lag: timedelta
     #: OMN-18867: omniclaude's deploy-gate path validator, the runtime-change
     #: classifier's path rule. Empty disables the nearest-runtime-affecting
     #: ancestor rule and asks the delivered sha itself.
@@ -1799,6 +2045,11 @@ class ModelAlarmConfig:
             consumer_groups=tuple(str(g) for g in groups),
             effects_group_prefix=str(payload["effects_group_prefix"]),
             effects_group_suffix=str(payload["effects_group_suffix"]),
+            work_ledger_db_container=str(payload["work_ledger_db_container"]),
+            work_ledger_database=str(payload["work_ledger_database"]),
+            work_ledger_max_lag=timedelta(
+                minutes=int(payload["work_ledger_max_lag_minutes"])
+            ),
             runtime_path_validator=expand_env(
                 str(payload.get("runtime_path_validator", "")), source=path
             ),
@@ -1829,7 +2080,7 @@ def run_once(
     env_file: Path,
     subject_resolver: SubjectResolver | None = None,
 ) -> ModelAlarmRun:
-    """Evaluate all five conditions, record the run, return it."""
+    """Evaluate all six conditions, record the run, return it."""
     started = _now()
     state = ModelAlarmState.load(state_dir / "state.json")
 
@@ -1849,7 +2100,20 @@ def run_once(
     effects_report, recovery = evaluate_effects_held_behind_runtime(
         effects_reader, state=state, now=started
     )
-    watched_reports = (receipt_report, restart_report, lag_report, effects_report)
+    work_ledger_report = evaluate_work_ledger_projection_stale(
+        ledger_path=ledger_path,
+        container=config.work_ledger_db_container,
+        database=config.work_ledger_database,
+        max_lag=config.work_ledger_max_lag,
+        runner=runner,
+    )
+    watched_reports = (
+        receipt_report,
+        restart_report,
+        lag_report,
+        effects_report,
+        work_ledger_report,
+    )
     stale_report = evaluate_stale_indeterminate(watched_reports, state, now=started)
 
     reports = (*watched_reports, stale_report)

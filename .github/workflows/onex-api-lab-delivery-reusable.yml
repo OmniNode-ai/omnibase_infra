@@ -115,6 +115,9 @@ jobs:
       published: ${{ steps.publish.outputs.published }}
       runtime_lane: ${{ steps.publish.outputs.runtime_lane }}
       source_sha: ${{ steps.publish.outputs.sibling_sha }}
+      # OMN-20154: the verify guard waits for THIS published job to end before
+      # binding the probe's container generation.
+      correlation_id: ${{ steps.publish.outputs.correlation_id }}
 
     steps:
       - name: Refuse a branch this delivery does not serve
@@ -288,15 +291,34 @@ jobs:
           # because it is DATA the receipt carries, not a verdict it reports.
           echo "LAB_PASS_INVENTORY=${LAB_PASS_WORK}/node-inventory.json" >> "$GITHUB_ENV"
 
+      # OMN-20154: read dev-201's verify.deploy_agent_url from the routing
+      # table through the shared lane-env writer, as the sibling reusable does.
+      # It also exports DEV_LANE_RUNTIME_CONTAINER and the three readiness URLs.
+      # The probe step's explicit values stay authoritative: step env overrides
+      # job env, including its onex-api DEV_LANE_CONTAINER and readiness URLs.
+      - name: Read the compose-dev lane's verify targets
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/check_dev_lane_staleness.py \
+            --write-lane-env \
+            --lane compose-dev
+
+      # OMN-20154: convergence can precede the agent's verification recreate.
+      # Bind only after that job ends, within the SAME 25-minute wait window;
+      # a recorded recovered recreate with the same image and revision rebinds.
       - name: Wait for the lane's onex-api to report this revision
         id: converge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE_SHA: ${{ needs.trigger-delivery.outputs.source_sha }}
+          CORRELATION_ID: ${{ needs.trigger-delivery.outputs.correlation_id }}
+          DEPLOY_AGENT_URL: ${{ env.DEPLOY_AGENT_URL }}
         run: |
           set -euo pipefail
           uv run python scripts/ci/check_lane_onex_api_revision.py \
             --expect-revision "$SOURCE_SHA" \
+            --agent-url "$DEPLOY_AGENT_URL" \
+            --correlation-id "$CORRELATION_ID" \
             --wait-timeout 25m \
             --poll-interval 60s
 
