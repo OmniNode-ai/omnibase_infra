@@ -250,7 +250,7 @@ def test_judge_redpanda_can_host_full_contract_topic_catalog() -> None:
 
     assert redpanda["ulimits"]["nofile"] == {"soft": 65535, "hard": 65535}
     assert "--overprovisioned" in command
-    assert command[command.index("--memory") + 1] == "${REDPANDA_MEMORY:-8G}"
+    assert command[command.index("--memory") + 1] == "${JUDGE_REDPANDA_MEMORY:-2G}"
     assert "--reserve-memory" in command
     assert command[command.index("--reserve-memory") + 1] == "0M"
     assert "--check=false" in command
@@ -280,7 +280,7 @@ def test_judge_profile_names_and_ports_do_not_reuse_dev_or_prod() -> None:
     assert services["postgres"]["ports"] == [
         "${JUDGE_POSTGRES_EXTERNAL_PORT:-35436}:5432"
     ]
-    assert services["redpanda"]["ports"] == ["49092:19092", "127.0.0.1:49644:9644"]
+    assert services["redpanda"]["ports"] == ["59092:19092", "127.0.0.1:59644:9644"]
     assert services["valkey"]["ports"] == ["${JUDGE_VALKEY_EXTERNAL_PORT:-56379}:6379"]
     assert services["omninode-runtime"]["ports"] == [
         "${JUDGE_RUNTIME_MAIN_PORT:?runtime policy contract must set JUDGE_RUNTIME_MAIN_PORT}:8085"
@@ -309,3 +309,19 @@ def test_judge_runtime_services_mount_contracts_from_clone() -> None:
             "${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro"
             in volumes
         )
+
+
+@pytest.mark.unit
+def test_judge_redpanda_matches_the_running_broker_contract() -> None:
+    """OMN-20260: port 59092, a reachable advertised host, own memory dial, loopback admin."""
+    redpanda = _load_compose()["services"]["redpanda"]
+    command = redpanda["command"]
+    advertised = command[command.index("--advertise-kafka-addr") + 1]
+    memory = command[command.index("--memory") + 1]
+
+    assert redpanda["ports"] == ["59092:19092", "127.0.0.1:59644:9644"]
+    assert advertised.endswith(":59092")
+    assert "${JUDGE_REDPANDA_ADVERTISE_HOST:?" in advertised
+    assert "localhost" not in advertised.split("external://")[1].split("${")[0]
+    assert memory == "${JUDGE_REDPANDA_MEMORY:-2G}"
+    assert "REDPANDA_MEMORY" not in memory.replace("JUDGE_REDPANDA_MEMORY", "")

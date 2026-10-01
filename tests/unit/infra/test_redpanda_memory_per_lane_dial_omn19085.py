@@ -80,7 +80,7 @@ def test_dev_lane_reads_its_own_memory_dial() -> None:
     ("compose_file", "expected"),
     [
         ("docker-compose.stability-test.yml", "${STABILITY_TEST_REDPANDA_MEMORY:-12G}"),
-        ("docker-compose.judge.yml", "${REDPANDA_MEMORY:-8G}"),
+        ("docker-compose.judge.yml", "${JUDGE_REDPANDA_MEMORY:-2G}"),
         ("docker-compose.lakshman.yml", "${LAKSHMAN_REDPANDA_MEMORY:-2G}"),
         ("docker-compose.dogfood.yml", "${DOGFOOD_REDPANDA_MEMORY:-2G}"),
         ("docker-compose.prod.yml", "${PROD_REDPANDA_MEMORY:-8G}"),

@@ -83,7 +83,7 @@ OUT_OF_SCOPE_SERVICES = {
 }
 EXPECTED_PUBLISHED_PORTS = {
     "postgres": {"35436"},
-    "redpanda": {"49092", "49644"},
+    "redpanda": {"59092", "59644"},
     "redpanda-partition-cap": set(),
     "valkey": {"56379"},
     "forward-migration": set(),
@@ -315,7 +315,7 @@ def test_judge_lane_render_raises_redpanda_fd_and_partition_capacity() -> None:
 
     assert redpanda["ulimits"]["nofile"] == {"soft": 65535, "hard": 65535}
     assert "--overprovisioned" in command
-    assert command[command.index("--memory") + 1] == "8G"
+    assert command[command.index("--memory") + 1] == "2G"
     assert "--reserve-memory" in command
     assert command[command.index("--reserve-memory") + 1] == "0M"
     assert "--check=false" in command
@@ -421,3 +421,32 @@ def test_judge_secret_refs_are_rendered_from_runtime_policy() -> None:
             "source_type": "env",
             "source_path": "LLM_GLM_API_KEY",
         }
+
+
+@pytest.mark.integration
+def test_judge_redpanda_render_matches_the_running_broker() -> None:
+    """OMN-20260: rendered broker is 59092, LAN-advertised, own memory dial, loopback admin."""
+    advertise_host = "192.0.2.10"  # RFC 5737 documentation address
+    result = subprocess.run(
+        _docker_compose_command("config", "--format", "json"),
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        env={
+            **_compose_render_env(),
+            "JUDGE_REDPANDA_ADVERTISE_HOST": advertise_host,
+            "REDPANDA_MEMORY": "24G",
+        },
+        text=True,
+    )
+    redpanda = json.loads(result.stdout)["services"]["redpanda"]
+    command = redpanda["command"]
+    advertised = command[command.index("--advertise-kafka-addr") + 1]
+    ports = {(p.get("host_ip", ""), str(p["published"])) for p in redpanda["ports"]}
+
+    assert ("", "59092") in ports
+    assert ("127.0.0.1", "59644") in ports
+    assert advertised == f"internal://redpanda:9092,external://{advertise_host}:59092"
+    assert "localhost" not in advertised
+    # The shared REDPANDA_MEMORY (24G live) must not reach the judge broker.
+    assert command[command.index("--memory") + 1] == "2G"

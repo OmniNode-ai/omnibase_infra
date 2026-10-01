@@ -27,11 +27,16 @@
 name: omnibase-infra-judge
 x-omninode-contract-overlay:
   judge-redpanda:
-    advertised_kafka_addr: &judge_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://localhost:49092"
-    kafka_port_publish: &judge_redpanda_kafka_port_publish "49092:19092"
+    # OMN-20260: the judge broker runs on 59092 (Kafka) and 59644 (admin) on the
+    # .201 host; the source follows the running container. The advertised host
+    # is what off-host producers are told to reconnect to, so it must be an
+    # address they can reach: the value is operator-supplied (lab overlay or
+    # env), never a literal, and never localhost.
+    advertised_kafka_addr: &judge_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://${JUDGE_REDPANDA_ADVERTISE_HOST:?JUDGE_REDPANDA_ADVERTISE_HOST is required - the address off-host producers reach this broker on, not localhost}:59092"
+    kafka_port_publish: &judge_redpanda_kafka_port_publish "59092:19092"
     # Loopback only (OMN-20260): admin_api_require_auth is false on this broker,
     # and every in-network consumer uses redpanda:9644.
-    admin_port_publish: &judge_redpanda_admin_port_publish "127.0.0.1:49644:9644"
+    admin_port_publish: &judge_redpanda_admin_port_publish "127.0.0.1:59644:9644"
   judge-model-secrets:
     required_secret_refs:
       - GEMINI_API_KEY
@@ -250,7 +255,10 @@ services:
       - --smp
       - "1"
       - --memory
-      - ${REDPANDA_MEMORY:-8G}
+      # OMN-20260: judge reads its OWN dial, not the shared REDPANDA_MEMORY
+      # (host-global, 24G live). The default is the 2G the running broker has;
+      # the earlier source default was 8G.
+      - ${JUDGE_REDPANDA_MEMORY:-2G}
       - --reserve-memory
       - "0M"
       - --node-id
