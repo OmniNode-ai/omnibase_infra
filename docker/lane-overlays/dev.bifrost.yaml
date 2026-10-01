@@ -59,7 +59,7 @@ backends:
     endpoint_url: "http://192.168.86.202:8000/v1/chat/completions"
     served_model_id: "Qwen3.8-27B"
     parameter_count: "27B"
-    context_window: 32768
+    context_window: 65536
     max_tokens: 16384
     timeout_ms: 300000
     provider: local
@@ -71,11 +71,12 @@ backends:
       - refactoring
       - documentation
     # OMN-19215: placed in the local tier after the two .201 rungs it backs.
-    # 32768 is llama.cpp's per-slot n_ctx above. `mode: spread` (AC4, RULING
+    # 65536 is llama.cpp's per-slot n_ctx above (OMN-20240, re-probed
+    # 2026-10-01; one KV pool shared by the four slots under --kv-unified). `mode: spread` (AC4, RULING
     # ledger:4257) also gives it a share of those rungs' first-choice traffic:
     # the routing authority picks .201 or .202 per request by a stable hash of
     # the correlation id, and a transport failure on either retries the other.
-    # A prompt larger than 32768 tokens always stays on .201. Each engine
+    # A prompt larger than 65536 tokens always stays on .201. Each engine
     # enforces its own four-slot limit (.201 vLLM --max-num-seqs 4, .202
     # llama.cpp --parallel 4).
     placement:
@@ -83,7 +84,7 @@ backends:
       fallback_for:
         - local-coder
         - local-heavy-reasoning
-      max_context_tokens: 32768
+      max_context_tokens: 65536
       mode: spread
   # OMN-19432: gpt-oss-120b on the .200 Mac Studio (llama.cpp, MXFP4 GGUF, keyless,
   # 131072-token context pool shared by four slots). RULING 2026-09-30T15:07:51Z:
