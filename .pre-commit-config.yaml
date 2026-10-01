@@ -93,6 +93,7 @@ repos:
     rev: 5220ecf1758b4475c2963ec13171b6431fdc2224 # pragma: allowlist secret
     hooks:
       - id: check-shape-gate-independence
+        require_serial: true
   # Hardcoded topic guard — sourced from onex_change_control (OMN-5256/OMN-5259)
   # Pre-existing violations excluded pending migration to canonical constants (OMN-5259)
   # OMN-13195 (phase A4): dropped the redundant `event_bus/topic_constants.py`
