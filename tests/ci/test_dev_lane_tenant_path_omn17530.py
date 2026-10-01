@@ -184,6 +184,21 @@ def test_broker_acl_provider_is_the_lane_s_own_broker() -> None:
 
 
 @pytest.mark.unit
+def test_onex_api_declares_the_lane_s_own_redpanda_admin_api() -> None:
+    """OMN-20213: tenant create issues ACLs and a SCRAM login on THIS broker.
+
+    onex-api's redpanda provider has no default admin address, so an absent
+    value would silently keep every lane tenant at acl_state deferred with no
+    bus login. The value must name this lane's own ``redpanda`` service, the
+    same broker ``KAFKA_BOOTSTRAP_SERVERS`` names, never another lane's.
+    """
+    lane = _load_dev_lane()
+    env = lane["services"]["onex-api"]["environment"]
+    assert env["REDPANDA_ADMIN_URL"] == "http://redpanda:9644"
+    assert env["KAFKA_BOOTSTRAP_SERVERS"].split(":")[0] == "redpanda"
+
+
+@pytest.mark.unit
 def test_images_are_tag_referenced_and_fail_closed() -> None:
     """No ``:latest`` default, in either direction.
 

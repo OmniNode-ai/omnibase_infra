@@ -1,3 +1,36 @@
+## v0.38.61 (2026-10-01)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.61 by the scheduled release train.
+- 24 release-relevant commit(s) merged since v0.38.60.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.60
+- feat: vendor the delegation_dispositions projection migrations ahead of omnimarket (#4397)
+- feat: price claude-sonnet-5-5 in the pricing manifest (#4400)
+- fix: eight orchestrators and the ledger projection compute declare runtime_profiles [main], and ten runtime_profiles allowlist rows are deleted (#4393)
+- chore: advance omnimarket contract pin to 49ee50d5f1b0 (#4385)
+- feat: a lane overlay chooses the served model; the local bundle keeps a runtime-owned key store and the tenant credentials projection (#4381)
+- fix: the deployed-lane locus probe asks only about the orchestrator contract's own consumer groups (#4390)
+- fix: an in-process onex delegate on a shared bus is refused, because the deployed orchestrator also consumes its start command (#4389)
+- fix: the 22 lapsed subscribe-wiring exemptions are resolved by evidence, not a new date (#4384)
+- fix: unused validator exemptions fail CI and the delegation seam test runs on every PR (#4376)
+- fix: the model catalog and compose defaults stop addressing the GLM Coding Plan endpoint, and a gate keeps it out of tracked config (#4370)
+- feat(migrations): vendor delegation eval-run migrations 0003-0006 [] (#4371)
+- chore: advance omnimarket contract pin to 7f67a60b8a09 (#4366)
+- chore(deps): bump omnibase-core to 0.47.27 (#4355)
+- feat: a lane overlay placement carries use_for and weight to the routing authority (#4358)
+- feat: vendor the provider_quota_state projection migrations ahead of omnimarket#3134 (#4363)
+- feat: the laptop stack serves the pages' exposures and CI proves each service healthy (#4352)
+- chore: advance omnimarket contract pin to 92bc73177b90 (#4349)
+- feat: vendor the delegation_eval_items projection migrations ahead of omnimarket#3059 (#4315)
+- fix: a redeploy no longer loses a record whose handler is still running (#4346)
+- fix: receipt mode has no emit spool, so a fresh install prints no spool warning (#4342)
+- chore: advance omnimarket contract pin to 532ec1f53834 (#4336)
+- feat: onex delegate prints the answer by default, full receipt JSON behind --json (#4341)
+- fix: env_default_overrides refuses what it cannot rewrite safely (#4339)
+- feat: vendor the work ledger projection migrations ahead of omnimarket#3050 (#4272)
+
 ## v0.38.60 (2026-09-30)
 
 ### Release
