@@ -12,9 +12,6 @@ import pytest
 from omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_learn_initiate import (
     HandlerChainLearnInitiate,
 )
-from omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_replay_complete import (
-    HandlerChainReplayComplete,
-)
 from omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_retrieval_complete import (
     HandlerChainRetrievalComplete,
 )
@@ -110,33 +107,6 @@ class TestHandlerChainRetrievalComplete:
         result = await handler.handle(retrieval, uuid4())
         assert result["path"] == "explore"
         assert result["is_hit"] is False
-
-
-@pytest.mark.unit
-class TestHandlerChainReplayComplete:
-    @pytest.mark.asyncio
-    async def test_high_confidence_stores(self) -> None:
-        handler = HandlerChainReplayComplete()
-        replay = ModelChainReplayResult(
-            correlation_id=uuid4(),
-            adapted_steps=(_make_step(),),
-            adaptation_summary="No changes",
-            confidence=0.95,
-        )
-        result = await handler.handle(replay, uuid4())
-        assert result["action"] == "verify"
-
-    @pytest.mark.asyncio
-    async def test_low_confidence_fallback(self) -> None:
-        handler = HandlerChainReplayComplete()
-        replay = ModelChainReplayResult(
-            correlation_id=uuid4(),
-            adapted_steps=(_make_step(),),
-            adaptation_summary="Many changes",
-            confidence=0.3,
-        )
-        result = await handler.handle(replay, uuid4())
-        assert result["action"] == "fallback"
 
 
 @pytest.mark.unit

@@ -816,6 +816,9 @@ jobs:
           echo "================================================================"
           uv run python scripts/validate.py architecture_layers --verbose
 
+      - name: Reject unused validator exemptions
+        run: uv run python scripts/validate.py unused_exemptions --verbose
+
       - name: Run ONEX validators
         run: |
           uv run python scripts/validate.py all --verbose
@@ -866,6 +869,7 @@ jobs:
       # changed-node ratchet (pre-commit, blocking) stops regressions. Rides
       # OMN-12550 / OMN-13325 — same path as Signal A, not a fresh hook.
       - name: Run orchestration-monolith ratchet report (ARCH-004 Signal B)
+        # advisory-ok: OMN-13486 report-only ratchet while the baseline is above threshold; the changed-node ratchet in pre-commit is the blocking gate
         continue-on-error: true
         run: |
           echo "================================================================"
@@ -4377,6 +4381,37 @@ jobs:
           docker compose
           -f docker/legacy-rds-fixture/compose.yml
           down --volumes --remove-orphans --rmi local
+
+  # OMN-20183: always prove the local delegation FSM seam, including merge groups.
+  # CI Summary requires success via STRICT_GATE_JOBS in ci_summary_gate.py.
+  delegation-seam-gate:
+    name: delegation-seam-gate
+    # OMNI_RUNNER_SELECTOR_V1 — same selector as the other strict CI jobs.
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
+    env:
+      ONEX_EVENT_BUS_TYPE: "inmemory"
+      LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      - name: Run delegation cross-boundary seam test
+        run: uv run pytest tests/integration/runtime/test_s8_delegation_fsm_seam.py -v
 
   ci-summary:
     name: CI Summary
