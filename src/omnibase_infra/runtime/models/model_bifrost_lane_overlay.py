@@ -1,17 +1,20 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Strict contract overlay for local Bifrost delegation bindings (OMN-15807).
+"""Strict contract overlay for Bifrost delegation bindings (OMN-15807).
 
 OMN-17502 adds the execution-locale axis. See
 :class:`~omnibase_infra.runtime.models.enum_bifrost_lane_locale.EnumBifrostLaneLocale`
-for why a lane that runs off the lab network has to be able to declare zero
-local backends as a stated fact.
+for why a lane that runs off the lab network must reach no local backend.
+Cloud overlays may be empty, rebind base cloud backends, or add fully declared
+non-local backends. The model rejects local-tier additions; the renderer also
+rejects bindings targeting local-tier backends in the base contract.
 
 OMN-17099 removed the set-equality rule: a lab lane used to have to declare
 EXACTLY a backend set hardcoded in the product. Which backends a lab lane must
 bind is now derived from the base contract by the renderer — every local
 backend the base contract routes to — and a lane may add backends the base
 does not declare, fully specified.
+The overlay chooses the served model independently of the base contract.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
     EnumBifrostLaneLocale,
 )
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
+    LOCAL_TIER,
     ModelBifrostLaneBackendBinding,
 )
 
@@ -35,7 +39,11 @@ _SCHEMA_VERSION = "bifrost_lane_overlay.v3"
 
 
 class ModelBifrostLaneOverlay(BaseModel):
-    """The sole typed authority for a lane's local Bifrost delegation bindings."""
+    """The typed authority for a lane's Bifrost endpoint and model bindings.
+
+    Lab lanes bind every routed local backend (enforced by the renderer).
+    Cloud lanes may bind only non-local backends, or declare no bindings.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
@@ -67,16 +75,14 @@ class ModelBifrostLaneOverlay(BaseModel):
             )
 
         if self.locale is EnumBifrostLaneLocale.CLOUD:
-            if backend_keys:
-                raise ValueError(
-                    f"lane {self.lane!r} declares locale "
-                    f"{EnumBifrostLaneLocale.CLOUD.value!r} and must declare zero "
-                    f"local backends, got {sorted(backend_keys)}: a cloud lane runs "
-                    "where the lab endpoints do not exist, so binding "
-                    "one here would advertise a rung the lane cannot reach "
-                    "(OMN-17502). Its delegation comes from the base contract's "
-                    "cloud backends."
-                )
+            for binding in self.backends:
+                if binding.declares_new_backend and binding.tier == LOCAL_TIER:
+                    raise ValueError(
+                        f"lane {self.lane!r} declares locale "
+                        f"{EnumBifrostLaneLocale.CLOUD.value!r} but adds local-tier "
+                        f"backend {binding.backend_key!r}: a cloud lane must "
+                        "reach no lab endpoint (OMN-17502)."
+                    )
             return self
 
         if not backend_keys:

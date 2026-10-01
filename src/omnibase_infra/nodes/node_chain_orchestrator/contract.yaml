@@ -7,6 +7,7 @@
 #
 name: "node_chain_orchestrator"
 node_type: "ORCHESTRATOR_GENERIC"
+runtime_profiles: [main]
 contract_version:
   major: 1
   minor: 0
@@ -23,7 +24,11 @@ event_bus:
   subscribe_topics:
     - "onex.cmd.omnibase-infra.chain-learn.v1"
     - "onex.evt.omnibase-infra.chain-retrieval-result.v1"
-    - "onex.evt.omnibase-infra.chain-replay-result.v1"
+    # OMN-17427: `onex.evt.omnibase-infra.chain-replay-result.v1` DELETED from subscribe_topics. No contract and no
+    # runtime path anywhere in the fleet publishes it (grep of every omni_home
+    # clone, 2026-10-01), so the subscription only minted a permanently empty
+    # consumer group (OMN-16795). Re-add it with its publisher and its handler
+    # entry, in one diff (OMN-7897).
     # OMN-18013: `onex.evt.omnibase-infra.chain-verified.v1` DELETED from subscribe_topics. No handler_routing entry owned it
     # (_topics_for_handler_entry returned no match, so ZERO dispatch routes existed) AND
     # no contract anywhere in the corpus publishes it, so nothing could ever arrive on it
@@ -71,16 +76,6 @@ handler_routing:
         module: "omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_retrieval_complete"
       output_events:
         - "ModelChainReplayInput"
-    - event_model:
-        name: "ModelChainReplayResult"
-        module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_replay_result"
-      event_type: "omnibase-infra.chain-replay-result"
-      message_category: "EVENT"
-      handler:
-        name: "HandlerChainReplayComplete"
-        module: "omnibase_infra.nodes.node_chain_orchestrator.handlers.handler_chain_replay_complete"
-      output_events:
-        - "ModelChainStoreRequest"
     - event_model:
         name: "ModelChainStoreResult"
         module: "omnibase_infra.nodes.node_chain_orchestrator.models.model_chain_store_result"

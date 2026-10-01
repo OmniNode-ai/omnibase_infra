@@ -104,6 +104,13 @@
 # naming the credential. This file names it so the row can be written; bring-up
 # is phase 2 and every command is in the runbook.
 #
+# A second principal, the lab-work login (`CI_BUS_LABWORK_SASL_USERNAME` /
+# `CI_BUS_LABWORK_SASL_PASSWORD`, conventionally `ci-bus-labwork`), is NOT a
+# superuser: `ci-bus-labwork-user` creates it with only that one-shot's ACLs.
+# Its OPERATOR-CONSENT row is docs/tracking/ROLLING_WORK_LEDGER.md:20169 in
+# omni_home (operator, 2026-10-01). It is a new principal, not a rotation
+# (Operating Rule 22).
+#
 # Ticket: OMN-18691. Parent: OMN-18096. History: OMN-18012 (the SASL transport),
 # OMN-14800/OMN-14801 (why the lane->broker map is committed at all).
 name: omninode-ci-bus
@@ -122,8 +129,8 @@ services:
   # one host is a second set of upgrade semantics nobody asked for.
   #
   # `--smp 1` and a 1 GB memory reservation, against the lanes' 8 G: this broker
-  # carries five low-volume CI topics, not a runtime. Sizing it like a lane would
-  # take 8 GB from a host that ran out of headroom this morning.
+  # carries sixteen low-volume CI and lab topics, not a runtime. Sizing it like
+  # a lane would take 8 GB from a host that ran out of headroom this morning.
   redpanda:
     image: redpandadata/redpanda:v24.2.7
     container_name: omninode-ci-bus-redpanda
@@ -170,7 +177,7 @@ services:
       - "com.omninode.lane=ci-bus"
       - "com.omninode.ticket=OMN-18691"
   # ===========================================================================
-  # (2) THE CI TOPICS — created explicitly, never by broker auto-create
+  # (2) THE SIXTEEN CI AND LAB TOPICS — explicit, never broker auto-create
   # ===========================================================================
   # None of the four publishers creates a topic. They build a
   # `confluent_kafka.Producer` and call `produce`/`flush`; there is no
@@ -205,22 +212,41 @@ services:
   # that do not exist, and the first publish discovers it instead.
   #
   # The trailing per-topic readback is the point of the service, not decoration.
+  #
+  # The pool lab-work bus (`onex lab-work serve` on every pool host, OMN-20105,
+  # plus focused test run / push validation via `open_lab_run_bus`) moves off
+  # the h105 dogfood broker onto this broker, which no lane rebuild reaches
+  # (OMN-20213). Its contracts live in omnimarket: node_lab_work_unit_effect,
+  # node_focused_test_run_effect, node_push_validation_effect. Six partitions
+  # matches DEFAULT_EVENT_TOPIC_PARTITIONS for these eleven lab topics too.
   ci-bus-topics:
     image: redpandadata/redpanda:v24.2.7
     container_name: omninode-ci-bus-topics
     entrypoint: ["/bin/sh", "-c"]
+    environment:
+      CI_BUS_KAFKA_SASL_USERNAME: ${CI_BUS_KAFKA_SASL_USERNAME:?CI_BUS_KAFKA_SASL_USERNAME must be set - the topics one-shot authenticates as the publisher principal once SASL is on (OMN-20213); it is resolved from the operator env file, never inlined here}
+      CI_BUS_KAFKA_SASL_PASSWORD: ${CI_BUS_KAFKA_SASL_PASSWORD:?CI_BUS_KAFKA_SASL_PASSWORD must be set - the topics one-shot authenticates as the publisher principal once SASL is on (OMN-20213); it is resolved from the operator env file, never inlined here}
     command:
       - |
         set -eu
         BROKER="-X brokers=redpanda:9092"
         ADMIN="-X admin.hosts=redpanda:9644"
+        # Unauthenticated Kafka calls fail on re-apply after the SASL flip,
+        # blocking ci-bus-sasl-enable behind this one-shot. The admin API is
+        # not SASL-gated; branch on its state before any Kafka call (OMN-20213).
+        SASL_ENABLED=$$(/usr/bin/rpk cluster config get enable_sasl $$ADMIN)
+        if [ "$$SASL_ENABLED" = true ]; then
+          BROKER="$$BROKER -X sasl.mechanism=SCRAM-SHA-256 -X user=$$CI_BUS_KAFKA_SASL_USERNAME -X pass=$$CI_BUS_KAFKA_SASL_PASSWORD"
+        fi
         # Match the lanes' per-shard partition ceiling so a future topic
         # addition does not hit the Redpanda default of 1000 (OMN-7302).
         /usr/bin/rpk cluster config set topic_partitions_per_shard 7000 $$ADMIN
-        TOPICS="onex.cmd.omnimarket.occ-autobind.v1 onex.cmd.omnimarket.occ-companion-effect-requested.v1 onex.evt.github.pr-merged.v1 onex.cmd.omnimarket.redeploy-start.v1 onex.evt.deploy.rebuild-completed.v1"
+        CI_TOPICS="onex.cmd.omnimarket.occ-autobind.v1 onex.cmd.omnimarket.occ-companion-effect-requested.v1 onex.evt.github.pr-merged.v1 onex.cmd.omnimarket.redeploy-start.v1 onex.evt.deploy.rebuild-completed.v1"
+        LAB_TOPICS="onex.cmd.omnimarket.lab-work-unit-requested.v1 onex.evt.omnimarket.lab-work-unit-completed.v1 onex.evt.omnimarket.lab-work-unit-failed.v1 onex.evt.omnimarket.lab-host-capacity-advertised.v1 onex.cmd.omnimarket.focused-test-run-requested.v1 onex.evt.omnimarket.focused-test-run-completed.v1 onex.evt.omnimarket.focused-test-run-failed.v1 onex.cmd.omnimarket.push-validation-requested.v1 onex.evt.omnimarket.push-validation-completed.v1 onex.evt.omnimarket.push-validation-failed.v1 onex.dlq.omnimarket.push-validation.v1"
+        TOPICS="$$CI_TOPICS $$LAB_TOPICS"
         for t in $$TOPICS; do
           if /usr/bin/rpk topic list $$BROKER | awk '{print $$1}' | grep -qx "$$t"; then
-            echo "OMN-18691: topic already present: $$t"
+            echo "OMN-18691 + OMN-20213: topic already present: $$t"
           else
             /usr/bin/rpk topic create "$$t" \
               --partitions 6 \
@@ -229,13 +255,13 @@ services:
               -c cleanup.policy=delete \
               -c segment.bytes=134217728 \
               $$BROKER
-            echo "OMN-18691: topic created: $$t"
+            echo "OMN-18691 + OMN-20213: topic created: $$t"
           fi
         done
         for t in $$TOPICS; do
           /usr/bin/rpk topic list $$BROKER | awk '{print $$1}' | grep -qx "$$t"
         done
-        echo "OMN-18691: readback confirms all five CI-bus topics exist"
+        echo "OMN-18691 + OMN-20213: readback confirms all sixteen topics exist"
     depends_on:
       redpanda:
         condition: service_healthy
@@ -383,6 +409,104 @@ services:
       - "com.omninode.layer=infrastructure"
       - "com.omninode.lane=ci-bus"
       - "com.omninode.ticket=OMN-18691"
+  # ===========================================================================
+  # (5) THE LAB-WORK PRINCIPAL — scoped ACLs, never a superuser (OMN-20213)
+  # ===========================================================================
+  # The pool's lab-work, focused test run and push validation share this login.
+  # It is not a superuser: laptops and pool hosts need only these topics and
+  # consumer-group prefixes, never unrestricted CI-bus access. The consent row
+  # (docs/tracking/ROLLING_WORK_LEDGER.md:20169 in omni_home, operator,
+  # 2026-10-01) puts hand-typed rpk users out of scope; creation and grants are
+  # declared by this one-shot so re-apply performs the same reviewed steps.
+  #
+  # Run AFTER the SASL flip: the publisher superuser must exist and authenticate
+  # before it can grant ACLs. Refuse the superuser identity, create and read back
+  # the SCRAM user over admin, refuse superuser membership, then grant and read
+  # back ACLs before testing topic visibility as the scoped login itself.
+  ci-bus-labwork-user:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: omninode-ci-bus-labwork-user
+    entrypoint: ["/bin/sh", "-c"]
+    environment:
+      CI_BUS_KAFKA_SASL_USERNAME: ${CI_BUS_KAFKA_SASL_USERNAME:?CI_BUS_KAFKA_SASL_USERNAME must be set - the superuser creates lab-work ACLs (OMN-20213); it is resolved from the operator env file, never inlined here}
+      CI_BUS_KAFKA_SASL_PASSWORD: ${CI_BUS_KAFKA_SASL_PASSWORD:?CI_BUS_KAFKA_SASL_PASSWORD must be set - the superuser creates lab-work ACLs (OMN-20213); it is resolved from the operator env file, never inlined here}
+      CI_BUS_LABWORK_SASL_USERNAME: ${CI_BUS_LABWORK_SASL_USERNAME:?CI_BUS_LABWORK_SASL_USERNAME must be set - the scoped lab-work SCRAM login (OMN-20213); it is resolved from the operator env file, never inlined here}
+      CI_BUS_LABWORK_SASL_PASSWORD: ${CI_BUS_LABWORK_SASL_PASSWORD:?CI_BUS_LABWORK_SASL_PASSWORD must be set - the scoped lab-work SCRAM login (OMN-20213); it is resolved from the operator env file, never inlined here}
+    command:
+      - |
+        set -eu
+        ADMIN="-X admin.hosts=redpanda:9644"
+        BROKER="-X brokers=redpanda:9092"
+        SU="-X sasl.mechanism=SCRAM-SHA-256 -X user=$$CI_BUS_KAFKA_SASL_USERNAME -X pass=$$CI_BUS_KAFKA_SASL_PASSWORD"
+        LW="-X sasl.mechanism=SCRAM-SHA-256 -X user=$$CI_BUS_LABWORK_SASL_USERNAME -X pass=$$CI_BUS_LABWORK_SASL_PASSWORD"
+        if [ "$$CI_BUS_LABWORK_SASL_USERNAME" = "$$CI_BUS_KAFKA_SASL_USERNAME" ]; then
+          echo "OMN-20213 FAIL: lab-work login equals the superuser; ACL scoping is meaningless" >&2
+          exit 1
+        fi
+        if /usr/bin/rpk security user list $$ADMIN | awk '{print $$1}' | grep -qx "$$CI_BUS_LABWORK_SASL_USERNAME"; then
+          echo "OMN-20213: lab-work SCRAM principal already present"
+        else
+          /usr/bin/rpk security user create "$$CI_BUS_LABWORK_SASL_USERNAME" -p "$$CI_BUS_LABWORK_SASL_PASSWORD" --mechanism SCRAM-SHA-256 $$ADMIN
+          echo "OMN-20213: lab-work SCRAM principal created"
+        fi
+        /usr/bin/rpk security user list $$ADMIN | awk '{print $$1}' | grep -qx "$$CI_BUS_LABWORK_SASL_USERNAME"
+        echo "OMN-20213: readback confirms the lab-work principal exists"
+        SUPERUSERS=$$(/usr/bin/rpk cluster config get superusers $$ADMIN)
+        if printf '%s\n' "$$SUPERUSERS" | grep -Fq "$$CI_BUS_LABWORK_SASL_USERNAME"; then
+          echo "OMN-20213 FAIL: lab-work principal appears in superusers" >&2
+          exit 1
+        fi
+        echo "OMN-20213: lab-work principal is not a superuser"
+        # Kafka ACL creation is idempotent: an identical binding is a no-op.
+        LAB_TOPICS="onex.cmd.omnimarket.lab-work-unit-requested.v1 onex.evt.omnimarket.lab-work-unit-completed.v1 onex.evt.omnimarket.lab-work-unit-failed.v1 onex.evt.omnimarket.lab-host-capacity-advertised.v1 onex.cmd.omnimarket.focused-test-run-requested.v1 onex.evt.omnimarket.focused-test-run-completed.v1 onex.evt.omnimarket.focused-test-run-failed.v1 onex.cmd.omnimarket.push-validation-requested.v1 onex.evt.omnimarket.push-validation-completed.v1 onex.evt.omnimarket.push-validation-failed.v1 onex.dlq.omnimarket.push-validation.v1"
+        for t in $$LAB_TOPICS; do
+          /usr/bin/rpk security acl create --allow-principal "User:$$CI_BUS_LABWORK_SASL_USERNAME" \
+            --resource-pattern-type literal --topic "$$t" \
+            --operation read --operation write --operation describe $$BROKER $$SU
+        done
+        # derive_service_group_id(..., service="omnimarket") under env token
+        # local: pool host groups are <prefix>.<host>, client groups append a
+        # random suffix, and EventBusKafka appends .__t.<topic>. These must be
+        # prefixed grants rather than literal group names.
+        GROUP_PREFIXES="local.omnimarket.node_lab_work_unit_effect.consume.v1. local.omnimarket.lab_work_client.consume.v1. local.omnimarket.node_focused_test_run_effect.consume.v1 local.omnimarket.delegated_test_loop_client.consume.v1."
+        for g in $$GROUP_PREFIXES; do
+          /usr/bin/rpk security acl create --allow-principal "User:$$CI_BUS_LABWORK_SASL_USERNAME" \
+            --resource-pattern-type prefixed --group "$$g" \
+            --operation read --operation describe $$BROKER $$SU
+        done
+        # EventBusKafka producers default enable_idempotence=True
+        # (model_kafka_event_bus_config.py). Producer-id allocation requires
+        # IdempotentWrite on the cluster; this grants access to no topic.
+        /usr/bin/rpk security acl create --allow-principal "User:$$CI_BUS_LABWORK_SASL_USERNAME" \
+          --cluster --operation idempotent_write $$BROKER $$SU
+        ACLS=$$(/usr/bin/rpk security acl list --allow-principal "User:$$CI_BUS_LABWORK_SASL_USERNAME" $$BROKER $$SU)
+        for t in $$LAB_TOPICS; do
+          printf '%s\n' "$$ACLS" | grep -q "$$t"
+        done
+        echo "OMN-20213: ACL readback confirms all eleven lab topics"
+        # A down broker also hides topics, so the negative alone proves nothing.
+        # Capture once as the lab-work login: the positive proves authentication
+        # and authorization, and the negative proves a CI topic is invisible.
+        VISIBLE_TOPICS=$$(/usr/bin/rpk topic list $$BROKER $$LW)
+        printf '%s\n' "$$VISIBLE_TOPICS" | awk '{print $$1}' | grep -qx onex.cmd.omnimarket.lab-work-unit-requested.v1
+        echo "OMN-20213: lab-work requested topic visible - positive control"
+        if printf '%s\n' "$$VISIBLE_TOPICS" | awk '{print $$1}' | grep -qx onex.evt.github.pr-merged.v1; then
+          echo "OMN-20213 FAIL: CI topic is visible to the lab-work login" >&2
+          exit 1
+        fi
+        echo "OMN-20213: CI topic invisible - negative control"
+    depends_on:
+      ci-bus-sasl-enable:
+        condition: service_completed_successfully
+    networks:
+      - ci-bus-network
+    restart: "no"
+    logging: *ci_bus_logging
+    labels:
+      - "com.omninode.service=ci-bus-labwork-user"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.lane=ci-bus"
+      - "com.omninode.ticket=OMN-20213"
 networks:
   ci-bus-network:
     # Spelled explicitly so the network is identifiable on a host that runs six

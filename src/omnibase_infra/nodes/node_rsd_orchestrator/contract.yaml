@@ -6,6 +6,7 @@
 #
 name: "node_rsd_orchestrator"
 node_type: "ORCHESTRATOR_GENERIC"
+runtime_profiles: [main]
 contract_version:
   major: 1
   minor: 0
@@ -21,8 +22,16 @@ event_bus:
     patch: 0
   subscribe_topics:
     - "onex.cmd.rsd.score.v1"
-    - "onex.evt.rsd.data-fetched.v1"
-    - "onex.evt.rsd.scores-calculated.v1"
+    # OMN-17427: `onex.evt.rsd.data-fetched.v1` DELETED from subscribe_topics. No contract and no
+    # runtime path anywhere in the fleet publishes it (grep of every omni_home
+    # clone, 2026-10-01), so the subscription only minted a permanently empty
+    # consumer group (OMN-16795). Re-add it with its publisher and its handler
+    # entry, in one diff (OMN-7897).
+    # OMN-17427: `onex.evt.rsd.scores-calculated.v1` DELETED from subscribe_topics. No contract and no
+    # runtime path anywhere in the fleet publishes it (grep of every omni_home
+    # clone, 2026-10-01), so the subscription only minted a permanently empty
+    # consumer group (OMN-16795). Re-add it with its publisher and its handler
+    # entry, in one diff (OMN-7897).
     # OMN-18013: `onex.evt.rsd.scores-stored.v1` DELETED from subscribe_topics. No handler_routing entry owned it
     # (_topics_for_handler_entry returned no match, so ZERO dispatch routes existed) AND
     # no contract anywhere in the corpus publishes it, so nothing could ever arrive on it
@@ -62,26 +71,6 @@ handler_routing:
         module: "omnibase_infra.nodes.node_rsd_orchestrator.handlers.handler_rsd_initiate"
       output_events:
         - "ModelRsdDataFetchRequest"
-    - event_model:
-        name: "ModelRsdDataFetchResult"
-        module: "omnibase_infra.nodes.node_rsd_data_fetch_effect.models.model_rsd_data_fetch_result"
-      event_type: "rsd.data-fetched"
-      message_category: "EVENT"
-      handler:
-        name: "HandlerRsdDataFetchComplete"
-        module: "omnibase_infra.nodes.node_rsd_orchestrator.handlers.handler_rsd_data_fetch_complete"
-      output_events:
-        - "ModelRsdScoreInput"
-    - event_model:
-        name: "ModelRsdScoreResult"
-        module: "omnibase_infra.nodes.node_rsd_score_compute.models.model_rsd_score_result"
-      event_type: "rsd.scores-calculated"
-      message_category: "EVENT"
-      handler:
-        name: "HandlerRsdScoreComplete"
-        module: "omnibase_infra.nodes.node_rsd_orchestrator.handlers.handler_rsd_score_complete"
-      output_events:
-        - "ModelRsdResult"
 workflow_coordination:
   workflow_definition:
     workflow_metadata:

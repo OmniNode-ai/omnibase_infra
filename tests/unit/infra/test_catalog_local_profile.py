@@ -11,6 +11,9 @@ lab dependency, a shared Docker object name, or a second env source.
 from __future__ import annotations
 
 import os
+import re
+import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -109,6 +112,7 @@ def test_local_bundle_runs_both_runtime_kernels_the_writer_and_the_migration_gat
         "consumer-health-projection",
         "omnimarket-projection-delegation",
         "omnimarket-projection-llm-cost",
+        "omnimarket-projection-tenant-credentials",
         "omninode-runtime",
         "projection-api",
         "runtime-effects",
@@ -177,7 +181,13 @@ def test_local_runtime_kernels_mount_and_pin_the_local_overlay() -> None:
     )
 
 
-def test_local_projection_writer_binds_the_lab_principals_not_the_superuser() -> None:
+@pytest.mark.parametrize(
+    "writer",
+    ["omnimarket-projection-delegation", "omnimarket-projection-tenant-credentials"],
+)
+def test_local_projection_writer_binds_the_lab_principals_not_the_superuser(
+    writer: str,
+) -> None:
     """omnimarket's standalone writer attests the connected principal per binding.
 
     With the superuser DSNs the laptop bundle used to inject, the delegation
@@ -188,7 +198,7 @@ def test_local_projection_writer_binds_the_lab_principals_not_the_superuser() ->
     resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
     services = generate_compose(resolved)["services"]
     assert isinstance(services, dict)
-    env = services["omnimarket-projection-delegation"]["environment"]
+    env = services[writer]["environment"]
     assert env["ONEX_DATABASE_TOPOLOGY_PROFILE"] == "local"
     assert env["ONEX_TENANT_DB_URL"].startswith(
         "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?"
@@ -205,6 +215,199 @@ def test_local_projection_writer_binds_the_lab_principals_not_the_superuser() ->
         migration_env["TENANT_PROJECTION_WRITER_PASSWORD"]
         == "${TENANT_PROJECTION_WRITER_PASSWORD:-}"
     )
+
+
+def test_local_tenant_credentials_projection_runs_with_its_own_healthcheck() -> None:
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    services = generate_compose(resolved)["services"]
+    assert isinstance(services, dict)
+    writer = services["omnimarket-projection-tenant-credentials"]
+    assert writer["image"] == f"{_PROJECT}-runtime:latest"
+    assert writer["command"] == [
+        "python",
+        "-m",
+        "omnimarket.nodes.node_projection_tenant_credentials.handlers."
+        "handler_tenant_credentials_projection",
+    ]
+    assert writer["environment"]["KAFKA_CONSUMER_GROUP"] == (
+        "local.omnimarket-projections.tenant-credentials-writer.consume.v1"
+    )
+    assert writer["environment"]["PROJECTION_RUNNER_HEALTH_PORT"] == "8102"
+    assert writer["healthcheck"]["test"] == [
+        "CMD-SHELL",
+        "curl -sf http://localhost:8102/ready",
+    ]
+    assert (
+        writer["depends_on"]
+        == services["omnimarket-projection-delegation"]["depends_on"]
+    )
+    assert set(
+        resolved.manifests["omnimarket-projection-tenant-credentials"].required_env
+    ) == {
+        "OMNIDASH_ANALYTICS_DB_URL",
+        "ONEX_TENANT_DB_URL",
+        "OMNINODE_INTERNAL_DB_URL",
+    }
+
+
+def test_the_runtime_family_that_resolves_a_tenant_key_shares_one_credentials_store() -> (
+    None
+):
+    """The main runtime hosts the LLM call effect; runtime-effects hosts intake.
+
+    Measured on the lab (2026-09-30): with the store on runtime-effects alone,
+    the main runtime could not resolve the tenant's minted reference ("could
+    not be resolved from the secret store") and the tenant route failed.
+    """
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    compose = generate_compose(resolved)
+    services = compose["services"]
+    assert isinstance(services, dict)
+    target = "/home/omniinfra/.omninode/delegation"
+    owners = {
+        name: [v for v in svc.get("volumes", []) if f":{target}" in v]
+        for name, svc in services.items()
+        if any(f":{target}" in v for v in svc.get("volumes", []))
+    }
+    assert owners == {
+        "omninode-runtime": [f"delegation_credentials:{target}"],
+        "runtime-effects": [f"delegation_credentials:{target}"],
+    }
+    volumes = compose["volumes"]
+    assert isinstance(volumes, dict)
+    assert volumes["delegation_credentials"] == {
+        "name": f"{_PROJECT}-delegation_credentials"
+    }
+
+
+def _provider_credential_env_names(environment: Mapping[str, object]) -> list[str]:
+    return sorted(
+        name
+        for name in environment
+        if any(
+            fragment in name.upper()
+            for fragment in ("GEMINI", "OPENROUTER", "GLM_", "OPENAI", "ANTHROPIC")
+        )
+        or name.lower().startswith("llm.")
+    )
+
+
+def test_local_render_has_no_provider_credential_environment_names() -> None:
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    services = generate_compose(resolved)["services"]
+    assert isinstance(services, dict)
+    assert {
+        name: hits
+        for name, svc in services.items()
+        if (hits := _provider_credential_env_names(svc.get("environment", {})))
+    } == {}
+
+
+def test_provider_credential_environment_scan_can_fail() -> None:
+    forbidden = {
+        "GEMINI_API_KEY": "",
+        "OPENAI_API_KEY": "",
+        "OPENROUTER_TOKEN": "",
+        "GLM_TOKEN": "",
+        "llm.example.secret": "",
+    }
+    assert _provider_credential_env_names({**forbidden, "ONEX_TENANT_ID": ""}) == (
+        sorted(forbidden)
+    )
+
+
+def test_local_lane_tenant_is_optional_and_injected_into_every_runtime_service() -> (
+    None
+):
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    services = generate_compose(resolved)["services"]
+    assert isinstance(services, dict)
+    assert "ONEX_TENANT_ID" not in resolved.required_env
+    for name, manifest in resolved.manifests.items():
+        assert "ONEX_TENANT_ID" not in manifest.required_env
+        env = services[name].get("environment", {})
+        if manifest.layer == EnumInfraLayer.RUNTIME:
+            assert env["ONEX_TENANT_ID"] == "${ONEX_TENANT_ID:-}"
+        else:
+            assert "ONEX_TENANT_ID" not in env
+
+
+def test_secret_local_make_target_passes_only_provider_and_tenant_as_arguments() -> (
+    None
+):
+    makefile = (_REPO / "Makefile").read_text(encoding="utf-8")
+    target = makefile.split("\nsecret-local:", 1)[1].split("\n\n", 1)[0]
+    assert 'test -n "$(PROVIDER)"' in target
+    assert "ONEX_TENANT_ID=" in target
+    assert '"$(LOCAL_ENV_FILE)"' in target
+    assert 'test -n "$$tenant"' in target
+    # The key is registered only for the tenant the RUNNING runtime serves.
+    assert "printenv ONEX_TENANT_ID" in target
+    commands = [
+        line
+        for line in target.splitlines()
+        if "docker exec -u" in line and " -i " in line
+    ]
+    assert commands
+    for command in commands:
+        assert (
+            "docker exec -u omniinfra -e HOME=/home/omniinfra -i "
+            "$(LOCAL_PROJECT)-runtime-effects onex secret "
+            'register-tenant-key "$(PROVIDER)" --tenant "$$tenant"'
+        ) in command
+        assert not re.search(r"\$[({][^)}]*(?:KEY|VALUE)[^)}]*[)}]", command)
+    assert "read -r -s" in target  # Terminal input must be hidden.
+
+
+def _make(target: str, env_file: Path, overlay_file: Path) -> None:
+    result = subprocess.run(
+        [
+            "make",
+            target,
+            f"LOCAL_ENV_FILE={env_file}",
+            f"LOCAL_OVERLAY_FILE={overlay_file}",
+        ],
+        cwd=_REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_local_env_leaves_the_runtime_without_a_tenant(tmp_path: Path) -> None:
+    """A tenant makes every delegation BYOK-only, so it is never the default."""
+    env_file = tmp_path / "local.env"
+    _make("local-env", env_file, tmp_path / "local.bifrost.yaml")
+    lines = env_file.read_text(encoding="utf-8").splitlines()
+    assert "ONEX_TENANT_ID=" in lines
+
+
+@pytest.mark.parametrize("existing_tenant", [None, "absent", "", "local-kept"])
+def test_tenant_local_generates_a_tenant_once(
+    tmp_path: Path, existing_tenant: str | None
+) -> None:
+    env_file = tmp_path / "local.env"
+    overlay_file = tmp_path / "local.bifrost.yaml"
+    if existing_tenant is not None:
+        contents = "POSTGRES_PASSWORD=kept\n"
+        if existing_tenant != "absent":
+            contents += f"ONEX_TENANT_ID={existing_tenant}\n"
+        env_file.write_text(contents, encoding="utf-8")
+    _make("tenant-local", env_file, overlay_file)
+    tenant_lines = [
+        line
+        for line in env_file.read_text().splitlines()
+        if line.startswith("ONEX_TENANT_ID=")
+    ]
+    assert len(tenant_lines) == 1
+    tenant = tenant_lines[0].partition("=")[2]
+    if existing_tenant == "local-kept":
+        assert tenant == existing_tenant
+    else:
+        assert re.fullmatch(r"local-[0-9a-f]{12}", tenant)
+    _make("tenant-local", env_file, overlay_file)
+    assert tenant_lines[0] in env_file.read_text().splitlines()
 
 
 def test_overlay_template_is_a_typed_lab_overlay_named_for_the_local_lane() -> None:

@@ -15,6 +15,7 @@ Verifies that:
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -308,6 +309,75 @@ class TestLiveAllowlistHygiene:
         merged = {**_EXTERNAL_PUBLISHER_ALLOWLIST, **_BASELINE_DEAD_LETTER_ALLOWLIST}
         missing = [t for t, r in merged.items() if _parse_allowlist_expiry(r) is None]
         assert missing == [], f"Entries with no parseable expiry: {missing}"
+
+
+_PATTERN_B_REASON = re.compile(
+    r"Published by RuntimePatternBBroker as the local-ingress "
+    r"route\.command_topic of (?P<nodes>node_[a-z0-9_]+(?: and node_[a-z0-9_]+)*)"
+    r"|and by RuntimePatternBBroker as the local-ingress route\.command_topic of "
+    r"(?P<nodes2>node_[a-z0-9_]+)"
+)
+
+
+class TestPatternBRouteEntries:
+    """An external entry that names the Pattern B broker must still be true (OMN-17427).
+
+    OMN-17427 moved seven command topics off the lapsed OMN-16795 short leash by
+    naming their publisher: RuntimePatternBBroker publishes ``route.command_topic``
+    for every node that runtime_local_ingress discovers. That claim is only as good
+    as the discovery, so this re-derives the routes from the live contracts instead
+    of trusting a date: a node that stops being a local-ingress route fails here.
+    """
+
+    def _claims(self) -> dict[str, list[str]]:
+        claims: dict[str, list[str]] = {}
+        for topic, reason in _EXTERNAL_PUBLISHER_ALLOWLIST.items():
+            match = _PATTERN_B_REASON.search(reason)
+            if match is None:
+                continue
+            nodes = match.group("nodes") or match.group("nodes2")
+            claims[topic] = nodes.split(" and ")
+        return claims
+
+    def test_the_claim_set_is_not_empty(self) -> None:
+        # Positive control: the parser must find the seven OMN-17427 entries, so
+        # the route assertion below cannot pass by matching nothing.
+        claims = self._claims()
+        assert len(claims) >= 7, sorted(claims)
+        assert "onex.cmd.omnibase-infra.llm-inference-request.v1" in claims
+
+    def test_every_claimed_node_is_a_discovered_route_on_that_topic(self) -> None:
+        from omnibase_infra.runtime.runtime_local_ingress import (
+            discover_runtime_local_ingress_routes,
+        )
+
+        routes = discover_runtime_local_ingress_routes(("omnibase_infra",))
+        by_topic: dict[str, set[str]] = {}
+        for route in routes.values():
+            by_topic.setdefault(route.command_topic, set()).add(route.contract_name)
+
+        wrong = {
+            topic: (nodes, sorted(by_topic.get(topic, set())))
+            for topic, nodes in self._claims().items()
+            if not set(nodes) <= by_topic.get(topic, set())
+        }
+        assert wrong == {}, (
+            "External allowlist entries name RuntimePatternBBroker as the publisher, "
+            "but the named node is no longer a local-ingress route on that command "
+            "topic, so nothing publishes it. Fix the route or delete the "
+            f"subscription: {wrong}"
+        )
+
+    def test_a_topic_with_no_route_is_reported(self) -> None:
+        # Negative control: the same comparison flags a claim no route backs.
+        from omnibase_infra.runtime.runtime_local_ingress import (
+            discover_runtime_local_ingress_routes,
+        )
+
+        routes = discover_runtime_local_ingress_routes(("omnibase_infra",))
+        topics = {route.command_topic for route in routes.values()}
+        assert "onex.evt.rsd.scores-calculated.v1" not in topics
+        assert "onex.cmd.omnibase-infra.llm-inference-request.v1" in topics
 
 
 class TestOmn16795IncidentReplay:

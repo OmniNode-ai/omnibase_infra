@@ -10,14 +10,20 @@ no Docker.
 from __future__ import annotations
 
 import json
+import os
 import re
+import socket
+import stat
 import subprocess
+import tempfile
 import threading
 import urllib.error
 import urllib.request
 from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from http import HTTPStatus
-from http.server import ThreadingHTTPServer
+from http.client import HTTPResponse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -29,6 +35,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 GRANTS = REPO_ROOT / "deploy" / "lab" / "developer-principal-grants.yaml"
 FACTS = REPO_ROOT / "deploy" / "lab" / "developer-onboarding.yaml"
 LOGIN = "dev.person@omninode.ai"
+UNIX_ONLY = pytest.mark.skipif(
+    not hasattr(socket, "SO_PEERCRED"), reason="SO_PEERCRED is Linux-only"
+)
 
 
 class FakeBroker(lpi.Broker):
@@ -92,9 +101,19 @@ def test_the_checked_in_grant_file_is_valid(declaration: lpi.Declaration) -> Non
     )
 
 
-def test_only_the_delegate_command_is_writable(declaration: lpi.Declaration) -> None:
-    writable = [g.name for g in declaration.grants if "write" in g.operations]
-    assert writable == ["onex.cmd.omnimarket.delegate-skill.v1"]
+def test_only_the_delegate_command_and_its_terminals_are_writable(
+    declaration: lpi.Declaration,
+) -> None:
+    # A machine that runs a harness task publishes the terminal event itself, so it
+    # holds write on the two delegate-skill terminals and on nothing else: literal
+    # names, no prefix or wildcard grant.
+    writable = [g for g in declaration.grants if "write" in g.operations]
+    assert {g.name for g in writable} == {
+        "onex.cmd.omnimarket.delegate-skill.v1",
+        "onex.evt.omnimarket.delegate-skill-completed.v1",
+        "onex.evt.omnimarket.delegate-skill-failed.v1",
+    }
+    assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
 
 
 @pytest.mark.parametrize(
@@ -317,15 +336,97 @@ def test_user_password_travels_in_the_admin_api_body(
 
 
 @pytest.fixture
-def server(issuer: lpi.Issuer) -> Iterator[str]:
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), lpi.make_handler(issuer))
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-    thread.start()
-    yield f"http://127.0.0.1:{httpd.server_address[1]}"
-    httpd.shutdown()
+def socket_path() -> Iterator[str]:
+    # macOS tmp_path can exceed AF_UNIX's 104-byte path limit.
+    with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+        yield str(Path(directory) / "issuer.sock")
 
 
-def _post(url: str, body: object, login: str | None) -> tuple[int, dict[str, str], str]:
+@contextmanager
+def _unix_server(issuer: lpi.Issuer, path: str, proxy_uid: int) -> Iterator[str]:
+    with lpi.UnixHTTPServer(path, lpi.make_handler(issuer, proxy_uid)) as httpd:
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield path
+        finally:
+            httpd.shutdown()
+            thread.join()
+
+
+@pytest.fixture
+def server(issuer: lpi.Issuer, socket_path: str) -> Iterator[str]:
+    with _unix_server(issuer, socket_path, os.getuid()) as path:
+        yield path
+
+
+def _unix_request(
+    path: str, method: str, body: bytes, headers: dict[str, str]
+) -> tuple[int, dict[str, str], str]:
+    headers = {**headers, "Content-Length": str(len(body))}
+    request = f"{method} /v1/principals HTTP/1.0\r\n"
+    request += "".join(f"{name}: {value}\r\n" for name, value in headers.items())
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+        client.settimeout(5)
+        client.connect(path)
+        client.sendall(request.encode() + b"\r\n" + body)
+        with HTTPResponse(client) as response:
+            response.begin()
+            return (
+                response.status,
+                json.loads(response.read()),
+                response.getheader("Cache-Control", ""),
+            )
+
+
+def _post(
+    path: str, body: object, login: str | None
+) -> tuple[int, dict[str, str], str]:
+    headers = {"Content-Type": "application/json"}
+    if login:
+        headers[lpi.LOGIN_HEADER] = login
+    return _unix_request(path, "POST", json.dumps(body).encode(), headers)
+
+
+@contextmanager
+def _proxy(path: str, login: str | None) -> Iterator[str]:
+    """Simulate tailscale serve's header stripping and Unix socket forwarding."""
+
+    class ProxyHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            for name in list(self.headers):
+                if name.lower().startswith("tailscale-"):
+                    del self.headers[name]
+            if login is not None:
+                self.headers[lpi.LOGIN_HEADER] = login
+            status, payload, cache = _unix_request(
+                path, "POST", body, dict(self.headers.items())
+            )
+            data = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", cache)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, format: str, *args: object) -> None:  # noqa: A002 - http.server's name
+            pass
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), ProxyHandler) as httpd:
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        thread.start()
+        try:
+            yield f"http://127.0.0.1:{httpd.server_address[1]}"
+        finally:
+            httpd.shutdown()
+            thread.join()
+
+
+def _proxy_post(
+    url: str, body: object, login: str | None
+) -> tuple[int, dict[str, str], str]:
     request = urllib.request.Request(  # noqa: S310 - a loopback test server
         f"{url}/v1/principals", data=json.dumps(body).encode(), method="POST"
     )
@@ -343,17 +444,98 @@ def _post(url: str, body: object, login: str | None) -> tuple[int, dict[str, str
         return exc.code, json.loads(exc.read()), exc.headers.get("Cache-Control", "")
 
 
+@UNIX_ONLY
 def test_http_issues_to_a_tailnet_user_and_is_never_cached(server: str) -> None:
-    status, body, cache = _post(server, {"lane": "dev", "device": "mac"}, LOGIN)
+    with _proxy(server, LOGIN) as url:
+        status, body, cache = _proxy_post(url, {"lane": "dev", "device": "mac"}, LOGIN)
     assert status == HTTPStatus.CREATED
     assert body["principal"].startswith("dev-")
     assert cache == "no-store"
 
 
+@UNIX_ONLY
 def test_http_refuses_a_request_with_no_tailnet_user(server: str) -> None:
-    status, body, _ = _post(server, {"lane": "dev", "device": "mac"}, None)
+    with _proxy(server, None) as url:
+        status, body, _ = _proxy_post(url, {"lane": "dev", "device": "mac"}, None)
     assert status == HTTPStatus.FORBIDDEN
     assert "tagged devices" in body["error"]
+
+
+@UNIX_ONLY
+def test_a_forged_login_from_a_peer_that_is_not_the_proxy_is_refused(
+    issuer: lpi.Issuer,
+    socket_path: str,
+    broker: FakeBroker,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    forged = "someone.else@omninode.ai"
+    with _unix_server(issuer, socket_path, os.getuid() + 1) as path:
+        status, body, _ = _post(path, {"lane": "dev", "device": "mac"}, forged)
+    assert status == HTTPStatus.FORBIDDEN
+    assert "tailscale serve" in body["error"]
+    assert broker.users == {}
+    assert not ledger_path.exists()
+    log = capsys.readouterr().err
+    assert f"peer_uid={os.getuid()}" in log
+    assert forged not in log
+
+
+@UNIX_ONLY
+def test_a_proxied_request_is_issued(
+    server: str, broker: FakeBroker, declaration: lpi.Declaration, ledger_path: Path
+) -> None:
+    forged = "someone.else@omninode.ai"
+    with _proxy(server, LOGIN) as url:
+        status, body, _ = _proxy_post(url, {"lane": "dev", "device": "mac"}, forged)
+    assert status == HTTPStatus.CREATED
+    assert body["principal"] == lpi.principal_name(declaration, LOGIN, "mac")
+    assert lpi.principal_name(declaration, forged, "mac") not in broker.users
+    assert set(broker.users) == {body["principal"]}
+    assert json.loads(ledger_path.read_text())["login"] == LOGIN
+
+
+@UNIX_ONLY
+def test_a_proxied_request_from_a_tagged_device_is_refused(
+    server: str, broker: FakeBroker, ledger_path: Path
+) -> None:
+    with _proxy(server, None) as url:
+        status, body, _ = _proxy_post(
+            url, {"lane": "dev", "device": "mac"}, "someone.else@omninode.ai"
+        )
+    assert status == HTTPStatus.FORBIDDEN
+    assert "tagged devices" in body["error"]
+    assert broker.users == {}
+    assert not ledger_path.exists()
+
+
+@UNIX_ONLY
+def test_the_socket_is_owner_only(server: str) -> None:
+    assert stat.S_IMODE(os.stat(server).st_mode) == 0o600  # noqa: PTH116 - check the socket's mode
+
+
+@UNIX_ONLY
+def test_peer_uid_reads_the_kernel_credential() -> None:
+    a, b = socket.socketpair()
+    with a, b:
+        assert lpi.peer_uid(a) == os.getuid()
+
+
+@UNIX_ONLY
+def test_health_command(server: str) -> None:
+    assert lpi.main(["health", "--socket", server]) == 0
+    assert lpi.main(["health", "--socket", server + ".missing"]) == 1
+
+
+@UNIX_ONLY
+def test_serve_refuses_a_path_that_is_not_a_socket(
+    issuer: lpi.Issuer, socket_path: str
+) -> None:
+    path = Path(socket_path)
+    path.write_text("leave this file untouched")
+    with pytest.raises(SystemExit, match="non-socket path"):
+        lpi.UnixHTTPServer(path, lpi.make_handler(issuer, os.getuid()))
+    assert path.read_text() == "leave this file untouched"
 
 
 # --- the file the onboarding script reads ---------------------------------

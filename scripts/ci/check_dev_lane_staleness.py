@@ -2870,6 +2870,8 @@ def bind_generation_to_job_end(
     converged: ModelLaneGeneration | None,
     after_job: ModelLaneGeneration | None,
     job_end: ModelJobEnd | None,
+    *,
+    service: str = "",
 ) -> tuple[ModelLaneGeneration | None, str]:
     """Choose the generation the probe is bound to, and say why (OMN-19374).
 
@@ -2878,8 +2880,11 @@ def bind_generation_to_job_end(
 
     * the job ended ``success``;
     * the job's OWN record names a ``recovered`` verification recreate of the
-      service this container is (on the dev lane the container and the compose
-      service share the name);
+      service this container is. The record carries the compose SERVICE name;
+      on the .201 dev lane that is also the container name, and on a prefixed
+      lane (``.202``: service ``runtime-effects``, container
+      ``omninode-dev-202-runtime-effects``) the caller passes ``service``, read
+      from the container's own compose label (OMN-20154);
     * the container the job left running has the same image AND the same
       revision label as the one convergence verified.
 
@@ -2894,9 +2899,9 @@ def bind_generation_to_job_end(
         return converged, ""
     if after_job.container_id == converged.container_id:
         return converged, ""
+    names = {converged.container, service.strip()} - {""}
     recreated_here = job_end.status == "success" and any(
-        record.get("service") == converged.container
-        and record.get("outcome") == "recovered"
+        record.get("service") in names and record.get("outcome") == "recovered"
         for record in job_end.verify_recreate
     )
     if not recreated_here:
@@ -2915,6 +2920,40 @@ def bind_generation_to_job_end(
         f"rebound from {converged.short} to the job's own post-recreate container "
         f"{after_job.short} (same image and revision)"
     )
+
+
+#: The compose label naming the SERVICE a container runs. The deploy agent's
+#: ``verify_recreate`` record names the service, never the container.
+COMPOSE_SERVICE_LABEL: Final = "com.docker.compose.service"
+
+
+def read_compose_service(container: str) -> str:
+    """The compose service ``container`` runs, or ``""`` when it cannot be read.
+
+    Read-only. An empty answer only narrows :func:`bind_generation_to_job_end`
+    back to a container-name match, so an unreadable label can never widen what
+    rebinds (OMN-20154).
+    """
+    try:
+        result = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                container,
+                "--format",
+                f'{{{{ index .Config.Labels "{COMPOSE_SERVICE_LABEL}" }}}}',
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if result.returncode != 0:
+        return ""
+    value = result.stdout.strip()
+    return "" if value == "<no value>" else value
 
 
 def _read_generation_or_warn(container: str) -> ModelLaneGeneration | None:
@@ -3235,6 +3274,7 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
                 converged_generation,
                 _read_generation_or_warn(args.container),
                 job_end,
+                service=read_compose_service(args.container),
             )
 
     evidence = convergence_evidence(
