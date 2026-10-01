@@ -66,7 +66,7 @@
 #   postgres        45436
 #   valkey          46379
 #   redpanda kafka  55092   (external; container-internal stays 19092)
-#   redpanda admin  55644
+#   redpanda admin  55644   (host loopback only, OMN-20260)
 #   projection-api  53002
 #   keycloak        58080   reserved, unused — this lane runs no Keycloak
 #
@@ -87,7 +87,12 @@ x-omninode-contract-overlay:
   lakshman-redpanda:
     advertised_kafka_addr: &lakshman_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://localhost:55092"
     kafka_port_publish: &lakshman_redpanda_kafka_port_publish "55092:19092"
-    admin_port_publish: &lakshman_redpanda_admin_port_publish "55644:9644"
+    # Admin API on the host loopback ONLY (OMN-20260). admin_api_require_auth is
+    # false on this broker (the healthcheck and the rpk one-shots call it with no
+    # credentials), so an all-interfaces publish let any LAN or tailnet host
+    # create SCRAM users and rewrite cluster config. In-network consumers use
+    # redpanda:9644; host-side tools on .201 still reach localhost:55644.
+    admin_port_publish: &lakshman_redpanda_admin_port_publish "127.0.0.1:55644:9644"
   lakshman-model-secrets:
     # Correction (b): no required_secret_refs. Every cloud LLM ref below is
     # optional so the lane boots without any of them.
