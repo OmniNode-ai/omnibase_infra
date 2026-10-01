@@ -143,13 +143,13 @@ from omnibase_infra.cli.enum_off_registry_reason import EnumOffRegistryReason
 from omnibase_infra.cli.enum_off_registry_verdict import EnumOffRegistryVerdict
 from omnibase_infra.cli.model_off_registry_check import ModelOffRegistryCheck
 from omnibase_infra.cli.model_omnimarket_lag_stamp import ModelOmnimarketLagStamp
-from omnibase_infra.cli.model_omnimarket_registry_stamp import (
-    ModelOmnimarketRegistryStamp,
-)
 from omnibase_infra.cli.protocol_drift_guard_verdict import (
     ProtocolDriftGuardVerdict,
 )
 from omnibase_infra.cli.workspace_reconcile import ReconcileFn
+from omnibase_infra.models.delegation.model_omnimarket_registry_stamp import (
+    ModelOmnimarketRegistryStamp,
+)
 
 __all__ = [
     "CanonicalCloneAttachment",
