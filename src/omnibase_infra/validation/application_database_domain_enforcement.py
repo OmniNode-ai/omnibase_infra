@@ -71,6 +71,94 @@ _SQL_IDENTIFIER = (
 )
 _OPTIONAL_ONLY_TARGET = r"(?:only\s+(?:\(\s*)?)?"
 _SYSTEM_READ_SCHEMAS = frozenset({"information_schema", "pg_catalog"})
+# OMN-20201 (I21): PostgreSQL's fully reserved key words. Unquoted, none of them
+# can name a table, view, sequence or function, so a relation-target pattern that
+# lands on one has matched SQL grammar, not a relation. Observed captures: ALL in
+# `GRANT ... ON ALL TABLES IN SCHEMA`, OR and THEN after the LIKE operator once its
+# string literal is blanked, TRUE and FALSE in `CHECK (x IS TRUE)`. A quoted
+# identifier ("all") is a real relation name and is still held to the lint.
+_POSTGRES_RESERVED_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "all",
+        "analyse",
+        "analyze",
+        "and",
+        "any",
+        "array",
+        "as",
+        "asc",
+        "asymmetric",
+        "both",
+        "case",
+        "cast",
+        "check",
+        "collate",
+        "column",
+        "constraint",
+        "create",
+        "current_catalog",
+        "current_date",
+        "current_role",
+        "current_time",
+        "current_timestamp",
+        "current_user",
+        "default",
+        "deferrable",
+        "desc",
+        "distinct",
+        "do",
+        "else",
+        "end",
+        "except",
+        "false",
+        "fetch",
+        "for",
+        "foreign",
+        "from",
+        "grant",
+        "group",
+        "having",
+        "in",
+        "initially",
+        "intersect",
+        "into",
+        "lateral",
+        "leading",
+        "limit",
+        "localtime",
+        "localtimestamp",
+        "not",
+        "null",
+        "offset",
+        "on",
+        "only",
+        "or",
+        "order",
+        "placing",
+        "primary",
+        "references",
+        "returning",
+        "select",
+        "session_user",
+        "some",
+        "symmetric",
+        "system_user",
+        "table",
+        "then",
+        "to",
+        "trailing",
+        "true",
+        "union",
+        "unique",
+        "user",
+        "using",
+        "variadic",
+        "when",
+        "where",
+        "window",
+        "with",
+    }
+)
 # OMN-16237: the static schema-qualification lint below must agree with the
 # runtime grants system's physical_grant_schema_for_table() on which tables
 # are logically tenant/omninode_internal domain but still physically created
@@ -1240,7 +1328,10 @@ def _record_sql_target(
     """Apply one topology-derived qualification verdict to a parsed target."""
     name = _unquote_identifier(name_token)
     if schema_token is None:
-        if name.lower() in {"false", "true"}:
+        if (
+            not name_token.strip().startswith('"')
+            and name in _POSTGRES_RESERVED_KEYWORDS
+        ):
             return
         if permits_ephemeral and (
             name in cte_names or remaining.lstrip().startswith("(")
