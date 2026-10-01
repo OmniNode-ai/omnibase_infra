@@ -894,9 +894,3 @@ fenced_node_migrations:
   # No lane release is added here.
   - id: "node:node_projection_delegation_disposition:0002_force_rls_delegation_dispositions.sql"
     ticket: "OMN-20242"
-  # OMN-20276: 0051 lifts and restores FORCE ROW LEVEL SECURITY on
-  # delegation_events to rewrite the 249 contradictory rows. It is fenced on
-  # arrival. Its release is a separate operator-sequenced step that needs an
-  # operator ruling. No lane release is added here.
-  - id: "node:node_projection_delegation:0051_delegation_events_failed_outcome_backfill.sql"
-    ticket: "OMN-20276"
