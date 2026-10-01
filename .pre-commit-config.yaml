@@ -28,17 +28,20 @@ repos:
     rev: 309d89fa7254701347f95bf99205cccfb3f6c1df # pragma: allowlist secret
     hooks:
       - id: check-stub-implementations
+        require_serial: true
       # OMN-13281: scan staged ModelDodReceipt YAML files under
       # drift/dod_receipts/ for gaming patterns (echo-probe PASS, deferred
       # evidence in PASS receipts, self-attestation, fake human verifiers,
       # deploy-keyword echo receipts). Only fires when a receipt YAML is
       # staged; no-op on commits that touch no receipts.
       - id: check-receipt-honesty
+        require_serial: true
       # OMN-13026: bare AsyncMock/MagicMock without spec=/spec_set= on
       # EventBus/transport/kafka surfaces. Ratchet: existing violations frozen
       # in config/validation/transport_mock_baseline.yaml (218 violations, 63 files).
       # New violations blocked. Drain tracked by OMN-13026 per-site tickets.
       - id: transport-mock-lint
+        require_serial: true
         args: [--baseline, config/validation/transport_mock_baseline.yaml]
   # Canonical Inference Gate (OMN-13249, fleet rollout of OMN-13219).
   # Rejects NEW non-canonical model-inference surfaces: shelled model CLIs
@@ -52,6 +55,7 @@ repos:
     rev: 940d2f2ab44d2f455a607926674b90ecbc9b74ba # pragma: allowlist secret
     hooks:
       - id: check-canonical-inference
+        require_serial: true
         args: [--repo, omnibase_infra, --repo-root, .]
         exclude: ^(tests/|archived/|archive/).*\.py$
   # URL Authority Gate (OMN-13298, child of OMN-12803).
@@ -62,6 +66,7 @@ repos:
     rev: be4f95460dcd6865264ab0713a5b1cc48b41aef9 # pragma: allowlist secret
     hooks:
       - id: check-url-authority
+        require_serial: true
         args: [--repo, omnibase_infra, --repo-root, .]
         exclude: ^(tests/|archived/|archive/).*\.py$
   # OMN-14350: non-canonical lifecycle-class ratchet (fan-out from the omnibase_core
@@ -77,6 +82,7 @@ repos:
     rev: 63635097705d832e0ee9c4811093efb31349105c # pragma: allowlist secret
     hooks:
       - id: no-noncanonical-lifecycle-classes
+        require_serial: true
         args: [--allowlist, .onex_ratchets/noncanonical_class_allowlist.yaml, src/omnibase_infra]
         files: ^src/omnibase_infra/.*\.py$
   # Hardcoded topic guard — sourced from onex_change_control (OMN-5256/OMN-5259)
@@ -122,10 +128,13 @@ repos:
       # -> excludes.allowed includes `\.yaml$`); this entry is narrower than that
       # allowance, naming one file rather than a suffix.
       - id: no-hardcoded-topics
+        require_serial: true
         exclude: ^(src/omnibase_infra/(enums/generated|cli|tui|models/registration/model_event_bus_topic_entry\.py|nodes/.*/handlers|nodes/.*/services|nodes/.*/contracts|runtime/contract_registration_event_router\.py|services/observability|services/service_timeout_emitter\.py|topics/service_topic_registry\.py|validation|contracts/)|scripts/|tests/|contracts/|src/dep_health_allowlist\.yaml|docker/docker-compose\.ci-bus\.yml)
       - id: no-bare-feature-flags
+        require_serial: true
         # YAML formatting (standard across ecosystem)
       - id: no-untracked-todos
+        require_serial: true
         stages: [pre-commit]
   - repo: https://github.com/google/yamlfmt
     rev: v0.17.2
@@ -232,6 +241,7 @@ repos:
         files: ^tests/.*\.py$
         stages: [pre-commit]
       - id: ruff-format
+        require_serial: true
         name: ruff format (auto-format)
         entry: uv run --frozen ruff format
         language: system
@@ -239,6 +249,7 @@ repos:
         exclude: ^(archived/|tests/fixtures/|\.github/workflows/|src/omnibase_infra/enums/generated/).*$
         stages: [pre-commit]
       - id: ruff-fix
+        require_serial: true
         name: ruff check (auto-fix linting + import sorting)
         entry: uv run --frozen ruff check --fix --exit-non-zero-on-fix
         language: system
@@ -252,6 +263,7 @@ repos:
       # enforcement cannot drift. scripts/lib/** is held to --severity=style; the
       # rest of the tree to --severity=error.
       - id: shell-hygiene
+        require_serial: true
         name: Shell hygiene (shellcheck, OMN-14761)
         entry: scripts/ci/check_shell_hygiene.sh
         language: script
@@ -259,6 +271,7 @@ repos:
         pass_filenames: true
         stages: [pre-commit]
       - id: mypy-type-check
+        require_serial: true
         name: mypy (type checking)
         entry: bash -c 'uv run --frozen mypy "$@" --show-error-codes --no-error-summary' --
         language: system
@@ -281,12 +294,27 @@ repos:
       # Escape hatch, per line only, ticket + reason required:
       #   # onex-allow-exposed-identifier OMN-XXXXX reason="<concrete reason>"
       - id: exposed-identifier-gate
+        require_serial: true
         name: Exposed identifier gate (OMN-17320)
         entry: uv run --frozen python scripts/validation/check_exposed_identifiers.py --mode blocking
         language: system
         pass_filenames: true
         stages: [pre-commit]
         exclude: ^(archived/|workspace/sibling-repos/).*$
+      # OMN-19407: the onex CLI keeps no hand-written vocabulary. Operator
+      # ruling 2026-09-24: everything is fetched from the registry. Refuses a
+      # `*_CHOICES` literal, a click.Choice over a literal list, and a
+      # multi-string Literal in any CLI module, unless the line carries
+      # `# cli-own-vocabulary: <reason>` for a vocabulary the CLI itself owns.
+      # SYNC with the ci.yml step of the same name.
+      - id: check-cli-registry-vocabulary
+        require_serial: true
+        name: onex CLI reads vocabularies from the registry (OMN-19407)
+        entry: uv run --frozen python scripts/validation/check_cli_registry_vocabulary.py
+        language: system
+        pass_filenames: true
+        stages: [pre-commit]
+        files: ^src/omnibase_infra/cli/.*\.py$
       # Cleanup: Clear tmp/ directory before commits
       - id: clean-tmp-directory
         name: Clean tmp directory
@@ -296,6 +324,7 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
       - id: lint-pricing-manifest
+        require_serial: true
         name: Lint pricing manifest seed keys
         entry: uv run --frozen python scripts/lint_pricing_manifest.py
         language: system
@@ -311,6 +340,7 @@ repos:
       # REFUSES that flag under CI, so the enforcing surface stays fail-closed
       # and the hook can never be the reason a bad pin merges.
       - id: check-pin-reachability
+        require_serial: true
         name: Cross-repo pins must be reachable from dev/main (OMN-15538)
         entry: uv run --frozen python scripts/ci/check_pin_reachability.py --allow-undetermined
         language: system
@@ -580,6 +610,7 @@ repos:
       # index pin is OMN-16518) -- see the script's module docstring for the
       # layered-defense rationale.
       - id: check-lockfile-registry-allowlist
+        require_serial: true
         name: uv.lock package sources must resolve to a public host allowlist (OMN-16516)
         entry: uv run --frozen python scripts/ci/check_lockfile_registry_allowlist.py --min-packages 20
         language: system
@@ -598,6 +629,7 @@ repos:
       # hook builds a separate pip env and can fail for unrelated resolver/index
       # reasons before the validator runs.
       - id: no-plugin-daemon-classes
+        require_serial: true
         name: Block Plugin* daemon/service/worker classes (OMN-13284)
         entry: uv run --frozen python -m omnibase_core.validators.no_plugin_daemon_classes
         language: system
@@ -617,12 +649,14 @@ repos:
       # OMN-13412: Fresh-deploy fitness gates (terminal cost / context ROI /
       # release identity) — enforcement, not detection. Wired as required CI too.
       - id: check-terminal-cost-completeness
+        require_serial: true
         name: Forbid hardcoded cost_usd=0.0 on terminal cost paths (OMN-13412)
         entry: uv run --frozen python scripts/check_terminal_cost_completeness.py
         language: system
         files: ^src/.*\.py$
         stages: [pre-commit]
       - id: check-context-field-presence
+        require_serial: true
         name: Context-ROI claim must carry context_pack_hash (OMN-13412)
         entry: uv run --frozen python scripts/check_context_field_presence.py
         language: system
@@ -667,6 +701,14 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-commit]
+  - repo: local
+    hooks:
+      - id: board-check-coverage
+        name: Board checks require executable criterion coverage (OMN-19931)
+        entry: uv run python -m omnibase_infra.nodes.node_board_probe_effect.coverage_validator
+        language: system
+        pass_filenames: false
+        always_run: true
   # ONEX Validation Hooks (infrastructure-specific)
   - repo: local
     hooks:
@@ -678,6 +720,7 @@ repos:
       # against the pinned omnibase_core. SYNC with ci.yml step
       # "operation_match operation-field gate".
       - id: operation-match-requires-operation
+        require_serial: true
         name: operation_match handler operation-field gate (OMN-13530)
         entry: uv run python -m omnibase_core.validators.operation_match_requires_operation
         language: system
@@ -692,6 +735,7 @@ repos:
       # parse guard in auto_wiring/discovery._parse_handler_routing. SYNC with
       # ci.yml step "handler_routing flat-schema gate".
       - id: handler-routing-schema-gate
+        require_serial: true
         name: handler_routing flat-schema gate (OMN-14141)
         entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.handler_routing_schema
         language: system
@@ -710,6 +754,7 @@ repos:
       # OMN-14208 silent-no-op near-miss). SYNC with ci.yml step
       # "tenant_scoped_ingress opt-in gate".
       - id: tenant-scoped-ingress-gate
+        require_serial: true
         name: tenant_scoped_ingress opt-in gate (OMN-14360)
         entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.tenant_scoped_ingress_schema
         language: system
@@ -1054,6 +1099,7 @@ repos:
       # as blocking gates) and the ratchet-enforcement epic OMN-13325 — it is NOT
       # a parallel/competing hook. Owner epic for the baselined nodes: OMN-13471.
       - id: onex-imperative-orchestrator-ratchet
+        require_serial: true
         name: ONEX Imperative-Orchestrator Ratchet (ARCH-004)
         entry: uv run --frozen python scripts/validate.py imperative_orchestrators
         language: system
@@ -1073,6 +1119,7 @@ repos:
       # Same OMN-12550 / OMN-13325 wiring as Signal A — NOT a parallel hook.
       # Owner epic for the baselined nodes: OMN-13485.
       - id: onex-orchestration-monolith-ratchet
+        require_serial: true
         name: ONEX Orchestration-Monolith Ratchet (ARCH-004 Signal B)
         entry: uv run --frozen python scripts/validate.py orchestration_monoliths
         language: system
@@ -1092,6 +1139,7 @@ repos:
       # accepted-debt baseline for this rule — the repo carries zero
       # unexempted violations as of OMN-14222, so any new one fails outright.
       - id: onex-orchestrator-reducer-state-invariant
+        require_serial: true
         name: ONEX Orchestrator/Reducer State Invariant (ARCH-005)
         entry: uv run --frozen python scripts/validate.py orchestrator_reducer_state
         language: system
@@ -1157,6 +1205,7 @@ repos:
       # (ported from omnimarket OMN-12971). Suppression (test fixtures only):
       # backend-secret-ok: <reason> on the offending line.
       - id: onex-validate-backend-secret-discipline
+        require_serial: true
         name: Backend Secret Discipline (OMN-13290)
         entry: uv run --frozen python -m omnibase_core.validators.backend_secret_discipline
         language: system
@@ -1179,6 +1228,7 @@ repos:
       # its self-test. Runs on every commit touching Python so a new log site
       # is caught at the keyboard, not in a pod log.
       - id: check-no-credential-in-log
+        require_serial: true
         name: Credential-in-log gate (OMN-17423)
         entry: uv run --frozen python scripts/ci/check_no_credential_in_log.py
         language: system
@@ -1223,6 +1273,7 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
       - id: handler-any-signature
+        require_serial: true
         name: Block Any in handler signatures (OMN-10820)
         entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.handler_any_signature --max-violations 0
         language: system
@@ -1298,6 +1349,7 @@ repos:
       # SYNC with the ci.yml step
       # 'Check envelope tenant dimension gate (OMN-16831)'.
       - id: envelope-tenant-dimension
+        require_serial: true
         name: Every event producer declares its tenant dimension (OMN-16831)
         entry: env PYTHONPATH=src uv run --frozen python -m omnibase_infra.validators.envelope_tenant_dimension
         language: system
@@ -1404,6 +1456,7 @@ repos:
       # Incremental validation: only checks staged node.py files, not entire codebase
       # Exempt nodes via: # ONEX_EXCLUDE: declarative_node
       - id: onex-validate-declarative-nodes
+        require_serial: true
         name: ONEX Declarative Node Validation
         entry: uv run --frozen python scripts/validate.py declarative_nodes
         language: system
@@ -1452,6 +1505,7 @@ repos:
       # Ensures all internal markdown links point to existing files and anchors
       # External links are skipped by default (configurable in .markdown-link-check.json)
       - id: onex-validate-markdown-links
+        require_serial: true
         name: ONEX Markdown Link Validation
         entry: uv run --frozen python scripts/validate.py markdown_links
         language: system
@@ -1469,6 +1523,7 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
       - id: check-ai-slop
+        require_serial: true
         name: Check for AI-slop patterns
         language: system
         entry: uv run --frozen python scripts/validation/check_ai_slop.py --strict
@@ -1498,6 +1553,7 @@ repos:
       # Covers all 6 pattern types from OMN-10658 enforcement sweep.
       # Annotation: add  # fallback-ok: <reason>  to exempt a justified line.
       - id: no-env-fallbacks
+        require_serial: true
         name: No localhost/hardcoded-endpoint fallbacks (OMN-10741)
         entry: uv run --frozen python scripts/validate_no_env_fallbacks.py
         language: system
@@ -1507,6 +1563,7 @@ repos:
       # OMN-3554: Reject hardcoded Kafka broker address fallbacks
       # Detects os.getenv("KAFKA_*", non-empty) and private-IP Kafka broker ports
       - id: kafka-no-hardcoded-fallback
+        require_serial: true
         name: Reject hardcoded Kafka broker address fallbacks
         entry: bash scripts/validation/check_kafka_no_hardcoded_fallback.sh
         language: system
@@ -1515,6 +1572,7 @@ repos:
         stages: [pre-commit]
       # OMN-7077: Prevent new direct imports of EventBusInmemory from infra path
       - id: no-infra-inmemory-import
+        require_serial: true
         name: Block infra-path EventBusInmemory imports (OMN-7077)
         entry: bash scripts/validation/check_no_infra_inmemory_import.sh
         language: system
@@ -1574,6 +1632,7 @@ repos:
         stages: [pre-commit]
       # OMN-4385: SPDX header enforcement
       - id: validate-spdx-headers
+        require_serial: true
         name: ONEX SPDX Header Requirement
         entry: uv run --frozen onex spdx validate
         language: system
@@ -1614,6 +1673,7 @@ repos:
       # OMN-4857: Block Consul references in source (decommissioned service)
       # Prevents reintroduction of CONSUL_HOST or consul.connect.io references in src/.
       - id: no-consul-references
+        require_serial: true
         name: No Consul service discovery (decommissioned — OMN-4857)
         language: pygrep
         entry: "CONSUL_HOST|consul\\.connect\\.io"
@@ -1624,6 +1684,7 @@ repos:
       # ONEX_ENV is never set in containers; reads silently default to "dev", creating
       # env-prefixed topics (e.g. dev.onex.evt.*) that break node registration.
       - id: no-onex-env-reads
+        require_serial: true
         name: Block vestigial ONEX_ENV reads (use ONEX_ENVIRONMENT — OMN-5189)
         language: pygrep
         entry: "os\\.getenv\\([\"']ONEX_ENV[\"']|os\\.environ\\.get\\([\"']ONEX_ENV[\"']|os\\.environ\\[[\"']ONEX_ENV[\"']"
@@ -1650,6 +1711,7 @@ repos:
       # OMN-5063: Block untyped metadata dict fields
       # Centralized in onex_change_control (OMN-5135)
       - id: no-untyped-metadata
+        require_serial: true
         name: No untyped metadata dict fields
         language: system
         entry: uv run --frozen check-no-untyped-metadata
@@ -1730,6 +1792,7 @@ repos:
       # Blocks [skip-*] bypass tokens in staged markdown/yaml/txt files.
       # Escape hatch: add '# skip-token-allowed: <receipt-id>' with a traceable approval receipt.
       - id: reject-deploy-gate-skip-token
+        require_serial: true
         name: Reject skip-gate bypass tokens (OMN-10414)
         entry: .pre-commit-hooks/reject-deploy-gate-skip-token.sh
         language: script
@@ -1738,12 +1801,14 @@ repos:
         stages: [pre-commit]
         exclude: ^tests/.*fixtures/
       - id: reject-deploy-gate-skip-token-commit-msg
+        require_serial: true
         name: Reject skip-gate bypass tokens in commit messages (OMN-10414)
         entry: .pre-commit-hooks/reject-deploy-gate-skip-token.sh
         language: script
         pass_filenames: true
         stages: [commit-msg]
       - id: strip-ai-coauthor-trailer
+        require_serial: true
         name: Strip AI-generated Co-Authored-By trailers from commit messages
         entry: perl -i -ne 'print unless /^co-authored-by:.*claude.*noreply\@anthropic\.com/i'
         language: system
@@ -1799,6 +1864,7 @@ repos:
     rev: d163312724489f10f58ffdf8115ba1fa9d5783e8 # pragma: allowlist secret
     hooks:
       - id: validate-validator-requirements
+        require_serial: true
         args:
           - --repo
           - omnibase_infra
@@ -2030,6 +2096,13 @@ repos:
   # never be run against just the staged files.
   - repo: local
     hooks:
+      - id: no-coding-plan-endpoint
+        name: Refuse Coding Plan endpoints in configuration (OMN-20173)
+        entry: uv run python scripts/check_no_coding_plan_endpoint.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
       - id: subscribe-wiring-health
         name: Subscribe wiring health + allowlist hygiene (OMN-16795)
         entry: uv run python scripts/check_subscribe_wiring_health.py
@@ -2063,26 +2136,31 @@ repos:
     rev: 3faefdcd5750b05f69d2efcb8cf200bc359483c3 # pragma: allowlist secret
     hooks:
       - id: anti-growth-baseline
+        require_serial: true
         alias: anti-growth-noncanonical-class-allowlist
         name: Noncanonical class allowlist baseline can only shrink (OMN-19677)
         args: [--baseline, .onex_ratchets/noncanonical_class_allowlist.yaml, --parser, 'yaml-list:allowlist', --base-ref, origin/dev]
         files: ^\.onex_ratchets/noncanonical_class_allowlist\.yaml$
       - id: anti-growth-baseline
+        require_serial: true
         alias: anti-growth-topic-naming-baseline
         name: Topic naming baseline can only shrink (OMN-19677)
         args: [--baseline, scripts/validation/topic_naming_baseline.txt, --parser, line-set, --base-ref, origin/dev]
         files: ^scripts/validation/topic_naming_baseline\.txt$
       - id: anti-growth-baseline
+        require_serial: true
         alias: anti-growth-validator-requirements-baseline
         name: Validator requirements baseline can only shrink (OMN-19677)
         args: [--baseline, architecture-handshakes/validator-requirements-baseline.yaml, --parser, 'yaml-list:gaps', --base-ref, origin/dev]
         files: ^architecture-handshakes/validator-requirements-baseline\.yaml$
       - id: anti-growth-baseline
+        require_serial: true
         alias: anti-growth-runtime-profiles-allowlist
         name: Runtime profiles allowlist baseline can only shrink (OMN-19677)
         args: [--baseline, config/validation/runtime_profiles_allowlist.yaml, --parser, 'yaml-list:allowlist', --base-ref, origin/dev]
         files: ^config/validation/runtime_profiles_allowlist\.yaml$
       - id: anti-growth-baseline
+        require_serial: true
         alias: anti-growth-skip-count-baseline
         name: Skip count baseline can only shrink (OMN-19677)
         args: [--baseline, config/skip_count_baseline.yaml, --parser, 'yaml-counted-list-map:suites', --base-ref, origin/dev]

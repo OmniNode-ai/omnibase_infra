@@ -23,7 +23,9 @@ x-omninode-contract-overlay:
     advertised_kafka_addr: &stability_test_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://100.109.203.94:39092"
     advertised_pandaproxy_addr: &stability_test_redpanda_advertised_pandaproxy_addr "internal://redpanda:8082,external://100.109.203.94:28082"
     kafka_port_publish: &stability_test_redpanda_kafka_port_publish "39092:19092"
-    admin_port_publish: &stability_test_redpanda_admin_port_publish "29644:9644"
+    # Loopback only (OMN-20260): admin_api_require_auth is false on this broker,
+    # and every in-network consumer uses redpanda:9644.
+    admin_port_publish: &stability_test_redpanda_admin_port_publish "127.0.0.1:29644:9644"
 # =============================================================================
 # STRICT AUTO-WIRING (OMN-17531)
 # =============================================================================

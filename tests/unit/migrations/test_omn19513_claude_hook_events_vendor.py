@@ -21,9 +21,11 @@ _MANIFEST = _FORWARD / "_ledger" / "application-migrations.tsv"
 _CLASSES = _ROOT / "config" / "migration_classes.yaml"
 _CREATE = "0000_create_claude_hook_events.sql"
 _GRANT = "0001_grant_omninode_runtime_claude_hook_events.sql"
+_GOAL = "0005_add_goal_id.sql"
 _SHA256 = {
     _CREATE: "388faf7f8d683a28341b306a5d67dc208b98aaf5b8f39789b97361cba4ed72ae",
     _GRANT: "c69298981a4a481d394c0f9cbf9c5374904644981073afa84ce87ae4ae4182d0",
+    _GOAL: "14f1c5e67a51e1d30da1b21c5267de497e0bec7d2e443471a45d905b7de3708f",
 }
 _TABLES = ("claude_agent_spans", "claude_hook_events")
 
@@ -36,7 +38,7 @@ def _statements(filename: str) -> str:
     )
 
 
-@pytest.mark.parametrize("filename", [_CREATE, _GRANT])
+@pytest.mark.parametrize("filename", [_CREATE, _GRANT, _GOAL])
 def test_vendor_bytes_and_manifest_binding_are_exact(filename: str) -> None:
     artifact_path = f"nodes/{_NODE}/{filename}"
     assert (
@@ -62,6 +64,25 @@ def test_migration_classes_match_the_classifier() -> None:
     classes = yaml.safe_load(_CLASSES.read_text(encoding="utf-8"))["migrations"]
     assert classes[f"forward/nodes/{_NODE}/{_CREATE}"] == "forward-only"
     assert classes[f"forward/nodes/{_NODE}/{_GRANT}"] == "expand-only"
+    assert classes[f"forward/nodes/{_NODE}/{_GOAL}"] == "expand-only"
+
+
+def test_the_goal_migration_adds_nullable_uuid_columns_and_a_partial_index() -> None:
+    """OMN-20031: the omnimarket 0005, vendored byte for byte, declares its shape."""
+    sql = _statements(_GOAL)
+    for column in ("goal_id", "parent_goal_id"):
+        assert re.search(
+            rf"ALTER TABLE omninode_internal\.claude_hook_events\s+"
+            rf"ADD COLUMN IF NOT EXISTS {column} UUID;",
+            sql,
+        )
+    assert re.search(
+        r"CREATE INDEX IF NOT EXISTS idx_claude_hook_events_goal_id\s+"
+        r"ON omninode_internal\.claude_hook_events \(goal_id\)\s+"
+        r"WHERE goal_id IS NOT NULL;",
+        sql,
+    )
+    assert _grants(sql) == set()
 
 
 def test_both_tables_and_exact_runtime_grants_are_present() -> None:
@@ -160,7 +181,7 @@ def test_every_issued_privilege_is_asserted_including_schema_usage() -> None:
         assert f"AS {table}_cursor_sequence_usage_assertion" in grants
 
 
-@pytest.mark.parametrize("filename", [_CREATE, _GRANT])
+@pytest.mark.parametrize("filename", [_CREATE, _GRANT, _GOAL])
 @pytest.mark.parametrize(
     "profile", ["local", "onex-dev", "onex-prod", "stability-test"]
 )

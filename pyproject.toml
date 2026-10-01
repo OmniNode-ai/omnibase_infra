@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.38.60"
+version = "0.38.62"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{ name = "OmniNode.ai", email = "contact@omninode.ai" }]
 license = {text = "MIT"}
@@ -66,7 +66,7 @@ dependencies = [
     # Core dependencies
     "pydantic>=2.11.7,<3.0.0",
     "fastapi>=0.120.1,<0.142.0",
-    "uvicorn>=0.32.0,<0.54.0",
+    "uvicorn>=0.32.0,<0.55.0",
     "pyyaml>=6.0.2,<7.0.0",
     # OMN-15688 (2026-08-04): floor raised to 3.14.3 to clear CVE-2026-69244
     # (HIGH, out-of-bounds heap read in the C HTTP response parser error path
@@ -160,8 +160,11 @@ dependencies = [
     "a2a-sdk>=0.3.4,<2.0.0", # Real A2A client/server protocol support for remote-agent invocation
     # Security: CVE-2026-32597 (HIGH) - PyJWT <2.12.0 accepts unknown `crit` header extensions.
     # Security: CVE-2026-48526 (HIGH) - PyJWT <2.13.0 authentication bypass via forged tokens.
+    # Security: GHSA-9j54-fg26-wv3r, GHSA-9v7f-9g4p-ffgj, GHSA-ffc3-869f-jxw9 (CRITICAL),
+    # GHSA-p4g4-x82p-q773, GHSA-r6x4-923q-g947, GHSA-w2cx-738m-mc7w - PyJWT 2.13.0 key-confusion
+    # and JWKS bypasses; the lockfile CVE scan blocks every merge-group run until >=2.15.1 (OMN-17427).
     # Transitive dependency (via mcp/httpx/authlib). Explicitly declared to enforce minimum version.
-    "pyjwt>=2.13.0",
+    "pyjwt>=2.15.1",
     # Security: CVE-2026-53539 (HIGH) - python-multipart <0.0.30 streaming-parser vulnerability.
     # Transitive dependency (via fastapi/mcp). Explicitly declared to enforce the CVE-fixed minimum.
     "python-multipart>=0.0.30",
@@ -193,6 +196,7 @@ kafka = "omnibase_infra.cli.cli_kafka:kafka"
 ledger = "omnibase_infra.cli.cli_ledger:ledger_group"
 node = "omnibase_infra.cli.cli_node:run_node_by_name"
 occ = "omnibase_infra.cli.cli_occ:occ"
+profile = "omnibase_infra.cli.cli_profile:profile_group"
 skill = "omnibase_infra.cli.cli_skill:run_skill_by_name"
 
 [project.entry-points."onex.backends"]
@@ -201,6 +205,13 @@ state_postgres = "omnibase_infra.backends.backend_probe:probe_postgres"
 
 [project.entry-points."onex.domain_plugins"]
 registration = "omnibase_infra.nodes.node_registration_orchestrator.plugin:ServiceRegistration"
+
+[project.entry-points."onex.doctor"]
+delegation_identity = "omnibase_infra.doctor.checks.check_delegation_identity:CheckDelegationIdentity"
+delegation_key = "omnibase_infra.doctor.checks.check_delegation_key:CheckDelegationKey"
+delegation_gateway = "omnibase_infra.doctor.checks.check_delegation_gateway:CheckDelegationGateway"
+delegation_quota = "omnibase_infra.doctor.checks.check_delegation_quota:CheckDelegationQuota"
+delegation_local_model = "omnibase_infra.doctor.checks.check_delegation_local_model:CheckDelegationLocalModel"
 
 [dependency-groups]
 dev = [
@@ -260,7 +271,7 @@ override-dependencies = [
     # OMN-19749: released omnibase-core 0.47.24 (PyPI, OMN-18595) carries
     # omnibase_core#1786's runtime lane declaration types this draft needs; the
     # temporary git-rev override below is removed in the same change.
-    "omnibase-core==0.47.24",
+    "omnibase-core==0.47.28",
     "omnibase-spi==0.23.5",
     "omnibase-compat==0.5.7",
 ]
@@ -631,6 +642,7 @@ node_auth_gate_compute = "omnibase_infra.nodes.node_auth_gate_compute"
 node_baseline_capture = "omnibase_infra.nodes.node_baseline_capture"
 node_baseline_comparison_compute = "omnibase_infra.nodes.node_baseline_comparison_compute"
 node_baselines_batch_compute = "omnibase_infra.nodes.node_baselines_batch_compute"
+node_board_probe_effect = "omnibase_infra.nodes.node_board_probe_effect"
 node_broker_disk_watermark_compute = "omnibase_infra.nodes.node_broker_disk_watermark_compute"
 node_build_loop_projection_compute = "omnibase_infra.nodes.node_build_loop_projection_compute"
 node_build_loop_write_effect = "omnibase_infra.nodes.node_build_loop_write_effect"
@@ -688,6 +700,8 @@ node_llm_completion_effect = "omnibase_infra.nodes.node_llm_completion_effect"
 node_llm_embedding_effect = "omnibase_infra.nodes.node_llm_embedding_effect"
 node_llm_inference_effect = "omnibase_infra.nodes.node_llm_inference_effect"
 node_merge_gate_effect = "omnibase_infra.nodes.node_merge_gate_effect"
+node_merge_provenance_compute = "omnibase_infra.nodes.node_merge_provenance_compute"
+node_merge_provenance_observe_effect = "omnibase_infra.nodes.node_merge_provenance_observe_effect"
 node_merge_sweep_auto_merge_effect = "omnibase_infra.nodes.node_merge_sweep_auto_merge_effect"
 node_merge_sweep_classify_compute = "omnibase_infra.nodes.node_merge_sweep_classify_compute"
 node_merge_sweep_pr_list_effect = "omnibase_infra.nodes.node_merge_sweep_pr_list_effect"

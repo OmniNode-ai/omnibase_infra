@@ -254,9 +254,14 @@ class TestNoLaundering:
     ) -> None:
         runs = _Runs([GREEN])
         _verdict(runs, monkeypatch, now="2026-09-23T17:30:00Z")
-        assert runs.paths == [
+        filtered = (
             f"repos/{REPO}/actions/workflows/{WORKFLOW}/runs"
             "?branch=dev&status=completed&per_page=50"
+        )
+        assert runs.paths == [
+            filtered,
+            f"repos/{REPO}/actions/workflows/{WORKFLOW}/runs?per_page=50",
+            filtered,
         ]
 
 

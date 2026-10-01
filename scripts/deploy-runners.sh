@@ -351,6 +351,9 @@ SYNC_PATHS=(
     "docker/runners/Dockerfile"
     "docker/runners/runner-image.lock.json"
     "docker/runners/entrypoint.sh"
+    # OMN-19960: the Dockerfile COPYs it and entrypoint.sh sources it, so the
+    # host build context needs it or the image build fails at that COPY layer.
+    "docker/runners/cgroup-cpu-env.sh"
     "docker/runners/runner-job-started.sh"
     "docker/runners/runner-monitor.sh"
     # OMN-18819: absent until 2026-09-19, which is the mechanical reason
@@ -696,6 +699,7 @@ rsync_artifacts() {
         "${REPO_ROOT}/docker/runners/Dockerfile" \
         "${REPO_ROOT}/docker/runners/runner-image.lock.json" \
         "${REPO_ROOT}/docker/runners/entrypoint.sh" \
+        "${REPO_ROOT}/docker/runners/cgroup-cpu-env.sh" \
         "${REPO_ROOT}/docker/runners/runner-job-started.sh" \
         "${REPO_ROOT}/docker/runners/runner-monitor.sh" \
         "${REPO_ROOT}/docker/runners/healthcheck.sh" \

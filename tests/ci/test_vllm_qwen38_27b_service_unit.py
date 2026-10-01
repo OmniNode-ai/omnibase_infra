@@ -86,7 +86,8 @@ def _kernel_config() -> dict[str, object]:
         "unit must declare --kernel-config as a single-quoted JSON object; "
         "without it a cold start pays the full sm120 autotune sweep."
     )
-    return json.loads(match.group(1))
+    config: dict[str, object] = json.loads(match.group(1))
+    return config
 
 
 @pytest.mark.unit
@@ -250,3 +251,20 @@ def test_provisioning_script_is_idempotent_and_has_a_check_mode() -> None:
 
     mode = PROVISION_PATH.stat().st_mode
     assert mode & stat.S_IXUSR, f"{PROVISION_PATH} must be executable"
+
+
+@pytest.mark.unit
+def test_unit_splits_reasoning_from_content_with_the_qwen3_parser() -> None:
+    """OMN-20240: thinking goes to message.reasoning, never into content.
+
+    Removing the flag puts the model's thinking back into message.content,
+    which every caller then has to strip by hand. The tool-call parser must
+    stay alongside it, or tool calls stop parsing.
+    """
+    exec_start = _exec_start()
+
+    match = re.search(r"--reasoning-parser\s+(\S+)", exec_start)
+    assert match is not None, "unit must declare --reasoning-parser"
+    assert match.group(1) == "qwen3"
+    assert "--tool-call-parser qwen3_coder" in exec_start
+    assert "--enable-auto-tool-choice" in exec_start

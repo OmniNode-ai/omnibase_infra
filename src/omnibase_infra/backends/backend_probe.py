@@ -26,6 +26,7 @@ import socket
 from typing import Protocol, cast
 
 from omnibase_infra.backends.enum_probe_state import EnumProbeState
+from omnibase_infra.backends.model_consumer_group_owner import ModelConsumerGroupOwner
 from omnibase_infra.backends.model_probe_result import ModelProbeResult
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
@@ -149,8 +150,9 @@ def live_consumer_groups(
     topic: str,
     bootstrap_servers: str | None = None,
     timeout: float = 5.0,
+    owner: ModelConsumerGroupOwner | None = None,
 ) -> tuple[str, ...]:
-    """Return the ids of every ``Stable`` consumer group bound to *topic*.
+    """Return the ids of matching ``Stable`` consumer groups bound to *topic*.
 
     Wiring truth, not configuration: a group id ending in the
     ``TOPIC_SCOPE_INFIX`` scope suffix for *topic*, in state ``STABLE``, is a
@@ -159,6 +161,8 @@ def live_consumer_groups(
     up" available to an off-box caller — broker-identity string matching is
     structurally blind through any address the broker does not advertise
     (OMN-16529), and a topic's existence says nothing about consumers.
+    With an owner, only that contract's service and node can prove liveness
+    (OMN-20235); other nodes consuming the same topic cannot answer for it.
 
     Unlike :func:`_has_live_consumer_group` this is NOT probe-safe: it raises
     rather than reporting a bare ``False`` for a question it could not ask.
@@ -172,10 +176,13 @@ def live_consumer_groups(
         bootstrap_servers: Comma-separated broker addresses. Defaults to
             ``KAFKA_BOOTSTRAP_SERVERS``.
         timeout: Admin request timeout in seconds.
+        owner: Restrict groups to this contract's service and node identity,
+            independent of environment and deployed version. None asks about
+            every consumer on the topic.
 
     Returns:
         Group ids, sorted, possibly empty. Empty is a real answer: the broker
-        was asked and no ``STABLE`` group is bound.
+        was asked and no matching ``STABLE`` group is bound.
 
     Raises:
         ConsumerGroupLivenessUnknownError: the question could not be answered
@@ -197,7 +204,7 @@ def live_consumer_groups(
     try:
         return asyncio.run(
             _live_consumer_groups_async(
-                topic=topic, bootstrap_servers=resolved, timeout=timeout
+                topic=topic, bootstrap_servers=resolved, timeout=timeout, owner=owner
             )
         )
     except ConsumerGroupLivenessUnknownError:
@@ -209,7 +216,11 @@ def live_consumer_groups(
 
 
 async def _live_consumer_groups_async(
-    *, topic: str, bootstrap_servers: str, timeout: float
+    *,
+    topic: str,
+    bootstrap_servers: str,
+    timeout: float,
+    owner: ModelConsumerGroupOwner | None = None,
 ) -> tuple[str, ...]:
     """Ask the broker the liveness question with the runtime's own client.
 
@@ -232,6 +243,13 @@ async def _live_consumer_groups_async(
     moment a mechanism arrived the family cannot express. One client
     resolution path is the fix, not a second set of credentials: the MSK token
     callback has exactly one implementation and the probe shares it.
+
+    Args:
+        topic: Exact topic whose consuming groups are wanted.
+        bootstrap_servers: Broker address resolved for this run.
+        timeout: Admin request timeout in seconds.
+        owner: Optional contract service and node identity to filter before
+            describing candidates.
     """
     from aiokafka.admin import AIOKafkaAdminClient
     from aiokafka.errors import GroupAuthorizationFailedError
@@ -264,24 +282,30 @@ async def _live_consumer_groups_async(
         await admin.describe_cluster()
         listing = await admin.list_consumer_groups()
 
-        # Narrow by name before describing. The group id carries the topic it
-        # is scoped to, so the describe — one coordinator round trip per group
-        # — runs over the handful of candidates rather than the ~600 groups a
-        # real cluster lists.
+        # OMN-20235: the topic suffix alone admits every per-run and every
+        # other-node group on the topic. Measured 2026-10-01: 385 groups,
+        # including 383 Empty per-run groups. Filter by owner before the cap
+        # and serial describes to ask about the one node the dispatch needs.
+        # This only narrows a read-only question; it never deletes groups.
         suffix = f"{TOPIC_SCOPE_INFIX}{topic}"
         candidates = sorted(
             {
                 str(entry[0])
                 for entry in listing
-                if entry and str(entry[0]).endswith(suffix)
+                if entry
+                and str(entry[0]).endswith(suffix)
+                and (owner is None or owner.matches(str(entry[0])))
             }
         )
         if not candidates:
             return ()
         if len(candidates) > _MAX_LIVE_CONSUMER_GROUP_DESCRIBE_CANDIDATES:
+            owner_filter = (
+                f" of {owner.service}.{owner.node}" if owner is not None else ""
+            )
             raise ConsumerGroupLivenessUnknownError(
                 f"consumer group liveness for {topic!r} on {bootstrap_servers} "
-                f"matched {len(candidates)} candidate groups; refusing to run "
+                f"matched {len(candidates)} candidate groups{owner_filter}; refusing to run "
                 "unbounded serial DescribeGroups probes"
             )
 

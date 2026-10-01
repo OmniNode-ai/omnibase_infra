@@ -126,6 +126,7 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "CI Tests Gate",  # tests-gate — aggregator over the split matrix
     "Lint",  # lint
     "ONEX Validators",  # onex-validation
+    "delegation-seam-gate",  # OMN-20183: unconditional local FSM seam
     "Infra Node Handler Ownership",  # infra-node-handler-ownership
     "Migration Freeze Check",  # migration-freeze
     "Fingerprint Check",  # fingerprint-check
@@ -314,6 +315,11 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # authenticate to an auth-required listener; the sharded test matrix
     # excludes it by marker (`-m "not kafka"`).
     "Customer Path Boundary (OMN-18012)",  # customer-path-boundary
+    # OMN-19928: the forwarder against a broker that enforces grants, with one
+    # refused inbound topic (tests/integration/bus_acl_boundary/). THIS LINE IS
+    # THE MECHANISM: CI Summary counts `skipped` as passed for an unregistered
+    # job, so without it a skipped or deleted boundary job reads green.
+    "Bus ACL Boundary (OMN-19928)",  # bus-acl-boundary
     # OMN-19412: the lab probe-window file's drift check. THIS LINE IS THE
     # MECHANISM, the same as the lockfile entries above: the job has no `if:`,
     # so it always completes, and registering it here is what makes a skip or
@@ -411,6 +417,45 @@ DOCS_ONLY_SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
 # Every job the completeness anchor must observe present+good for SUCCESS.
 GATE_JOBS: tuple[str, ...] = STRICT_GATE_JOBS + SKIPPABLE_GATE_JOBS
 
+# OMN-20147 — strict on ``merge_group`` ONLY.
+#
+# ``runtime-boot-smoke`` in ci.yml is the one CI job that boots a real ONEX
+# runtime and runtime-effects over compose Postgres and Redpanda, holds both
+# healthy for 60s, and runs the two runtime-backed suites (OMN-18795). Its
+# caller ``if:`` runs it on merge_group, workflow_dispatch and a main push, and
+# never on pull_request. Every omnibase_infra PR to ``dev`` lands through the
+# merge queue (ruleset 13269702, OMN-19697), so requiring it here requires a
+# green real-runtime boot on the exact commit that lands.
+#
+# The name is the reusable's INNER compose job, the row the jobs API reports
+# when the caller executes (``<caller> / <inner>``). A caller that skips leaves
+# only a bare ``Runtime Boot Smoke (compose)`` row, so this gate reads absent:
+# PENDING, then FAILURE at the poller's deadline, never SUCCESS. On merge_group
+# the caller skips only when ``occ-preflight`` or ``tests-gate`` did not
+# succeed, and both are STRICT, so that run fails on its own first. A runner
+# with no Docker Compose fails the inner job outright (OMN-18811 AC4).
+#
+# On every other event the job keeps its SOFT_ALLOWLIST reading below. That
+# entry is prefix-aware, but strict gates are judged before the allowlist is
+# consulted, so it cannot relax this tier on merge_group.
+RUNTIME_BOOT_SMOKE_COMPOSE_GATE = (
+    "Runtime Boot Smoke (compose) / runtime-boot (mode=compose)"
+)
+MERGE_GROUP_STRICT_GATE_JOBS: tuple[str, ...] = (RUNTIME_BOOT_SMOKE_COMPOSE_GATE,)
+
+
+def strict_gates_for_event(event_name: str) -> tuple[str, ...]:
+    """The strict gate tier for one GitHub event (OMN-20147).
+
+    ``merge_group`` adds :data:`MERGE_GROUP_STRICT_GATE_JOBS`; every other
+    event returns :data:`STRICT_GATE_JOBS` unchanged.
+    """
+
+    if event_name == "merge_group":
+        return STRICT_GATE_JOBS + MERGE_GROUP_STRICT_GATE_JOBS
+    return STRICT_GATE_JOBS
+
+
 # Jobs that do NOT gate merge today (verified against ci.yml ci-summary ``needs``
 # + the pass/fail condition, and against dev branch-protection required contexts
 # on 2026-07-07). The default-deny sweep ignores these so it never newly-wedges
@@ -428,7 +473,9 @@ SOFT_ALLOWLIST: frozenset[str] = frozenset(
         "Test-Failure Ratchet Gate",  # advisory (OMN-13867)
         "Version Pin Compliance",  # in needs, never checked in the condition
         # Not in ci-summary ``needs`` and not a required context:
-        "Runtime Boot Smoke (compose)",  # advisory (OMN-9120); reusable caller
+        # Advisory off merge_group only (OMN-9120); on merge_group its compose
+        # inner job is STRICT via MERGE_GROUP_STRICT_GATE_JOBS (OMN-20147).
+        "Runtime Boot Smoke (compose)",
         "Cross-Repo Migration Conflicts",  # migration-conflict-check; not required
         "Kafka Boundary Compat (OMN-3256)",  # advisory; carries xfail known-drift
         "AI-Slop Pattern Check (strict, PR diff)",  # aislop-sweep gates the tree
@@ -701,6 +748,33 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # Admitted under POST_FIXTURE_WINDOW_CONTEXTS, which carries the admission
     # argument, and placed at the tail for the reason the entry above states.
     "pypi-pin-resolvability",
+    # OMN-19451 / OMN-19998: the delegation-health check. It fails a runtime
+    # change while a delegation verdict it reads (config/
+    # delegation_health_check.yaml) is red, stale or unreadable. It ran as a
+    # "(shadow)" job and then under a sweep exclusion (#4312), which is the
+    # observe-only mode the 2026-09-29T12:02:35Z operator ruling removed: every
+    # check acts or blocks. Registered here for the OMN-16878 reason the
+    # kb-doc-gate note above gives -- `dev` requires exactly ONE context, so
+    # this tuple IS the external enforcement surface on this repo.
+    #
+    # ADMISSION IS BY CONSTRUCTION, on the argument recorded for
+    # `exposure-reader-coverage`:
+    #   * The caller (.github/workflows/delegation-health-check.yml) declares
+    #     `pull_request` AND `merge_group`, and its one job carries no `needs:`,
+    #     no job-level `if:` and no path filter, so it cannot skip-as-passed and
+    #     cannot leave a queue head waiting. The reusable derives the changed
+    #     files and labels for both events itself and fails on an unresolved
+    #     input.
+    #   * It is proven able to FAIL on real input: on 2026-09-29 it failed
+    #     omnibase_infra#4303, #4265 and #3991 naming omninode_infra
+    #     m4-customer-pass-verdict runs 36615744209 and 36572408773.
+    #   * It is proven able to PASS: the same reader passed the
+    #     delegation-regression-nightly (run 36538536307) and
+    #     m4-c17-customer-surface-verdict (run 36576684190) sources in those
+    #     same runs.
+    # Admitted under POST_FIXTURE_WINDOW_CONTEXTS and placed at the tail for
+    # the reason the `Governed helper primitive gate` entry states.
+    "delegation-health-check / Delegation Health Check",
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -723,6 +797,9 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
 # finding, not a fixture convenience.
 POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
     {
+        # OMN-19451: registered 2026-09-29, after both fixture windows closed.
+        # Comes out at the next fixture re-capture.
+        "delegation-health-check / Delegation Health Check",
         # Landed with its validator in the same PR (Rule 5) on 2026-08-30; both
         # fixture windows (#2546…#2567, #2705…#2720) close well before that.
         "exposure-reader-coverage",
@@ -1159,13 +1236,13 @@ class SweepExclusion:
 # where the numbers are recorded, not here.
 SWEEP_EXCLUSION_MAX_DAYS: int = 90
 
-# TEN ENTRIES, one per name the measurement found non-green on ANY head over
+# The first TEN ENTRIES, one per name the measurement found non-green on ANY head over
 # the 16-PR window recorded above. OMN-18960 shipped this dict EMPTY beside a
 # weaker conclusion set; OMN-18979 replaced that pairing with the strict bar
 # and these entries, so every tolerance is now a named, dated, owned decision
 # rather than a silent one buried in a frozenset.
 #
-# They all expire on 2026-12-20, ninety days out, INCLUDING the ones whose
+# Those initial entries all expire on 2026-12-20, ninety days out, INCLUDING the ones whose
 # mechanism looks structural — a fork-only job, a main-branch-only job, a
 # manual-dispatch entrypoint. The cap is not a prediction that the mechanism
 # will change. It is what forces a premise that has held for a quarter to be
@@ -1371,10 +1448,11 @@ DEPENDENCY_BOT_AUTHORS: frozenset[str] = frozenset({"dependabot[bot]", "renovate
 # The ticket token both the title rule and the producers' `if:` look for.
 TICKET_TOKEN_RE = re.compile(r"OMN-\d+")
 
-# A MIRROR, not a second policy. Source of truth, read live on 2026-09-22:
+# A MIRROR, not a second policy. Source of truth, read live on 2026-09-22; the
+# reusable was re-read byte-identical at ebe30bc on 2026-09-29:
 #   OmniNode-ai/onex_change_control
 #   .github/workflows/pr-title-check-reusable.yml
-#   @babdd13ce68f07df20f989f52ff1c4514d03d896
+#   @ebe30bc3589c9f803e8920b941ddaef07b17ed90
 # which is the exact ref .github/workflows/pr-title-check.yml in THIS repo
 # pins, so the mirror and the enforcer cannot be reading different revisions
 # without that pin moving. Its shell tests, in order, are:
@@ -1621,9 +1699,46 @@ class JobState:
     completed_at: str | None = None
 
 
+def carries_failure_conclusion(state: JobState) -> bool:
+    """True when the row's conclusion is a failure-class verdict, whatever its status.
+
+    OMN-20077. GitHub can report ``status: in_progress`` beside a set
+    ``conclusion`` on the same row. Measured on omnibase_infra#4274 (head
+    4d61341048f70a3a890c3bac6e7087f253cf5936, check-run 109295007859,
+    "Integration Test Coverage"): status in_progress, conclusion failure,
+    completed_at set. Every layer read the status first, filed the row as
+    "still running (reported, not waited on)" and CI Summary concluded SUCCESS.
+
+    The set is derived from the two existing constants and adds none: any
+    conclusion that is neither :data:`GOOD_CONCLUSIONS` nor
+    :data:`NON_VERDICT_CONCLUSIONS` (failure, timed_out, cancelled,
+    action_required, stale, startup_failure). ``None`` is no verdict. A good or
+    non-verdict conclusion on a running row is NOT decided here: only a
+    ``completed`` row can pass, so this never widens what passes.
+    """
+
+    return state.conclusion is not None and state.conclusion not in (
+        GOOD_CONCLUSIONS | NON_VERDICT_CONCLUSIONS
+    )
+
+
+def is_decided(state: JobState) -> bool:
+    """True when a layer may judge the row's conclusion: completed, or already failed.
+
+    A running row with no conclusion, or with a good conclusion, stays in
+    flight exactly as before. A row that carries a failure-class conclusion is
+    judged like a completed one, so the failure and cancellation graces, the
+    replacement-run check and the exclusion registries all still apply to it.
+    """
+
+    return state.status == "completed" or carries_failure_conclusion(state)
+
+
 def _state_severity(job: JobState) -> int:
     """Rank same-attempt duplicate jobs by the most blocking state."""
 
+    if carries_failure_conclusion(job):
+        return 3
     if job.status != "completed":
         return 2
     if job.conclusion not in GOOD_CONCLUSIONS:
@@ -2050,9 +2165,12 @@ def evaluate_external_contexts(
     for context in expected:
         raw = rows.get(context)
         state = None if raw is None else _state_from_check_run(context, raw)
-        if raw is None or state is None or state.status != "completed":
+        if raw is None or state is None or not is_decided(state):
             unresolved.append(context)
-        elif state.conclusion in EXTERNAL_GOOD_CONCLUSIONS:
+        elif (
+            state.status == "completed"
+            and state.conclusion in EXTERNAL_GOOD_CONCLUSIONS
+        ):
             continue
         elif verdict_is_provisional(state, now) or replacement_run_in_flight(
             raw, workflow_runs
@@ -2084,7 +2202,7 @@ def provisional_external_verdicts(
         context
         for context in expected
         if (raw := rows.get(context)) is not None
-        and (state := _state_from_check_run(context, raw)).status == "completed"
+        and is_decided(state := _state_from_check_run(context, raw))
         and state.conclusion not in EXTERNAL_GOOD_CONCLUSIONS
         and (
             verdict_is_provisional(state, now)
@@ -2113,7 +2231,7 @@ def provisional_cancellations(
         context
         for context in expected
         if (state := latest.get(context)) is not None
-        and state.status == "completed"
+        and is_decided(state)
         and cancellation_is_provisional(state, now)
     )
 
@@ -2459,6 +2577,8 @@ def _sweep_failure_reason(name: str, state: JobState, now: datetime | None) -> s
     """
 
     if state.conclusion != "cancelled":
+        if state.status != "completed":
+            return f"{name} ({state.conclusion} while status is {state.status})"
         return f"{name} ({state.conclusion})"
     completed = _parse_timestamp(state.completed_at)
     if completed is None or now is None:
@@ -2493,7 +2613,9 @@ def evaluate_external_sweep(
     Returns ``(failures, in_flight, swept, excluded, provisional)``:
 
     * ``failures`` — one line per refusal. These FAIL the umbrella.
-    * ``in_flight`` — swept names still running. REPORTING ONLY; see below.
+    * ``in_flight`` — swept names still running with no failure-class conclusion
+      (OMN-20077: a running row that already carries one is judged, not filed
+      here). REPORTING ONLY; see below.
     * ``swept`` — every name this layer judged, so a clean run records what it
       looked at instead of printing nothing (rule 16).
     * ``excluded`` — swept-population names an active registry entry admitted,
@@ -2549,10 +2671,10 @@ def evaluate_external_sweep(
             continue
         swept.append(name)
         state = _state_from_check_run(name, raw)
-        if state.status != "completed":
+        if not is_decided(state):
             in_flight.append(name)
             continue
-        if state.conclusion in SWEEP_GOOD_CONCLUSIONS:
+        if state.status == "completed" and state.conclusion in SWEEP_GOOD_CONCLUSIONS:
             continue
         # OMN-19167 — the conditional arm, consulted only for a row that is
         # ALREADY about to red. It can never turn a red into a pass for a name
@@ -2683,7 +2805,7 @@ def evaluate(
         for g in strict_gates
         if (
             (st := latest.get(g)) is not None
-            and st.status == "completed"
+            and is_decided(st)
             and (
                 st.conclusion not in GOOD_CONCLUSIONS
                 if g in relaxed
@@ -2698,7 +2820,7 @@ def evaluate(
         for g in skippable_gates
         if (
             (st := latest.get(g)) is not None
-            and st.status == "completed"
+            and is_decided(st)
             and st.conclusion not in GOOD_CONCLUSIONS
         )
     )
@@ -2710,7 +2832,7 @@ def evaluate(
         if name != self_name
         and name not in gate_names
         and not _is_allowlisted(name, allowlist)
-        and j.status == "completed"
+        and is_decided(j)
         and j.conclusion not in GOOD_CONCLUSIONS
     )
 
@@ -3119,6 +3241,8 @@ def main(argv: list[str] | None = None) -> int:
     code, report = evaluate(
         jobs,
         run_attempt=args.run_attempt,
+        # OMN-20147: merge_group adds the real-runtime boot to the strict tier.
+        strict_gates=strict_gates_for_event(args.event_name),
         check_runs=_load_check_runs(args.check_runs_file),
         external_contexts=external_contexts,
         pr_author=args.pr_author,

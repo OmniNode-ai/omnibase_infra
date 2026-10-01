@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import signal
+import socket
 import threading
 import time
 from collections.abc import Callable
@@ -117,8 +118,29 @@ from deploy_agent.routing import (
     build_router_from_env,
 )
 from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
+from deploy_agent.unit_drift import check_units, load_manifest, report
 
 logger = logging.getLogger(__name__)
+
+
+def _unit_drift_report() -> dict[str, object]:
+    """Expose stale installed units, or the reason observation failed (OMN-20037)."""
+    try:
+        repo_root = (
+            Path(os.environ.get("DEPLOY_AGENT_DIR", DEPLOY_AGENT_DIR))
+            .resolve()
+            .parents[1]
+        )
+        hostname = socket.gethostname()
+        results = check_units(
+            load_manifest(repo_root / "deploy" / "unit-drift-manifest.yaml"),
+            repo_root=repo_root,
+            hostname=hostname,
+            home=Path.home(),
+        )
+        return report(results, hostname)
+    except Exception as exc:  # noqa: BLE001
+        return {"drift": None, "reason": str(exc)}
 
 
 def _runtime_container_for_lane(lane: EnumRuntimeLane) -> str:
@@ -308,6 +330,11 @@ class _TerminalFacts:
 #: measurement this replaces and for why the cause is recorded rather than
 #: worked around here.
 REJECTION_PUBLISH_MAX_BLOCK_MS = 10_000
+
+#: OMN-20133: kafka-python's default ``max_poll_interval_ms`` (the consumer
+#: does not override it). A pre-accept settle wait at least this long has let
+#: the coordinator drop the member, which is reported rather than discovered.
+SETTLE_WAIT_EVICTION_WARN_SECONDS = 300.0
 
 
 class DeployAgent:
@@ -609,6 +636,7 @@ class DeployAgent:
             get_agent_state=self._get_state,
             get_accept_backlog=self._accept_backlog.latest,
             get_control_topic_lag=self._lag_sampler.latest,
+            get_unit_drift=_unit_drift_report,
         )
         runner = web.AppRunner(health_app)
         await runner.setup()
@@ -845,10 +873,27 @@ class DeployAgent:
         """
 
         def _before_reexec() -> None:
-            # Wait first, then rewind: the rewind must be the last thing before
-            # the process image is replaced (OMN-16442).
-            self._await_settle_before_reexec()
+            # Rewind first, then wait (OMN-20133). The settle wait does not
+            # call poll(), and a lab-overlay settle routinely runs past
+            # kafka-python's max_poll_interval_ms (300 s): job 7b970ab9 waited
+            # 6m43s, the coordinator dropped the member, and a rewind made
+            # AFTER the wait raised CommitFailedError, so no re-exec happened
+            # and the command was lost. Committed while the member is live, the
+            # rewind holds whatever the wait does to the membership, because
+            # nothing on this thread commits between here and the re-exec.
             rewind_offset()
+            started = time.monotonic()
+            self._await_settle_before_reexec()
+            waited = time.monotonic() - started
+            if waited >= SETTLE_WAIT_EVICTION_WARN_SECONDS:
+                logger.warning(
+                    "self_update[boundary=pre_accept]: the settle wait took %.0fs, "
+                    "past the consumer's poll interval, so the group has likely "
+                    "dropped this member; the command's offset was rewound "
+                    "before the wait, so the replacement process re-reads it "
+                    "friction_type=self_update_settle_outlasted_poll_interval",
+                    waited,
+                )
 
         self.executor.self_update(
             boundary=EnumSelfUpdateBoundary.PRE_ACCEPT,

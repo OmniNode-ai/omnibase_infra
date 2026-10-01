@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# delegation-health-check.yml -- OMN-19451. omnibase_infra's caller of the
+# delegation-health check (see delegation-health-reusable.yml for the design).
+#
+# ENFORCING. The check-run this caller produces, `delegation-health-check /
+# Delegation Health Check`, is a member of EXPECTED_EXTERNAL_CONTEXTS in
+# scripts/ci/ci_summary_gate.py, so CI Summary requires it present, completed
+# and green on every pull request head and every merge-queue head (operator
+# ruling 2026-09-29T12:02:35Z, OMN-19998: no shadow or advisory mode). That
+# registration is what the shape below exists to satisfy: it runs on
+# `pull_request` AND `merge_group`, the one job carries no `needs:`, no
+# job-level `if:` and no path filter, so it can neither skip-as-passed nor
+# leave a queue head waiting on a context that never reports. A fork pull
+# request carries no secrets, so it cannot read the verdicts and fails closed.
+# tests/ci/test_delegation_health_check_omn19451.py pins all of it.
+name: Delegation Health Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    branches: [dev]
+  merge_group:
+
+concurrency:
+  # A merge-queue entry carries its own github.ref, so queue heads never
+  # cancel one another; pull-request runs cancel their superseded predecessor.
+  group: delegation-health-check-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  # No `name:` on purpose: the check-run is then `<job id> / <called job name>`,
+  # `delegation-health-check / Delegation Health Check`, the exact context
+  # EXPECTED_EXTERNAL_CONTEXTS registers and the prefix the omniclaude
+  # advisory-job gate matches a called workflow's job by.
+  delegation-health-check:
+    uses: ./.github/workflows/delegation-health-reusable.yml
+    with:
+      repo_key: omnibase_infra
+    secrets:
+      ONEXBOT_OCC_APP_ID: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+      ONEXBOT_OCC_PRIVATE_KEY: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}

@@ -60,6 +60,17 @@ runtime-core:
 local:
   description: "Laptop profile — the ONEX stack plus your own runtime (main + effects) in containers, no lab or ops secrets (OMN-19496). `make up-local`."
   project: omnibase-infra-local
+  # OMN-19972: a laptop's database, broker and kernels are for that laptop.
+  # Every published port binds loopback, so nothing is exposed to the network
+  # the developer happens to be on. The lab lanes render the same manifests
+  # without this and stay reachable.
+  publish_host: 127.0.0.1
+  # OMN-19972: the shared Redpanda manifest defaults its advertised address to
+  # the lab's LAN IP, which the dev lane on .201 relies on. The laptop render
+  # must name no lab host, so its default is localhost; the env file can still
+  # set REDPANDA_ADVERTISE_HOST.
+  env_default_overrides:
+    REDPANDA_ADVERTISE_HOST: localhost
   services:
     - postgres
     - redpanda
@@ -72,9 +83,37 @@ local:
     # The delegation_events writer. It is a standalone projection runner, not
     # a kernel handler, on every lane that projects delegations.
     - omnimarket-projection-delegation
+    # Projects registered credential references into the tenant routing overlay.
+    - omnimarket-projection-tenant-credentials
+    # OMN-19972 (plan T4.1, demo half): the six local pages read served
+    # exposures, so the laptop runs its own projection API, the LLM call and
+    # cost writer behind the Usage page, and the consumer-health projection.
+    - projection-api
+    - omnimarket-projection-llm-cost
+    - consumer-health-projection
+  # OMN-19972: 3002 is the lab lanes' projection API port. The laptop's own API
+  # answers on 3102 (loopback, by publish_host above).
+  port_overrides:
+    projection-api: 3102
+  # OMN-19972: the projection API refuses to start while any bus-backed
+  # exposure's topic is missing, and on a laptop the kernel's boot is what
+  # creates them (TopicProvisioner, from every installed contract). Measured on
+  # the lakshman lane 2026-09-30: started first, it waited 300 s, exited with
+  # "no partition metadata" and looped.
+  extra_depends_on:
+    projection-api:
+      omninode-runtime: service_healthy
   includes: []
   inject_env:
     ONEX_ENVIRONMENT: local
+    # Non-secret lane identity; empty means this runtime has no lane tenant.
+    ONEX_TENANT_ID: "${ONEX_TENANT_ID:-}"
+    # OMN-19408: a lane-scoped node contract (omnimarket's lab projections and
+    # PR-landing nodes) fails closed on a runtime that cannot name its lane, and
+    # each such refusal is a discovery error that holds /health at `degraded`.
+    # A laptop is the dogfood shape (the lab's dogfood lane runs on laptops), a
+    # registered non-lab lane: the lab-scoped nodes are excluded without error.
+    ONEX_RUNTIME_LANE: dogfood
     ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: "1"
     ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
     # Wiring strictness is the dev lane's: unset, so a handler the resolver
@@ -88,11 +127,17 @@ local:
     BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/local.bifrost.yaml
     BIFROST_VERIFY_ENDPOINTS: "0"
     DELEGATION_ROUTING_TIERS_PATH: /app/config/delegation/routing_tiers.yaml
-    # Laptop limit, stated: every service connects as the postgres superuser,
-    # so row-level security and the tenant and internal non-superuser
-    # principals the lab lanes use are NOT exercised on a laptop.
+    # Database principals. The tenant and internal bindings connect as the same
+    # non-superuser principals the lab runtimes use (docker-compose.infra.yml
+    # x-runtime-env): omnimarket's standalone projection writers attest the
+    # connected principal per binding (OMN-17454) and refuse the superuser.
+    # forward-migration asserts both LOGIN credentials from the env file.
+    # Laptop limit, stated: the dashboard binding still connects as the
+    # postgres superuser, so role_omnidash and its RLS are NOT exercised.
+    ONEX_DATABASE_TOPOLOGY_PROFILE: local
     OMNIDASH_ANALYTICS_DB_URL: "postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
-    ONEX_TENANT_DB_URL: "postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnidash_analytics"
+    ONEX_TENANT_DB_URL: "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?TENANT_PROJECTION_WRITER_PASSWORD required}@postgres:5432/omnidash_analytics"
+    OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD required}@postgres:5432/omnidash_analytics"
     OMNIMEMORY_ENABLED: "false"
     # Legacy PluginLlm URLs. Delegation routes through the overlay above; these
     # only need to be well-formed. Override in the env file if you use them.
@@ -126,6 +171,8 @@ local:
     - "${ONEX_LOCAL_BIFROST_OVERLAY:?ONEX_LOCAL_BIFROST_OVERLAY must name your model overlay file (template: docker/lane-overlays/local.bifrost.example.yaml)}:/app/config/delegation/local.bifrost.yaml:ro"
   inject_required_env:
     - ONEX_LOCAL_BIFROST_OVERLAY
+    - OMNINODE_RUNTIME_PASSWORD
+    - TENANT_PROJECTION_WRITER_PASSWORD
 runtime-integrations:
   description: "Runtime external-integration services — Linear, CI, Slack webhooks (OMN-9332)"
   services:

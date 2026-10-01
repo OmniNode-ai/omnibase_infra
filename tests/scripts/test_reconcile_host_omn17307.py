@@ -338,7 +338,13 @@ def test_core_bare_clone_fails_even_though_the_delegate_exited_zero(
     assert proc.returncode == EXIT_FAILED, proc.stderr
     assert "clone:omnibase_core" in proc.stderr
     assert "core.bare" in proc.stderr
-    assert not ws.floor.exists(), "a failed run must not stamp the floor"
+    # omnibase_core does not feed the dispatch build, so the verdict fails but
+    # the dispatch floor is still stamped (OMN-20111). A failed run on a
+    # dispatch-premise surface withholding it is pinned in
+    # test_dispatch_floor_omn20111.py.
+    assert json.loads(ws.floor.read_text(encoding="utf-8"))["distributions"] == {
+        "omnibase_core": "0.46.9"
+    }
 
 
 def test_clone_behind_origin_fails_when_the_delegate_is_a_no_op(ws: Workspace) -> None:
@@ -358,7 +364,8 @@ def test_clone_behind_origin_fails_when_the_delegate_is_a_no_op(ws: Workspace) -
 
     assert proc.returncode == EXIT_FAILED
     assert "clone:omnibase_core: DID_NOT_MOVE" in proc.stderr
-    assert not ws.floor.exists()
+    assert "converge-canonical-clone.sh omnibase_core --execute" in proc.stderr
+    assert ws.floor.exists(), "an unrelated clone must not withhold the floor"
 
 
 def test_clone_that_actually_advanced_passes(ws: Workspace) -> None:
@@ -650,7 +657,9 @@ def test_missing_venv_delegate_is_uncovered_not_skipped(ws: Workspace) -> None:
 # AC4 -- alert on failure, and never a success line
 # --------------------------------------------------------------------------- #
 def test_failure_alerts_and_leaves_the_previous_floor_untouched(ws: Workspace) -> None:
-    _clone, seed = _make_clone(ws.root, "omnibase_core")
+    # omnimarket, not an unrelated clone: only a dispatch-premise failure keeps
+    # the previous floor (OMN-20111).
+    _clone, seed = _make_clone(ws.root, "omnimarket")
     _advance_origin(seed, "moved")
     _lock(ws)
     _stub(
@@ -666,7 +675,7 @@ def test_failure_alerts_and_leaves_the_previous_floor_untouched(ws: Workspace) -
     assert proc.returncode == EXIT_FAILED
     assert ws.alert_witness.exists(), "a failing surface must alert"
     alert_text = ws.alert_witness.read_text(encoding="utf-8")
-    assert "omnibase_core" in alert_text
+    assert "omnimarket" in alert_text
     assert ws.floor.read_text(encoding="utf-8") == previous, (
         "a failed reconcile must leave the last PROVEN floor in place, not "
         "overwrite it and not delete it"
@@ -748,6 +757,7 @@ def test_check_mode_still_reports_drift(ws: Workspace) -> None:
 
     assert proc.returncode == EXIT_FAILED
     assert "clone:omnibase_core: DID_NOT_MOVE" in proc.stderr
+    assert not ws.floor.exists(), "--check never stamps, even an unrelated failure"
 
 
 # --------------------------------------------------------------------------- #
@@ -768,8 +778,14 @@ def test_receipt_is_written_on_both_outcomes(ws: Workspace) -> None:
     receipt = json.loads(ws.receipt.read_text(encoding="utf-8"))
     assert receipt["schema"] == "onex.workspace.reconcile.v1"
     assert receipt["failures"] >= 1
-    surfaces = {s["surface"]: s["verdict"] for s in receipt["surfaces"]}
-    assert surfaces["clone:omnibase_core"] == "DID_NOT_MOVE"
+    surfaces = {s["surface"]: s for s in receipt["surfaces"]}
+    assert surfaces["clone:omnibase_core"]["verdict"] == "DID_NOT_MOVE"
+    assert surfaces["clone:omnibase_core"]["dispatch_premise"] is False
+    assert (
+        "converge-canonical-clone.sh omnibase_core --execute"
+        in (surfaces["clone:omnibase_core"]["remedy"])
+    )
+    assert receipt["dispatch_premise_failures"] == 0
 
 
 def test_script_is_executable_in_the_repo() -> None:

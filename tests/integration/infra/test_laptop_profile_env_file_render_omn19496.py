@@ -37,7 +37,13 @@ _ENV_TEMPLATE = _REPO / "docker" / "local.env.example"
 _OVERLAY_TEMPLATE = _REPO / "docker" / "lane-overlays" / "local.bifrost.example.yaml"
 _PROJECT = "omnibase-infra-local"
 _OVERLAY_PIN = "/app/config/delegation/local.bifrost.yaml"
-_OPERATOR_KEYS = ("POSTGRES_PASSWORD", "VALKEY_PASSWORD", "ONEX_LOCAL_BIFROST_OVERLAY")
+_OPERATOR_KEYS = (
+    "POSTGRES_PASSWORD",
+    "VALKEY_PASSWORD",
+    "OMNINODE_RUNTIME_PASSWORD",
+    "TENANT_PROJECTION_WRITER_PASSWORD",
+    "ONEX_LOCAL_BIFROST_OVERLAY",
+)
 
 
 def _write_laptop_files(tmp_path: Path) -> tuple[Path, Path]:
@@ -48,6 +54,8 @@ def _write_laptop_files(tmp_path: Path) -> tuple[Path, Path]:
     values = {
         "POSTGRES_PASSWORD": secrets.token_hex(32),
         "VALKEY_PASSWORD": secrets.token_hex(32),
+        "OMNINODE_RUNTIME_PASSWORD": secrets.token_hex(32),
+        "TENANT_PROJECTION_WRITER_PASSWORD": secrets.token_hex(32),
         "ONEX_LOCAL_BIFROST_OVERLAY": str(overlay),
     }
     lines = []
@@ -121,6 +129,7 @@ def test_laptop_env_file_alone_validates_and_renders_the_local_stack(
         "omninode-runtime",
         "runtime-effects",
         "omnimarket-projection-delegation",
+        "omnimarket-projection-tenant-credentials",
     } <= set(services)
 
     published: list[str] = []

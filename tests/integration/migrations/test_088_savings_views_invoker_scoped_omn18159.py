@@ -47,6 +47,7 @@ DELEGATION = NODES / "node_projection_delegation"
 SAVINGS = NODES / "node_projection_savings"
 
 MIGRATION_FILE = SAVINGS / "088_savings_views_invoker_scoped.sql"
+REPAIR_MIGRATION = SAVINGS / "092_restore_savings_views_security_invoker.sql"
 PREVIOUS_MIGRATION = "087_savings_views_read_persisted_provenance.sql"
 
 SAVINGS_VIEWS = (
@@ -135,19 +136,6 @@ def _security_invoker(
         return {row[0]: row[1] for row in cur.fetchall()}
 
 
-@pytest.mark.xfail(
-    reason=(
-        "OMN-19808: 089:121 and 090:63 re-create projection_delegation_savings "
-        "with a bare CREATE OR REPLACE VIEW, which does not carry the previous "
-        "reloptions forward, so 088's security_invoker is dropped and the view "
-        "is back to owner rights. _series is not re-created after 088 and still "
-        "reads true, which is why only one half of the pair fails. This test is "
-        "CORRECT and the database is wrong; xfail rather than skip so the day "
-        "the migration is fixed this goes XPASS and has to be re-read. Out of "
-        "scope for OMN-15425, which only made the proof runnable at all."
-    ),
-    strict=False,
-)
 @pytest.mark.integration
 def test_088_turns_invoker_rights_on_and_087_leaves_them_off(
     ephemeral_postgres: EphemeralPostgres,
@@ -189,9 +177,11 @@ def test_088_turns_invoker_rights_on_and_087_leaves_them_off(
     try:
         _apply(conn, stop_after=None)
         assert _security_invoker(conn) == dict.fromkeys(SAVINGS_VIEWS, "true")
-        # Idempotent: a corpus re-run must not fail on it.
+        # The full corpus must preserve 088's rights, including later replacements.
+        # Re-running 088 and the forward repair must both be idempotent.
         with conn.cursor() as cur:
             cur.execute(_schema_safe(MIGRATION_FILE.read_text(encoding="utf-8")))
+            cur.execute(_schema_safe(REPAIR_MIGRATION.read_text(encoding="utf-8")))
         assert _security_invoker(conn) == dict.fromkeys(SAVINGS_VIEWS, "true")
     finally:
         conn.close()

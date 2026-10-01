@@ -149,6 +149,15 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_hook_event_capture/"
             "0002_hook_events_tenant_rls.sql"
         ),
+        # OMN-19978: this vendored file is byte-identical to omnimarket and
+        # uses unqualified `pg_roles` in its role guard, like its
+        # node_projection_cost_summary sibling. Exempting here, not editing
+        # the SQL, is the canonical fix; the created-object ownership check
+        # still applies.
+        Path(
+            "docker/migrations/forward/nodes/node_projection_usage_by_model_day/"
+            "0001_grant_usage_by_model_day.sql"
+        ),
         # OMN-15655 also reconciles historical root migration shapes for
         # fixture parity. These are legacy default-schema repair paths, not new
         # application-database authority, and they must retain compatibility with
@@ -372,12 +381,29 @@ def _is_legacy_default_schema_sql_path(relative_path: Path) -> bool:
 
 _ZERO_REVISION = "0" * 40
 
-# The trusted CI step resolves the diff base from workflow event context:
-# pull_request.base.sha, merge_group.base_sha, or push event.before. A pinned
-# fallback SHA is forbidden -- a commit reachable only through a since-deleted
-# stacked branch is absent from every checkout, so the first push-event run of
-# this gate crashed on a raw git fatal instead of a diagnosable verdict
-# (OMN-16076). Validate the base up front and fail with the remediation.
+# Pull-request merge refs use their first parent as the diff base: the event's
+# pull_request.base.sha can lag behind the base tip used to build the merge ref
+# (OMN-17427). Other events use merge_group.base_sha or push event.before.
+# A pinned fallback SHA is forbidden -- a commit reachable only through a
+# since-deleted stacked branch is absent from every checkout (OMN-16076).
+# Validate the selected base up front and fail with the remediation.
+
+
+def pull_request_merge_ref_base(repository: Path, head_revision: str) -> str:
+    """Return the base tip used to build a two-parent pull-request merge ref."""
+    result = subprocess.run(
+        ["git", "rev-list", "--parents", "-n", "1", head_revision],
+        cwd=repository,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    revisions = result.stdout.strip().split()
+    if result.returncode != 0 or len(revisions) != 3:
+        raise RuntimeError(
+            f"head revision {head_revision} is not a pull request merge commit"
+        )
+    return revisions[1]
 
 
 def _assert_base_revision_resolvable(repository: Path, base_revision: str) -> None:
@@ -660,6 +686,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repository", type=Path, default=Path.cwd())
     parser.add_argument("--base-revision", required=True)
     parser.add_argument("--head-revision", default="HEAD")
+    parser.add_argument("--pull-request-merge-ref", action="store_true")
     parser.add_argument(
         "--ownership-manifest",
         action="append",
@@ -672,9 +699,17 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
+    base_revision = args.base_revision
+    if args.pull_request_merge_ref:
+        base_revision = pull_request_merge_ref_base(args.repository, args.head_revision)
+        print(
+            "application_database_sql_gate "
+            f"base={base_revision} (pull-request merge ref first parent; "
+            f"event base {args.base_revision})"
+        )
     outcome = validate_changed_sql(
         args.repository,
-        args.base_revision,
+        base_revision,
         args.head_revision,
         ownership_manifest_paths=tuple(
             path if path.is_absolute() else args.repository / path

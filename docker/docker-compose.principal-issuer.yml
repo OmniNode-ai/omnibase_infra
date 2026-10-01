@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20150 — issues each developer machine its own lab dev-lane bus principal.
+#
+# Runs on the lab host beside the dev lane, as its own compose project, so the
+# lane's catalog render is untouched. It joins the dev lane's network to reach
+# the broker's admin API and Kafka listener. It has no TCP listener and publishes
+# no port; the host's tailscale serve reaches its Unix socket in a named volume.
+# The issuer checks the kernel-attested peer uid is root before trusting the
+# tailnet login header set by tailscale serve:
+#
+#   docker compose -f docker/docker-compose.principal-issuer.yml \
+#     --env-file <the operator env file> up -d --build
+#   tailscale serve --bg --https=8443 "unix:$(docker volume inspect -f '{{.Mountpoint}}' omnibase-infra-principal-issuer_principal-issuer-socket)/issuer.sock"
+#
+# The URL developer machines use is declared in deploy/lab/developer-onboarding.yaml.
+# The issuer authenticates to the broker as the lane's superuser principal, from
+# the same operator env file the dev lane's one-shots read, never inlined here.
+name: omnibase-infra-principal-issuer
+services:
+  principal-issuer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.principal-issuer
+    container_name: omnibase-infra-principal-issuer
+    environment:
+      RPK_USER: ${DEV_KAFKA_SASL_USERNAME:?DEV_KAFKA_SASL_USERNAME must be set - the issuer creates principals as the dev lane's superuser (OMN-18012); resolved from the operator env file, never inlined here}
+      RPK_PASS: ${DEV_KAFKA_SASL_PASSWORD:?DEV_KAFKA_SASL_PASSWORD must be set - the issuer creates principals as the dev lane's superuser (OMN-18012); resolved from the operator env file, never inlined here}
+      RPK_SASL_MECHANISM: SCRAM-SHA-256
+      RPK_BROKERS: redpanda:9092
+      RPK_ADMIN_HOSTS: redpanda:9644
+    volumes:
+      - principal-issuer-ledger:/data
+      - principal-issuer-socket:/run/principal-issuer
+    networks:
+      - dev-lane
+    restart: unless-stopped
+    read_only: true
+    healthcheck:
+      test: ["CMD", "python3", "scripts/lab_principal_issuer.py", "health", "--socket", "/run/principal-issuer/issuer.sock"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      - "com.omninode.service=principal-issuer"
+      - "com.omninode.layer=infrastructure"
+      - "com.omninode.ticket=OMN-20150"
+volumes:
+  principal-issuer-ledger:
+  principal-issuer-socket:
+networks:
+  dev-lane:
+    # The network docker/docker-compose.infra.yml declares for the dev lane's broker.
+    name: omnibase-infra-network
+    external: true

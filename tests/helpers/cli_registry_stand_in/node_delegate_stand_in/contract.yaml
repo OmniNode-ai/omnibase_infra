@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Stand-in delegate node contract for the onex CLI registry tests (OMN-19407).
+# Only the fields the CLI reads through the registry are declared.
+name: node_delegate_stand_in
+node_type: orchestrator
+input_model:
+  name: ModelStandInDelegateRequest
+  module: tests.helpers.cli_registry_stand_in.node_delegate_stand_in.model_stand_in_delegate_request

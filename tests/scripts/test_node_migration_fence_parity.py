@@ -515,6 +515,40 @@ FENCED_OMN18987_IDS = (
     "node:node_projection_delegation:0043z_preflight_delegation_shadow_comparisons.sql",
     "node:node_projection_delegation:0044_restore_delegation_shadow_comparisons.sql",
 )
+# OMN-19978: this new TENANT table RLS posture is fenced on arrival. Its
+# release is a separate operator-sequenced step that needs an operator ruling;
+# this fence addition carries no lane release.
+FENCED_USAGE_BY_MODEL_DAY_RLS_IDS = (
+    "node:node_projection_usage_by_model_day:0001_grant_usage_by_model_day.sql",
+)
+# OMN-19790: delegation_eval_items' FORCE ROW LEVEL SECURITY lives in its own
+# 0002 migration (split out of the create, the same split node_hook_event_capture
+# 0002 used), so only that step is fenced on arrival. 0000 (the create) and 0001
+# (the tenant_projection_writer grant) apply on every lane; a fence on either
+# would skip the CREATE TABLE or apply the grant against a missing relation. The
+# release of 0002 is a separate operator-sequenced step that needs an operator
+# ruling; this fence addition carries no lane release.
+FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS = (
+    "node:node_projection_delegation_eval:0002_force_rls_delegation_eval_items.sql",
+)
+# OMN-20154: provider_quota_state's FORCE ROW LEVEL SECURITY lives in its own
+# 0002 migration, split out of the create exactly as delegation_eval_items' was,
+# so only that step is fenced on arrival. Its release is a separate
+# operator-sequenced step; this fence addition carries no lane release.
+FENCED_PROVIDER_QUOTA_STATE_RLS_IDS = (
+    "node:node_projection_provider_quota:0002_force_rls_provider_quota_state.sql",
+)
+# OMN-19793: the eval-run tables' FORCE ROW LEVEL SECURITY lives in 0006, split
+# out of the 0003/0004 creates for the same reason as 0002 above. Only that step
+# is fenced on arrival; the creates and the 0005 grant apply on every lane.
+FENCED_DELEGATION_EVAL_RUN_RLS_IDS = (
+    "node:node_projection_delegation_eval:0006_force_rls_delegation_eval_run_tables.sql",
+)
+# OMN-20242: only the separate FORCE RLS step waits for an operator release.
+# The create, writer grants and security_invoker usage view apply on every lane.
+FENCED_DELEGATION_DISPOSITIONS_RLS_IDS = (
+    "node:node_projection_delegation_disposition:0002_force_rls_delegation_dispositions.sql",
+)
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS
     + FENCED_REGISTRATION_IDS
@@ -524,6 +558,11 @@ EXPECTED_FENCE = (
     + FENCED_DELEGATION_UUID_CONVERSION_IDS
     + FENCED_BUDGET_STATE_RLS_IDS
     + FENCED_OMN18987_IDS
+    + FENCED_USAGE_BY_MODEL_DAY_RLS_IDS
+    + FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS
+    + FENCED_PROVIDER_QUOTA_STATE_RLS_IDS
+    + FENCED_DELEGATION_EVAL_RUN_RLS_IDS
+    + FENCED_DELEGATION_DISPOSITIONS_RLS_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -882,9 +921,24 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
         found[hook_event_capture_end:uuid_conversion_end]
         == FENCED_DELEGATION_UUID_CONVERSION_IDS
     ), "the OMN-16493 delegation-0031 hold is not the expected id"
-    assert found[uuid_conversion_end:] == (
+    post_conversion_tail_end = uuid_conversion_end + len(
+        FENCED_BUDGET_STATE_RLS_IDS + FENCED_OMN18987_IDS
+    )
+    assert found[uuid_conversion_end:post_conversion_tail_end] == (
         FENCED_BUDGET_STATE_RLS_IDS + FENCED_OMN18987_IDS
     ), "the post-conversion operator fence tail is not the expected ids"
+    assert found[post_conversion_tail_end:] == (
+        FENCED_USAGE_BY_MODEL_DAY_RLS_IDS
+        + FENCED_DELEGATION_EVAL_ITEMS_RLS_IDS
+        + FENCED_PROVIDER_QUOTA_STATE_RLS_IDS
+        + FENCED_DELEGATION_EVAL_RUN_RLS_IDS
+        + FENCED_DELEGATION_DISPOSITIONS_RLS_IDS
+    ), (
+        "the OMN-19978 usage_by_model_day, OMN-19790 delegation_eval_items, "
+        "OMN-20154 provider_quota_state, OMN-19793 eval-run and OMN-20242 "
+        "delegation_dispositions RLS holds are not "
+        "the expected ids"
+    )
 
 
 def test_manifest_shell_parse_matches_yaml_parse() -> None:

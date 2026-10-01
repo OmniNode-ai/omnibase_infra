@@ -33,6 +33,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 REPO_ROOT = Path(__file__).parent.parent.parent
 GATE = REPO_ROOT / "scripts" / "validation" / "check_exposed_identifiers.py"
 REAL_DENYLIST = (
@@ -342,6 +346,7 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         check=False,
+        env=scrub_git_location_env(),
     )
 
 
@@ -386,6 +391,10 @@ def test_incident_replay_omn17288(tmp_path: Path) -> None:
     assert len(flagged) == len(INCIDENT_FILES), flagged
 
 
+# The scan hashes every tracked file (~9k files, ~40s on a quiet laptop), so the CI
+# default of --timeout=60 leaves no headroom on a loaded runner (OMN-17292: killed at
+# 60s with findings=0 unreachable). The scan is deterministic; only its budget was wrong.
+@pytest.mark.timeout(300)
 def test_the_whole_repository_is_clean() -> None:
     """The standing regression -- the check that runs on every PR and every commit."""
     result = subprocess.run(

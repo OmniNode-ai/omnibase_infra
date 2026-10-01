@@ -192,12 +192,14 @@ _SAVINGS_TABLES = (
 _LIVE_PRIVILEGES_SQL = (
     "SELECT a.privilege_type FROM pg_class c "
     "JOIN pg_namespace n ON n.oid = c.relnamespace, aclexplode(c.relacl) a "
-    "WHERE n.nspname = 'omninode_internal' AND c.relname = :'relname' "
+    "WHERE n.nspname = :'schema' AND c.relname = :'relname' "
     "AND a.grantee = :'grantee'::regrole;\n"
 )
 
 
-def _live_privileges(server: _Server, table: str, grantee: str) -> set[str]:
+def _live_privileges(
+    server: _Server, table: str, grantee: str, *, schema: str = "omninode_internal"
+) -> set[str]:
     # Read from the relation's own ACL, not information_schema: those views
     # only show grants involving a role the session is a member of. The names
     # go in as psql variables, which psql quotes; it expands them only in
@@ -208,6 +210,8 @@ def _live_privileges(server: _Server, table: str, grantee: str) -> set[str]:
             "-At",
             "-v",
             "ON_ERROR_STOP=1",
+            "-v",
+            f"schema={schema}",
             "-v",
             f"relname={table}",
             "-v",
@@ -328,6 +332,120 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
         pr_landing_live = _live_privileges(fresh_build, pr_landing_table, _RUNTIME)
         assert pr_landing_live == pr_landing_declared, pr_landing_table
         assert "DELETE" not in pr_landing_live, pr_landing_table
+
+    # OMN-19399: the worktree reconcile projection grants exactly the runtime
+    # writer's SELECT/INSERT/UPDATE privileges, with no DELETE or sequence.
+    worktree_reconcile_declared = {
+        privilege
+        for principal, relation, privilege in declared_acl(
+            load_topology_profile(PROFILE)
+        ).table_grants
+        if principal == _RUNTIME and relation == "worktree_reconcile_hosts"
+    }
+    assert worktree_reconcile_declared == {"SELECT", "INSERT", "UPDATE"}
+    worktree_reconcile_live = _live_privileges(
+        fresh_build, "worktree_reconcile_hosts", _RUNTIME
+    )
+    assert worktree_reconcile_live == worktree_reconcile_declared
+    assert "DELETE" not in worktree_reconcile_live
+
+    # OMN-19961: lab_container_memory_window, one row per lane container per
+    # census window, written by node_projection_lab_container_memory. The
+    # writer only upserts and never deletes a window, so the runtime role holds
+    # exactly SELECT/INSERT/UPDATE and no DELETE.
+    memory_window_declared = {
+        privilege
+        for principal, relation, privilege in declared_acl(
+            load_topology_profile(PROFILE)
+        ).table_grants
+        if principal == _RUNTIME and relation == "lab_container_memory_window"
+    }
+    assert memory_window_declared == {"SELECT", "INSERT", "UPDATE"}
+    memory_window_live = _live_privileges(
+        fresh_build, "lab_container_memory_window", _RUNTIME
+    )
+    assert memory_window_live == memory_window_declared
+    assert "DELETE" not in memory_window_live
+    # OMN-19513: 0001 from omnimarket#3050 explicitly grants the runtime
+    # SELECT/INSERT/UPDATE on both work-ledger tables, with no DELETE.
+    for work_ledger_table in ("work_ledger_rows", "work_ledger_state"):
+        work_ledger_declared = {
+            privilege
+            for principal, relation, privilege in declared_acl(
+                load_topology_profile(PROFILE)
+            ).table_grants
+            if principal == _RUNTIME and relation == work_ledger_table
+        }
+        assert work_ledger_declared == {"SELECT", "INSERT", "UPDATE"}, work_ledger_table
+        work_ledger_live = _live_privileges(fresh_build, work_ledger_table, _RUNTIME)
+        assert work_ledger_live == work_ledger_declared, work_ledger_table
+        assert "DELETE" not in work_ledger_live, work_ledger_table
+
+    # OMN-19999: the PR state projection grants exactly the runtime writer's
+    # SELECT/INSERT/UPDATE privileges, with no DELETE or sequence.
+    pr_state_declared = {
+        privilege
+        for principal, relation, privilege in declared_acl(
+            load_topology_profile(PROFILE)
+        ).table_grants
+        if principal == _RUNTIME and relation == "pr_state"
+    }
+    assert pr_state_declared == {"SELECT", "INSERT", "UPDATE"}
+    pr_state_live = _live_privileges(fresh_build, "pr_state", _RUNTIME)
+    assert pr_state_live == pr_state_declared
+    assert "DELETE" not in pr_state_live
+
+    # OMN-19790: the source migration grants the tenant writer public-table
+    # access and the dashboard a tenant-scoped read. This relation is outside
+    # the omninode_internal diff above, so read its public ACL explicitly.
+    assert _live_privileges(
+        fresh_build,
+        "delegation_eval_items",
+        "tenant_projection_writer",
+        schema="public",
+    ) == {"SELECT", "INSERT", "UPDATE"}
+    assert _live_privileges(
+        fresh_build, "delegation_eval_items", "app_dashboard", schema="public"
+    ) == {"SELECT"}
+
+    # OMN-19793: the eval-run tables follow the same grants as the label table.
+    for eval_run_table in ("delegation_eval_item_verdicts", "delegation_eval_results"):
+        assert _live_privileges(
+            fresh_build,
+            eval_run_table,
+            "tenant_projection_writer",
+            schema="public",
+        ) == {"SELECT", "INSERT", "UPDATE"}
+        assert _live_privileges(
+            fresh_build, eval_run_table, "app_dashboard", schema="public"
+        ) == {"SELECT"}
+
+    # OMN-20242: the tenant writer writes dispositions; the dashboard reads them.
+    assert _live_privileges(
+        fresh_build,
+        "delegation_dispositions",
+        "tenant_projection_writer",
+        schema="public",
+    ) == {"SELECT", "INSERT", "UPDATE"}
+    assert _live_privileges(
+        fresh_build, "delegation_dispositions", "app_dashboard", schema="public"
+    ) == {"SELECT"}
+
+    # OMN-19937: the board probe results projection grants exactly the runtime
+    # writer's SELECT/INSERT/UPDATE privileges, with no DELETE.
+    board_probe_results_declared = {
+        privilege
+        for principal, relation, privilege in declared_acl(
+            load_topology_profile(PROFILE)
+        ).table_grants
+        if principal == _RUNTIME and relation == "board_probe_results"
+    }
+    assert board_probe_results_declared == {"SELECT", "INSERT", "UPDATE"}
+    board_probe_results_live = _live_privileges(
+        fresh_build, "board_probe_results", _RUNTIME
+    )
+    assert board_probe_results_live == board_probe_results_declared
+    assert "DELETE" not in board_probe_results_live
 
     live = set(report["findings"])
     allowed = {entry["finding"] for entry in _load_allowlist()}

@@ -11,6 +11,9 @@ lab dependency, a shared Docker object name, or a second env source.
 from __future__ import annotations
 
 import os
+import re
+import subprocess
+from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
@@ -36,11 +39,14 @@ _OVERLAY_TEMPLATE = _REPO / "docker" / "lane-overlays" / "local.bifrost.example.
 _PROJECT = "omnibase-infra-local"
 _OVERLAY_PIN = "/app/config/delegation/local.bifrost.yaml"
 
-#: Every name the laptop profile may ask its operator for. Two local passwords
-#: and the path of the model overlay; nothing else.
+#: Every name the laptop profile may ask its operator for. Four local passwords
+#: (make local-env generates all four) and the path of the model overlay;
+#: nothing else.
 _LAPTOP_REQUIRED_ENV = {
     "POSTGRES_PASSWORD",
     "VALKEY_PASSWORD",
+    "OMNINODE_RUNTIME_PASSWORD",
+    "TENANT_PROJECTION_WRITER_PASSWORD",
     "ONEX_LOCAL_BIFROST_OVERLAY",
 }
 
@@ -62,7 +68,7 @@ _FORBIDDEN_FRAGMENTS = (
 )
 
 
-def test_laptop_required_env_is_two_passwords_and_the_overlay_path() -> None:
+def test_laptop_required_env_is_four_passwords_and_the_overlay_path() -> None:
     resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
     assert resolved.required_env == _LAPTOP_REQUIRED_ENV
 
@@ -103,8 +109,12 @@ def test_local_bundle_runs_both_runtime_kernels_the_writer_and_the_migration_gat
         n for n, m in resolved.manifests.items() if m.layer == EnumInfraLayer.RUNTIME
     ]
     assert sorted(runtime) == [
+        "consumer-health-projection",
         "omnimarket-projection-delegation",
+        "omnimarket-projection-llm-cost",
+        "omnimarket-projection-tenant-credentials",
         "omninode-runtime",
+        "projection-api",
         "runtime-effects",
     ]
 
@@ -169,6 +179,235 @@ def test_local_runtime_kernels_mount_and_pin_the_local_overlay() -> None:
     assert not any(
         v.endswith(_OVERLAY_PIN + ":ro") for v in services["postgres"]["volumes"]
     )
+
+
+@pytest.mark.parametrize(
+    "writer",
+    ["omnimarket-projection-delegation", "omnimarket-projection-tenant-credentials"],
+)
+def test_local_projection_writer_binds_the_lab_principals_not_the_superuser(
+    writer: str,
+) -> None:
+    """omnimarket's standalone writer attests the connected principal per binding.
+
+    With the superuser DSNs the laptop bundle used to inject, the delegation
+    writer crash-looped on a missing topology profile, then on principal
+    ``postgres`` where ``omninode_runtime`` was expected, and no
+    ``delegation_events`` row was ever written.
+    """
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    services = generate_compose(resolved)["services"]
+    assert isinstance(services, dict)
+    env = services[writer]["environment"]
+    assert env["ONEX_DATABASE_TOPOLOGY_PROFILE"] == "local"
+    assert env["ONEX_TENANT_DB_URL"].startswith(
+        "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?"
+    )
+    assert env["OMNINODE_INTERNAL_DB_URL"].startswith(
+        "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?"
+    )
+    # forward-migration is what gives those principals a LOGIN credential.
+    migration_env = services["forward-migration"]["environment"]
+    assert (
+        migration_env["OMNINODE_RUNTIME_PASSWORD"] == "${OMNINODE_RUNTIME_PASSWORD:-}"
+    )
+    assert (
+        migration_env["TENANT_PROJECTION_WRITER_PASSWORD"]
+        == "${TENANT_PROJECTION_WRITER_PASSWORD:-}"
+    )
+
+
+def test_local_tenant_credentials_projection_runs_with_its_own_healthcheck() -> None:
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    services = generate_compose(resolved)["services"]
+    assert isinstance(services, dict)
+    writer = services["omnimarket-projection-tenant-credentials"]
+    assert writer["image"] == f"{_PROJECT}-runtime:latest"
+    assert writer["command"] == [
+        "python",
+        "-m",
+        "omnimarket.nodes.node_projection_tenant_credentials.handlers."
+        "handler_tenant_credentials_projection",
+    ]
+    assert writer["environment"]["KAFKA_CONSUMER_GROUP"] == (
+        "local.omnimarket-projections.tenant-credentials-writer.consume.v1"
+    )
+    assert writer["environment"]["PROJECTION_RUNNER_HEALTH_PORT"] == "8102"
+    assert writer["healthcheck"]["test"] == [
+        "CMD-SHELL",
+        "curl -sf http://localhost:8102/ready",
+    ]
+    assert (
+        writer["depends_on"]
+        == services["omnimarket-projection-delegation"]["depends_on"]
+    )
+    assert set(
+        resolved.manifests["omnimarket-projection-tenant-credentials"].required_env
+    ) == {
+        "OMNIDASH_ANALYTICS_DB_URL",
+        "ONEX_TENANT_DB_URL",
+        "OMNINODE_INTERNAL_DB_URL",
+    }
+
+
+def test_the_runtime_family_that_resolves_a_tenant_key_shares_one_credentials_store() -> (
+    None
+):
+    """The main runtime hosts the LLM call effect; runtime-effects hosts intake.
+
+    Measured on the lab (2026-09-30): with the store on runtime-effects alone,
+    the main runtime could not resolve the tenant's minted reference ("could
+    not be resolved from the secret store") and the tenant route failed.
+    """
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    compose = generate_compose(resolved)
+    services = compose["services"]
+    assert isinstance(services, dict)
+    target = "/home/omniinfra/.omninode/delegation"
+    owners = {
+        name: [v for v in svc.get("volumes", []) if f":{target}" in v]
+        for name, svc in services.items()
+        if any(f":{target}" in v for v in svc.get("volumes", []))
+    }
+    assert owners == {
+        "omninode-runtime": [f"delegation_credentials:{target}"],
+        "runtime-effects": [f"delegation_credentials:{target}"],
+    }
+    volumes = compose["volumes"]
+    assert isinstance(volumes, dict)
+    assert volumes["delegation_credentials"] == {
+        "name": f"{_PROJECT}-delegation_credentials"
+    }
+
+
+def _provider_credential_env_names(environment: Mapping[str, object]) -> list[str]:
+    return sorted(
+        name
+        for name in environment
+        if any(
+            fragment in name.upper()
+            for fragment in ("GEMINI", "OPENROUTER", "GLM_", "OPENAI", "ANTHROPIC")
+        )
+        or name.lower().startswith("llm.")
+    )
+
+
+def test_local_render_has_no_provider_credential_environment_names() -> None:
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    services = generate_compose(resolved)["services"]
+    assert isinstance(services, dict)
+    assert {
+        name: hits
+        for name, svc in services.items()
+        if (hits := _provider_credential_env_names(svc.get("environment", {})))
+    } == {}
+
+
+def test_provider_credential_environment_scan_can_fail() -> None:
+    forbidden = {
+        "GEMINI_API_KEY": "",
+        "OPENAI_API_KEY": "",
+        "OPENROUTER_TOKEN": "",
+        "GLM_TOKEN": "",
+        "llm.example.secret": "",
+    }
+    assert _provider_credential_env_names({**forbidden, "ONEX_TENANT_ID": ""}) == (
+        sorted(forbidden)
+    )
+
+
+def test_local_lane_tenant_is_optional_and_injected_into_every_runtime_service() -> (
+    None
+):
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    services = generate_compose(resolved)["services"]
+    assert isinstance(services, dict)
+    assert "ONEX_TENANT_ID" not in resolved.required_env
+    for name, manifest in resolved.manifests.items():
+        assert "ONEX_TENANT_ID" not in manifest.required_env
+        env = services[name].get("environment", {})
+        if manifest.layer == EnumInfraLayer.RUNTIME:
+            assert env["ONEX_TENANT_ID"] == "${ONEX_TENANT_ID:-}"
+        else:
+            assert "ONEX_TENANT_ID" not in env
+
+
+def test_secret_local_make_target_passes_only_provider_and_tenant_as_arguments() -> (
+    None
+):
+    makefile = (_REPO / "Makefile").read_text(encoding="utf-8")
+    target = makefile.split("\nsecret-local:", 1)[1].split("\n\n", 1)[0]
+    assert 'test -n "$(PROVIDER)"' in target
+    assert "ONEX_TENANT_ID=" in target
+    assert '"$(LOCAL_ENV_FILE)"' in target
+    assert 'test -n "$$tenant"' in target
+    # The key is registered only for the tenant the RUNNING runtime serves.
+    assert "printenv ONEX_TENANT_ID" in target
+    commands = [
+        line
+        for line in target.splitlines()
+        if "docker exec -u" in line and " -i " in line
+    ]
+    assert commands
+    for command in commands:
+        assert (
+            "docker exec -u omniinfra -e HOME=/home/omniinfra -i "
+            "$(LOCAL_PROJECT)-runtime-effects onex secret "
+            'register-tenant-key "$(PROVIDER)" --tenant "$$tenant"'
+        ) in command
+        assert not re.search(r"\$[({][^)}]*(?:KEY|VALUE)[^)}]*[)}]", command)
+    assert "read -r -s" in target  # Terminal input must be hidden.
+
+
+def _make(target: str, env_file: Path, overlay_file: Path) -> None:
+    result = subprocess.run(
+        [
+            "make",
+            target,
+            f"LOCAL_ENV_FILE={env_file}",
+            f"LOCAL_OVERLAY_FILE={overlay_file}",
+        ],
+        cwd=_REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_local_env_leaves_the_runtime_without_a_tenant(tmp_path: Path) -> None:
+    """A tenant makes every delegation BYOK-only, so it is never the default."""
+    env_file = tmp_path / "local.env"
+    _make("local-env", env_file, tmp_path / "local.bifrost.yaml")
+    lines = env_file.read_text(encoding="utf-8").splitlines()
+    assert "ONEX_TENANT_ID=" in lines
+
+
+@pytest.mark.parametrize("existing_tenant", [None, "absent", "", "local-kept"])
+def test_tenant_local_generates_a_tenant_once(
+    tmp_path: Path, existing_tenant: str | None
+) -> None:
+    env_file = tmp_path / "local.env"
+    overlay_file = tmp_path / "local.bifrost.yaml"
+    if existing_tenant is not None:
+        contents = "POSTGRES_PASSWORD=kept\n"
+        if existing_tenant != "absent":
+            contents += f"ONEX_TENANT_ID={existing_tenant}\n"
+        env_file.write_text(contents, encoding="utf-8")
+    _make("tenant-local", env_file, overlay_file)
+    tenant_lines = [
+        line
+        for line in env_file.read_text().splitlines()
+        if line.startswith("ONEX_TENANT_ID=")
+    ]
+    assert len(tenant_lines) == 1
+    tenant = tenant_lines[0].partition("=")[2]
+    if existing_tenant == "local-kept":
+        assert tenant == existing_tenant
+    else:
+        assert re.fullmatch(r"local-[0-9a-f]{12}", tenant)
+    _make("tenant-local", env_file, overlay_file)
+    assert tenant_lines[0] in env_file.read_text().splitlines()
 
 
 def test_overlay_template_is_a_typed_lab_overlay_named_for_the_local_lane() -> None:
@@ -332,3 +571,360 @@ def test_up_precleanup_removes_anonymous_volumes_of_removed_containers(
             "-v",
         ]
     ]
+
+
+# --- OMN-19972: the laptop profile publishes on loopback only and names no lab host.
+#
+# Failure modes these pin (spec, workflow/records/plans/OMN-19972):
+#   1. a published port binds all interfaces in the ``local`` render;
+#   2. a lab address (the .201 LAN IP, the tailnet domain, the lab hostname)
+#      appears anywhere in the ``local`` render;
+#   3. the loopback bind or the default override leaks into another bundle,
+#      which the lab lanes render from the same shared manifests.
+
+_LOOPBACK = "127.0.0.1"
+_LAB_HOST_MARKERS = ("192.168.86.", "tail75df5e", "omninode-pc")
+
+
+def _published_ports(compose: dict[str, object]) -> dict[str, list[str]]:
+    services = compose["services"]
+    assert isinstance(services, dict)
+    return {
+        name: [str(p) for p in svc["ports"]]
+        for name, svc in services.items()
+        if svc.get("ports")
+    }
+
+
+def _lab_host_hits(compose: dict[str, object]) -> list[str]:
+    text = yaml.safe_dump(compose, sort_keys=True)
+    return [marker for marker in _LAB_HOST_MARKERS if marker in text]
+
+
+def test_local_render_publishes_every_port_on_loopback_only() -> None:
+    compose = generate_compose(
+        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    )
+    published = _published_ports(compose)
+    # The five host ports the laptop guide names; a render that published none
+    # would pass the loopback check vacuously.
+    assert {
+        "postgres",
+        "redpanda",
+        "valkey",
+        "omninode-runtime",
+        "runtime-effects",
+    } <= set(published)
+    not_loopback = {
+        name: ports
+        for name, ports in published.items()
+        if any(not p.startswith(f"{_LOOPBACK}:") or p.count(":") != 2 for p in ports)
+    }
+    assert not_loopback == {}
+
+
+def test_local_render_names_no_lab_host() -> None:
+    compose = generate_compose(
+        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    )
+    assert _lab_host_hits(compose) == []
+
+
+def test_lab_host_check_can_fail() -> None:
+    """Positive control: the shared lab-facing render still carries the .201 default."""
+    compose = generate_compose(
+        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["core"])
+    )
+    assert "192.168." in "".join(_lab_host_hits(compose))
+
+
+@pytest.mark.parametrize("bundle", ["core", "runtime"])
+def test_other_bundles_keep_all_interface_ports_and_the_lab_advertise_default(
+    bundle: str,
+) -> None:
+    compose = generate_compose(
+        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve([bundle])
+    )
+    published = _published_ports(compose)
+    assert published
+    for ports in published.values():
+        for port in ports:
+            assert port.count(":") == 1, port
+            assert not port.startswith(f"{_LOOPBACK}:"), port
+    services = compose["services"]
+    assert isinstance(services, dict)
+    command = " ".join(services["redpanda"]["command"])
+    assert "${REDPANDA_ADVERTISE_HOST:-192.168.86.201}" in command
+
+
+# --- OMN-19972 hostile-review follow-ups: env_default_overrides must fail loudly
+# rather than render a broken compose file, and must not trip over a non-string
+# command part.
+
+
+def _override_catalog(
+    tmp_path: Path, command: list[object], overrides: dict[str, str]
+) -> CatalogResolver:
+    services = tmp_path / "services"
+    services.mkdir()
+    manifest = _fixture_manifest("svc", "infrastructure", [])
+    manifest["command"] = command
+    (services / "svc.yaml").write_text(yaml.safe_dump(manifest), encoding="utf-8")
+    (tmp_path / "bundles.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "b": {
+                    "description": "b",
+                    "services": ["svc"],
+                    "env_default_overrides": overrides,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return CatalogResolver(catalog_dir=str(tmp_path))
+
+
+def test_override_of_a_nested_default_is_refused(tmp_path: Path) -> None:
+    """``${A:-${B:-x}}`` cannot be rewritten safely; a half-rewrite breaks compose."""
+    resolver = _override_catalog(
+        tmp_path, ["run", "--addr ${ADV:-${OTHER:-lab}}:1"], {"ADV": "localhost"}
+    )
+    with pytest.raises(ValueError, match="nested"):
+        generate_compose(resolver.resolve(["b"]))
+
+
+@pytest.mark.parametrize("bad", ["a}b", "a$b"])
+def test_override_value_that_would_break_interpolation_is_refused(
+    tmp_path: Path, bad: str
+) -> None:
+    resolver = _override_catalog(tmp_path, ["run"], {"ADV": bad})
+    with pytest.raises(ValueError, match="env_default_overrides"):
+        resolver.resolve(["b"])
+
+
+def test_override_leaves_a_non_string_command_part_untouched(tmp_path: Path) -> None:
+    resolver = _override_catalog(
+        tmp_path, ["sleep", 5, "--addr ${ADV:-lab}"], {"ADV": "localhost"}
+    )
+    compose = generate_compose(resolver.resolve(["b"]))
+    services = compose["services"]
+    assert isinstance(services, dict)
+    assert services["svc"]["command"] == ["sleep", 5, "--addr ${ADV:-localhost}"]
+
+
+# --- OMN-19972 demo half (plan T4.1): the services the six pages read ----------
+#
+# Failure modes these tests are written against, each shown failing on dev
+# 83fa0e0c3 before the change:
+#   1. an added service is missing from the laptop render, or runs with no
+#      health signal, so the CI boot cannot tell it is dead;
+#   2. the laptop's projection API keeps port 3002, the lab lanes' port;
+#   3. the projection API starts before the kernel has provisioned the exposure
+#      topics (measured on the lakshman lane 2026-09-30: it waits 300 s, exits
+#      with "no partition metadata" and loops);
+#   4. a laptop-only override leaks into another bundle rendered from the same
+#      shared manifests;
+#   5. the llm-cost writer names an image no catalog render builds.
+#   6. the projection API is given no Kafka broker and exits at startup (measured in
+#      CI run 36729468068 attempt 2: "projection-api requires Kafka bootstrap
+#      servers", 16 restarts, never healthy).
+
+_PAGE_SERVICES = (
+    "projection-api",
+    "omnimarket-projection-llm-cost",
+    "consumer-health-projection",
+)
+_LAPTOP_PROJECTION_API_PORT = 3102
+
+
+def _render(*bundles: str) -> dict[str, object]:
+    return generate_compose(
+        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(list(bundles))
+    )
+
+
+def _services(compose: dict[str, object]) -> dict[str, dict[str, object]]:
+    services = compose["services"]
+    assert isinstance(services, dict)
+    return services
+
+
+def test_local_render_carries_the_services_the_pages_read() -> None:
+    assert set(_PAGE_SERVICES) <= set(_services(_render("local")))
+
+
+def test_every_long_running_local_service_has_a_healthcheck() -> None:
+    services = _services(_render("local"))
+    unwatched = sorted(
+        name
+        for name, svc in services.items()
+        if svc.get("restart") != "no" and "healthcheck" not in svc
+    )
+    assert unwatched == []
+
+
+def test_local_projection_api_publishes_a_laptop_port_not_the_lab_port() -> None:
+    ports = _services(_render("local"))["projection-api"]["ports"]
+    assert ports == [f"{_LOOPBACK}:{_LAPTOP_PROJECTION_API_PORT}:3002"]
+
+
+def test_other_bundles_keep_the_projection_api_on_3002() -> None:
+    ports = _services(_render("runtime-observability-projections"))["projection-api"][
+        "ports"
+    ]
+    assert ports == ["3002:3002"]
+
+
+def test_local_projection_api_waits_for_the_kernel_that_provisions_its_topics() -> None:
+    depends_on = _services(_render("local"))["projection-api"]["depends_on"]
+    assert isinstance(depends_on, dict)
+    assert depends_on.get("omninode-runtime") == {"condition": "service_healthy"}
+
+
+def test_other_bundles_do_not_gain_the_kernel_dependency() -> None:
+    depends_on = _services(_render("runtime-observability-projections"))[
+        "projection-api"
+    ]["depends_on"]
+    assert isinstance(depends_on, dict)
+    assert "omninode-runtime" not in depends_on
+
+
+def test_local_projection_api_is_given_the_compose_broker() -> None:
+    env = _services(_render("local"))["projection-api"]["environment"]
+    assert isinstance(env, dict)
+    assert env.get("KAFKA_BROKERS") == "redpanda:9092"
+
+
+def test_llm_cost_writer_builds_from_the_runtime_image_and_reports_ready() -> None:
+    for bundle in ("local", "omnimarket-projections"):
+        svc = _services(_render(bundle))["omnimarket-projection-llm-cost"]
+        assert "omnimarket-projection:latest" not in str(svc["image"]), bundle
+        test = svc["healthcheck"]["test"]  # type: ignore[index]
+        assert "/ready" in " ".join(test), bundle
+        env = svc["environment"]
+        assert isinstance(env, dict)
+        assert env.get("PROJECTION_RUNNER_HEALTH_PORT"), bundle
+
+
+def test_two_bundles_overriding_one_service_port_differently_are_refused(
+    tmp_path: Path,
+) -> None:
+    import shutil
+
+    catalog = tmp_path / "catalog"
+    shutil.copytree(_CATALOG_DIR, catalog)
+    bundles_file = catalog / "bundles.yaml"
+    bundles = yaml.safe_load(bundles_file.read_text())
+    bundles["other-laptop"] = {
+        "description": "fixture: a second bundle overriding the same port",
+        "services": ["projection-api"],
+        "port_overrides": {"projection-api": 3999},
+    }
+    bundles_file.write_text(yaml.safe_dump(bundles, sort_keys=False))
+    with pytest.raises(ValueError, match=r"[Pp]ort override conflict"):
+        CatalogResolver(catalog_dir=str(catalog)).resolve(["local", "other-laptop"])
+
+
+# The resolver's other override guards (hostile review, both models: each was
+# untested). Each test adds fixture bundles to a copy of the real catalog.
+
+
+def _catalog_with(tmp_path: Path, extra: dict[str, object]) -> CatalogResolver:
+    import shutil
+
+    catalog = tmp_path / "catalog"
+    shutil.copytree(_CATALOG_DIR, catalog)
+    bundles_file = catalog / "bundles.yaml"
+    bundles = yaml.safe_load(bundles_file.read_text())
+    bundles.update(extra)
+    bundles_file.write_text(yaml.safe_dump(bundles, sort_keys=False))
+    return CatalogResolver(catalog_dir=str(catalog))
+
+
+def test_two_bundles_waiting_differently_on_one_dependency_are_refused(
+    tmp_path: Path,
+) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "other-laptop": {
+                "description": "fixture: waits on the kernel as merely started",
+                "services": ["projection-api"],
+                "extra_depends_on": {
+                    "projection-api": {"omninode-runtime": "service_started"}
+                },
+            }
+        },
+    )
+    with pytest.raises(ValueError, match="Extra dependency conflict"):
+        resolver.resolve(["local", "other-laptop"])
+
+
+def test_extra_dependency_on_a_service_the_stack_does_not_run_is_refused(
+    tmp_path: Path,
+) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "probe": {
+                "description": "fixture: redpanda alone, waiting on postgres",
+                "services": ["redpanda"],
+                "extra_depends_on": {"redpanda": {"postgres": "service_healthy"}},
+            }
+        },
+    )
+    with pytest.raises(ValueError, match="Extra dependency names 'postgres'"):
+        resolver.resolve(["probe"])
+
+
+def test_port_override_for_a_service_the_stack_does_not_run_is_refused(
+    tmp_path: Path,
+) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "probe": {
+                "description": "fixture: overrides a service it does not run",
+                "services": ["redpanda"],
+                "port_overrides": {"projection-api": 3999},
+            }
+        },
+    )
+    with pytest.raises(ValueError, match="Port override for 'projection-api'"):
+        resolver.resolve(["probe"])
+
+
+def test_port_override_for_a_service_that_publishes_no_port_is_refused(
+    tmp_path: Path,
+) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "probe": {
+                "description": "fixture: overrides a writer that publishes no port",
+                "services": ["omnimarket-projection-llm-cost"],
+                "port_overrides": {"omnimarket-projection-llm-cost": 3999},
+            }
+        },
+    )
+    with pytest.raises(ValueError, match="publishes no port"):
+        resolver.resolve(["probe"])
+
+
+def test_unknown_dependency_condition_is_refused(tmp_path: Path) -> None:
+    resolver = _catalog_with(
+        tmp_path,
+        {
+            "probe": {
+                "description": "fixture: a condition compose does not know",
+                "services": ["projection-api"],
+                "extra_depends_on": {"projection-api": {"redpanda": "service_happy"}},
+            }
+        },
+    )
+    # Resolved alone, so no other bundle's condition can conflict with it: only
+    # the condition check can refuse (with "local", the conflict guard answered
+    # first and this test passed with the condition check removed).
+    with pytest.raises(ValueError, match="'service_happy' is not a valid"):
+        resolver.resolve(["probe"])

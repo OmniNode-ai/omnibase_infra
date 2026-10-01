@@ -185,17 +185,19 @@ jobs:
           elif command -v docker-compose >/dev/null 2>&1; then
             compose_cmd="docker-compose"
           else
-            skip_reason="Docker Compose not available on runner; compose runtime boot smoke skipped (OMN-12563)"
-            echo "::warning::${skip_reason}"
-            echo "RUNTIME_BOOT_SKIP_REASON=${skip_reason}" >> "$GITHUB_ENV"
-            exit 0
+            # OMN-20147 / OMN-18811 AC4: no self-skip. This job is a strict CI
+            # Summary gate on merge_group, so a runner that cannot boot the
+            # stack must fail it; a green that booted nothing would pass the
+            # queue's only real-runtime check.
+            echo "::error::Docker Compose not available on runner (neither 'docker compose' nor 'docker-compose'); the compose runtime boot cannot run, failing rather than skipping (OMN-20147)"
+            exit 1
           fi
           echo "DOCKER_COMPOSE_CMD=${compose_cmd}" >> "$GITHUB_ENV"
           read -r -a compose_cmd_parts <<< "$compose_cmd"
           "${compose_cmd_parts[@]}" version
 
       - name: Bring up compose stack (postgres + redpanda)
-        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
+        if: inputs.mode == 'compose'
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -455,7 +457,7 @@ jobs:
           fi
 
       - name: Run database migrations (compose mode)
-        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
+        if: inputs.mode == 'compose'
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -465,7 +467,7 @@ jobs:
           uv run python scripts/run-migrations.py
 
       - name: Pre-warm Redpanda metadata (compose mode)
-        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
+        if: inputs.mode == 'compose'
         run: |
           set -euo pipefail
           # Fresh Redpanda brokers need time for their metadata subsystem to
@@ -479,7 +481,7 @@ jobs:
           echo "Redpanda pre-warm complete"
 
       - name: Stage contracts outside /home (compose mode)
-        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
+        if: inputs.mode == 'compose'
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
@@ -492,7 +494,7 @@ jobs:
           echo "ONEX_CONTRACTS_DIR=/tmp/onex-contracts" >> "$GITHUB_ENV"
 
       - name: Launch runtime (compose mode)
-        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
+        if: inputs.mode == 'compose'
         working-directory: ${{ github.workspace }}
         env:
           # Fresh Redpanda brokers exhibit metadata propagation lag — topics are
@@ -514,7 +516,7 @@ jobs:
           echo "RUNTIME_PID=$!" >> "$GITHUB_ENV"
 
       - name: Launch runtime-effects (compose mode)
-        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
+        if: inputs.mode == 'compose'
         working-directory: ${{ github.workspace }}
         env:
           KAFKA_TIMEOUT_SECONDS: "120"
@@ -532,7 +534,6 @@ jobs:
           echo "RUNTIME_EFFECTS_PID=$!" >> "$GITHUB_ENV"
 
       - name: Wait for runtime and runtime-effects health (hard gate)
-        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         id: health_wait
         run: |
           set -euo pipefail
@@ -601,7 +602,6 @@ jobs:
           fi
 
       - name: Hold 60s — runtime and runtime-effects stability
-        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         run: |
           set -euo pipefail
           runtime_url="http://${RUNTIME_HOST}:8085/health"
@@ -664,7 +664,6 @@ jobs:
           fi
 
       - name: Fail on startup auto-wiring or registration errors
-        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         run: |
           set -euo pipefail
           # OMN-9458: hard-fail on startup log regressions seen during the
@@ -707,7 +706,7 @@ jobs:
       # not something to do to a shared lane.
       - name: Run the runtime-backed suites (OMN-18795)
         id: run_runtime_suites
-        if: inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
+        if: inputs.mode == 'compose'
         env:
           # KAFKA_BOOTSTRAP_SERVERS / KAFKA_BROKER_ALLOWLIST / OMNIBASE_INFRA_DB_URL
           # are already in $GITHUB_ENV, resolved by the connectivity step above to
@@ -724,13 +723,18 @@ jobs:
           # Event processing and output events are asserted rather than opted
           # out of: the steps above have already proved the runtime is consuming
           # and writing registration projections, so a timeout here is a real
-          # regression. Consul stays off -- OMN-3540 removed that backend, so
-          # those tests cannot pass and their skip is the one this job's guard
-          # config recognises as legitimately optional.
+          # regression. The guard below tolerates no skip at all (OMN-20147).
           RUNTIME_E2E_PROCESSING_ENABLED: "true"
-          RUNTIME_E2E_OUTPUT_EVENTS_ENABLED: "true"
-          RUNTIME_E2E_CONSUL_ENABLED: "false"
         run: |
+          INTEGRATION_POSTGRES_PASSWORD="$(uv run python - <<'PY'
+          import os
+          from urllib.parse import unquote, urlparse
+
+          print(unquote(urlparse(os.environ["OMNIBASE_INFRA_DB_URL"]).password))
+          PY
+          )"
+          printf '::add-mask::%s\n' "$INTEGRATION_POSTGRES_PASSWORD"
+          export INTEGRATION_POSTGRES_PASSWORD
           uv run pytest \
             tests/integration/test_runtime_consumes_build_loop_terminal_event.py \
             tests/integration/registration/e2e/test_runtime_e2e.py \
@@ -760,7 +764,6 @@ jobs:
           retention-days: 7
 
       - name: Query registration_projections for active/fresh rows
-        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         id: pg_liveness
         env:
           REAL_PG_PASSWORD: ${{ secrets.RUNTIME_PG_PASSWORD }}
@@ -790,7 +793,6 @@ jobs:
           fi
 
       - name: Assert runtime consumer groups are active
-        if: env.RUNTIME_BOOT_SKIP_REASON == ''
         id: rpk_groups
         run: |
           set -euo pipefail
@@ -880,7 +882,6 @@ jobs:
             --arg mode "${{ inputs.mode }}" \
             --arg runtime_host "${RUNTIME_HOST}" \
             --arg pg_port "${PG_PORT}" \
-            --arg skip_reason "${RUNTIME_BOOT_SKIP_REASON:-}" \
             --slurpfile health health_initial.json \
             --slurpfile effects_health effects_health_initial.json \
             --arg active_fresh "${active_fresh_raw}" \
@@ -891,8 +892,6 @@ jobs:
               mode: $mode,
               runtime_host: $runtime_host,
               pg_port: $pg_port,
-              skipped: ($skip_reason != ""),
-              skip_reason: $skip_reason,
               health: $health[0],
               effects_health: $effects_health[0],
               active_fresh_registrations: ($active_fresh | tonumber),
@@ -911,7 +910,7 @@ jobs:
           retention-days: 14
 
       - name: Upload runtime startup logs
-        if: always() && inputs.mode == 'compose' && env.RUNTIME_BOOT_SKIP_REASON == ''
+        if: always() && inputs.mode == 'compose'
         uses: actions/upload-artifact@v7
         with:
           name: runtime-startup-logs-${{ inputs.mode }}
@@ -972,9 +971,8 @@ jobs:
   # runtime kernels report /health status "healthy" with is_running true, and
   # a consumer group is live on the delegate-skill command topic.
   #
-  # No self-skip: a runner without Docker Compose FAILS this job (the `compose`
-  # mode's green-with-a-warning path is the OMN-18811 AC4 finding this job does
-  # not repeat). Probes run through `docker exec`, never a host port, so they
+  # No self-skip: a runner without Docker Compose FAILS this job, as it fails
+  # the `compose` mode's boot job since OMN-20147 (OMN-18811 AC4). Probes run through `docker exec`, never a host port, so they
   # hold on a runner that shares the host Docker daemon from inside a container.
   # ===========================================================================
   boot-catalog-local:
@@ -1068,6 +1066,64 @@ jobs:
             done
           done
 
+      # OMN-19972: every long-running service of the laptop profile reports
+      # healthy, not only the two kernels. The list is derived from the `local`
+      # render (a healthcheck and not a one-shot), so a service added to the
+      # bundle is covered without editing this step, and a service that never
+      # started fails it rather than being skipped. The regression test
+      # tests/ci/test_runtime_boot_catalog_local_health_omn19972.py runs this
+      # step's own text against a stub Docker.
+      - name: Every health-checked laptop service reports healthy
+        run: |
+          set -euo pipefail
+          services="$(uv run python - <<'PY'
+          from omnibase_infra.docker.catalog.generator import generate_compose
+          from omnibase_infra.docker.catalog.resolver import CatalogResolver
+
+          compose = generate_compose(CatalogResolver(catalog_dir="docker/catalog").resolve(["local"]))
+          for name, svc in compose["services"].items():
+              if "healthcheck" in svc and svc.get("restart") != "no":
+                  print(name)
+          PY
+          )"
+          if [ -z "$services" ]; then
+            echo "::error::the local render lists no health-checked service"
+            exit 1
+          fi
+          failed=()
+          # One budget of 90 polls x 10 s for the whole step, not per service: the
+          # services boot in parallel, so a service still starting when the budget
+          # is spent gets one last look and fails, instead of N stuck services
+          # costing N x 15 minutes of CI.
+          polls_left=90
+          for svc in $services; do
+            container="${LOCAL_PROJECT}-${svc}"
+            status=""
+            while :; do
+              if ! status="$(docker inspect --format '{{.State.Health.Status}}' "$container" 2>/dev/null)"; then
+                status="missing"
+                break
+              fi
+              if [ "$status" = "healthy" ] || [ "$status" = "unhealthy" ]; then
+                break
+              fi
+              if [ "$polls_left" -le 0 ]; then
+                break
+              fi
+              polls_left=$((polls_left - 1))
+              sleep 10
+            done
+            restarts="$(docker inspect --format '{{.RestartCount}}' "$container" 2>/dev/null || echo "?")"
+            echo "${svc}: ${status:-none} restarts=${restarts}"
+            if [ "$status" != "healthy" ]; then
+              failed+=("${svc}=${status:-none}")
+            fi
+          done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::laptop services not healthy: ${failed[*]}"
+            exit 1
+          fi
+
       - name: Delegate-skill command topic has a live consumer group
         run: |
           set -euo pipefail
@@ -1111,7 +1167,7 @@ jobs:
         if: always()
         run: |
           docker ps -a --filter "name=${LOCAL_PROJECT}" --format 'table {{.Names}}\t{{.Status}}' || true
-          for svc in omninode-runtime runtime-effects migration-gate forward-migration redpanda-partition-cap; do
+          for svc in omninode-runtime runtime-effects migration-gate forward-migration redpanda-partition-cap projection-api omnimarket-projection-llm-cost consumer-health-projection; do
             echo "::group::${svc} logs (tail)"
             docker logs --tail 120 "${LOCAL_PROJECT}-${svc}" 2>&1 || true
             echo "::endgroup::"

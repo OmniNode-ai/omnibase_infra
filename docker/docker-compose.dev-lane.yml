@@ -1940,6 +1940,13 @@ services:
       # Redpanda, so this is the honest value and not a disable. `msk` would
       # make every lane tenant-create attempt to reach AWS.
       BROKER_ACL_PROVIDER: "redpanda"
+      # OMN-20213: the lane declares the broker it manages. The redpanda
+      # provider grants tenant ACLs over this lane's own Kafka connection
+      # (KAFKA_BOOTSTRAP_SERVERS above) and issues each tenant its own SCRAM
+      # login through this Admin API (/v1/security/users). onex-api has no
+      # default for it: unset, tenant create records acl_state as deferred and
+      # issues no login, which is what every dev-lane tenant read before this.
+      REDPANDA_ADMIN_URL: "http://redpanda:9644"
       BROKER_QUOTA_PROVIDER: "deferred"
       GATEWAY_P0B_PER_TENANT_CREDENTIALS: ${GATEWAY_P0B_PER_TENANT_CREDENTIALS:-enabled}
       GATEWAY_ATTACH_TOKEN_EXCHANGE: "enabled"

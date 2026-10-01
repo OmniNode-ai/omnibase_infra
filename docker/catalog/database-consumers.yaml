@@ -22,6 +22,12 @@ consumers:
   omnimarket-projection-session-outcome:
     bindings:
       - tenant_projection
+  # OMN-17099: the tenant credentials projection writes the tenant-domain
+  # credential catalog and routing-overlay relations, so it binds
+  # `tenant_projection` like every projection above.
+  omnimarket-projection-tenant-credentials:
+    bindings:
+      - tenant_projection
   # OMN-18114: the TENANT-domain projection CARRIER. It binds `tenant_projection`
   # for the same reason every entry above does -- it writes TENANT-domain
   # relations -- but it is the runtime KERNEL under

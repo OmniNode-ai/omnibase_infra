@@ -11,6 +11,12 @@ import pytest
 import yaml
 
 from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.runtime.models.enum_bifrost_endpoint_probe_failure_kind import (
+    EnumBifrostEndpointProbeFailureKind,
+)
+from omnibase_infra.runtime.models.model_bifrost_endpoint_probe_failure import (
+    ModelBifrostEndpointProbeFailure,
+)
 from omnibase_infra.runtime.render_bifrost_delegation_contract import (
     render_bifrost_delegation_contract,
 )
@@ -287,18 +293,87 @@ def test_missing_or_malformed_overlay_fails_before_dispatch(tmp_path: Path) -> N
 
 
 @pytest.mark.unit
-def test_base_model_mismatch_fails_instead_of_dropping_served_id(
+def test_overlay_model_overrides_a_different_base_model_and_records_it(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source = tmp_path / "base.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_base_contract(source, coder_model="Qwen3.8-27B-27b")
+
+    render_bifrost_delegation_contract(
+        source_path=source,
+        overlay_path=_OVERLAY,
+        target_path=target,
+        verify_endpoints=False,
+    )
+
+    contract = yaml.safe_load(target.read_text(encoding="utf-8"))
+    by_id = {backend["backend_id"]: backend for backend in contract["backends"]}
+    assert by_id["local-coder"]["model_name"] == "Qwen3.8-27B"
+    assert capsys.readouterr().out == (
+        "[entrypoint] Bifrost backend 'local-coder' model_name 'Qwen3.8-27B-27b' "
+        "overridden by lane overlay 'dev' served_model_id 'Qwen3.8-27B'\n"
+    )
+
+
+@pytest.mark.unit
+def test_base_backend_without_a_model_name_key_is_still_malformed(
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "base.yaml"
-    _write_base_contract(source, coder_model="Qwen3.8-27B-27b")
+    target = tmp_path / "rendered.yaml"
+    _write_base_contract(source)
+    base = yaml.safe_load(source.read_text(encoding="utf-8"))
+    del base["backends"][0]["model_name"]
+    source.write_text(yaml.safe_dump(base), encoding="utf-8")
 
-    with pytest.raises(ProtocolConfigurationError, match="does not match overlay"):
+    with pytest.raises(ProtocolConfigurationError, match="must declare model_name"):
         render_bifrost_delegation_contract(
             source_path=source,
             overlay_path=_OVERLAY,
-            target_path=tmp_path / "rendered.yaml",
+            target_path=target,
         )
+    assert not target.exists()
+
+
+@pytest.mark.unit
+def test_dark_rung_keeps_the_overlay_model_when_it_differs_from_the_base(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "base.yaml"
+    overlay_path = tmp_path / "lane.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_base_contract(source)
+    overlay = yaml.safe_load(_OVERLAY.read_text(encoding="utf-8"))
+    for binding in overlay["backends"]:
+        if binding["backend_id"] == "local-coder":
+            binding["served_model_id"] = "operator-chosen-model"
+            binding["serving"] = False
+    overlay_path.write_text(yaml.safe_dump(overlay), encoding="utf-8")
+    probed_models: list[str] = []
+
+    def probe(
+        endpoint_url: str, model_name: str, timeout: float
+    ) -> ModelBifrostEndpointProbeFailure | None:
+        probed_models.append(model_name)
+        return None
+
+    render_bifrost_delegation_contract(
+        source_path=source,
+        overlay_path=overlay_path,
+        target_path=target,
+        verify_endpoints=True,
+        endpoint_probe=probe,
+    )
+
+    contract = yaml.safe_load(target.read_text(encoding="utf-8"))
+    by_id = {backend["backend_id"]: backend for backend in contract["backends"]}
+    assert by_id["local-coder"]["model_name"] == "operator-chosen-model"
+    assert by_id["local-coder"]["endpoint_url"] is None
+    assert by_id["local-coder"]["max_tokens"] == 65_536
+    assert by_id["local-coder"]["timeout_ms"] == 300_000
+    assert "operator-chosen-model" not in probed_models
 
 
 @pytest.mark.unit
@@ -327,13 +402,16 @@ def test_endpoint_probe_requires_advertised_served_id(tmp_path: Path) -> None:
 
     def rejected_probe(
         endpoint_url: str, model_name: str, timeout: float
-    ) -> str | None:
+    ) -> ModelBifrostEndpointProbeFailure | None:
         assert (endpoint_url, model_name) in {
             (_ENDPOINT, "Qwen3.8-27B"),
             (_DS_V4_ENDPOINT, "deepseek-v4-flash"),
         }
         assert timeout > 0
-        return f"model endpoint did not advertise {model_name}"
+        return ModelBifrostEndpointProbeFailure(
+            kind=EnumBifrostEndpointProbeFailureKind.REFUSED,
+            detail=f"model endpoint did not advertise {model_name}",
+        )
 
     with pytest.raises(ProtocolConfigurationError, match="failed verification"):
         render_bifrost_delegation_contract(
@@ -435,6 +513,125 @@ def _write_mixed_base_contract(
         ),
         encoding="utf-8",
     )
+
+
+def _write_cloud_overlay(path: Path, **binding_overrides: object) -> None:
+    overlay = yaml.safe_load(_CLOUD_OVERLAY.read_text(encoding="utf-8"))
+    overlay["backends"] = [
+        {
+            "backend_id": "cloud-gemini-pro",
+            "endpoint_url": "https://cloud.example.invalid/v1/chat/completions",
+            "served_model_id": "operator-chosen-gemini",
+            "parameter_count": "unknown",
+            "context_window": 32_768,
+            "max_tokens": 16_384,
+            "timeout_ms": 30_000,
+            **binding_overrides,
+        }
+    ]
+    path.write_text(yaml.safe_dump(overlay), encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_cloud_overlay_rebinds_a_base_cloud_backends_model_and_endpoint(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "base.yaml"
+    overlay_path = tmp_path / "cloud.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_mixed_base_contract(source)
+    _write_cloud_overlay(overlay_path)
+
+    render_bifrost_delegation_contract(
+        source_path=source,
+        overlay_path=overlay_path,
+        target_path=target,
+        verify_endpoints=False,
+    )
+
+    contract = yaml.safe_load(target.read_text(encoding="utf-8"))
+    by_id = {backend["backend_id"]: backend for backend in contract["backends"]}
+    assert by_id["cloud-gemini-pro"]["model_name"] == "operator-chosen-gemini"
+    assert by_id["cloud-gemini-pro"]["endpoint_url"] == (
+        "https://cloud.example.invalid/v1/chat/completions"
+    )
+    assert by_id["cloud-gemini-pro"]["tier"] == "frontier_api"
+    assert by_id["local-coder"]["endpoint_url"] is None
+
+
+@pytest.mark.unit
+def test_cloud_overlay_adds_a_fully_declared_cloud_backend(tmp_path: Path) -> None:
+    source = tmp_path / "base.yaml"
+    overlay_path = tmp_path / "cloud.yaml"
+    target = tmp_path / "rendered.yaml"
+    # The added endpoint must count as active even when the base has none.
+    _write_mixed_base_contract(source, cloud_endpoint=None)
+    _write_cloud_overlay(
+        overlay_path,
+        backend_id="cloud-custom",
+        provider="gemini",
+        tier="frontier_api",
+        credential={"kind": "secret_ref", "secret_ref": "llm.custom.api_key"},
+    )
+
+    render_bifrost_delegation_contract(
+        source_path=source,
+        overlay_path=overlay_path,
+        target_path=target,
+        verify_endpoints=False,
+    )
+
+    contract = yaml.safe_load(target.read_text(encoding="utf-8"))
+    backend = contract["backends"][-1]
+    assert backend["backend_id"] == "cloud-custom"
+    assert backend["provider"] == "gemini"
+    assert backend["tier"] == "frontier_api"
+    assert backend["secret_ref"] == "llm.custom.api_key"
+    assert backend["model_name"] == "operator-chosen-gemini"
+    assert backend["endpoint_url"] == (
+        "https://cloud.example.invalid/v1/chat/completions"
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("declared", [False, True])
+@pytest.mark.parametrize("serving", [False, True])
+def test_cloud_overlay_refuses_added_or_base_local_backends(
+    tmp_path: Path,
+    declared: bool,
+    serving: bool,
+) -> None:
+    source = tmp_path / "base.yaml"
+    overlay_path = tmp_path / "cloud.yaml"
+    target = tmp_path / "rendered.yaml"
+    _write_mixed_base_contract(source)
+    backend_id = "added-local" if declared else "local-coder"
+    declaration: dict[str, object] = (
+        {"provider": "openai", "tier": "local", "credential": {"kind": "none"}}
+        if declared
+        else {}
+    )
+    _write_cloud_overlay(
+        overlay_path,
+        backend_id=backend_id,
+        serving=serving,
+        **declaration,
+    )
+
+    with pytest.raises(ProtocolConfigurationError) as excinfo:
+        render_bifrost_delegation_contract(
+            source_path=source,
+            overlay_path=overlay_path,
+            target_path=target,
+        )
+
+    message = str(excinfo.value)
+    assert "lane 'onex-dev'" in message
+    assert "locale 'cloud'" in message
+    assert backend_id in message
+    assert "local" in message
+    assert "OMN-17502" in message
+    assert not target.exists()
 
 
 @pytest.mark.unit

@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-OMNI_HOME="${OMNI_HOME:-/Volumes/PRO-G40/Code/omni_home}"
+OMNI_HOME="${OMNI_HOME:?set OMNI_HOME to the omni_home registry path}"
 
 REPOS=(
   knowledge-base

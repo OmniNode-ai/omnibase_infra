@@ -867,3 +867,55 @@ def test_plpgsql_declared_variable_does_not_mask_a_real_relation_read() -> None:
     assert "schema-qualified" in "\n".join(
         lint_application_database_sql(sql, _TOPOLOGY)
     )
+
+
+@pytest.mark.parametrize(
+    ("sql", "keyword"),
+    [
+        (
+            "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA omninode_internal TO app_dashboard;",
+            "all",
+        ),
+        (
+            "REVOKE SELECT ON ALL TABLES IN SCHEMA omninode_internal FROM role_omnidash;",
+            "all",
+        ),
+        (
+            "UPDATE omninode_internal.live_events SET event_type = CASE "
+            "WHEN lower(topic) LIKE '%failed%' OR lower(topic) LIKE '%error%' "
+            "THEN 'ERROR' ELSE event_type END;",
+            "or",
+        ),
+        (
+            "UPDATE omninode_internal.live_events SET event_type = CASE "
+            "WHEN lower(topic) LIKE '%cmd%'\n        THEN 'COMMAND' ELSE event_type END;",
+            "then",
+        ),
+        (
+            "CREATE TABLE omninode_internal.claims (ok BOOLEAN NOT NULL, "
+            "CONSTRAINT ck_ok CHECK (ok IS TRUE), CONSTRAINT ck_no CHECK (ok IS NOT FALSE));",
+            "true",
+        ),
+    ],
+)
+def test_reserved_keywords_are_never_relation_targets(sql: str, keyword: str) -> None:
+    """OMN-20201 (I21): a reserved key word the matcher lands on is grammar."""
+    joined = "\n".join(lint_application_database_sql(sql, _TOPOLOGY))
+    assert (
+        f"application relation target {keyword!r} must be schema-qualified"
+        not in joined
+    )
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        'SELECT * FROM "all";',
+        'UPDATE "then" SET x = 1;',
+        "SELECT * FROM events WHERE topic LIKE '%x%';",
+    ],
+)
+def test_reserved_keyword_guard_never_exempts_a_real_relation(sql: str) -> None:
+    """Control: a quoted key word, or a real bare relation beside LIKE, still fails."""
+    joined = "\n".join(lint_application_database_sql(sql, _TOPOLOGY))
+    assert "must be schema-qualified" in joined

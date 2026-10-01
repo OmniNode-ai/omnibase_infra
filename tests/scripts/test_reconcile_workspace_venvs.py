@@ -381,11 +381,21 @@ class _Workspace:
         return out
 
     def dispatch_syncs(self) -> list[str]:
-        """Mutating uv syncs that targeted the DISPATCH venv."""
+        """Mutating uv syncs that targeted the DISPATCH venv.
+
+        Includes the staging sibling: since OMN-19432 every writing pass is done
+        on a clone of the live venv and renamed in, so the venv "targeted" is
+        the live one by identity, not by path.
+        """
         return [
             c
             for c in self.uv_calls()
-            if "sync" in c and "--check" not in c and f"env={self.dispatch_venv} " in c
+            if "sync" in c
+            and "--check" not in c
+            and (
+                f"env={self.dispatch_venv} " in c
+                or f"env={self.dispatch_venv}.rebuilding " in c
+            )
         ]
 
     def gate_syncs(self) -> list[str]:
@@ -537,13 +547,102 @@ def test_provider_coinstall_runs_before_the_lock_pass(ws: _Workspace) -> None:
     lock_after = [
         i
         for i, (kind, call) in enumerate(order)
-        if kind == "uv" and "--check" not in call and f"env={ws.dispatch_venv} " in call
+        if kind == "uv"
+        and "--check" not in call
+        and (
+            f"env={ws.dispatch_venv} " in call
+            or f"env={ws.dispatch_venv}.rebuilding " in call
+        )
     ]
     assert lock_after, "no dispatch-venv lock pass ran at all"
     assert max(lock_after) > provider_at, (
         "the provider co-install ran last, so a pin it downgraded stays "
         f"downgraded. Order was: {order!r}"
     )
+
+
+def _make_install_shim_needing_the_lock(path: Path, dispatch_venv: Path) -> Path:
+    """A co-install whose readback refuses until the dispatch venv has had a lock sync.
+
+    OMN-20231. ``install-node-skill-package.sh`` ends with a readback of
+    omnimarket's packaged floors, so when omnimarket raises its
+    ``omnibase-core`` floor in the same move that ``omnibase_infra/uv.lock``
+    raises the pin, the readback refuses on the OLD core -- unless the lock
+    has already been applied to that venv. This shim refuses exactly then.
+    """
+    path.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "${OMNIMARKET_REF:-<unset>}" >> "$INSTALL_SHIM_LOG"\n'
+        'printf "%s\\n" "$*" >> "$INSTALL_ARGV_LOG"\n'
+        'printf "install %s\\n" "${OMNIMARKET_REF:-<unset>}" >> "$ORDER_LOG"\n'
+        f'if grep -E "^uv env={dispatch_venv}(\\.rebuilding)? " "$ORDER_LOG" 2>/dev/null'
+        ' | grep -v -- "--check" | grep -q " sync "; then exit 0; fi\n'
+        'echo "omnibase-core (floor from omnimarket): installed 0.47.25 != expected'
+        ' omnibase-core>=0.47.27 (MISMATCH)" >&2\n'
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    path.chmod(0o755)
+    return path
+
+
+def _dispatch_lock_syncs(ws: _Workspace) -> list[int]:
+    order = ws.ordered_calls()
+    return [
+        i
+        for i, (kind, call) in enumerate(order)
+        if kind == "uv"
+        and " sync " in f" {call} "
+        and "--check" not in call
+        and (
+            f"env={ws.dispatch_venv} " in call
+            or f"env={ws.dispatch_venv}.rebuilding " in call
+        )
+    ]
+
+
+def test_a_lock_already_behind_is_applied_before_the_provider_co_install(
+    ws: _Workspace,
+) -> None:
+    """OMN-20231: a core bump in the lock and in omnimarket's floor, together.
+
+    Measured 2026-09-30: an existing dispatch venv on omnibase-core 0.47.25,
+    the infra lock on 0.47.27 (#4355) and omnimarket requiring >=0.47.27. The
+    provider pass ran first, its readback refused on the old core, the run
+    exited, and the lock pass that would have installed 0.47.27 never ran.
+    A lock the pre-check already found behind is now applied FIRST, and the
+    post-co-install lock pass (OMN-16262) still ends the run.
+    """
+    ws.set_installed_commit("0" * _SHA_LEN)  # the provider layer is behind
+    _make_uv_shim(ws.bin_dir, check_exit=1)  # and so is the lock
+    _make_install_shim_needing_the_lock(ws.install_script, ws.dispatch_venv)
+
+    result = ws.run()
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+
+    order = ws.ordered_calls()
+    provider_at = next(i for i, (kind, _) in enumerate(order) if kind == "install")
+    locks = _dispatch_lock_syncs(ws)
+    assert any(i < provider_at for i in locks), (
+        f"no lock pass before the co-install: {order!r}"
+    )
+    assert any(i > provider_at for i in locks), (
+        f"no lock pass after the co-install: {order!r}"
+    )
+
+
+def test_a_lock_in_step_is_not_synced_before_the_provider_co_install(
+    ws: _Workspace,
+) -> None:
+    """OMN-20231 adds no work to the common tick: only a lock already behind goes first."""
+    ws.set_installed_commit("0" * _SHA_LEN)  # provider behind, lock conformant
+    assert ws.run().returncode == _EXIT_OK
+
+    order = ws.ordered_calls()
+    provider_at = next(i for i, (kind, _) in enumerate(order) if kind == "install")
+    locks = _dispatch_lock_syncs(ws)
+    assert not any(i < provider_at for i in locks), order
+    assert any(i > provider_at for i in locks), order
 
 
 def test_provider_layer_is_pinned_to_local_clone_head_not_remote_tip(
@@ -683,7 +782,12 @@ def test_clone_movement_moves_the_provider_layer_and_then_reapplies_the_lock(
     order = ws.ordered_calls()
     provider_at = max(i for i, (kind, _) in enumerate(order) if kind == "install")
     assert any(
-        kind == "uv" and "--check" not in call and f"env={ws.dispatch_venv} " in call
+        kind == "uv"
+        and "--check" not in call
+        and (
+            f"env={ws.dispatch_venv} " in call
+            or f"env={ws.dispatch_venv}.rebuilding " in call
+        )
         for kind, call in order[provider_at:]
     ), (
         "the provider layer moved and no lock pass followed, so an OMN-16262 "
@@ -1417,13 +1521,21 @@ def test_a_staged_venv_that_is_not_relocatable_is_refused(ws: _Workspace) -> Non
     )
 
 
-def test_an_additive_pass_is_not_staged(ws: _Workspace) -> None:
-    """Control: only a REBUILD is staged.
+def test_an_additive_pass_never_writes_to_the_live_dispatch_venv(
+    ws: _Workspace,
+) -> None:
+    """A provider or lock pass is staged too, because it is NOT harmless in place.
 
-    Staging every pass would double the disk cost and the wall clock of the
-    common case -- the clone advanced, the interpreter did not -- for no gain,
-    because an additive provider or lock pass never leaves the venv unusable.
-    This proves the narrowing is real rather than incidental.
+    OMN-19432: about one `onex delegate` call in ten failed at CLI startup with
+    ``omnimarket.cli.choice_from_authority`` missing, and a retry succeeded. The
+    cause is this pass. `uv pip install --reinstall` of the omnimarket provider
+    layer into the live dispatch venv uninstalls the package and reinstalls it
+    file by file; every `onex` that imports during that window sees a package
+    with modules missing (measured against real uv 0.11.32: a poller importing
+    the module during 15 reinstalls failed on most of the window, with
+    ``No module named 'omnimarket.cli.choice_from_authority'`` and, at the
+    edge, ``No module named 'omnimarket'``). The earlier premise that an
+    additive pass "never leaves the venv unusable" was false.
     """
     ws.set_installed_commit("0" * _SHA_LEN)
 
@@ -1431,10 +1543,136 @@ def test_an_additive_pass_is_not_staged(ws: _Workspace) -> None:
 
     assert result.returncode == _EXIT_OK, result.stdout + result.stderr
     staging = Path(str(ws.dispatch_venv) + _UV_STAGING_SUFFIX)
-    assert not staging.exists()
-    assert str(ws.dispatch_venv) in _mutating_uv_targets(ws), (
-        "an additive pass stopped writing to the live venv"
+    targets = _mutating_uv_targets(ws)
+    assert str(staging) in targets, (
+        f"the additive pass did not sync into the staging sibling: {targets!r}"
     )
+    assert str(ws.dispatch_venv) not in targets, (
+        "an additive pass wrote straight to the live dispatch venv, which is "
+        f"the window `onex delegate` fails in: {targets!r}"
+    )
+    argv = ws.install_argv_log.read_text(encoding="utf-8")
+    assert str(staging / "bin" / "python") in argv, (
+        f"the provider layer was composed into the wrong interpreter: {argv!r}"
+    )
+    assert str(ws.dispatch_venv / "bin" / "python") not in argv, (
+        f"the provider co-install targeted the live venv: {argv!r}"
+    )
+    assert not staging.exists(), "the staging directory survived the swap"
+    assert (ws.dispatch_venv / "bin" / "python").exists()
     assert not any(line.startswith("venv ") for line in ws.uv_calls()), (
-        "an additive pass created a venv, so every tick now pays for a rebuild"
+        "an additive pass built a fresh venv instead of cloning the live one"
     )
+
+
+def test_an_additive_pass_is_seeded_from_the_live_venv(ws: _Workspace) -> None:
+    """The staged copy starts as the live venv, so the pass stays additive.
+
+    A fresh `uv venv` would drop every package the lock does not mention,
+    including the composed provider layer's companions, and every pass would
+    become a full rebuild. The clone carries a marker only the live venv has.
+    """
+    marker = ws.dispatch_venv / "lib" / "marker-only-in-live.txt"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("seeded", encoding="utf-8")
+    ws.set_installed_commit("0" * _SHA_LEN)
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    assert marker.read_text(encoding="utf-8") == "seeded", (
+        "the swapped-in venv is not a clone of the live one"
+    )
+    cfg = (ws.dispatch_venv / "pyvenv.cfg").read_text(encoding="utf-8")
+    assert "relocatable = true" in cfg, (
+        f"the swapped-in venv is not marked relocatable: {cfg!r}"
+    )
+
+
+def test_a_failed_additive_pass_leaves_the_live_dispatch_venv_serving(
+    ws: _Workspace,
+) -> None:
+    """The failure half of the property: the live venv comes through untouched."""
+    _make_uv_shim(ws.bin_dir, sync_exit=1)
+    ws.set_installed_commit("0" * _SHA_LEN)
+    before = (ws.dispatch_venv / "bin" / "python").read_text(encoding="utf-8")
+
+    result = ws.run()
+
+    assert result.returncode == _EXIT_FAILED, result.stdout + result.stderr
+    assert "UNTOUCHED" in result.stdout, result.stdout
+    after = (ws.dispatch_venv / "bin" / "python").read_text(encoding="utf-8")
+    assert after == before, "a failed additive pass damaged the live dispatch venv"
+
+
+def test_an_in_sync_dispatch_venv_is_not_staged(ws: _Workspace) -> None:
+    """Control: no drift, no clone. The common no-op tick stays free."""
+    result = ws.run()
+
+    assert result.returncode == _EXIT_OK, result.stdout + result.stderr
+    staging = Path(str(ws.dispatch_venv) + _UV_STAGING_SUFFIX)
+    assert not staging.exists()
+    assert str(staging) not in _mutating_uv_targets(ws)
+
+
+def test_the_swap_exchanges_the_directories_in_one_syscall(tmp_path: Path) -> None:
+    """The live path names a complete venv at every instant (OMN-19432).
+
+    A two-rename swap leaves a millisecond in which the live path does not
+    exist, and an `onex` importing inside it fails like an in-place reinstall
+    does. The exchange is the function under test, lifted out of the script by
+    its own delimiters so the test reads the shipped text, not a copy.
+    """
+    text = _SCRIPT.read_text(encoding="utf-8")
+    start = text.index("exchange_dirs_atomically() {")
+    end = text.index("\n}\n", start) + 3
+    live = tmp_path / "live"
+    staging = tmp_path / "staging"
+    live.mkdir()
+    staging.mkdir()
+    (live / "which").write_text("old", encoding="utf-8")
+    (staging / "which").write_text("new", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f'{text[start:end]}\nexchange_dirs_atomically "$1" "$2"',
+            "_",
+            str(staging),
+            str(live),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (live / "which").read_text(encoding="utf-8") == "new"
+    assert (staging / "which").read_text(encoding="utf-8") == "old"
+
+
+def test_the_swap_falls_back_when_the_exchange_is_unavailable(tmp_path: Path) -> None:
+    """Positive control: a missing target makes the exchange refuse, not corrupt."""
+    text = _SCRIPT.read_text(encoding="utf-8")
+    start = text.index("exchange_dirs_atomically() {")
+    end = text.index("\n}\n", start) + 3
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            f'{text[start:end]}\nexchange_dirs_atomically "$1" "$2"',
+            "_",
+            str(staging),
+            str(tmp_path / "absent"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert staging.is_dir()

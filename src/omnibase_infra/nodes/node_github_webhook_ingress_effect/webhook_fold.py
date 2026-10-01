@@ -6,7 +6,7 @@ Nothing here reads the environment, the clock or the network. The handler
 supplies the secret, the received time and the publish time, so every function
 is deterministic and replayable from a recorded delivery.
 
-What each GitHub event contributes to pr_state (``None`` = "says nothing"):
+What each GitHub event contributes (``None`` = "says nothing"):
 
 - ``pull_request``: title, draft, base/head ref, head sha, mergeable and
   mergeable_state; triage_state on open, ready, draft and close; ci_status
@@ -18,8 +18,13 @@ What each GitHub event contributes to pr_state (``None`` = "says nothing"):
   submit and REVIEW_REQUIRED on dismiss; a plain comment says nothing.
 - ``check_run``: ci_status for each PR the run names, but only when the run is
   one of the configured summary checks (the one required context per repo,
-  e.g. "CI Summary"); a lone check run is not a PR's verdict.
-- anything else (ping, check_suite, status, push, ...): nothing.
+  e.g. "CI Summary"); a lone check run is not a PR's verdict. A summary run
+  on a watched branch also yields branch-head-status; a run on
+  gh-readonly-queue/<watched>/... yields merge-group-status instead, never a
+  branch-head verdict.
+- ``push``: branch-ref-advanced for a watched refs/heads/<branch>, excluding
+  deletions. Branch observations are published on the branch-head topic.
+- anything else (ping, check_suite, status, ...): nothing.
 
 Known gap, owned by the reconciler (OMN-19493): deliveries can arrive out of
 order and a check run can report on a head the PR has already moved past. The
@@ -40,6 +45,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from omnibase_infra.nodes.node_github_webhook_ingress_effect.models import (
+    ModelGitHubBranchHeadObservation,
     ModelGitHubPrMergedObservation,
     ModelGitHubPrStateObservation,
 )
@@ -83,6 +89,7 @@ def fold_delivery(
     received_at: datetime,
     published_at: datetime,
     summary_check_names: frozenset[str],
+    watched_branches: frozenset[str] = frozenset(),
 ) -> tuple[BaseModel, ...]:
     """Fold one verified delivery into the observations it implies."""
     if event == "pull_request":
@@ -90,8 +97,43 @@ def fold_delivery(
     if event == "pull_request_review":
         return _fold_review(delivery_id, payload, received_at)
     if event == "check_run":
-        return _fold_check_run(delivery_id, payload, received_at, summary_check_names)
+        return _fold_check_run(
+            delivery_id, payload, received_at, summary_check_names, watched_branches
+        )
+    if event == "push":
+        return _fold_push(delivery_id, payload, received_at, watched_branches)
     return ()
+
+
+def _fold_push(
+    delivery_id: UUID,
+    payload: Mapping[str, object],
+    received_at: datetime,
+    watched_branches: frozenset[str],
+) -> tuple[BaseModel, ...]:
+    ref = _str(payload.get("ref"))
+    if not ref or not ref.startswith("refs/heads/") or payload.get("deleted") is True:
+        return ()
+    branch = ref.removeprefix("refs/heads/")
+    if branch not in watched_branches:
+        return ()
+    repo = _repo(payload)
+    sha = _str(payload.get("after"))
+    if sha is None:
+        raise WebhookFoldError("push.after missing or not a non-empty string")
+    return (
+        ModelGitHubBranchHeadObservation(
+            kind="branch-ref-advanced",
+            entity_id=f"{repo}@{branch}",
+            repo=repo,
+            branch=branch,
+            delivery_id=delivery_id,
+            github_event="push",
+            as_of=received_at,
+            sha=sha,
+            before_sha=_str(payload.get("before")),
+        ),
+    )
 
 
 def _fold_pull_request(
@@ -234,6 +276,7 @@ def _fold_check_run(
     payload: Mapping[str, object],
     received_at: datetime,
     summary_check_names: frozenset[str],
+    watched_branches: frozenset[str],
 ) -> tuple[BaseModel, ...]:
     run = _mapping(payload.get("check_run"), "check_run")
     if _str(run.get("name")) not in summary_check_names:
@@ -263,6 +306,41 @@ def _fold_check_run(
                 as_of=as_of,
                 ci_status=verdict,
                 head_sha=_str(run.get("head_sha")),
+            )
+        )
+    suite = run.get("check_suite")
+    head_branch = _str(suite.get("head_branch")) if isinstance(suite, Mapping) else None
+    branch = None
+    merge_group_ref = None
+    if head_branch and head_branch.startswith("gh-readonly-queue/"):
+        # Longest first also handles watched branch names containing slashes.
+        for watched in sorted(watched_branches, key=lambda name: (-len(name), name)):
+            prefix = f"gh-readonly-queue/{watched}/"
+            if head_branch.startswith(prefix) and head_branch[len(prefix) :]:
+                branch = watched
+                merge_group_ref = head_branch
+                break
+    elif head_branch in watched_branches:
+        branch = head_branch
+    if branch is not None:
+        sha = _str(run.get("head_sha"))
+        if sha is None:
+            raise WebhookFoldError(
+                "check_run.head_sha missing or not a non-empty string"
+            )
+        out.append(
+            ModelGitHubBranchHeadObservation(
+                kind="merge-group-status" if merge_group_ref else "branch-head-status",
+                entity_id=f"{repo}@{branch}",
+                repo=repo,
+                branch=branch,
+                delivery_id=delivery_id,
+                github_event="check_run",
+                as_of=as_of,
+                sha=sha,
+                ci_status=verdict,
+                check_name=_str(run.get("name")),
+                merge_group_ref=merge_group_ref,
             )
         )
     return tuple(out)

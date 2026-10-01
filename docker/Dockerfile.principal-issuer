@@ -1,0 +1,45 @@
+# syntax=docker/dockerfile:1.4
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 OmniNode Team
+#
+# OMN-20150 — the lab principal issuer (scripts/lab_principal_issuer.py).
+#
+# Python stdlib + PyYAML, plus rpk for ACLs. rpk comes from the Redpanda release
+# matching the lab broker (redpandadata/redpanda:v24.2.7), checksum-verified.
+FROM python:3.12-slim
+
+ARG TARGETARCH=amd64
+ARG RPK_VERSION=v24.2.7
+ARG RPK_SHA256_AMD64=31ccfa9a788e5ce1acbe6cea4a38d1441f1b588935fa543d61cd82440ae828e0
+ARG RPK_SHA256_ARM64=9b79b131de9c93a656ac7a96c06ed6408c933f9c64baa79a4896680a6cef7fd6
+
+RUN set -eu; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends curl unzip ca-certificates; \
+    case "$TARGETARCH" in \
+      amd64) sum="$RPK_SHA256_AMD64" ;; \
+      arm64) sum="$RPK_SHA256_ARM64" ;; \
+      *) echo "unsupported arch $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/rpk.zip "https://github.com/redpanda-data/redpanda/releases/download/${RPK_VERSION}/rpk-linux-${TARGETARCH}.zip"; \
+    echo "$sum  /tmp/rpk.zip" | sha256sum -c -; \
+    unzip -q /tmp/rpk.zip -d /usr/local/bin; \
+    rm -f /tmp/rpk.zip; \
+    apt-get purge -y curl unzip; \
+    apt-get autoremove -y; \
+    rm -rf /var/lib/apt/lists/*; \
+    pip install --no-cache-dir 'pyyaml==6.0.2'; \
+    useradd --system --uid 10020 --home-dir /nonexistent issuer; \
+    mkdir -p /data /run/principal-issuer && \
+    chown issuer /data /run/principal-issuer && \
+    chmod 0700 /run/principal-issuer
+
+COPY scripts/__init__.py /app/scripts/__init__.py
+COPY scripts/lab_principal_issuer.py /app/scripts/lab_principal_issuer.py
+COPY deploy/lab/developer-principal-grants.yaml /app/developer-principal-grants.yaml
+
+USER issuer
+WORKDIR /app
+RUN python3 scripts/lab_principal_issuer.py check --grants /app/developer-principal-grants.yaml
+ENTRYPOINT ["python3", "scripts/lab_principal_issuer.py"]
+CMD ["serve", "--grants", "/app/developer-principal-grants.yaml", "--ledger", "/data/issuances.jsonl", "--socket", "/run/principal-issuer/issuer.sock", "--proxy-uid", "0"]

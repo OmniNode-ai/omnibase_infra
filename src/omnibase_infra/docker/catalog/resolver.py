@@ -40,6 +40,10 @@ class ResolvedStack:
     injected_env: dict[str, str]
     injected_volumes: list[str] = field(default_factory=list)
     project: str = DEFAULT_PROJECT
+    publish_host: str | None = None
+    env_default_overrides: dict[str, str] = field(default_factory=dict)
+    port_overrides: dict[str, int] = field(default_factory=dict)
+    extra_depends_on: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @property
     def service_names(self) -> set[str]:
@@ -181,6 +185,10 @@ class CatalogResolver:
                     inject_required_env=bdef.get("inject_required_env", []),
                     inject_volumes=bdef.get("inject_volumes", []),
                     project=bdef.get("project"),
+                    publish_host=bdef.get("publish_host"),
+                    env_default_overrides=bdef.get("env_default_overrides", {}),
+                    port_overrides=bdef.get("port_overrides", {}),
+                    extra_depends_on=bdef.get("extra_depends_on", {}),
                 )
 
     def resolve(self, bundles: list[str]) -> ResolvedStack:
@@ -203,6 +211,12 @@ class CatalogResolver:
         bundle_required_env: set[str] = set()
         project: str | None = None
         project_owner = ""
+        publish_host: str | None = None
+        publish_host_owner = ""
+        env_default_overrides: dict[str, str] = {}
+        port_overrides: dict[str, int] = {}
+        port_override_owner: dict[str, str] = {}
+        extra_depends_on: dict[str, dict[str, str]] = {}
 
         for bundle_name in all_bundle_names:
             if bundle_name not in self._bundles:
@@ -251,6 +265,56 @@ class CatalogResolver:
                 project = bundle.project
                 project_owner = bundle_name
 
+            if bundle.publish_host is not None:
+                if publish_host is not None and publish_host != bundle.publish_host:
+                    raise ValueError(
+                        f"Publish host conflict: bundle '{publish_host_owner}' "
+                        f"publishes on '{publish_host}' and bundle '{bundle_name}' "
+                        f"on '{bundle.publish_host}'. One stack binds one address."
+                    )
+                publish_host = bundle.publish_host
+                publish_host_owner = bundle_name
+
+            for k, v in bundle.env_default_overrides.items():
+                # The value is spliced into ``${VAR:-<value>}``; a ``$``, ``{``
+                # or ``}`` in it would end or re-open the reference and compose
+                # would read a different default, or none.
+                if any(ch in v for ch in "${}"):
+                    raise ValueError(
+                        f"env_default_overrides value for {k} in bundle "
+                        f"'{bundle_name}' contains '$', '{{' or '}}': {v!r}"
+                    )
+                if k in env_default_overrides and env_default_overrides[k] != v:
+                    raise ValueError(
+                        f"Env default conflict: {k} defaults to "
+                        f"'{env_default_overrides[k]}' by one bundle and '{v}' "
+                        f"by bundle '{bundle_name}'"
+                    )
+                env_default_overrides[k] = v
+
+            for svc_name, host_port in bundle.port_overrides.items():
+                if svc_name in port_overrides and port_overrides[svc_name] != host_port:
+                    raise ValueError(
+                        f"Port override conflict: bundle "
+                        f"'{port_override_owner[svc_name]}' publishes '{svc_name}' on "
+                        f"{port_overrides[svc_name]} and bundle '{bundle_name}' on "
+                        f"{host_port}. One service has one host port."
+                    )
+                port_overrides[svc_name] = host_port
+                port_override_owner[svc_name] = bundle_name
+
+            for svc_name, deps in bundle.extra_depends_on.items():
+                merged = extra_depends_on.setdefault(svc_name, {})
+                for dep_name, condition in deps.items():
+                    EnumDependsOnCondition(condition)  # refuse an unknown condition
+                    if dep_name in merged and merged[dep_name] != condition:
+                        raise ValueError(
+                            f"Extra dependency conflict: '{svc_name}' waits for "
+                            f"'{dep_name}' as '{merged[dep_name]}' in one bundle and "
+                            f"'{condition}' in bundle '{bundle_name}'"
+                        )
+                    merged[dep_name] = condition
+
         # Transitively resolve service dependencies (BFS until no new deps found)
         pending: list[CatalogManifest] = list(selected_entries.values())
         while pending:
@@ -269,6 +333,23 @@ class CatalogResolver:
                         required_env.update(dep_manifest.required_env)
                         next_pending.append(dep_manifest)
             pending = next_pending
+
+        # OMN-19972: an override for a service this stack does not run would
+        # render nothing and say nothing; refuse it so a renamed or dropped
+        # service cannot leave a silent, dead override behind.
+        for svc_name in port_overrides:
+            entry = selected_entries.get(svc_name)
+            if entry is None or entry.ports is None:
+                raise ValueError(
+                    f"Port override for '{svc_name}', which this stack does not "
+                    "run or which publishes no port"
+                )
+        for svc_name, deps in extra_depends_on.items():
+            for name in (svc_name, *deps):
+                if name not in selected_entries:
+                    raise ValueError(
+                        f"Extra dependency names '{name}', which this stack does not run"
+                    )
 
         # OMN-19496: a bundle's ``inject_env`` value is what the generator
         # renders for that var on every runtime-layer entry, over the entry's
@@ -290,4 +371,8 @@ class CatalogResolver:
             injected_env=injected_env,
             injected_volumes=injected_volumes,
             project=project or DEFAULT_PROJECT,
+            publish_host=publish_host,
+            env_default_overrides=env_default_overrides,
+            port_overrides=port_overrides,
+            extra_depends_on=extra_depends_on,
         )

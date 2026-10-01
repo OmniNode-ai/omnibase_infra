@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -15,6 +16,36 @@ from omnibase_infra.docker.catalog.resolver import DEFAULT_PROJECT, ResolvedStac
 _RUNTIME_IMAGE_BUILD_SERVICE = "omninode-runtime"
 _RUNTIME_IMAGE = "runtime:latest"
 _DEFAULT_NETWORK = "omnibase-infra-network"
+
+
+def _override_defaults(value: str, overrides: Mapping[str, str]) -> str:
+    """Replace the default of each ``${VAR:-default}`` named in ``overrides``.
+
+    OMN-19972: a bundle may need a different default than the shared manifest
+    carries (the laptop profile must not render the lab's LAN address). Only
+    the ``:-`` default form is rewritten; a ``${VAR:?...}`` requirement and a
+    value the operator sets in the env file both keep their meaning.
+    """
+    for var, default in overrides.items():
+        pattern = rf"\$\{{{re.escape(var)}:-([^}}]*)\}}"
+        # A nested default (``${A:-${B:-x}}``) cannot be rewritten by a
+        # match that stops at the first ``}``: half of it would survive and
+        # compose would reject the file. Refuse it instead of rendering it.
+        for match in re.finditer(pattern, value):
+            if "${" in match.group(1):
+                raise ValueError(
+                    f"env_default_overrides cannot rewrite {var}: its default in "
+                    f"{value!r} is a nested ${{...}} reference"
+                )
+        replacement = f"${{{var}:-{default}}}"
+        # A function replacement, so ``\`` in the default is inserted literally
+        # rather than read as a group reference.
+        value = re.sub(
+            pattern,
+            lambda _match: replacement,  # noqa: B023 - used before the loop moves on
+            value,
+        )
+    return value
 
 
 def _scoped(project: str, name: str) -> str:
@@ -125,6 +156,10 @@ def _runtime_image_build(project: str = DEFAULT_PROJECT) -> dict[str, object]:
     unset value. Rendering ``${OMNI_HOME:-}`` here only handed the build a
     silent empty default; without it, the Dockerfile's workspace guard fails
     fast when the value is missing.
+
+    ``OMNIMARKET_REF`` is the git ref a ``BUILD_SOURCE=release`` build installs
+    omnimarket from. Its default is the Dockerfile's own (``dev``); rendering it
+    lets an env file pin the image to a tag instead of the moving dev tip.
     """
     return {
         "context": "..",
@@ -132,6 +167,7 @@ def _runtime_image_build(project: str = DEFAULT_PROJECT) -> dict[str, object]:
         "args": {
             "BUILD_SOURCE": "${BUILD_SOURCE:-release}",
             "EXPECTED_BUILD_SOURCE": "${EXPECTED_BUILD_SOURCE:-release}",
+            "OMNIMARKET_REF": "${OMNIMARKET_REF:-dev}",
             "RUNTIME_VERSION": "${RUNTIME_VERSION:-0.1.0}",
             "BUILD_DATE": "${BUILD_DATE:-}",
             "VCS_REF": "${VCS_REF:-}",
@@ -177,7 +213,21 @@ def generate_compose(
 
         # Command
         if manifest.command:
-            svc["command"] = manifest.command
+            if resolved.env_default_overrides:
+                overrides = resolved.env_default_overrides
+                if isinstance(manifest.command, str):
+                    svc["command"] = _override_defaults(manifest.command, overrides)
+                else:
+                    # YAML can load a numeric argument; only text can carry a
+                    # ``${VAR:-default}`` reference, so anything else passes through.
+                    svc["command"] = [
+                        _override_defaults(part, overrides)
+                        if isinstance(part, str)
+                        else part
+                        for part in manifest.command
+                    ]
+            else:
+                svc["command"] = manifest.command
 
         # Environment
         env: dict[str, str] = {}
@@ -194,12 +244,24 @@ def generate_compose(
         if manifest.layer == EnumInfraLayer.RUNTIME:
             env.update(resolved.injected_env)
 
+        if resolved.env_default_overrides:
+            env = {
+                k: _override_defaults(v, resolved.env_default_overrides)
+                for k, v in env.items()
+            }
+
         if env:
             svc["environment"] = env
 
-        # Ports
+        # Ports. A bundle's publish host binds every published port to that
+        # address (OMN-19972); without one, the historical form binds all
+        # interfaces.
         if manifest.ports:
-            svc["ports"] = [f"{manifest.ports.external}:{manifest.ports.internal}"]
+            external = resolved.port_overrides.get(name, manifest.ports.external)
+            port = f"{external}:{manifest.ports.internal}"
+            if resolved.publish_host:
+                port = f"{resolved.publish_host}:{port}"
+            svc["ports"] = [port]
 
         # Volumes
         volumes = list(manifest.volumes)
@@ -292,10 +354,12 @@ def generate_compose(
             svc["labels"] = manifest.labels
 
         # Depends on
-        if manifest.depends_on:
-            deps: dict[str, dict[str, str]] = {}
-            for dep in manifest.depends_on:
-                deps[dep.service] = {"condition": dep.condition.value}
+        deps: dict[str, dict[str, str]] = {}
+        for dep in manifest.depends_on:
+            deps[dep.service] = {"condition": dep.condition.value}
+        for dep_name, condition in resolved.extra_depends_on.get(name, {}).items():
+            deps[dep_name] = {"condition": condition}
+        if deps:
             svc["depends_on"] = deps
 
         services[name] = svc

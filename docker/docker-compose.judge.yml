@@ -29,7 +29,9 @@ x-omninode-contract-overlay:
   judge-redpanda:
     advertised_kafka_addr: &judge_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://localhost:49092"
     kafka_port_publish: &judge_redpanda_kafka_port_publish "49092:19092"
-    admin_port_publish: &judge_redpanda_admin_port_publish "49644:9644"
+    # Loopback only (OMN-20260): admin_api_require_auth is false on this broker,
+    # and every in-network consumer uses redpanda:9644.
+    admin_port_publish: &judge_redpanda_admin_port_publish "127.0.0.1:49644:9644"
   judge-model-secrets:
     required_secret_refs:
       - GEMINI_API_KEY
@@ -142,7 +144,8 @@ x-judge-runtime-env: &judge-runtime-env
   # backend cloud-glm); this default only keeps the judge lane from falling
   # back onto the wrong product. Guarded by
   # tests/test_glm_endpoint_surface_omn6790.py.
-  LLM_GLM_URL: ${LLM_GLM_URL:-https://api.z.ai/api/coding/paas/v4}
+  # OMN-20173: Coding Plan use is Claude Code only; no system endpoint default.
+  LLM_GLM_URL: ${LLM_GLM_URL:-}
   LLM_GLM_MODEL_NAME: ${LLM_GLM_MODEL_NAME:-glm-4.5}
   LLM_GLM_API_KEY: ${LLM_GLM_API_KEY:-}
   GEMINI_API_KEY: ${GEMINI_API_KEY:?GEMINI_API_KEY required for judge Gemini route}

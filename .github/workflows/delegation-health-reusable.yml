@@ -1,0 +1,175 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# delegation-health-reusable.yml -- OMN-19451 (epic OMN-19432, wave 2)
+#
+# The ONE authored surface of the delegation-health check on runtime PRs. A
+# runtime-affecting PR is reported red while the delegation regression nightly
+# (omnimarket) or an M4 verdict workflow (omninode_infra) is red. Auto-merge, the
+# landing lane and humans already obey a check, so no skill needs to change.
+#
+# ENFORCING. There is no shadow state (operator ruling 2026-09-29T12:02:35Z,
+# OMN-19998). On omnibase_infra a red of this check fails CI Summary through the
+# default-deny external sweep in scripts/ci/ci_summary_gate.py.
+# config/delegation_health_check.yaml names the sources and why each belongs.
+#
+# THE READER IS THE EXISTING ONE. Each source is read through
+# `lab_pass_receipt.py`'s workflow-verdict reader (OMN-18866), the same state-keyed,
+# fail-closed reader staging delivery uses (OMN-19311). A red, cancelled, stale,
+# absent or unreadable newest run is red, and the message names the run id.
+#
+# FIX-FORWARD. A PR that repairs the red carries the label
+# `delegation-fix-forward:OMN-<n>` naming the red's ticket. It is admitted and the
+# admission (ticket, red run ids) is written to the job summary. A label with no
+# ticket id is refused.
+#
+# THE SCRIPTS COME FROM THE PINNED WORKFLOW SHA (github.job_workflow_sha), so the
+# YAML a caller pinned and the code it invokes cannot diverge (OMN-18387).
+name: delegation-health-reusable
+
+on:
+  workflow_call:
+    inputs:
+      repo_key:
+        description: "Which repository is calling: omnibase_infra or omnimarket."
+        required: true
+        type: string
+    secrets:
+      ONEXBOT_OCC_APP_ID:
+        required: true
+      ONEXBOT_OCC_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  delegation-health:
+    name: Delegation Health Check
+    runs-on: >-
+      ${{ fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout omnibase_infra at the pinned workflow sha
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_infra
+          ref: ${{ github.job_workflow_sha }}
+          persist-credentials: false
+
+      - name: Fetch canonical deploy-path classifier
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omniclaude
+          ref: main
+          path: .deploy-gate-source
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/deploy-gate/validate_pr_deploy_required.py
+          sparse-checkout-cone-mode: false
+
+      - name: Obtain a read-only Actions token for the verdict repositories
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+          owner: OmniNode-ai
+          repositories: |
+            omnimarket
+            omninode_infra
+          permission-actions: read
+
+      # The tree under test, blobless: `git diff --name-only` needs commits and
+      # trees, never file contents.
+      - name: Checkout the tree under test
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          path: .tree-under-test
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+
+      # The changed files and labels of THIS event, derived here rather than
+      # passed in, so the check reads the same facts on a pull request and on a
+      # merge-queue head. A pull request diffs from its merge base (three dots:
+      # the event's base.sha is the base tip, not the merge base). A queue head
+      # is built on its base, so two dots. A queue head names its pull request
+      # in its ref (gh-readonly-queue/<base>/pr-<n>-<sha>) and the labels are
+      # read from that pull request, so a fix-forward label admits the queue
+      # head exactly as it admitted the pull request. Anything unreadable fails
+      # the step: an empty or unresolved input must never read as "not runtime".
+      - name: Resolve the changed files and labels of this event
+        id: event
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_LABELS_JSON: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          MQ_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          MQ_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          MQ_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          set -euo pipefail
+          tree=.tree-under-test
+          case "$EVENT_NAME" in
+            pull_request)
+              git -C "$tree" diff --name-only "${PR_BASE_SHA}...${PR_HEAD_SHA}" > "$RUNNER_TEMP/changed.txt"
+              labels="$(python3 -c 'import json, os; print(",".join(json.loads(os.environ["PR_LABELS_JSON"]) or []))')"
+              ;;
+            merge_group)
+              git -C "$tree" diff --name-only "${MQ_BASE_SHA}..${MQ_HEAD_SHA}" > "$RUNNER_TEMP/changed.txt"
+              if [[ ! "$MQ_HEAD_REF" =~ /pr-([1-9][0-9]*)-[0-9a-f]{40}$ ]]; then
+                echo "::error::merge-queue ref '${MQ_HEAD_REF}' names no pull request"
+                exit 1
+              fi
+              pr="${BASH_REMATCH[1]}"
+              labels="$(gh api "repos/${REPO}/pulls/${pr}" --jq '[.labels[].name] | join(",")')"
+              ;;
+            *)
+              echo "::error::unsupported event '${EVENT_NAME}' for the delegation-health check"
+              exit 1
+              ;;
+          esac
+          if [[ ! -s "$RUNNER_TEMP/changed.txt" ]]; then
+            echo "::error::no changed files resolved for this ${EVENT_NAME} event"
+            exit 1
+          fi
+          files="$(paste -sd, "$RUNNER_TEMP/changed.txt")"
+          echo "changed $(wc -l < "$RUNNER_TEMP/changed.txt") file(s); labels: ${labels:-<none>}"
+          {
+            echo "files=${files}"
+            echo "labels=${labels}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Read the delegation verdicts for this runtime change
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          PR_CHANGED_FILES: ${{ steps.event.outputs.files }}
+          PR_LABELS: ${{ steps.event.outputs.labels }}
+          REPO_KEY: ${{ inputs.repo_key }}
+        run: |
+          set -euo pipefail
+          uv run --no-project --with pydantic --with pyyaml \
+            python3 scripts/ci/delegation_health_check.py \
+            --repo-key "$REPO_KEY" \
+            --changed-files "$PR_CHANGED_FILES" \
+            --labels "$PR_LABELS" \
+            --runtime-validator ".deploy-gate-source/.github/actions/deploy-gate/validate_pr_deploy_required.py" \
+            --record-out "$RUNNER_TEMP/delegation-health-record.json"
+
+      - name: Upload the admission record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: delegation-health-record-${{ inputs.repo_key }}
+          path: ${{ runner.temp }}/delegation-health-record.json
+          if-no-files-found: ignore

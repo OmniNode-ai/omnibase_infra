@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """The verdict rules: PASS, FAIL, INCONCLUSIVE, DEV_INHERITED, and restored beside them.
 
-Ticket: OMN-19572
+Tickets: OMN-19572, OMN-19941
 """
 
 from __future__ import annotations
@@ -147,6 +147,62 @@ def test_focused_tests_are_n_a_when_the_pr_changes_none() -> None:
     focused = next(c for c in result.checks if c.check is _C.FOCUSED_TESTS)
     assert focused.passed
     assert focused.detail.startswith("n/a")
+
+
+def test_planned_focused_tests_without_an_observation_fail_closed() -> None:
+    plan = core_plan()
+    assert any(step.step_id is _ID.FOCUSED_TESTS for step in plan.steps)
+    report = report_for(plan)
+    report = report.model_copy(
+        update={
+            "observations": tuple(
+                observation
+                for observation in report.observations
+                if observation.step_id is not _ID.FOCUSED_TESTS
+            )
+        }
+    )
+
+    result = _judge(plan, report)
+
+    focused = next(c for c in result.checks if c.check is _C.FOCUSED_TESTS)
+    assert not focused.passed
+    assert "undecidable" in focused.detail.lower()
+    assert result.outcome is not _O.PASS
+
+
+@pytest.mark.parametrize(
+    ("ran", "timed_out"), [(False, False), (True, True)], ids=["not-run", "timeout"]
+)
+def test_mandatory_step_not_run_or_timed_out_never_passes(
+    ran: bool, timed_out: bool
+) -> None:
+    plan = core_plan()
+    report = report_for(plan)
+    report = report.model_copy(
+        update={
+            "observations": tuple(
+                observation.model_copy(
+                    update={
+                        "ran": ran,
+                        "timed_out": timed_out,
+                        "exit_code": None,
+                        "expectation_met": False,
+                        "ok": False,
+                    }
+                )
+                if observation.step_id is _ID.FOCUSED_TESTS
+                else observation
+                for observation in report.observations
+            )
+        }
+    )
+
+    result = _judge(plan, report)
+
+    focused = next(c for c in result.checks if c.check is _C.FOCUSED_TESTS)
+    assert not focused.passed
+    assert result.outcome is not _O.PASS
 
 
 def test_a_fail_reproduced_at_the_merge_base_is_dev_inherited() -> None:

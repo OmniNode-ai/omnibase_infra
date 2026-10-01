@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.adapters.llm.adapter_model_router import AdapterModelRouter
+from omnibase_infra.adapters.llm.coding_plan_endpoint import is_coding_plan_endpoint
 from omnibase_infra.services.service_llm_endpoint_health import (
     ModelLlmEndpointHealthConfig,
     ServiceLlmEndpointHealth,
@@ -242,9 +243,17 @@ class PluginLlm:
         return "LLM"
 
     def should_activate(self, config: ModelDomainPluginConfig) -> bool:
-        """Activate when any LLM_*_URL env var is set."""
+        """Activate when an allowed LLM_*_URL env var is set (OMN-20173)."""
+        self._endpoints.clear()
         for var in _LLM_URL_ENV_VARS:
             url = os.environ.get(var)  # ONEX_FLAG_EXEMPT: activation gate
+            if url and is_coding_plan_endpoint(url):
+                logger.warning(
+                    "PluginLlm: ignoring %s; Coding Plan use is Claude Code only "
+                    "(OMN-20173)",
+                    var,
+                )
+                continue
             if url:
                 self._endpoints[var] = url
         activated = bool(self._endpoints)

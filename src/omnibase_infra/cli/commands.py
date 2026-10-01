@@ -66,6 +66,7 @@ def validate_architecture_cmd(directory: str, max_violations: int | None) -> Non
 @click.option(
     "--mode",
     default="strict",
+    # cli-own-vocabulary: this command's own validator modes
     type=click.Choice(["strict", "migration_audit"], case_sensitive=False),
     help="Validation mode: strict (default) or migration_audit for legacy corpus sweeps.",
 )
@@ -764,6 +765,15 @@ cli.add_command(env_group)
 from omnibase_infra.cli.cli_auth import auth_group
 
 cli.add_command(auth_group)
+
+
+# =============================================================================
+# Developer Profile Commands (bind-lane, unbind-lane, show) [OMN-19973]
+# =============================================================================
+
+from omnibase_infra.cli.cli_profile import profile_group
+
+cli.add_command(profile_group)
 
 
 if __name__ == "__main__":

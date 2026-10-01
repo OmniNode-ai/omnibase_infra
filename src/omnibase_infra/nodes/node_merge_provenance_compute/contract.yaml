@@ -1,0 +1,65 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# ONEX Node Contract
+# Node: NodeMergeProvenanceCompute
+#
+# Plan: knowledge-base plans/2026-09-28-verification-before-and-after-merge-
+# and-declared-lab-state.md, task S2. Ticket OMN-19927.
+#
+# Pure: a commit and the merge-group observation read for it, to VALIDATED,
+# UNVALIDATED or UNDECIDABLE. On a `dev` push, CI runs the full suite for the
+# last two (reason `unvalidated_push` in scripts/ci/detect_test_paths.py).
+# The event topic the plan names for this verdict is added with its consumer,
+# the branch-head health projection (plan B1/B2); see the observe effect's
+# contract for why no topic is declared before that.
+name: "node_merge_provenance_compute"
+contract_name: "node_merge_provenance_compute"
+node_name: "node_merge_provenance_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_type: "COMPUTE_GENERIC"
+description: >
+  Compute node that grades one commit's merge provenance from the observation node_merge_provenance_observe_effect read: VALIDATED only when a merge_group run of the workflow for that exact sha has a summary job that concluded success; UNVALIDATED when the read found no such run or none succeeded; UNDECIDABLE when the read failed, the summary job is absent, or the observation is for another commit. Definition-B, stateless and deterministic.
+
+input_model:
+  name: "ModelMergeProvenanceRequest"
+  module: "omnibase_infra.nodes.node_merge_provenance_compute.models.model_merge_provenance_request"
+  description: "Repository, commit sha and the merge-group observation for it."
+output_model:
+  name: "ModelMergeProvenanceResult"
+  module: "omnibase_infra.nodes.node_merge_provenance_compute.models.model_merge_provenance_result"
+  description: "Verdict, reason, the run ids read, the validating run, and whether the push must run the full suite."
+capabilities:
+  - name: "ci.merge_provenance.evaluate"
+    description: "Grade whether a commit was validated by a successful merge group"
+handler_routing:
+  routing_strategy: "payload_type_match"
+  handlers:
+    - event_model:
+        name: "ModelMergeProvenanceRequest"
+        module: "omnibase_infra.nodes.node_merge_provenance_compute.models.model_merge_provenance_request"
+      handler:
+        name: "HandlerMergeProvenance"
+        module: "omnibase_infra.nodes.node_merge_provenance_compute.handlers.handler_merge_provenance"
+      output_events:
+        - "ModelMergeProvenanceResult"
+metadata:
+  description: "Merge-provenance verdict for a pushed commit (plan S2)."
+  author: "OmniNode Team"
+  license: "MIT"
+  created: "2026-09-28"
+  updated: "2026-09-28"
+  ticket: "OMN-19927"
+  tags:
+    - compute
+    - def-b
+    - ci
+    - merge-queue
+    - provenance

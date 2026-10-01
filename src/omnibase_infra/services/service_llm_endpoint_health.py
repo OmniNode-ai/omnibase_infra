@@ -162,8 +162,8 @@ def _declared_probe_urls(endpoint_url: str, probe_paths: tuple[str, ...]) -> lis
 
     Synthesizing ``/health`` and ``/v1/models`` is right for a local
     vLLM-style server and wrong for a vendor surface that serves neither.  The
-    GLM coding-plan base ``.../api/coding/paas/v4`` 404s on both synthesized
-    paths even with a valid credential, and serves ``/models``.  Where a
+    vendor API may serve ``/models`` while returning 404 on both synthesized
+    paths even with a valid credential. Where a
     backend declares what it serves, that declaration wins.
 
     Args:

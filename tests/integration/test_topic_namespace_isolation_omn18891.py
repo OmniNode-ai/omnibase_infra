@@ -125,7 +125,7 @@ def test_bus_publish_and_subscribe_use_the_physical_name_together(
     with patch(
         "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer"
     ) as consumer_cls:
-        bus._build_consumer(topic, "group", "instance", "earliest")
+        bus._build_consumer(topic, "group", "instance", "earliest", group_id="group")
     subscribed = consumer_cls.call_args.args[0]
 
     transport = KafkaTransport(

@@ -8,11 +8,12 @@ hosts, ports and served ids, and the overlay demanded set equality with it, so
 the shipped product carried lab values and a lab host could not be registered
 without a release. The model is now a SCHEMA: it checks that a binding is
 well-formed and complete, and the lane overlay file that declares it is the
-authority on what the lab serves. Two checks that used to live in the table
+authority on what the lane serves. Two checks that used to live in the table
 live elsewhere now:
 
-* served id — the renderer still refuses a binding whose ``served_model_id``
-  disagrees with the base contract's ``model_name`` for the same backend, and
+* served id — the overlay's ``served_model_id`` overrides the base contract's
+  ``model_name`` for the same backend. Omnimarket's dispatch-time
+  ``probe_served_models`` guards that the endpoint serves the chosen id, and
   ``tests/unit/runtime/test_bifrost_served_model_probe_fixture.py`` pins every
   committed lab overlay row to a recorded ``/v1/models`` probe;
 * liveness — ``serving`` is declared by the overlay row and pinned to the same
@@ -24,6 +25,9 @@ backend must carry the declaration the base contract would otherwise supply —
 ``provider``, ``tier`` and ``credential`` — all three, or none. Which of the two
 cases applies is only knowable against the base contract, so the renderer
 enforces it; this model enforces that the declaration is never partial.
+Cloud-locale overlays may rebind or add cloud backends, but never local-tier
+backends; the overlay model checks added declarations and the renderer checks
+the target backend's tier from the base contract.
 """
 
 from __future__ import annotations
@@ -56,6 +60,8 @@ _ALLOWED_SCHEMES = frozenset({"http", "https"})
 #: The fields an ADDED backend declares and a base-declared backend inherits
 #: from the base contract. All-or-none on one binding.
 NEW_BACKEND_DECLARATION_FIELDS: tuple[str, ...] = ("provider", "tier", "credential")
+#: The contract tier declaring that a backend is served from the lab.
+LOCAL_TIER = "local"
 
 
 class ModelBifrostLaneBackendBinding(BaseModel):
@@ -179,6 +185,7 @@ class ModelBifrostLaneBackendBinding(BaseModel):
 
 
 __all__ = [
+    "LOCAL_TIER",
     "NEW_BACKEND_DECLARATION_FIELDS",
     "ModelBifrostLaneBackendBinding",
 ]

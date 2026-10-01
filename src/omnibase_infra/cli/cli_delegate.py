@@ -10,7 +10,8 @@ governing simplification is that **a dispatch skill IS one CLI call**.
 ``onex delegate "<prompt>" [--task-type X] [--max-tokens N]`` wraps, inside
 the CLI entrypoint:
 
-1. task-type classification (when ``--task-type`` is omitted),
+1. task-class resolution by the task-class contract, read through the
+   installed registry (``onex.contracts:task_class_authority``, OMN-19407),
 2. typed payload construction written to ``<state-root>/tmp/<run_id>.json``
    (run_id-suffixed scratch — never ``/tmp``; ``feedback_no_tmp_use_workspace``),
 3. resolution of the packaged ``node_delegate_skill_orchestrator`` contract,
@@ -121,8 +122,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import click
+from pydantic import BaseModel, ValidationError
 
 from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
+from omnibase_core.errors.model_onex_error import ModelOnexError
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_infra.backends.auto_configure import (
     BUS_INMEMORY,
@@ -132,10 +135,21 @@ from omnibase_infra.backends.auto_configure import (
     resolve_bus_type,
 )
 from omnibase_infra.cli.cli_node import _resolve_packaged_contract
+from omnibase_infra.cli.contract_registry import (
+    ContractChoice,
+    RegistryUnresolvedError,
+    field_vocabulary,
+    node_input_model,
+)
 from omnibase_infra.cli.delegate_caller import (
     DELEGATE_CALLER_LANE_METADATA_KEY,
     resolve_delegate_caller,
 )
+from omnibase_infra.cli.delegate_env_config_overrides import (
+    env_config_overrides,
+    format_override_line,
+)
+from omnibase_infra.cli.delegate_human_output import render_delegate_outcome
 from omnibase_infra.cli.delegate_lane import (
     DelegateLaneSelectionError,
     resolve_lane_target,
@@ -164,6 +178,9 @@ from omnibase_infra.cli.delegate_terminal_resolver import (
 )
 from omnibase_infra.cli.model_delegate_caller import ModelDelegateCaller
 from omnibase_infra.cli.model_delegate_default_bus import ModelDelegateDefaultBus
+from omnibase_infra.cli.model_delegate_env_config_override import (
+    ModelDelegateEnvConfigOverride,
+)
 from omnibase_infra.cli.model_delegate_locus_decision import (
     ModelDelegateLocusDecision,
 )
@@ -188,23 +205,18 @@ from omnibase_infra.cli.omnimarket_drift_guard import (
 from omnibase_infra.cli.protocol_drift_guard_verdict import (
     ProtocolDriftGuardVerdict,
 )
+from omnibase_infra.cli.protocol_execution_budget import ProtocolExecutionBudget
 from omnibase_infra.cli.receipt_mode import (
     capture_log_path,
     default_emit_socket_path,
     run_receipt_mode,
 )
-from omnibase_infra.cli.task_class_selection import (
-    DEFAULT_TASK_TYPE,
-    EnumTaskTypeResolution,
-    ModelSelectableTaskClass,
-    ModelTaskClassExecutionBudget,
-    ModelTaskTypeResolution,
+from omnibase_infra.cli.store_developer_profile import StoreDeveloperProfile
+from omnibase_infra.cli.task_class_registry import (
     TaskClassContractError,
-    load_selectable_task_classes,
-    load_selection_fallback,
-    resolve_task_class_contract_path,
-    resolve_task_class_execution_budget,
-    resolve_task_type,
+    describe_task_classes,
+    load_task_class_authority,
+    resolve_task_class,
 )
 from omnibase_infra.cli.workspace_reconcile import make_workspace_reconciler
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
@@ -228,19 +240,15 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DELEGATE_NODE_NAME",
     "DELEGATE_SOURCE",
-    "DELEGATE_SOURCE_CHOICES",
-    "DEFAULT_TASK_TYPE",
-    "TASK_TYPE_CHOICES",
     "BUS_CHOICES",
     "DEFAULT_BUS",
     "LOCUS_CHOICES",
     "DelegateTimeoutExceededError",
     "build_backend_overrides",
-    "classify_task_type",
-    "load_supported_criteria",
     "resolve_default_bus",
-    "resolve_task_class",
+    "load_supported_criteria",
     "run_delegate",
+    "validate_request_against_contract",
 ]
 
 # The omnimarket node that owns the consumer-facing delegation contract. It is
@@ -248,70 +256,65 @@ __all__ = [
 # this CLI's environment (the delegate node ships its packaged contract.yaml).
 DELEGATE_NODE_NAME = "node_delegate_skill_orchestrator"
 
-# Default registered adapter source for ``ModelDelegateSkillRequest`` (Literal
-# field) -- what the payload carries when ``--source`` is omitted. Preserves
-# pre-OMN-15185 behavior for every existing caller.
+# The adapter source this CLI stamps when ``--source`` is omitted. It is this
+# command's own identity, not a copy of a vocabulary: the delegate contract's
+# input model owns the vocabulary, ``--source`` offers exactly that, and
+# ``validate_request_against_contract`` refuses the request by name if the
+# contract ever stops admitting this value.
 DELEGATE_SOURCE = "claude-code"
 
-# Closed choices for ``--source``, mirroring omnimarket's wire model
-# (``ModelDelegateSkillRequest.source: Literal["claude-code", "codex",
-# "external-client"]`` in
-# ``omnimarket/models/delegation/wire/model_delegate_skill_request.py``).
-#
-# This CANNOT be derived by import: repo layering runs
-# compat -> core -> spi -> infra, and separately omnimarket depends on
-# omnibase-infra (declared in omnimarket's pyproject.toml) -- never the
-# reverse. omnibase_infra importing omnimarket would be a circular/wrong-
-# direction dependency, so this tuple is a manually-maintained duplicate of
-# the wire Literal's args.
-#
-# DRIFT WARNING (OMN-15175's duplicate-alias failure class -- a hand-rolled
-# ``_DelegateSource`` Literal in omnimarket silently fell out of sync with
-# this exact wire model after it was widened): any future widening of
-# ``ModelDelegateSkillRequest.source`` must be mirrored here by hand.
-# ``tests/unit/cli/test_cli_delegate.py::TestSourceFlagDriftGuard`` asserts
-# this tuple matches the live wire model's Literal args whenever omnimarket
-# happens to be importable in the test env; when it is not (the normal
-# omnibase_infra CI env, which has no omnimarket dependency), it instead
-# asserts against the SAME documented value list stated here, so the test
-# still fails the moment this comment and the tuple below disagree.
-DELEGATE_SOURCE_CHOICES: tuple[str, ...] = ("claude-code", "codex", "external-client")
 
-# The task classes the delegate contract exposes at the public Gateway --
-# a hand-maintained MIRROR of the ``gateway_exposure: public`` projection of
-# omnimarket's ``configs/task_class_contracts.v1.yaml``, used ONLY for the
-# ``--task-type`` help text.
-#
-# It is not the authority and it never decides anything: an explicit
-# ``--task-type`` is validated at run time against the contract itself
-# (:func:`resolve_task_class`), which is what makes the CLI's selectable
-# vocabulary EQUAL the contract's public set rather than merely resemble it.
-# The mirror exists because repo layering forbids importing omnimarket from
-# here and the ordinary omnibase_infra CI environment has no omnimarket
-# installed, so there is nothing to read at import time -- the same constraint
-# and the same treatment as ``DELEGATE_SOURCE_CHOICES`` above.
-#
-# DRIFT GUARD: ``tests/unit/cli/test_cli_delegate.py::TestTaskTypeVocabulary``
-# asserts this mirror matches the stand-in contract used by infra CI. The live
-# omnimarket contract has its own vocabulary pin in omnimarket's test suite;
-# repo layering forbids importing that package here. Before OMN-18305 this
-# tuple listed SEVEN classes against the contract's eleven, and
-# ``summarization`` and ``planning`` -- the two classes an engineering standup
-# actually belongs to -- were unreachable from the CLI by hand or by
-# classifier.
-TASK_TYPE_CHOICES = (
-    "code_generation",
-    "code_review",
-    "complex_reasoning",
-    "document",
-    "planning",
-    "reasoning",
-    "refactor",
-    "research",
-    "review",
-    "summarization",
-    "test",
-)
+def _delegate_request_model() -> type[BaseModel]:
+    """Return the input model the delegate node's contract declares, via the registry."""
+    return node_input_model(DELEGATE_NODE_NAME)
+
+
+def _task_class_names() -> tuple[str, ...]:
+    """Every class the task-class contract declares, for ``--task-type``.
+
+    An unroutable class is offered too, so that naming it earns the
+    contract's own refusal rather than a generic "not one of".
+    """
+    try:
+        authority = load_task_class_authority()
+    except TaskClassContractError as exc:
+        raise RegistryUnresolvedError(str(exc)) from exc
+    return tuple(
+        sorted(authority.public_task_classes.union(authority.internal_task_classes))
+    )
+
+
+def _source_names() -> tuple[str, ...]:
+    """The adapter sources the delegate contract's input model admits."""
+    return field_vocabulary(_delegate_request_model(), "source")
+
+
+def _criteria_mode_names() -> tuple[str, ...]:
+    """The quality-contract modes the input model admits, spelled as flags are."""
+    return tuple(
+        mode.replace("_", "-")
+        for mode in field_vocabulary(_delegate_request_model(), "quality_contract_mode")
+    )
+
+
+class TaskTypeOption(click.Option):
+    """``--task-type``, whose help is rendered from the task-class contract.
+
+    The help names the contract's public, internal and unroutable classes and
+    its fallback, so it is read when help is rendered rather than frozen into
+    this module at import.
+    """
+
+    def get_help_record(self, ctx: click.Context) -> tuple[str, str] | None:
+        try:
+            self.help = describe_task_classes(load_task_class_authority())
+        except TaskClassContractError as exc:
+            raise click.UsageError(
+                "--task-type help is read from the task-class contract, which "
+                f"could not be read: {exc}"
+            ) from exc
+        return super().get_help_record(ctx)
+
 
 # Event-bus targets the CLI can select (OMN-13532). This is a TRANSPORT
 # choice. It is no longer ALSO the execution-locality choice by accident:
@@ -432,13 +435,6 @@ def _delegation_result(envelope: dict[str, object]) -> ModelDelegateTerminal | N
     )
 
 
-#: Mirrors the wire model's own pattern for a parameterised criterion slug.
-#: The SLUG SET is read from the installed omnimarket (see
-#: :func:`load_supported_criteria`); only this shape is spelled here, because a
-#: regex cannot drift the way a copied list of names can.
-_MAX_WORDS_PER_SENTENCE_RE = re.compile(r"^max_words_per_sentence_([1-9]\d*)$")
-
-
 def _attempt_evidence(result: ModelDelegateTerminal) -> list[dict[str, object]]:
     """Return every rung this run attempted, in order, with its own verdict.
 
@@ -512,6 +508,15 @@ def _drift_guard_receipt_block(
     if drift_guard is None:
         return {}
     return {"drift_guard": drift_guard.as_receipt_fields()}
+
+
+def _config_overrides_receipt_block(
+    config_overrides: tuple[ModelDelegateEnvConfigOverride, ...],
+) -> dict[str, object]:
+    """Include environment override provenance only when overrides are present."""
+    if not config_overrides:
+        return {}
+    return {"config_overrides": [o.model_dump(mode="json") for o in config_overrides]}
 
 
 def _budget_outcome_receipt_block(result: ModelDelegateTerminal) -> dict[str, object]:
@@ -787,6 +792,7 @@ def _write_unattributed_run_files(
     task_type_resolution: str,
     addressing: ModelDelegateRunAddressing,
     drift_guard: ProtocolDriftGuardVerdict | None = None,
+    config_overrides: tuple[ModelDelegateEnvConfigOverride, ...] = (),
     requested_backend_id: str | None = None,
 ) -> None:
     """Persist a terminally-failed delegation that attributed no route.
@@ -842,6 +848,7 @@ def _write_unattributed_run_files(
                 # exactly why it cannot be inferred from anything else here.
                 **addressing.as_run_file_fields(),
                 **_drift_guard_receipt_block(drift_guard),
+                **_config_overrides_receipt_block(config_overrides),
             },
             indent=2,
             sort_keys=True,
@@ -1047,6 +1054,41 @@ def _resolve_transport_bound() -> tuple[int, float]:
     return policy.total_attempts, policy.total_bound_seconds
 
 
+def _stdout_is_tty() -> bool:
+    """Whether stdout is a terminal, which picks the default output form (OMN-20124).
+
+    A pipe, a subprocess or CI keeps the one-JSON-line receipt every parsing
+    caller reads; only a person at a terminal gets the human form.
+    """
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _render_receipt_for_person(receipt: object, *, state_root: Path) -> bool:
+    """Print the default, human form of one receipt and say whether it succeeded (OMN-20124).
+
+    The answer goes to stdout, the one-line summary or failure line to stderr.
+    A receipt that is not a delegation is printed as JSON rather than dropped.
+    """
+    dump = getattr(receipt, "model_dump", None)
+    envelope = dump(mode="json") if callable(dump) else None
+    outcome = (
+        render_delegate_outcome(envelope, state_root=state_root)
+        if isinstance(envelope, dict)
+        else None
+    )
+    if outcome is None:
+        click.echo(receipt.model_dump_json())  # type: ignore[attr-defined]
+        return True
+    if outcome.stdout:
+        click.echo(outcome.stdout)
+    for line in outcome.stderr:
+        click.echo(line, err=True)
+    return outcome.succeeded
+
+
 def _write_local_run_files(
     *,
     receipt: object,
@@ -1056,6 +1098,7 @@ def _write_local_run_files(
     addressing: ModelDelegateRunAddressing,
     task_type_resolution: str | None = None,
     drift_guard: ProtocolDriftGuardVerdict | None = None,
+    config_overrides: tuple[ModelDelegateEnvConfigOverride, ...] = (),
     require_budget_evidence: bool = False,
     require_contract_evidence: bool = False,
     requested_backend_id: str | None = None,
@@ -1177,6 +1220,7 @@ def _write_local_run_files(
             task_type_resolution=task_type_resolution,
             addressing=addressing,
             drift_guard=drift_guard,
+            config_overrides=config_overrides,
             requested_backend_id=requested_backend_id,
         )
         return
@@ -1233,6 +1277,7 @@ def _write_local_run_files(
                 # neither can be read against the other.
                 **addressing.as_run_file_fields(),
                 **_drift_guard_receipt_block(drift_guard),
+                **_config_overrides_receipt_block(config_overrides),
             },
             indent=2,
             sort_keys=True,
@@ -1273,6 +1318,7 @@ def resolve_default_bus(
     *,
     kafka_bootstrap: str | None = None,
     workspace_root: Path | None = None,
+    developer_lane_binding: str | None = None,
 ) -> ModelDelegateDefaultBus:
     """Resolve the bus ``--bus`` defaults to when the flag is omitted (OMN-17304).
 
@@ -1332,7 +1378,8 @@ def resolve_default_bus(
     from omnibase_infra.runtime.service_kernel import resolve_embedded_runtime_config
 
     config, config_source = resolve_embedded_runtime_config(
-        workspace_root=workspace_root
+        workspace_root=workspace_root,
+        developer_lane_binding=developer_lane_binding,
     )
     bus, reason = resolve_bus_type(
         config_bus=str(config.event_bus.type),
@@ -1419,70 +1466,40 @@ def build_backend_overrides(*, bus: str, kafka_bootstrap: str | None) -> dict[st
     return overrides
 
 
-def classify_task_type(
-    prompt: str,
-    *,
-    classes: tuple[ModelSelectableTaskClass, ...] | None = None,
-) -> str:
-    """Resolve ``prompt`` to a task class declared by the task-class contract.
+def validate_request_against_contract(payload: dict[str, object]) -> None:
+    """Validate the request this CLI is about to send with the contract's input model.
 
-    OMN-18305 removed the hardcoded keyword table this used to be. Selection
-    rules — word boundaries, presence-not-frequency, and shape gating — are
-    declared per class in omnimarket's ``task_class_contracts.v1.yaml`` and
-    evaluated by :mod:`omnibase_infra.cli.task_class_selection`; see that
-    module for what the table got wrong and why.
-
-    ``classes`` is for callers that already resolved the contract (the CLI
-    resolves it once per run) and for tests pointing at a probe contract.
+    The delegate node's contract names its input model, and that model is the
+    one authority on what a request may carry: the task-class vocabulary, the
+    adapter sources, the quality-contract modes and the acceptance-criterion
+    slugs. So the CLI keeps no copy of any of them. It builds the request and
+    asks the model, and a refusal names each field and the model's own words.
+    Measured before this existed (2026-09-15): free-text criteria produced a
+    265 ms ``ValidationError`` traceback after dispatch, naming no flag.
     """
-    return resolve_task_class(prompt, explicit=None, classes=classes).task_type
-
-
-def resolve_task_class(
-    prompt: str,
-    *,
-    explicit: str | None,
-    classes: tuple[ModelSelectableTaskClass, ...] | None = None,
-) -> ModelTaskTypeResolution:
-    """Resolve this run's task class and carry HOW it was resolved with it.
-
-    An explicit ``--task-type`` is validated against the RESOLVED contract, never
-    against ``TASK_TYPE_CHOICES`` alone (OMN-18342). ``TASK_TYPE_CHOICES`` is a
-    documentation/help-text mirror pinned equal to the contract by
-    ``TestTaskTypeVocabulary`` -- it must never decide a live path. When the
-    contract cannot be resolved, this fails closed (propagates
-    ``TaskClassContractError``) rather than falling back to the mirror.
-    """
-    if classes is not None:
-        return resolve_task_type(prompt, explicit=explicit, classes=classes)
-    contract_path = resolve_task_class_contract_path()
-    return resolve_task_type(
-        prompt,
-        explicit=explicit,
-        classes=load_selectable_task_classes(contract_path),
-        # OMN-18305 residual: the fallback is a GRADING decision, so the
-        # contract owns it. A contract that declares none yields the module
-        # default, whose docstring records the two properties any fallback
-        # has to satisfy.
-        fallback=load_selection_fallback(contract_path),
-    )
+    model = _delegate_request_model()
+    try:
+        model.model_validate(payload)
+    except ValidationError as exc:
+        problems = "; ".join(
+            f"{'.'.join(str(part) for part in error['loc']) or '(request)'}: "
+            f"{error['msg']}"
+            for error in exc.errors()
+        )
+        raise ValueError(
+            f"the delegate contract's input model "
+            f"{model.__module__}.{model.__qualname__} refuses this request: "
+            f"{problems}"
+        ) from exc
 
 
 def load_supported_criteria() -> frozenset[str] | None:
     """Return the closed acceptance-criterion vocabulary, or ``None`` if unreadable.
 
-    ``acceptance_criteria`` is NOT free text. The delegation wire model
-    validates every entry against a closed slug set, plus the pattern
-    ``max_words_per_sentence_<N>``, and refuses the whole request otherwise.
-    Measured live 2026-09-15: three free-text criteria produced a 265 ms
-    ``ValidationError`` with a pydantic traceback, zero rungs attempted, and no
-    mention of which command-line flag the caller had got wrong.
-
-    So the vocabulary is resolved HERE, at the flag, from the same installed
-    omnimarket the contract itself is read from — one source, not a copy that
-    can drift. ``None`` means omnimarket is unresolvable, in which case this
-    command cannot dispatch at all for unrelated reasons and the criteria are
-    passed through to be validated where they always were.
+    ``acceptance_criteria`` is NOT free text: the wire model refuses an entry
+    outside its closed slug set and the ``max_words_per_sentence_<N>`` pattern.
+    ``None`` means omnimarket is unresolvable, in which case this command cannot
+    dispatch at all and the criteria are validated where they always were.
     """
     try:
         module = importlib.import_module(
@@ -1606,28 +1623,6 @@ def resolve_delegate_ticket(ticket: str | None, *, cwd: Path) -> tuple[str | Non
     return None, "none"
 
 
-def _validate_criteria(criteria: tuple[str, ...]) -> tuple[str, ...]:
-    """Refuse an unknown criterion here, naming the flag and the vocabulary."""
-    if not criteria:
-        return criteria
-    supported = load_supported_criteria()
-    if supported is None:
-        return criteria
-    unsupported = sorted(
-        item
-        for item in criteria
-        if item not in supported and not _MAX_WORDS_PER_SENTENCE_RE.match(item)
-    )
-    if unsupported:
-        raise ValueError(
-            "--criteria takes declared criterion slugs, not free text. "
-            f"Unsupported: {', '.join(repr(item) for item in unsupported)}. "
-            f"Allowed: {', '.join(sorted(supported))}, or "
-            "max_words_per_sentence_<N>."
-        )
-    return criteria
-
-
 def _validate_replace_mode_authority(
     criteria: tuple[str, ...],
     criteria_mode: str | None,
@@ -1718,6 +1713,75 @@ def _load_response_contract(raw: str | None) -> dict[str, object] | None:
     return parsed
 
 
+def _wire_criteria_mode(criteria_mode: str | None) -> str | None:
+    """Spell a ``--criteria-mode`` value the way the input model declares it.
+
+    The flag spells the contract's values with dashes, as every other choice
+    flag on this command does; the model spells them with underscores.
+    """
+    return None if criteria_mode is None else criteria_mode.replace("-", "_")
+
+
+def _request_payload(
+    *,
+    prompt: str,
+    task_type: str,
+    source: str,
+    max_tokens: int | None,
+    correlation_id: uuid.UUID,
+    acceptance_criteria: tuple[str, ...] = (),
+    quality_contract_mode: str | None = None,
+    response_contract: dict[str, object] | None = None,
+    system_prompt: str | None = None,
+    requested_timeout_seconds: int | None = None,
+    backend_id: str | None = None,
+    ticket_id: str | None = None,
+    caller: ModelDelegateCaller | None = None,
+) -> dict[str, object]:
+    """Build the delegate request, setting only the fields the caller supplied."""
+    payload: dict[str, object] = {
+        "prompt": prompt,
+        "task_type": task_type,
+        "source": source,
+        "correlation_id": str(correlation_id),
+    }
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
+    if acceptance_criteria:
+        payload["acceptance_criteria"] = list(acceptance_criteria)
+    if quality_contract_mode is not None:
+        payload["quality_contract_mode"] = quality_contract_mode
+    if response_contract is not None:
+        payload["response_contract"] = response_contract
+    if system_prompt is not None:
+        payload["system_prompt"] = system_prompt
+    if requested_timeout_seconds is not None:
+        payload["requested_timeout_seconds"] = requested_timeout_seconds
+    # OMN-19124: the caller's explicit rung pin, written under the field name
+    # the node contract already declares. Omitted entirely when unset, like
+    # every other optional field here, because ``ModelDelegateSkillRequest``
+    # declares ``extra="forbid"`` and a null would be a shape change on every
+    # existing caller's payload.
+    if backend_id is not None:
+        payload["backend_id"] = backend_id
+    # OMN-19514: the ticket this delegation works, in the request's metadata
+    # map, which every released request consumer already accepts. Omitted
+    # entirely when no ticket was named.
+    metadata: dict[str, str] = {}
+    if ticket_id is not None:
+        metadata[DELEGATE_TICKET_METADATA_KEY] = ticket_id
+    # OMN-19860: who issued the run. The lane rides in the same metadata map;
+    # the session rides in the declared ``session_id`` field, only ever as a
+    # UUID. Each is omitted entirely when unresolved.
+    if caller is not None and caller.lane is not None:
+        metadata[DELEGATE_CALLER_LANE_METADATA_KEY] = caller.lane
+    if metadata:
+        payload["metadata"] = metadata
+    if caller is not None and caller.session_id is not None:
+        payload["session_id"] = caller.session_id
+    return payload
+
+
 def _write_payload(
     *,
     prompt: str,
@@ -1775,48 +1839,21 @@ def _write_payload(
     tmp_dir = state_root / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     payload_path = tmp_dir / f"delegate-input-{run_id}.json"
-    payload: dict[str, object] = {
-        "prompt": prompt,
-        "task_type": task_type,
-        "source": source,
-        "correlation_id": str(correlation_id),
-    }
-    if max_tokens is not None:
-        payload["max_tokens"] = max_tokens
-    if acceptance_criteria:
-        payload["acceptance_criteria"] = list(acceptance_criteria)
-    if quality_contract_mode is not None:
-        payload["quality_contract_mode"] = quality_contract_mode
-    if response_contract is not None:
-        payload["response_contract"] = response_contract
-    if system_prompt is not None:
-        payload["system_prompt"] = system_prompt
-    if requested_timeout_seconds is not None:
-        payload["requested_timeout_seconds"] = requested_timeout_seconds
-    # OMN-19124: the caller's explicit rung pin, written under the field name
-    # the node contract already declares. Omitted entirely when unset, like
-    # every other optional field here, because ``ModelDelegateSkillRequest``
-    # declares ``extra="forbid"`` and a null would be a shape change on every
-    # existing caller's payload.
-    if backend_id is not None:
-        payload["backend_id"] = backend_id
-    # OMN-19514: the ticket this delegation works, in the request's metadata
-    # map, which every released request consumer already accepts. A declared
-    # request field would be refused by the deployed consumer until a release
-    # carried it. Omitted entirely when no ticket was named.
-    metadata: dict[str, str] = {}
-    if ticket_id is not None:
-        metadata[DELEGATE_TICKET_METADATA_KEY] = ticket_id
-    # OMN-19860: who issued the run. The lane rides in the same metadata map,
-    # for the same reason as the ticket; the session rides in the request's
-    # declared ``session_id`` field, only ever as a UUID. Each is omitted
-    # entirely when unresolved, so an unattributed caller changes no shape.
-    if caller is not None and caller.lane is not None:
-        metadata[DELEGATE_CALLER_LANE_METADATA_KEY] = caller.lane
-    if metadata:
-        payload["metadata"] = metadata
-    if caller is not None and caller.session_id is not None:
-        payload["session_id"] = caller.session_id
+    payload = _request_payload(
+        prompt=prompt,
+        task_type=task_type,
+        source=source,
+        max_tokens=max_tokens,
+        correlation_id=correlation_id,
+        acceptance_criteria=acceptance_criteria,
+        quality_contract_mode=quality_contract_mode,
+        response_contract=response_contract,
+        system_prompt=system_prompt,
+        requested_timeout_seconds=requested_timeout_seconds,
+        backend_id=backend_id,
+        ticket_id=ticket_id,
+        caller=caller,
+    )
     payload_path.write_text(
         json.dumps(payload),
         encoding="utf-8",
@@ -1827,7 +1864,7 @@ def _write_payload(
 def _terminal_wait_seconds(
     *,
     requested_timeout_seconds: int | None,
-    execution_budget: ModelTaskClassExecutionBudget,
+    execution_budget: ProtocolExecutionBudget,
 ) -> int:
     """Return the effective execution window plus its declared delivery margin."""
     execution_seconds = (
@@ -1974,22 +2011,14 @@ def _timeout_receipt(
 @click.option(
     "--task-type",
     "task_type",
-    type=str,
+    cls=TaskTypeOption,
+    type=ContractChoice("the task-class contract's classes", _task_class_names),
     default=None,
-    help=(
-        "Task class for routing, validated at run time against the task-class "
-        "contract's public projection ("
-        + ", ".join(TASK_TYPE_CHOICES)
-        + "). Omit to resolve it from the contract's declared selection "
-        f"predicates; the fallback when none claims the prompt is "
-        f"{DEFAULT_TASK_TYPE}. The chosen class and how it was chosen are "
-        "printed on stderr and recorded in the run artifacts."
-    ),
 )
 @click.option(
     "--task-class",
     "task_class_alias",
-    type=str,
+    type=ContractChoice("the task-class contract's classes", _task_class_names),
     default=None,
     help=(
         "Alias for --task-type. The contract calls these TASK CLASSES, so the "
@@ -2037,7 +2066,9 @@ def _timeout_receipt(
 @click.option(
     "--criteria-mode",
     "criteria_mode",
-    type=click.Choice(["extend-task-class", "replace-task-class"]),
+    type=ContractChoice(
+        "the delegate contract's quality_contract_mode values", _criteria_mode_names
+    ),
     default=None,
     help=(
         "Whether --criteria are added to the task class's own definition of "
@@ -2085,13 +2116,13 @@ def _timeout_receipt(
 @click.option(
     "--source",
     "source",
-    type=click.Choice(DELEGATE_SOURCE_CHOICES),
+    type=ContractChoice("the delegate contract's adapter sources", _source_names),
     default=None,
     help=(
         "Registered adapter source stamped into the delegation request's "
-        "'source' field (must match the wire model's ModelDelegateSkillRequest "
-        f".source Literal). Omit to use the default: {DELEGATE_SOURCE!r} — "
-        "unchanged pre-OMN-15185 behavior for every existing caller."
+        "'source' field; the values offered are the ones the delegate "
+        "contract's input model admits, read when this command runs. Omit to "
+        f"use this command's own identity, {DELEGATE_SOURCE!r}."
     ),
 )
 @click.option(
@@ -2186,8 +2217,8 @@ def _timeout_receipt(
     default=None,
     help=(
         "Unix socket of the emit daemon for capture events (default: "
-        "~/.claude/emit.sock). Unreachable daemon => events spool under "
-        "<state-root>/emit_spool/ for later replay."
+        "~/.claude/emit.sock). Unreachable daemon => events are "
+        "dropped."
     ),
 )
 @click.option(
@@ -2234,6 +2265,29 @@ def _timeout_receipt(
     ),
 )
 @click.option(
+    "--json",
+    "force_json",
+    is_flag=True,
+    default=False,
+    help=(
+        "Force the full typed receipt as ONE JSON line on stdout, even on a "
+        "terminal. This is already the default whenever stdout is not a "
+        "terminal (pipes, subprocesses, CI) (OMN-20124)."
+    ),
+)
+@click.option(
+    "--human",
+    "force_human",
+    is_flag=True,
+    default=False,
+    help=(
+        "Force the human form (the answer on stdout, a one-line summary on "
+        "stderr) even when stdout is not a terminal. Without --json or "
+        "--human the form follows stdout: human on a terminal, the JSON "
+        "receipt otherwise (OMN-20124)."
+    ),
+)
+@click.option(
     "--allow-omnimarket-drift",
     "allow_omnimarket_drift",
     is_flag=True,
@@ -2267,20 +2321,30 @@ def delegate_command(
     verbose: bool,
     emit_socket: Path | None,
     omnibase_path: Path | None,
+    force_json: bool,
+    force_human: bool,
     allow_omnimarket_drift: bool,
     ticket: str | None,
     caller_lane: str | None,
 ) -> None:
-    """Delegate PROMPT to a local LLM and print exactly one typed result.
+    """Delegate PROMPT to a local LLM and print the result.
 
-    stdout carries exactly ONE ``ModelSkillResult[ModelDelegateSkillResponse]``
-    JSON — the full LLM response and metrics, never truncated. RuntimeLocal
-    logs go to a capture file + the content-addressed artifact store, never to
-    stdout. Exits non-zero on failure.
+    Output form follows stdout (OMN-20124). When stdout is NOT a terminal
+    (a pipe, a subprocess, CI) stdout carries exactly ONE
+    ``ModelSkillResult[ModelDelegateSkillResponse]`` JSON, the full LLM
+    response and metrics, never truncated: the contract every program that
+    parses this command reads, unchanged. On a terminal stdout is the answer
+    text and stderr carries a one-line summary (model, cost, run id, where the
+    full receipt is); on failure stdout is empty and stderr names the cause,
+    the reason and the run id. ``--json`` forces the JSON form and ``--human``
+    the human form. Exits non-zero on failure in every form. RuntimeLocal logs
+    go to a capture file + the content-addressed artifact store, never to
+    stdout.
 
     \b
     Examples:
         onex delegate "explain what a calendar app needs"
+        onex delegate "say hello in one word" --json  # force JSON on a terminal
         onex delegate "write a Python HTTP server" --task-type code_generation
         onex delegate "analyze the routing architecture" --max-tokens 4096
         onex delegate "hand off from the external client" --source external-client
@@ -2290,14 +2354,17 @@ def delegate_command(
         # part of the command, not an optional extra.
         onex delegate "document the router" --bus kafka --lane dev --locus deployed-lane
         # Run it here on purpose, and say so in the record:
-        onex delegate "document the router" --bus kafka --lane dev --locus in-process
+        onex delegate "document the router" --bus inmemory --locus in-process
     """
+    if force_json and force_human:
+        raise click.UsageError("--json and --human are mutually exclusive.")
+    json_output = force_json or not (force_human or _stdout_is_tty())
     try:
         ticket_id, ticket_resolution = resolve_delegate_ticket(ticket, cwd=Path.cwd())
         caller = resolve_delegate_caller(
             caller_lane, cwd=Path.cwd(), environ=os.environ
         )
-        acceptance_criteria = _validate_criteria(tuple(criteria))
+        acceptance_criteria = tuple(criteria)
         declared_contract = _load_response_contract(response_contract)
         _validate_replace_mode_authority(
             acceptance_criteria, criteria_mode, response_contract=declared_contract
@@ -2325,6 +2392,7 @@ def delegate_command(
             ticket_id=ticket_id,
             ticket_resolution=ticket_resolution,
             caller=caller,
+            json_output=json_output,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -2355,6 +2423,7 @@ def run_delegate(
     ticket_id: str | None = None,
     ticket_resolution: str = "none",
     caller: ModelDelegateCaller | None = None,
+    json_output: bool = True,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -2365,9 +2434,11 @@ def run_delegate(
     ``source`` (OMN-15185) is the registered adapter source stamped into the
     delegation request's ``source`` field. ``None`` (the CLI default) resolves
     to :data:`DELEGATE_SOURCE` (``"claude-code"``) — unchanged pre-OMN-15185
-    behavior for every existing caller. An explicit value must be one of
-    :data:`DELEGATE_SOURCE_CHOICES`; the CLI's ``click.Choice`` enforces this
-    at the flag boundary, and this function does not re-validate it.
+    behavior for every existing caller. An explicit value must be one the
+    delegate contract's input model admits: the flag offers exactly those
+    (read through the registry, OMN-19407), and
+    :func:`validate_request_against_contract` checks the whole request with
+    that model before anything is dispatched.
 
     ``bus`` selects the event-bus backend. ``None`` (the CLI default,
     OMN-17304) resolves via :func:`resolve_default_bus` from the embedded
@@ -2420,24 +2491,49 @@ def run_delegate(
     except OmnimarketDriftError as exc:
         raise click.ClickException(str(exc)) from exc
 
+    overrides = env_config_overrides(os.environ)
+    for override in overrides:
+        click.echo(format_override_line(override), err=True)
+
     # OMN-18305: resolve the class from the CONTRACT, and say out loud which
     # class was chosen and how. A class chosen silently is how a prose task
     # ended up filed as `test`, with the prose quality checks disarmed and the
     # customer never told.
     try:
-        task_class = resolve_task_class(prompt, explicit=task_type)
-        execution_budget = resolve_task_class_execution_budget(
-            resolve_task_class_contract_path(), task_type=task_class.task_type
-        )
-    except TaskClassContractError as exc:
+        authority = load_task_class_authority()
+        task_class = resolve_task_class(authority, prompt, explicit=task_type)
+        execution_budget = authority.execution_budget(task_class.task_type)
+    except (TaskClassContractError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
     resolved_task_type = task_class.task_type
+    resolution = str(task_class.resolution)
     click.echo(
-        f"task class: {resolved_task_type} "
-        f"({task_class.resolution.value} — {task_class.reason})",
+        f"task class: {resolved_task_type} ({resolution} — {task_class.reason})",
         err=True,
     )
     resolved_source = source or DELEGATE_SOURCE
+    # OMN-19407: the request is checked against the delegate contract's own
+    # input model BEFORE any bus is resolved or anything is written, so a
+    # value the contract does not admit (a criterion slug, a source, a mode)
+    # is refused here, by field, in the model's words.
+    try:
+        validate_request_against_contract(
+            _request_payload(
+                prompt=prompt,
+                task_type=resolved_task_type,
+                source=resolved_source,
+                acceptance_criteria=acceptance_criteria,
+                quality_contract_mode=_wire_criteria_mode(criteria_mode),
+                response_contract=response_contract,
+                system_prompt=system_prompt,
+                requested_timeout_seconds=timeout,
+                backend_id=backend_id,
+                max_tokens=max_tokens,
+                correlation_id=uuid.uuid4(),
+            )
+        )
+    except RegistryUnresolvedError as exc:
+        raise click.ClickException(str(exc)) from exc
     if bus is None:
         if kafka_bootstrap is not None:
             raise ValueError(
@@ -2446,7 +2542,18 @@ def run_delegate(
                 "an explicit bootstrap override — pass --bus kafka too)."
             )
         try:
-            default_bus = resolve_default_bus(workspace_root=omni_home)
+            # OMN-19973: the developer's own lane binding, read here and
+            # handed to the one config authority, which decides where it
+            # ranks. An unreadable binding refuses rather than being skipped.
+            lane_binding = StoreDeveloperProfile(
+                onex_home=Path.home() / ".onex"
+            ).lane_binding()
+        except ModelOnexError as exc:
+            raise click.ClickException(str(exc)) from exc
+        try:
+            default_bus = resolve_default_bus(
+                workspace_root=omni_home, developer_lane_binding=lane_binding
+            )
         except (EventBusResolutionAmbiguousError, ProtocolConfigurationError) as exc:
             # OMN-16678: an indeterminate probe is a REFUSAL, not a fallback.
             # OMN-19193: so is a bound workspace root that declares no runtime
@@ -2455,6 +2562,7 @@ def run_delegate(
             # traceback or a silently chosen transport.
             raise click.ClickException(str(exc)) from exc
         bus, reason = default_bus.bus, default_bus.reason
+        transport_authority = reason
         if bus == "kafka" and lane is None and default_bus.lane is not None:
             # OMN-19193: the configuration that chose the shared bus also names
             # which declared lane it is. Taken only on this branch, where the
@@ -2504,6 +2612,13 @@ def run_delegate(
             "config surface, env override, or broker probe was consulted",
             bus,
         )
+        transport_authority = f"explicit --bus {bus}"
+    # OMN-19973: say on stderr which authority chose the transport and lane,
+    # so a profile-bound run is never mistaken for one whose flags chose it.
+    click.echo(
+        f"transport: bus={bus} lane={lane or 'none'} ({transport_authority})",
+        err=True,
+    )
     # OMN-16871: the broker ADDRESS comes from the lane the caller selected,
     # read out of the checked-in lane declaration. It is never taken from
     # ``KAFKA_BOOTSTRAP_SERVERS`` -- on the launching host that variable names
@@ -2579,9 +2694,7 @@ def run_delegate(
             acceptance_criteria=acceptance_criteria,
             # The wire enum spells these with underscores; the flag spells them
             # with dashes, as every other choice flag on this command does.
-            quality_contract_mode=(
-                None if criteria_mode is None else criteria_mode.replace("-", "_")
-            ),
+            quality_contract_mode=_wire_criteria_mode(criteria_mode),
             response_contract=response_contract,
             system_prompt=system_prompt,
             requested_timeout_seconds=timeout,
@@ -2654,12 +2767,13 @@ def run_delegate(
                 state_root=state_root,
                 prompt=prompt,
                 task_type=resolved_task_type,
-                task_type_resolution=task_class.resolution.value,
+                task_type_resolution=resolution,
                 addressing=ModelDelegateRunAddressing(
                     locus=EnumDelegateLocus.DEPLOYED_LANE,
                     bus=bus,
                     lane=lane_target.lane if lane_target is not None else None,
                     dispatch_target=None,
+                    transport_authority=transport_authority,
                 ),
             )
             if lane_target is not None:
@@ -2676,7 +2790,7 @@ def run_delegate(
                 ) from exc
             raise click.ClickException(str(exc)) from exc
 
-        # OMN-18810: the four addressing facts the two written files record,
+        # OMN-18810: the five addressing facts the two written files record,
         # built from the decision that was just PROVEN viable rather than
         # from the raw flags. ``--lane dev`` that resolved to no broker never
         # reaches here (``resolve_delegate_locus`` refuses first), so a file
@@ -2690,6 +2804,7 @@ def run_delegate(
                 if locus_decision.locus is EnumDelegateLocus.DEPLOYED_LANE
                 else None
             ),
+            transport_authority=transport_authority,
         )
 
         # OMN-18956: derive ONCE, before the receipt layer is wired, so the
@@ -2724,6 +2839,15 @@ def run_delegate(
                     # the receipt was the wrong one's.
                     host_handlers=locus_decision.locus is EnumDelegateLocus.IN_PROCESS,
                     locus_decision=locus_decision,
+                    # OMN-20124: the default output is for a person. --json keeps
+                    # the one-receipt-JSON-line contract for programs.
+                    receipt_renderer=(
+                        None
+                        if json_output
+                        else functools.partial(
+                            _render_receipt_for_person, state_root=state_root
+                        )
+                    ),
                     # OMN-17295 / OMN-14872: the receipt layer cannot select by an
                     # identity it was never told. Handing it the id this CLI just
                     # minted is what lets it refuse another run's terminal
@@ -2752,9 +2876,10 @@ def run_delegate(
                         state_root=state_root,
                         prompt=prompt,
                         task_type=resolved_task_type,
-                        task_type_resolution=task_class.resolution.value,
+                        task_type_resolution=resolution,
                         addressing=addressing,
                         drift_guard=drift_guard_check,
+                        config_overrides=overrides,
                         # OMN-18956 residual: this is the SECOND site that
                         # arms the same refusal, and the first fix moved only
                         # the validator. The writer runs inside the receipt
@@ -2802,6 +2927,13 @@ def run_delegate(
                 consumer_groups=locus_decision.lane_consumer_groups,
             )
             click.echo(f"{exc} Queue: {queue_depth.describe()}.", err=True)
+            if not json_output:
+                click.echo(
+                    f"onex delegate failed: timed out waiting for the result "
+                    f"(run {run_id}; pass --json for the typed timeout receipt)",
+                    err=True,
+                )
+                return 1
             click.echo(
                 _timeout_receipt(
                     correlation_id=correlation_id,

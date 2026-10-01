@@ -357,6 +357,10 @@ done
 if [[ -n "$OMNI_HOME_ARG" ]]; then
   OMNI_HOME="$OMNI_HOME_ARG"
 fi
+# Children (the lane-identity module refuses to run without it, rule 8) must see
+# the root this script resolved, not whatever the caller's shell happened to
+# export: a `--omni-home` run from a session with no OMNI_HOME (OMN-19432).
+export OMNI_HOME
 
 say() { printf '[reconcile] %s\n' "$*"; }
 trace() { [[ "$VERBOSE" -eq 1 ]] && printf '[reconcile]   $ %s\n' "$*"; return 0; }
@@ -665,9 +669,61 @@ venv_is_relocatable() {
 # Rename a proven staged venv over the live one: two renames on one filesystem,
 # keeping the old generation until the new one is in place, so a failed second
 # rename is rolled back rather than leaving the host with no venv at all.
+# Seed a staging venv from the LIVE one (OMN-19432). Copy-on-write where the
+# filesystem offers it (APFS `cp -c`, btrfs/xfs `--reflink=auto`), a plain copy
+# otherwise. The copy is then marked relocatable: uv writes self-locating
+# scripts for whatever it installs into a relocatable venv, and the scripts
+# that were copied already name the LIVE path, which is where the copy ends up.
+# Runs as the surface owner, like every other write to this venv.
+clone_venv_to_staging() {
+  local live="$1" staging="$2"
+  rm -rf "$staging"
+  if ! as_owner cp -Rc "$live" "$staging" 2>/dev/null; then
+    rm -rf "$staging"
+    if ! as_owner cp -a --reflink=auto "$live" "$staging" 2>/dev/null; then
+      rm -rf "$staging"
+      as_owner cp -a "$live" "$staging" || return 1
+    fi
+  fi
+  if ! venv_is_relocatable "$staging"; then
+    printf 'relocatable = true\n' >> "$staging/pyvenv.cfg" || return 1
+  fi
+}
+
+# Exchange two directories in ONE syscall, so that `$live` names a complete venv
+# at every instant (OMN-19432). The two-rename swap below leaves a gap between
+# `mv live previous` and `mv staging live` in which `$live` does not exist, and
+# an `onex` that imports inside it fails exactly as an in-place reinstall does
+# (measured: 3 ModuleNotFoundError and 2 exec failures in ~1,100 imports over 15
+# swaps, each gap about a millisecond). renamex_np(RENAME_SWAP) on macOS and
+# renameat2(RENAME_EXCHANGE) on Linux are the exchange; anything else, or a
+# filesystem that refuses it, returns non-zero and the caller falls back to the
+# two-rename swap rather than failing the reconcile.
+exchange_dirs_atomically() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "$1" "$2" <<'PYEOF'
+import ctypes, ctypes.util, os, sys
+
+a, b = (os.fsencode(p) for p in sys.argv[1:3])
+libc = ctypes.CDLL(ctypes.util.find_library("c") or None, use_errno=True)
+if sys.platform == "darwin":
+    rc = libc.renamex_np(a, b, 2)  # RENAME_SWAP
+elif hasattr(libc, "renameat2"):
+    rc = libc.renameat2(-100, a, -100, b, 2)  # AT_FDCWD, RENAME_EXCHANGE
+else:
+    sys.exit(1)
+sys.exit(0 if rc == 0 else 1)
+PYEOF
+}
+
 swap_dispatch_venv() {
   local staging="$1" live="$2" previous="$2.previous"
   rm -rf "$previous"
+  # After the exchange `$staging` holds the OLD venv, which is scrap.
+  if [[ -d "$live" ]] && exchange_dirs_atomically "$staging" "$live"; then
+    rm -rf "$staging"
+    return 0
+  fi
   if [[ -e "$live" ]] && ! mv "$live" "$previous"; then
     fail "could not move the live dispatch venv aside; it is UNTOUCHED and" \
       "still serving, and the gate venv was NOT touched." \
@@ -1655,9 +1711,8 @@ run_repair() {
   fi
 
   # WHERE THIS PASS WRITES. A rebuild is staged at a sibling and renamed in at
-  # the end; everything else writes straight to the live venv, because an
-  # ADDITIVE provider or lock pass never leaves it unusable and staging one
-  # would buy nothing. A venv that does not exist YET is also built in place --
+  # the end; an additive pass is staged by a clone of the live venv
+  # (below, OMN-19432). A venv that does not exist YET is also built in place --
   # there is no live environment to protect, and no lane can be using it.
   local target_venv="$DISPATCH_VENV" target_python="$DISPATCH_PYTHON" staging=""
   if [[ "$rebuild" -eq 1 ]]; then
@@ -1679,6 +1734,34 @@ run_repair() {
         "Run by hand and read the error:" \
         "  cd $INFRA_DIR && env -u PYTHONPATH \\" \
         "    uv venv --relocatable ${dispatch_python_arg[*]} $staging"
+    fi
+  fi
+
+  # AN ADDITIVE PASS IS STAGED TOO (OMN-19432). The paragraph above used to end
+  # "an ADDITIVE provider or lock pass never leaves it unusable and staging one
+  # would buy nothing", and that was wrong. The provider co-install is a
+  # `uv pip install --reinstall` of omnimarket, which removes the package and
+  # writes it back file by file; every `onex` that imports inside that window
+  # sees a package with modules missing. That was the intermittent
+  # `onex delegate` startup failure, ModuleNotFoundError for
+  # `omnimarket.cli.choice_from_authority` (one call in ten, gone on retry),
+  # reproduced against real uv by importing the module in a loop during
+  # repeated reinstalls. So every pass that will write is done on a clone of the
+  # live venv and renamed in once the same readbacks a rebuild gets have passed.
+  # The clone is copy-on-write where the filesystem has it, so the common tick
+  # (the clone advanced, the interpreter did not) pays for a rename, not a
+  # rebuild. A pass with nothing to do clones nothing.
+  if [[ "$rebuild" -eq 0 && -x "$DISPATCH_PYTHON" ]] \
+     && [[ "$need_lock" -eq 1 || "$need_provider" -eq 1 ]]; then
+    staging="$DISPATCH_VENV.rebuilding"
+    target_venv="$staging"
+    target_python="$staging/bin/python"
+    say "dispatch venv: staging the additive pass at $staging"
+    trace "cp -c $DISPATCH_VENV $staging"
+    if ! clone_venv_to_staging "$DISPATCH_VENV" "$staging"; then
+      fail "could not stage the dispatch venv; the live venv is UNTOUCHED and" \
+        "still serving, and the gate venv was NOT touched." \
+        "Free the disk space or remove $staging and re-run."
     fi
   fi
 
@@ -1732,6 +1815,30 @@ run_repair() {
     # its hardcoded COMPAT_PIN downgrades omnibase-compat 0.5.6 -> 0.5.5 and
     # breaks the `occ` CLI extension badly enough that `onex` will not start),
     # so the lock pass has to come after it to undo that.
+    #
+    # ...EXCEPT that a lock layer already BEHIND is applied before it as well
+    # (OMN-20154). The co-install's own readback (OMN-18752) refuses when the
+    # provider's declared floor is above what the venv carries, and a floor the
+    # LOCK already satisfies is exactly that case: on .202 the lock pinned
+    # omnibase-core 0.47.27, omnimarket declared >=0.47.27, the venv held
+    # 0.47.25, the co-install refused on every tick, and the lock pass after it
+    # never ran -- so nothing ever moved. Applying the lock first gives the
+    # co-install the layer it was built against; the pass after it still has
+    # the last word, so the OMN-16262 guarantee is unchanged. A venv that was
+    # just created or rebuilt above already had its lock pass.
+    if [[ "$need_provider" -eq 1 && "$need_lock" -eq 1 \
+          && -x "$DISPATCH_PYTHON" && "$rebuild" -eq 0 ]]; then
+      say "dispatch venv: lock layer is behind; applying $INFRA_DIR/uv.lock before the provider co-install"
+      trace "UV_PROJECT_ENVIRONMENT=$target_venv uv sync --frozen --inexact --project $INFRA_DIR ${dispatch_python_arg[*]}"
+      if ! (cd "$INFRA_DIR" && as_owner env -u PYTHONPATH UV_PROJECT_ENVIRONMENT="$target_venv" \
+          "$UV_BIN" sync --frozen --inexact --project "$INFRA_DIR" "${dispatch_python_arg[@]}"); then
+        fail "dispatch venv lock sync did not complete; $intact_note" \
+          "Run by hand and read the error:" \
+          "  cd $INFRA_DIR && env -u PYTHONPATH UV_PROJECT_ENVIRONMENT=$target_venv \\" \
+          "    uv sync --frozen --inexact"
+      fi
+    fi
+
     if [[ "$need_provider" -eq 1 ]]; then
       say "dispatch venv: reconciling provider layer to omnimarket ${head:0:12}"
       if [[ ! -x "$INSTALL_SCRIPT" ]]; then

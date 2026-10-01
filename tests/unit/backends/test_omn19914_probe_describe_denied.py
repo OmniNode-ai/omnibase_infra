@@ -35,6 +35,7 @@ from omnibase_infra.backends.backend_probe import (
     ConsumerGroupLivenessUnknownError,
     live_consumer_groups,
 )
+from omnibase_infra.backends.model_consumer_group_owner import ModelConsumerGroupOwner
 from omnibase_infra.cli import delegate_locus
 from omnibase_infra.cli.delegate_locus import (
     DelegateLocusAclRefusedError,
@@ -205,11 +206,18 @@ def test_the_locus_gate_refusal_is_typed_and_names_the_grant(
 ) -> None:
     contract = tmp_path / "contract.yaml"
     contract.write_text(
-        yaml.safe_dump({"event_bus": {"subscribe_topics": [_TOPIC]}}),
+        yaml.safe_dump(
+            {
+                "name": "node_delegate_skill_orchestrator",
+                "event_bus": {"subscribe_topics": [_TOPIC]},
+            }
+        ),
         encoding="utf-8",
     )
 
-    def _deny(**_: object) -> tuple[str, ...]:
+    def _deny(
+        *, owner: ModelConsumerGroupOwner | None = None, **_: object
+    ) -> tuple[str, ...]:
         raise ConsumerGroupDescribeDeniedError(
             group_ids=(_SLOT_GROUP,), bootstrap_servers=_BROKER, principal=_PRINCIPAL
         )

@@ -11,6 +11,9 @@ added backend is appended to the rendered contract after every base backend, so
 it never displaces a rung the base declared. A binding that names an undeclared
 backend without that declaration, or a base backend WITH it, fails the render —
 never a silent drop and never a default.
+The overlay's served model always wins over the base contract's model. Cloud
+overlays may rebind or add non-local backends while every local rung stays
+disabled (OMN-17502).
 """
 
 from __future__ import annotations
@@ -37,10 +40,17 @@ from omnibase_infra.runtime.config_provenance import (
 from omnibase_infra.runtime.dogfood_delegation_fault_routes import (
     load_dogfood_delegation_fault_routes,
 )
+from omnibase_infra.runtime.models.enum_bifrost_endpoint_probe_failure_kind import (
+    EnumBifrostEndpointProbeFailureKind,
+)
 from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
     EnumBifrostLaneLocale,
 )
+from omnibase_infra.runtime.models.model_bifrost_endpoint_probe_failure import (
+    ModelBifrostEndpointProbeFailure,
+)
 from omnibase_infra.runtime.models.model_bifrost_lane_backend_binding import (
+    LOCAL_TIER,
     NEW_BACKEND_DECLARATION_FIELDS,
     ModelBifrostLaneBackendBinding,
 )
@@ -58,8 +68,6 @@ _CHAT_COMPLETIONS_PATH_SUFFIX = "/chat/completions"
 _EMBEDDINGS_PATH_SUFFIX = "/embeddings"
 _COMPLETE_ENDPOINT_SUFFIXES = (_CHAT_COMPLETIONS_PATH_SUFFIX, _EMBEDDINGS_PATH_SUFFIX)
 _DEFAULT_ENDPOINT_PROBE_TIMEOUT_SECONDS = 3.0
-#: The base contract's own declaration that a backend is served from the lab.
-_LOCAL_TIER = "local"
 #: OMN-19432: the base contract's own declaration that a backend answers TYPED
 #: DECISIONS on its provider's own schema (TypeSafe Jev's System One API)
 #: rather than OpenAI chat completions. Such a backend is never a rung: no
@@ -71,7 +79,7 @@ _TYPED_DECISION_TIER = "typed_decision"
 #: bare base, which OMN-12815 forbids: nothing downstream appends a path.
 _BARE_VERSION_SEGMENT = re.compile(r"^v\d+(?:(?:alpha|beta)\d*)?$")
 
-EndpointProbe = Callable[[str, str, float], str | None]
+EndpointProbe = Callable[[str, str, float], ModelBifrostEndpointProbeFailure | None]
 
 
 def _resolve_canonical_source_path() -> Path:
@@ -167,7 +175,7 @@ def _resolve_target_path(
 
 def _probe_openai_model_endpoint(
     endpoint_url: str, model_name: str, timeout_seconds: float
-) -> str | None:
+) -> ModelBifrostEndpointProbeFailure | None:
     parsed = urlsplit(endpoint_url)
     path = parsed.path.rstrip("/")
     matched_suffix = next(
@@ -184,8 +192,16 @@ def _probe_openai_model_endpoint(
         request = Request(endpoint, headers={"accept": "application/json"})  # noqa: S310
         with urlopen(request, timeout=timeout_seconds) as response:  # noqa: S310
             payload = json.loads(response.read().decode("utf-8"))
-    except (HTTPError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        return f"{endpoint} is not a readable model endpoint: {exc}"
+    except (HTTPError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return ModelBifrostEndpointProbeFailure(
+            kind=EnumBifrostEndpointProbeFailureKind.REFUSED,
+            detail=f"{endpoint} is not a readable model endpoint: {exc}",
+        )
+    except OSError as exc:
+        return ModelBifrostEndpointProbeFailure(
+            kind=EnumBifrostEndpointProbeFailureKind.UNREACHABLE,
+            detail=f"{endpoint} is unreachable: {exc}",
+        )
     data = payload.get("data") if isinstance(payload, dict) else None
     model_ids = (
         {item.get("id") for item in data if isinstance(item, dict)}
@@ -193,7 +209,13 @@ def _probe_openai_model_endpoint(
         else set()
     )
     if model_name not in model_ids:
-        return f"{endpoint} does not list required model {model_name!r}"
+        return ModelBifrostEndpointProbeFailure(
+            kind=EnumBifrostEndpointProbeFailureKind.REFUSED,
+            detail=(
+                f"{endpoint} does not list required model {model_name!r}; "
+                f"it serves {sorted(str(i) for i in model_ids)}"
+            ),
+        )
     return None
 
 
@@ -222,7 +244,7 @@ def _index_base_backends(base: dict[str, object]) -> dict[str, dict[object, obje
 
 def _is_local_backend(backend: dict[object, object]) -> bool:
     """Whether the contract declares this backend as lab-served (its ``tier``)."""
-    return backend.get("tier") == _LOCAL_TIER
+    return backend.get("tier") == LOCAL_TIER
 
 
 def _is_typed_decision_backend(backend: dict[object, object]) -> bool:
@@ -353,6 +375,16 @@ def _added_backend_entry(
     return entry
 
 
+def _render_dark(
+    backend: dict[object, object], binding: ModelBifrostLaneBackendBinding
+) -> None:
+    """Write the declared-but-dark shape: no endpoint, binding kept in place."""
+    backend["endpoint_url"] = None
+    backend["model_name"] = binding.advertised_model
+    backend["max_tokens"] = binding.max_tokens
+    backend["timeout_ms"] = binding.timeout_ms
+
+
 def _merge_lane_overlay(
     *,
     base: dict[str, object],
@@ -381,6 +413,7 @@ def _merge_lane_overlay(
     added: list[dict[object, object]] = []
     for binding in overlay.backends:
         backend = by_id.get(binding.backend_key)
+        base_model: object = None
         if backend is None:
             if not binding.declares_new_backend:
                 raise ProtocolConfigurationError(
@@ -406,25 +439,30 @@ def _merge_lane_overlay(
                     f"Bifrost base backend {binding.backend_key!r} must declare model_name"
                 )
             base_model = backend["model_name"]
-            if base_model is not None and base_model != binding.advertised_model:
-                raise ProtocolConfigurationError(
-                    f"Bifrost base backend {binding.backend_key!r} model_name {base_model!r} "
-                    f"does not match overlay served_model_id {binding.advertised_model!r}"
-                )
+        if overlay.locale is EnumBifrostLaneLocale.CLOUD and _is_local_backend(backend):
+            raise ProtocolConfigurationError(
+                f"Bifrost lane overlay for lane {overlay.lane!r} declares locale "
+                f"{EnumBifrostLaneLocale.CLOUD.value!r} but binds local-tier "
+                f"backend {binding.backend_key!r}: a cloud lane must reach no "
+                "lab endpoint (OMN-17502)."
+            )
+        if base_model is not None and base_model != binding.advertised_model:
+            sys.stdout.write(
+                f"[entrypoint] Bifrost backend {binding.backend_key!r} "
+                f"model_name {base_model!r} overridden by lane overlay "
+                f"{overlay.lane!r} served_model_id {binding.advertised_model!r}\n"
+            )
         if not binding.serving:
             # OMN-16999: a DECLARED-but-dark rung. Write the disabled shape —
             # the same ``endpoint_url: null`` a cloud lane's local backends get
             # — so ``_load_bifrost_endpoints`` skips it and routing never offers
             # it, while ``routing_rules``/``default_backends`` naming this
-            # backend stay resolvable. model_name is still asserted above and
-            # still written below, so the binding survives in the artifact and
+            # backend stay resolvable. The overlay's served model is written
+            # below, so the binding survives in the artifact and
             # the rung is restored by flipping one flag, not by reconstructing
             # it. The probe is skipped for the obvious reason: probing an
             # endpoint already proven dark would only fail the render.
-            backend["endpoint_url"] = None
-            backend["model_name"] = binding.advertised_model
-            backend["max_tokens"] = binding.max_tokens
-            backend["timeout_ms"] = binding.timeout_ms
+            _render_dark(backend, binding)
             continue
         if verify:
             failure = endpoint_probe(
@@ -433,8 +471,18 @@ def _merge_lane_overlay(
                 _DEFAULT_ENDPOINT_PROBE_TIMEOUT_SECONDS,
             )
             if failure is not None:
+                if failure.kind is EnumBifrostEndpointProbeFailureKind.UNREACHABLE:
+                    # OMN-19455: nothing answered, so there is no served id to
+                    # contradict. Mark the rung dark and keep booting.
+                    sys.stdout.write(
+                        f"[entrypoint] Bifrost backend {binding.backend_key!r} "
+                        f"unreachable, marked dark: {failure.detail}\n"
+                    )
+                    _render_dark(backend, binding)
+                    continue
                 raise ProtocolConfigurationError(
-                    f"Bifrost lane binding {binding.backend_key!r} failed verification: {failure}"
+                    f"Bifrost lane binding {binding.backend_key!r} failed "
+                    f"verification: {failure.detail}"
                 )
         backend["endpoint_url"] = binding.endpoint_url
         backend["model_name"] = binding.advertised_model
@@ -527,8 +575,9 @@ def render_bifrost_delegation_contract(
     The overlay's execution locale decides what "merged" means (OMN-17502): a
     ``lab`` lane binds every local backend the base contract routes to and may
     add fully declared backends of its own (OMN-17099), while a ``cloud``
-    lane declares none and renders the base contract's cloud backends with every
-    local rung explicitly disabled.
+    lane may rebind base cloud backends or add fully declared non-local backends
+    with every local rung explicitly disabled. Each binding's served model
+    overrides the base model in either locale.
     """
     env = environ if environ is not None else os.environ
     target = _resolve_target_path(target_path=target_path, env=env)

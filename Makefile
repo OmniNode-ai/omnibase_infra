@@ -29,6 +29,8 @@
 #     make up-local            # write ~/.omnibase/local.env + model overlay if absent, then boot
 #     make status-local        # migration gate, runtime /health bodies, delegate consumer group
 #     make delegate-local PROMPT="..."  # one delegation through your runtime on the local broker
+#     make tenant-local        # give your runtime a tenant (only if you use your own provider key), then make up-local
+#     make secret-local PROVIDER=gemini # register your tenant's provider key from stdin or a hidden prompt
 #     make down-local          # stop the laptop profile (keeps its volumes)
 #     make down-local-volumes  # stop it and delete its volumes (local data)
 #
@@ -45,7 +47,7 @@
 
 .PHONY: help up up-auth up-runtime down down-auth down-runtime down-all status \
         seed-keycloak seed-infisical _check-docker _check-env-file \
-        local-env up-local status-local delegate-local down-local down-local-volumes
+        local-env up-local status-local delegate-local tenant-local secret-local down-local down-local-volumes
 
 OMNIBASE_ENV_FILE ?= $(HOME)/.omnibase/.env
 LOCAL_ENV_FILE ?= $(HOME)/.omnibase/local.env
@@ -119,13 +121,21 @@ local-env: ## Write the laptop env file and model overlay from their templates (
 	  cp docker/lane-overlays/local.bifrost.example.yaml "$(LOCAL_OVERLAY_FILE)"; \
 	  echo "==> Wrote model overlay $(LOCAL_OVERLAY_FILE)"; \
 	fi
+	@command -v openssl > /dev/null 2>&1 || { echo "ERROR: openssl is required to generate the local passwords"; exit 1; }
 	@if [ -e "$(LOCAL_ENV_FILE)" ]; then \
 	  echo "==> Keeping existing env file $(LOCAL_ENV_FILE)"; \
+	  for var in OMNINODE_RUNTIME_PASSWORD TENANT_PROJECTION_WRITER_PASSWORD; do \
+	    grep -q "^$$var=" "$(LOCAL_ENV_FILE)" || { \
+	      printf '%s=%s\n' "$$var" "$$(openssl rand -hex 32)" >> "$(LOCAL_ENV_FILE)"; \
+	      echo "==> Added $$var to $(LOCAL_ENV_FILE) (generated)"; \
+	    }; \
+	  done; \
 	else \
-	  command -v openssl > /dev/null 2>&1 || { echo "ERROR: openssl is required to generate the local passwords"; exit 1; }; \
 	  umask 077; \
 	  sed -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$$(openssl rand -hex 32)|" \
 	      -e "s|^VALKEY_PASSWORD=.*|VALKEY_PASSWORD=$$(openssl rand -hex 32)|" \
+	      -e "s|^OMNINODE_RUNTIME_PASSWORD=.*|OMNINODE_RUNTIME_PASSWORD=$$(openssl rand -hex 32)|" \
+	      -e "s|^TENANT_PROJECTION_WRITER_PASSWORD=.*|TENANT_PROJECTION_WRITER_PASSWORD=$$(openssl rand -hex 32)|" \
 	      -e "s|^ONEX_LOCAL_BIFROST_OVERLAY=.*|ONEX_LOCAL_BIFROST_OVERLAY=$(LOCAL_OVERLAY_FILE)|" \
 	      docker/local.env.example > "$(LOCAL_ENV_FILE)"; \
 	  echo "==> Wrote env file $(LOCAL_ENV_FILE) (passwords generated)"; \
@@ -147,8 +157,38 @@ status-local: _check-docker ## Laptop profile: migration gate, runtime /health b
 
 delegate-local: _check-docker ## Laptop profile: one delegation through your runtime on the local broker (PROMPT="...")
 	@test -n "$(PROMPT)" || { echo 'usage: make delegate-local PROMPT="Reply with exactly one word: hello"'; exit 2; }
-	docker exec $(LOCAL_PROJECT)-runtime-effects onex delegate "$(PROMPT)" \
+	docker exec $(LOCAL_PROJECT)-runtime-effects onex delegate $(DELEGATE_FLAGS) "$(PROMPT)" \
 	  --bus kafka --kafka-bootstrap redpanda:9092 --locus deployed-lane
+
+tenant-local: local-env ## Laptop profile: give your runtime a tenant (needed to use your own provider key); then make up-local
+	@if grep -q '^ONEX_TENANT_ID=.' "$(LOCAL_ENV_FILE)"; then \
+	  echo "==> $(LOCAL_ENV_FILE) already names a tenant: $$(sed -n 's/^ONEX_TENANT_ID=//p' "$(LOCAL_ENV_FILE)")"; \
+	else \
+	  tenant="local-$$(openssl rand -hex 6)" || exit 1; \
+	  if grep -q '^ONEX_TENANT_ID=' "$(LOCAL_ENV_FILE)"; then \
+	    env_tmp=$$(mktemp "$(LOCAL_ENV_FILE).XXXXXX") || exit 1; \
+	    sed "s|^ONEX_TENANT_ID=.*|ONEX_TENANT_ID=$$tenant|" "$(LOCAL_ENV_FILE)" > "$$env_tmp" \
+	      && cat "$$env_tmp" > "$(LOCAL_ENV_FILE)"; \
+	    result=$$?; rm -f "$$env_tmp"; [ "$$result" -eq 0 ] || exit "$$result"; \
+	  else \
+	    printf '\nONEX_TENANT_ID=%s\n' "$$tenant" >> "$(LOCAL_ENV_FILE)" || exit 1; \
+	  fi; \
+	  echo "==> Added ONEX_TENANT_ID=$$tenant to $(LOCAL_ENV_FILE). Run make up-local so your runtime serves it."; \
+	fi
+
+secret-local: _check-docker ## Laptop profile: register your tenant's provider key (PROVIDER=gemini; stdin or hidden prompt)
+	@test -n "$(PROVIDER)" || { echo 'usage: make secret-local PROVIDER=gemini' >&2; exit 2; }
+	@test -f "$(LOCAL_ENV_FILE)" || { echo 'ERROR: local env file is missing; run make tenant-local first.' >&2; exit 2; }
+	@tenant=$$(sed -n 's/^ONEX_TENANT_ID=//p' "$(LOCAL_ENV_FILE)") || exit 1; \
+	  test -n "$$tenant" || { echo 'ERROR: ONEX_TENANT_ID is empty or absent; run make tenant-local, then make up-local.' >&2; exit 2; }; \
+	  served=$$(docker exec $(LOCAL_PROJECT)-runtime-effects printenv ONEX_TENANT_ID 2>/dev/null) || served=""; \
+	  test "$$served" = "$$tenant" || { echo "ERROR: your runtime serves tenant '$$served', not '$$tenant'. Run make up-local so it serves $$tenant, then register the key." >&2; exit 2; }; \
+	  if [ -t 0 ]; then \
+	    bash -c 'read -r -s -p "Provider key (input hidden): " credential || exit 1; printf "\n" >&2; printf "%s" "$$credential"' \
+	      | docker exec -u omniinfra -e HOME=/home/omniinfra -i $(LOCAL_PROJECT)-runtime-effects onex secret register-tenant-key "$(PROVIDER)" --tenant "$$tenant"; \
+	  else \
+	    docker exec -u omniinfra -e HOME=/home/omniinfra -i $(LOCAL_PROJECT)-runtime-effects onex secret register-tenant-key "$(PROVIDER)" --tenant "$$tenant"; \
+	  fi
 
 down-local: _check-docker ## Laptop profile: stop it (keeps its volumes)
 	$(ONEX_CLI) down

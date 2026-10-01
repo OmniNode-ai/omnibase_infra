@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import concurrent.futures
 import datetime as dt
 import gzip
 import hashlib
@@ -471,13 +472,22 @@ def survey(
     now: dt.datetime,
     me: str | None = None,
 ) -> list[HostState]:
-    states = []
-    for host in cfg.hosts:
-        if host.status == "excluded":
-            states.append(HostState(host, "EXCLUDED"))
-            continue
-        rc, out = transport.run(host, _probe_command(cfg, host), timeout=30)
-        states.append(parse_probe(host, rc, out))
+    states: list[HostState] = []
+    max_workers = max(1, sum(host.status != "excluded" for host in cfg.hosts))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            i: executor.submit(
+                transport.run, host, _probe_command(cfg, host), timeout=30
+            )
+            for i, host in enumerate(cfg.hosts)
+            if host.status != "excluded"
+        }
+        for i, host in enumerate(cfg.hosts):
+            if host.status == "excluded":
+                states.append(HostState(host, "EXCLUDED"))
+                continue
+            rc, out = futures[i].result()
+            states.append(parse_probe(host, rc, out))
     return assess(states, cfg, holds, now, me)
 
 

@@ -8,6 +8,7 @@
 #
 name: "node_routing_orchestrator"
 node_type: "ORCHESTRATOR_GENERIC"
+runtime_profiles: [main]
 contract_version:
   major: 1
   minor: 0
@@ -23,8 +24,16 @@ event_bus:
     patch: 0
   subscribe_topics:
     - "onex.cmd.router.route-request.v1"
-    - "onex.evt.router.health-snapshot.v1"
-    - "onex.evt.router.scoring-decision.v1"
+    # OMN-17427: `onex.evt.router.health-snapshot.v1` DELETED from subscribe_topics. No contract and no
+    # runtime path anywhere in the fleet publishes it (grep of every omni_home
+    # clone, 2026-10-01), so the subscription only minted a permanently empty
+    # consumer group (OMN-16795). Re-add it with its publisher and its handler
+    # entry, in one diff (OMN-7897).
+    # OMN-17427: `onex.evt.router.scoring-decision.v1` DELETED from subscribe_topics. No contract and no
+    # runtime path anywhere in the fleet publishes it (grep of every omni_home
+    # clone, 2026-10-01), so the subscription only minted a permanently empty
+    # consumer group (OMN-16795). Re-add it with its publisher and its handler
+    # entry, in one diff (OMN-7897).
     # OMN-18013: `onex.evt.router.routing-outcome.v1` DELETED from subscribe_topics. No handler_routing entry owned it
     # (_topics_for_handler_entry returned no match, so ZERO dispatch routes existed) AND
     # no contract anywhere in the corpus publishes it, so nothing could ever arrive on it
@@ -61,26 +70,6 @@ handler_routing:
         module: "omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_routing_initiate"
       output_events:
         - "ModelHealthRequest"
-    - event_model:
-        name: "ModelHealthSnapshot"
-        module: "omnibase_infra.nodes.node_model_health_effect.models.model_health_snapshot"
-      event_type: "router.health-snapshot"
-      message_category: "EVENT"
-      handler:
-        name: "HandlerHealthComplete"
-        module: "omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_health_complete"
-      output_events:
-        - "ModelScoringInput"
-    - event_model:
-        name: "ModelRoutingDecision"
-        module: "omnibase_infra.nodes.node_model_router_compute.models.model_routing_decision"
-      event_type: "router.scoring-decision"
-      message_category: "EVENT"
-      handler:
-        name: "HandlerScoringComplete"
-        module: "omnibase_infra.nodes.node_routing_orchestrator.handlers.handler_scoring_complete"
-      output_events:
-        - "ModelRoutingResult"
 workflow_coordination:
   workflow_definition:
     workflow_metadata:

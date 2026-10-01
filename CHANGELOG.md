@@ -1,3 +1,95 @@
+## v0.38.61 (2026-10-01)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.61 by the scheduled release train.
+- 24 release-relevant commit(s) merged since v0.38.60.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.60
+- feat: vendor the delegation_dispositions projection migrations ahead of omnimarket (#4397)
+- feat: price claude-sonnet-5-5 in the pricing manifest (#4400)
+- fix: eight orchestrators and the ledger projection compute declare runtime_profiles [main], and ten runtime_profiles allowlist rows are deleted (#4393)
+- chore: advance omnimarket contract pin to 49ee50d5f1b0 (#4385)
+- feat: a lane overlay chooses the served model; the local bundle keeps a runtime-owned key store and the tenant credentials projection (#4381)
+- fix: the deployed-lane locus probe asks only about the orchestrator contract's own consumer groups (#4390)
+- fix: an in-process onex delegate on a shared bus is refused, because the deployed orchestrator also consumes its start command (#4389)
+- fix: the 22 lapsed subscribe-wiring exemptions are resolved by evidence, not a new date (#4384)
+- fix: unused validator exemptions fail CI and the delegation seam test runs on every PR (#4376)
+- fix: the model catalog and compose defaults stop addressing the GLM Coding Plan endpoint, and a gate keeps it out of tracked config (#4370)
+- feat(migrations): vendor delegation eval-run migrations 0003-0006 [] (#4371)
+- chore: advance omnimarket contract pin to 7f67a60b8a09 (#4366)
+- chore(deps): bump omnibase-core to 0.47.27 (#4355)
+- feat: a lane overlay placement carries use_for and weight to the routing authority (#4358)
+- feat: vendor the provider_quota_state projection migrations ahead of omnimarket#3134 (#4363)
+- feat: the laptop stack serves the pages' exposures and CI proves each service healthy (#4352)
+- chore: advance omnimarket contract pin to 92bc73177b90 (#4349)
+- feat: vendor the delegation_eval_items projection migrations ahead of omnimarket#3059 (#4315)
+- fix: a redeploy no longer loses a record whose handler is still running (#4346)
+- fix: receipt mode has no emit spool, so a fresh install prints no spool warning (#4342)
+- chore: advance omnimarket contract pin to 532ec1f53834 (#4336)
+- feat: onex delegate prints the answer by default, full receipt JSON behind --json (#4341)
+- fix: env_default_overrides refuses what it cannot rewrite safely (#4339)
+- feat: vendor the work ledger projection migrations ahead of omnimarket#3050 (#4272)
+
+## v0.38.60 (2026-09-30)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.60 by the scheduled release train.
+- 50 release-relevant commit(s) merged since v0.38.59.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.59
+- feat: vendor the usage_by_model_day projection migrations ahead of omnimarket#3073 (#4301)
+- feat: vendor the pr_state projection migrations ahead of omnimarket#3054 (#4303)
+- feat: a developer lane binding makes onex delegate dispatch to the lab by default (#4329)
+- feat: vendor the metering_summary projection migrations ahead of omnimarket#3079 (#4304)
+- chore: advance omnimarket contract pin to fbf4f45c3a0c (#4326)
+- fix: the state_io outbox publishes for a row keyed on a domain key (#4331)
+- chore(deps): bump omnibase-core to 0.47.25 (#4317)
+- fix: bump pyjwt to 2.15.1, the lockfile CVE scan fails every merge-group run (#4325)
+- fix: the local bundle's delegation writer binds the lab principals (#4319)
+- feat: publish the board probe result event and the chain canary verdict (#4279)
+- feat: vendor the lab_proof_receipts projection migrations ahead of omnimarket#3043 (#4265)
+- chore: advance omnimarket contract pin to e01380bfde11 (#4313)
+- fix: an absorbed duplicate or stale event no longer moves delegation_workflow_state updated_at (#4290)
+- feat: base-branch check runs become branch-head observations (#4286)
+- feat: onex doctor names each customer delegation fault with its one fix (#4287)
+- fix: consume deadline covers the delegate-skill wait and a DLQ replay keeps its original message id (#4289)
+- feat: consumer_flow board check, coverage contract and validator, C28 workflow shim (#4283)
+- feat: vendor the board_probe_results projection migrations ahead of omnimarket#3061 (#4302)
+- feat: onex delegate names every delegation config key an env var overrides (#4282)
+- fix: the local bundle publishes on loopback only and names no lab host (#4297)
+- feat: the onex CLI reads every vocabulary from the registry and keeps no list of its own (#4273)
+- feat: vendor the lab container memory projection migrations ahead of omnimarket#3051 (#4271)
+- build(deps): update uvicorn requirement from <0.54.0,>=0.32.0 to >=0.32.0,<0.55.0 (#4292)
+- fix: INDETERMINATE fails closed in every verdict path (#4274)
+- feat: vendor the worktree_reconcile projection migrations ahead of omnimarket#3047 (#4266)
+- feat: boot marks an unreachable Bifrost backend dark and refuses a served-model mismatch (#4277)
+- feat: vendor demo-readiness projection migrations (#4217)
+- feat: a refused topic fails the lab half before merge (#4261)
+- fix: a refused inbound topic no longer kills the gateway forwarder (#4254)
+- feat: a dev push the merge queue did not validate runs the full suite (#4260)
+- feat: add operator delegation writer (#4240)
+- feat: vendor the claude_hook_events projection migrations ahead of omnimarket#2956 (#4169)
+- fix: state_io reads a key the route model derives, so the PR landing orchestrator stops failing every message closed (#4248)
+- fix: onex skill merge_sweep maps no admin-merge fallback (#4258)
+- feat: the lab pool mints a pr-head receipt per proof and a workflow posts lab-proof-receipt on the proven head (#4250)
+- fix: the delegate lane probe skips a group it may not describe once a live group is proven, and names the missing ACL when none is (#4256)
+- feat: the dev overlay spreads delegation across the two Qwen3.8-27B hosts (#4134)
+- fix: declare gateway_link_health and grant it explicitly (AC2 step 2) (#4219)
+- feat: GitHub webhook ingress folds signed deliveries into pr_state and pr-merged for every repo (#4227)
+- feat: create pr_landing_workflow_state, the PR landing orchestrator's state_io table, with its grant (#4224)
+- feat: carry a lane-added backend's tier placement through the bifrost renderer (#3999)
+- feat: vendor the session_content projection migration ahead of omnimarket#2905 (#4154)
+- feat: ship the public runtime.lane example overlay document (#4180)
+- feat: the bifrost renderer admits a typed-decision backend's operation URL (#4215)
+- feat: vendor the pr_landing projection migrations ahead of omnimarket#3000 (#4210)
+- fix: the pin check honours a local BYOK-substituted attempt (#4173)
+- fix: dev lane binds local-embedding to its real /v1/embeddings endpoint (#4207)
+- fix: the chain canary reads the dev lane's deploy agent, waits out a redeploy and retries once when one overlapped a red (#4200)
+- feat: onex delegate names the lane and session that issued it, and vendor delegation_events.caller_lane (#4206)
+- fix: consumer-flow deltas carry declares_output from the contract's publish_topics (#4171)
+
 ## v0.38.59 (2026-09-27)
 
 ### Release

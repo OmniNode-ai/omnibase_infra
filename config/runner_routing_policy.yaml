@@ -1051,6 +1051,9 @@ route:
         - advisory-job-gate / advisory-job-gate
         - Application Database Domain Enforcement (OMN-15361)
         - Arch Invariants (OMN-3343)
+        # OMN-19928: the forwarder against a grant-enforcing broker, registered
+        # STRICT in ci.yml and enforced by the CI Summary poller.
+        - Bus ACL Boundary (OMN-19928)
         - call-reject-skip-token / scan / reject-skip-gate-token
         - Canonical Inference Gate
         - CI Evidence Policy (OMN-18247)
@@ -1063,6 +1066,11 @@ route:
         - Contract Sync Gate (Wave C) [OMN-8915]
         - contract-validation
         - Customer Path Boundary (OMN-18012)
+        # OMN-19451: the delegation-health check, registered in
+        # EXPECTED_EXTERNAL_CONTEXTS when its shadow mode was removed (OMN-19998).
+        - delegation-health-check / Delegation Health Check
+        # OMN-20183: unconditional local FSM seam job, enforced by the CI Summary poller
+        - delegation-seam-gate
         - Demo Loop Gate
         - Dep Provenance Gate
         - Dep Provenance Lineage Gate (OMN-15604)

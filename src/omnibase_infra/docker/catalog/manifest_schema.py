@@ -140,6 +140,29 @@ class Bundle:
     # network, volume and runtime-image names, so it can run beside any other
     # compose project on the same Docker host.
     project: str | None = None
+    # OMN-19972: the host address every published port binds to. ``None``
+    # keeps the historical ``<external>:<internal>`` form, which binds all
+    # interfaces; the lab lanes render from the same shared manifests and are
+    # meant to be reachable. The laptop profile sets ``127.0.0.1`` so a
+    # developer's database and broker are not published to their network.
+    publish_host: str | None = None
+    # OMN-19972: replacement defaults for ``${VAR:-default}`` references in
+    # every entry's command and environment. A shared manifest's default is
+    # right for the lab lanes that render it; a bundle that must not carry it
+    # (the laptop profile and the lab's LAN address) overrides it here instead
+    # of editing the shared manifest.
+    env_default_overrides: dict[str, str] = field(default_factory=dict)
+    # OMN-19972: a replacement external (host) port per entry name. The shared
+    # manifest's port is right for the lab lanes that render it; the laptop
+    # profile must not take the lab's projection API port, so it overrides the
+    # host side here and leaves the container port alone.
+    port_overrides: dict[str, int] = field(default_factory=dict)
+    # OMN-19972: extra start-order dependencies per entry name, as
+    # ``{entry: {dependency: condition}}``. On the laptop the projection API
+    # must wait for the kernel that provisions its exposure topics; other
+    # bundles that render the projection API may not run that kernel at all,
+    # so the dependency belongs to the bundle, not to the shared manifest.
+    extra_depends_on: dict[str, dict[str, str]] = field(default_factory=dict)
 
     def resolve_includes(
         self,

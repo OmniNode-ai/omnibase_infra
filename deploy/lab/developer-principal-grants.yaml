@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# What a developer machine's lab bus principal may do (OMN-20150).
+#
+# This file is the declaration. `scripts/lab_principal_issuer.py` applies exactly
+# these grants to every principal it issues and refuses to start if the file asks
+# for more than the rules below allow. Until OMN-19799 derives broker grants for
+# the whole lane, a developer principal's grants live here and nowhere else: a
+# grant typed by hand on the broker is drift.
+#
+# THE MINIMUM FOR ONE LANE DELEGATION (`onex delegate --bus kafka --lane dev`):
+#   * produce the delegate command;
+#   * read the two terminal events it waits for;
+#   * write those same two terminals: a machine that runs a harness task
+#     (`/omni:harness-delegate`) publishes its own delegate-skill terminal event to
+#     the lane, so it must not relay the emit through the lane runtime over ssh.
+#     Literal names only, never a prefix or `*`;
+#   * describe consumer groups, because the CLI refuses to publish unless a live
+#     lab consumer is bound to the command topic (delegate_locus.live_consumer_groups);
+#   * read under the CLI's own terminal consumer group. That group is
+#     `<env>.omnibase_core.runtime_local_terminal...` (omnibase_core
+#     runtime_local.derive_runtime_local_group_id); a developer machine's env
+#     token is `local`, the core default. The lab's kernels subscribe as
+#     `local.omnimarket.*` / `local.omnibase_infra.*` groups, never under
+#     `local.omnibase_core.runtime_local_`, so this prefix cannot join one of
+#     their groups and take its partitions.
+#
+# RULES the issuer enforces on this file:
+#   * operations are only read, write and describe;
+#   * `*` (every resource) may carry describe only;
+#   * a prefixed group grant with read must be at least 16 characters long.
+schema: developer-principal-grants.v1
+lane: dev
+# Principals are named <principal_prefix><login>-<device>, lower-case, [a-z0-9-].
+principal_prefix: dev-
+# A tailnet login may hold at most this many machine principals.
+max_devices_per_login: 5
+# Empty admits every user-owned device on the tailnet. Tagged devices never carry
+# a user identity and are always refused.
+allowed_login_domains: []
+grants:
+  - resource: topic
+    name: onex.cmd.omnimarket.delegate-skill.v1
+    pattern: literal
+    operations: [write, describe]
+  - resource: topic
+    name: onex.evt.omnimarket.delegate-skill-completed.v1
+    pattern: literal
+    operations: [read, write, describe]
+  - resource: topic
+    name: onex.evt.omnimarket.delegate-skill-failed.v1
+    pattern: literal
+    operations: [read, write, describe]
+  - resource: group
+    name: local.omnibase_core.runtime_local_
+    pattern: prefixed
+    operations: [read, describe]
+  - resource: group
+    name: "*"
+    pattern: literal
+    operations: [describe]

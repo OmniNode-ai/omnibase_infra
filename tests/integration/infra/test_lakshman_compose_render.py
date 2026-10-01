@@ -50,6 +50,13 @@ RENDER_ONLY_SECRETS = {
     "VALKEY_PASSWORD": "render-only-not-a-secret",
     "OMNINODE_RUNTIME_PASSWORD": "render-only-not-a-secret",
     "TENANT_PROJECTION_WRITER_PASSWORD": "render-only-not-a-secret",
+    "ROLE_OMNINODE_PASSWORD": "render-only-not-a-secret",
+    "ROLE_OMNIDASH_PASSWORD": "render-only-not-a-secret",
+    "TENANT_BOOTSTRAP_ADMIN_SECRET": "render-only-not-a-secret",
+    "ONEX_API_IMAGE": "render-only/onex-api:omn15359",
+    "ONEX_CLOUD_MIGRATE_IMAGE": "render-only/cloud-migrate:omn15359",
+    "STRIPE_API_KEY": "render-only-stripe-sentinel",
+    "STRIPE_WEBHOOK_SECRET": "render-only-stripe-sentinel",
 }
 
 #: Compose resolves a relative bind-mount source against the directory holding
@@ -70,6 +77,11 @@ EXPECTED_RENDERED_SERVICES = {
     "omninode-runtime",
     "runtime-effects",
     "projection-api",
+    "projection-delegation-writer",
+    "cloud-migration-files",
+    "cloud-migration",
+    "onex-api",
+    "projection-tenant-registry-writer",
 }
 #: Services that must never appear on this lane. ``keycloak`` and ``infisical``
 #: are the OMN-13581 cross-lane displacement risk (they carry no profile in the
@@ -99,6 +111,11 @@ EXPECTED_PUBLISHED_PORTS = {
     "omninode-runtime": {"58085"},
     "runtime-effects": {"58086"},
     "projection-api": {"53002"},
+    "projection-delegation-writer": set(),
+    "cloud-migration-files": set(),
+    "cloud-migration": set(),
+    "onex-api": set(),
+    "projection-tenant-registry-writer": set(),
 }
 #: Ports belonging to the four lanes that predate this one. Publishing any of
 #: them here would displace a live lane on the shared .201 host (OMN-13581).
@@ -298,6 +315,9 @@ def test_lakshman_lane_render_carries_its_own_runtime_identity() -> None:
     assert services["projection-api"]["container_name"] == (
         "omnimarket-lakshman-projection-api"
     )
+    assert services["projection-delegation-writer"]["container_name"] == (
+        "omnimarket-lakshman-projection-delegation-writer"
+    )
 
     for service_name in ("omninode-runtime", "runtime-effects"):
         environment = services[service_name]["environment"]
@@ -324,6 +344,40 @@ def test_lakshman_lane_render_carries_its_own_runtime_identity() -> None:
     assert services["runtime-effects"]["environment"]["ONEX_GROUP_ID"] == (
         "onex-lakshman-runtime-effects"
     )
+
+
+@pytest.mark.integration
+def test_lakshman_delegation_writer_is_lane_isolated() -> None:
+    """The AC3 writer must consume and project only inside the operator lane."""
+    writer = _compose_config_json()["services"]["projection-delegation-writer"]
+
+    assert writer["command"] == [
+        "python",
+        "-m",
+        "omnimarket.nodes.node_projection_delegation.handlers.handler_delegation",
+    ]
+    assert writer["environment"]["ONEX_ENVIRONMENT"] == "lakshman"
+    assert writer["environment"]["KAFKA_ENVIRONMENT"] == "lakshman"
+    assert writer["environment"]["KAFKA_BROKERS"] == "redpanda:9092"
+    assert writer["environment"]["KAFKA_BOOTSTRAP_SERVERS"] == "redpanda:9092"
+    assert writer["environment"]["KAFKA_CONSUMER_GROUP"] == (
+        "lakshman.omnimarket-projections.delegation-writer.consume.v1"
+    )
+    assert writer["environment"]["PROJECTION_RUNNER_HEALTH_PORT"] == "8199"
+    assert writer["environment"]["ONEX_TENANT_DB_URL"].startswith(
+        "postgresql://tenant_projection_writer:"
+    )
+    assert writer["environment"]["ONEX_TENANT_DB_URL"].endswith(
+        "@postgres:5432/omnidash_analytics"
+    )
+    assert set(writer["depends_on"]) == {"migration-gate", "postgres", "redpanda"}
+    assert writer["healthcheck"]["test"] == [
+        "CMD",
+        "curl",
+        "-sf",
+        "http://localhost:8199/ready",
+    ]
+    assert writer.get("ports", []) == []
 
 
 @pytest.mark.integration
@@ -385,6 +439,11 @@ def test_lakshman_lane_infrastructure_credentials_stay_fail_closed() -> None:
         "OMNINODE_RUNTIME_PASSWORD:?",
         "TENANT_PROJECTION_WRITER_PASSWORD:?",
         "OMNICLAUDE_SKILLS_DIR:?",
+        "ROLE_OMNINODE_PASSWORD:?",
+        "ROLE_OMNIDASH_PASSWORD:?",
+        "TENANT_BOOTSTRAP_ADMIN_SECRET:?",
+        "ONEX_API_IMAGE:?",
+        "ONEX_CLOUD_MIGRATE_IMAGE:?",
     ):
         assert required_ref in raw, (
             f"{required_ref!r} lost its fail-closed guard; the lane would boot "
@@ -428,3 +487,76 @@ def test_skills_mount_resolves_to_the_sibling_omnimarket_checkout() -> None:
         "Compose resolves a relative source against docker/, so a sibling "
         "checkout needs TWO levels up (../../omnimarket/...), not one."
     )
+
+
+@pytest.mark.integration
+def test_operator_tenant_path_blocks_false_ac3_provenance() -> None:
+    """OMN-15359 failure modes: missing cloud corpus, wrong DB principal,
+    cross-lane broker/consumer group, disabled outbox producer, or a bootstrap
+    API that starts before migration can all leave an apparently healthy lane
+    with no real tenant provenance. These assertions pin the rendered path;
+    the live AC3 receipt must still prove delivery and mapping end to end.
+    """
+    services = _compose_config_json()["services"]
+    migration = services["cloud-migration"]
+    api = services["onex-api"]
+    writer = services["projection-tenant-registry-writer"]
+
+    assert migration["environment"]["DB_USER"] == "role_omninode"
+    assert migration["environment"]["DB_NAME"] == "omninode_cloud"
+    assert migration["depends_on"]["forward-migration"]["condition"] == (
+        "service_completed_successfully"
+    )
+    assert migration["depends_on"]["cloud-migration-files"]["condition"] == (
+        "service_completed_successfully"
+    )
+    assert api["depends_on"]["cloud-migration"]["condition"] == (
+        "service_completed_successfully"
+    )
+    api_env = api["environment"]
+    assert api_env["OMNINODE_CLOUD_DB_URL"].startswith("postgresql://role_omninode:")
+    assert api_env["KAFKA_BOOTSTRAP_SERVERS"] == "redpanda:9092"
+    assert api_env["REDPANDA_ADMIN_URL"] == "http://redpanda:9644"
+    assert api_env["VALKEY_URL"].startswith("redis://:")
+    assert api_env["VALKEY_URL"].endswith("@valkey:6379")
+    assert api_env["BROKER_ACL_PROVIDER"] == "redpanda"
+    assert api_env["BROKER_QUOTA_PROVIDER"] == "deferred"
+    assert api_env["GATEWAY_P0B_PER_TENANT_CREDENTIALS"] == "disabled"
+    assert api_env["GATEWAY_BRIDGED_TENANT_SLUGS"] == ""
+    assert api_env["KEYCLOAK_ADMIN_CLIENT_SECRET"] == ""
+    assert (
+        api_env["TENANT_BOOTSTRAP_ADMIN_SECRET"]
+        == (RENDER_ONLY_SECRETS["TENANT_BOOTSTRAP_ADMIN_SECRET"])
+    )
+    assert api.get("ports", []) == []
+
+    writer_env = writer["environment"]
+    assert writer_env["KAFKA_BROKERS"] == "redpanda:9092"
+    assert writer_env["KAFKA_CONSUMER_GROUP"].startswith("lakshman.")
+    assert writer_env["OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY"] == (
+        "/etc/onex/projection-runtime-binding.yaml"
+    )
+    assert writer_env["OMNINODE_INTERNAL_DB_URL"].startswith(
+        "postgresql://omninode_runtime:"
+    )
+    assert writer["depends_on"]["cloud-migration"]["condition"] == (
+        "service_completed_successfully"
+    )
+    assert writer.get("ports", []) == []
+
+
+@pytest.mark.integration
+def test_operator_registry_binding_cannot_join_the_dev_consumer_group() -> None:
+    """A duplicate group would split tenant events across two consumers."""
+    services = _compose_config_json()["services"]
+    writer = services["projection-tenant-registry-writer"]
+    mounts = writer.get("volumes", [])
+    overlay = next(
+        Path(mount["source"])
+        for mount in mounts
+        if mount["target"] == "/etc/onex/projection-runtime-binding.yaml"
+    )
+    text = overlay.read_text(encoding="utf-8")
+    assert "lakshman.omnimarket-projections.tenant-registry-writer.consume.v1" in text
+    assert "env:OMNINODE_INTERNAL_DB_URL" in text
+    assert "local.omnimarket-projections.tenant-registry-writer.consume.v1" not in text

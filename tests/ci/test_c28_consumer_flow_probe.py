@@ -290,6 +290,33 @@ def test_red_when_a_truncated_page_carries_no_cursor() -> None:
     assert "truncated_pages_carry_a_cursor" in _mutate(mutate)
 
 
+@pytest.mark.parametrize("proven", [True, False])
+def test_full_final_page_requires_measured_end_proof(proven: bool) -> None:
+    obs = _green()
+    proof = {
+        "since": "9",
+        "beyond_row_count": 0,
+        "reread_next_cursor": None,
+        "proven": proven,
+    }
+    obs["cursor"]["pages"] = [
+        {
+            "row_count": 500,
+            "row_limit": 500,
+            "next_cursor": None,
+            "end_proof": proof,
+        }
+    ]
+    rec = probe.grade(obs)
+    check = next(c for c in rec.checks if c.name == "truncated_pages_carry_a_cursor")
+    assert check.ok is proven
+    assert _failed(rec) == (set() if proven else {check.name})
+    assert check.evidence == (
+        f"pages at row_limit with a null next_cursor: {[] if proven else [0]}"
+        f"; full final page proven the end by a since= read past it: {proof}"
+    )
+
+
 def test_red_when_the_walk_does_not_terminate() -> None:
     def mutate(obs: dict[str, Any]) -> None:
         obs["cursor"]["terminated"] = False
@@ -551,7 +578,8 @@ def test_the_workflow_runs_the_probe_beside_the_resolved_lane() -> None:
     assert "schedule" in triggers and "workflow_dispatch" in triggers
     assert "pull_request" not in triggers
     runs = "\n".join(str(s.get("run", "")) for s in job["steps"])
-    assert "scripts/ci/c28_consumer_flow_probe.py" in runs
+    assert "onex node node_board_probe_effect" in runs
+    assert "scripts/ci/c28_consumer_flow_probe.py" not in runs
     uploads = [
         s
         for s in job["steps"]

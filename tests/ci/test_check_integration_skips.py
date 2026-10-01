@@ -289,3 +289,37 @@ def test_every_path_the_guard_job_runs_is_declared_curated() -> None:
         f"does not declare them, so the config understates what the gate "
         f"covers: {undeclared}"
     )
+
+
+# --- OMN-20147 / OMN-18811 AC2: the runtime-backed suites tolerate zero skips ---
+
+_RUNTIME_BOOT_CONFIG = (
+    Path(__file__).resolve().parents[2]
+    / "scripts"
+    / "ci"
+    / "runtime_boot_suites_skip_guard.yaml"
+)
+
+_JUNIT_RUNTIME_ONE_SKIP = """<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="pytest" tests="2" skipped="1">
+ <testcase classname="tests.integration.registration.e2e.test_runtime_e2e.TestRuntime"
+   name="test_runs" time="0.1"/>
+ <testcase classname="tests.integration.registration.e2e.test_runtime_e2e.TestRuntime"
+   name="test_some_opt_in_feature">
+   <skipped type="pytest.skip" message="Some feature requires explicit opt-in"/>
+ </testcase>
+</testsuite></testsuites>"""
+
+
+def test_runtime_boot_suites_allow_no_optional_skip() -> None:
+    cfg = GuardConfig.load(_RUNTIME_BOOT_CONFIG)
+    assert cfg.allowed_optional_patterns == []
+
+
+def test_runtime_boot_suites_fail_on_any_skip(tmp_path: Path) -> None:
+    """Any skip, whatever its reason, is a violation under the strict guard."""
+    cfg = GuardConfig.load(_RUNTIME_BOOT_CONFIG)
+    report = tmp_path / "runtime-boot-suites.xml"
+    report.write_text(_JUNIT_RUNTIME_ONE_SKIP, encoding="utf-8")
+    violations = evaluate(parse_junit([report]), cfg, strict=True)
+    assert any("UNCLASSIFIED-SKIP" in v for v in violations)

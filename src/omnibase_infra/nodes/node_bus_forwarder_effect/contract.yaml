@@ -323,6 +323,10 @@ config:
       reconnect_backoff_max_seconds: 30
       reconnect_backoff_jitter_seconds: 0.5
       degraded_after_seconds: 60
+      # OMN-15629: a cloud-inbound topic the broker refuses (not authorized or
+      # missing) is peeled off the subscription with a WARNING and retried at
+      # this interval, so one refused topic never stops the others.
+      inbound_topic_retry_seconds: 300
     dedupe:
       key: "envelope_id"
       store: "sqlite"

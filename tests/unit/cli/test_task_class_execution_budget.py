@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Task-class execution budget resolution for the delegate CLI."""
+"""How the delegate CLI uses the execution budget the task-class contract declares."""
 
 from __future__ import annotations
 
@@ -11,60 +11,14 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.cli.cli_delegate import _terminal_wait_seconds, _write_payload
-from omnibase_infra.cli.model_task_class_execution_budget import (
-    ModelTaskClassExecutionBudget,
-)
-from omnibase_infra.cli.task_class_selection import (
-    TaskClassContractError,
-    resolve_task_class_execution_budget,
-)
+from tests.helpers.cli_registry_stand_in import StandInExecutionBudget
 
-
-def _contract(path: Path, *, budget: str = "") -> Path:
-    declared = budget or (
-        "    task_class_timeout_ceiling_seconds: 240\n"
-        "    terminal_delivery_margin_seconds: 60"
-    )
-    path.write_text(
-        f"execution_budgets:\n  document:\n{declared}\n",
-        encoding="utf-8",
-    )
-    return path
-
-
-@pytest.mark.unit
-def test_resolves_declared_execution_and_delivery_windows(tmp_path: Path) -> None:
-    budget = resolve_task_class_execution_budget(
-        _contract(tmp_path / "task_classes.yaml"), task_type="document"
-    )
-
-    assert budget.task_class_timeout_ceiling_seconds == 240
-    assert budget.terminal_delivery_margin_seconds == 60
-
-
-@pytest.mark.unit
-def test_refuses_an_execution_ceiling_that_reaches_port_wait(tmp_path: Path) -> None:
-    with pytest.raises(TaskClassContractError, match="less_than_equal"):
-        resolve_task_class_execution_budget(
-            _contract(
-                tmp_path / "task_classes.yaml",
-                budget=(
-                    "    task_class_timeout_ceiling_seconds: 300\n"
-                    "    terminal_delivery_margin_seconds: 60"
-                ),
-            ),
-            task_type="document",
-        )
-
-
-@pytest.mark.unit
-def test_refuses_a_selected_class_without_declared_budget(tmp_path: Path) -> None:
-    with pytest.raises(
-        TaskClassContractError, match="'research' declares no execution budget"
-    ):
-        resolve_task_class_execution_budget(
-            _contract(tmp_path / "task_classes.yaml"), task_type="research"
-        )
+# The budget itself -- its declared values, the 240-second ceiling bound and
+# the refusal of a class with no declared budget -- is the task-class
+# contract's, and is tested by its owner (omnimarket
+# tests/unit/inference/test_task_class_resolution_omn19407.py). The CLI reads
+# it through the registry (OMN-19407); what is tested here is only what the
+# CLI does with the budget it is handed.
 
 
 @pytest.mark.unit
@@ -93,7 +47,7 @@ def test_payload_omits_unrequested_timeout_and_preserves_explicit_request(
 
 @pytest.mark.unit
 def test_terminal_wait_uses_effective_requested_execution_plus_margin() -> None:
-    budget = ModelTaskClassExecutionBudget(
+    budget = StandInExecutionBudget(
         task_class_timeout_ceiling_seconds=240,
         terminal_delivery_margin_seconds=60,
     )

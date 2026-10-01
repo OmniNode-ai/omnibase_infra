@@ -85,19 +85,24 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - board_probe_results
               - ci_attempt_outcome
               - claude_agent_spans
               - claude_hook_events
               - consumer_flow_windows
               - delegate_skill_command_claims
+              - demo_readiness_latest
               - dod_verify_runs
               - gateway_link_health
+              - lab_container_memory_window
               - lab_lane_health
+              - lab_proof_receipts
               - live_events
               - log_entries
               - open_obligations
               - pr_landing_state
               - pr_landing_transitions
+              - pr_state
               - prod_promotion_gate_decisions
               - projection_watermarks
               - runner_fleet_liveness
@@ -109,6 +114,9 @@ databases:
               - topic_activity
               - topic_produce_windows
               - work_events
+              - work_ledger_rows
+              - work_ledger_state
+              - worktree_reconcile_hosts
             privileges: [INSERT, SELECT, UPDATE]
             schema: omninode_internal
           - object_type: TABLE
@@ -187,6 +195,10 @@ databases:
               - capability_scores
               - context_roi_scores
               - delegation_budget_state
+              - delegation_dispositions
+              - delegation_eval_item_verdicts
+              - delegation_eval_items
+              - delegation_eval_results
               - delegation_events
               - delegation_judge_verdict_events
               - delegation_routing_tenant_overlay
@@ -195,11 +207,15 @@ databases:
               - hook_events
               - instruction_eval_aggregate_snapshots
               - llm_cost_aggregates
+              - metering_summary
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
+              - provider_quota_state
               - savings_estimates
               - skill_execution_snapshots
               - tenant_inference_credentials
+              - usage_by_model_day
+              - usage_by_model_day_calls
             privileges: [INSERT, SELECT, UPDATE]
             schema: public
           - object_type: TABLE

@@ -8,14 +8,17 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
 import time
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from types import ModuleType
@@ -70,6 +73,7 @@ from deploy_agent.lane_lock_client import (
     lane_lock,
 )
 from deploy_agent.loaded_code import loaded_code_sha
+from deploy_agent.reconcile_host_lock import hold_reconcile_host_lock
 from deploy_agent.recreate_supervisor import (
     DEPS_COMPOSE_UP_FLOOR_SECONDS,
     DEPS_COMPOSE_UP_MARGIN_SECONDS,
@@ -86,6 +90,11 @@ from deploy_agent.routing import AGENT_CLONE_ROOT, RoutingTableError
 from deploy_agent.tracking_ref import (
     load_tracking_ref_from_env,
     load_tracking_remote_ref_from_env,
+)
+from deploy_agent.unit_drift import (
+    load_manifest,
+    own_unit_name_from_cgroup,
+    sync_own_unit,
 )
 
 # Maps deploy scope to catalog bundle names used by compose_gen.
@@ -150,6 +159,8 @@ REPOINT_ONEX_API_SCRIPT = (
 ONEX_API_SERVICE = "onex-api"
 REPOINT_TIMEOUT_SECONDS = 120
 ONEX_API_RECREATE_TIMEOUT_SECONDS = 300
+# OMN-20154: bound the wait for reconcile-host to finish rewriting build contexts.
+RECONCILE_HOST_LOCK_WAIT_SECONDS = 900
 
 PHASE_TIMEOUTS = {
     Phase.PREFLIGHT: 30,
@@ -884,6 +895,33 @@ def _decode_stream(stream: str | bytes | None) -> str:
     return str(stream)
 
 
+def build_failure_excerpt(stdout: str, *, limit: int = 4000) -> str:
+    """Extract BuildKit failure summaries, or the tail of other build output."""
+    lines = stdout.splitlines()
+    extracted: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if (
+            line == "------"
+            and index + 1 < len(lines)
+            and lines[index + 1].startswith(" > ")
+        ):
+            end = index + 2
+            while end < len(lines) and lines[end] != "------":
+                end += 1
+            if end < len(lines):
+                extracted.extend(lines[index : end + 1])
+                index = end + 1
+                continue
+        if re.match(r"#\d+ ERROR:", line):
+            extracted.append(line)
+        index += 1
+    if not extracted:
+        extracted = [line for line in lines if line.strip()][-40:]
+    return "\n".join(extracted)[-limit:] if limit > 0 else ""
+
+
 def _run(
     cmd: list[str],
     timeout: int,
@@ -908,6 +946,33 @@ def _run(
         cwd=cwd,
         env=env,
     )
+
+
+def _sync_own_unit_after_pull(agent_dir: str) -> str | None:
+    """Repair only our Linux unit and return its name when restart is needed.
+
+    OMN-20037: pulling the PATH fix left the installed unit stale for two days.
+    A re-exec cannot pick up systemd's changed unit environment; a restart can.
+    """
+    if sys.platform != "linux":
+        return None
+    try:
+        unit_name = own_unit_name_from_cgroup(Path("/proc/self/cgroup").read_text())
+    except OSError:
+        return None
+    if unit_name is None:
+        return None
+    repo_root = Path(agent_dir).resolve().parents[1]
+    changed = sync_own_unit(
+        load_manifest(repo_root / "deploy" / "unit-drift-manifest.yaml"),
+        unit_name=unit_name,
+        repo_root=repo_root,
+        hostname=socket.gethostname(),
+        home=Path.home(),
+        runner=lambda cmd: _run(cmd, timeout=60).returncode,
+        stamp=datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
+    )
+    return unit_name if changed else None
 
 
 def _uv_sync_after_pull(agent_dir: str, boundary: EnumSelfUpdateBoundary) -> None:
@@ -2253,6 +2318,30 @@ class DeployExecutor:
             # post-pull HEAD is known without a second rev-parse.
             disk_sha = remote_sha
 
+        # OMN-20037: even a current clone can have a stale installed unit.
+        try:
+            synced_unit = _sync_own_unit_after_pull(agent_dir)
+            if synced_unit is not None:
+                logger.info(
+                    "self_update[boundary=%s]: synced unit %s; restarting via systemd",
+                    boundary.value,
+                    synced_unit,
+                )
+                if on_before_reexec is not None:
+                    on_before_reexec()
+                subprocess.run(
+                    ["systemctl", "--user", "restart", synced_unit],
+                    check=True,
+                    timeout=60,
+                )
+                return
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "self_update[boundary=%s]: unit sync/restart failed: %s",
+                boundary.value,
+                exc,
+            )
+
         # STEP 2 -- decide whether to RE-EXEC, and decide it against the code
         # this process actually loaded. The clone being current with the remote
         # says nothing about that: an external reconciler resets this clone to
@@ -3043,29 +3132,36 @@ class DeployExecutor:
             # Build images first (both scopes), then bring them up.
             # _compose_build passes --build-arg GIT_SHA so Docker invalidates
             # the COPY src/ layer even when the file-system mtime is cached.
-            self._compose_build(
-                Scope.CORE,
-                git_sha,
-                on_phase_update,
-                build_source=build_source,
-                runtime_lane=lane,
-                git_ref=git_ref,
-            )
-            self._compose_build(
-                Scope.RUNTIME,
-                git_sha,
-                on_phase_update,
-                build_source=build_source,
-                runtime_lane=lane,
-                git_ref=git_ref,
-            )
-            self._build_dev_lane_only_services(
-                git_sha,
-                on_phase_update,
-                build_source=build_source,
-                lane=lane,
-                git_ref=git_ref,
-            )
+            # OMN-20154: hold from staging through the LAST build, which reuses
+            # staged provenance a reconcile checkout would reset to a placeholder.
+            with hold_reconcile_host_lock(
+                os.environ.get("OMNI_HOME", "").strip(),
+                purpose=f"deploy-agent image build {git_sha[:12]}",
+                wait_seconds=RECONCILE_HOST_LOCK_WAIT_SECONDS,
+            ):
+                self._compose_build(
+                    Scope.CORE,
+                    git_sha,
+                    on_phase_update,
+                    build_source=build_source,
+                    runtime_lane=lane,
+                    git_ref=git_ref,
+                )
+                self._compose_build(
+                    Scope.RUNTIME,
+                    git_sha,
+                    on_phase_update,
+                    build_source=build_source,
+                    runtime_lane=lane,
+                    git_ref=git_ref,
+                )
+                self._build_dev_lane_only_services(
+                    git_sha,
+                    on_phase_update,
+                    build_source=build_source,
+                    lane=lane,
+                    git_ref=git_ref,
+                )
             # OMN-18640: the deps leg of a FULL rebuild CONVERGES rather than
             # recreates. A FULL rebuild is a request to rebuild and replace the
             # RUNTIME images; the broker, the database and the cache are
@@ -3096,22 +3192,29 @@ class DeployExecutor:
                 services_for_scope(Scope.FULL, lane=lane), lane
             )
 
-        self._compose_build(
-            scope,
-            git_sha,
-            on_phase_update,
-            build_source=build_source,
-            runtime_lane=lane,
-            git_ref=git_ref,
-        )
-        if scope == Scope.RUNTIME:
-            self._build_dev_lane_only_services(
+        # OMN-20154: span staging through the LAST build so reconcile-host
+        # cannot reset staged provenance before the dev-only build consumes it.
+        with hold_reconcile_host_lock(
+            os.environ.get("OMNI_HOME", "").strip(),
+            purpose=f"deploy-agent image build {git_sha[:12]}",
+            wait_seconds=RECONCILE_HOST_LOCK_WAIT_SECONDS,
+        ):
+            self._compose_build(
+                scope,
                 git_sha,
                 on_phase_update,
                 build_source=build_source,
-                lane=lane,
+                runtime_lane=lane,
                 git_ref=git_ref,
             )
+            if scope == Scope.RUNTIME:
+                self._build_dev_lane_only_services(
+                    git_sha,
+                    on_phase_update,
+                    build_source=build_source,
+                    lane=lane,
+                    git_ref=git_ref,
+                )
         self._compose_up(phase, scope, services, on_phase_update, lane=lane)
         # After the infra family, never before it: the forwarder mirrors off
         # this lane's broker, so deploying it against a lane that is still
@@ -3985,12 +4088,22 @@ class DeployExecutor:
             ) from exc
         if result.returncode != 0:
             on_phase_update(build_phase, PhaseStatus.FAILED)
+            excerpt = build_failure_excerpt(_decode_stream(result.stdout))
+            step_output = ""
+            if excerpt:
+                logger.error(
+                    "Failing build step output for profile %s:\n%s", profile, excerpt
+                )
+                step_output = (
+                    "\n--- failing build step output (compose writes BuildKit progress to stdout) ---\n"
+                    + excerpt
+                )
             raise RuntimeError(
                 f"{EnumBuildOutcome.BUILD_ERRORED.value}: docker compose build "
                 f"for profile {profile!r} exited {result.returncode} inside its "
                 f"{timeout}s ceiling -- this is a BROKEN BUILD, not an exhausted "
                 f"budget, and retrying it unchanged buys nothing: "
-                f"{result.stderr}"
+                f"{result.stderr}{step_output}"
             )
 
     def _record_compose_invocation(self, phase: Phase, cmd: Sequence[str]) -> None:
@@ -4815,7 +4928,41 @@ class DeployExecutor:
 
         settled: list[ModelHealthCheck] = []
         pending_timeout: subprocess.TimeoutExpired | None = None
+        earlier_target_failed = False
         for service, port, check, timed_out in probes:
+            if check.status == "fail":
+                if earlier_target_failed:
+                    # OMN-20238: this reading was taken up front, BEFORE the
+                    # earlier target's failure was settled, and settling it
+                    # (a declared-start wait, a recreate) takes minutes. On the
+                    # dev-202 lane, 2026-09-30, every full deploy probed
+                    # runtime-effects seconds after it started, waited ~321s
+                    # on omninode-runtime, then recreated a runtime-effects
+                    # that had been answering healthy for over a minute, on
+                    # the stale reading. One fresh probe settles which it is;
+                    # a target still failing on it (the OMN-18640 wedge) goes
+                    # on to the wait and the single recreate exactly as
+                    # before. The rule is structural, not a clock: a target
+                    # with no earlier failure keeps its up-front reading.
+                    logger.info(
+                        "%s re-taking failed up-front reading after an earlier "
+                        "failed target was settled (OMN-20238)",
+                        check.endpoint,
+                    )
+                    check, timed_out = self._probe_runtime_health(
+                        service=service, port=port
+                    )
+                    if check.status == "pass":
+                        check = check.model_copy(
+                            update={
+                                "detail": (
+                                    "up-front reading was taken before an earlier "
+                                    "target's start wait and was re-taken "
+                                    "(OMN-20238)"
+                                )
+                            }
+                        )
+                earlier_target_failed = True
             if check.status == "fail" and lane in VERIFY_RECREATE_LANES:
                 check, timed_out = self._await_declared_start(
                     lane=lane,
