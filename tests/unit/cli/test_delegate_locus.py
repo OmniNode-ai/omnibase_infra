@@ -149,7 +149,7 @@ class TestLocusResolution:
         _stub_groups(monkeypatch, ())
         decision = resolve_delegate_locus(
             requested=EnumDelegateLocus.IN_PROCESS,
-            bus=_BUS_KAFKA,
+            bus=_BUS_INMEMORY,
             kafka_bootstrap=None,
             contract_path=contract,
             shared_bus_value=_BUS_KAFKA,

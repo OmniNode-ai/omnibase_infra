@@ -8,7 +8,7 @@ executor, but it was read as though it did, so a "dev-lane probe" issued as
 caller's own venv and its result was reported as a statement about ``.201``.
 The instrument produced a confident answer about a machine it never touched.
 
-Two rules make that impossible here:
+Three rules make that impossible here:
 
 1. **Locus is resolved, never assumed.** It follows the transport by default —
    a shared bus means somebody else consumes, an in-memory bus means nobody
@@ -19,6 +19,8 @@ Two rules make that impossible here:
    broker, refuses the run. It never silently degrades to in-process, because
    a degraded lane probe is worse than no lane probe: it still prints a
    receipt.
+3. **An in-process run never shares a broker with a deployed orchestrator**
+   (OMN-20236).
 
 .. versionadded:: OMN-17304
 """
@@ -249,9 +251,9 @@ def resolve_delegate_locus(
         )
 
     if locus is EnumDelegateLocus.IN_PROCESS:
-        # Best-effort for an in-process run: the topic is informational there
-        # (the runtime publishes and consumes it inside this process), and a
-        # contract that does not declare one is a legitimate shape for a
+        # Best-effort for an in-process run: the topic is informational only
+        # on an in-memory bus, where the runtime publishes and consumes it
+        # inside this process. A contract without a topic is legitimate for a
         # single-handler workflow. A dispatched run is the opposite — the
         # topic IS the interface to the other runtime — so it refuses below.
         try:
@@ -264,6 +266,17 @@ def resolve_delegate_locus(
                 exc,
             )
             command_topic = ""
+        if on_shared_bus and command_topic:
+            raise DelegateLocusRefusedError(
+                f"--locus in-process on a shared bus causes double dispatch: "
+                f"the start command lands on the shared topic '{command_topic}', "
+                "which the deployed orchestrator consumes now or from its "
+                "committed offset when it next starts, so the run executes "
+                "twice and the second copy overwrites the first in the "
+                "projection (OMN-20236). Use --locus deployed-lane for one "
+                "dispatch on the lane, or --bus inmemory for a true in-process "
+                "run that publishes nothing to a shared broker."
+            )
         logger.info(
             "onex delegate: execution locus IN-PROCESS (%s) — the accept/climb "
             "decision is made by %s in THIS process; this run is not evidence "
@@ -366,7 +379,7 @@ def _assert_dispatch_viable(
                 f"cannot confirm a deployed orchestrator is consuming "
                 f"'{command_topic}': {exc} Refusing rather than running here and "
                 "reporting it as a lane result. Add the grant to the lane's "
-                "declared broker ACLs and apply them, or pass --locus "
+                "declared broker ACLs and apply them, or pass --bus inmemory --locus "
                 "in-process to run it locally on purpose.",
                 group_ids=exc.group_ids,
             ) from exc
@@ -376,7 +389,7 @@ def _assert_dispatch_viable(
                 f"'{command_topic}' ({exc}). A lane probe that cannot verify "
                 "the lane is not a lane probe — refusing rather than running "
                 "here and reporting it as a lane result. Fix the broker "
-                "address, or pass --locus in-process to run it locally on "
+                "address, or pass --bus inmemory --locus in-process to run it locally on "
                 "purpose."
             ) from exc
         waited = _monotonic() - started
@@ -401,7 +414,7 @@ def _assert_dispatch_viable(
                 f"bound for the {REBIND_WINDOW_FAILURE_CLASS} class "
                 f"({_REBIND_WAIT_SECONDS:.0f} s, OMN-18843), so this is a lane "
                 "that is down, not one that is rebinding. Start the runtime "
-                "that consumes this topic, or pass --locus in-process to run "
+                "that consumes this topic, or pass --bus inmemory --locus in-process to run "
                 "it here on purpose."
             )
         logger.warning(
