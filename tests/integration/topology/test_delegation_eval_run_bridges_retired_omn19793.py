@@ -15,9 +15,12 @@ This module asserts that the deletion stuck and did not drop what it bridged:
 
 1. no supplemental bridge for either relation remains;
 2. the vendored migration lineage and the shipped topology instances still
-   grant both relations to ``tenant_projection_writer``; and
-3. when the pinned omnimarket checkout is present, the pinned contracts alone
-   declare both relations ``read_write`` in ``application.public``.
+   grant both relations to ``tenant_projection_writer``.
+
+That the pinned contracts declare both relations is not asserted here: the
+generator's ``--check --prove`` already fails on a shipped grant no contract
+declares, and a test needing the pinned checkout would be collected and skipped
+in the split jobs.
 """
 
 from __future__ import annotations
@@ -29,7 +32,6 @@ import yaml
 
 from omnibase_infra.topology.table_grant_derivation import (
     LEGACY_MIGRATION_TABLE_DECLARATIONS,
-    load_contract_declarations,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -39,15 +41,6 @@ _RELATIONS = {
     "delegation_eval_item_verdicts": "0003_create_delegation_eval_item_verdicts.sql",
     "delegation_eval_results": "0004_create_delegation_eval_results.sql",
 }
-_PROOF_DEPENDENCIES = _REPO_ROOT / ".proof-dependencies"
-_CONTRACTS_SUFFIX = ("src", "omnimarket", "nodes")
-
-
-def _pinned_contracts_root() -> Path:
-    mirror = _PROOF_DEPENDENCIES.joinpath("omnimarket-pin", *_CONTRACTS_SUFFIX)
-    if mirror.is_dir():
-        return mirror
-    return _PROOF_DEPENDENCIES.joinpath("omnimarket", *_CONTRACTS_SUFFIX)
 
 
 class TestTheDelegationEvalRunBridgesWereRetired:
@@ -98,20 +91,3 @@ class TestTheDelegationEvalRunBridgesWereRetired:
             "retiring the bridge must leave the shipped grant byte-identical"
         )
         assert set(shipped[0]["privileges"]) == {"SELECT", "INSERT", "UPDATE"}
-
-    @pytest.mark.skipif(
-        not _pinned_contracts_root().is_dir(),
-        reason="requires the pinned omnimarket checkout under .proof-dependencies",
-    )
-    @pytest.mark.parametrize("relation", sorted(_RELATIONS))
-    def test_the_pinned_contracts_declare_it(self, relation: str) -> None:
-        declared = [
-            declaration.table
-            for declaration in load_contract_declarations(_pinned_contracts_root())
-            if declaration.table.name == relation
-        ]
-        assert declared, f"the pinned omnimarket contracts do not declare {relation}"
-        for table in declared:
-            assert table.database_ref == "application"
-            assert table.schema == "public"
-            assert table.access == "read_write"
