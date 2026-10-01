@@ -106,6 +106,7 @@ _PINNED_CONTRACTS = _pinned_contracts_root(_PROOF_DEPENDENCIES)
 # contract; add it in the same pull request that vendors it, and this module
 # will tell you when to take it out.
 _INTERIM_ENTRIES: dict[str, str] = {
+    "delegation_dispositions": "omnimarket OMN-20242 (node_projection_delegation_disposition)",
     "provider_quota_state": "omnimarket#3134",
     "demo_readiness_latest": "omnimarket OMN-19861 (node_projection_demo_readiness)",
 }

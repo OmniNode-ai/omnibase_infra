@@ -50,7 +50,7 @@
     },
     {
       "endpoint": "http://192.168.86.202:8000/v1/models",
-      "probed_at": "2026-09-22T22:39:22Z",
+      "probed_at": "2026-10-01T04:20:12Z",
       "command": "docker exec omninode-runtime-effects python -c \"urllib.request.urlopen('http://192.168.86.202:8000/v1/models', timeout=5)\" (run on 192.168.86.201, dev lane compose project omnibase-infra, so the reachability recorded is the runtime's own)",
       "http_status": 200,
       "reachable": true,
@@ -58,10 +58,10 @@
         "Qwen3.8-27B"
       ],
       "owned_by": "llamacpp",
-      "max_model_len": 32768,
+      "max_model_len": 65536,
       "max_model_len_source": "llama.cpp reports the per-slot context as data[].meta.n_ctx rather than max_model_len; the value is that field",
-      "control": "Negative control in the same process with the same call: http://192.168.86.202:8001/v1/models raised URLError Errno 111 Connection refused in 0.001s, so the http=200 in 0.015s on :8000 is that port answering. Keyless per RULING ledger 5474 (no Authorization header sent).",
-      "revalidation_note": "OMN-19187. omnipc2, the second RTX 4090 host, serving the same Qwen3.8-27B weights as .201 under llama.cpp. Recorded so a lab lane overlay may bind it (OMN-17099); binding it is a lane-overlay change, not a product change."
+      "control": "Negative control in the same process with the same call: http://192.168.86.202:8001/v1/models raised URLError Errno 111 Connection refused in 0.001s, so the http=200 in 0.01s on :8000 is that port answering. Keyless per RULING ledger 5474 (no Authorization header sent).",
+      "revalidation_note": "OMN-19187. omnipc2, the second RTX 4090 host, serving the same Qwen3.8-27B weights as .201 under llama.cpp. Recorded so a lab lane overlay may bind it (OMN-17099); binding it is a lane-overlay change, not a product change. OMN-20240 (2026-10-01): re-probed after the operator-consented restart of llamacpp-gpu0 with -c 65536 (ledger OPERATOR-CONSENT 2026-10-01T03:51:07Z lane=model-servers-0c2f); data[].meta.n_ctx and /props default_generation_settings.n_ctx both read 65536 with 4 slots. With --kv-unified that value is one KV pool shared by the 4 slots, as the 32768 it replaces was."
     },
     {
       "endpoint": "http://192.168.86.201:8002/v1/models",
