@@ -354,6 +354,8 @@ def test_ci_bus_requires_its_advertise_host_and_credentials(
         "CI_BUS_REDPANDA_ADVERTISE_HOST:?",
         "CI_BUS_KAFKA_SASL_USERNAME:?",
         "CI_BUS_KAFKA_SASL_PASSWORD:?",
+        "CI_BUS_LABWORK_SASL_USERNAME:?",
+        "CI_BUS_LABWORK_SASL_PASSWORD:?",
     ):
         assert required in raw, (
             f"{required[:-2]} must use the `:?` required form. A `:-` default "
@@ -364,6 +366,8 @@ def test_ci_bus_requires_its_advertise_host_and_credentials(
         "CI_BUS_REDPANDA_ADVERTISE_HOST:-",
         "CI_BUS_KAFKA_SASL_USERNAME:-",
         "CI_BUS_KAFKA_SASL_PASSWORD:-",
+        "CI_BUS_LABWORK_SASL_USERNAME:-",
+        "CI_BUS_LABWORK_SASL_PASSWORD:-",
     ):
         assert forbidden not in raw, (
             f"{forbidden[:-2]} must never carry a `:-` default."
@@ -385,9 +389,10 @@ def test_ci_bus_topics_are_exactly_the_ci_bus_set(ci_bus: dict[str, Any]) -> Non
     The gate is therefore replaced rather than excused: an edit to that list is a
     red test here. The exclusion without this assertion would be a hole.
 
-    THE FIVE NAMES. Four are the topics the thin CI publishers write to; the fifth
+    THE FIVE CI NAMES. Four are the topics the thin CI publishers write to; the fifth
     is consumed by the rebuild trigger when it waits for a rebuild, so it rides the
-    same broker and is provisioned with them.
+    same broker and is provisioned with them. Eleven lab-work bus topics cover
+    lab-work units, host capacity, focused test runs and push validation (OMN-20213).
     """
     expected = {
         "onex.cmd.omnimarket.occ-autobind.v1",  # onex-topic-allow: OMN-18691 CI-bus provisioning set
@@ -395,6 +400,17 @@ def test_ci_bus_topics_are_exactly_the_ci_bus_set(ci_bus: dict[str, Any]) -> Non
         "onex.evt.github.pr-merged.v1",  # onex-topic-allow: OMN-18691
         "onex.cmd.omnimarket.redeploy-start.v1",  # onex-topic-allow: OMN-18691
         "onex.evt.deploy.rebuild-completed.v1",  # onex-topic-allow: OMN-18691
+        "onex.cmd.omnimarket.lab-work-unit-requested.v1",  # onex-topic-allow: OMN-20213
+        "onex.evt.omnimarket.lab-work-unit-completed.v1",  # onex-topic-allow: OMN-20213
+        "onex.evt.omnimarket.lab-work-unit-failed.v1",  # onex-topic-allow: OMN-20213
+        "onex.evt.omnimarket.lab-host-capacity-advertised.v1",  # onex-topic-allow: OMN-20213
+        "onex.cmd.omnimarket.focused-test-run-requested.v1",  # onex-topic-allow: OMN-20213
+        "onex.evt.omnimarket.focused-test-run-completed.v1",  # onex-topic-allow: OMN-20213
+        "onex.evt.omnimarket.focused-test-run-failed.v1",  # onex-topic-allow: OMN-20213
+        "onex.cmd.omnimarket.push-validation-requested.v1",  # onex-topic-allow: OMN-20213
+        "onex.evt.omnimarket.push-validation-completed.v1",  # onex-topic-allow: OMN-20213
+        "onex.evt.omnimarket.push-validation-failed.v1",  # onex-topic-allow: OMN-20213
+        "onex.dlq.omnimarket.push-validation.v1",  # onex-topic-allow: OMN-20213
     }
 
     raw = CI_BUS_COMPOSE.read_text(encoding="utf-8")
@@ -409,7 +425,7 @@ def test_ci_bus_topics_are_exactly_the_ci_bus_set(ci_bus: dict[str, Any]) -> Non
     )
 
     # Cross-check the one name this repo owns a canonical constant for. The other
-    # four are declared in omnimarket's topic registry, which this repo does not
+    # fifteen are declared in omnimarket's topic registry, which this repo does not
     # import -- stated rather than left as an apparent omission.
     from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_GITHUB_PR_MERGED
 
@@ -417,6 +433,63 @@ def test_ci_bus_topics_are_exactly_the_ci_bus_set(ci_bus: dict[str, Any]) -> Non
         "the canonical pr-merged topic constant no longer matches the name the "
         "CI-bus one-shot creates. The registry moved and this file did not."
     )
+
+
+def test_ci_bus_labwork_principal_is_scoped_not_superuser(
+    ci_bus: dict[str, Any],
+) -> None:
+    """OMN-20213: the second login is scoped, never the superuser.
+
+    The consent row puts superuser-on-laptops and hand-typed users out of scope.
+    A declared one-shot must grant only provisioned lab topics and prefixed
+    consumer groups after the publisher's SASL flip completes.
+    """
+    services = ci_bus.get("services") or {}
+    assert "ci-bus-labwork-user" in services
+    service = services["ci-bus-labwork-user"]
+    command = "\n".join(service["command"])
+    for wildcard in ("--topic '*'", '--topic "*"', r"--topic \*"):
+        assert wildcard not in command
+    assert "cluster config set superusers" not in command
+    assert "--resource-pattern-type prefixed" in command
+    # The CI topic is checked only by the refusal branch, never granted.
+    ci_topic = "onex.evt.github.pr-merged.v1"  # onex-topic-allow: OMN-20213
+    assert command.count(ci_topic) == 1
+    assert re.search(
+        r"if [^\n]*grep -qx onex\.evt\.github\.pr-merged\.v1; then\n"
+        r"[^\n]*\n\s*exit 1\n\s*fi",
+        command,
+    )
+    assert service["depends_on"]["ci-bus-sasl-enable"] == {
+        "condition": "service_completed_successfully"
+    }
+    lab_topics = re.search(r'LAB_TOPICS="([^"]+)"', command)
+    assert lab_topics is not None, "the lab-work ACL grant set must be explicit"
+    granted = lab_topics.group(1).split()
+    assert len(granted) == 11
+    assert '--resource-pattern-type literal --topic "$$t"' in command
+    topics_command = "\n".join(services["ci-bus-topics"]["command"])
+    declared = set(re.findall(r"onex\.[a-z]+\.[a-z0-9.-]+\.v\d+", topics_command))
+    assert set(granted) <= declared, "every lab-work grant must name a declared topic"
+    # Include any separately added literal grant, not just the LAB_TOPICS loop.
+    referenced = set(re.findall(r"onex\.[a-z]+\.[a-z0-9.-]+\.v\d+", command))
+    assert referenced <= declared, "lab-work ACLs and controls must use declared topics"
+
+
+def test_ci_bus_topics_one_shot_authenticates_once_sasl_is_on(
+    ci_bus: dict[str, Any],
+) -> None:
+    """OMN-20213: re-apply must not deadlock topics behind the SASL flip.
+
+    Once enable_sasl is true, unauthenticated topic provisioning fails and the
+    dependent ci-bus-sasl-enable cannot run. Read state over the ungated admin
+    API and authenticate as the publisher before touching the Kafka listener.
+    """
+    command = "\n".join(ci_bus["services"]["ci-bus-topics"]["command"])
+    assert 'ADMIN="-X admin.hosts=redpanda:9644"' in command
+    assert "cluster config get enable_sasl $$ADMIN" in command
+    assert 'if [ "$$SASL_ENABLED" = true ]; then' in command
+    assert "sasl.mechanism=SCRAM-SHA-256" in command
 
 
 def test_ci_bus_topics_are_created_explicitly_not_auto(

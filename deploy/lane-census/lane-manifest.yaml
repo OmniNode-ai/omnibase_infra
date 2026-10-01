@@ -1374,6 +1374,8 @@ lanes:
         kind: oneshot
       - name: omninode-ci-bus-sasl-enable
         kind: oneshot
+      - name: omninode-ci-bus-labwork-user
+        kind: oneshot
 # ---------------------------------------------------------------------------
 # hook_edge — which lane the Claude Code hook edge publishes to (OMN-17204)
 # ---------------------------------------------------------------------------
