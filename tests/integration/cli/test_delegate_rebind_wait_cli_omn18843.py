@@ -22,6 +22,7 @@ import click
 import pytest
 import yaml
 
+from omnibase_infra.backends.model_consumer_group_owner import ModelConsumerGroupOwner
 from omnibase_infra.cli import cli_delegate, delegate_locus
 from omnibase_infra.cli.cli_delegate import run_delegate
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
@@ -77,13 +78,20 @@ def harness(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 def _answer(monkeypatch: pytest.MonkeyPatch, answers: list[tuple[str, ...]]) -> None:
-    asked: list[int] = []
+    asked: list[dict[str, object]] = []
 
     def _fake(
-        *, topic: str, bootstrap_servers: str | None, timeout: float
+        *,
+        topic: str,
+        bootstrap_servers: str | None,
+        timeout: float,
+        owner: ModelConsumerGroupOwner | None = None,
     ) -> tuple[str, ...]:
         assert topic == _COMMAND_TOPIC
-        asked.append(1)
+        assert owner == ModelConsumerGroupOwner(
+            service="omnimarket", node="node_delegate_skill_orchestrator"
+        )
+        asked.append({"topic": topic, "owner": owner})
         return answers[min(len(asked), len(answers)) - 1]
 
     monkeypatch.setattr(delegate_locus, "live_consumer_groups", _fake)
