@@ -7,9 +7,11 @@
 SCOPE — read this before trusting a green run (OMN-14516):
     These tests drive the handler seam against a REAL PostgreSQL instance:
 
-    1. ``HandlerLedgerProjection.handle(envelope)`` -- the actual auto-wiring
-       dispatch entrypoint, invoked with the DICT-shaped envelope the live
-       dispatch path delivers (NOT ``project()``, and NOT an object envelope).
+    1. The auto-wiring dispatch callback wrapping
+       ``HandlerLedgerProjection.handle`` -- invoked with the DICT-shaped
+       envelope the live dispatch path delivers (NOT ``project()``). The
+       callback materializes the contract ``event_model`` and passes ``handle``
+       a typed ``ModelEventMessage`` (OMN-14823 def-B).
     2. ``IntentEffectDispatchBridge`` -- the single generic intent effect the
        kernel DERIVES for every audit/projection consumer (OMN-14516). It carries
        the emitted intent's payload to the write effect's canonical ``handle()``,
@@ -105,14 +107,42 @@ class TestLedgerE2EPipeline:
             offset=str(unique_offset),
         )
 
-        # Step 1: dispatch entrypoint. handle() -- not project() -- is what
-        # auto-wiring actually invokes, and it receives a DICT envelope on the
-        # live path. Calling project() here would bypass the exact method whose
-        # absence kept this table empty.
+        # Step 1: dispatch entrypoint. The auto-wiring dispatch callback -- not
+        # project() -- is what the runtime actually invokes, and it receives a
+        # DICT envelope on the live path. Since the canonical def-B flip
+        # (OMN-14823) the callback materializes the contract-declared
+        # event_model (ModelEventMessage) and hands handle() the typed model.
+        # Calling project() or handle() directly would bypass that seam.
+        from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+            _make_dispatch_callback,
+        )
+        from omnibase_infra.runtime.auto_wiring.models import ModelHandlerRef
         from omnibase_infra.runtime.intent_effects import IntentEffectDispatchBridge
+        from omnibase_infra.runtime.message_dispatch_engine import (
+            MessageDispatchEngine,
+        )
 
-        output = await projection_handler.handle({"payload": message.model_dump()})
-        intent = output.result
+        # The exact dict the live engine hands every dispatcher
+        # ({"payload", "__bindings", "__debug_trace"}), built by the engine's
+        # own materializer rather than a hand-written approximation.
+        materialized = MessageDispatchEngine()._materialize_envelope_with_bindings(
+            {"payload": message, "correlation_id": correlation_id},
+            {},
+            message.topic,
+        )
+        callback = _make_dispatch_callback(
+            projection_handler,
+            event_model=ModelHandlerRef(
+                name="ModelEventMessage",
+                module="omnibase_infra.event_bus.models.model_event_message",
+            ),
+        )
+        # The engine hands dispatchers this dict despite DispatcherFunc naming
+        # ModelEventEnvelope (message_dispatch_engine.py dispatch phase).
+        dispatch_result = await callback(materialized)  # type: ignore[arg-type]
+        assert dispatch_result is not None
+        assert len(dispatch_result.output_intents) == 1
+        intent = dispatch_result.output_intents[0]
 
         assert intent.intent_type
         assert intent.payload.intent_type == "ledger.append"

@@ -694,6 +694,11 @@ class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
 
         mock_container = MagicMock(spec=ModelONEXContainer)
         pg = _resolve_postgres_config()
+        # node_registrations is handler-owned: no file in docker/migrations
+        # creates it. The runtime constructs this handler with
+        # auto_create_schema=True (node_registration_orchestrator/plugin.py),
+        # so the test does the same instead of depending on another test
+        # having created the table first.
         handler = HandlerRegistrationStoragePostgres(
             container=mock_container,
             host=pg["host"],
@@ -701,6 +706,7 @@ class TestPostgresHandlerSwapping(BaseHandlerSwappingTests):
             database=pg["database"],
             user=pg["user"],
             password=pg["password"],
+            auto_create_schema=True,
         )
 
         yield handler

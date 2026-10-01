@@ -85,12 +85,6 @@ suites:
     job: nightly-integration / "Run integration tests"
     selected_by: >-
       pytest tests/integration/ -m "integration and not bastion" — the module is kafka-marked and integration-marked, and the nightly filter selects both. The broker is the dockerized e2e stack's Redpanda; KAFKA_BOOTSTRAP_SERVERS is written to $GITHUB_ENV by the "Resolve reachable e2e connectivity host" step. Verified 2026-09-18.
-  tests/integration/runtime/test_golden_chain_live_runtime.py:
-    env_vars: [KAFKA_BOOTSTRAP_SERVERS]
-    workflow: .github/workflows/nightly-integration.yml
-    job: nightly-integration / "Run integration tests"
-    selected_by: >-
-      Same selection and same broker as the adapter suite above. Verified 2026-09-18.
   tests/integration/runtime/test_kafka_contract_source_integration.py:
     env_vars: [KAFKA_BOOTSTRAP_SERVERS]
     workflow: .github/workflows/nightly-integration.yml
