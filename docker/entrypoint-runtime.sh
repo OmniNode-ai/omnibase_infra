@@ -35,6 +35,11 @@ if [ "$(id -u)" -eq 0 ]; then
   echo "[entrypoint] Bootstrapping runtime volume ownership..."
   install -d -o omniinfra -g omniinfra /app/data /app/data/delegation /app/logs /app/tmp
   chown -R omniinfra:omniinfra /app/data /app/logs /app/tmp
+  # The runtime-owned secret store (OMN-17099): a named volume mounted under the
+  # runtime user's home is root-owned when fresh, and the process below runs as
+  # omniinfra, so it could neither read nor create the store until repaired.
+  install -d -o omniinfra -g omniinfra /home/omniinfra/.omninode /home/omniinfra/.omninode/delegation
+  chown -R omniinfra:omniinfra /home/omniinfra/.omninode
   exec gosu omniinfra "$0" "$@"
 fi
 

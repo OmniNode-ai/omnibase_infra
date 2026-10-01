@@ -301,17 +301,57 @@ def test_cloud_locale_declares_zero_local_backends() -> None:
 
 
 @pytest.mark.unit
-def test_cloud_locale_listing_a_backend_is_rejected_naming_lane_and_rule() -> None:
+def test_cloud_locale_rejects_declared_local_backend_naming_lane_and_rule() -> None:
     """A cloud lane may not smuggle a lab endpoint in through the overlay."""
     with pytest.raises(ValidationError) as excinfo:
         ModelBifrostLaneOverlay.model_validate(
-            _overlay(lane="onex-dev", locale="cloud", backends=[_binding()])
+            _overlay(
+                lane="onex-dev",
+                locale="cloud",
+                backends=[
+                    _binding(
+                        provider="openai",
+                        tier="local",
+                        credential={"kind": "none"},
+                    )
+                ],
+            )
         )
 
     message = str(excinfo.value)
     assert "'onex-dev'" in message
     assert "locale 'cloud'" in message
     assert "local-coder" in message
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("declared", [False, True])
+def test_cloud_locale_accepts_nonlocal_backend_bindings(declared: bool) -> None:
+    declaration: dict[str, object] = (
+        {
+            "provider": "gemini",
+            "tier": "frontier_api",
+            "credential": {"kind": "secret_ref", "secret_ref": "llm.custom.api_key"},
+        }
+        if declared
+        else {}
+    )
+    binding = {
+        **_binding(
+            endpoint_url="https://cloud.example.invalid/v1/chat/completions",
+            served_model_id="operator-chosen-gemini",
+            **declaration,
+        ),
+        "backend_id": "cloud-custom",
+    }
+    overlay = ModelBifrostLaneOverlay.model_validate(
+        _overlay(lane="onex-dev", locale="cloud", backends=[binding])
+    )
+
+    assert overlay.locale is EnumBifrostLaneLocale.CLOUD
+    assert overlay.backends[0].backend_key == "cloud-custom"
+    assert overlay.backends[0].advertised_model == "operator-chosen-gemini"
+    assert overlay.backends[0].declares_new_backend is declared
 
 
 @pytest.mark.unit

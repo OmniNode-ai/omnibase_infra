@@ -411,7 +411,7 @@ lanes:
     hosts: [lab-201]
     compose_file: docker/docker-compose.generated.yml
     compose_project: omnibase-infra
-    network: omnibase-infra_default
+    network: omnibase-infra-network
     image_tag_pattern: '.+'
     optional: true
     services:
@@ -629,7 +629,7 @@ lanes:
     hosts: [lab-201]
     compose_file: docker/docker-compose.principal-issuer.yml
     compose_project: omnibase-infra-principal-issuer
-    network: omnibase-infra_default
+    network: omnibase-infra-network
     image_tag_pattern: '.+'
     optional: true
     services:

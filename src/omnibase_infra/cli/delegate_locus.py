@@ -8,17 +8,20 @@ executor, but it was read as though it did, so a "dev-lane probe" issued as
 caller's own venv and its result was reported as a statement about ``.201``.
 The instrument produced a confident answer about a machine it never touched.
 
-Two rules make that impossible here:
+Three rules make that impossible here:
 
 1. **Locus is resolved, never assumed.** It follows the transport by default —
    a shared bus means somebody else consumes, an in-memory bus means nobody
    can — and an explicit ``--locus`` says so in the record.
 2. **A dispatched run fails closed.** Before publishing, the exact command
    topic (read from the contract, not from a constant here) must have a live
-   ``STABLE`` consumer group bound to it. No consumer, or an unanswerable
+   ``STABLE`` consumer group owned by the contract's node bound to it
+   (OMN-20235). No consumer, or an unanswerable
    broker, refuses the run. It never silently degrades to in-process, because
    a degraded lane probe is worse than no lane probe: it still prints a
    receipt.
+3. **An in-process run never shares a broker with a deployed orchestrator**
+   (OMN-20236).
 
 .. versionadded:: OMN-17304
 """
@@ -38,6 +41,7 @@ from omnibase_infra.backends.backend_probe import (
     ConsumerGroupLivenessUnknownError,
     live_consumer_groups,
 )
+from omnibase_infra.backends.model_consumer_group_owner import ModelConsumerGroupOwner
 from omnibase_infra.cli.model_delegate_locus_decision import ModelDelegateLocusDecision
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 
@@ -46,6 +50,7 @@ __all__ = [
     "DelegateLocusAclRefusedError",
     "DelegateLocusRefusedError",
     "contract_command_topic",
+    "contract_consumer_owner",
     "contract_terminal_topic",
     "orchestrator_distribution",
     "resolve_delegate_locus",
@@ -176,6 +181,31 @@ def contract_command_topic(contract_path: Path) -> str:
     return topics[0]
 
 
+def contract_consumer_owner(contract_path: Path) -> ModelConsumerGroupOwner:
+    """Read the node identity whose groups a deployed dispatch needs (OMN-20235).
+
+    The distribution shipping the contract is the runtime's package_name.
+
+    Raises:
+        DelegateLocusRefusedError: the contract is unreadable or has no node name.
+    """
+    try:
+        raw = yaml.safe_load(  # yaml-safe-load-ok: contract is trusted package data
+            contract_path.read_text(encoding="utf-8")
+        )
+    except (OSError, yaml.YAMLError, UnicodeError) as exc:
+        raise DelegateLocusRefusedError(
+            f"cannot read the delegate contract at {contract_path}: {exc}"
+        ) from exc
+    name = raw.get("name") if isinstance(raw, dict) else None
+    if not isinstance(name, str) or not name:
+        raise DelegateLocusRefusedError(
+            f"the delegate contract at {contract_path} declares no string name, "
+            "so its consumer group owner cannot be checked"
+        )
+    return ModelConsumerGroupOwner(service=_ORCHESTRATOR_DISTRIBUTION, node=name)
+
+
 def orchestrator_distribution() -> str:
     """Name the installed distribution the orchestrator contract came from.
 
@@ -249,9 +279,9 @@ def resolve_delegate_locus(
         )
 
     if locus is EnumDelegateLocus.IN_PROCESS:
-        # Best-effort for an in-process run: the topic is informational there
-        # (the runtime publishes and consumes it inside this process), and a
-        # contract that does not declare one is a legitimate shape for a
+        # Best-effort for an in-process run: the topic is informational only
+        # on an in-memory bus, where the runtime publishes and consumes it
+        # inside this process. A contract without a topic is legitimate for a
         # single-handler workflow. A dispatched run is the opposite — the
         # topic IS the interface to the other runtime — so it refuses below.
         try:
@@ -264,6 +294,17 @@ def resolve_delegate_locus(
                 exc,
             )
             command_topic = ""
+        if on_shared_bus and command_topic:
+            raise DelegateLocusRefusedError(
+                f"--locus in-process on a shared bus causes double dispatch: "
+                f"the start command lands on the shared topic '{command_topic}', "
+                "which the deployed orchestrator consumes now or from its "
+                "committed offset when it next starts, so the run executes "
+                "twice and the second copy overwrites the first in the "
+                "projection (OMN-20236). Use --locus deployed-lane for one "
+                "dispatch on the lane, or --bus inmemory for a true in-process "
+                "run that publishes nothing to a shared broker."
+            )
         logger.info(
             "onex delegate: execution locus IN-PROCESS (%s) — the accept/climb "
             "decision is made by %s in THIS process; this run is not evidence "
@@ -282,6 +323,7 @@ def resolve_delegate_locus(
         )
 
     command_topic = contract_command_topic(contract_path)
+    owner = contract_consumer_owner(contract_path)
     if kafka_bootstrap is None:
         # OMN-16871. This used to mean "let the client read
         # KAFKA_BOOTSTRAP_SERVERS", so the probe asked whichever lane the
@@ -299,6 +341,7 @@ def resolve_delegate_locus(
     groups, bind_wait_seconds = _assert_dispatch_viable(
         command_topic=command_topic,
         kafka_bootstrap=kafka_bootstrap,
+        owner=owner,
     )
     broker = kafka_bootstrap
     logger.info(
@@ -326,9 +369,9 @@ def resolve_delegate_locus(
 
 
 def _assert_dispatch_viable(
-    *, command_topic: str, kafka_bootstrap: str
+    *, command_topic: str, kafka_bootstrap: str, owner: ModelConsumerGroupOwner
 ) -> tuple[tuple[str, ...], float]:
-    """Refuse unless something is provably consuming the command topic.
+    """Refuse unless the contract's node is consuming the command topic.
 
     Returns the live groups and the seconds spent waiting for them to bind.
 
@@ -350,6 +393,11 @@ def _assert_dispatch_viable(
     The address is required (OMN-16871): the caller resolves it from the
     selected lane, so this function can never probe a broker the publish will
     not use.
+
+    Args:
+        command_topic: Exact topic this dispatch publishes to.
+        kafka_bootstrap: Broker address resolved for this run.
+        owner: Contract service and node whose live groups are required.
     """
     started = _monotonic()
     probes = 0
@@ -360,13 +408,14 @@ def _assert_dispatch_viable(
                 topic=command_topic,
                 bootstrap_servers=kafka_bootstrap,
                 timeout=_LIVENESS_TIMEOUT_SECONDS,
+                owner=owner,
             )
         except ConsumerGroupDescribeDeniedError as exc:
             raise DelegateLocusAclRefusedError(
                 f"cannot confirm a deployed orchestrator is consuming "
                 f"'{command_topic}': {exc} Refusing rather than running here and "
                 "reporting it as a lane result. Add the grant to the lane's "
-                "declared broker ACLs and apply them, or pass --locus "
+                "declared broker ACLs and apply them, or pass --bus inmemory --locus "
                 "in-process to run it locally on purpose.",
                 group_ids=exc.group_ids,
             ) from exc
@@ -376,7 +425,7 @@ def _assert_dispatch_viable(
                 f"'{command_topic}' ({exc}). A lane probe that cannot verify "
                 "the lane is not a lane probe — refusing rather than running "
                 "here and reporting it as a lane result. Fix the broker "
-                "address, or pass --locus in-process to run it locally on "
+                "address, or pass --bus inmemory --locus in-process to run it locally on "
                 "purpose."
             ) from exc
         waited = _monotonic() - started
@@ -394,14 +443,15 @@ def _assert_dispatch_viable(
             return groups, waited
         if waited + _REBIND_POLL_SECONDS > _REBIND_WAIT_SECONDS:
             raise DelegateLocusRefusedError(
-                f"no live consumer group is bound to '{command_topic}' — there "
+                f"no live consumer group is bound to '{command_topic}' for "
+                f"{owner.service}.{owner.node} — there "
                 "is no deployed orchestrator to make the accept/climb "
                 "decision. The command would be published and nothing would "
                 f"answer it. Waited {waited:.1f} s over {probes} probes, the "
                 f"bound for the {REBIND_WINDOW_FAILURE_CLASS} class "
                 f"({_REBIND_WAIT_SECONDS:.0f} s, OMN-18843), so this is a lane "
                 "that is down, not one that is rebinding. Start the runtime "
-                "that consumes this topic, or pass --locus in-process to run "
+                "that consumes this topic, or pass --bus inmemory --locus in-process to run "
                 "it here on purpose."
             )
         logger.warning(

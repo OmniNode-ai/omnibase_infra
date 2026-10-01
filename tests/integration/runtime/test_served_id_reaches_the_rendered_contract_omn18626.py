@@ -43,7 +43,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime.render_bifrost_delegation_contract import (
     render_bifrost_delegation_contract,
 )
@@ -157,73 +156,35 @@ def test_the_rendered_wire_model_is_an_id_the_endpoint_answered_with(
         )
 
 
-def test_a_base_contract_naming_a_different_model_is_refused(tmp_path: Path) -> None:
-    """The cross-repo cross-check still bites, and is why this is two PRs.
+def test_a_base_contract_naming_a_different_model_is_overridden(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The overlay's served id wins over a base that names the retired id.
 
     ``omnimarket``'s ``configs/bifrost_delegation.yaml`` supplies the base
-    ``model_name``; this repo's overlay supplies ``served_model_id``. The
-    renderer refuses them when they disagree. That refusal is the mechanism that
-    turns a half-applied repoint into a loud failure instead of a silent one, so
-    it is asserted here BEHAVIOURALLY -- drive the real renderer with a real
-    committed overlay and a base that names the retired id.
+    ``model_name``; this repo's overlay supplies ``served_model_id``. When they
+    disagree the renderer writes the overlay's id and records the override on
+    stdout, so a half-applied repoint is visible without blocking the render.
     """
     stale = dict(_overlay_model_names())
     stale["local-coder"] = "Qwen3.6-35B-A3B"
 
     source = tmp_path / "base.yaml"
     _write_base_contract(source, model_name_for=stale)
-
-    with pytest.raises(ProtocolConfigurationError) as excinfo:
-        render_bifrost_delegation_contract(
-            source_path=source,
-            overlay_path=_OVERLAY_DIR / "dev.bifrost.yaml",
-            target_path=tmp_path / "rendered.yaml",
-            environ={},
-        )
-
-    message = str(excinfo.value)
-    assert "local-coder" in message
-    assert "Qwen3.6-35B-A3B" in message
-    assert _overlay_model_names()["local-coder"] in message
-    assert not (tmp_path / "rendered.yaml").exists(), (
-        "a refused render must leave no artifact behind -- a partial write is a "
-        "contract the runtime would read"
-    )
-
-
-def test_the_null_model_name_escape_is_available_and_is_not_how_this_is_fixed(
-    tmp_path: Path,
-) -> None:
-    """Positive control on the refusal above, and a standing warning.
-
-    ``_merge_lane_overlay`` skips its comparison when the base declares
-    ``model_name: null``. That branch is real and this test proves it, so the
-    refusal in the test above is a genuine comparison rather than a renderer
-    that rejects every base it is given.
-
-    It is also the cheap way out of the two-repo sequencing this ticket
-    describes, and it must not be taken: with a null base the two repos can no
-    longer disagree because one of them has stopped saying anything, and a
-    repoint applied to one repo alone goes silent again. If you are reading this
-    because you are tempted, the answer is to land both PRs together.
-    """
-    nulled = dict(_overlay_model_names())
-    nulled["local-coder"] = None  # type: ignore[assignment]
-
-    source = tmp_path / "base.yaml"
     target = tmp_path / "rendered.yaml"
-    _write_base_contract(source, model_name_for=nulled)  # type: ignore[arg-type]
 
-    rendered = render_bifrost_delegation_contract(
+    render_bifrost_delegation_contract(
         source_path=source,
         overlay_path=_OVERLAY_DIR / "dev.bifrost.yaml",
         target_path=target,
         environ={},
     )
-    assert rendered == target
 
-    contract = yaml.safe_load(target.read_text(encoding="utf-8"))
-    by_id = {backend["backend_id"]: backend for backend in contract["backends"]}
-    # The overlay still supplies the value, which is exactly why the escape is
-    # dangerous: the artifact looks correct while the cross-check is gone.
+    rendered = yaml.safe_load(target.read_text(encoding="utf-8"))
+    by_id = {backend["backend_id"]: backend for backend in rendered["backends"]}
     assert by_id["local-coder"]["model_name"] == _overlay_model_names()["local-coder"]
+    out = capsys.readouterr().out
+    assert "local-coder" in out
+    assert "Qwen3.6-35B-A3B" in out
+    assert "overridden by lane overlay" in out

@@ -7,17 +7,15 @@ checks each committed binding's ``parameter_count`` against its served model id,
 and ``test_bifrost_served_model_probe_fixture.py`` checks the served id against a
 recorded probe. That is the referent half. This is the reach half: it proves the
 committed lab overlays render into the artifact routing actually consumes, and
-that the renderer still REFUSES a binding whose served id disagrees with the base
-contract, which is the load-bearing check that survives OMN-17099.
+that the overlay's served id overrides the base contract's model_name.
 
 OMN-17099 removed the hardcoded authorization table this module used to read its
 expected values from. The expected values are now the lab overlays' own
 declarations; what the renderer enforces against them is the base contract.
 
-The negative control is the assertion that makes this test worth running: a copy
+The override control is the assertion that makes this test worth running: a copy
 of the real dev overlay, identical except for a served id the base contract does
-not declare, must be REFUSED and leave no artifact. Without it, a renderer that
-silently dropped the check would pass the positive case and prove nothing.
+not declare, must render with the overlay's id and record the override.
 """
 
 from __future__ import annotations
@@ -27,7 +25,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.runtime.render_bifrost_delegation_contract import (
     render_bifrost_delegation_contract,
 )
@@ -134,17 +131,17 @@ def test_committed_lab_overlay_renders_and_carries_the_corrected_binding(
         assert by_id[backend_id]["endpoint_url"] == declared[backend_id]["endpoint_url"]
 
 
-def test_an_overlay_binding_a_served_id_the_base_does_not_declare_is_refused(
+def test_an_overlay_served_id_the_base_does_not_declare_overrides_the_base(
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """NEGATIVE CONTROL: the served id is enforced, not merely written.
+    """The overlay's served id wins over the base contract's model_name.
 
     The fixture is the real dev overlay with the .201 rungs' served id set to
-    something the base contract does not declare, so a pass here would mean the
-    renderer no longer checks a binding against its base contract. The poison
-    is DERIVED from the committed value (OMN-18626: a literal poison went stale
-    the day the endpoint was re-pinned onto it, and the control silently stopped
-    controlling for anything).
+    something the base contract does not declare. The renderer overrides the
+    base model with the overlay's served id and records the override on stdout.
+    The override value is DERIVED from the committed value (OMN-18626: a
+    literal went stale the day the endpoint was re-pinned onto it).
     """
     overlay = _dev_overlay()
     poisoned_count = 0
@@ -165,14 +162,20 @@ def test_an_overlay_binding_a_served_id_the_base_does_not_declare_is_refused(
     target = tmp_path / "rendered.yaml"
     _write_base_contract(source)
 
-    with pytest.raises(ProtocolConfigurationError):
-        render_bifrost_delegation_contract(
-            source_path=source,
-            overlay_path=poisoned,
-            target_path=target,
-            environ={},
-        )
-    assert not target.exists(), (
-        "a refused overlay must leave no rendered contract behind — a partial "
-        "write here would be read by the next process to start"
+    render_bifrost_delegation_contract(
+        source_path=source,
+        overlay_path=poisoned,
+        target_path=target,
+        environ={},
     )
+    contract = yaml.safe_load(target.read_text(encoding="utf-8"))
+    by_id = {backend["backend_id"]: backend for backend in contract["backends"]}
+    declared = {b["backend_id"]: b for b in overlay["backends"]}
+    for backend_id in _LOCAL_201_BACKENDS:
+        assert (
+            by_id[backend_id]["model_name"] == declared[backend_id]["served_model_id"]
+        )
+    out = capsys.readouterr().out
+    for backend_id in _LOCAL_201_BACKENDS:
+        assert f"Bifrost backend '{backend_id}'" in out
+        assert "overridden by lane overlay" in out

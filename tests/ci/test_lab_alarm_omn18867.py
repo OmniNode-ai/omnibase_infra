@@ -56,8 +56,10 @@ from scripts.lab_alarm import (
     evaluate_effects_held_behind_runtime,
     evaluate_lab_pass_receipt,
     evaluate_stale_indeterminate,
+    evaluate_work_ledger_projection_stale,
     expand_env,
     make_runner,
+    read_ledger_newest_canonical_row,
     read_onex_lane_credential,
     resolve_posting_consent,
     run_once,
@@ -664,11 +666,23 @@ def _run(
         consumer_groups=("savings",),
         effects_group_prefix="group-",
         effects_group_suffix="",
+        work_ledger_db_container="pg",
+        work_ledger_database="analytics",
+        work_ledger_max_lag=timedelta(minutes=30),
     )
+    # The work-ledger condition reads --ledger too: give it one canonical row,
+    # appended below any consent row so cited line numbers do not move, and a
+    # projection already caught up to it.
+    fresh_row = "2026-10-01T03:00:00Z | STATUS | lane=fixture | projection fresh"
+    if ledger.exists() and fresh_row not in ledger.read_text(encoding="utf-8"):
+        with ledger.open("a", encoding="utf-8") as handle:
+            handle.write(fresh_row + "\n")
 
     def runner(
         argv: Sequence[str], *, timeout: float
     ) -> subprocess.CompletedProcess[str]:
+        if "psql" in argv:
+            return _completed("2026-10-01 03:00:00+00\n")
         return _completed(restarts)
 
     return run_once(
@@ -1026,6 +1040,248 @@ def test_no_matching_group_is_indeterminate_not_a_silent_ok() -> None:
     )
     assert report.outcome is EnumConditionOutcome.INDETERMINATE
     assert "no group matched" in report.evidence
+
+
+# ---------------------------------------------------------------------------
+# Condition 6 — the work-ledger projection behind the ledger file (OMN-20248)
+# ---------------------------------------------------------------------------
+
+_WL_CONTAINER = "omnibase-infra-postgres"
+_WL_DATABASE = "omnidash_analytics"
+
+
+def _work_ledger_file(tmp_path: Path, *rows: str) -> Path:
+    path = tmp_path / "ROLLING_WORK_LEDGER.md"
+    path.write_text("# rolling work ledger\n\n" + "\n".join(rows) + "\n", "utf-8")
+    return path
+
+
+def _psql_runner(
+    answer: subprocess.CompletedProcess[str],
+    seen: list[list[str]] | None = None,
+):
+    """A runner answering the projection's max(row_ts) query with *answer*."""
+
+    def run(argv: Sequence[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+        if seen is not None:
+            seen.append(list(argv))
+        return answer
+
+    return run
+
+
+def _evaluate_work_ledger(
+    ledger: Path, answer: subprocess.CompletedProcess[str]
+) -> ModelConditionReport:
+    return evaluate_work_ledger_projection_stale(
+        ledger_path=ledger,
+        container=_WL_CONTAINER,
+        database=_WL_DATABASE,
+        max_lag=timedelta(minutes=30),
+        runner=_psql_runner(answer),
+    )
+
+
+@pytest.mark.unit
+def test_work_ledger_fresh_projection_reads_ok(tmp_path: Path) -> None:
+    """Positive control: a projection ten minutes behind is inside a 30 min bound."""
+    ledger = _work_ledger_file(
+        tmp_path,
+        "2026-10-01T02:50:00Z | CLAIM | lane=a | ticket=OMN-1",
+        "2026-10-01T03:00:00Z | STATUS | lane=a | ticket=OMN-1",
+    )
+    seen: list[list[str]] = []
+    report = evaluate_work_ledger_projection_stale(
+        ledger_path=ledger,
+        container=_WL_CONTAINER,
+        database=_WL_DATABASE,
+        max_lag=timedelta(minutes=30),
+        runner=_psql_runner(_completed("2026-10-01 02:50:00+00\n"), seen),
+    )
+
+    assert report.outcome is EnumConditionOutcome.OK
+    assert "2026-10-01T03:00:00Z" in report.evidence
+    assert "2026-10-01 02:50:00+00" in report.evidence
+    assert "0:10:00" in report.evidence
+    assert "not a liveness statement" in report.evidence
+    # Read-only, through the docker seam, naming the declared container and db.
+    assert seen == [
+        [
+            "docker",
+            "exec",
+            _WL_CONTAINER,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            _WL_DATABASE,
+            "-Atc",
+            "select coalesce(max(row_ts)::text, '') "
+            "from omninode_internal.work_ledger_rows",
+        ]
+    ]
+
+
+@pytest.mark.unit
+def test_work_ledger_lag_over_the_bound_reads_alarm(tmp_path: Path) -> None:
+    """OMN-20248 falsifier: the 36 h freeze at 424 rows read green everywhere."""
+    ledger = _work_ledger_file(
+        tmp_path, "2026-10-01T03:00:00Z | TERMINAL | lane=a | outcome=done"
+    )
+    report = _evaluate_work_ledger(ledger, _completed("2026-09-29 15:38:00+00\n"))
+
+    assert report.outcome is EnumConditionOutcome.ALARM
+    assert len(report.alarms) == 1
+    alarm = report.alarms[0]
+    assert alarm.condition is EnumAlarmCondition.WORK_LEDGER_PROJECTION_STALE
+    assert alarm.subject == "omninode_internal.work_ledger_rows"
+    assert "2026-10-01T03:00:00Z" in alarm.detail
+    assert "2026-09-29 15:38:00+00" in alarm.detail
+    assert "1 day, 11:22:00" in alarm.detail
+
+
+@pytest.mark.unit
+def test_work_ledger_empty_table_reads_alarm(tmp_path: Path) -> None:
+    """An empty projection is infinitely behind, not caught up."""
+    ledger = _work_ledger_file(
+        tmp_path, "2026-10-01T03:00:00Z | STATUS | lane=a | ticket=OMN-1"
+    )
+    report = _evaluate_work_ledger(ledger, _completed("\n"))
+
+    assert report.outcome is EnumConditionOutcome.ALARM
+    assert "no row" in report.alarms[0].detail
+
+
+@pytest.mark.unit
+def test_work_ledger_psql_non_zero_exit_reads_indeterminate(tmp_path: Path) -> None:
+    """Unread is not caught up: a refused query never grades OK."""
+    ledger = _work_ledger_file(
+        tmp_path, "2026-10-01T03:00:00Z | STATUS | lane=a | ticket=OMN-1"
+    )
+    report = _evaluate_work_ledger(
+        ledger, _completed("", 2, "psql: error: connection refused")
+    )
+
+    assert report.outcome is EnumConditionOutcome.INDETERMINATE
+    assert "exited 2" in report.evidence
+
+
+@pytest.mark.unit
+def test_work_ledger_psql_timeout_or_unparseable_reads_indeterminate(
+    tmp_path: Path,
+) -> None:
+    ledger = _work_ledger_file(
+        tmp_path, "2026-10-01T03:00:00Z | STATUS | lane=a | ticket=OMN-1"
+    )
+
+    def timing_out(
+        argv: Sequence[str], *, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd=list(argv), timeout=timeout)
+
+    timed_out = evaluate_work_ledger_projection_stale(
+        ledger_path=ledger,
+        container=_WL_CONTAINER,
+        database=_WL_DATABASE,
+        max_lag=timedelta(minutes=30),
+        runner=timing_out,
+    )
+    garbled = _evaluate_work_ledger(ledger, _completed("not a timestamp\n"))
+
+    assert timed_out.outcome is EnumConditionOutcome.INDETERMINATE
+    assert "TimeoutExpired" in timed_out.evidence
+    assert garbled.outcome is EnumConditionOutcome.INDETERMINATE
+    assert "not a timestamp" in garbled.evidence
+
+
+@pytest.mark.unit
+def test_work_ledger_with_no_canonical_row_reads_indeterminate(tmp_path: Path) -> None:
+    """A ledger the alarm cannot date is not a ledger the projection matches."""
+    ledger = _work_ledger_file(tmp_path, "| none |", "free prose, no stamp")
+    report = _evaluate_work_ledger(ledger, _completed("2026-10-01 03:00:00+00\n"))
+
+    assert report.outcome is EnumConditionOutcome.INDETERMINATE
+    assert "no canonical row" in report.evidence
+
+    missing = _evaluate_work_ledger(
+        tmp_path / "absent.md", _completed("2026-10-01 03:00:00+00\n")
+    )
+    assert missing.outcome is EnumConditionOutcome.INDETERMINATE
+
+
+@pytest.mark.unit
+def test_work_ledger_non_canonical_row_type_at_the_tail_is_ignored(
+    tmp_path: Path,
+) -> None:
+    """A newer stamped row of a type the projection does not carry is not news."""
+    ledger = _work_ledger_file(
+        tmp_path,
+        "2026-10-01T02:50:00Z | STATUS | lane=a | ticket=OMN-1",
+        "2026-10-01T09:00:00Z | NOTE | not a canonical row type",
+        "2026-10-01T09:00:00Z | STATUSX | prefix of a canonical type",
+    )
+    report = _evaluate_work_ledger(ledger, _completed("2026-10-01 02:50:00+00\n"))
+
+    assert report.outcome is EnumConditionOutcome.OK
+    assert "2026-10-01T02:50:00Z" in report.evidence
+    assert "09:00:00" not in report.evidence
+
+
+@pytest.mark.unit
+def test_work_ledger_reads_only_the_tail_of_a_large_ledger(tmp_path: Path) -> None:
+    """The newest row is found without reading the whole rolling file."""
+    filler = "x" * 200
+    ledger = _work_ledger_file(
+        tmp_path,
+        "2026-10-01T03:00:00Z | OPERATOR-CONSENT | far above the tail",
+        *(f"| filler {filler} |" for _ in range(2000)),
+        "2026-10-01T02:00:00Z | FRICTION | lane=a",
+    )
+    newest, row_type = read_ledger_newest_canonical_row(ledger, tail_bytes=4096)
+    assert newest == datetime(2026, 10, 1, 2, 0, tzinfo=UTC)
+    assert row_type == "FRICTION"
+
+
+@pytest.mark.unit
+def test_work_ledger_alarm_raises_once_and_clears_when_the_projection_catches_up(
+    tmp_path: Path,
+) -> None:
+    """The generic edge-trigger carries the new condition unchanged."""
+    ledger = _work_ledger_file(
+        tmp_path, "2026-10-01T03:00:00Z | STATUS | lane=a | ticket=OMN-1"
+    )
+    state = ModelAlarmState()
+    behind = _evaluate_work_ledger(ledger, _completed("2026-09-29 15:38:00+00\n"))
+    caught_up = _evaluate_work_ledger(ledger, _completed("2026-10-01 03:00:00+00\n"))
+
+    first = select_new_alarms([behind], state, now="t0")
+    second = select_new_alarms([behind], state, now="t1")
+    select_new_alarms([caught_up], state, now="t2")
+    again = select_new_alarms([behind], state, now="t3")
+
+    assert [a.subject for a in first] == ["omninode_internal.work_ledger_rows"]
+    assert second == ()
+    assert [a.subject for a in again] == ["omninode_internal.work_ledger_rows"]
+
+
+@pytest.mark.unit
+def test_the_shipped_config_declares_the_work_ledger_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ONEX_INFRA_HOST", "lab.invalid")
+    monkeypatch.setenv("ONEX_RUNTIME_SSH_HOST", "user@lab.invalid")
+    monkeypatch.setenv("OMNI_HOME", "/nonexistent")
+    config = ModelAlarmConfig.load(CONFIG)
+    assert config.work_ledger_db_container == "omnibase-infra-postgres"
+    assert config.work_ledger_database == "omnidash_analytics"
+    assert config.work_ledger_max_lag == timedelta(minutes=30)
+    payload = json.loads(CONFIG.read_text(encoding="utf-8"))
+    for key in (
+        "work_ledger_db_container",
+        "work_ledger_database",
+        "work_ledger_max_lag_minutes",
+    ):
+        assert any(k.startswith("_comment_") and key in v for k, v in payload.items())
 
 
 # ---------------------------------------------------------------------------
