@@ -20,7 +20,10 @@
 # heal listens to `pull_request: edited` and `workflow_run: completed`, both of
 # which fire before the median companion merges, so it does not clear this
 # failure; the two heals are complementary. Keep the logic identical to
-# omniclaude's; a fix lands there first and is copied here.
+# omniclaude's; a fix lands there first and is copied here. One exception:
+# OMN-20319 landed here first, because only this repo failed on it (78% of
+# scheduled passes, run 36871003284): runs past GitHub's 30-day re-run window
+# are no longer selected, and the `checks: read` grant below is declared.
 #
 # THE FAILURE THIS CLEARS
 # `occ-preflight / eligibility` waits a bounded 1500 seconds for the cited
@@ -125,10 +128,15 @@ jobs:
     timeout-minutes: 10
     permissions:
       # `actions: write` is the re-run. `pull-requests: read` is the PR listing
-      # and body. Nothing else is granted, at any scope.
+      # and body. `checks: read` is the per-head check-runs read: this repo is
+      # public so the read succeeds without it, but in a private repo the
+      # same read is refused with HTTP 403 "Resource not accessible by
+      # integration" (omninode_infra heal run 36871561152, OMN-20319).
+      # Nothing else is granted, at any scope.
       actions: write
       contents: read
       pull-requests: read
+      checks: read
     # OMNI_RUNNER_SELECTOR_V1 - trusted CI defaults to self-hosted omnibase-ci.
     # This job is a handful of API calls and only does work when a companion
     # has actually merged behind a failed preflight.
