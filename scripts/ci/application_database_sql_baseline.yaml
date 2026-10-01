@@ -24,14 +24,8 @@
 # Entries are keyed by sha256 of the "<path>: <message>" violation line -- content,
 # never line numbers, so unrelated SQL edits cannot silently re-key an entry.
 generated_at: "2026-08-15"
-count: 200
+count: 194
 violations:
-  - key: "d253a5eec3857233d66f04c8ff8b30e9b7807ca0e7fad2df3095640e1e017faf"
-    path: "docker/application-acl-proof/seed.sql"
-    violation: "application relation target 'all' must be schema-qualified"
-  - key: "87513822c4c19c1c97e72a782ddd20ba1fa8c33a5808a7bf7bc4aaa70ab3b842"
-    path: "docker/application-acl-proof/seed.sql"
-    violation: "application relation target 'false' must be schema-qualified"
   - key: "af6044a4b757ce804d0612ed0332c04f45167f99a6a628cf8537caef1fda84ed"
     path: "docker/application-acl-proof/seed.sql"
     violation: "application relation target 'omninode_internal' must be schema-qualified"
@@ -41,9 +35,6 @@ violations:
   - key: "bdde09dc72c65af5ed96c1c9dd893b2669700265ae92202e9168d820cca6a344"
     path: "docker/application-acl-proof/seed.sql"
     violation: "application relation target 'public.legacy_scaffold_data' is prohibited in public"
-  - key: "504420a2df287548117ddee80d176cf4d5a2fbd841073ff0d205721219612bc0"
-    path: "docker/application-acl-proof/seed.sql"
-    violation: "application relation target 'true' must be schema-qualified"
   - key: "d3d3a4ec16674640bcf885cd5f53b59677fa6e03e21ba457679fdda49ba77378"
     path: "docker/application-acl-proof/seed.sql"
     violation: "application target omninode_internal.runtime_code requires exactly one ownership declaration"
@@ -470,12 +461,6 @@ violations:
   - key: "5a43ba1ba5cd6e6723e34355ea4aa2af9af73411cfa15076ac5eb1d2a14f190f"
     path: "docker/migrations/forward/nodes/node_projection_live_events/0001_reclassify_event_lifecycle_types.sql"
     violation: "application relation target 'live_events' must be schema-qualified"
-  - key: "11e0276b3eeb323ca9c22731def2b6633a40fb682344cdd502c5ca84f095e6eb"
-    path: "docker/migrations/forward/nodes/node_projection_live_events/0001_reclassify_event_lifecycle_types.sql"
-    violation: "application relation target 'or' must be schema-qualified"
-  - key: "22b572fd4bf78d656909e5c045aa38769ebadb55d85d884e747e84dbb721027f"
-    path: "docker/migrations/forward/nodes/node_projection_live_events/0001_reclassify_event_lifecycle_types.sql"
-    violation: "application relation target 'then' must be schema-qualified"
   - key: "6871b504bb84f4f11518926de889321064820bfa37d5282bea6a8b5d47ea2492"
     path: "docker/migrations/forward/nodes/node_projection_llm_cost/0001_create_llm_call_metrics.sql"
     violation: "application relation target 'llm_call_metrics' must be schema-qualified"
@@ -620,9 +605,6 @@ violations:
   - key: "a5b1545729f4a20557951b252f91346b56366d3d887253054238f044e97f1902"
     path: "docker/migrations/intelligence/026_create_code_entities.sql"
     violation: "application relation target 'code_relationships' must be schema-qualified"
-  - key: "f6c6e998dd8567ac04ce66d9de4599726fee18e896a180c0627319e56b38f87d"
-    path: "docker/migrations/rollback/rollback_096_grant_role_omnidash_omnidash_analytics.sql"
-    violation: "application relation target 'all' must be schema-qualified"
   - key: "9d54fdd9dd6f098f4e51562cceee3e4c38f25b2b48124c001fff560e4e243548"
     path: "docker/migrations/rollback/rollback_096_grant_role_omnidash_omnidash_analytics.sql"
     violation: "application relation target 'role_omnidash' must be schema-qualified"

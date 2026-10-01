@@ -4948,6 +4948,11 @@ WORKFLOW_VERDICT_MAX_AGE_CEILING_HOURS: Final[float] = 72.0
 #: of an older run supersede a newer-created one, in both directions.
 WORKFLOW_VERDICT_PAGE: Final[int] = 50
 
+#: Orders a run with no parseable start before every real one when two reads
+#: return different attempts of the same run id (the later evaluation still
+#: refuses a run with no parseable start).
+_EPOCH: Final[datetime] = datetime.fromtimestamp(0, tz=UTC)
+
 #: OMN-19311 AC5 -- the planted-red drill's blast-radius ceiling. `until` may
 #: not be set more than this many hours in the future, so a mistyped date
 #: cannot leave staging delivery closed for days with nobody watching. The
@@ -5114,17 +5119,44 @@ def evaluate_workflow_verdict(
     if not admitted:
         return refuse("no event is admitted, so no run can decide the verdict.")
 
-    path = (
-        f"repos/{repo}/actions/workflows/{workflow}/runs"
-        f"?branch={branch}&status=completed&per_page={WORKFLOW_VERDICT_PAGE}"
+    # OMN-20277: one read is not enough. The filtered listing intermittently
+    # returns a page that lacks the newest runs (on 14 of 18 Delegation Health
+    # Check reds, 2026-09-30/10-01, it named a 4-13 day old run as newest while
+    # the real newest was a fresh green). Every read below must succeed, and the
+    # runs they return are unioned by id, keeping each run's latest attempt.
+    # A union only ADDS real completed runs, so it can surface a newer run a
+    # bad page hid, and it can never hide a newer red that any read returned.
+    base = f"repos/{repo}/actions/workflows/{workflow}/runs"
+    filtered = (
+        f"{base}?branch={branch}&status=completed&per_page={WORKFLOW_VERDICT_PAGE}"
     )
-    try:
-        payload = json.loads(_gh_api(path).decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001 - rule 16: an unread surface is a refusal
-        return refuse(f"the run surface is unreadable: {exc}.")
-    runs = payload.get("workflow_runs") if isinstance(payload, dict) else None
-    if not isinstance(runs, list):
-        return refuse("the run listing carries no 'workflow_runs' list.")
+    paths = (filtered, f"{base}?per_page={WORKFLOW_VERDICT_PAGE}", filtered)
+    by_id: dict[object, Mapping[str, Any]] = {}
+    unkeyed: list[object] = []
+    for path in paths:
+        try:
+            payload = json.loads(_gh_api(path).decode("utf-8"))
+        except Exception as exc:  # noqa: BLE001 - rule 16: an unread surface is a refusal
+            return refuse(f"the run surface is unreadable: {exc}.")
+        listed = payload.get("workflow_runs") if isinstance(payload, dict) else None
+        if not isinstance(listed, list):
+            return refuse("the run listing carries no 'workflow_runs' list.")
+        for r in listed:
+            key = r.get("id") if isinstance(r, dict) else None
+            if key is None:
+                unkeyed.append(r)
+                continue
+            held = by_id.get(key)
+            if held is None or (_run_started(r) or _EPOCH) > (
+                _run_started(held) or _EPOCH
+            ):
+                by_id[key] = r
+    runs: list[object] = [*by_id.values(), *unkeyed]
+    print(
+        f"  reads       : {len(paths)} listing read(s) unioned by run id "
+        f"({len(by_id)} distinct run(s))",
+        file=out,
+    )
 
     candidates = [
         r
