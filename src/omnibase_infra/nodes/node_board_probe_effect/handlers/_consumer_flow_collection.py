@@ -24,6 +24,7 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_consta
     BOOT_CONTAINERS,
     BOUNDARY_RE,
     BRANCHES,
+    CURSOR_FIELD,
     GENERIC_DLQ,
     KINDS,
     NEGATIVE_TESTS,
@@ -44,6 +45,7 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._error_consumer_flow_
     ConsumerFlowInputError,
 )
 from omnibase_infra.nodes.node_board_probe_effect.handlers.handler_consumer_flow import (
+    _is_int,
     kind_rows,
 )
 from omnibase_infra.nodes.node_board_probe_effect.models.typed_dict_consumer_flow import (
@@ -137,6 +139,41 @@ def walk(lane: ConsumerFlowLane, max_pages: int = 200) -> TypedDictConsumerFlowW
             break
         seen_cursors.add(str(nxt))
         cursor = str(nxt)
+    if (
+        terminated
+        and _is_int(count := pages[-1].get("row_count"))
+        and _is_int(limit := pages[-1].get("row_limit"))
+        and count >= limit
+        and not pages[-1].get("next_cursor")
+    ):
+        last = max(
+            (
+                int(value)
+                for row in page_rows
+                if _is_int(value := row.get(CURSOR_FIELD))
+                or (isinstance(value, str) and value.isdigit())
+            ),
+            default=None,
+        )
+        pages[-1]["end_proof"] = {
+            "since": None,
+            "beyond_row_count": None,
+            "reread_next_cursor": None,
+            "proven": False,
+        }
+        if last is not None:
+            beyond = lane.page({"since": str(last)})
+            beyond_n = len(beyond["rows"])
+            reread_next_cursor = None
+            if beyond_n:
+                reread = lane.page({"since": cursor} if cursor else {})
+                reread_next_cursor = reread.get("next_cursor")
+            pages[-1]["end_proof"] = {
+                "since": str(last),
+                "beyond_row_count": beyond_n,
+                "reread_next_cursor": reread_next_cursor,
+                "proven": beyond_n == 0 or bool(reread_next_cursor),
+            }
     return {
         "pages": pages,
         "rows": rows,
