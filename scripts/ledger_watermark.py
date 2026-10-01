@@ -36,10 +36,12 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
-import importlib.util
+import importlib
 import json
+import os
 import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 WATERMARK_SCHEMA_VERSION = 2
@@ -49,27 +51,37 @@ SCHEMA_VERSION_KEY = "watermark_schema_version"
 EXIT_UNRESOLVED = 3
 EXIT_SCHEMA = 4
 
-_HERE = Path(__file__).resolve().parent
 
-
-def _load_ledger_lock() -> Any:
-    """Load the section parser from its single implementation.
-
-    Section/row parsing lives in ledger_lock.py because that is the tool that
-    WRITES the section; a second copy here would be free to drift from the
-    writer's idea of where a row starts, which is precisely the class of bug
-    this ticket is closing.
-    """
-    script = _HERE / "ledger_lock.py"
-    spec = importlib.util.spec_from_file_location("ledger_lock", script)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"cannot load {script}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+def _load_section_parser() -> ModuleType:
+    """Use the writer's parser from the canonical operator-tool package."""
+    raw = os.environ.get("OMNI_HOME")
+    if not raw:
+        raise RuntimeError(
+            "OMNI_HOME is not set; the canonical ledger parser is required"
+        )
+    source = (
+        Path(
+            os.environ.get(
+                "OMNIBASE_INTERNAL_HOME", str(Path(raw).parent / "omnibase_internal")
+            )
+        )
+        / "src"
+    )
+    expected = source / "omnibase_internal" / "ledger" / "lock.py"
+    if not expected.is_file():
+        raise RuntimeError(
+            f"canonical omnibase_internal ledger parser missing: {expected}"
+        )
+    sys.path.insert(0, str(source))
+    module = importlib.import_module("omnibase_internal.ledger.lock")
+    if module.__file__ is None or Path(module.__file__).resolve() != expected.resolve():
+        raise RuntimeError(
+            f"ledger parser did not load from its canonical home: {expected}"
+        )
     return module
 
 
-LOCK = _load_ledger_lock()
+LOCK = _load_section_parser()
 
 
 class UnresolvedAnchorError(RuntimeError):

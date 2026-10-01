@@ -778,3 +778,67 @@ def test_the_shipped_config_resolves_and_is_revocable() -> None:
     assert config.enabled is True
     assert config.consent_citation.startswith("docs/tracking/ROLLING_WORK_LEDGER.md:")
     assert "enabled" in TIMER_CONFIG.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("explicit_root", [False, True])
+def test_ledger_note_runs_the_canonical_packaged_appender(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    explicit_root: bool,
+) -> None:
+    import worktree_prune_timer as timer
+
+    monkeypatch.delenv("OMNIBASE_INTERNAL_HOME", raising=False)
+    calls: list[list[str]] = []
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(timer, "_run", run)
+    home = tmp_path / "registry"
+    internal = home.parent / "omnibase_internal"
+    if explicit_root:
+        internal = tmp_path / "explicit-internal"
+        monkeypatch.setenv("OMNIBASE_INTERNAL_HOME", str(internal))
+    ledger = home / "docs" / "tracking" / "ROLLING_WORK_LEDGER.md"
+    report = timer.ModelRunReport(
+        started_at="t", executed=True, consent_citation="proof:2"
+    )
+    report.worktrees_removed = 2
+    row = timer.append_ledger_note(ledger, report, home)
+    assert calls == [
+        [
+            "env",
+            "-u",
+            "PYTHONPATH",
+            "uv",
+            "run",
+            "--project",
+            str(internal),
+            "onex-ledger",
+            str(ledger),
+            "--append",
+            row,
+        ]
+    ]
+    assert "lane=worktree-prune-timer" in row
+    assert "consent=proof:2" in row and "worktrees_removed=2" in row
+    assert report.notes == []
+
+
+def test_ledger_note_preserves_append_refusal_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import worktree_prune_timer as timer
+
+    def run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 65, "", "row refused")
+
+    monkeypatch.setattr(timer, "_run", run)
+    report = timer.ModelRunReport(
+        started_at="t", executed=True, consent_citation="proof:2"
+    )
+    timer.append_ledger_note(tmp_path / "LEDGER.md", report, tmp_path / "registry")
+    assert report.notes == ["ledger append failed (exit 65): row refused"]
