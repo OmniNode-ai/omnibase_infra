@@ -1911,6 +1911,79 @@ class TestSupersededSkipIsPartitionedByHeadSha:
         ]
 
 
+class TestSkippedCallerRowSupersededByReusableRow:
+    """OMN-20275 — a skipped reusable-workflow caller writes a BARE name.
+
+    Live shape (omnibase_infra#4417, head 9e219e32): opened as a draft against
+    dev, ``deploy-gate.yml``'s caller job was skipped and wrote ``deploy-gate``
+    = skipped. ready_for_review re-ran it and the reusable wrote
+    ``deploy-gate / deploy-gate`` = success. The names differ, so the bare skip
+    stayed on the head and the layer-5 sweep failed CI Summary closed on it.
+    The two rows below are that head's real rows.
+    """
+
+    HEAD = "9e219e32ade5ae1d258b529579799c31aaa98878"
+    SKIPPED_CALLER: dict[str, object] = {
+        "id": 110344935824,
+        "name": "deploy-gate",
+        "head_sha": HEAD,
+        "status": "completed",
+        "conclusion": "skipped",
+        "started_at": "2026-10-01T11:21:51Z",
+        "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/36854892989/job/110344935824",
+    }
+    REUSABLE: dict[str, object] = {
+        "id": 110348422625,
+        "name": "deploy-gate / deploy-gate",
+        "head_sha": HEAD,
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-10-01T11:32:12Z",
+        "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/36855974944/job/110348422625",
+    }
+
+    def _sweep(self, rows: list[dict[str, object]]) -> list[str]:
+        failures, _in_flight, _swept, _excluded, _prov = evaluate_external_sweep(
+            rows,
+            expected=EXPECTED_EXTERNAL_CONTEXTS,
+            in_run_names=frozenset(),
+            self_name="CI Summary",
+            exclusions={},
+            events={},
+            now=NOW,
+        )
+        return failures
+
+    def test_reusable_verdict_drops_the_bare_caller_skip(self) -> None:
+        """RED CONTROL: the #4417 pair no longer fails the sweep."""
+        rows = [dict(self.SKIPPED_CALLER), dict(self.REUSABLE)]
+        assert drop_superseded_non_verdicts(rows) == [self.REUSABLE]
+        assert self._sweep(rows) == []
+
+    def test_lone_bare_caller_skip_still_fails(self) -> None:
+        """POSITIVE CONTROL: with no reusable row the skip still fails closed."""
+        failures = self._sweep([dict(self.SKIPPED_CALLER)])
+        assert failures == ["deploy-gate (skipped)"]
+
+    def test_reusable_row_on_another_head_does_not_clear_the_skip(self) -> None:
+        """POSITIVE CONTROL: supersession stays partitioned by head SHA."""
+        rows = [dict(self.SKIPPED_CALLER), {**self.REUSABLE, "head_sha": "b" * 40}]
+        assert len(drop_superseded_non_verdicts(rows)) == 2
+
+    def test_bare_verdict_does_not_clear_a_reusable_skip(self) -> None:
+        """POSITIVE CONTROL: one direction only."""
+        rows = [
+            {**self.SKIPPED_CALLER, "conclusion": "success"},
+            {**self.REUSABLE, "conclusion": "skipped"},
+        ]
+        assert len(drop_superseded_non_verdicts(rows)) == 2
+
+    def test_bare_caller_failure_is_never_dropped(self) -> None:
+        """POSITIVE CONTROL: only non-verdict rows are dropped."""
+        rows = [{**self.SKIPPED_CALLER, "conclusion": "failure"}, dict(self.REUSABLE)]
+        assert len(drop_superseded_non_verdicts(rows)) == 2
+
+
 class TestCancellationGraceFailsClosedOmn18355:
     """OMN-18355 — the bounded wait a cancelled external context earns.
 

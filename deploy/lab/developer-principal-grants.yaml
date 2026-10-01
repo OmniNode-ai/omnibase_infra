@@ -9,6 +9,8 @@
 # the whole lane, a developer principal's grants live here and nowhere else: a
 # grant typed by hand on the broker is drift.
 #
+# THE LEDGER WRITE PATH: see the four grants after the delegation ones below.
+#
 # THE MINIMUM FOR ONE LANE DELEGATION (`onex delegate --bus kafka --lane dev`):
 #   * produce the delegate command;
 #   * read the two terminal events it waits for;
@@ -54,6 +56,30 @@ grants:
     operations: [read, write, describe]
   - resource: group
     name: local.omnibase_core.runtime_local_
+    pattern: prefixed
+    operations: [read, describe]
+  # THE LEDGER WRITE PATH (OMN-20275). A developer machine or lab host writes a
+  # rolling-work-ledger row by publishing an append command; the one serve process
+  # on the ledger host appends it and answers on the two terminals, which the
+  # caller reads under its own group (omnimarket work_ledger_bus
+  # WorkLedgerAppendCaller: `local.omnimarket.work_ledger_append_client.consume.v1.`
+  # plus a per-call suffix). The serve group,
+  # `local.omnimarket.node_work_ledger_append_effect.consume.v1`, does not start
+  # with that prefix, so a developer principal cannot join it and take commands.
+  - resource: topic
+    name: onex.cmd.omnimarket.work-ledger-append-requested.v1
+    pattern: literal
+    operations: [write, describe]
+  - resource: topic
+    name: onex.evt.omnimarket.work-ledger-append-completed.v1
+    pattern: literal
+    operations: [read, describe]
+  - resource: topic
+    name: onex.evt.omnimarket.work-ledger-append-failed.v1
+    pattern: literal
+    operations: [read, describe]
+  - resource: group
+    name: local.omnimarket.work_ledger_append_client.consume.v1.
     pattern: prefixed
     operations: [read, describe]
   - resource: group

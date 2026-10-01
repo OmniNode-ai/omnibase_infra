@@ -101,19 +101,47 @@ def test_the_checked_in_grant_file_is_valid(declaration: lpi.Declaration) -> Non
     )
 
 
-def test_only_the_delegate_command_and_its_terminals_are_writable(
+def test_only_the_two_commands_and_the_delegate_terminals_are_writable(
     declaration: lpi.Declaration,
 ) -> None:
     # A machine that runs a harness task publishes the terminal event itself, so it
-    # holds write on the two delegate-skill terminals and on nothing else: literal
-    # names, no prefix or wildcard grant.
+    # holds write on the two delegate-skill terminals. The ledger write path
+    # (OMN-20275) adds write on its append command only: the ledger host's serve
+    # process alone writes the append terminals. Literal names, no prefix or
+    # wildcard grant.
     writable = [g for g in declaration.grants if "write" in g.operations]
     assert {g.name for g in writable} == {
         "onex.cmd.omnimarket.delegate-skill.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
         "onex.evt.omnimarket.delegate-skill-failed.v1",
+        "onex.cmd.omnimarket.work-ledger-append-requested.v1",
     }
     assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
+
+
+def test_ledger_append_caller_group_cannot_join_the_serve_group(
+    declaration: lpi.Declaration,
+) -> None:
+    # OMN-20275: a developer principal reads the append terminals under its own
+    # caller group prefix. The ledger host's serve group must not start with any
+    # prefix a developer may read under, or a developer could take its commands.
+    serve_group = "local.omnimarket.node_work_ledger_append_effect.consume.v1"
+    readable_prefixes = [
+        g.name
+        for g in declaration.grants
+        if g.resource == "group" and g.pattern == "prefixed" and "read" in g.operations
+    ]
+    assert "local.omnimarket.work_ledger_append_client.consume.v1." in readable_prefixes
+    assert not any(serve_group.startswith(prefix) for prefix in readable_prefixes)
+    terminals = {
+        g.name: set(g.operations)
+        for g in declaration.grants
+        if g.name.startswith("onex.evt.omnimarket.work-ledger-append-")
+    }
+    assert terminals == {
+        "onex.evt.omnimarket.work-ledger-append-completed.v1": {"read", "describe"},
+        "onex.evt.omnimarket.work-ledger-append-failed.v1": {"read", "describe"},
+    }
 
 
 @pytest.mark.parametrize(
