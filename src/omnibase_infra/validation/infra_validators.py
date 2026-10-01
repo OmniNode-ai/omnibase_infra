@@ -516,6 +516,8 @@ INFRA_UNIONS_STRICT = True
 def validate_infra_architecture(
     directory: PathInput = INFRA_SRC_PATH,
     max_violations: int = INFRA_MAX_VIOLATIONS,
+    *,
+    apply_exemptions: bool = True,
 ) -> ValidationResult:
     """
     Validate infrastructure architecture with strict defaults.
@@ -533,6 +535,7 @@ def validate_infra_architecture(
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
         max_violations: Maximum allowed violations. Defaults to INFRA_MAX_VIOLATIONS (0).
+        apply_exemptions: Disable to expose raw findings for the unused-entry check.
 
     Returns:
         ModelValidationResult with validation status and filtered errors.
@@ -543,7 +546,7 @@ def validate_infra_architecture(
 
     # Load exemption patterns from YAML configuration
     # See validation_exemptions.yaml for pattern definitions and rationale
-    exempted_patterns = get_architecture_exemptions()
+    exempted_patterns = get_architecture_exemptions() if apply_exemptions else []
 
     # Filter errors using regex-based pattern matching
     filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
@@ -572,6 +575,8 @@ def validate_infra_contracts(
 def validate_infra_patterns(
     directory: PathInput = INFRA_SRC_PATH,
     strict: bool = INFRA_PATTERNS_STRICT,
+    *,
+    apply_exemptions: bool = True,
 ) -> ValidationResult:
     """
     Validate infrastructure code patterns with infrastructure-specific exemptions.
@@ -599,6 +604,7 @@ def validate_infra_patterns(
     Args:
         directory: Directory to validate. Defaults to infrastructure source.
         strict: Enable strict mode. Defaults to INFRA_PATTERNS_STRICT (True).
+        apply_exemptions: Disable to expose raw findings for the unused-entry check.
 
     Returns:
         ModelValidationResult with validation status and filtered errors.
@@ -609,7 +615,7 @@ def validate_infra_patterns(
 
     # Load exemption patterns from YAML configuration
     # See validation_exemptions.yaml for pattern definitions and rationale
-    exempted_patterns = get_pattern_exemptions()
+    exempted_patterns = get_pattern_exemptions() if apply_exemptions else []
 
     # Filter errors using regex-based pattern matching
     filtered_errors = _filter_exempted_errors(base_result.errors, exempted_patterns)
@@ -677,23 +683,7 @@ def _filter_exempted_errors(
             if not isinstance(pattern, dict):
                 continue
 
-            # Extract pattern fields (all are optional except file_pattern in practice)
-            file_pattern = pattern.get("file_pattern", "")
-            class_pattern = pattern.get("class_pattern", "")
-            method_pattern = pattern.get("method_pattern", "")
-            violation_pattern = pattern.get("violation_pattern", "")
-
-            # Check if all specified patterns match
-            # Skip unspecified (empty) patterns - they match everything
-            matches_file = not file_pattern or re.search(file_pattern, err)
-            matches_class = not class_pattern or re.search(class_pattern, err)
-            matches_method = not method_pattern or re.search(method_pattern, err)
-            matches_violation = not violation_pattern or re.search(
-                violation_pattern, err
-            )
-
-            # All specified patterns must match for exemption
-            if matches_file and matches_class and matches_method and matches_violation:
+            if _matches_exemption(err, pattern):
                 is_exempted = True
                 break
 
@@ -701,6 +691,54 @@ def _filter_exempted_errors(
             filtered.append(err)
 
     return filtered
+
+
+def _matches_exemption(error: str, pattern: ExemptionPattern) -> bool:
+    """Use the same conjunctive regex matcher for filtering and stale checks."""
+    return all(
+        not value or re.search(value, error) is not None
+        for value in (
+            pattern.get("file_pattern", ""),
+            pattern.get("class_pattern", ""),
+            pattern.get("method_pattern", ""),
+            pattern.get("violation_pattern", ""),
+        )
+    )
+
+
+def find_unused_exemptions(
+    errors: list[str], patterns: list[ExemptionPattern]
+) -> list[ExemptionPattern]:
+    """Return entries matching no raw finding, including overlapping entries."""
+    return [
+        pattern
+        for pattern in patterns
+        if not any(_matches_exemption(error, pattern) for error in errors)
+    ]
+
+
+def validate_infra_unused_exemptions(
+    directory: PathInput = INFRA_SRC_PATH,
+) -> ValidationResult:
+    """Reject stale entries against all three validators with exemptions disabled."""
+    raw_results = {
+        "pattern_exemptions": validate_infra_patterns(
+            directory, apply_exemptions=False
+        ),
+        "architecture_exemptions": validate_infra_architecture(
+            directory, apply_exemptions=False
+        ),
+        "union_exemptions": validate_infra_union_usage(
+            directory, apply_exemptions=False
+        ),
+    }
+    exemptions = _load_exemptions_yaml()
+    errors: list[str] = []
+    for section, result in raw_results.items():
+        for index, pattern in enumerate(exemptions[section], start=1):
+            if find_unused_exemptions(result.errors, [pattern]):
+                errors.append(f"Unused {section}[{index}]: {pattern}")
+    return ModelValidationResult(is_valid=not errors, errors=errors)
 
 
 def _create_filtered_result(
@@ -1259,6 +1297,8 @@ def validate_infra_union_usage(
     directory: PathInput = INFRA_SRC_PATH,
     max_unions: int = INFRA_MAX_UNIONS,
     strict: bool = INFRA_UNIONS_STRICT,
+    *,
+    apply_exemptions: bool = True,
 ) -> ValidationResult:
     """
     Validate Union type usage in infrastructure code.
@@ -1293,6 +1333,7 @@ def validate_infra_union_usage(
         max_unions: Maximum union count threshold. Defaults to INFRA_MAX_UNIONS.
             Note: This threshold applies only after excluding optionals and isinstance.
         strict: Enable strict mode. Defaults to INFRA_UNIONS_STRICT (True).
+        apply_exemptions: Disable to expose raw findings for the unused-entry check.
 
     Returns:
         ModelValidationResult with validation status and any errors.
@@ -1320,7 +1361,7 @@ def validate_infra_union_usage(
     )
 
     # Load exemption patterns from YAML configuration
-    exempted_patterns = get_union_exemptions()
+    exempted_patterns = get_union_exemptions() if apply_exemptions else []
 
     # Filter errors using regex-based pattern matching
     filtered_issues = _filter_exempted_errors(issues, exempted_patterns)

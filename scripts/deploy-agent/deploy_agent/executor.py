@@ -8,6 +8,7 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import socket
@@ -72,6 +73,7 @@ from deploy_agent.lane_lock_client import (
     lane_lock,
 )
 from deploy_agent.loaded_code import loaded_code_sha
+from deploy_agent.reconcile_host_lock import hold_reconcile_host_lock
 from deploy_agent.recreate_supervisor import (
     DEPS_COMPOSE_UP_FLOOR_SECONDS,
     DEPS_COMPOSE_UP_MARGIN_SECONDS,
@@ -157,6 +159,8 @@ REPOINT_ONEX_API_SCRIPT = (
 ONEX_API_SERVICE = "onex-api"
 REPOINT_TIMEOUT_SECONDS = 120
 ONEX_API_RECREATE_TIMEOUT_SECONDS = 300
+# OMN-20154: bound the wait for reconcile-host to finish rewriting build contexts.
+RECONCILE_HOST_LOCK_WAIT_SECONDS = 900
 
 PHASE_TIMEOUTS = {
     Phase.PREFLIGHT: 30,
@@ -889,6 +893,33 @@ def _decode_stream(stream: str | bytes | None) -> str:
     if isinstance(stream, bytes):
         return stream.decode("utf-8", errors="replace")
     return str(stream)
+
+
+def build_failure_excerpt(stdout: str, *, limit: int = 4000) -> str:
+    """Extract BuildKit failure summaries, or the tail of other build output."""
+    lines = stdout.splitlines()
+    extracted: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if (
+            line == "------"
+            and index + 1 < len(lines)
+            and lines[index + 1].startswith(" > ")
+        ):
+            end = index + 2
+            while end < len(lines) and lines[end] != "------":
+                end += 1
+            if end < len(lines):
+                extracted.extend(lines[index : end + 1])
+                index = end + 1
+                continue
+        if re.match(r"#\d+ ERROR:", line):
+            extracted.append(line)
+        index += 1
+    if not extracted:
+        extracted = [line for line in lines if line.strip()][-40:]
+    return "\n".join(extracted)[-limit:] if limit > 0 else ""
 
 
 def _run(
@@ -3101,29 +3132,36 @@ class DeployExecutor:
             # Build images first (both scopes), then bring them up.
             # _compose_build passes --build-arg GIT_SHA so Docker invalidates
             # the COPY src/ layer even when the file-system mtime is cached.
-            self._compose_build(
-                Scope.CORE,
-                git_sha,
-                on_phase_update,
-                build_source=build_source,
-                runtime_lane=lane,
-                git_ref=git_ref,
-            )
-            self._compose_build(
-                Scope.RUNTIME,
-                git_sha,
-                on_phase_update,
-                build_source=build_source,
-                runtime_lane=lane,
-                git_ref=git_ref,
-            )
-            self._build_dev_lane_only_services(
-                git_sha,
-                on_phase_update,
-                build_source=build_source,
-                lane=lane,
-                git_ref=git_ref,
-            )
+            # OMN-20154: hold from staging through the LAST build, which reuses
+            # staged provenance a reconcile checkout would reset to a placeholder.
+            with hold_reconcile_host_lock(
+                os.environ.get("OMNI_HOME", "").strip(),
+                purpose=f"deploy-agent image build {git_sha[:12]}",
+                wait_seconds=RECONCILE_HOST_LOCK_WAIT_SECONDS,
+            ):
+                self._compose_build(
+                    Scope.CORE,
+                    git_sha,
+                    on_phase_update,
+                    build_source=build_source,
+                    runtime_lane=lane,
+                    git_ref=git_ref,
+                )
+                self._compose_build(
+                    Scope.RUNTIME,
+                    git_sha,
+                    on_phase_update,
+                    build_source=build_source,
+                    runtime_lane=lane,
+                    git_ref=git_ref,
+                )
+                self._build_dev_lane_only_services(
+                    git_sha,
+                    on_phase_update,
+                    build_source=build_source,
+                    lane=lane,
+                    git_ref=git_ref,
+                )
             # OMN-18640: the deps leg of a FULL rebuild CONVERGES rather than
             # recreates. A FULL rebuild is a request to rebuild and replace the
             # RUNTIME images; the broker, the database and the cache are
@@ -3154,22 +3192,29 @@ class DeployExecutor:
                 services_for_scope(Scope.FULL, lane=lane), lane
             )
 
-        self._compose_build(
-            scope,
-            git_sha,
-            on_phase_update,
-            build_source=build_source,
-            runtime_lane=lane,
-            git_ref=git_ref,
-        )
-        if scope == Scope.RUNTIME:
-            self._build_dev_lane_only_services(
+        # OMN-20154: span staging through the LAST build so reconcile-host
+        # cannot reset staged provenance before the dev-only build consumes it.
+        with hold_reconcile_host_lock(
+            os.environ.get("OMNI_HOME", "").strip(),
+            purpose=f"deploy-agent image build {git_sha[:12]}",
+            wait_seconds=RECONCILE_HOST_LOCK_WAIT_SECONDS,
+        ):
+            self._compose_build(
+                scope,
                 git_sha,
                 on_phase_update,
                 build_source=build_source,
-                lane=lane,
+                runtime_lane=lane,
                 git_ref=git_ref,
             )
+            if scope == Scope.RUNTIME:
+                self._build_dev_lane_only_services(
+                    git_sha,
+                    on_phase_update,
+                    build_source=build_source,
+                    lane=lane,
+                    git_ref=git_ref,
+                )
         self._compose_up(phase, scope, services, on_phase_update, lane=lane)
         # After the infra family, never before it: the forwarder mirrors off
         # this lane's broker, so deploying it against a lane that is still
@@ -4043,12 +4088,22 @@ class DeployExecutor:
             ) from exc
         if result.returncode != 0:
             on_phase_update(build_phase, PhaseStatus.FAILED)
+            excerpt = build_failure_excerpt(_decode_stream(result.stdout))
+            step_output = ""
+            if excerpt:
+                logger.error(
+                    "Failing build step output for profile %s:\n%s", profile, excerpt
+                )
+                step_output = (
+                    "\n--- failing build step output (compose writes BuildKit progress to stdout) ---\n"
+                    + excerpt
+                )
             raise RuntimeError(
                 f"{EnumBuildOutcome.BUILD_ERRORED.value}: docker compose build "
                 f"for profile {profile!r} exited {result.returncode} inside its "
                 f"{timeout}s ceiling -- this is a BROKEN BUILD, not an exhausted "
                 f"budget, and retrying it unchanged buys nothing: "
-                f"{result.stderr}"
+                f"{result.stderr}{step_output}"
             )
 
     def _record_compose_invocation(self, phase: Phase, cmd: Sequence[str]) -> None:
