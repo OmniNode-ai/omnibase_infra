@@ -4,8 +4,10 @@
 
 Joining omnibase-infra_default isolates the principal issuer from the dev lane's
 broker, making redpanda:9092 and redpanda:9644 unreachable.
+OMN-20250: the issuer accepts issuance only over its Unix socket from tailscale serve.
 """
 
+import json
 from pathlib import Path
 from typing import Any, cast
 
@@ -45,3 +47,28 @@ def test_manifest_issuer_and_dev_networks_match_dev_broker() -> None:
         == lanes["dev"]["network"]
         == _dev_broker_network_name()
     )
+
+
+@pytest.mark.unit
+def test_issuer_publishes_no_port_and_serves_a_unix_socket() -> None:
+    compose = _load_yaml("docker/docker-compose.principal-issuer.yml")
+    service = compose["services"]["principal-issuer"]
+    assert "ports" not in service
+    assert "expose" not in service
+    assert "principal-issuer-socket:/run/principal-issuer" in service["volumes"]
+    assert "principal-issuer-socket" in compose["volumes"]
+    assert service["healthcheck"]["test"] == [
+        "CMD",
+        "python3",
+        "scripts/lab_principal_issuer.py",
+        "health",
+        "--socket",
+        "/run/principal-issuer/issuer.sock",
+    ]
+    dockerfile = (REPO_ROOT / "docker/Dockerfile.principal-issuer").read_text()
+    (cmd_line,) = [line for line in dockerfile.splitlines() if line.startswith("CMD ")]
+    cmd = json.loads(cmd_line.removeprefix("CMD "))
+    assert cmd[cmd.index("--socket") + 1] == "/run/principal-issuer/issuer.sock"
+    assert cmd[cmd.index("--proxy-uid") + 1] == "0"
+    assert "--bind" not in cmd
+    assert "--port" not in cmd

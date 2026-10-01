@@ -147,8 +147,8 @@ _LANE_PORT_MAP: dict[str, dict[str, str]] = {
     # The rest of its 43xxx block is declared in the lane manifest's comment.
     "dev-105": {"main": "43085", "effects": "43086"},
     # OMN-20150 — the developer principal issuer is a broker-credential service,
-    # not a runtime lane: it has no runtime main/effects pair. Its one port
-    # (loopback 19190) is declared in its compose file. That is a real absence.
+    # not a runtime lane: it has no runtime main/effects pair. It publishes no
+    # port and serves a Unix socket reached only by the host's tailscale serve.
     "principal-issuer": _PORTS_NONE,
 }
 
@@ -221,8 +221,8 @@ _LANE_BOUNDARY: dict[str, str] = {
     # OMN-20150. Optional and declared ahead of the operator's first deploy.
     "principal-issuer": (
         "developer principal issuer — a credential service on the .201 dev lane "
-        "network, loopback only; NOT a runtime lane, never a proof lane, and "
-        "never sourced for stability/prod grants"
+        "network, unix socket only, no published port; NOT a runtime lane, "
+        "never a proof lane, and never sourced for stability/prod grants"
     ),
 }
 
