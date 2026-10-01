@@ -139,6 +139,9 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "Writer-Migration Coupling Check",  # migration-required-check
     "Node Migration Declaration Check",  # node-migration-declaration-check (OMN-15717)
     "no-noncanonical-lifecycle-classes",  # OMN-14350 non-canonical lifecycle-class ratchet
+    "Canonical Handler-Shape Gate (OMN-20298)",  # canonical-handler-shape-gate — detector with no preflight dependency
+    "No Plugin Daemon Classes Gate (OMN-20298)",  # no-plugin-daemon-classes-gate — detector with no preflight dependency
+    "Shape-Gate Independence (OMN-20298)",  # shape-gate-independence — refuses a detector behind the preflight
     "Effect-Assertion Gate (RT-5)",  # OMN-14467 deploy-trigger fails closed on zero output
     "OCC Companion Merged Gate (OMN-15214)",  # occ-companion-merged — cited OCC evidence must be MERGED before product merge
     # OMN-16774: whole event chains driven through the REAL dispatch seam on the

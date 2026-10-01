@@ -85,6 +85,14 @@ repos:
         require_serial: true
         args: [--allowlist, .onex_ratchets/noncanonical_class_allowlist.yaml, src/omnibase_infra]
         files: ^src/omnibase_infra/.*\.py$
+  # Shape-gate independence (OMN-20298): a shape-gate detector job never waits
+  # on the change-control preflight and never reads its result. BLOCKING, zero
+  # baseline, no allowlist, no suppression comment. CI twin: the
+  # shape-gate-independence job in .github/workflows/ci.yml (STRICT CI Summary gate).
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: 5220ecf1758b4475c2963ec13171b6431fdc2224 # pragma: allowlist secret
+    hooks:
+      - id: check-shape-gate-independence
   # Hardcoded topic guard — sourced from onex_change_control (OMN-5256/OMN-5259)
   # Pre-existing violations excluded pending migration to canonical constants (OMN-5259)
   # OMN-13195 (phase A4): dropped the redundant `event_bus/topic_constants.py`
