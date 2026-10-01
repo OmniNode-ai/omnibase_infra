@@ -24,16 +24,15 @@ from omnibase_infra.nodes.node_architecture_validator.validators.scanner_imperat
 )
 
 # Per-node owner-ticket attribution introduced by OMN-13485 (B0 re-point).
+# OMN-17427 removed the merge-sweep, routing, rsd and scope orchestrators: their
+# completion handlers were deleted (no node published the events they consumed),
+# so none of the four hard-fails any more and the shrink-only list shrank.
 EXPECTED_OWNER_TICKETS: dict[str, str] = {
     "node_delegation_orchestrator": "OMN-13471",
     "pr_lifecycle_orchestrator": "OMN-13487",
     "autopilot_orchestrator": "OMN-13488",
     "node_chain_orchestrator": "OMN-13489",
-    "node_merge_sweep_workflow_orchestrator": "OMN-13490",
     "node_registration_orchestrator": "OMN-13491",
-    "node_routing_orchestrator": "OMN-13492",
-    "node_rsd_orchestrator": "OMN-13493",
-    "node_scope_workflow_orchestrator": "OMN-13494",
     "node_runner_fleet_maintain_orchestrator": "OMN-13942",
 }
 
@@ -95,9 +94,10 @@ def test_live_baseline_owner_tickets_repointed() -> None:
 def test_live_baseline_risk2_entries_carry_accepted_rationale() -> None:
     baseline = _load_live_baseline()
     risk2 = [e for e in baseline.values() if e.risk_score == 2]
-    # There are exactly seven risk-2 thin handlers accepted as baseline
-    # (six from OMN-13485 plus node_runner_fleet_maintain_orchestrator, OMN-13942).
-    assert len(risk2) == 7
+    # There are exactly three risk-2 thin handlers accepted as baseline: the six
+    # from OMN-13485 plus node_runner_fleet_maintain_orchestrator (OMN-13942),
+    # less the four orchestrators OMN-17427 took off the list.
+    assert len(risk2) == 3
     for entry in risk2:
         assert entry.accepted_rationale, (
             f"{entry.node}: risk-2 baseline entry must carry an accepted_rationale"
