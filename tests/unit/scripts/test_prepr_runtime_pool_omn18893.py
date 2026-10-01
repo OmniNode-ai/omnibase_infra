@@ -174,7 +174,9 @@ def test_every_lab_machine_takes_part_and_every_exclusion_states_a_reason() -> N
     # Operator ruling 2026-09-27T20:20:42Z: ".105, .201 and .202 are available,
     # what do you mean only 1 lab host?" Every lab machine has a pool member.
     in_pool = {h.machine for h in CFG.hosts if h.status == "pool"}
-    assert in_pool == {"lab-101", "lab-105", "lab-200", "lab-201", "lab-202"}
+    # Operator 2026-10-01: .105 is out of the mix (taken to tech week).
+    assert in_pool == {"lab-101", "lab-200", "lab-201", "lab-202"}
+    assert CFG.host("lab-105").status == "excluded"
     assert CFG.host("lab-202").status == "pool"
     assert CFG.host("lab-202").positive_control == "omnibase-infra-dev-202"
     assert all(h.reason for h in CFG.hosts if h.status == "excluded")
@@ -323,34 +325,34 @@ def test_survey_probes_concurrently_and_preserves_host_order() -> None:
 def test_pick_takes_the_least_loaded_free_host_and_never_an_excluded_one() -> None:
     hosts = {
         "lab-101": FakeHost(load=6.0),
-        "lab-105": FakeHost(cores=10, load=1.0),
         "lab-200": FakeHost(cores=24, load=3.0),
         "lab-201": FakeHost(),
-        "lab-202": FakeHost(),
+        "lab-202": FakeHost(cores=10, load=1.0),
     }
     states = _survey(hosts)
     verdicts = {s.host.name: s.verdict for s in states}
     assert verdicts["lab-201"] == "EXCLUDED"
+    assert verdicts["lab-105"] == "EXCLUDED"
     assert verdicts["lab-202"] == "FREE"
-    assert pool.pick(states).host.name == "lab-105"
+    assert pool.pick(states).host.name == "lab-202"
 
 
 def test_offline_overloaded_leased_held_and_occupied_hosts_are_not_free() -> None:
     hosts = {
         "lab-101": FakeHost(),
-        "lab-105": FakeHost(online=False),
+        "lab-202": FakeHost(online=False),
         "lab-200": FakeHost(cores=24, load=74.0),
     }
     hosts["lab-101"].lease = _lease("other-lane", NOW + dt.timedelta(minutes=30))
     v = {s.host.name: s for s in _survey(hosts)}
     assert v["lab-101"].verdict == "BUSY" and "other-lane" in v["lab-101"].detail
-    assert v["lab-105"].verdict == "OFFLINE"
+    assert v["lab-202"].verdict == "OFFLINE"
     assert v["lab-200"].verdict == "OVERLOADED"
     assert pool.pick(list(v.values())) is None
 
     held = {
         "lab-101": FakeHost(),
-        "lab-105": FakeHost(slot=3),
+        "lab-202": FakeHost(slot=3),
         "lab-200": FakeHost(listen=1),
     }
     v2 = {
@@ -361,7 +363,7 @@ def test_offline_overloaded_leased_held_and_occupied_hosts_are_not_free() -> Non
     }
     assert v2["lab-101"].verdict == "BUSY" and "HOLD id1" in v2["lab-101"].detail
     assert (
-        v2["lab-105"].verdict == "BUSY" and "containers present" in v2["lab-105"].detail
+        v2["lab-202"].verdict == "BUSY" and "containers present" in v2["lab-202"].detail
     )
     assert v2["lab-200"].verdict == "BUSY" and "listeners" in v2["lab-200"].detail
 
@@ -732,7 +734,6 @@ def test_failed_build_still_tears_down_and_releases(tmp_path: Path) -> None:
 def test_run_refuses_when_no_host_is_free(tmp_path: Path) -> None:
     hosts = {
         "lab-101": FakeHost(cores=12, load=40.0),
-        "lab-105": FakeHost(online=False),
         "lab-200": FakeHost(slot=9),
     }
     code, text = pool.run_proof(
@@ -749,7 +750,7 @@ def test_run_refuses_when_no_host_is_free(tmp_path: Path) -> None:
     assert code == pool.EXIT_NO_FREE_HOST
     assert (
         "lab-101 OVERLOADED" in text
-        and "lab-105 OFFLINE" in text
+        and "lab-105 EXCLUDED" in text
         and "lab-201 EXCLUDED" in text
         and "lab-202 OFFLINE" in text
     )
