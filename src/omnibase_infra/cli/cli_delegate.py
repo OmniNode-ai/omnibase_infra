@@ -2354,7 +2354,7 @@ def delegate_command(
         # part of the command, not an optional extra.
         onex delegate "document the router" --bus kafka --lane dev --locus deployed-lane
         # Run it here on purpose, and say so in the record:
-        onex delegate "document the router" --bus kafka --lane dev --locus in-process
+        onex delegate "document the router" --bus inmemory --locus in-process
     """
     if force_json and force_human:
         raise click.UsageError("--json and --human are mutually exclusive.")
