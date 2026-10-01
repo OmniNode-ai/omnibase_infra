@@ -273,7 +273,7 @@ def test_stability_lane_runtime_ports_override_production_bindings() -> None:
     ]
     assert services["redpanda"]["ports"] == [
         "39092:19092",
-        "29644:9644",
+        "127.0.0.1:29644:9644",
     ]
     assert services["valkey"]["ports"] == [
         "${STABILITY_TEST_VALKEY_EXTERNAL_PORT:-26379}:6379"
