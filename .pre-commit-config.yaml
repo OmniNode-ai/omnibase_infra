@@ -32,6 +32,18 @@ repos:
     hooks:
       - id: canonical-file-shape
         require_serial: true
+  # OMN-20295: direct-model-call gate, BLOCKING. A model call (HTTP to a model
+  # endpoint, provider or base_url; a model CLI exec such as crush, codex,
+  # claude -p or llama-cli; a model SDK import; or a caller of one) must sit in a
+  # sanctioned delegation node package named in omnibase_core's policy.yaml.
+  # Shrink-only baseline .onex_ratchets/direct_model_call_baseline.yaml; no
+  # suppression marker. Keep this rev equal to the pin in
+  # .github/workflows/direct-model-call.yml. Server-side backstop: OMN-20299.
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: 2685a264629c847c291d9e96e3d4ea2cb2773cec # pragma: allowlist secret
+    hooks:
+      - id: check-direct-model-call
+        args: [--repo, omnibase_infra, --baseline, .onex_ratchets/direct_model_call_baseline.yaml, --base, HEAD]
   # Stub implementation detection + receipt-honesty gate + transport-mock lint —
   # sourced from omnibase_core. Rev bumped to OMN-13026 (transport-mock-lint
   # hook added); OMN-13281 wires receipt-honesty to this block.
