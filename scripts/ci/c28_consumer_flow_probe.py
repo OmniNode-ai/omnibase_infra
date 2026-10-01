@@ -138,6 +138,7 @@ REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 
 # ---- the subject, as the readback named it ---------------------------------
 EXPOSURE_TOPIC: Final[str] = "onex.snapshot.projection.consumer-flow.v1"
+CURSOR_FIELD: Final[str] = "projection_cursor"
 DEFAULT_BASE_URL: Final[str] = "http://host.docker.internal:3002"
 LIVE_WINDOW_MINUTES: Final[int] = 10
 LIVE_WINDOW_SQL: Final[str] = (
@@ -435,6 +436,8 @@ def grade_cursor(rec: Record, cur: dict[str, Any]) -> None:
         f"{len(pages)} page(s); last next_cursor "
         f"{pages[-1].get('next_cursor') if pages else None!r}; terminated={cur.get('terminated')}",
     )
+    # OMN-19812: the fixed 2000-row served window (omnimarket#3119, OMN-20152)
+    # makes an exactly-full final page normal, so the end is measured, not assumed.
     silent_truncation = [
         i
         for i, p in enumerate(pages)
@@ -442,12 +445,18 @@ def grade_cursor(rec: Record, cur: dict[str, Any]) -> None:
         and _is_int(p.get("row_limit"))
         and p["row_count"] >= p["row_limit"]
         and not p.get("next_cursor")
+        and not (
+            isinstance(end_proof := p.get("end_proof"), dict)
+            and end_proof.get("proven") is True
+        )
     ]
+    proof = pages[-1].get("end_proof") if pages else None
     rec.add(
         "cursor",
         "truncated_pages_carry_a_cursor",
         bool(pages) and not silent_truncation,
-        f"pages at row_limit with a null next_cursor: {silent_truncation}",
+        f"pages at row_limit with a null next_cursor: {silent_truncation}"
+        f"; full final page proven the end by a since= read past it: {proof}",
     )
     advancing = cur.get("second_page_differs")
     rec.add(
@@ -760,6 +769,41 @@ def walk(lane: Lane, max_pages: int = 200) -> dict[str, Any]:
             break
         seen_cursors.add(str(nxt))
         cursor = str(nxt)
+    if (
+        terminated
+        and _is_int(count := pages[-1].get("row_count"))
+        and _is_int(limit := pages[-1].get("row_limit"))
+        and count >= limit
+        and not pages[-1].get("next_cursor")
+    ):
+        last = max(
+            (
+                int(value)
+                for row in page_rows
+                if _is_int(value := row.get(CURSOR_FIELD))
+                or (isinstance(value, str) and value.isdigit())
+            ),
+            default=None,
+        )
+        pages[-1]["end_proof"] = {
+            "since": None,
+            "beyond_row_count": None,
+            "reread_next_cursor": None,
+            "proven": False,
+        }
+        if last is not None:
+            beyond = lane.page({"since": str(last)})
+            beyond_n = len(beyond["rows"])
+            reread_next_cursor = None
+            if beyond_n:
+                reread = lane.page({"since": cursor} if cursor else {})
+                reread_next_cursor = reread.get("next_cursor")
+            pages[-1]["end_proof"] = {
+                "since": str(last),
+                "beyond_row_count": beyond_n,
+                "reread_next_cursor": reread_next_cursor,
+                "proven": beyond_n == 0 or bool(reread_next_cursor),
+            }
     return {
         "pages": pages,
         "rows": rows,

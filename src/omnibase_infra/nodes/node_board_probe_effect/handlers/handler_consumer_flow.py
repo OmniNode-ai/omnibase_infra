@@ -230,6 +230,8 @@ def grade_cursor(
         f"{len(pages)} page(s); last next_cursor "
         f"{pages[-1].get('next_cursor') if pages else None!r}; terminated={cur.get('terminated')}",
     )
+    # OMN-19812: the fixed 2000-row served window (omnimarket#3119, OMN-20152)
+    # makes an exactly-full final page normal, so the end is measured, not assumed.
     silent_truncation = [
         i
         for i, p in enumerate(pages)
@@ -237,13 +239,19 @@ def grade_cursor(
         and _is_int(limit := p.get("row_limit"))
         and count >= limit
         and not p.get("next_cursor")
+        and not (
+            isinstance(end_proof := p.get("end_proof"), dict)
+            and end_proof.get("proven") is True
+        )
     ]
+    proof = pages[-1].get("end_proof") if pages else None
     _add(
         rec,
         "cursor",
         "truncated_pages_carry_a_cursor",
         bool(pages) and not silent_truncation,
-        f"pages at row_limit with a null next_cursor: {silent_truncation}",
+        f"pages at row_limit with a null next_cursor: {silent_truncation}"
+        f"; full final page proven the end by a since= read past it: {proof}",
     )
     advancing = cur.get("second_page_differs")
     _add(
