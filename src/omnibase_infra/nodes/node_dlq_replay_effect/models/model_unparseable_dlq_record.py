@@ -33,6 +33,9 @@ if TYPE_CHECKING:
     from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_message import (
         ModelDlqMessage,
     )
+    from omnibase_infra.nodes.node_dlq_replay_effect.models.model_gateway_quarantined_dlq_record import (
+        ModelGatewayQuarantinedDlqRecord,
+    )
 
 
 class DlqRecordUnparseableError(ValueError):
@@ -75,10 +78,12 @@ class ModelUnparseableDlqRecord(BaseModel):
 
 
 #: What ``DLQConsumer.consume_messages`` yields and ``HandlerDlqReplay.run``
-#: consumes: either a parsed DLQ message, or the typed refusal that carries the
-#: raw bytes of one that would not parse. Declared once, as an alias, so the
-#: shape is stated in a single place rather than repeated at every seam.
-type DlqDrainRecord = ModelDlqMessage | ModelUnparseableDlqRecord
+#: consumes: a parsed DLQ message, a typed refusal carrying unparseable raw
+#: bytes, or the gateway's own already-quarantined record. One alias states the
+#: shape in a single place rather than repeating it at every seam.
+type DlqDrainRecord = (
+    ModelDlqMessage | ModelUnparseableDlqRecord | ModelGatewayQuarantinedDlqRecord
+)
 
 __all__ = [
     "DlqDrainRecord",

@@ -12,9 +12,11 @@ Truthfulness invariants:
     - A replay attempt that raises is recorded as FAILED (never COMPLETED).
     - A QUARANTINED outcome is recorded only after the quarantine publish
       succeeds; a failed quarantine publish is recorded as FAILED.
-    - Tracking (``dlq_replay_history``) records every terminal outcome --
+    - Tracking (``dlq_replay_history``) records terminal replay/quarantine outcomes --
       including the OMN-17896 unparseable-record path, which reached its own
       durable quarantine without ever calling the recorder until OMN-18111.
+      Already-quarantined gateway records are skipped without a publish or
+      audit row (OMN-20318).
     - An audit write is a side effect of an ALREADY-DURABLE outcome and can
       therefore never change one: a tracking failure costs an audit row, never
       a verdict and never a committable offset (OMN-18111).
@@ -62,6 +64,9 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_result 
 )
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_run_result import (
     ModelDlqReplayRunResult,
+)
+from omnibase_infra.nodes.node_dlq_replay_effect.models.model_gateway_quarantined_dlq_record import (
+    ModelGatewayQuarantinedDlqRecord,
 )
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_unparseable_dlq_record import (
     DlqDrainRecord,
@@ -584,7 +589,9 @@ class HandlerDlqReplay:
                         withheld += 1
                         continue
 
-                    if isinstance(message, ModelUnparseableDlqRecord):
+                    if isinstance(message, ModelGatewayQuarantinedDlqRecord):
+                        result = self._skip_gateway_quarantined(message)
+                    elif isinstance(message, ModelUnparseableDlqRecord):
                         result = await self._quarantine_unparseable(message)
                     else:
                         result = await self._process_message(message, config)
@@ -823,13 +830,9 @@ class HandlerDlqReplay:
         # ``ModelDlqMessage`` carries no DLQ topic of its own — a consumer
         # drains exactly one, named by ITS OWN config, which is why the caller
         # passes it rather than reading a handler-wide primary (OMN-18119) —
-        # while the unparseable record carries its own so the two shapes key
-        # identically.
-        topic = (
-            message.dlq_topic
-            if isinstance(message, ModelUnparseableDlqRecord)
-            else dlq_topic
-        )
+        # while unparseable and gateway-quarantined records carry their own
+        # DLQ topic so all drain shapes key identically.
+        topic = dlq_topic if isinstance(message, ModelDlqMessage) else message.dlq_topic
         return (topic, message.dlq_partition)
 
     def _mark_offset(
@@ -842,11 +845,12 @@ class HandlerDlqReplay:
         """Record whether this record's offset may be committed (OMN-17896).
 
         A record COMPLETED when it reached a durable terminal outcome — it was
-        replayed, it was durably quarantined, or the run is a dry run and
-        published nothing at all. A ``FAILED`` result means the record is
-        durable NOWHERE: neither replayed nor quarantined. Advancing past it
-        would be the silent drop §4 rule 1 of the lab repair plan forbids,
-        reached through the quarantine path rather than through a ``continue``.
+        replayed, it was durably quarantined (including by the gateway), or
+        the run is a dry run and published nothing at all. A ``FAILED`` result
+        means the record is durable NOWHERE: neither replayed nor quarantined.
+        Advancing past it would be the silent drop §4 rule 1 of the lab repair
+        plan forbids, reached through the quarantine path rather than through
+        a ``continue``.
         Its partition is blocked for the rest of the batch so no later success
         can commit over it.
         """
@@ -855,6 +859,24 @@ class HandlerDlqReplay:
             ledger.block(key)
             return
         ledger.mark_completed(key, message.dlq_offset + 1)
+
+    @staticmethod
+    def _skip_gateway_quarantined(
+        record: ModelGatewayQuarantinedDlqRecord,
+    ) -> ModelDlqReplayResult:
+        """Complete an already-quarantined record without side effects (OMN-20318)."""
+        return ModelDlqReplayResult(
+            correlation_id=uuid5(
+                NAMESPACE_URL,
+                f"{record.dlq_topic}:{record.dlq_partition}:{record.dlq_offset}",
+            ),
+            original_topic=record.original_topic,
+            status=EnumReplayStatus.SKIPPED,
+            message=(
+                f"{record.failure_class}: record is already quarantined by the "
+                f"gateway and stays on the DLQ topic {record.dlq_topic}"
+            ),
+        )
 
     async def _quarantine_unparseable(
         self, record: ModelUnparseableDlqRecord

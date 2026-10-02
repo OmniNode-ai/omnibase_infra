@@ -42,6 +42,9 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.enum_dlq_replay_filter_t
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_message import (
     ModelDlqMessage,
 )
+from omnibase_infra.nodes.node_dlq_replay_effect.models.model_gateway_quarantined_dlq_record import (
+    ModelGatewayQuarantinedDlqRecord,
+)
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_unparseable_dlq_record import (
     DlqDrainRecord,
     DlqRecordUnparseableError,
@@ -561,7 +564,9 @@ class DLQConsumer:
 
     async def consume_messages(self) -> AsyncIterator[DlqDrainRecord]:
         """Yield each DLQ record, parsed — or, when it cannot be parsed, as a
-        typed ``ModelUnparseableDlqRecord`` carrying its raw bytes.
+        typed ``ModelUnparseableDlqRecord`` carrying its raw bytes. Gateway
+        forensic records yield ``ModelGatewayQuarantinedDlqRecord`` instead:
+        they are already durably quarantined (OMN-20318).
 
         OMN-17896. This generator performs NO durable write, deliberately. It
         is driven through ``asyncio.wait_for(anext(...), timeout=remaining)``
@@ -611,6 +616,22 @@ class DLQConsumer:
                         raw_value=msg.value,
                         reason=f"DLQ record body is not JSON: {exc}",
                     )
+                    continue
+                gateway_record = ModelGatewayQuarantinedDlqRecord.from_payload(
+                    payload,
+                    dlq_topic=self.config.dlq_topic,
+                    dlq_partition=msg.partition,
+                    dlq_offset=msg.offset,
+                )
+                if gateway_record is not None:
+                    logger.info(
+                        "Gateway record at %s/%s/%s is already quarantined (%s)",
+                        gateway_record.dlq_topic,
+                        gateway_record.dlq_partition,
+                        gateway_record.dlq_offset,
+                        gateway_record.failure_class,
+                    )
+                    yield gateway_record
                     continue
                 try:
                     parsed = ModelDlqMessage.from_kafka_message(
