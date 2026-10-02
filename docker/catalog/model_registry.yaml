@@ -60,28 +60,17 @@ models:
   # `disabled` and no longer owns LLM_CODER_FAST_URL, so keeping this row would
   # break the cross-file consistency rule (every local model's base_url_env must
   # be owned by a RUNNING topology slot). Its deep_reasoning/code_review work is
-  # served by qwen3-coder-30b (.201:8000) and deepseek-r1-32b (.200:8101).
-  - model_key: "deepseek-r1-32b"
-    provider: local
-    transport: http
-    base_url_env: LLM_DEEPSEEK_R1_URL
-    health_path: "/health"
-    # OMN-16442 (2026-08-28): routing key retained for contract stability, but
-    # the served model changed. Live readback, GET
-    # http://192.168.86.200:8101/v1/models: ids {"deepseek-v4-flash",
-    # "deepseek-v4-pro"}, owned_by "ds4.c", context_length 131072 — DeepSeek V4
-    # Flash under antirez/ds4, not the MLX DeepSeek-R1-Distill-Qwen-32B this key
-    # is named for. context_window stays a conservative 65536 budget (matches
-    # the topology contract's context_window_budgeted for this slot), not the
-    # server's 131072 ceiling.
-    probe_path: "/health"
-    capabilities:
-      - deep_reasoning
-      - code_review
-      - math
-    context_window: 65536
-    hardware: "M2 Ultra"
-    tier: local
+  # served by qwen3-coder-30b (.201:8000).
+  # The "deepseek-r1-32b" entry (base_url_env LLM_DEEPSEEK_R1_URL, DeepSeek V4
+  # Flash under antirez/ds4 on 192.168.86.200:8101) was REMOVED. The ds4 server
+  # is gone from .200 (no launchd label, plist or process; AI_LAB_HARDWARE.md
+  # verified 2026-09-23); live probe 2026-10-02T08:37Z, `curl
+  # http://127.0.0.1:8101` on .200 -> http=000. contracts/llm_endpoints.yaml's
+  # reasoning-deepseek-32b slot is now `disabled` and no longer owns
+  # LLM_DEEPSEEK_R1_URL, so keeping this row would break the cross-file
+  # consistency rule (every local model's base_url_env must be owned by a
+  # RUNNING topology slot). Its deep_reasoning/code_review/math work is served
+  # by qwen3-coder-30b (.201:8000).
   # OMN-16442: the "qwen3-next-80b" entry (base_url_env LLM_QWEN3_NEXT_URL,
   # mlx-community/Qwen3.6-35B-A3B-8bit on .200:8102) was REMOVED. Live probe
   # 2026-08-28: `curl http://192.168.86.200:8102/v1/models` -> exit 7 "Couldn't

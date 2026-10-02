@@ -425,9 +425,14 @@ x-runtime-env: &runtime-env
   # This PluginLlm transport lane is outside Bifrost receipt delegation: the
   # mounted typed Bifrost overlay is its sole model/endpoint authority.
   LLM_CODER_URL: ${LLM_CODER_URL:?LLM_CODER_URL required for PluginLlm activation}
-  LLM_CODER_FAST_URL: ${LLM_CODER_FAST_URL:?LLM_CODER_FAST_URL required for PluginLlm activation}
+  # LLM_CODER_FAST_URL and LLM_DEEPSEEK_R1_URL name retired hardware (.201:8001,
+  # the removed RTX 4090; .200:8101, the gone ds4 server). PluginLlm and two
+  # adapters still read them, so they stay set, aliased onto the surviving coder
+  # slot (LLM_CODER_URL, .201:8000) instead of taking an operator-supplied
+  # address that can go stale. Retiring the variables is tracked on OMN-16442.
+  LLM_CODER_FAST_URL: ${LLM_CODER_URL:?LLM_CODER_URL required for PluginLlm activation}
   LLM_EMBEDDING_URL: ${LLM_EMBEDDING_URL:?LLM_EMBEDDING_URL required for PluginLlm activation}
-  LLM_DEEPSEEK_R1_URL: ${LLM_DEEPSEEK_R1_URL:?LLM_DEEPSEEK_R1_URL required for PluginLlm activation}
+  LLM_DEEPSEEK_R1_URL: ${LLM_CODER_URL:?LLM_CODER_URL required for PluginLlm activation}
   # OMN-20173: GLM variables are optional; Coding Plan use is Claude Code only.
   # System callers must supply a separately entitled endpoint explicitly.
   LLM_GLM_URL: ${LLM_GLM_URL:-}

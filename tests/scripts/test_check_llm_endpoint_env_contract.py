@@ -148,9 +148,9 @@ def test_derived_env_var_set_excludes_released_variables() -> None:
     assert derived == (
         "LLM_CODER_URL",
         "LLM_EMBEDDING_URL",
-        "LLM_DEEPSEEK_R1_URL",
     )
     assert "LLM_CODER_FAST_URL" not in derived
+    assert "LLM_DEEPSEEK_R1_URL" not in derived
     assert "LLM_QWEN3_NEXT_URL" not in derived
 
 

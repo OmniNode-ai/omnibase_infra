@@ -10,15 +10,18 @@ required_env:
   - ONEX_SERVICE_CLIENT_SECRET
   - ONEX_REGISTRATION_AUTO_ACK
   - LLM_CODER_URL
-  - LLM_CODER_FAST_URL
   - LLM_EMBEDDING_URL
-  - LLM_DEEPSEEK_R1_URL
   - LLM_ENDPOINT_CIDR_ALLOWLIST
   - LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST
   - LOCAL_LLM_SHARED_SECRET
   - GITHUB_TOKEN
   - DEPLOY_AGENT_HMAC_SECRET
 hardcoded_env:
+  # LLM_CODER_FAST_URL / LLM_DEEPSEEK_R1_URL named retired hardware (.201:8001,
+  # .200:8101). PluginLlm and two adapters still read them, so they stay set,
+  # aliased onto the surviving coder slot instead of an operator-supplied address.
+  LLM_CODER_FAST_URL: ${LLM_CODER_URL:?LLM_CODER_URL required for PluginLlm activation}
+  LLM_DEEPSEEK_R1_URL: ${LLM_CODER_URL:?LLM_CODER_URL required for PluginLlm activation}
   OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra'
   OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence'
   KAFKA_BOOTSTRAP_SERVERS: redpanda:9092

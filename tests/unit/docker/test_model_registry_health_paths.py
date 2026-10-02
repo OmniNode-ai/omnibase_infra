@@ -22,8 +22,9 @@ _REGISTRY_PATH = _PROJECT_ROOT / "docker" / "catalog" / "model_registry.yaml"
 # http://192.168.86.201:8001/v1/models` -> exit 7 "Couldn't connect to server".
 # A health_path assertion on a model row that must not exist would force the
 # dead row to be kept purely to satisfy a test.
+# "deepseek-r1-32b" left the same way: its base_url_env (LLM_DEEPSEEK_R1_URL)
+# pointed at .200:8101, where the ds4 server is gone (probe 2026-10-02T08:37Z).
 _PHASE2_HEALTH_PATHS: dict[str, str] = {
-    "deepseek-r1-32b": "/health",
     "qwen3-coder-30b": "/health",
 }
 
@@ -31,7 +32,14 @@ _PHASE2_HEALTH_PATHS: dict[str, str] = {
 # ABSENT so a future edit cannot reintroduce a row pointing at dead hardware.
 # OMN-20173: also refuse retired GLM HTTP routes (Claude Code only).
 _RETIRED_MODEL_KEYS: frozenset[str] = frozenset(
-    {"deepseek-r1-14b", "qwen3-next-80b", "glm-4.5", "glm-5", "glm-5.1"}
+    {
+        "deepseek-r1-14b",
+        "deepseek-r1-32b",
+        "qwen3-next-80b",
+        "glm-4.5",
+        "glm-5",
+        "glm-5.1",
+    }
 )
 
 
@@ -75,6 +83,7 @@ def test_retired_model_keys_are_absent(registry: list[dict[str, object]]) -> Non
     * ``deepseek-r1-14b`` -> LLM_CODER_FAST_URL -> .201:8001, RTX 4090 pulled
       for RMA (OMN-16407).
     * ``qwen3-next-80b``  -> LLM_QWEN3_NEXT_URL -> .200:8102, no listener.
+    * ``deepseek-r1-32b`` -> LLM_DEEPSEEK_R1_URL -> .200:8101, ds4 server gone.
 
     Both endpoints were re-probed 2026-08-28 and return curl exit 7 "Couldn't
     connect to server"; contracts/llm_endpoints.yaml marks both slots

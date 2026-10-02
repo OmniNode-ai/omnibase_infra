@@ -79,20 +79,21 @@ _PLANNED_NULLABLE_FIELDS: frozenset[str] = frozenset(
 # The ENV VAR itself still exists and is still required by the runtime
 # (docker-compose.infra.yml uses ${LLM_CODER_FAST_URL:?...}); operators alias it
 # onto the surviving .201:8000 coder endpoint until replacement hardware is
-# registered. See config/shared_key_registry.yaml for that guidance. The
+# registered. See config/shared_key_registry.yaml for that guidance.
+# LLM_DEEPSEEK_R1_URL left this set the same way: its slot
+# (reasoning-deepseek-32b, .200:8101) is retired, the ds4 server is gone. The
 # topology contract models HARDWARE SLOTS, not consumer-facing aliases.
 _RUNTIME_REQUIRED_URL_ENV_VARS: frozenset[str] = frozenset(
     [
         "LLM_CODER_URL",
         "LLM_EMBEDDING_URL",
-        "LLM_DEEPSEEK_R1_URL",
     ]
 )
 
 # OMN-16442: slots whose backing hardware/listener is gone. Asserted `disabled`
 # so a future edit cannot flip one back to `running` without re-probing.
 _DECOMMISSIONED_SLOT_IDS: frozenset[str] = frozenset(
-    {"coder-fast-4090", "reasoning-moe-35b", "embeddings-200"}
+    {"coder-fast-4090", "reasoning-deepseek-32b", "reasoning-moe-35b", "embeddings-200"}
 )
 _SUPPORTED_TOPOLOGY_FIELDS: frozenset[str] = frozenset(
     [
@@ -288,12 +289,6 @@ class TestLlmEndpointsContract:
         assert emb["status"] == "running"
         assert emb["endpoint_url"] == "http://192.168.86.201:8002"
         assert emb["model_hf_id"] == "Qwen/Qwen3-Embedding-0.6B"
-
-        # GET .200:8101/v1/models -> {"deepseek-v4-flash", "deepseek-v4-pro"}.
-        ds = by_slot["reasoning-deepseek-32b"]
-        assert ds["status"] == "running"
-        assert ds["endpoint_url"] == "http://192.168.86.200:8101"
-        assert ds["model_hf_id"] == "antirez/deepseek-v4-gguf"
 
     def test_embeddings_201_endpoint_reconciled_to_8002(self) -> None:
         """LLM_EMBEDDING_URL slot resolves to :8002, not the dead :8100.

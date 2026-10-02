@@ -171,38 +171,36 @@ endpoints:
       repo-owned yet — it exists only as a hand-managed
       /etc/systemd/system/vllm-embeddings.service on .201.
   - slot_id: reasoning-deepseek-32b
-    host: 192.168.86.200
-    port: 8101
-    endpoint_url: http://192.168.86.200:8101
-    url_env_var: LLM_DEEPSEEK_R1_URL
-    role_env_alias: LLM_REASONING_URL
-    model_hf_id: antirez/deepseek-v4-gguf
+    host: null
+    port: null
+    endpoint_url: null
+    url_env_var: null
+    role_env_alias: null
+    model_hf_id: null
     role: reasoning
-    status: running
+    status: disabled
     hardware: M2 Ultra (.200)
-    context_window_budgeted: 65536
+    context_window_budgeted: null
     launchd_unit_or_none: null
     notes: |
-      Architecturally-different second opinion for math/algorithmic code.
-      OMN-16442 reconcile (2026-08-28): the SLOT is still live at .200:8101, but
-      it no longer serves the MLX DeepSeek-R1-Distill-Qwen-32B it was recorded
-      with. Live readback, GET http://192.168.86.200:8101/v1/models: ids
-      {"deepseek-v4-flash", "deepseek-v4-pro"} (two aliases for one model,
-      display name "DeepSeek V4 Flash"), owned_by "ds4.c", context_length
-      131072. Served by the `ds4-server` binary (antirez/ds4) under a keepalive
-      LaunchAgent, NOT by the retired com.mlx.deepseek-reasoning MLX job — that
-      launchd label is cleared here because it no longer owns this port.
-      model_hf_id names the GGUF artifact repo actually loaded
-      (antirez/deepseek-v4-gguf, from $HOME/Code/ds4/gguf/); the upstream base is
-      deepseek-ai/DeepSeek-V4-Flash.
-      context_window_budgeted 8192 -> 65536: a deliberate conservative budget
-      matching omnimarket routing_tiers.yaml's max_context_tokens for this
-      backend, still well inside the server's 131072 ceiling. It is a BUDGET,
-      not the server limit.
-      RESOLVED DRIFT: the old "KNOWN DRIFT" note said LLM_DEEPSEEK_R1_URL pointed
-      at .201:8001 (14B) instead of this slot. That target no longer exists at
-      all (GPU removed for RMA, OMN-16407), so the only correct value for
-      LLM_DEEPSEEK_R1_URL is this slot.
+      RETIRED (2026-10-02, following the OMN-16442 coder-fast-4090 precedent).
+      .200:8101 no longer has a model server: the ds4-server LaunchAgent that
+      kept DeepSeek V4 Flash (antirez/ds4) on that port is gone (no ds4 launchd
+      label, plist or process on .200), and the port refuses connections.
+      Live probe 2026-10-02T08:37Z: `curl http://127.0.0.1:8101` on .200 ->
+      http=000; the only model server left on .200 is gpt-oss-120b on :8130
+      (http=200). The canonical inventory
+      (omni_home/docs/reference/AI_LAB_HARDWARE.md, verified 2026-09-23) marks
+      the endpoint retired. This is not a crashed server; nothing is to be
+      restarted.
+      LLM_DEEPSEEK_R1_URL and the LLM_REASONING_URL alias are RELEASED here: a
+      disabled slot must not own runtime env vars, and a runtime-required env
+      var must resolve to a live listener. The variable itself is still read by
+      PluginLlm and adapter_documentation_generation, so the key stays seeded
+      and is aliased onto the surviving coder slot (LLM_CODER_URL, .201:8000);
+      retiring the variable spans compose, the adapters and transport_config_map
+      and is tracked on OMN-16442. The docker/catalog/model_registry.yaml
+      `deepseek-r1-32b` entry was removed in the same change.
   - slot_id: reasoning-moe-35b
     host: null
     port: null
