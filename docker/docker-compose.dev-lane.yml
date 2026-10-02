@@ -968,6 +968,14 @@ services:
   runtime-effects:
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env]
+      # OMN-20159: node_projection_read_effect runs here and reads through the
+      # runtime binding; without it the /skill edge refuses every read with
+      # projection_binding_unconfigured. The same binding is the delegation
+      # evidence and claim store of node_delegate_skill_orchestrator here.
+      OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY: /etc/onex/projection-runtime-binding.yaml
+    volumes:
+      # Read-only; names OMNIDASH_ANALYTICS_DB_URL, rendered above as role_omnidash.
+      - ./projection-runtime-binding/runtime-read.yaml:/etc/onex/projection-runtime-binding.yaml:ro
     healthcheck:
       test:
         - CMD

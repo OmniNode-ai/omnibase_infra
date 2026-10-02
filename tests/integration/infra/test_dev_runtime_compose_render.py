@@ -937,3 +937,53 @@ def test_the_base_broker_probe_is_unchanged_for_every_other_lane() -> None:
         assert "onex-broker-readiness-probe" not in str(target), (
             "the OMN-18789 probe leaked into the base every other lane merges"
         )
+
+
+_RUNTIME_BINDING_TARGET = "/etc/onex/projection-runtime-binding.yaml"
+
+
+def _binding_mount_source(service: dict[str, Any]) -> Path | None:
+    for mount in service.get("volumes", []):
+        if isinstance(mount, dict) and mount.get("target") == _RUNTIME_BINDING_TARGET:
+            return Path(mount["source"])
+    return None
+
+
+@pytest.mark.integration
+def test_dev_lane_runtime_effects_carries_the_projection_read_binding() -> None:
+    """OMN-20159: node_projection_read_effect runs in runtime-effects, and with no
+    binding the /skill edge refuses every read ``projection_binding_unconfigured``.
+
+    The binding must name OMNIDASH_ANALYTICS_DB_URL, which this overlay renders as
+    role_omnidash, the identity the dev lane's projection-api (:3002) reads with,
+    so both read paths answer the same rows. Its consumer group must be one no
+    other dev-lane binding uses, or the read node would split a writer's
+    partitions.
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+    effects = services["runtime-effects"]
+    assert (
+        effects["environment"].get("OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY")
+        == _RUNTIME_BINDING_TARGET
+    )
+    source = _binding_mount_source(effects)
+    assert source is not None, "runtime-effects mounts no projection runtime binding"
+    binding = yaml.safe_load(source.read_text(encoding="utf-8"))
+    assert binding["database_url_secret_ref"] == "env:OMNIDASH_ANALYTICS_DB_URL"
+    assert "OMNIDASH_ANALYTICS_DB_URL" in effects["environment"]
+
+    other_groups = {
+        yaml.safe_load(other.read_text(encoding="utf-8"))["kafka_consumer_group"]
+        for name, service in services.items()
+        if name != "runtime-effects"
+        and (other := _binding_mount_source(service)) is not None
+    }
+    assert other_groups, (
+        "no other dev-lane binding found; the comparison proves nothing"
+    )
+    assert binding["kafka_consumer_group"] not in other_groups
