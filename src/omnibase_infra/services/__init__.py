@@ -25,69 +25,127 @@ Exports:
     TimeoutScanner: Alias for ServiceTimeoutScanner
 """
 
-from omnibase_infra.enums import EnumSelectionStrategy
+import importlib
+from typing import TYPE_CHECKING
 
-# Contract publisher service (OMN-1752)
-from omnibase_infra.services.contract_publisher import (
-    ContractPublisherError,
-    ContractPublishingInfraError,
-    ContractSourceNotConfiguredError,
-    ModelContractError,
-    ModelContractPublisherConfig,
-    ModelDiscoveredContract,
-    ModelInfraError,
-    ModelPublishResult,
-    ModelPublishStats,
-    NoContractsFoundError,
-    ProtocolContractPublisherSource,
-    ServiceContractPublisher,
-    SourceContractComposite,
-    SourceContractFilesystem,
-    SourceContractPackage,
-)
-from omnibase_infra.services.corpus_capture import CorpusCapture
-from omnibase_infra.services.service_capability_query import ServiceCapabilityQuery
-from omnibase_infra.services.service_circuit_breaker_event_publisher import (
-    CircuitBreakerEventPublisher,
-)
-from omnibase_infra.services.service_llm_endpoint_health import (
-    ServiceLlmEndpointHealth,
-)
-from omnibase_infra.services.service_node_selector import (
-    DEFAULT_SELECTION_KEY,
-    ServiceNodeSelector,
-)
-from omnibase_infra.services.service_timeout_emitter import (
-    ModelTimeoutEmissionConfig,
-    ModelTimeoutEmissionResult,
-    ServiceTimeoutEmitter,
-)
-from omnibase_infra.services.service_timeout_scanner import (
-    ModelTimeoutQueryResult,
-    ServiceTimeoutScanner,
-)
-from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
+if TYPE_CHECKING:
+    from omnibase_infra.enums import EnumSelectionStrategy
 
-# Session services (moved from omniclaude in OMN-1526)
-from omnibase_infra.services.session import (
-    ConfigSessionConsumer,
-    ConfigSessionStorage,
-    ConsumerMetrics,
-    EnumCircuitState,
-    ProtocolSessionAggregator,
-    SessionEventConsumer,
-    SessionSnapshotStore,
-    SessionStoreNotInitializedError,
-)
-from omnibase_infra.services.snapshot import (
-    ServiceSnapshot,
-    StoreSnapshotInMemory,
-    StoreSnapshotPostgres,
-)
+    # Contract publisher service (OMN-1752)
+    from omnibase_infra.services.contract_publisher import (
+        ContractPublisherError,
+        ContractPublishingInfraError,
+        ContractSourceNotConfiguredError,
+        ModelContractError,
+        ModelContractPublisherConfig,
+        ModelDiscoveredContract,
+        ModelInfraError,
+        ModelPublishResult,
+        ModelPublishStats,
+        NoContractsFoundError,
+        ProtocolContractPublisherSource,
+        ServiceContractPublisher,
+        SourceContractComposite,
+        SourceContractFilesystem,
+        SourceContractPackage,
+    )
+    from omnibase_infra.services.corpus_capture import CorpusCapture
+    from omnibase_infra.services.service_capability_query import ServiceCapabilityQuery
+    from omnibase_infra.services.service_circuit_breaker_event_publisher import (
+        CircuitBreakerEventPublisher,
+    )
+    from omnibase_infra.services.service_llm_endpoint_health import (
+        ServiceLlmEndpointHealth,
+    )
+    from omnibase_infra.services.service_node_selector import (
+        DEFAULT_SELECTION_KEY,
+        ServiceNodeSelector,
+    )
+    from omnibase_infra.services.service_timeout_emitter import (
+        ModelTimeoutEmissionConfig,
+        ModelTimeoutEmissionResult,
+        ServiceTimeoutEmitter,
+    )
+    from omnibase_infra.services.service_timeout_scanner import (
+        ModelTimeoutQueryResult,
+        ServiceTimeoutScanner,
+    )
+    from omnibase_infra.services.service_topic_catalog import ServiceTopicCatalog
 
-# Aliases for convenience
-TimeoutEmitter = ServiceTimeoutEmitter
-TimeoutScanner = ServiceTimeoutScanner
+    # Session services (moved from omniclaude in OMN-1526)
+    from omnibase_infra.services.session import (
+        ConfigSessionConsumer,
+        ConfigSessionStorage,
+        ConsumerMetrics,
+        EnumCircuitState,
+        ProtocolSessionAggregator,
+        SessionEventConsumer,
+        SessionSnapshotStore,
+        SessionStoreNotInitializedError,
+    )
+    from omnibase_infra.services.snapshot import (
+        ServiceSnapshot,
+        StoreSnapshotInMemory,
+        StoreSnapshotPostgres,
+    )
+
+    # Aliases for convenience
+    TimeoutEmitter = ServiceTimeoutEmitter
+    TimeoutScanner = ServiceTimeoutScanner
+
+# OMN-19444: Lazy imports keep `onex <cmd> --help` fast.
+_LAZY_EXPORTS: dict[str, str] = {
+    "CircuitBreakerEventPublisher": "omnibase_infra.services.service_circuit_breaker_event_publisher",
+    "ConfigSessionConsumer": "omnibase_infra.services.session",
+    "ConfigSessionStorage": "omnibase_infra.services.session",
+    "ConsumerMetrics": "omnibase_infra.services.session",
+    "ContractPublisherError": "omnibase_infra.services.contract_publisher",
+    "ContractPublishingInfraError": "omnibase_infra.services.contract_publisher",
+    "ContractSourceNotConfiguredError": "omnibase_infra.services.contract_publisher",
+    "CorpusCapture": "omnibase_infra.services.corpus_capture",
+    "DEFAULT_SELECTION_KEY": "omnibase_infra.services.service_node_selector",
+    "EnumCircuitState": "omnibase_infra.services.session",
+    "EnumSelectionStrategy": "omnibase_infra.enums",
+    "ModelContractError": "omnibase_infra.services.contract_publisher",
+    "ModelContractPublisherConfig": "omnibase_infra.services.contract_publisher",
+    "ModelDiscoveredContract": "omnibase_infra.services.contract_publisher",
+    "ModelInfraError": "omnibase_infra.services.contract_publisher",
+    "ModelPublishResult": "omnibase_infra.services.contract_publisher",
+    "ModelPublishStats": "omnibase_infra.services.contract_publisher",
+    "ModelTimeoutEmissionConfig": "omnibase_infra.services.service_timeout_emitter",
+    "ModelTimeoutEmissionResult": "omnibase_infra.services.service_timeout_emitter",
+    "ModelTimeoutQueryResult": "omnibase_infra.services.service_timeout_scanner",
+    "NoContractsFoundError": "omnibase_infra.services.contract_publisher",
+    "ProtocolContractPublisherSource": "omnibase_infra.services.contract_publisher",
+    "ProtocolSessionAggregator": "omnibase_infra.services.session",
+    "ServiceCapabilityQuery": "omnibase_infra.services.service_capability_query",
+    "ServiceContractPublisher": "omnibase_infra.services.contract_publisher",
+    "ServiceLlmEndpointHealth": "omnibase_infra.services.service_llm_endpoint_health",
+    "ServiceNodeSelector": "omnibase_infra.services.service_node_selector",
+    "ServiceSnapshot": "omnibase_infra.services.snapshot",
+    "ServiceTimeoutEmitter": "omnibase_infra.services.service_timeout_emitter",
+    "ServiceTimeoutScanner": "omnibase_infra.services.service_timeout_scanner",
+    "ServiceTopicCatalog": "omnibase_infra.services.service_topic_catalog",
+    "SessionEventConsumer": "omnibase_infra.services.session",
+    "SessionSnapshotStore": "omnibase_infra.services.session",
+    "SessionStoreNotInitializedError": "omnibase_infra.services.session",
+    "SourceContractComposite": "omnibase_infra.services.contract_publisher",
+    "SourceContractFilesystem": "omnibase_infra.services.contract_publisher",
+    "SourceContractPackage": "omnibase_infra.services.contract_publisher",
+    "StoreSnapshotInMemory": "omnibase_infra.services.snapshot",
+    "StoreSnapshotPostgres": "omnibase_infra.services.snapshot",
+}
+
+_LAZY_ALIASES: dict[str, tuple[str, str]] = {
+    "TimeoutEmitter": (
+        "omnibase_infra.services.service_timeout_emitter",
+        "ServiceTimeoutEmitter",
+    ),
+    "TimeoutScanner": (
+        "omnibase_infra.services.service_timeout_scanner",
+        "ServiceTimeoutScanner",
+    ),
+}
 
 __all__ = [
     "DEFAULT_SELECTION_KEY",
@@ -137,3 +195,22 @@ __all__ = [
     "SourceContractFilesystem",
     "SourceContractPackage",
 ]
+
+
+def __getattr__(name: str) -> object:
+    if name in _LAZY_EXPORTS:
+        module = importlib.import_module(_LAZY_EXPORTS[name])
+        value: object = getattr(module, name)
+        globals()[name] = value
+        return value
+    if name in _LAZY_ALIASES:
+        module_name, attribute_name = _LAZY_ALIASES[name]
+        module = importlib.import_module(module_name)
+        value = getattr(module, attribute_name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *__all__})
