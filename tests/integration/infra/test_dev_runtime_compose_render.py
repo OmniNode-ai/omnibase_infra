@@ -950,15 +950,15 @@ def _binding_mount_source(service: dict[str, Any]) -> Path | None:
 
 
 @pytest.mark.integration
-def test_dev_lane_runtime_effects_carries_the_projection_read_binding() -> None:
-    """OMN-20159: node_projection_read_effect runs in runtime-effects, and with no
-    binding the /skill edge refuses every read ``projection_binding_unconfigured``.
-
-    The binding must name OMNIDASH_ANALYTICS_DB_URL, which this overlay renders as
-    role_omnidash, the identity the dev lane's projection-api (:3002) reads with,
-    so both read paths answer the same rows. Its consumer group must be one no
-    other dev-lane binding uses, or the read node would split a writer's
-    partitions.
+def test_dev_lane_runtime_effects_carries_no_projection_binding() -> None:
+    """OMN-17427: the OMN-20159 read binding also selects the delegation claim store.
+    node_delegate_skill_orchestrator then INSERTs as role_omnidash, which lacks
+    USAGE on omninode_internal and cannot write delegate_skill_command_claims.
+    Postgres skips the pinned search_path schema, so every delegation fails with
+    UndefinedTable: relation "delegate_skill_command_claims" does not exist.
+    Chain-canary 37043007992 failed with verdict projection_row_absent.
+    Change this test when the claim store resolves a write principal separately
+    from the /skill read binding (OMN-20159).
     """
     env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
 
@@ -967,36 +967,12 @@ def test_dev_lane_runtime_effects_carries_the_projection_read_binding() -> None:
     assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
     services = yaml.safe_load(result.stdout)["services"]
     effects = services["runtime-effects"]
-    assert (
-        effects["environment"].get("OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY")
-        == _RUNTIME_BINDING_TARGET
-    )
-    source = _binding_mount_source(effects)
-    assert source is not None, "runtime-effects mounts no projection runtime binding"
-    binding = yaml.safe_load(source.read_text(encoding="utf-8"))
-    assert binding["database_url_secret_ref"] == "env:OMNIDASH_ANALYTICS_DB_URL"
-    assert "OMNIDASH_ANALYTICS_DB_URL" in effects["environment"]
+    assert "OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY" not in effects["environment"]
+    assert _binding_mount_source(effects) is None
 
-    # Every group another dev-lane service consumes under: the ones its own
-    # binding file declares and the ones its environment declares (each
-    # standalone writer sets KAFKA_CONSUMER_GROUP; runtimes set ONEX_GROUP_ID).
-    binding_groups = {
-        yaml.safe_load(other.read_text(encoding="utf-8"))["kafka_consumer_group"]
+    # Positive control: the helper finds another service's binding at the target.
+    assert any(
+        _binding_mount_source(service) is not None
         for name, service in services.items()
         if name != "runtime-effects"
-        and (other := _binding_mount_source(service)) is not None
-    }
-    env_groups = {
-        str(value)
-        for name, service in services.items()
-        if name != "runtime-effects"
-        for key, value in (service.get("environment") or {}).items()
-        if key in {"KAFKA_CONSUMER_GROUP", "ONEX_GROUP_ID"} and value
-    }
-    assert binding_groups, (
-        "no other dev-lane binding found; the comparison proves nothing"
-    )
-    assert "local.omnimarket-projections.delegation-writer.consume.v1" in env_groups, (
-        "the delegation writer's own group is missing; the env comparison proves nothing"
-    )
-    assert binding["kafka_consumer_group"] not in binding_groups | env_groups
+    ), "no other dev-lane binding found; the helper check proves nothing"
