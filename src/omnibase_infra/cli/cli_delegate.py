@@ -231,6 +231,9 @@ from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy import (
     ModelKafkaConnectRetryPolicy,
 )
+from omnibase_infra.handlers.handler_workspace_runtime_config_materializer import (
+    HandlerWorkspaceRuntimeConfigMaterializer,
+)
 from omnibase_infra.runtime_identity import collect_runtime_identity
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
@@ -1333,10 +1336,12 @@ def resolve_default_bus(
        :func:`omnibase_infra.runtime.service_kernel.resolve_embedded_runtime_config`:
        the ``ONEX_CONTRACTS_DIR`` BOOTSTRAP pointer names a contracts
        directory whose ``runtime/runtime_config.yaml`` is the configured
-       authority; with no pointer, a bound ``workspace_root`` answers with its
-       checked-in tier-1 runtime config (OMN-19193); with neither, the SHIPPED
-       tier-0 default runtime config answers — in-memory bus, ``local``
-       profile. An unconfigured install is still config-resolved.
+       authority; with no pointer or developer lane binding, a bound
+       ``workspace_root`` answers with its materialized ``origin/main`` tier-1
+       runtime config (OMN-19212), falling back to the working tree
+       (OMN-19193); with neither, the SHIPPED tier-0 default runtime config
+       answers — in-memory bus, ``local`` profile. An unconfigured install
+       is still config-resolved.
     2. ``config.event_bus.type`` from that configuration is passed as
        ``config_bus=`` — the tier the pre-ruling CLI skipped, which is what
        made ``~/.zshrc`` the transport authority.
@@ -2550,6 +2555,20 @@ def run_delegate(
             ).lane_binding()
         except ModelOnexError as exc:
             raise click.ClickException(str(exc)) from exc
+        if omni_home is not None:
+            materialization = HandlerWorkspaceRuntimeConfigMaterializer().materialize(
+                omni_home
+            )
+            if materialization.ok:
+                logger.info(
+                    "onex delegate: workspace runtime config materialised at %s",
+                    materialization.sha,
+                )
+            else:
+                logger.warning(
+                    "onex delegate: workspace runtime config materialisation failed: %s",
+                    materialization.detail,
+                )
         try:
             default_bus = resolve_default_bus(
                 workspace_root=omni_home, developer_lane_binding=lane_binding
