@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 122 and seed 7409676383408747674 with 4 workers on 32 cores with 23552MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.0-34-generic amd64, Eclipse Adoptium 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 70 and seed -3262530086181479696 with 4 workers on 32 cores with 23552MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.0-34-generic amd64, Eclipse Adoptium 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /m/DelegationReaper.tla
 Parsing file /tmp/Integers.tla
 Parsing file /tmp/FiniteSets.tla
@@ -12,9 +12,9 @@ Semantic processing of module Integers
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module DelegationReaper
-Starting... (2026-10-02 13:04:53)
+Starting... (2026-10-02 13:58:47)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-02 13:04:53.
+Finished computing initial states: 1 distinct state generated at 2026-10-02 13:58:47.
 Error: Invariant AtMostOneTerminal is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -147,7 +147,7 @@ State 10: <Handoff line 171, col 3 to line 175, col 76 of module DelegationReape
 /\ reapT = [c1 |-> 0, c2 |-> -1]
 /\ evid = [c1 |-> {}, c2 |-> {}]
 
-44709 states generated, 13852 distinct states found, 7573 states left on queue.
+43791 states generated, 13676 distinct states found, 7524 states left on queue.
 The depth of the complete state graph search is 10.
 The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 9 and the 95th percentile is 5).
-Finished in 00s at (2026-10-02 13:04:54)
+Finished in 00s at (2026-10-02 13:58:47)

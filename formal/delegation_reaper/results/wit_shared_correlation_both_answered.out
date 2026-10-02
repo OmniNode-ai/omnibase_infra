@@ -1,7 +1,7 @@
 TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
 Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
 (Use the -nowarning option to disable this warning.)
-Running breadth-first search Model-Checking with fp 15 and seed -9212943290187296327 with 4 workers on 32 cores with 23552MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.0-34-generic amd64, Eclipse Adoptium 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Running breadth-first search Model-Checking with fp 81 and seed -5012710520334932906 with 4 workers on 32 cores with 23552MB heap and 64MB offheap memory [pid: 1] (Linux 7.0.0-34-generic amd64, Eclipse Adoptium 17.0.20.1 x86_64, MSBDiskFPSet, DiskStateQueue).
 Parsing file /m/DelegationReaper.tla
 Parsing file /tmp/Integers.tla
 Parsing file /tmp/FiniteSets.tla
@@ -12,9 +12,9 @@ Semantic processing of module Integers
 Semantic processing of module Sequences
 Semantic processing of module FiniteSets
 Semantic processing of module DelegationReaper
-Starting... (2026-10-02 13:05:22)
+Starting... (2026-10-02 13:59:19)
 Computing initial states...
-Finished computing initial states: 1 distinct state generated at 2026-10-02 13:05:23.
+Finished computing initial states: 1 distinct state generated at 2026-10-02 13:59:20.
 Error: Invariant WitSharedCorrelationBothAnswered is violated.
 Error: The behavior up to this point is:
 State 1: <Initial predicate>
@@ -111,7 +111,7 @@ State 7: <ClaimB line 121, col 3 to line 126, col 65 of module DelegationReaper>
 State 8: <ReapCas line 185, col 3 to line 187, col 87 of module DelegationReaper>
 /\ now = 2
 /\ pc = [w1 |-> "running", w2 |-> "idle", w3 |-> "running", w4 |-> "idle"]
-/\ slot = [c1 |-> <<"no_terminal", "reaper">>, c2 |-> <<"none", "none">>]
+/\ slot = [c1 |-> <<"none", "none">>, c2 |-> <<"no_terminal", "reaper">>]
 /\ copied = [c1 |-> FALSE, c2 |-> FALSE]
 /\ reapSeen = [c1 |-> FALSE, c2 |-> FALSE]
 /\ first = [c1 |-> "c1", c2 |-> "c2"]
@@ -121,20 +121,20 @@ State 8: <ReapCas line 185, col 3 to line 187, col 87 of module DelegationReaper
 /\ reapT = [c1 |-> 0, c2 |-> 0]
 /\ evid = [c1 |-> {}, c2 |-> {}]
 
-State 9: <ReapHeal line 206, col 3 to line 210, col 80 of module DelegationReaper>
+State 9: <ReapCas line 185, col 3 to line 187, col 87 of module DelegationReaper>
 /\ now = 2
 /\ pc = [w1 |-> "running", w2 |-> "idle", w3 |-> "running", w4 |-> "idle"]
-/\ slot = [c1 |-> <<"no_terminal", "reaper">>, c2 |-> <<"none", "none">>]
-/\ copied = [c1 |-> TRUE, c2 |-> FALSE]
+/\ slot = [c1 |-> <<"no_terminal", "reaper">>, c2 |-> <<"no_terminal", "reaper">>]
+/\ copied = [c1 |-> FALSE, c2 |-> FALSE]
 /\ reapSeen = [c1 |-> FALSE, c2 |-> FALSE]
 /\ first = [c1 |-> "c1", c2 |-> "c2"]
 /\ claimRow = [c1 |-> TRUE, c2 |-> TRUE]
-/\ pub = {<<"c1", "no_terminal", "reaper">>}
+/\ pub = {}
 /\ kindOf = [w1 |-> "none", w2 |-> "none", w3 |-> "none", w4 |-> "none"]
 /\ reapT = [c1 |-> 0, c2 |-> 0]
 /\ evid = [c1 |-> {}, c2 |-> {}]
 
-State 10: <ReapCas line 185, col 3 to line 187, col 87 of module DelegationReaper>
+State 10: <ReapHeal line 206, col 3 to line 210, col 80 of module DelegationReaper>
 /\ now = 2
 /\ pc = [w1 |-> "running", w2 |-> "idle", w3 |-> "running", w4 |-> "idle"]
 /\ slot = [c1 |-> <<"no_terminal", "reaper">>, c2 |-> <<"no_terminal", "reaper">>]
@@ -160,7 +160,7 @@ State 11: <ReapHeal line 206, col 3 to line 210, col 80 of module DelegationReap
 /\ reapT = [c1 |-> 0, c2 |-> 0]
 /\ evid = [c1 |-> {}, c2 |-> {}]
 
-169534 states generated, 47883 distinct states found, 23987 states left on queue.
+154245 states generated, 43831 distinct states found, 22060 states left on queue.
 The depth of the complete state graph search is 12.
-The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 10 and the 95th percentile is 5).
-Finished in 00s at (2026-10-02 13:05:23)
+The average outdegree of the complete state graph is 2 (minimum is 0, the maximum 11 and the 95th percentile is 5).
+Finished in 01s at (2026-10-02 13:59:20)
