@@ -51,6 +51,9 @@ WHAT C16 SAYS, AND WHICH PROBE ANSWERS EACH CLAUSE
                 ``correlation_id``, ``state`` and ``traffic_class`` only, by
                 design; the bus is the surface this lane can read without
                 widening a least-privilege grant over every tenant's payloads.)
+                The terminal scan keeps reading until the window ends or the
+                terminal is found, including terminals published after the
+                scan began.
     R-DELEG-11  SKIP never PASS; a failed run never reports success. The
                 HEALTHY run, if completed, must carry a NON-EMPTY list of
                 quality-rule evaluations, every one of which states a boolean
@@ -84,7 +87,8 @@ NO CREDENTIAL REACHES ARGV, A LOG OR THE RECORD
     ``/proc`` is world-readable, so a value on a command line is readable by
     every process on the host; the record is an uploaded artifact, so a value
     in it would be a real exposure. The record also carries no tenant id, no
-    endpoint URL and no response text: only the keys it compares.
+    endpoint URL and no response text: only the keys it compares and the
+    healthy run's correlation id, which is neither a secret nor a tenant value.
 """
 
 from __future__ import annotations
@@ -179,6 +183,7 @@ class Observations:
     healthy: RunObservation
     healthy_terminal: TerminalObservation
     dying: RunObservation
+    healthy_correlation_id: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -433,6 +438,7 @@ def grade_typed_death(dying: RunObservation) -> ProbeResult:
 @dataclass
 class Record:
     results: list[ProbeResult]
+    healthy_correlation_id: str = ""
 
     @property
     def failures(self) -> list[str]:
@@ -470,7 +476,7 @@ def grade(observations: Observations) -> Record:
     graded = tuple(r.probe for r in results)
     if graded != PROBES:  # pragma: no cover - a structural invariant
         raise AssertionError(f"graded {graded}, the criterion names {PROBES}")
-    return Record(results)
+    return Record(results, healthy_correlation_id=observations.healthy_correlation_id)
 
 
 # ---------------------------------------------------------------------------
@@ -660,11 +666,13 @@ async def _scan_terminal(
             consumer.seek(
                 partition, max(begins[partition], ends[partition] - per_partition)
             )
-        # "Not found" is a claim only once every partition has been read up to
-        # the high watermark captured above. A window that expires first read
-        # PART of the topic, and that is an unobserved terminal, not an absent
-        # one: the first scheduled run on dev (35787593146) graded R-DELEG-12
-        # FAIL at a broker-host load near 300 for a terminal that sat at
+        # Keep reading until the window ends or this run's terminal is found.
+        # Catching up to the starting end offsets is not a stop condition: a
+        # terminal published after the scan began, inside the window, is still
+        # returned. Absence is claimed only when the window ended with every
+        # partition read to its captured end; a window that ended short of the
+        # end is unobserved. The first scheduled run on dev (35787593146) graded
+        # R-DELEG-12 FAIL at a broker-host load near 300 for a terminal that sat at
         # partition 0 offset 809 the whole time. Reported as an error, which
         # grades SKIP -- still red, and named for what actually happened.
         scanned = 0
@@ -685,13 +693,13 @@ async def _scan_terminal(
                         and payload.get("correlation_id") == correlation_id
                     ):
                         return TerminalObservation(payload)
-            caught_up = True
-            for partition in partitions:
-                if await consumer.position(partition) < ends[partition]:
-                    caught_up = False
-                    break
-            if caught_up:
-                return TerminalObservation()
+        caught_up = True
+        for partition in partitions:
+            if await consumer.position(partition) < ends[partition]:
+                caught_up = False
+                break
+        if caught_up:
+            return TerminalObservation()
         return TerminalObservation(
             error=(
                 f"the scan did not reach the end of {topic!r} inside "
@@ -748,7 +756,9 @@ def observe_live(
         if _status_of(healthy_run.receipt) == "completed"
         else TerminalObservation(error="not read: the healthy run did not complete")
     )
-    return Observations(healthy_run, terminal, dying_run)
+    return Observations(
+        healthy_run, terminal, dying_run, healthy_correlation_id=healthy.correlation_id
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -786,12 +796,16 @@ def observations_from_replay(payload: Mapping[str, Any]) -> Observations:
         terminal.get("payload"), dict
     ):
         raise ProbeInputError("replay 'healthy_terminal.payload' is not an object")
+    healthy_correlation_id = raw.get("healthy_correlation_id", "")
+    if not isinstance(healthy_correlation_id, str):
+        raise ProbeInputError("replay 'healthy_correlation_id' is not a string")
     return Observations(
         healthy=_run_from(raw["healthy"], "healthy"),
         healthy_terminal=TerminalObservation(
             terminal.get("payload"), terminal.get("error")
         ),
         dying=_run_from(raw["dying"], "dying"),
+        healthy_correlation_id=healthy_correlation_id,
     )
 
 
@@ -808,6 +822,7 @@ def record_dict(record: Record, *, base_url: str, as_of: str) -> dict[str, Any]:
         "as_of": as_of,
         "base_url": base_url,
         "dying_task_type": DYING_TASK_TYPE,
+        "healthy_correlation_id": record.healthy_correlation_id,
         "verdict": record.verdict,
         "detail": record.detail,
         "probes": [r.to_dict() for r in record.results],
