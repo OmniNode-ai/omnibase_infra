@@ -1,0 +1,100 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-rung-eval.service — the nightly per-rung delegation eval and its
+# missing-night report, on a lab host (OMN-19456).
+#
+# A systemd USER unit (NOT a lane container). One-shot, triggered by
+# onex-rung-eval.timer.
+#
+# WHY A LAB-HOST TIMER. omnimarket's GitHub schedule ran twice and failed both
+# times: the rungs' endpoints are lab addresses, a public repository cannot hold
+# them as variables (they print in step headers) and a hosted runner cannot reach
+# them. The endpoints live in a host-local env file instead, and the table lives
+# on the host's disk.
+#
+# WHAT IT RUNS (both are omnimarket's existing runner, scripts/ci/run_delegation_rung_eval.py)
+#   1. `run`            one row per rung, case and night into $RUNG_EVAL_TABLE_DIR
+#                       (rung_eval_<night>.jsonl, rewritten atomically). A rung with
+#                       no endpoint, model or key on this host gets a row with status
+#                       `unresolved` and the variable's NAME as its reason; a rung that
+#                       cannot be reached gets status `error`. Neither is skipped.
+#                       Prefixed '-' so a crash still reaches step 2, which then names
+#                       the cells it did not get.
+#   2. `check-missing`  every (night, rung, task class, case) cell with no row in the
+#                       window, written to $RUNG_EVAL_TABLE_DIR/missing_latest.txt.
+#                       The window starts at the oldest night file (so the nights before
+#                       the first run are never reported) and is capped at
+#                       $RUNG_EVAL_WINDOW_DAYS. The file's first line is a fixed
+#                       summary a reader parses:
+#                         RUNG-EVAL through=<date> read=<UTC> window_days=<n> rows=<n> missing=<n>
+#                       followed by one `MISSING <night> | <rung> | <task class> | <case>`
+#                       line per gap. A crash of the check, or an empty table, writes
+#                       `UNREAD` instead of `missing=0`: it can never read as a clean
+#                       night. The unit FAILS (exit 1) when a cell is missing, so
+#                       `systemctl --user --failed` names it too.
+#
+# HOST-LOCAL CONFIGURATION (never committed): ~/.config/onex/rung-eval.env, from
+# deploy/rung-eval/rung-eval.env.example. The three RUNG_EVAL_* knobs below
+# (clone, table, window) have defaults here and are overridden by that file, which
+# systemd reads after Environment=. The file is optional ('-'): without it every
+# rung records `unresolved`, which is the honest night for a host with no endpoints.
+#
+# ESCAPING. systemd expands $VAR and %-specifiers in ExecStart before bash sees
+# it, so the shell's own `$` and `%` are doubled below ($$ and %%).
+#
+# Install (user scope, no sudo; run from a clone of omnibase_infra):
+#   mkdir -p ~/.config/systemd/user ~/.config/onex
+#   cp deploy/rung-eval/onex-rung-eval.service deploy/rung-eval/onex-rung-eval.timer ~/.config/systemd/user/
+#   [ -e ~/.config/onex/rung-eval.env ] || install -m 600 deploy/rung-eval/rung-eval.env.example ~/.config/onex/rung-eval.env
+#   $EDITOR ~/.config/onex/rung-eval.env        # uncomment and fill this host's rungs
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now onex-rung-eval.timer
+#
+# The installed copies are byte-compared to these by deploy/unit-drift-manifest.yaml.
+#
+# Run once by hand, then read the table and the report:
+#   systemctl --user start onex-rung-eval.service
+#   cat ~/.local/share/onex/rung-eval/missing_latest.txt
+#   journalctl --user -u onex-rung-eval.service -n 40
+
+[Unit]
+Description=ONEX nightly per-rung delegation eval and missing-night report (OMN-19456)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=2h
+
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="RUNG_EVAL_OMNIMARKET_DIR=%h/Code/omni_home/omnimarket"
+Environment="RUNG_EVAL_TABLE_DIR=%h/.local/share/onex/rung-eval"
+Environment="RUNG_EVAL_WINDOW_DAYS=14"
+EnvironmentFile=-%h/.config/onex/rung-eval.env
+
+ExecStartPre=/bin/mkdir -p ${RUNG_EVAL_TABLE_DIR}
+
+ExecStart=-/usr/bin/env uv run --frozen --project ${RUNG_EVAL_OMNIMARKET_DIR} python ${RUNG_EVAL_OMNIMARKET_DIR}/scripts/ci/run_delegation_rung_eval.py run --out-dir ${RUNG_EVAL_TABLE_DIR}
+
+ExecStart=/bin/bash -c '\
+    cd "$$RUNG_EVAL_TABLE_DIR" || exit 2; \
+    today=$$(date -u +%%F); now=$$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ); \
+    shopt -s nullglob; set -- rung_eval_*.jsonl; \
+    if [ $$# -eq 0 ]; then \
+        echo "RUNG-EVAL through=$$today read=$$now UNREAD no night files in the table" > missing_latest.txt; \
+        cat missing_latest.txt; exit 3; \
+    fi; \
+    first=$${1#rung_eval_}; first=$${first%%.jsonl}; \
+    w=$$(( ( $$(date -u -d "$$today" +%%s) - $$(date -u -d "$$first" +%%s) ) / 86400 + 1 )); \
+    [ "$$w" -le "$$RUNG_EVAL_WINDOW_DAYS" ] || w=$$RUNG_EVAL_WINDOW_DAYS; \
+    gaps=$$(uv run --frozen --project "$$RUNG_EVAL_OMNIMARKET_DIR" python "$$RUNG_EVAL_OMNIMARKET_DIR/scripts/ci/run_delegation_rung_eval.py" check-missing --dir . --through "$$today" --window-days "$$w"); rc=$$?; \
+    case $$rc in 0|1) ;; *) \
+        echo "RUNG-EVAL through=$$today read=$$now window_days=$$w UNREAD check-missing exited $$rc" > missing_latest.txt; \
+        cat missing_latest.txt; exit $$rc;; \
+    esac; \
+    rows=$$(cat rung_eval_*.jsonl | wc -l); n=$$(echo "$$gaps" | grep -c .); \
+    { echo "RUNG-EVAL through=$$today read=$$now window_days=$$w rows=$$rows missing=$$n"; [ -z "$$gaps" ] || echo "$$gaps"; } > missing_latest.txt; \
+    cat missing_latest.txt; exit $$rc'
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=onex-rung-eval
