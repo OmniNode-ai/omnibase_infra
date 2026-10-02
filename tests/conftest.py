@@ -140,6 +140,37 @@ def pytest_configure(config: pytest.Config) -> None:
         pytest.exit(f"OMN-15620 venv-purity gate: {exc}", returncode=1)
 
 
+#: Names a lane's shell exports for the ledger bus write, mirror and emit journal (OMN-19513).
+_LEDGER_BUS_ENV = (
+    "ONEX_LEDGER_WRITE_VIA",
+    "ONEX_LEDGER_BUS_APPEND_COMMAND",
+    "ONEX_LEDGER_BUS_MIRROR",
+    "ONEX_LEDGER_BUS_TIMEOUT_S",
+    "ONEX_LEDGER_HOST_NAME",
+    "ONEX_LEDGER_EMIT_APPENDER",
+    "ONEX_LEDGER_EMIT_DRAINER_STATUS",
+    "ONEX_HOOK_EMIT_JOURNAL_DIR",
+)
+
+
+@pytest.fixture(autouse=True)
+def _ledger_isolation(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Give each test a scratch ledger and no route to the real one (OMN-19513).
+
+    The write path's own guard (``handler_ledger_write_guard``) refuses a test's write to the
+    canonical ledger whatever this fixture does; this is the second layer, so a test that forgets
+    still lands in a scratch file. The suite-wide broker variables stay: integration tests need
+    them, and the guard judges the topic itself.
+    """
+    for name in _LEDGER_BUS_ENV:
+        monkeypatch.delenv(name, raising=False)
+    scratch = tmp_path_factory.mktemp("ledger_isolation")
+    monkeypatch.setenv("ONEX_LEDGER_PATH", str(scratch / "ROLLING_WORK_LEDGER.md"))
+    monkeypatch.setenv("ONEX_TEST_CONTEXT", "pytest")
+
+
 @pytest.fixture(autouse=True)
 def _strip_test_local_git_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Prevent one test's Git process state from leaking into the next test.
