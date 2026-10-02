@@ -474,6 +474,21 @@
 #     successor path. No input/output model changed; contract_version is
 #     unchanged.
 #
+#   - OMN-20368 (node_version unchanged, 1.16.1): THE DONE-WRITE RULE IS
+#     SHARED, NOT OWNED HERE. The closer's rule that a ticket reaches Done
+#     only on a verified receipt whose checks bind every acceptance criterion
+#     (`evaluate_done_write_receipt`), plus `ModelAcBindingRow` and
+#     `EnumAcBindingCheckStatus`, moved to omnibase_core so that the
+#     sync-revert watchdog and the Linear adapters apply the same rule instead
+#     of a private copy. This node's handler now imports it, and the dod_verify
+#     argv helper, process reaper and subprocess runner moved to
+#     `omnibase_infra.handlers.handler_done_write_receipt_guard`, unchanged in
+#     behaviour. The old infra module paths re-export the core types. No
+#     input/output model changed and the verdict is unchanged, so neither
+#     contract_version nor node_version moves: bumping node_version would
+#     restate every standing gap comment once (it is part of the gap
+#     fingerprint) for a refactor that says nothing new to a ticket's reader.
+#
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
