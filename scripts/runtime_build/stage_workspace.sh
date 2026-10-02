@@ -186,6 +186,37 @@ resolve_expected_refs_out() {
     printf '%s\n' "${home}/.omnibase/state/deploy_source_refs/${ctx_slug}.json"
 }
 EXPECTED_REFS_OUT=""
+# OMN-20263: RT-1 checks each pinned sibling out in a detached worktree of its
+# own under this root and stages from there. It used to check the ref out IN
+# ${OMNI_HOME}/<repo>, the shared canonical clone, leaving it on a detached HEAD
+# for the whole build (46 times in 30 hours on h202, 2026-10-01), and every lab
+# delegation that read the clone in that window refused. Keyed on the build
+# context like the manifest; DEPLOY_SOURCE_WORKTREE_ROOT overrides it.
+SOURCE_TREES_ROOT=""
+resolve_source_trees_root() {
+    if [[ -n "${DEPLOY_SOURCE_WORKTREE_ROOT:-}" ]]; then
+        printf '%s\n' "${DEPLOY_SOURCE_WORKTREE_ROOT}"
+        return 0
+    fi
+    local home build_ctx
+    home="${HOME:?HOME must be set to resolve the default source-tree root; set DEPLOY_SOURCE_WORKTREE_ROOT to choose one explicitly}"
+    build_ctx="$(pwd -P)"
+    printf '%s\n' "${home}/.omnibase/state/deploy_source_trees/${build_ctx//[!A-Za-z0-9._-]/_}"
+}
+# The tree a sibling is staged from: its RT-1 worktree when RT-1 pinned it, the
+# clone itself otherwise (hotpatch, explicitly-unpinned, and non-vendored repos).
+sibling_source() {
+    local repo="$1" vendored
+    if [[ -n "${SOURCE_TREES_ROOT}" ]]; then
+        for vendored in "${SIBLING_REPOS[@]}"; do
+            if [[ "${vendored}" == "${repo}" ]]; then
+                printf '%s\n' "${SOURCE_TREES_ROOT}/${repo}"
+                return 0
+            fi
+        done
+    fi
+    printf '%s\n' "${OMNI_HOME}/${repo}"
+}
 DEPLOY_REF="${DEPLOY_REF:-}"
 DEPLOY_HOTPATCH="${DEPLOY_HOTPATCH:-0}"
 # Explicit "did RT-1 run THIS invocation" flag so the end-of-staging assertion
@@ -220,6 +251,10 @@ if [[ ${#REPO_REF_ARGS[@]} -gt 0 || -n "${DEPLOY_REF}" || "${DEPLOY_HOTPATCH}" =
     fi
     if [[ "${DEPLOY_HOTPATCH}" == "1" ]]; then
         checkout_args+=(--hotpatch)
+    else
+        SOURCE_TREES_ROOT="$(resolve_source_trees_root)"
+        checkout_args+=(--worktree-root "${SOURCE_TREES_ROOT}")
+        echo "RT-1: pinned siblings check out under ${SOURCE_TREES_ROOT}, never in the canonical clones (OMN-20263)" >&2
     fi
     if [[ ${#REPO_REF_ARGS[@]} -gt 0 ]]; then
         echo "RT-1: resolve all immutable per-repo pins before non-forcing checkout" >&2
@@ -249,7 +284,7 @@ fi
 # ---------------------------------------------------------------------------
 # Sibling-pin preflight (OMN-12977): the consuming repo's uv.lock is authority.
 # ---------------------------------------------------------------------------
-CONSUMER_LOCK="${CONSUMER_LOCK:-${OMNI_HOME}/omnimarket/uv.lock}"
+CONSUMER_LOCK="${CONSUMER_LOCK:-$(sibling_source omnimarket)/uv.lock}"
 PIN_COMPARISON_OUT="workspace/sibling-pin-comparison.json"
 
 # Foundation + sibling packages the build vendors, mapped to OMNI_HOME clone
@@ -263,7 +298,7 @@ PIN_COMPARISON_OUT="workspace/sibling-pin-comparison.json"
 PREFLIGHT_REPO_ARGS=()
 for i in "${!SIBLING_CLONE_MANIFEST[@]}"; do
     PREFLIGHT_REPO_ARGS+=(
-        --repo "${SIBLING_CLONE_MANIFEST_DIST_NAMES[$i]}=${OMNI_HOME}/${SIBLING_CLONE_MANIFEST[$i]}"
+        --repo "${SIBLING_CLONE_MANIFEST_DIST_NAMES[$i]}=$(sibling_source "${SIBLING_CLONE_MANIFEST[$i]}")"
     )
 done
 
@@ -416,7 +451,7 @@ VCS_PROVENANCE_OUT="workspace/sibling-vcs-provenance.json"
 
 missing=()
 for repo in "${SIBLING_REPOS[@]}"; do
-    src="${OMNI_HOME}/${repo}"
+    src="$(sibling_source "${repo}")"
     if [[ ! -d "${src}" ]]; then
         missing+=("${src}")
     fi
@@ -432,7 +467,7 @@ fi
 
 vcs_entries=()
 for repo in "${SIBLING_REPOS[@]}"; do
-    src="${OMNI_HOME}/${repo}"
+    src="$(sibling_source "${repo}")"
     dst="${STAGING_DIR}/${repo}"
     echo "staging: ${src} -> ${dst}"
     stage_repo_tree "${src}" "${dst}"

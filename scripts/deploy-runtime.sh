@@ -1209,6 +1209,23 @@ read_repo_ref_or_main() {
     fi
 }
 
+# OMN-20263: where stage_workspace.sh's RT-1 checked the pinned siblings out
+# this run (its own detached worktrees, never the canonical clones). Empty when
+# RT-1 did not pin (release builds, hotpatch, explicitly-unpinned).
+SIBLING_SOURCE_ROOT=""
+
+sibling_source_path() {
+    # The tree a sibling was staged from: its RT-1 worktree when this run pinned
+    # it, the OMNI_HOME clone otherwise.
+    local omni_home="$1"
+    local repo="$2"
+    if [[ -n "${SIBLING_SOURCE_ROOT}" && -d "${SIBLING_SOURCE_ROOT}/${repo}" ]]; then
+        echo "${SIBLING_SOURCE_ROOT}/${repo}"
+    else
+        echo "${omni_home}/${repo}"
+    fi
+}
+
 resolve_build_source() {
     # Resolve the selected Dockerfile dependency source.
     #
@@ -1308,9 +1325,15 @@ stage_workspace_if_needed() {
         exit 1
     fi
 
+    if [[ -n "${DEPLOY_REF:-}" && "${DEPLOY_HOTPATCH:-0}" != "1" ]]; then
+        local build_ctx
+        build_ctx="$(cd "${repo_root}" && pwd -P)"
+        SIBLING_SOURCE_ROOT="${DEPLOY_SOURCE_WORKTREE_ROOT:-${HOME}/.omnibase/state/deploy_source_trees/${build_ctx//[!A-Za-z0-9._-]/_}}"
+    fi
+
     log_step "Stage Workspace Sibling Repos"
-    log_cmd "OMNI_HOME=${omni_home} bash ${stage_script}"
-    (cd "${repo_root}" && OMNI_HOME="${omni_home}" bash "${stage_script}")
+    log_cmd "OMNI_HOME=${omni_home} DEPLOY_SOURCE_WORKTREE_ROOT=${SIBLING_SOURCE_ROOT} bash ${stage_script}"
+    (cd "${repo_root}" && OMNI_HOME="${omni_home}" DEPLOY_SOURCE_WORKTREE_ROOT="${SIBLING_SOURCE_ROOT}" bash "${stage_script}")
 
     check_sibling_lock_pins "${repo_root}" "${omni_home}"
 }
@@ -1351,7 +1374,8 @@ check_sibling_lock_pins() {
     # the pin authority), repeatable --repo PACKAGE=PATH (the canonical clones
     # the build vendors), and --output (where to write the comparison JSON).
     # The consuming repo's uv.lock (omnimarket) is the pin authority.
-    local lock_path="${omni_home}/omnimarket/uv.lock"
+    local lock_path
+    lock_path="$(sibling_source_path "${omni_home}" omnimarket)/uv.lock"
     # --build-source workspace: this preflight only runs on the workspace path
     # (stage_workspace_if_needed short-circuits unless BUILD_SOURCE=workspace), so
     # a registry-sourced sibling whose clone is FORWARD of the lock (the OMN-13929
@@ -1360,9 +1384,9 @@ check_sibling_lock_pins() {
     local guard_args=(
         --lock "${lock_path}"
         --repo "omnibase-infra=${omni_home}/omnibase_infra"
-        --repo "omnibase-core=${omni_home}/omnibase_core"
+        --repo "omnibase-core=$(sibling_source_path "${omni_home}" omnibase_core)"
         --repo "omnibase-spi=${omni_home}/omnibase_spi"
-        --repo "omnibase-compat=${omni_home}/omnibase_compat"
+        --repo "omnibase-compat=$(sibling_source_path "${omni_home}" omnibase_compat)"
         --output "${provenance_out}"
         --build-source workspace
     )
@@ -2935,8 +2959,8 @@ build_images() {
     local compat_ref="main"
     local omnimarket_ref="dev"
     if [[ -n "${omni_home}" ]]; then
-        compat_ref="$(read_repo_ref_or_main "${omni_home}/omnibase_compat")"
-        omnimarket_ref="$(read_repo_ref_or_main "${omni_home}/omnimarket")"
+        compat_ref="$(read_repo_ref_or_main "$(sibling_source_path "${omni_home}" omnibase_compat)")"
+        omnimarket_ref="$(read_repo_ref_or_main "$(sibling_source_path "${omni_home}" omnimarket)")"
     fi
 
     # Build timeout in seconds (default: 15 minutes). Prevents the known issue
@@ -4109,8 +4133,8 @@ print_compose_commands() {
     local compat_ref="main"
     local omnimarket_ref="dev"
     if [[ -n "${omni_home}" ]]; then
-        compat_ref="$(read_repo_ref_or_main "${omni_home}/omnibase_compat")"
-        omnimarket_ref="$(read_repo_ref_or_main "${omni_home}/omnimarket")"
+        compat_ref="$(read_repo_ref_or_main "$(sibling_source_path "${omni_home}" omnibase_compat)")"
+        omnimarket_ref="$(read_repo_ref_or_main "$(sibling_source_path "${omni_home}" omnimarket)")"
     fi
 
     log_step "Compose Commands"

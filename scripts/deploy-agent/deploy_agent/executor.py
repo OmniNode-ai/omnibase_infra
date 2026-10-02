@@ -3998,14 +3998,19 @@ class DeployExecutor:
                     "_compose_build: sibling source refs %s",
                     {repo: sha[:12] for repo, sha in self.sibling_source_refs.items()},
                 )
-        omnimarket_ref = (
+        # OMN-20263: RT-1 checks the pinned siblings out in worktrees of their
+        # own, so the canonical clone's HEAD is no longer the staged commit; the
+        # SHA RT-1 resolved is. The clone's HEAD stays the answer when RT-1 did
+        # not run in this deploy (a non-workspace build).
+        resolved_refs = self.sibling_source_refs or {}
+        omnimarket_ref = resolved_refs.get("omnimarket") or (
             self._resolve_plugin_ref(
                 f"{omni_home}/omnimarket", fallback=sibling_fallback
             )
             if omni_home
             else sibling_fallback
         )
-        compat_ref = (
+        compat_ref = resolved_refs.get("omnibase_compat") or (
             self._resolve_plugin_ref(
                 f"{omni_home}/omnibase_compat", fallback=sibling_fallback
             )
