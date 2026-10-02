@@ -52,8 +52,8 @@ class _EmptyConsumer:
         return None
 
     async def consume_messages(self) -> AsyncIterator[ModelDlqMessage]:
-        return
-        yield  # pragma: no cover - makes this an async generator
+        for message in ():
+            yield message
 
     async def commit(self) -> None:
         return None

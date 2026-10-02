@@ -195,7 +195,7 @@ jobs:
     with:
       contracts-dir: contracts
       receipts-dir: drift/dod_receipts
-      core-ref: dev
+      core-ref: 1e69bec909f245be511803191554e5b340def0b7 # .github/sibling-pins.yaml
 
   # =============================================================================
   # Phase 0 - Zone filter (OMN-10475)
@@ -569,7 +569,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_core
-          ref: dev
+          ref: 1e69bec909f245be511803191554e5b340def0b7 # .github/sibling-pins.yaml
           path: .ci/omnibase_core
           token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
 
@@ -629,7 +629,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_core
-          ref: dev
+          ref: 1e69bec909f245be511803191554e5b340def0b7 # .github/sibling-pins.yaml
           path: .ci/omnibase_core
           token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
 
@@ -736,8 +736,8 @@ jobs:
       - name: Refuse shape-gate detector jobs that depend on the preflight (OMN-20298)
         run: |
           uv run --no-project \
-            --with 'omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@5220ecf1758b4475c2963ec13171b6431fdc2224' \
-            python -m omnibase_core.validators.shape_gate_independence
+            --with 'omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@d17f5be8be88a8d35fc6a69e13cb8c1896c3025b' \
+            python -m omnibase_core.handlers.handler_shape_gate_independence
 
   # RT-5 (OMN-14467): the deploy-trigger producer must fail closed on zero
   # output. Its RED-on-zero acceptance test and the anti-regression policy gate
@@ -1657,7 +1657,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: dev
+          ref: 9819782319a96cae1bfee6a0a5955029e882c601 # .github/sibling-pins.yaml
           path: .probe-roots/omninode_infra
           token: ${{ steps.infra-token.outputs.token }}
           persist-credentials: false
@@ -1669,7 +1669,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: dev
+          ref: d471dcb96d054e85089a63437aa05c1ef68bfee5 # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -1799,6 +1799,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
+          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1806,6 +1807,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimemory
+          ref: c7175878b331628de9be9358cb178547d8247c34 # .github/sibling-pins.yaml
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1813,6 +1815,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniclaude
+          ref: c86c9fe6330c789614126f5f106bfb1be364b20d # .github/sibling-pins.yaml
           path: omniclaude
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1885,6 +1888,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
+          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1892,6 +1896,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimemory
+          ref: c7175878b331628de9be9358cb178547d8247c34 # .github/sibling-pins.yaml
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1899,6 +1904,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
+          ref: d471dcb96d054e85089a63437aa05c1ef68bfee5 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1906,6 +1912,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_compat
+          ref: 65aed95fa710748654e37d5c15c5446e779fdf52 # .github/sibling-pins.yaml
           path: omnibase_compat
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1913,6 +1920,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
+          ref: d471dcb96d054e85089a63437aa05c1ef68bfee5 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -2705,6 +2713,7 @@ jobs:
         continue-on-error: true
         with:
           repository: OmniNode-ai/onex_change_control
+          ref: 802b5f7101f4c49f8b30e8deda3d4c5d024c5710 # .github/sibling-pins.yaml
           token: ${{ steps.app-token.outputs.token }}
           path: onex_change_control
           sparse-checkout: |
@@ -4470,6 +4479,75 @@ jobs:
       - name: Run delegation cross-boundary seam test
         run: uv run pytest tests/integration/runtime/test_s8_delegation_fsm_seam.py -v
 
+  # Canonical-file-shape ratchet (OMN-20304). Operator ruling 2026-10-01: no
+  # new scripts, plugins or exceptions in any repository. Refuses a new code
+  # file outside src/<pkg>/{nodes,handlers,models,protocols,contracts,enums}/,
+  # tests/ and docs/, new imperative lines in a SKILL.md, and any new baseline,
+  # allowlist, waiver or suppression entry. Existing files sit in the
+  # shrink-only .onex_ratchets/canonical_file_shape_baseline.txt. Same module
+  # and same omnibase_core commit as the canonical-file-shape pre-commit hook.
+  # Unconditional: no `if:`, no `needs:`. The positive-control step plants a
+  # bad sample on every run and fails unless the ratchet refuses it.
+  canonical-file-shape:
+    name: Canonical File Shape (OMN-20304)
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    timeout-minutes: 15
+    env:
+      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@33a8eb68b0f5f0e22fd8a574abd29caecea0d5fc"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.8.3"
+      - name: Positive control (planted bad sample refused, clean sample accepted)
+        run: |
+          set -u
+          ratchet() {
+            uv run --no-project --with "$CANONICAL_FILE_SHAPE_CORE" \
+              python -m omnibase_core.validators.canonical_file_shape "$@"
+          }
+          mkdir -p bin tests
+          printf '#!/bin/sh\necho planted\n' > bin/zz_canary_planted
+          git add bin/zz_canary_planted
+          if ratchet; then
+            echo "POSITIVE CONTROL FAILED: planted bin/zz_canary_planted was accepted"
+            exit 1
+          fi
+          echo "positive control: planted bad sample refused"
+          git rm -q --cached bin/zz_canary_planted
+          rm bin/zz_canary_planted
+          printf 'def test_canary() -> None:\n    assert True\n' > tests/zz_canary_clean.py
+          git add tests/zz_canary_clean.py
+          ratchet
+          echo "positive control: clean sample accepted"
+          git rm -q --cached tests/zz_canary_clean.py
+          rm tests/zz_canary_clean.py
+      - name: Refuse new non-canonical files and new exceptions
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -u
+          base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
+          if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base="$(git merge-base "$base" HEAD)"
+            uv run --no-project --with "$CANONICAL_FILE_SHAPE_CORE" \
+              python -m omnibase_core.validators.canonical_file_shape --base "$base" --head HEAD
+          else
+            echo "no base revision on this event; checking the tree against the baseline only"
+            uv run --no-project --with "$CANONICAL_FILE_SHAPE_CORE" \
+              python -m omnibase_core.validators.canonical_file_shape --head HEAD
+          fi
+
   ci-summary:
     name: CI Summary
     # OMN-14127: REQUIRED branch-protection context — the single umbrella gate for
@@ -4799,6 +4877,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
+          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4806,6 +4885,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimemory
+          ref: c7175878b331628de9be9358cb178547d8247c34 # .github/sibling-pins.yaml
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4813,6 +4893,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
+          ref: d471dcb96d054e85089a63437aa05c1ef68bfee5 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4820,6 +4901,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_compat
+          ref: 65aed95fa710748654e37d5c15c5446e779fdf52 # .github/sibling-pins.yaml
           path: omnibase_compat
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4827,6 +4909,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
+          ref: d471dcb96d054e85089a63437aa05c1ef68bfee5 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 

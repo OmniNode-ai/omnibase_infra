@@ -420,3 +420,89 @@ def test_cli_checkout_then_assert_green_and_red(tmp_path: Path) -> None:
     )
     rc = mod.main(["assert", "--vcs-provenance", str(vcs), "--expected-refs", str(out)])
     assert rc == mod.ASSERT_FAILED
+
+
+def _make_canonical_clone(registry: Path) -> tuple[Path, str, str]:
+    """A canonical clone ``<registry>/omnimarket``: commits A then B on ``dev``,
+    HEAD ON the branch at B, with untracked operator work beside it.
+
+    Returns (clone, sha_A, sha_B).
+    """
+    clone = registry / "omnimarket"
+    sha_a, sha_b = _make_behind_dirty_repo(clone)
+    (clone / "untracked.txt").unlink()
+    _git(clone, "checkout", "-q", "dev")
+    (clone / "operator.txt").write_text("work in progress\n", encoding="utf-8")
+    return clone, sha_a, sha_b
+
+
+def _assert_canonical_untouched(clone: Path, sha_b: str) -> None:
+    assert _git(clone, "symbolic-ref", "-q", "HEAD") == "refs/heads/dev"
+    assert _git(clone, "rev-parse", "HEAD") == sha_b
+    assert (clone / "operator.txt").read_text(encoding="utf-8") == (
+        "work in progress\n"
+    )
+
+
+@pytest.mark.unit
+def test_checkout_refuses_to_detach_a_canonical_clone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-20263 falsifier: the deploy agent's RT-1 step checked a pinned SHA out
+    IN ``$OMNI_HOME/omnimarket``, leaving the shared clone on a detached HEAD
+    (46 times in 30 hours on h202). Pre-fix this call detaches the clone at A and
+    ``clean -ffdx`` deletes ``operator.txt``; post-fix it refuses first."""
+    registry = tmp_path / "omni_home"
+    clone, sha_a, sha_b = _make_canonical_clone(registry)
+    monkeypatch.setenv("OMNI_HOME", str(registry))
+    monkeypatch.delenv("ONEX_REGISTRY_ROOTS", raising=False)
+
+    with pytest.raises(mod.DeploySourceRefError) as excinfo:
+        mod.clean_checkout(clone, sha_a, fetch=False)
+
+    assert excinfo.value.exit_code == mod.CHECKOUT_FAILED
+    assert "canonical clone" in str(excinfo.value)
+    _assert_canonical_untouched(clone, sha_b)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("immutable", [False, True])
+def test_cli_checkout_pins_a_worktree_and_leaves_the_canonical_clone_on_its_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, immutable: bool
+) -> None:
+    """OMN-20263: with ``--worktree-root`` the pinned SHA lands in a detached
+    worktree of the clone, the manifest names that worktree, and the canonical
+    clone keeps its branch, HEAD and untracked work. A second run replaces the
+    worktree (the deploy agent stages every rebuild)."""
+    registry = tmp_path / "omni_home"
+    clone, sha_a, sha_b = _make_canonical_clone(registry)
+    monkeypatch.setenv("OMNI_HOME", str(registry))
+    monkeypatch.delenv("ONEX_REGISTRY_ROOTS", raising=False)
+    trees = tmp_path / "state" / "deploy_source_trees"
+    out = tmp_path / "deploy-source-refs.json"
+    pin = (
+        ["--require-immutable-refs", "--repo-ref", f"omnimarket={sha_a}"]
+        if immutable
+        else ["--ref", sha_a]
+    )
+    argv = [
+        "checkout",
+        "--no-fetch",
+        "--repo",
+        f"omnimarket={clone}",
+        *pin,
+        "--worktree-root",
+        str(trees),
+        "--output",
+        str(out),
+    ]
+
+    for _run in range(2):
+        assert mod.main(argv) == 0
+        tree = trees.resolve() / "omnimarket"
+        assert _git(tree, "rev-parse", "HEAD") == sha_a
+        assert _git(tree, "status", "--porcelain") == ""
+        row = json.loads(out.read_text(encoding="utf-8"))["repos"]["omnimarket"]
+        assert row["path"] == str(tree)
+        assert row["expected_sha"] == sha_a
+        _assert_canonical_untouched(clone, sha_b)

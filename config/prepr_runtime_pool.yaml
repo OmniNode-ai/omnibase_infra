@@ -73,7 +73,9 @@ hosts:
     ssh_target: "192.168.86.105" # onex-allow-internal-ip
     surface: 105-runtime
     os: macos
-    status: pool
+    status: excluded
+    reason: >-
+      out of the lab mix: operator 2026-10-01 ~09:05 ET, ".105 is not working right now, keep it out of the mix, we are taking it to tech week" (MSG 2026-10-01T13:07:36Z-host-105-out); its ssh probe times out, so the pool status read waited 30 s on it every call
   - name: lab-200
     ssh_target: "192.168.86.200" # onex-allow-internal-ip
     surface: 200-runtime

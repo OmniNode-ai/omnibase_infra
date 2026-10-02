@@ -120,8 +120,11 @@ class TestConsumerHealthEmitterIntegration:
 
             payload = json.loads(msg.value)
             assert payload["consumer_identity"] == "test-consumer-1"
-            assert payload["event_type"] == "HEARTBEAT_FAILURE"
-            assert payload["severity"] == "ERROR"
+            assert (
+                payload["event_type"]
+                == EnumConsumerHealthEventType.HEARTBEAT_FAILURE.value
+            )
+            assert payload["severity"] == EnumConsumerHealthSeverity.ERROR.value
 
     @pytest.mark.asyncio
     async def test_emitter_rate_limiting(

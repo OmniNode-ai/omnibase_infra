@@ -92,8 +92,21 @@ def kafka_available() -> bool:
 
 
 async def _topic_error_code(admin: object, topic: str) -> int:
-    """Topic-scoped describe -> the topic's error code (0 exists, 3 absent)."""
-    described = await admin.describe_topics([topic])  # type: ignore[attr-defined]
+    """Topic-scoped describe -> the topic's error code (0 exists, 3 absent).
+
+    Sends the Metadata request with ``allow_auto_topic_creation=False``.
+    aiokafka's ``AIOKafkaAdminClient.describe_topics`` sends it with auto-creation
+    allowed, so on a broker with ``auto_create_topics_enabled`` (Redpanda
+    ``--mode dev-container``, as in docker-compose.e2e.yml) merely asking whether
+    a just-deleted topic exists recreates it with the broker default partition
+    count, and the "wait until deleted" loop can never observe it absent.
+    """
+    from aiokafka.protocol.metadata import MetadataRequest
+
+    response = await admin._send_request(  # type: ignore[attr-defined]
+        MetadataRequest([topic], allow_auto_topic_creation=False)
+    )
+    described = response.to_object()["topics"]
     for entry in described:
         if entry.get("topic") == topic:
             return int(entry.get("error_code", _ERR_UNKNOWN_TOPIC))

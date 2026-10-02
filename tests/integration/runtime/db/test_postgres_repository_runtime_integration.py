@@ -31,7 +31,9 @@ The S608 suppression for this file is configured in pyproject.toml under
 
 from __future__ import annotations
 
+import dataclasses
 import uuid
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -139,7 +141,10 @@ async def cleanup_test_table(db_pool):
         await conn.execute(f"DROP TABLE IF EXISTS {_TEST_TABLE_NAME}")
 
 
-@pytest_asyncio.fixture
+# loop_scope="module" is required: ``db_pool`` is bound to the module event loop,
+# and a fixture on the default (function) loop that awaits it fails with
+# "attached to a different loop" and leaves the pooled connection mid-operation.
+@pytest_asyncio.fixture(loop_scope="module")
 async def test_table(db_pool: asyncpg.Pool):
     """Create a temporary test table for isolation (reuses same table across tests)."""
     global _TABLE_CREATED  # noqa: PLW0603  # Module-scoped fixture state
@@ -462,15 +467,93 @@ class TestArgumentValidation:
         assert "expects 1 argument" in str(exc_info.value)
 
 
-class TestLearnedPatternsTable:
-    """Test against the real learned_patterns table schema."""
+# learned_patterns is owned by the omniintelligence service database, not
+# omnibase_infra: it is created by docker/migrations/intelligence/ (applied to
+# the ``omniintelligence`` database by the intelligence-migration one-shot,
+# docker/catalog/services/intelligence-migration.yaml ->
+# scripts/run-intelligence-migrations.sh). scripts/run-migrations.py never
+# applies that set to omnibase_infra. The fixture below builds a scratch
+# database from that real migration set, in the runner's sorted order, so the
+# test exercises the shipped schema without depending on a pre-provisioned
+# omniintelligence database.
+_INTELLIGENCE_MIGRATIONS_DIR = (
+    Path(__file__).resolve().parents[4] / "docker" / "migrations" / "intelligence"
+)
+_INTELLIGENCE_DB_NAME = f"omniintelligence_rt_{uuid.uuid4().hex[:8]}"
 
-    async def test_query_learned_patterns_validated(self, db_pool: asyncpg.Pool):
-        """Test querying the actual learned_patterns table for validated patterns."""
+
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
+async def intelligence_db_pool(db_pool: asyncpg.Pool):
+    """Pool on a scratch database migrated with docker/migrations/intelligence."""
+    import asyncpg
+
+    from tests.helpers.util_postgres import PostgresConfig
+
+    migrations = sorted(_INTELLIGENCE_MIGRATIONS_DIR.glob("*.sql"))
+    assert migrations, (
+        f"No intelligence migrations under {_INTELLIGENCE_MIGRATIONS_DIR}"
+    )
+
+    async with db_pool.acquire() as conn:
+        await conn.execute(f"CREATE DATABASE {_INTELLIGENCE_DB_NAME}")
+
+    config = dataclasses.replace(
+        PostgresConfig.from_env(), database=_INTELLIGENCE_DB_NAME
+    )
+    pool = await asyncpg.create_pool(config.build_dsn(), min_size=1, max_size=2)
+    try:
+        async with pool.acquire() as conn:
+            for migration in migrations:
+                await conn.execute(migration.read_text(encoding="utf-8"))
+        yield pool
+    finally:
+        await pool.close()
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                f"DROP DATABASE IF EXISTS {_INTELLIGENCE_DB_NAME} WITH (FORCE)"
+            )
+
+
+class TestLearnedPatternsTable:
+    """Test against the real learned_patterns table schema (omniintelligence)."""
+
+    async def test_query_learned_patterns_validated(
+        self, intelligence_db_pool: asyncpg.Pool
+    ):
+        """Query validated patterns from the migrated learned_patterns table."""
+        session_id = uuid.uuid4()
+        seeded = [
+            # (pattern_signature, confidence, status, promoted)
+            ("sig-validated-low", 0.6, "validated", True),
+            ("sig-validated-high", 0.95, "validated", True),
+            ("sig-validated-mid", 0.8, "validated", True),
+            ("sig-candidate", 0.99, "candidate", False),
+            ("sig-deprecated", 0.9, "deprecated", False),
+        ]
+        async with intelligence_db_pool.acquire() as conn:
+            for signature, confidence, status, promoted in seeded:
+                await conn.execute(
+                    """
+                    INSERT INTO learned_patterns (
+                        pattern_signature, signature_hash, domain_id,
+                        domain_version, confidence, status, promoted_at,
+                        source_session_ids
+                    ) VALUES (
+                        $1, md5($1), 'code_generation', '1.0', $2, $3,
+                        CASE WHEN $4 THEN NOW() END, ARRAY[$5::uuid]
+                    )
+                    """,
+                    signature,
+                    confidence,
+                    status,
+                    promoted,
+                    session_id,
+                )
+
         contract = ModelDbRepositoryContract(
             name="learned_patterns_repo",
             engine="postgres",
-            database_ref="omnibase_infra",
+            database_ref="omniintelligence",
             tables=["learned_patterns"],
             models={"LearnedPattern": "dict"},
             ops={
@@ -490,27 +573,32 @@ class TestLearnedPatternsTable:
         )
 
         config = ModelRepositoryRuntimeConfig(max_row_limit=10)
-        runtime = PostgresRepositoryRuntime(db_pool, contract, config)
+        runtime = PostgresRepositoryRuntime(intelligence_db_pool, contract, config)
 
-        # Query for validated patterns - validates the runtime executes correctly
         results = await runtime.call("find_validated", "validated")
 
-        # Validate the query returns a well-formed list of dicts
         assert isinstance(results, list)
-
+        assert [row["pattern_signature"] for row in results] == [
+            "sig-validated-high",
+            "sig-validated-mid",
+            "sig-validated-low",
+        ]
         expected_keys = {"id", "pattern_signature", "domain_id", "confidence", "status"}
         for row in results:
             assert isinstance(row, dict), f"Expected dict row, got {type(row)}"
-            assert expected_keys.issubset(row.keys()), (
-                f"Row missing expected keys: {expected_keys - row.keys()}"
-            )
-            assert row["status"] == "validated", (
-                f"Expected status='validated', got status='{row['status']}'"
-            )
+            assert set(row.keys()) == expected_keys
+            assert row["status"] == "validated"
+            assert row["domain_id"] == "code_generation"
+        assert [row["confidence"] for row in results] == [0.95, 0.8, 0.6]
 
-        # Verify ORDER BY confidence DESC is respected
-        if len(results) > 1:
-            confidences = [row["confidence"] for row in results]
-            assert confidences == sorted(confidences, reverse=True), (
-                "Results are not ordered by confidence DESC"
-            )
+        # max_row_limit is enforced against the real table too.
+        limited = PostgresRepositoryRuntime(
+            intelligence_db_pool,
+            contract,
+            ModelRepositoryRuntimeConfig(max_row_limit=2),
+        )
+        top_two = await limited.call("find_validated", "validated")
+        assert [row["pattern_signature"] for row in top_two] == [
+            "sig-validated-high",
+            "sig-validated-mid",
+        ]

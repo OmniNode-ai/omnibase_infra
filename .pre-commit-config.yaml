@@ -21,6 +21,30 @@
 #   pre-commit install --hook-type pre-push  # Install pre-push hooks
 #   pre-commit run --all-files            # Run all pre-commit hooks
 repos:
+  # OMN-20304: canonical-file-shape ratchet (operator ruling 2026-10-01). No
+  # new code file outside the canonical contract/node/handler/models/
+  # protocols/tests/docs locations, no new imperative lines in a SKILL.md, no
+  # new baseline, allowlist or suppression entry. Shrink-only baseline at
+  # .onex_ratchets/canonical_file_shape_baseline.txt. CI runs the same module
+  # at the same commit (job "Canonical File Shape (OMN-20304)").
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: 33a8eb68b0f5f0e22fd8a574abd29caecea0d5fc
+    hooks:
+      - id: canonical-file-shape
+        require_serial: true
+  # OMN-20295: direct-model-call gate, BLOCKING. A model call (HTTP to a model
+  # endpoint, provider or base_url; a model CLI exec such as crush, codex,
+  # claude -p or llama-cli; a model SDK import; or a caller of one) must sit in a
+  # sanctioned delegation node package named in omnibase_core's policy.yaml.
+  # Shrink-only baseline .onex_ratchets/direct_model_call_baseline.yaml; no
+  # suppression marker. Keep this rev equal to the pin in
+  # .github/workflows/direct-model-call.yml. Server-side backstop: OMN-20299.
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: 2685a264629c847c291d9e96e3d4ea2cb2773cec
+    hooks:
+      - id: check-direct-model-call
+        require_serial: true
+        args: [--repo, omnibase_infra, --baseline, .onex_ratchets/direct_model_call_baseline.yaml, --base, HEAD]
   # Stub implementation detection + receipt-honesty gate + transport-mock lint —
   # sourced from omnibase_core. Rev bumped to OMN-13026 (transport-mock-lint
   # hook added); OMN-13281 wires receipt-honesty to this block.
@@ -89,10 +113,14 @@ repos:
   # on the change-control preflight and never reads its result. BLOCKING, zero
   # baseline, no allowlist, no suppression comment. CI twin: the
   # shape-gate-independence job in .github/workflows/ci.yml (STRICT CI Summary gate).
-  - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 5220ecf1758b4475c2963ec13171b6431fdc2224 # pragma: allowlist secret
+  - repo: local
     hooks:
       - id: check-shape-gate-independence
+        name: Shape-gate detectors never depend on the OCC preflight (OMN-20298)
+        entry: uv run --no-project --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@d17f5be8be88a8d35fc6a69e13cb8c1896c3025b" python -m omnibase_core.handlers.handler_shape_gate_independence
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$
+        pass_filenames: false
         require_serial: true
   # Hardcoded topic guard — sourced from onex_change_control (OMN-5256/OMN-5259)
   # Pre-existing violations excluded pending migration to canonical constants (OMN-5259)

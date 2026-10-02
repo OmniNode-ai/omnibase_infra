@@ -117,6 +117,12 @@ def _refs_out(build_ctx: Path) -> Path:
     return build_ctx.parent / "refs-state" / f"{build_ctx.name}.json"
 
 
+def _trees(build_ctx: Path) -> Path:
+    """Where these tests park RT-1's pinned worktrees (OMN-20263): beside the
+    build context, never under the real ``~/.omnibase/state``."""
+    return build_ctx.parent / "source-trees" / build_ctx.name
+
+
 def _run_stage(
     omni_home: Path,
     build_ctx: Path,
@@ -136,6 +142,7 @@ def _run_stage(
         "CONSUMER_LOCK": str(omni_home / "omnimarket" / "uv.lock"),
     }
     env.pop("DEPLOY_SOURCE_REFS_OUT", None)
+    env["DEPLOY_SOURCE_WORKTREE_ROOT"] = str(_trees(build_ctx))
     if home is not None:
         env["HOME"] = str(home)
     if not use_default_refs_out:
@@ -183,8 +190,10 @@ def test_deploy_ref_checks_out_behind_clone_and_asserts_green(tmp_path: Path) ->
     result = _run_stage(omni_home, build_ctx, deploy_ref="dev")
     assert result.returncode == 0, result.stderr
 
-    # The clone was checked out to dev HEAD before staging.
-    assert _git(omni_home / "omnibase_core", "rev-parse", "HEAD") == new_sha
+    # dev HEAD was checked out in RT-1's own worktree before staging, and the
+    # canonical clone itself was left where it was (OMN-20263).
+    assert _git(_trees(build_ctx) / "omnibase_core", "rev-parse", "HEAD") == new_sha
+    assert _git(omni_home / "omnibase_core", "rev-parse", "HEAD") == old_sha
 
     # The vendored-SHA manifest carries the NEW ref SHA -- proof the checkout
     # actually moved the tree during real staging (a no-op would leave old_sha).
@@ -422,8 +431,9 @@ def test_per_repo_pins_stage_distinct_immutable_commits(tmp_path: Path) -> None:
     expected = json.loads(_refs_out(build_ctx).read_text())
     vcs = json.loads((build_ctx / "workspace/sibling-vcs-provenance.json").read_text())
     assert expected["ref_pinned"] is True
+    assert _git(omni_home / "omnibase_core", "rev-parse", "HEAD") == old_core
     for repo, sha in targets.items():
-        assert _git(omni_home / repo, "rev-parse", "HEAD") == sha
+        assert _git(_trees(build_ctx) / repo, "rev-parse", "HEAD") == sha
         assert expected["repos"][repo]["expected_sha"] == sha
         assert expected["repos"][repo]["hotpatch"] is False
         assert vcs["siblings"][repo]["vcs_ref"] == sha
@@ -479,10 +489,12 @@ def test_per_repo_late_missing_commit_preserves_earlier_clone(tmp_path: Path) ->
 
 @pytest.mark.unit
 @pytest.mark.parametrize("ignored", [False, True])
-def test_per_repo_dirty_target_is_refused_without_deleting_work(
+def test_per_repo_dirty_clone_is_staged_from_a_worktree_without_touching_work(
     tmp_path: Path, ignored: bool
 ) -> None:
-    omni_home = _make_pinned_clones(tmp_path)
+    """OMN-20263: the pins are checked out in RT-1's own worktrees, so operator
+    work in a canonical clone is neither refused nor read nor deleted."""
+    omni_home = _make_omni_home(tmp_path)
     before_core, target_core = _behind_core(omni_home)
     market = omni_home / "omnimarket"
     if ignored:
@@ -494,7 +506,9 @@ def test_per_repo_dirty_target_is_refused_without_deleting_work(
     refs = _current_repo_refs(omni_home)
     refs[0] = f"omnibase_core={target_core}"
     result = _run_stage(omni_home, tmp_path / "ctx", repo_refs=refs)
-    assert result.returncode == 4, result.stderr
-    assert "dirty" in result.stderr.lower()
+    assert result.returncode == 0, result.stderr
     assert sentinel.read_text() == "must survive\n"
     assert _git(omni_home / "omnibase_core", "rev-parse", "HEAD") == before_core
+    trees = _trees(tmp_path / "ctx")
+    assert _git(trees / "omnibase_core", "rev-parse", "HEAD") == target_core
+    assert not (trees / "omnimarket" / "operator-work.txt").exists()

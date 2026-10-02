@@ -211,3 +211,54 @@ def test_completion_event_carries_the_sibling_refs() -> None:
     # A release-mode / prod-digest deploy vendors no sibling trees and says so
     # with an empty map rather than omitting the field.
     assert build_completion_payload(job, INFRA_SHA, [])["sibling_refs"] == {}
+
+
+def test_build_args_carry_the_rt1_resolved_shas_not_the_canonical_heads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-20263: RT-1 now checks the pins out in worktrees of its own, so the
+    canonical clone's HEAD is not the staged commit. OMNIMARKET_REF and
+    OMNIBASE_COMPAT_REF must be the SHAs RT-1 resolved, not the clone HEADs."""
+    resolved = {
+        "omnibase_core": "1111111111111111111111111111111111111111",
+        "omnibase_compat": "2222222222222222222222222222222222222222",
+        "omnimarket": "3333333333333333333333333333333333333333",
+    }
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _install_recording_stage_script(repo, resolved=resolved)
+    omni_home = tmp_path / "omni_home"
+    canonical_heads = {}
+    for name in ("omnimarket", "omnibase_compat"):
+        clone = omni_home / name
+        clone.mkdir(parents=True)
+        git = ["git", "-C", str(clone), "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run([*git, "init", "-q"], check=True)
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "c"], check=True)
+        canonical_heads[name] = subprocess.run(
+            [*git, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+        ).stdout.strip()
+    monkeypatch.setattr(executor_mod, "REPO_DIR", str(repo))
+    monkeypatch.setenv("OMNI_HOME", str(omni_home))
+    monkeypatch.setenv("DEPLOY_AGENT_TRACKING_REF", "dev")
+    commands: list[list[str]] = []
+
+    def record(cmd: list[str], timeout: float, **kwargs: object) -> object:
+        commands.append(list(cmd))
+        return _ok()
+
+    monkeypatch.setattr(executor_mod, "_run", record)
+
+    DeployExecutor()._compose_build(
+        Scope.RUNTIME,
+        INFRA_SHA[:7],
+        _noop_phase_update,
+        build_source=BuildSource.WORKSPACE,
+        runtime_lane=EnumRuntimeLane.DEV,
+        git_ref=INFRA_SHA,
+    )
+
+    build = next(cmd for cmd in commands if "build" in cmd)
+    assert f"OMNIMARKET_REF={resolved['omnimarket']}" in build
+    assert f"OMNIBASE_COMPAT_REF={resolved['omnibase_compat']}" in build
+    assert f"OMNIMARKET_REF={canonical_heads['omnimarket']}" not in build

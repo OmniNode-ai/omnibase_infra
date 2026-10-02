@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import logging
@@ -17,7 +18,7 @@ import sys
 import tempfile
 import time
 import tomllib
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -161,6 +162,36 @@ REPOINT_TIMEOUT_SECONDS = 120
 ONEX_API_RECREATE_TIMEOUT_SECONDS = 300
 # OMN-20154: bound the wait for reconcile-host to finish rewriting build contexts.
 RECONCILE_HOST_LOCK_WAIT_SECONDS = 900
+
+
+def _reconcile_lock_roots() -> list[str]:
+    """Return distinct agent and build-context trees, preserving their paths."""
+    roots: list[str] = []
+    seen: set[str] = set()
+    for root in (os.environ.get("OMNI_HOME", "").strip(), str(Path(REPO_DIR).parent)):
+        if not root.strip():
+            continue
+        normalized = os.path.realpath(root)
+        if normalized not in seen:
+            seen.add(normalized)
+            roots.append(root)
+    return roots
+
+
+@contextlib.contextmanager
+def _hold_reconcile_host_locks(purpose: str) -> Iterator[None]:
+    """Hold every tree's reconcile lock in a fixed acquisition order."""
+    with contextlib.ExitStack() as stack:
+        for root in sorted(_reconcile_lock_roots()) or [""]:
+            stack.enter_context(
+                hold_reconcile_host_lock(
+                    root,
+                    purpose=purpose,
+                    wait_seconds=RECONCILE_HOST_LOCK_WAIT_SECONDS,
+                )
+            )
+        yield
+
 
 PHASE_TIMEOUTS = {
     Phase.PREFLIGHT: 30,
@@ -3134,11 +3165,8 @@ class DeployExecutor:
             # the COPY src/ layer even when the file-system mtime is cached.
             # OMN-20154: hold from staging through the LAST build, which reuses
             # staged provenance a reconcile checkout would reset to a placeholder.
-            with hold_reconcile_host_lock(
-                os.environ.get("OMNI_HOME", "").strip(),
-                purpose=f"deploy-agent image build {git_sha[:12]}",
-                wait_seconds=RECONCILE_HOST_LOCK_WAIT_SECONDS,
-            ):
+            # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
+            with _hold_reconcile_host_locks(f"deploy-agent image build {git_sha[:12]}"):
                 self._compose_build(
                     Scope.CORE,
                     git_sha,
@@ -3194,11 +3222,8 @@ class DeployExecutor:
 
         # OMN-20154: span staging through the LAST build so reconcile-host
         # cannot reset staged provenance before the dev-only build consumes it.
-        with hold_reconcile_host_lock(
-            os.environ.get("OMNI_HOME", "").strip(),
-            purpose=f"deploy-agent image build {git_sha[:12]}",
-            wait_seconds=RECONCILE_HOST_LOCK_WAIT_SECONDS,
-        ):
+        # OMN-20154/OMN-20255: build tree may differ from OMNI_HOME; lock both.
+        with _hold_reconcile_host_locks(f"deploy-agent image build {git_sha[:12]}"):
             self._compose_build(
                 scope,
                 git_sha,
@@ -3973,14 +3998,19 @@ class DeployExecutor:
                     "_compose_build: sibling source refs %s",
                     {repo: sha[:12] for repo, sha in self.sibling_source_refs.items()},
                 )
-        omnimarket_ref = (
+        # OMN-20263: RT-1 checks the pinned siblings out in worktrees of their
+        # own, so the canonical clone's HEAD is no longer the staged commit; the
+        # SHA RT-1 resolved is. The clone's HEAD stays the answer when RT-1 did
+        # not run in this deploy (a non-workspace build).
+        resolved_refs = self.sibling_source_refs or {}
+        omnimarket_ref = resolved_refs.get("omnimarket") or (
             self._resolve_plugin_ref(
                 f"{omni_home}/omnimarket", fallback=sibling_fallback
             )
             if omni_home
             else sibling_fallback
         )
-        compat_ref = (
+        compat_ref = resolved_refs.get("omnibase_compat") or (
             self._resolve_plugin_ref(
                 f"{omni_home}/omnibase_compat", fallback=sibling_fallback
             )

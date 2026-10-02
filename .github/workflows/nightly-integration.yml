@@ -59,6 +59,10 @@ env:
   ONEX_EVENT_BUS_TYPE: "kafka"
   ONEX_ENVIRONMENT: "test"
   LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
+  # OMN-20317: tests/integration/transport (OMN-14756) refuses to run without
+  # a topic namespace and has no default; this nightly is its only runner.
+  # The namespace is the one its own docstring names, deliberately not onex.*.
+  ONEX_TRANSPORT_KAFKA_TOPIC_PREFIX: "transport.s3.integration"
 
 jobs:
   guard-live-host:
@@ -522,10 +526,29 @@ jobs:
           # would fail them for the absence of an env this workflow does not
           # own. Deselected by path, not by marker, so the rest of the
           # kafka-marked family keeps its nightly selection unchanged.
+          # OMN-20317: OMN-18795 moved seven more suites into that same ci.yml
+          # job and two into reusable-runtime-boot.yml (the only workflow that
+          # boots a runtime), all with fail-closed opt-ins, but this list was
+          # not extended. The nightly kept selecting them without their
+          # opt-ins, so 117 of its 164 errors each night were the guard
+          # refusing an env this workflow does not own. Same rule: their owner
+          # runs them, by path. The delegation consumer kwarg-parity proof is
+          # the same shape: it reads OmniMarket's consumer source, which only
+          # delegation-consumer-kwarg-parity.yml checks out (OMN-18938).
           uv run pytest tests/integration/ \
             -m "integration and not bastion" \
             --deselect tests/integration/event_bus/test_kafka_event_bus_integration.py \
             --deselect tests/integration/handlers/test_handler_qdrant_integration.py \
+            --deselect tests/integration/event_bus/test_dlq_integration.py \
+            --deselect tests/integration/nodes/test_node_reward_binder_effect.py \
+            --deselect tests/integration/handlers/test_handler_graph_integration.py \
+            --deselect tests/integration/correlation/test_correlation_propagation_heavy.py \
+            --deselect tests/integration/registration/e2e/test_topic_catalog_e2e.py \
+            --deselect tests/integration/registration/e2e/test_full_orchestrator_flow.py \
+            --deselect tests/integration/registration/e2e/test_two_way_registration_e2e.py \
+            --deselect tests/integration/registration/e2e/test_runtime_e2e.py \
+            --deselect tests/integration/test_runtime_consumes_build_loop_terminal_event.py \
+            --deselect tests/integration/runtime/test_delegation_dispatch_port_consumer_kwarg_parity.py \
             -v \
             --tb=short \
             --junitxml=nightly-integration-junit.xml \

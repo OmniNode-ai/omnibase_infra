@@ -122,28 +122,8 @@ async def cleanup_event_ledger(
 
 
 @pytest.fixture
-async def db_handler(
-    postgres_dsn: str, mock_container: MagicMock
-) -> AsyncGenerator[HandlerDb, None]:
-    """Create and initialize a HandlerDb for ledger tests.
-
-    Yields:
-        Initialized HandlerDb connected to test database.
-    """
-    from omnibase_infra.handlers.handler_db import HandlerDb
-
-    handler = HandlerDb(mock_container)
-    await handler.initialize({"dsn": postgres_dsn})
-
-    try:
-        yield handler
-    finally:
-        await handler.shutdown()
-
-
-@pytest.fixture
 async def ledger_append_handler(
-    db_handler: HandlerDb, mock_container: MagicMock
+    postgres_dsn: str, mock_container: MagicMock
 ) -> AsyncGenerator[HandlerLedgerAppend, None]:
     """Create and initialize a HandlerLedgerAppend for tests.
 
@@ -154,7 +134,7 @@ async def ledger_append_handler(
         HandlerLedgerAppend,
     )
 
-    handler = HandlerLedgerAppend(mock_container, db_handler)
+    handler = HandlerLedgerAppend(mock_container, db_dsn=postgres_dsn)
     await handler.initialize({})
 
     try:
@@ -165,7 +145,7 @@ async def ledger_append_handler(
 
 @pytest.fixture
 async def ledger_query_handler(
-    db_handler: HandlerDb, mock_container: MagicMock
+    postgres_dsn: str, mock_container: MagicMock
 ) -> AsyncGenerator[HandlerLedgerQuery, None]:
     """Create and initialize a HandlerLedgerQuery for tests.
 
@@ -176,7 +156,7 @@ async def ledger_query_handler(
         HandlerLedgerQuery,
     )
 
-    handler = HandlerLedgerQuery(mock_container, db_handler)
+    handler = HandlerLedgerQuery(mock_container, db_dsn=postgres_dsn)
     await handler.initialize({})
 
     try:
@@ -262,7 +242,6 @@ def make_ledger_payload() -> Callable[..., ModelPayloadLedgerAppend]:
 
 # Re-export TYPE_CHECKING imports for type hints
 if TYPE_CHECKING:
-    from omnibase_infra.handlers.handler_db import HandlerDb
     from omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_append import (
         HandlerLedgerAppend,
     )

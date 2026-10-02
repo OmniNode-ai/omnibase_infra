@@ -39,6 +39,7 @@ def test_lock_spans_every_build_and_ends_before_compose_up(
     scope: Scope, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OMNI_HOME", str(tmp_path))
+    monkeypatch.setattr(executor_mod, "REPO_DIR", str(tmp_path / "omnibase_infra"))
     lock = tmp_path / _LOCK_DIRNAME
     calls: list[str] = []
 
@@ -92,6 +93,66 @@ def test_lock_spans_every_build_and_ends_before_compose_up(
     assert not lock.exists()
 
 
+@pytest.mark.parametrize("scope", [Scope.FULL, Scope.RUNTIME])
+def test_lock_held_on_build_context_tree_when_omni_home_differs(
+    scope: Scope, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    agent_root = tmp_path / "agent"
+    build_root = tmp_path / "omni_home"
+    agent_root.mkdir()
+    build_root.mkdir()
+    monkeypatch.setenv("OMNI_HOME", str(agent_root))
+    monkeypatch.setattr(executor_mod, "REPO_DIR", str(build_root / "omnibase_infra"))
+    locks = [agent_root / _LOCK_DIRNAME, build_root / _LOCK_DIRNAME]
+    calls: list[str] = []
+
+    def compose_build(self: DeployExecutor, scope: Scope, *a: Any, **kw: Any) -> None:
+        assert all(lock.is_dir() for lock in locks)
+        calls.append(scope.value)
+
+    def dev_build(self: DeployExecutor, *a: Any, **kw: Any) -> None:
+        assert all(lock.is_dir() for lock in locks)
+        calls.append("dev-only")
+
+    def compose_up(self: DeployExecutor, *a: Any, **kw: Any) -> None:
+        assert all(not lock.exists() for lock in locks)
+        calls.append("up")
+
+    def gateway(self: DeployExecutor, *a: Any, **kw: Any) -> None:
+        assert all(not lock.exists() for lock in locks)
+        calls.append("gateway")
+
+    monkeypatch.setattr(DeployExecutor, "_compose_build", compose_build)
+    monkeypatch.setattr(DeployExecutor, "_build_dev_lane_only_services", dev_build)
+    monkeypatch.setattr(DeployExecutor, "_compose_up", compose_up)
+    monkeypatch.setattr(DeployExecutor, "_deploy_gateway_lane", gateway)
+    DeployExecutor().rebuild_scope(
+        scope,
+        [],
+        _noop_phase_update,
+        git_sha=_SHA,
+        git_ref="origin/dev",
+        build_source="workspace",
+        lane=EnumRuntimeLane.DEV,
+    )
+    expected = {
+        Scope.FULL: ["core", "runtime", "dev-only", "up", "up", "gateway"],
+        Scope.RUNTIME: ["runtime", "dev-only", "up", "gateway"],
+    }
+    assert calls == expected[scope]
+    assert all(not lock.exists() for lock in locks)
+
+
+@pytest.mark.parametrize("suffix", ["", "/."])
+def test_reconcile_lock_roots_deduplicates_build_context_tree(
+    suffix: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    omni_home = f"{tmp_path}{suffix}"
+    monkeypatch.setenv("OMNI_HOME", f" {omni_home} ")
+    monkeypatch.setattr(executor_mod, "REPO_DIR", str(tmp_path / "omnibase_infra"))
+    assert executor_mod._reconcile_lock_roots() == [omni_home]
+
+
 @pytest.mark.parametrize(
     ("scope", "fail_at"),
     [(Scope.FULL, 1), (Scope.FULL, 2), (Scope.FULL, 3), (Scope.RUNTIME, 2)],
@@ -100,6 +161,7 @@ def test_build_exception_releases_lock_without_recreating(
     scope: Scope, fail_at: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OMNI_HOME", str(tmp_path))
+    monkeypatch.setattr(executor_mod, "REPO_DIR", str(tmp_path / "omnibase_infra"))
     lock = tmp_path / _LOCK_DIRNAME
     calls = 0
 
@@ -134,6 +196,7 @@ def _no_workspace_staging(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
         DeployExecutor, "_resolve_plugin_ref", lambda self, path, fallback="": "0" * 40
     )
     monkeypatch.setenv("OMNI_HOME", str(tmp_path))
+    monkeypatch.setattr(executor_mod, "REPO_DIR", str(tmp_path / "omnibase_infra"))
 
 
 def _pin_host(monkeypatch: pytest.MonkeyPatch) -> None:

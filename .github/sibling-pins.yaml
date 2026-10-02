@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20331: the sibling-repo commits every gating omnibase_infra workflow
+# reads. A gating check that reads a sibling's live `dev`/`main` tip turns red
+# on every open omnibase_infra PR when that sibling merges, and no omnibase_infra
+# PR can fix it (the omnimarket-contract-pin.yaml rationale, OMN-17292, applied
+# to every sibling).
+#
+# Each value is the sha written inline as the `ref:` of the sibling checkout, the
+# `git clone` checkout, or the `uses: ...@<sha>` in .github/workflows/*.yml.
+# tests/ci/test_sibling_reads_pinned_omn20331.py fails when a workflow reads a
+# sibling by branch name, by no ref, or at a sha that is not the one below.
+#
+#   omnibase_core / omnibase_compat  the commits of the uv.lock releases
+#                                    (core 0.47.28, compat 0.5.7)
+#   omnimarket                       equals .github/omnimarket-contract-pin.yaml
+#   the rest                         the `dev` tip when the pin was added
+#
+# Move a pin only in a PR that also passes the gates reading that sibling at the
+# new sha. NON-GATING MONITOR workflows (schedule/dispatch only) read live tips by
+# design and are not pinned; they carry the label in their header.
+pins:
+  omnibase_core: 1e69bec909f245be511803191554e5b340def0b7
+  omnibase_compat: 65aed95fa710748654e37d5c15c5446e779fdf52
+  omnimarket: d471dcb96d054e85089a63437aa05c1ef68bfee5
+  omniintelligence: 51e1cb356453ad325d76aea57ab371cf975df3a4
+  omnimemory: c7175878b331628de9be9358cb178547d8247c34
+  omniclaude: c86c9fe6330c789614126f5f106bfb1be364b20d
+  onex_change_control: 802b5f7101f4c49f8b30e8deda3d4c5d024c5710
+  omninode_infra: 9819782319a96cae1bfee6a0a5955029e882c601
+  omnidash: cc628179717f4830bdd6c5a5e1b8d0c7bc4042ff

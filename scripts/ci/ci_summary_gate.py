@@ -336,6 +336,10 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "Validator Requirements Baseline One-way (OMN-19677) / anti-growth-baseline",
     "Runtime Profiles Allowlist One-way (OMN-19677) / anti-growth-baseline",
     "Skip Count Baseline One-way (OMN-19677) / anti-growth-baseline",
+    # OMN-20304: canonical-file-shape ratchet (no new scripts, plugins or
+    # exceptions). The job is unconditional in ci.yml (no needs/if), so a skip
+    # or absence fails closed here instead of reading green.
+    "Canonical File Shape (OMN-20304)",  # canonical-file-shape
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
@@ -778,6 +782,10 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # Admitted under POST_FIXTURE_WINDOW_CONTEXTS and placed at the tail for
     # the reason the `Governed helper primitive gate` entry states.
     "delegation-health-check / Delegation Health Check",
+    # OMN-20295: direct-model-call.yml reports on every pull request to main or
+    # dev; registered so a red run blocks a merge. Admitted under
+    # POST_FIXTURE_WINDOW_CONTEXTS and placed at the tail for the same reason.
+    "Direct Model Call Gate",
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -803,6 +811,9 @@ POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
         # OMN-19451: registered 2026-09-29, after both fixture windows closed.
         # Comes out at the next fixture re-capture.
         "delegation-health-check / Delegation Health Check",
+        # OMN-20295: the workflow lands in this same PR, so no merged PR in
+        # either fixture window could have produced this check-run.
+        "Direct Model Call Gate",
         # Landed with its validator in the same PR (Rule 5) on 2026-08-30; both
         # fixture windows (#2546…#2567, #2705…#2720) close well before that.
         "exposure-reader-coverage",

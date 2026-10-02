@@ -22,6 +22,13 @@ DETECTION is cheap and entirely LOCAL (no network): compare the commit the
 current interpreter's omnimarket was installed from against the HEAD of the
 already-checked-out canonical clone at ``$OMNI_HOME/omnimarket``.
 
+For a detached registry mirror (OMN-17427), the checkout is not the reference:
+the guard resolves the locally fetched remote default branch to one immutable
+SHA and verifies the installed VCS package against it. Proven equality or
+ancestry carries a receipt naming package, reference, checkout and measured
+lag. An absent remote default, non-VCS package or unmerged installed commit
+still refuses. The clone is never re-attached, reset or reconciled by dispatch.
+
 REPAIR is not this module's policy and never has been -- it belongs to
 ``scripts/reconcile-workspace-venvs.sh``. What changed in OMN-17190 is *when*
 that repair runs. It used to run only when a human read a refusal and typed the
@@ -140,6 +147,9 @@ from omnibase_infra.cli.protocol_drift_guard_verdict import (
     ProtocolDriftGuardVerdict,
 )
 from omnibase_infra.cli.workspace_reconcile import ReconcileFn
+from omnibase_infra.models.delegation.model_omnimarket_registry_stamp import (
+    ModelOmnimarketRegistryStamp,
+)
 
 __all__ = [
     "CanonicalCloneAttachment",
@@ -376,6 +386,71 @@ def canonical_clone_attachment(
     # could not read as a branch either, and a canonical clone in that state is
     # no more usable as a reference point than a detached one.
     return CanonicalCloneAttachment.DETACHED
+
+
+def resolve_detached_registry_stamp(
+    *, omni_home: str, checkout_commit: str
+) -> ModelOmnimarketRegistryStamp | None:
+    """Prove git-installed code against the fetched default without checkout files.
+
+    A detached registry mirror does not own the CLI's imported code. The
+    installed VCS package does; editable and non-VCS installations do not
+    qualify. The remote's symbolic HEAD declares its integration branch;
+    existing attached-clone policy already accepts dev as well as main.
+    Resolve that locally fetched ref once to an immutable commit and prove
+    equality or ancestry, applying the existing OMN-18814 bounded-lag policy. No fetch,
+    checkout, reconciliation or install belongs on this dispatch path.
+    """
+    clone = str(Path(omni_home) / "omnimarket")
+    try:
+        default = subprocess.run(
+            ["git", "-C", clone, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_SECONDS,
+            check=True,
+        )
+        reference_ref = default.stdout.strip()
+        if not reference_ref.startswith("refs/remotes/origin/"):
+            return None
+        resolved = subprocess.run(
+            [
+                "git",
+                "-C",
+                clone,
+                "rev-parse",
+                "--verify",
+                f"{reference_ref}^{{commit}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_SECONDS,
+            check=True,
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return None
+    reference = resolved.stdout.strip()
+    if len(reference) != 40:
+        return None
+    installed = installed_omnimarket_commit()
+    if installed is None:
+        return None
+    behind = 0
+    if installed != reference:
+        lag = resolve_ancestor_lag(
+            installed=installed, clone_head=reference, omni_home=omni_home
+        )
+        if lag is None:
+            return None
+        behind = lag.commits_behind
+    return ModelOmnimarketRegistryStamp(
+        installed_commit=installed,
+        reference_commit=reference,
+        reference_ref=reference_ref,
+        checkout_commit=checkout_commit,
+        commits_behind=behind,
+        stamped_at=datetime.now(UTC),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -792,8 +867,8 @@ def check_omnimarket_drift(
         # detached-HEAD branch below records.
         return _run_off_registry_check()
 
-    # OMN-17313: a DETACHED canonical clone is drift in its own right, and it
-    # has to be judged BEFORE the commit comparison below -- because that
+    # OMN-17313: a detached checkout cannot prove installed provenance by
+    # itself. Judge it BEFORE the commit comparison below -- because that
     # comparison PASSES on exactly this fault. The venv is pinned to the local
     # clone HEAD by reconcile-workspace-venvs.sh (OMN-16366), so when the clone
     # detaches the venv faithfully reproduces the frozen commit and the two
@@ -808,12 +883,23 @@ def check_omnimarket_drift(
     # packages into the venv; it cannot re-attach a git clone or make an
     # unreadable clone trustworthy, so invoking it here would burn an install
     # and then refuse anyway with a message about the wrong subsystem. The
-    # sanctioned repair is the converge script, which accepts a detached HEAD
-    # as of OMN-17313.
+    # OMN-17427 first attempts proof against the fetched remote default. Only
+    # an unverifiable installed package reaches the historical refusal below.
     attachment = CanonicalCloneAttachment.ATTACHED
     omni_home_path = Path(omni_home) if omni_home else None
     if omni_home_path and (omni_home_path / "omnimarket" / ".git").exists():
         attachment = canonical_clone_attachment(omni_home=omni_home)
+    # OMN-17427: registry clones are mirrors, not mutable dispatch sources.
+    # Preserve the OMN-17313 refusal for unmerged or unverifiable installed
+    # code, but do not require re-attaching a mirror to execute a proven VCS
+    # package. The receipt names both code and reference, including any lag.
+    if attachment is CanonicalCloneAttachment.DETACHED and omni_home:
+        registry_stamp = resolve_detached_registry_stamp(
+            omni_home=omni_home, checkout_commit=canonical
+        )
+        if registry_stamp is not None:
+            logger.warning("%s", registry_stamp.line)
+            return registry_stamp
     if attachment is not CanonicalCloneAttachment.ATTACHED:
         assert omni_home_path is not None
         converge_cmd = str(

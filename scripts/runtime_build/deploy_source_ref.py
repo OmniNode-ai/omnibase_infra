@@ -318,6 +318,85 @@ def _is_ancestor(repo_path: Path, ancestor: str, descendant: str) -> bool:
     return result.returncode == 0
 
 
+def _registry_roots() -> list[Path]:
+    """Every directory whose direct children are canonical clones: ``OMNI_HOME``
+    plus each ``ONEX_REGISTRY_ROOTS`` entry (the canonical-clone hook family's
+    union, ``scripts/git-hooks/canonical_clone_paths.sh``)."""
+    values = [os.environ.get("OMNI_HOME", "")]
+    values.extend(os.environ.get("ONEX_REGISTRY_ROOTS", "").split(":"))
+    return [Path(value).resolve() for value in values if value.strip()]
+
+
+def is_canonical_clone(repo_path: Path) -> bool:
+    """True when ``repo_path`` is the MAIN worktree of a clone that sits directly
+    under a registry root -- a shared canonical clone, not a tree this tool owns.
+
+    A linked worktree has ``--git-dir`` != ``--git-common-dir``; the main
+    worktree has them equal (the same path-layout-independent test the hook
+    family uses).
+    """
+    git_dir = _git(repo_path, "rev-parse", "--path-format=absolute", "--git-dir")
+    common_dir = _git(
+        repo_path, "rev-parse", "--path-format=absolute", "--git-common-dir"
+    )
+    if Path(git_dir).resolve() != Path(common_dir).resolve():
+        return False
+    top_level = Path(_git(repo_path, "rev-parse", "--show-toplevel")).resolve()
+    return top_level.parent in _registry_roots()
+
+
+def refuse_canonical_checkout(repo_path: Path) -> None:
+    """OMN-20263: RT-1 never moves HEAD in a canonical clone.
+
+    Measured on h202 2026-10-01: the deploy agent's RT-1 step ran
+    ``checkout --force <sha>`` + ``reset --hard`` + ``clean -ffdx`` in
+    ``$OMNI_HOME/omnimarket`` 46 times in 30 hours, leaving the shared clone on
+    a detached HEAD until the reconciler moved it back, and every lab delegation
+    reading the clone in that window refused. The canonical-clone git hook does
+    not cover a host where it is not installed; this check lives in the tool.
+    """
+    if is_canonical_clone(repo_path):
+        raise DeploySourceRefError(
+            f"{repo_path.name}: {repo_path} is a canonical clone (the main "
+            f"worktree of a clone under a registry root); RT-1 never checks a "
+            f"ref out there -- pass --worktree-root so the ref is checked out "
+            f"in a detached worktree of its own (OMN-20263)",
+            CHECKOUT_FAILED,
+        )
+
+
+def pinned_worktree(
+    repo_path: Path, sha: str, worktree_root: Path, *, force: bool
+) -> Path:
+    """Create ``<worktree_root>/<repo>`` as a fresh detached linked worktree of
+    ``repo_path`` at ``sha`` and return it.
+
+    The clone's own HEAD, index and working tree are never touched. A worktree
+    this function created on an earlier run is removed first (``force`` discards
+    anything written into it since); any other entry at that path is refused,
+    never overwritten.
+    """
+    target = Path(worktree_root).resolve() / repo_path.name
+    _git(repo_path, "worktree", "prune")
+    registered = {
+        Path(line.removeprefix("worktree ")).resolve()
+        for line in _git(repo_path, "worktree", "list", "--porcelain").splitlines()
+        if line.startswith("worktree ")
+    }
+    if target in registered:
+        remove = ["worktree", "remove", *(["--force"] if force else []), str(target)]
+        _git(repo_path, *remove)
+    elif target.exists():
+        raise DeploySourceRefError(
+            f"{repo_path.name}: {target} exists and is not a worktree of "
+            f"{repo_path}; refusing to overwrite it",
+            CHECKOUT_FAILED,
+        )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _git(repo_path, "worktree", "add", "--detach", str(target), sha)
+    return target
+
+
 def clean_checkout(
     repo_path: Path,
     ref: str | None,
@@ -325,6 +404,7 @@ def clean_checkout(
     hotpatch: bool = False,
     fetch: bool = True,
     fallback_ref: str | None = None,
+    worktree_root: Path | None = None,
 ) -> RepoRefResult:
     """Bring a sibling clone to a clean checkout of ``ref`` (or snapshot it, when
     ``hotpatch``).
@@ -352,6 +432,11 @@ def clean_checkout(
     silent rescue: a substitution appears in the expected-refs manifest the
     end-of-staging assertion is resolved against, so what was vendored and what
     was asked for are both readable afterwards.
+
+    ``worktree_root`` (OMN-20263) checks the ref out in a fresh detached
+    worktree ``<worktree_root>/<repo>`` instead of in ``repo_path``, and the
+    result's ``path`` names that worktree. Without it, a ``repo_path`` that is a
+    canonical clone is refused before any checkout.
     """
     repo_path = Path(repo_path)
     _assert_git_repo(repo_path)
@@ -416,18 +501,24 @@ def clean_checkout(
         )
 
     ref = effective_ref
-    _git(repo_path, "checkout", "--force", sha)
-    _git(repo_path, "reset", "--hard", sha)
-    _git(repo_path, "clean", "-ffdx")
+    tree = (
+        repo_path
+        if worktree_root is None
+        else pinned_worktree(repo_path, sha, worktree_root, force=True)
+    )
+    refuse_canonical_checkout(tree)
+    _git(tree, "checkout", "--force", sha)
+    _git(tree, "reset", "--hard", sha)
+    _git(tree, "clean", "-ffdx")
 
-    head = _git(repo_path, "rev-parse", "HEAD")
+    head = _git(tree, "rev-parse", "HEAD")
     if head != sha:
         raise DeploySourceRefError(
             f"{repo_path.name}: HEAD {head} != resolved ref {ref} ({sha}) after "
             f"clean checkout -- the checkout did not land where it claimed",
             CHECKOUT_FAILED,
         )
-    status = _git(repo_path, "status", "--porcelain")
+    status = _git(tree, "status", "--porcelain")
     if status:
         raise DeploySourceRefError(
             f"{repo_path.name}: tree still dirty after clean checkout of {ref}:\n"
@@ -436,7 +527,7 @@ def clean_checkout(
         )
     return RepoRefResult(
         repo=repo_path.name,
-        path=str(repo_path),
+        path=str(tree),
         ref=ref,
         expected_sha=sha,
         head_sha=head,
@@ -775,7 +866,10 @@ def _assert_owned_clean_target(selection: RepoRefSelection) -> None:
 
 
 def checkout_immutable_selections(
-    selections: tuple[RepoRefSelection, ...], *, fetch: bool
+    selections: tuple[RepoRefSelection, ...],
+    *,
+    fetch: bool,
+    worktree_root: Path | None = None,
 ) -> list[RepoRefResult]:
     """Resolve every pin before any checkout, then use non-forcing checkouts.
 
@@ -783,9 +877,14 @@ def checkout_immutable_selections(
     path, this mode never uses reset/clean/force, including when a target became
     dirty after the preflight. Fetch may update clone refs, but no working tree
     is changed until every requested commit has resolved in its own repository.
+
+    ``worktree_root`` (OMN-20263) checks each pin out in a fresh detached
+    worktree ``<worktree_root>/<repo>`` instead, so the clone's own tree is
+    neither read for dirt nor changed.
     """
-    for selection in selections:
-        _assert_owned_clean_target(selection)
+    if worktree_root is None:
+        for selection in selections:
+            _assert_owned_clean_target(selection)
     for selection in selections:
         if fetch and "origin" in _git(selection.path, "remote").split():
             _git(selection.path, "fetch", "--prune", "--tags", "origin")
@@ -799,26 +898,34 @@ def checkout_immutable_selections(
 
     results: list[RepoRefResult] = []
     for selection in selections:
-        _assert_owned_clean_target(selection)
         before_sha = _git(selection.path, "rev-parse", "HEAD")
-        _git(
-            selection.path,
-            "checkout",
-            "--detach",
-            "--no-overwrite-ignore",
-            selection.ref,
-        )
-        head = _git(selection.path, "rev-parse", "HEAD")
+        if worktree_root is None:
+            _assert_owned_clean_target(selection)
+            refuse_canonical_checkout(selection.path)
+            _git(
+                selection.path,
+                "checkout",
+                "--detach",
+                "--no-overwrite-ignore",
+                selection.ref,
+            )
+            target = selection
+        else:
+            tree = pinned_worktree(
+                selection.path, selection.ref, worktree_root, force=False
+            )
+            target = RepoRefSelection(selection.repo, tree, selection.ref)
+        head = _git(target.path, "rev-parse", "HEAD")
         if head != selection.ref:
             raise DeploySourceRefError(
                 f"{selection.repo}: HEAD {head} != selected SHA {selection.ref}",
                 CHECKOUT_FAILED,
             )
-        _assert_owned_clean_target(selection)
+        _assert_owned_clean_target(target)
         results.append(
             RepoRefResult(
                 repo=selection.repo,
-                path=str(selection.path),
+                path=str(target.path),
                 ref=selection.ref,
                 expected_sha=selection.ref,
                 head_sha=head,
@@ -833,6 +940,7 @@ def checkout_immutable_selections(
 def _cmd_checkout(args: argparse.Namespace) -> int:
     repos = _parse_name_value(args.repo, "--repo")
     repo_refs = _parse_name_value(args.repo_ref or [], "--repo-ref")
+    worktree_root = Path(args.worktree_root) if args.worktree_root else None
     results: list[RepoRefResult]
 
     if args.require_immutable_refs:
@@ -842,7 +950,9 @@ def _cmd_checkout(args: argparse.Namespace) -> int:
                 USAGE_ERROR,
             )
         selections = validate_immutable_selections(repos, repo_refs)
-        results = checkout_immutable_selections(selections, fetch=not args.no_fetch)
+        results = checkout_immutable_selections(
+            selections, fetch=not args.no_fetch, worktree_root=worktree_root
+        )
         write_expected_refs(results, Path(args.output))
         return 0
 
@@ -860,6 +970,7 @@ def _cmd_checkout(args: argparse.Namespace) -> int:
             hotpatch=args.hotpatch,
             fetch=not args.no_fetch,
             fallback_ref=args.fallback_ref,
+            worktree_root=worktree_root,
         )
         print(
             f"RT-1 checkout: {name} -> {result.ref} @ {result.expected_sha[:12]}"
@@ -979,6 +1090,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="deploy the current (possibly dirty) tree AS-IS; no reset/clean, "
         "labelled hotpatch in the manifest",
+    )
+    p_checkout.add_argument(
+        "--worktree-root",
+        help="check each ref out in a fresh detached worktree <dir>/<repo> of "
+        "its clone, never in the clone itself (OMN-20263); the manifest's path "
+        "names the worktree",
     )
     p_checkout.add_argument(
         "--no-fetch",

@@ -99,8 +99,14 @@ jobs:
       - name: Run slow and chaos tests
         run: |
           FILTER="${{ github.event.inputs.test_filter || 'slow or chaos' }}"
+          # OMN-20317: the two-way registration E2E suite carries `slow` tests
+          # and needs Kafka and Postgres, which this job does not provision.
+          # ci.yml's service-integration-suites job (OMN-18795) runs the whole
+          # file by path against real services with its opt-in set; selecting
+          # it here only made the fail-closed opt-in guard error every night.
           uv run pytest tests/ \
             --ignore=tests/integration/docker \
+            --deselect tests/integration/registration/e2e/test_two_way_registration_e2e.py \
             -m "$FILTER" \
             -n 2 \
             --timeout=600 \
