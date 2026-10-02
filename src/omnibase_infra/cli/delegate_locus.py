@@ -39,6 +39,7 @@ import yaml
 from omnibase_infra.backends.backend_probe import (
     ConsumerGroupDescribeDeniedError,
     ConsumerGroupLivenessUnknownError,
+    ConsumerGroupSaslRefusedError,
     live_consumer_groups,
 )
 from omnibase_infra.backends.model_consumer_group_owner import ModelConsumerGroupOwner
@@ -49,6 +50,7 @@ __all__ = [
     "REBIND_WINDOW_FAILURE_CLASS",
     "DelegateLocusAclRefusedError",
     "DelegateLocusRefusedError",
+    "DelegateLocusSaslRefusedError",
     "contract_command_topic",
     "contract_consumer_owner",
     "contract_terminal_topic",
@@ -119,6 +121,22 @@ class DelegateLocusAclRefusedError(DelegateLocusRefusedError):
     def __init__(self, message: str, *, group_ids: tuple[str, ...]) -> None:
         super().__init__(message)
         self.group_ids = group_ids
+
+
+class DelegateLocusSaslRefusedError(DelegateLocusRefusedError):
+    """The refusal is the broker rejecting this machine's SASL login (OMN-19452).
+
+    The broker answered the handshake with a verdict, so the address is right
+    and the identity is not. The generic liveness refusal tells the operator to
+    fix the broker address; this one carries the broker and the principal the
+    caller needs to name the lane login instead. Its class name is what the
+    written transport refusal records as ``transport_error_type``.
+    """
+
+    def __init__(self, message: str, *, broker: str, principal: str | None) -> None:
+        super().__init__(message)
+        self.broker = broker
+        self.principal = principal
 
 
 def contract_terminal_topic(contract_path: Path) -> str:
@@ -418,6 +436,14 @@ def _assert_dispatch_viable(
                 "declared broker ACLs and apply them, or pass --bus inmemory --locus "
                 "in-process to run it locally on purpose.",
                 group_ids=exc.group_ids,
+            ) from exc
+        except ConsumerGroupSaslRefusedError as exc:
+            raise DelegateLocusSaslRefusedError(
+                f"cannot confirm a deployed orchestrator is consuming "
+                f"'{command_topic}': {exc} Refusing rather than running here and "
+                "reporting it as a lane result.",
+                broker=exc.bootstrap_servers,
+                principal=exc.principal,
             ) from exc
         except ConsumerGroupLivenessUnknownError as exc:
             raise DelegateLocusRefusedError(

@@ -23,12 +23,15 @@ import asyncio
 import logging
 import os
 import socket
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from omnibase_infra.backends.enum_probe_state import EnumProbeState
 from omnibase_infra.backends.model_consumer_group_owner import ModelConsumerGroupOwner
 from omnibase_infra.backends.model_probe_result import ModelProbeResult
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
+
+if TYPE_CHECKING:
+    from aiokafka.admin import AIOKafkaAdminClient
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +146,101 @@ class ConsumerGroupDescribeDeniedError(ConsumerGroupLivenessUnknownError):
             f"Missing ACL: {grants}. A PREFIXED grant on the group's first "
             "dot-separated segment covers every version of it."
         )
+
+
+class ConsumerGroupSaslRefusedError(ConsumerGroupLivenessUnknownError):
+    """The broker refused this client's SASL login, so nothing could be asked.
+
+    OMN-19452. A subclass of UNKNOWN because a refused login still cannot say
+    whether the topic is consumed, so every fail-closed caller keeps refusing.
+    It exists because the generic UNKNOWN text tells the operator to fix the
+    broker ADDRESS, and an address that answered the SASL handshake with a
+    verdict is not the thing that is wrong: the identity is.
+
+    aiokafka does not raise the verdict. ``AIOKafkaClient.bootstrap`` logs the
+    broker's ``SaslAuthenticationFailed`` on its own logger and then raises a
+    generic ``KafkaConnectionError: Unable to bootstrap``, so the cause is
+    recovered from that log record (see :class:`BootstrapCauseRecorder`).
+
+    The message deliberately avoids the substrings the receipt sanitizer
+    treats as credential-shaped (``util_error_sanitization.SENSITIVE_PATTERNS``
+    redacts the whole message on any hit, and the Kafka error class name is
+    one), so the principal and the finding survive into the written refusal.
+    The remedy is therefore not in this message: it names a command and is
+    carried by the typed ``remediation`` field of the delegate refusal.
+    """
+
+    def __init__(self, *, bootstrap_servers: str, principal: str | None) -> None:
+        self.bootstrap_servers = bootstrap_servers
+        self.principal = principal
+        who = f"principal '{principal}'" if principal else "this client's principal"
+        super().__init__(
+            f"the broker at {bootstrap_servers} refused the SASL login of {who} "
+            f"(Kafka error {_SASL_LOGIN_REFUSED_ERROR_CODE}), so no deployed "
+            "orchestrator could be confirmed and liveness is unknown."
+        )
+
+
+# Kafka's SASL_AUTHENTICATION_FAILED, named by number for the message above.
+_SASL_LOGIN_REFUSED_ERROR_CODE = 58
+
+
+class BootstrapCauseRecorder(logging.Handler):
+    """Collects the exceptions aiokafka logs while it bootstraps.
+
+    ``AIOKafkaClient.bootstrap`` swallows every ``KafkaError`` a connection
+    attempt raises, logs it as ``Unable connect to "%s:%s": %s`` with the
+    exception as the last argument, and raises ``KafkaConnectionError`` once
+    every address has failed. The exception instance is the only place the
+    broker's verdict survives, so it is read off the log record's arguments
+    rather than parsed out of the rendered text.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.causes: list[BaseException] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if isinstance(record.args, tuple):
+            self.causes.extend(
+                arg for arg in record.args if isinstance(arg, BaseException)
+            )
+
+
+async def _start_admin_naming_sasl_refusal(
+    admin: AIOKafkaAdminClient, *, bootstrap_servers: str, principal: str | None
+) -> None:
+    """Start an aiokafka admin client, raising a typed error on a SASL refusal.
+
+    Raises:
+        ConsumerGroupSaslRefusedError: the broker refused the SASL login,
+            whether the client raised it or only logged it before its generic
+            bootstrap failure.
+    """
+    from aiokafka.errors import (
+        AuthenticationFailedError,
+        KafkaConnectionError,
+        SaslAuthenticationFailed,
+    )
+
+    refusals = (AuthenticationFailedError, SaslAuthenticationFailed)
+    recorder = BootstrapCauseRecorder()
+    aiokafka_logger = logging.getLogger("aiokafka")
+    aiokafka_logger.addHandler(recorder)
+    try:
+        await admin.start()
+    except refusals as exc:
+        raise ConsumerGroupSaslRefusedError(
+            bootstrap_servers=bootstrap_servers, principal=principal
+        ) from exc
+    except KafkaConnectionError as exc:
+        if any(isinstance(cause, refusals) for cause in recorder.causes):
+            raise ConsumerGroupSaslRefusedError(
+                bootstrap_servers=bootstrap_servers, principal=principal
+            ) from exc
+        raise
+    finally:
+        aiokafka_logger.removeHandler(recorder)
 
 
 def live_consumer_groups(
@@ -272,7 +370,9 @@ async def _live_consumer_groups_async(
         request_timeout_ms=int(timeout * 1000),
         **auth_kwargs,
     )
-    await admin.start()
+    await _start_admin_naming_sasl_refusal(
+        admin, bootstrap_servers=bootstrap_servers, principal=principal
+    )
     try:
         # Metadata FIRST, deliberately. A cluster that cannot describe itself
         # cannot be asked about consumers, and a client that answers the group

@@ -3,6 +3,9 @@
 
 """Delegation evidence models."""
 
+from omnibase_infra.models.delegation.model_delegate_phase_durations import (
+    ModelDelegatePhaseDurations,
+)
 from omnibase_infra.models.delegation.model_delegation_build_identity import (
     ModelDelegationBuildIdentity,
 )
@@ -23,6 +26,7 @@ from omnibase_infra.models.delegation.model_delegation_tier_retry_bound import (
 )
 
 __all__ = [
+    "ModelDelegatePhaseDurations",
     "ModelDelegationBuildIdentity",
     "ModelDelegationCohortKey",
     "ModelDelegationFirstInferenceIdentity",
