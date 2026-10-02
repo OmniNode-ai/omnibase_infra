@@ -243,3 +243,36 @@ class _FakeReceipt:
 
     def model_dump_json(self) -> str:
         return json.dumps(self.envelope)
+
+
+def test_a_reaper_no_terminal_terminal_renders_as_one_plain_failure_line(
+    tmp_path: Path,
+) -> None:
+    """OMN-19441: the delegation reaper's terminal decodes in the CLI renderer.
+
+    The reaper closes a command whose worker never answered with cause
+    ``no_terminal``. The renderer must treat it like any other failed terminal:
+    stdout stays empty and the cause, the reason and the run id are on one line.
+    """
+    terminal = _terminal(
+        attempts=[],
+        response="",
+        status="failed",
+        terminal_failure_cause="no_terminal",
+        error_message=(
+            "the command was claimed and produced no terminal by its deadline; "
+            "the delegation reaper closed it"
+        ),
+    )
+    outcome = render_delegate_outcome(
+        _summary_envelope(error="", terminal=terminal), state_root=tmp_path
+    )
+    assert outcome is not None
+    assert outcome.succeeded is False
+    assert outcome.stdout == ""
+    assert len(outcome.stderr) == 1
+    line = outcome.stderr[0]
+    assert "\n" not in line
+    assert "no_terminal" in line
+    assert "the delegation reaper closed it" in line
+    assert RUN_ID in line
