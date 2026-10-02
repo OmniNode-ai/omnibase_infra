@@ -26,40 +26,68 @@ Available Classes:
 - RegistryInfraLedgerProjection: Registry for ledger projection node
 """
 
-from omnibase_infra.models import ModelBackendResult
-from omnibase_infra.nodes.node_auth_gate_compute import (
-    NodeAuthGateCompute,
-    RegistryInfraAuthGateCompute,
-)
-from omnibase_infra.nodes.node_ledger_projection_compute import (
-    NodeLedgerProjectionCompute,
-    RegistryInfraLedgerProjection,
-)
-from omnibase_infra.nodes.node_registration_orchestrator import (
-    NodeRegistrationOrchestrator,
-)
-from omnibase_infra.nodes.node_registration_reducer import (
-    NodeRegistrationReducer,
-    RegistrationReducer,
-    RegistryInfraNodeRegistrationReducer,
-)
-from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
-from omnibase_infra.nodes.node_registry_effect.models import (
-    ModelRegistryRequest,
-    ModelRegistryResponse,
-)
-from omnibase_infra.nodes.node_session_lifecycle_reducer import (
-    ModelSessionLifecycleState,
-    NodeSessionLifecycleReducer,
-    RegistryInfraSessionLifecycle,
-)
-from omnibase_infra.nodes.node_session_state_effect import (
-    ModelRunContext,
-    ModelSessionIndex,
-    ModelSessionStateResult,
-    NodeSessionStateEffect,
-    RegistryInfraSessionState,
-)
+import importlib
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from omnibase_infra.models import ModelBackendResult
+    from omnibase_infra.nodes.node_auth_gate_compute import (
+        NodeAuthGateCompute,
+        RegistryInfraAuthGateCompute,
+    )
+    from omnibase_infra.nodes.node_ledger_projection_compute import (
+        NodeLedgerProjectionCompute,
+        RegistryInfraLedgerProjection,
+    )
+    from omnibase_infra.nodes.node_registration_orchestrator import (
+        NodeRegistrationOrchestrator,
+    )
+    from omnibase_infra.nodes.node_registration_reducer import (
+        NodeRegistrationReducer,
+        RegistrationReducer,
+        RegistryInfraNodeRegistrationReducer,
+    )
+    from omnibase_infra.nodes.node_registry_effect import NodeRegistryEffect
+    from omnibase_infra.nodes.node_registry_effect.models import (
+        ModelRegistryRequest,
+        ModelRegistryResponse,
+    )
+    from omnibase_infra.nodes.node_session_lifecycle_reducer import (
+        ModelSessionLifecycleState,
+        NodeSessionLifecycleReducer,
+        RegistryInfraSessionLifecycle,
+    )
+    from omnibase_infra.nodes.node_session_state_effect import (
+        ModelRunContext,
+        ModelSessionIndex,
+        ModelSessionStateResult,
+        NodeSessionStateEffect,
+        RegistryInfraSessionState,
+    )
+
+# OMN-19444: Lazy imports keep `onex <cmd> --help` fast.
+_LAZY_EXPORTS: dict[str, str] = {
+    "ModelBackendResult": "omnibase_infra.models",
+    "ModelRegistryRequest": "omnibase_infra.nodes.node_registry_effect.models",
+    "ModelRegistryResponse": "omnibase_infra.nodes.node_registry_effect.models",
+    "ModelRunContext": "omnibase_infra.nodes.node_session_state_effect",
+    "ModelSessionIndex": "omnibase_infra.nodes.node_session_state_effect",
+    "ModelSessionLifecycleState": "omnibase_infra.nodes.node_session_lifecycle_reducer",
+    "ModelSessionStateResult": "omnibase_infra.nodes.node_session_state_effect",
+    "NodeAuthGateCompute": "omnibase_infra.nodes.node_auth_gate_compute",
+    "NodeLedgerProjectionCompute": "omnibase_infra.nodes.node_ledger_projection_compute",
+    "NodeRegistrationOrchestrator": "omnibase_infra.nodes.node_registration_orchestrator",
+    "NodeRegistrationReducer": "omnibase_infra.nodes.node_registration_reducer",
+    "NodeRegistryEffect": "omnibase_infra.nodes.node_registry_effect",
+    "NodeSessionLifecycleReducer": "omnibase_infra.nodes.node_session_lifecycle_reducer",
+    "NodeSessionStateEffect": "omnibase_infra.nodes.node_session_state_effect",
+    "RegistrationReducer": "omnibase_infra.nodes.node_registration_reducer",
+    "RegistryInfraAuthGateCompute": "omnibase_infra.nodes.node_auth_gate_compute",
+    "RegistryInfraLedgerProjection": "omnibase_infra.nodes.node_ledger_projection_compute",
+    "RegistryInfraNodeRegistrationReducer": "omnibase_infra.nodes.node_registration_reducer",
+    "RegistryInfraSessionLifecycle": "omnibase_infra.nodes.node_session_lifecycle_reducer",
+    "RegistryInfraSessionState": "omnibase_infra.nodes.node_session_state_effect",
+}
 
 __all__: list[str] = [
     "ModelBackendResult",
@@ -83,3 +111,16 @@ __all__: list[str] = [
     "RegistryInfraSessionLifecycle",
     "RegistryInfraSessionState",
 ]
+
+
+def __getattr__(name: str) -> object:
+    if name in _LAZY_EXPORTS:
+        module = importlib.import_module(_LAZY_EXPORTS[name])
+        value: object = getattr(module, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *__all__})
