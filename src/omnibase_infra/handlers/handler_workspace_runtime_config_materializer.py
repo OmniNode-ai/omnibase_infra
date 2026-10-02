@@ -17,6 +17,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.errors import InfraConnectionError
 from omnibase_infra.models.workspace import (
     ModelMaterializedWorkspaceRuntimeConfig,
@@ -36,6 +37,16 @@ logger = logging.getLogger(__name__)
 
 class HandlerWorkspaceRuntimeConfigMaterializer:
     """Refresh and read the workspace's attributable tier-1 runtime config."""
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Return INFRA_HANDLER: this handler reads git objects and writes files."""
+        return EnumHandlerType.INFRA_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Return EFFECT: this handler performs git and filesystem I/O."""
+        return EnumHandlerTypeCategory.EFFECT
 
     def materialize(
         self, workspace_root: Path
