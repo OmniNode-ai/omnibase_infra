@@ -231,17 +231,21 @@ def test_real_tree_extraction_is_nonempty() -> None:
 
 
 @pytest.mark.unit
-def test_occ_reusable_pins_are_dev_not_main() -> None:
+def test_occ_reusable_pins_are_the_sibling_pin() -> None:
     """OMN-14941 F1 regression pin: the occ autobind + companion-effect
     reusables exist only on omniclaude dev; an @main pin is a parse-time 404
-    on every PR (the E1 failure class)."""
+    on every PR (the E1 failure class). OMN-20331: they are read at the
+    omniclaude commit pinned in .github/sibling-pins.yaml, a commit on dev."""
+    omniclaude_pin = yaml.safe_load(
+        (WORKFLOWS_DIR.parent / "sibling-pins.yaml").read_text()
+    )["pins"]["omniclaude"]
     refs = _extract_cross_repo_uses(WORKFLOWS_DIR)
     occ_pins = {
         r.path: r.ref for r in refs if r.repo == "omniclaude" and "call-occ-" in r.path
     }
     assert occ_pins == {
-        ".github/workflows/call-occ-autobind-reusable.yml": "dev",
-        ".github/workflows/call-occ-companion-effect-reusable.yml": "dev",
+        ".github/workflows/call-occ-autobind-reusable.yml": omniclaude_pin,
+        ".github/workflows/call-occ-companion-effect-reusable.yml": omniclaude_pin,
     }
 
 

@@ -195,7 +195,7 @@ jobs:
     with:
       contracts-dir: contracts
       receipts-dir: drift/dod_receipts
-      core-ref: dev
+      core-ref: 1e69bec909f245be511803191554e5b340def0b7 # .github/sibling-pins.yaml
 
   # =============================================================================
   # Phase 0 - Zone filter (OMN-10475)
@@ -569,7 +569,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_core
-          ref: dev
+          ref: 1e69bec909f245be511803191554e5b340def0b7 # .github/sibling-pins.yaml
           path: .ci/omnibase_core
           token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
 
@@ -629,7 +629,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_core
-          ref: dev
+          ref: 1e69bec909f245be511803191554e5b340def0b7 # .github/sibling-pins.yaml
           path: .ci/omnibase_core
           token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
 
@@ -1657,7 +1657,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omninode_infra
-          ref: dev
+          ref: 9819782319a96cae1bfee6a0a5955029e882c601 # .github/sibling-pins.yaml
           path: .probe-roots/omninode_infra
           token: ${{ steps.infra-token.outputs.token }}
           persist-credentials: false
@@ -1669,7 +1669,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: dev
+          ref: b1b406d0c8a6f935fb84da27f0464882b6639ff0 # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -1799,6 +1799,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
+          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1806,6 +1807,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimemory
+          ref: c7175878b331628de9be9358cb178547d8247c34 # .github/sibling-pins.yaml
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1813,6 +1815,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniclaude
+          ref: c86c9fe6330c789614126f5f106bfb1be364b20d # .github/sibling-pins.yaml
           path: omniclaude
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1885,6 +1888,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
+          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1892,6 +1896,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimemory
+          ref: c7175878b331628de9be9358cb178547d8247c34 # .github/sibling-pins.yaml
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1899,6 +1904,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
+          ref: b1b406d0c8a6f935fb84da27f0464882b6639ff0 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1906,6 +1912,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_compat
+          ref: 65aed95fa710748654e37d5c15c5446e779fdf52 # .github/sibling-pins.yaml
           path: omnibase_compat
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1913,6 +1920,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
+          ref: b1b406d0c8a6f935fb84da27f0464882b6639ff0 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -2705,6 +2713,7 @@ jobs:
         continue-on-error: true
         with:
           repository: OmniNode-ai/onex_change_control
+          ref: 802b5f7101f4c49f8b30e8deda3d4c5d024c5710 # .github/sibling-pins.yaml
           token: ${{ steps.app-token.outputs.token }}
           path: onex_change_control
           sparse-checkout: |
@@ -4868,6 +4877,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
+          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4875,6 +4885,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimemory
+          ref: c7175878b331628de9be9358cb178547d8247c34 # .github/sibling-pins.yaml
           path: omnimemory
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4882,6 +4893,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
+          ref: b1b406d0c8a6f935fb84da27f0464882b6639ff0 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4889,6 +4901,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_compat
+          ref: 65aed95fa710748654e37d5c15c5446e779fdf52 # .github/sibling-pins.yaml
           path: omnibase_compat
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4896,6 +4909,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
+          ref: b1b406d0c8a6f935fb84da27f0464882b6639ff0 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
