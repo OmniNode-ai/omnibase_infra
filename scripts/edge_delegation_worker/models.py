@@ -117,6 +117,9 @@ class ModelDelegationEnvelope(BaseModel):
 
     correlation_id: UUID
     source_topic: str
+    # The claimed record's own coordinates let ack commit exactly that record.
+    source_partition: int = Field(ge=0)
+    source_offset: int = Field(ge=0)
     event_type: str
     payload: dict[str, JsonType]
     headers: dict[str, str] = Field(default_factory=dict)

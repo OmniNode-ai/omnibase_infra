@@ -19,6 +19,7 @@ changes, so a red here always points at one clause.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -293,6 +294,64 @@ def test_route_is_presence_checked_only_and_says_so() -> None:
     assert "no route NAME to\n                compare it with" in (probe.__doc__ or "")
 
 
+@pytest.mark.unit
+def test_the_healthy_correlation_id_survives_live_observation_and_recording(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = probe.observations_from_replay(_load())
+
+    def submit(_base_url: str, payload: Any, **_kwargs: Any) -> probe._Submitted:
+        side = "healthy" if payload == probe.HEALTHY_PAYLOAD else "dying"
+        return probe._Submitted(202, side, f"cid-{side}", None)
+
+    def observe_run(
+        _base_url: str, submitted: probe._Submitted, **_kwargs: Any
+    ) -> probe.RunObservation:
+        return (
+            captured.healthy if submitted.workflow_id == "healthy" else captured.dying
+        )
+
+    def read_terminal(
+        topic: str, correlation_id: str, **_kwargs: Any
+    ) -> probe.TerminalObservation:
+        assert topic == "terminal-topic"
+        assert correlation_id == "cid-healthy"
+        return captured.healthy_terminal
+
+    monkeypatch.setattr(probe, "_submit", submit)
+    monkeypatch.setattr(probe, "_observe_run", observe_run)
+    monkeypatch.setattr(probe, "_read_terminal", read_terminal)
+    observations = probe.observe_live(
+        base_url="http://gateway.invalid",
+        api_key="test",
+        terminal_topic="terminal-topic",
+        budget_seconds=2.0,
+        runner_identity="test",
+    )
+    assert observations.healthy_correlation_id == "cid-healthy"
+    record = probe.record_dict(
+        probe.grade(observations), base_url="<replay>", as_of="2026-10-02T00:00:00Z"
+    )
+    assert record["healthy_correlation_id"] == "cid-healthy"
+
+
+@pytest.mark.unit
+def test_replay_healthy_correlation_id_is_optional_and_must_be_a_string() -> None:
+    payload = _load()
+    assert "healthy_correlation_id" not in payload["observations"]
+    assert probe.observations_from_replay(payload).healthy_correlation_id == ""
+    payload["observations"]["healthy_correlation_id"] = "cid-healthy"
+    observations = probe.observations_from_replay(payload)
+    assert observations.healthy_correlation_id == "cid-healthy"
+    record = probe.record_dict(
+        probe.grade(observations), base_url="<replay>", as_of="2026-10-02T00:00:00Z"
+    )
+    assert record["healthy_correlation_id"] == "cid-healthy"
+    payload["observations"]["healthy_correlation_id"] = 123
+    with pytest.raises(probe.ProbeInputError):
+        probe.observations_from_replay(payload)
+
+
 class _FakeRecord:
     def __init__(self, value: bytes) -> None:
         self.value = value
@@ -338,7 +397,10 @@ class _FakeConsumer:
 
 
 def _scan(
-    monkeypatch: pytest.MonkeyPatch, batches: list[list[bytes]], end: int
+    monkeypatch: pytest.MonkeyPatch,
+    batches: list[list[bytes]],
+    end: int,
+    wait_seconds: float = 2.0,
 ) -> probe.TerminalObservation:
     import asyncio
     import sys
@@ -352,18 +414,38 @@ def _scan(
     monkeypatch.setenv("KAFKA_BOOTSTRAP_SERVERS", "broker.invalid:9092")
     return asyncio.run(
         probe._scan_terminal(
-            "terminal-topic", "cid-1", wait_seconds=2.0, max_records=100
+            "terminal-topic", "cid-1", wait_seconds=wait_seconds, max_records=100
         )
     )
 
 
 @pytest.mark.unit
-def test_a_scan_that_reaches_the_watermark_without_a_match_is_absent(
+def test_absent_terminal_is_established_only_after_the_window_ends(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     other = json.dumps({"payload": {"correlation_id": "cid-2"}}).encode()
-    seen = _scan(monkeypatch, [[other, other]], end=2)
-    assert seen.error is None and seen.payload is None
+    started = time.monotonic()
+    seen = _scan(monkeypatch, [[other, other]], end=2, wait_seconds=0.3)
+    elapsed = time.monotonic() - started
+    assert seen.error is None
+    assert seen.payload is None
+    payload = _load()
+    payload["observations"]["healthy_terminal"] = {"payload": None, "error": seen.error}
+    assert _outcomes(payload)["R-DELEG-12"] == "FAIL"
+    assert elapsed >= 0.3
+
+
+@pytest.mark.unit
+def test_a_late_terminal_after_the_watermark_is_found_inside_the_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    other = json.dumps({"payload": {"correlation_id": "cid-2"}}).encode()
+    mine = {"correlation_id": "cid-1", "provider": "local"}
+    mine_bytes = json.dumps({"payload": mine}).encode()
+    seen = _scan(
+        monkeypatch, [[other, other], [], [mine_bytes]], end=2, wait_seconds=2.0
+    )
+    assert seen.payload == mine
 
 
 @pytest.mark.unit

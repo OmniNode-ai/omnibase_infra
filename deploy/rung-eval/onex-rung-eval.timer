@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-rung-eval.timer — nightly trigger for onex-rung-eval.service (OMN-19456).
+#
+# Systemd USER timer, following the onex-worktree-prune.timer pattern.
+#
+# 06:00 UTC is 02:00 ET: the eval has finished and missing_latest.txt is written
+# well before the morning read. The night a row set belongs to is the UTC date the
+# run starts on (the runner's default), so the schedule is pinned to UTC; a local
+# time would move the night boundary with the host's zone.
+#
+# Persistent=true fires a missed run on boot. It writes the night the host came up
+# on, not the night it missed, so the missed night stays a gap in the table and the
+# next morning's report names it; nothing back-fills a night that did not run.
+#
+# Install: see onex-rung-eval.service.
+#
+# Check:
+#   systemctl --user list-timers onex-rung-eval.timer
+
+[Unit]
+Description=ONEX nightly per-rung delegation eval timer (OMN-19456)
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 UTC
+# Spread a little so it never lines up with another scheduled job.
+RandomizedDelaySec=5min
+Persistent=true
+Unit=onex-rung-eval.service
+
+[Install]
+WantedBy=timers.target
