@@ -794,6 +794,12 @@ RUN set -eu; \
 #                            octal, fixed 10.3.1) — bundled transitively via
 #                            npm's socks-proxy-agent -> socks chain; added
 #                            OMN-15688.
+#   brace-expansion 5.0.9 -> CVE-2026-102276 (HIGH, fixed 5.0.10) and
+#                            CVE-2026-102278 (HIGH, fixed 5.0.11) — OMN-20339.
+#   undici          6.27.0 -> CVE-2026-19534 (HIGH, fixed 6.28.1) — bundled by
+#                            npm's node-gyp (dependency range ^6.25.0, satisfied
+#                            by 6.28.1); flat top-level entry, no nested duplicate
+#                            on npm 11.18.0; added OMN-20339.
 #
 # Remediation is two-step because these are *bundled inside npm itself*:
 #   1. Upgrade npm to 11.18.0 (exact pin — reproducible + satisfies
@@ -809,7 +815,7 @@ RUN set -eu; \
 #      package npm does not bundle there gets a fresh unreferenced copy while any
 #      real vulnerable copy survives elsewhere — a green scan over a still-
 #      vulnerable image. The assert is what caught the dead cross-spawn entry
-#      above. Verified on npm 11.18.0 that the remaining five are flat top-level
+#      above. Verified on npm 11.18.0 that the remaining six are flat top-level
 #      entries with no nested duplicates.
 #      Exact versions keep the image reproducible (npm pack is not an
 #      `npm install -g` global-CLI install, so it is outside the pin-check).
@@ -819,14 +825,14 @@ RUN set -eu; \
     npm install -g npm@11.18.0; \
     npm cache clean --force; \
     NPM_MODULES="$(npm root -g)/npm/node_modules"; \
-    for pkg in glob minimatch tar brace-expansion ip-address; do \
+    for pkg in glob minimatch tar brace-expansion ip-address undici; do \
         test -d "${NPM_MODULES}/${pkg}" || { \
             echo "ERROR: no bundled ${pkg} at ${NPM_MODULES}/${pkg} — npm's bundle layout changed; extracting there would create an unreferenced copy and leave the vulnerable one in place" >&2; \
             exit 1; \
         }; \
     done; \
     tmp="$(mktemp -d)"; \
-    for spec in glob@13.0.6 minimatch@10.2.5 tar@7.5.21 brace-expansion@5.0.9 ip-address@10.3.1; do \
+    for spec in glob@13.0.6 minimatch@10.2.5 tar@7.5.21 brace-expansion@5.0.11 ip-address@10.3.1 undici@6.28.1; do \
         pkg="${spec%@*}"; \
         npm pack "$spec" --pack-destination "$tmp" >/dev/null; \
         tb="$(ls "$tmp/${pkg}"-*.tgz)"; \
@@ -835,7 +841,7 @@ RUN set -eu; \
         tar -xzf "$tb" -C "${NPM_MODULES}/${pkg}" --strip-components=1; \
     done; \
     rm -rf "$tmp"; \
-    for pkg in glob minimatch tar brace-expansion ip-address; do \
+    for pkg in glob minimatch tar brace-expansion ip-address undici; do \
         v="$(node -p "require('${NPM_MODULES}/${pkg}/package.json').version")"; \
         echo "npm bundled ${pkg} patched to ${v}"; \
     done
