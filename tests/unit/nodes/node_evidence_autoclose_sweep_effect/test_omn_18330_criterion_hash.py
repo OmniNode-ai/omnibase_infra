@@ -42,12 +42,20 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    ac_binding_gap as _ac_binding_gap,
+)
+from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    criterion_pin_hash as _criterion_pin_hash,
+)
+from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    normalise_criterion as _normalise_criterion,
+)
+from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    pinned_criterion_hashes as _pinned_criterion_hashes,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
     HandlerEvidenceAutocloseSweep,
-    _ac_binding_gap,
-    _criterion_pin_hash,
-    _normalise_criterion,
-    _pinned_criterion_hashes,
 )
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_decision import (
     EnumEvidenceAutocloseDecision,

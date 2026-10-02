@@ -294,7 +294,9 @@ class TestWriteMethodsNotImplemented:
         self, adapter: AdapterTicketLinear
     ) -> None:
         with pytest.raises(NotImplementedError, match="update_ticket_status"):
-            await adapter.update_ticket_status("OMN-1", "done")
+            # A non-Done target goes straight to the stub. A Done target is
+            # gated first: see test_done_write_gate_adapters.py (OMN-20368).
+            await adapter.update_ticket_status("OMN-1", "In Progress")
 
     @pytest.mark.asyncio
     async def test_add_comment_raises(self, adapter: AdapterTicketLinear) -> None:

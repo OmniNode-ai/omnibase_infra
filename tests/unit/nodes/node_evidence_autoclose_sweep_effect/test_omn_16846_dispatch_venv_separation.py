@@ -70,9 +70,11 @@ from typing import Any
 import pytest
 import yaml
 
+from omnibase_infra.handlers.handler_done_write_receipt_guard import (
+    dod_verify_argv as _dod_verify_argv,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
     HandlerEvidenceAutocloseSweep,
-    _dod_verify_argv,
 )
 
 pytestmark = pytest.mark.unit
