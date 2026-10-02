@@ -35,10 +35,11 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from collections import defaultdict
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 # Allow running as a standalone script
@@ -361,10 +362,35 @@ def collect_subscribed_topics(contracts_dirs: list[Path]) -> set[str]:
     return subscribed
 
 
+# OMN-20354: the events whose run judges a tree already on its branch. Only
+# there does an expiring exemption fail no earlier than its real expiry.
+POST_MERGE_EVENTS: frozenset[str] = frozenset({"push", "schedule", "workflow_dispatch"})
+EXPIRY_FAIL_HORIZON_DAYS = 1
+
+
+def expiry_horizon_days(event_name: str | None) -> int:
+    """Days before its expiry at which an exemption already fails (OMN-20354).
+
+    A pull_request or merge_group run, and a local run with no event, fail an
+    exemption the day before it lapses. On 2026-10-01 the PR that landed at
+    00:00 (omnibase_infra#4372) had passed this gate at 23:18 the night before,
+    and the 22 exemptions that lapsed at midnight turned dev red for 3.8h with
+    no code change (run 36793940533). A push, schedule or dispatch run judges
+    only the real expiry, so dev stays green while pull requests carry it.
+    """
+    return 0 if event_name in POST_MERGE_EVENTS else EXPIRY_FAIL_HORIZON_DAYS
+
+
+def current_event_name() -> str | None:
+    """The GitHub Actions event this process runs under; ``None`` locally."""
+    return os.environ.get("GITHUB_EVENT_NAME") or None
+
+
 def check_allowlist_hygiene(
     allowlists: dict[str, str],
     subscribed_topics: set[str],
     today: date,
+    horizon_days: int = 0,
 ) -> list[str]:
     """Return one error per expired, malformed, or stale allowlist entry.
 
@@ -372,6 +398,8 @@ def check_allowlist_hygiene(
         allowlists: merged ``topic -> "reason | owner: X | expiry: YYYY-MM-DD"``.
         subscribed_topics: topics some contract actually subscribes to.
         today: the clock, injected so the enforcement itself is testable.
+        horizon_days: an entry lapsing within this many days also fails
+            (OMN-20354, see :func:`expiry_horizon_days`).
     """
     errors: list[str] = []
     for topic, reason in sorted(allowlists.items()):
@@ -398,6 +426,13 @@ def check_allowlist_hygiene(
                 f"EXPIRED: {topic} exemption lapsed on {expiry.isoformat()} "
                 f"(owner: {owner}). Either fix the gap (add a contract publisher) "
                 f"or renew with a FRESH reason and expiry that says what changed."
+            )
+        elif expiry <= today + timedelta(days=horizon_days):
+            errors.append(
+                f"EXPIRING: {topic} exemption lapses on {expiry.isoformat()}, inside "
+                f"the {horizon_days}-day pull-request horizon (OMN-20354) "
+                f"(owner: {owner}). Fix the gap or renew it now, before the date "
+                f"passes and dev goes red."
             )
     return errors
 
@@ -533,6 +568,7 @@ def main() -> int:
             },
             subscribed_topics=collect_subscribed_topics(dirs),
             today=datetime.now(UTC).date(),
+            horizon_days=expiry_horizon_days(current_event_name()),
         )
     )
 

@@ -30,6 +30,8 @@ from scripts.check_subscribe_wiring_health import (
     check_allowlist_hygiene,
     check_wiring_health,
     collect_subscribed_topics,
+    current_event_name,
+    expiry_horizon_days,
 )
 
 pytestmark = pytest.mark.unit
@@ -271,6 +273,60 @@ class TestAllowlistHygieneEnforcement:
         )
         assert any("STALE" in e and "onex.cmd.x.y.v1" in e for e in errors), errors
 
+    def test_waiver_expiring_within_horizon_fails_the_pull_request(self) -> None:
+        """OMN-20354, omnibase_infra run 36793940533: entries lapsing 2026-10-01
+        passed a PR run at 23:18 on 09-30 and turned the 00:00 dev push red. The
+        day before an entry lapses, the pull-request horizon fails it; a push
+        (horizon 0) still passes it, and two days before nothing fails."""
+        entry = {"onex.cmd.x.y.v1": "r | owner: jonah | expiry: 2026-10-01"}
+        pr_errors = check_allowlist_hygiene(
+            allowlists=entry,
+            subscribed_topics={"onex.cmd.x.y.v1"},
+            today=date(2026, 9, 30),
+            horizon_days=expiry_horizon_days("pull_request"),
+        )
+        assert any("EXPIRING" in e and "horizon" in e for e in pr_errors), pr_errors
+        assert (
+            check_allowlist_hygiene(
+                allowlists=entry,
+                subscribed_topics={"onex.cmd.x.y.v1"},
+                today=date(2026, 9, 30),
+                horizon_days=expiry_horizon_days("push"),
+            )
+            == []
+        )
+        assert (
+            check_allowlist_hygiene(
+                allowlists=entry,
+                subscribed_topics={"onex.cmd.x.y.v1"},
+                today=date(2026, 9, 29),
+                horizon_days=expiry_horizon_days("pull_request"),
+            )
+            == []
+        )
+
+    @pytest.mark.parametrize(
+        ("event", "days"),
+        [
+            ("push", 0),
+            ("schedule", 0),
+            ("workflow_dispatch", 0),
+            ("pull_request", 1),
+            ("merge_group", 1),
+            (None, 1),
+        ],
+    )
+    def test_expiry_horizon_days_by_event(self, event: str | None, days: int) -> None:
+        assert expiry_horizon_days(event) == days
+
+    def test_current_event_name_reads_the_actions_event(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("GITHUB_EVENT_NAME", "push")
+        assert current_event_name() == "push"
+        monkeypatch.delenv("GITHUB_EVENT_NAME")
+        assert current_event_name() is None
+
     def test_error_names_the_owner_so_it_is_actionable(self) -> None:
         errors = check_allowlist_hygiene(
             allowlists={"onex.cmd.x.y.v1": "r | owner: jonah | expiry: 2026-01-01"},
@@ -298,6 +354,7 @@ class TestLiveAllowlistHygiene:
             allowlists=merged,
             subscribed_topics=subscribed,
             today=datetime.now(UTC).date(),
+            horizon_days=expiry_horizon_days(current_event_name()),
         )
         assert errors == [], (
             "Allowlist hygiene failures — renew with a fresh reason+expiry if the "
