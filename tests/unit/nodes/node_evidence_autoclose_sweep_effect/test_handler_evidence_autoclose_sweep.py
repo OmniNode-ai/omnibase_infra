@@ -18,10 +18,12 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    acceptance_criteria_items as _acceptance_criteria_items,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
     HandlerEvidenceAutocloseSweep,
     _ac_coverage_gap,
-    _acceptance_criteria_items,
     _extract_ticket_binding,
 )
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_decision import (
@@ -1400,8 +1402,8 @@ class TestRealSubprocessReaping:
     async def test_reap_helper_kills_a_still_running_process(self):
         import asyncio
 
-        from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
-            _reap_timed_out_process,
+        from omnibase_infra.handlers.handler_done_write_receipt_guard import (
+            reap_timed_out_process as _reap_timed_out_process,
         )
 
         proc = await asyncio.create_subprocess_exec(
@@ -1418,8 +1420,8 @@ class TestRealSubprocessReaping:
     async def test_reap_helper_is_a_noop_for_an_already_exited_process(self):
         import asyncio
 
-        from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
-            _reap_timed_out_process,
+        from omnibase_infra.handlers.handler_done_write_receipt_guard import (
+            reap_timed_out_process as _reap_timed_out_process,
         )
 
         proc = await asyncio.create_subprocess_exec(

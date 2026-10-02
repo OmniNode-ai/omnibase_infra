@@ -227,6 +227,8 @@ class FakeLinearTransport(_LinearClient):
         self, query: str, variables: dict[str, object], timeout: float
     ) -> dict[str, object] | None:
         self.calls.append(dict(variables))
+        if "IssueDescription" in query:
+            return {"issue": {"id": "issue-1", "description": "- **AC1**: restored"}}
         if "history(" in query:
             return {"issue": {"history": self._history_page(variables)}}
         if "comments(" in query:

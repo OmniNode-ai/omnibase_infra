@@ -67,7 +67,13 @@ Pipeline
 4. Classify per the signals above. ``ERROR_STATE_NOT_RESOLVABLE`` fires
    when the prior completed state no longer resolves live on the team
    (renamed/deleted workflow state) — never guessed, never substituted.
-5. ``apply=False`` (the default) performs every read above but never
+5. DONE-WRITE RECEIPT GATE (OMN-20368). A re-flip writes a Done state, and a
+   Done state needs a PASS dod_verify receipt that binds every acceptance
+   criterion (``omnibase_core.handlers.handler_done_write_receipt_gate``). Without one the
+   ticket is left as it is and the outcome records why
+   (``SKIPPED_NO_BOUND_RECEIPT``): restoring a human's Done is not the same as
+   the Done having been earned.
+6. ``apply=False`` (the default) performs every read above but never
    calls a Linear mutation — every decision is logged as "would-do".
    ``apply=True`` performs the real ``issueUpdate``/``commentCreate``.
 
@@ -93,6 +99,9 @@ from uuid import uuid4
 import httpx
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.handlers.handler_done_write_receipt_guard import (
+    DoneWriteReceiptGuard,
+)
 from omnibase_infra.nodes.node_sync_revert_watchdog_effect.models.enum_prior_done_actor_kind import (
     EnumPriorDoneActorKind,
 )
@@ -208,6 +217,15 @@ _ISSUE_UPDATE_STATE_MUTATION = """
 mutation UpdateIssueState($issueId: String!, $stateId: String!) {
   issueUpdate(id: $issueId, input: { stateId: $stateId }) {
     success
+  }
+}
+"""
+
+_ISSUE_DESCRIPTION_QUERY = """
+query IssueDescription($issueId: String!) {
+  issue(id: $issueId) {
+    id
+    description
   }
 }
 """
@@ -409,6 +427,19 @@ class _LinearClient:
         update = data.get("issueUpdate")
         return bool(isinstance(update, dict) and update.get("success"))
 
+    async def fetch_issue_description(
+        self, issue_id: str, timeout: float
+    ) -> tuple[str | None, str]:
+        """The ticket's CURRENT description, read live. ``(None, why)`` on failure."""
+        data = await self._query(
+            _ISSUE_DESCRIPTION_QUERY, {"issueId": issue_id}, timeout
+        )
+        issue = data.get("issue") if isinstance(data, dict) else None
+        if not isinstance(issue, dict):
+            return None, "Failed to fetch the issue description from Linear."
+        description = issue.get("description")
+        return (description if isinstance(description, str) else ""), ""
+
     async def create_comment(self, issue_id: str, body: str, timeout: float) -> bool:
         """Post a comment on an issue. False on any failure."""
         data = await self._query(
@@ -427,12 +458,18 @@ class HandlerSyncRevertWatchdog:
         self,
         linear_client: _LinearClient | None = None,
         kill_switch_disabled: bool | None = None,
+        done_write_guard: DoneWriteReceiptGuard | None = None,
     ) -> None:
         # ``kill_switch_disabled`` mirrors the evidence-autoclose-sweep
         # precedent: read at construction time, override injectable for
         # tests. Re-checked defensively at the top of handle() too so a
         # zero-arg contract-driven construction can never silently skip it.
         self._linear = linear_client if linear_client is not None else _LinearClient()
+        self._done_write_guard = (
+            done_write_guard
+            if done_write_guard is not None
+            else DoneWriteReceiptGuard()
+        )
         self._kill_switch_ctor = (
             kill_switch_disabled
             if kill_switch_disabled is not None
@@ -512,6 +549,7 @@ class HandlerSyncRevertWatchdog:
                 EnumSyncRevertWatchdogDecision.SKIPPED_STATE_CHANGED_SINCE,
                 EnumSyncRevertWatchdogDecision.SKIPPED_ALREADY_RESOLVED,
                 EnumSyncRevertWatchdogDecision.SKIPPED_PRIOR_DONE_NOT_HUMAN_SET,
+                EnumSyncRevertWatchdogDecision.SKIPPED_NO_BOUND_RECEIPT,
             )
         )
         errored = sum(
@@ -740,6 +778,32 @@ class HandlerSyncRevertWatchdog:
             f"actorId=null, botActor.type={bot_actor_type or '(none)'}, "
             "no human comment nearby, no later human state change."
         )
+
+        # OMN-20368. The re-flip writes a Done state, so it needs the same
+        # bound PASS dod_verify receipt every other Done write needs. Read in
+        # DRY-RUN too, so a preview is an honest statement of what --apply
+        # would do. A ticket without one is left as it is, with the reason.
+        description, description_error = await self._linear.fetch_issue_description(
+            issue_id, request.linear_timeout_seconds
+        )
+        if description is None:
+            return ModelSyncRevertWatchdogOutcome(
+                decision=EnumSyncRevertWatchdogDecision.ERROR_LINEAR_API,
+                reason=description_error,
+                **common_fields,
+            )
+        receipt_decision = await self._done_write_guard.decide(
+            ticket_id=ticket_id, description=description
+        )
+        if not receipt_decision.allowed:
+            return ModelSyncRevertWatchdogOutcome(
+                decision=EnumSyncRevertWatchdogDecision.SKIPPED_NO_BOUND_RECEIPT,
+                reason=(
+                    f"Not re-flipped: {receipt_decision.reason} "
+                    f"(revert detected: {reason})"
+                ),
+                **common_fields,
+            )
 
         if not request.apply:
             logger.info(

@@ -344,7 +344,7 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "Empty string means: inherit the sweep process's own cwd. "
             "OMN-16846: this no longer selects the verifier's ENVIRONMENT. "
             "The verifier is dispatched from the sweep interpreter's own "
-            "`onex` (see `_dod_verify_argv`), so the venv carrying "
+            "`onex` (see `dod_verify_argv`), so the venv carrying "
             "node_dod_verify is decided by how the sweep was composed rather "
             "than by where it stands -- which is what lets the product clone "
             "the behaviour checks run pytest in stay lock-exact. This field "
