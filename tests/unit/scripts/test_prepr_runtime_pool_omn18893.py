@@ -417,6 +417,39 @@ def test_judge_pass_only_when_every_check_and_restore_hold() -> None:
     assert rb.outcome == "PASS" and rb.restored, rb
 
 
+def test_judge_passes_when_the_pr_changes_no_test_files() -> None:
+    rb = pool.judge({**GOOD, "tests": "no-focused-tests: the PR changes no test files"})
+    assert rb.checks["focused_tests"] is True
+    assert rb.outcome == "PASS"
+    assert "focused tests: n/a, the PR changes no test files" in rb.notes
+
+
+@pytest.mark.parametrize("text", ["", "unrecognized tests output"])
+def test_judge_fails_without_focused_test_evidence(text: str) -> None:
+    rb = pool.judge({**GOOD, "tests": text})
+    assert rb.checks["focused_tests"] is False
+
+
+def test_judge_no_focused_tests_marker_does_not_override_a_failure() -> None:
+    rb = pool.judge(
+        {
+            **GOOD,
+            "tests": (
+                "no-focused-tests: the PR changes no test files\n"
+                "omnibase_infra focused rc=1"
+            ),
+        }
+    )
+    assert rb.checks["focused_tests"] is False
+    assert "focused tests: n/a, the PR changes no test files" not in rb.notes
+
+
+def test_prove_script_uses_the_no_focused_tests_marker() -> None:
+    marker = "no-focused-tests: the PR changes no test files"
+    assert marker in PROVE_SH.read_text(encoding="utf-8")
+    assert marker == pool.NO_FOCUSED_TESTS_MARKER
+
+
 @pytest.mark.parametrize(
     ("phase", "text", "check"),
     [

@@ -393,6 +393,10 @@ print("status",d.get("status"),"healthy",det.get("healthy"),"failed_handlers",de
   uptime
   ;;
 tests)
+  if [ -z "${TESTS:-}" ]; then
+    echo "no-focused-tests: the PR changes no test files"
+    exit 0
+  fi
   for spec in ${TESTS:-}; do repo=${spec%%:*}; f=${spec#*:}; echo "$repo $f" >> /tmp/$TAG-tests.lst; done
   for repo in $(cut -d' ' -f1 /tmp/$TAG-tests.lst 2>/dev/null | sort -u); do
     cd "$T/$repo" || continue
