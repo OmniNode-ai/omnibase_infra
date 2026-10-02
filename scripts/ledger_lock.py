@@ -4499,6 +4499,33 @@ def enforce_section_caps(args: argparse.Namespace, payload: str) -> int | None:
     return None
 
 
+_WRITE_GUARD_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "src"
+    / "omnibase_infra"
+    / "handlers"
+    / "handler_ledger_write_guard.py"
+)
+
+
+def load_write_guard() -> Any:
+    """Load the test-write guard (OMN-19513) by path. Fails closed: a checkout without it
+    refuses every write rather than writing unguarded."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "onex_ledger_write_guard", _WRITE_GUARD_PATH
+    )
+    if spec is None or spec.loader is None or not _WRITE_GUARD_PATH.is_file():
+        raise SystemExit(
+            f"ledger_lock: test-write guard not found at {_WRITE_GUARD_PATH}; refusing to write"
+        )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser_argv, command = split_command(raw_argv)
@@ -4513,6 +4540,16 @@ def main(argv: list[str] | None = None) -> int:
     if path_reason is not None:
         print(f"ledger_lock: LEDGER PATH REFUSED -- {path_reason}", file=sys.stderr)
         return EXIT_LEDGER_PATH
+
+    # OMN-19513: the test-write guard, judged before the lock and before any write. A test
+    # process never writes the canonical ledger; a read-only query writes nothing and is exempt.
+    if not (args.print_grammar or args.verify_claim_token is not None):
+        write_guard = load_write_guard()
+        try:
+            write_guard.check_file(args.ledger, os.environ)
+        except write_guard.LedgerTestWriteRefusedError as exc:
+            print(f"ledger_lock: {exc}", file=sys.stderr)
+            return int(write_guard.EXIT_TEST_WRITE_REFUSED)
 
     validate_section_cap_args(parser, args)
     payload = read_append_payload(args)
