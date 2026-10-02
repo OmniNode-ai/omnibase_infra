@@ -977,13 +977,26 @@ def test_dev_lane_runtime_effects_carries_the_projection_read_binding() -> None:
     assert binding["database_url_secret_ref"] == "env:OMNIDASH_ANALYTICS_DB_URL"
     assert "OMNIDASH_ANALYTICS_DB_URL" in effects["environment"]
 
-    other_groups = {
+    # Every group another dev-lane service consumes under: the ones its own
+    # binding file declares and the ones its environment declares (each
+    # standalone writer sets KAFKA_CONSUMER_GROUP; runtimes set ONEX_GROUP_ID).
+    binding_groups = {
         yaml.safe_load(other.read_text(encoding="utf-8"))["kafka_consumer_group"]
         for name, service in services.items()
         if name != "runtime-effects"
         and (other := _binding_mount_source(service)) is not None
     }
-    assert other_groups, (
+    env_groups = {
+        str(value)
+        for name, service in services.items()
+        if name != "runtime-effects"
+        for key, value in (service.get("environment") or {}).items()
+        if key in {"KAFKA_CONSUMER_GROUP", "ONEX_GROUP_ID"} and value
+    }
+    assert binding_groups, (
         "no other dev-lane binding found; the comparison proves nothing"
     )
-    assert binding["kafka_consumer_group"] not in other_groups
+    assert "local.omnimarket-projections.delegation-writer.consume.v1" in env_groups, (
+        "the delegation writer's own group is missing; the env comparison proves nothing"
+    )
+    assert binding["kafka_consumer_group"] not in binding_groups | env_groups
