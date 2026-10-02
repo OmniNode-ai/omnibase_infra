@@ -3052,7 +3052,7 @@ jobs:
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
           permission-contents: write
-      - uses: OmniNode-ai/onex_change_control/.github/actions/validate-boundaries@802b5f7101f4c49f8b30e8deda3d4c5d024c5710 # .github/sibling-pins.yaml
+      - uses: OmniNode-ai/onex_change_control/.github/actions/validate-boundaries@main
         id: migration_conflicts
         env:
           OMNI_REPO_CLONE_TOKEN: ${{ steps.app-token.outputs.token || github.token }}

@@ -31,7 +31,12 @@ PINS = yaml.safe_load((REPO_ROOT / ".github" / "sibling-pins.yaml").read_text())
 # ci-bus-overlay-binding.yml binds the overlay to the branch the publisher reads at
 # merge time (its own test requires omnimarket ``dev``), and contract-validation.yml
 # runs onex_change_control's validate-contract composite action, whose inner
-# checkout fails when the action is addressed by a sha.
+# checkout fails when the action is addressed by a sha. The same holds for the
+# validate-boundaries action ci.yml calls: at a pinned OCC dev sha its inner
+# checkout takes ``github.action_ref``, which resolves to ``v6`` inside the
+# composite, and the merge_group Cross-Repo Migration Conflicts job went red
+# (run 36942428614); that one ``uses:`` stays on ``@main``.
+LIVE_ACTIONS = frozenset({"onex_change_control/.github/actions/validate-boundaries"})
 PINNED_WORKFLOWS = (
     "ci.yml",
     "call-occ-autobind.yml",
@@ -55,7 +60,7 @@ PINNED_WORKFLOWS = (
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 REPOSITORY = re.compile(r"^\s*repository: OmniNode-ai/(\w+)\s*$")
 REF = re.compile(r"^\s*ref: (\S+)")
-USES = re.compile(r"uses: OmniNode-ai/(\w+)/\.github/\S+@(\S+)")
+USES = re.compile(r"uses: OmniNode-ai/((\w+)/\.github/\S+)@(\S+)")
 
 
 def _checkout_refs(text: str) -> list[tuple[int, str, str | None]]:
@@ -107,9 +112,11 @@ def test_migrated_sites_carry_the_declared_sha(name: str) -> None:
 def test_no_sibling_reusable_workflow_or_clone_by_branch(name: str) -> None:
     text = (WORKFLOWS / name).read_text()
     bad = [
-        f"{name}: {m.group(1)}@{m.group(2)}"
+        f"{name}: {m.group(1)}@{m.group(3)}"
         for m in USES.finditer(text)
-        if m.group(1) in PINS and not HEX40.fullmatch(m.group(2))
+        if m.group(2) in PINS
+        and m.group(1) not in LIVE_ACTIONS
+        and not HEX40.fullmatch(m.group(3))
     ]
     assert not bad, f"sibling reusable workflow/action by branch: {bad}"
     assert not re.search(r"^\s*core-ref: (dev|main)\s*$", text, re.M)
