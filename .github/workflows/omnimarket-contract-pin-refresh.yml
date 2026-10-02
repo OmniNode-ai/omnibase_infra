@@ -19,10 +19,12 @@
 # OMN-17292 pins the derivation input so an infra PR's verdict depends only on
 # committed state. Pinning ALONE would be a straight return to OMN-15701 (a
 # stale pin used as a `--write` input silently reverted 8 live grants), so this
-# workflow is the other half: it advances the pin on a schedule, regenerates the
-# instances AND the rendered catalogs in the same commit, and opens a PR. The
-# pin can be briefly behind omnimarket dev; it cannot sit stale silently, and
-# scripts/ci/check_omnimarket_contract_pin_advance.py keeps it forward-only.
+# workflow is the other half: it advances the pin on a schedule, updates the
+# omnimarket entry in .github/sibling-pins.yaml and its inline workflow refs,
+# regenerates the instances AND the rendered catalogs in the same commit, and
+# opens a PR. The pin can be briefly behind omnimarket dev; it cannot sit stale
+# silently, and scripts/ci/check_omnimarket_contract_pin_advance.py keeps it
+# forward-only.
 #
 # Modelled on the sanctioned in-repo precedent for exactly this problem class:
 # .github/workflows/sibling-lock-refresh.yml (OMN-13902), which solved stale
@@ -77,6 +79,7 @@ jobs:
           repositories: omnibase_infra
           permission-contents: write
           permission-pull-requests: write
+          permission-workflows: write
 
       - name: Checkout (app token so the bot PR triggers CI)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -176,6 +179,32 @@ jobs:
           if count != 1:
               raise SystemExit("::error::could not rewrite omnimarket_contract_ref in the pin file")
           path.write_text(updated, encoding="utf-8")
+
+          path = Path(".github/sibling-pins.yaml")
+          original = path.read_text(encoding="utf-8")
+          pattern = r"^  omnimarket: ([0-9a-f]{40})$"
+          matches = re.findall(pattern, original, flags=re.MULTILINE)
+          if len(matches) != 1:
+              raise SystemExit("::error::could not rewrite the omnimarket entry in .github/sibling-pins.yaml")
+          old = matches[0]
+          updated = re.sub(pattern, f"  omnimarket: {target}", original, flags=re.MULTILINE)
+          path.write_text(updated, encoding="utf-8")
+
+          if old != target:
+              total = 0
+              for workflow in sorted(Path(".github/workflows").glob("*.yml")):
+                  original = workflow.read_text(encoding="utf-8")
+                  updated, count = re.subn(
+                      r"ref: " + re.escape(old) + r" # \.github/sibling-pins\.yaml",
+                      f"ref: {target} # .github/sibling-pins.yaml",
+                      original,
+                  )
+                  if count:
+                      workflow.write_text(updated, encoding="utf-8")
+                      print(f"{workflow}: updated {count} omnimarket sibling pin ref(s)")
+                      total += count
+              if total == 0:
+                  raise SystemExit("::error::no workflow ref matched the old omnimarket sibling pin")
           PY
           # --write regenerates the topology instances AND re-renders the
           # docker/catalog/database-topology projections derived from them
@@ -201,6 +230,8 @@ jobs:
           set -euo pipefail
           # .proof-dependencies is a CI-only checkout; never let it into a commit.
           git add -- .github/omnimarket-contract-pin.yaml \
+                     .github/sibling-pins.yaml \
+                     .github/workflows \
                      src/omnibase_infra/topology/instances \
                      docker/catalog/database-topology
           if git diff --cached --quiet; then
@@ -222,7 +253,7 @@ jobs:
           {
             printf '%s\n' "Automated omnimarket contract-pin advance (OMN-17292)."
             printf '\n'
-            printf '%s\n' "Advances \`.github/omnimarket-contract-pin.yaml\` from \`${CURRENT_PIN}\` to \`${TARGET_PIN}\` and regenerates the derived application-database TABLE grants and rendered catalogs in the same commit."
+            printf '%s\n' "Advances \`.github/omnimarket-contract-pin.yaml\` from \`${CURRENT_PIN}\` to \`${TARGET_PIN}\`, also moves the omnimarket entry of \`.github/sibling-pins.yaml\` and the inline workflow \`ref:\` shas that read it (OMN-20331), and regenerates the derived application-database TABLE grants and rendered catalogs in the same commit."
             printf '\n'
             printf '%s\n' "This PR is the surface upstream contract drift is supposed to land on. Before OMN-17292 this same drift appeared as a red required check on every open omnibase_infra PR simultaneously, with no action available to their authors (OMN-17141, OMN-16930, OMN-17290)."
             printf '\n'
