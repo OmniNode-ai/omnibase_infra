@@ -2786,9 +2786,11 @@ def run_delegate(
                     f"{lane_target.bootstrap_servers}, declared in "
                     f"{lane_target.declared_in}] To run offline on purpose, pass "
                     "--bus inmemory: the explicit override, whose evidence stays "
-                    "in the local store."
+                    f"in the local store. (run {run_id}, correlation {correlation_id})"
                 ) from exc
-            raise click.ClickException(str(exc)) from exc
+            raise click.ClickException(
+                f"{exc} (run {run_id}, correlation {correlation_id})"
+            ) from exc
 
         # OMN-18810: the five addressing facts the two written files record,
         # built from the decision that was just PROVEN viable rather than
@@ -2822,6 +2824,13 @@ def run_delegate(
                 requested_timeout_seconds=timeout,
                 execution_budget=execution_budget,
             )
+            if locus_decision.locus is EnumDelegateLocus.DEPLOYED_LANE:
+                click.echo(
+                    f"dispatching: run {run_id} correlation {correlation_id} to "
+                    f"{locus_decision.command_topic} via {locus_decision.broker}; "
+                    f"awaiting the lane's terminal for up to {terminal_wait_seconds} s",
+                    err=True,
+                )
             with _hard_timeout(terminal_wait_seconds + _HARD_TIMEOUT_GRACE_SECONDS):
                 return run_receipt_mode(
                     node_name=DELEGATE_NODE_NAME,

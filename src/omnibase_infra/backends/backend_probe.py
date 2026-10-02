@@ -23,12 +23,15 @@ import asyncio
 import logging
 import os
 import socket
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from omnibase_infra.backends.enum_probe_state import EnumProbeState
 from omnibase_infra.backends.model_consumer_group_owner import ModelConsumerGroupOwner
 from omnibase_infra.backends.model_probe_result import ModelProbeResult
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
+
+if TYPE_CHECKING:
+    from aiokafka.admin import AIOKafkaAdminClient
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +218,102 @@ def live_consumer_groups(
         ) from exc
 
 
+def live_chain_consumer_groups(
+    *,
+    command_topic: str,
+    subscribe_topics: tuple[str, ...],
+    bootstrap_servers: str | None = None,
+    timeout: float = 5.0,
+) -> tuple[str, ...]:
+    """Return Stable command groups whose base subscribes to the entire chain.
+
+    OMN-20209. The runtime plugin chooses the base identity, so the contract's
+    complete subscription footprint identifies candidates without guessing a
+    group name. Measured on the .201 dev broker 2026-10-02: the delegation
+    orchestrator's groups are ``local.runtime_config.delegation-orchestrator``
+    on all nine topics its contract subscribes to, while a ledger projection
+    is also ``Stable`` on the command topic but consumes only three of them.
+    A topic-suffix match alone would have counted the projection as the
+    chain; requiring the whole footprint does not. Unknown liveness refuses
+    just as :func:`live_consumer_groups` does.
+    """
+    if command_topic not in subscribe_topics:
+        raise ValueError("subscribe_topics must include command_topic")
+    resolved = bootstrap_servers or os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
+    if not resolved:
+        raise ConsumerGroupLivenessUnknownError(
+            "no broker address: neither an explicit bootstrap nor "
+            "KAFKA_BOOTSTRAP_SERVERS is set"
+        )
+    try:
+        return asyncio.run(
+            _live_chain_consumer_groups_async(
+                command_topic=command_topic,
+                subscribe_topics=subscribe_topics,
+                bootstrap_servers=resolved,
+                timeout=timeout,
+            )
+        )
+    except ConsumerGroupLivenessUnknownError:
+        raise
+    except Exception as exc:
+        raise ConsumerGroupLivenessUnknownError(
+            f"could not list consumer groups on {resolved}: {exc}"
+        ) from exc
+
+
+async def _live_chain_consumer_groups_async(
+    *,
+    command_topic: str,
+    subscribe_topics: tuple[str, ...],
+    bootstrap_servers: str,
+    timeout: float,
+) -> tuple[str, ...]:
+    """Identify complete topic-scoped bases, then ask about their command state."""
+    if command_topic not in subscribe_topics:
+        raise ValueError("subscribe_topics must include command_topic")
+    from aiokafka.admin import AIOKafkaAdminClient
+
+    from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
+    from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_for
+
+    auth_kwargs = build_aiokafka_auth_kwargs_for(bootstrap_servers)
+    principal_value = auth_kwargs.get("sasl_plain_username")
+    principal = principal_value if isinstance(principal_value, str) else None
+    admin = AIOKafkaAdminClient(
+        bootstrap_servers=bootstrap_servers,
+        request_timeout_ms=int(timeout * 1000),
+        **auth_kwargs,
+    )
+    await admin.start()
+    try:
+        await admin.describe_cluster()
+        listing = await admin.list_consumer_groups()
+        topics_by_base: dict[str, set[str]] = {}
+        for entry in listing:
+            if not entry:
+                continue
+            base, infix, topic = str(entry[0]).partition(TOPIC_SCOPE_INFIX)
+            if infix:
+                topics_by_base.setdefault(base, set()).add(topic)
+        required = set(subscribe_topics)
+        candidates = sorted(
+            base + TOPIC_SCOPE_INFIX + command_topic
+            for base, topics in topics_by_base.items()
+            if required.issubset(topics)
+        )
+    except BaseException:
+        await admin.close()
+        raise
+    return await _describe_live_consumer_groups(
+        admin=admin,
+        candidates=candidates,
+        topic=command_topic,
+        bootstrap_servers=bootstrap_servers,
+        principal=principal,
+    )
+
+
 async def _live_consumer_groups_async(
     *,
     topic: str,
@@ -252,7 +351,6 @@ async def _live_consumer_groups_async(
             describing candidates.
     """
     from aiokafka.admin import AIOKafkaAdminClient
-    from aiokafka.errors import GroupAuthorizationFailedError
 
     from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
     from omnibase_infra.event_bus.kafka_auth import (
@@ -297,6 +395,36 @@ async def _live_consumer_groups_async(
                 and (owner is None or owner.matches(str(entry[0])))
             }
         )
+    except BaseException:
+        await admin.close()
+        raise
+    return await _describe_live_consumer_groups(
+        admin=admin,
+        candidates=candidates,
+        topic=topic,
+        bootstrap_servers=bootstrap_servers,
+        principal=principal,
+        owner=owner,
+    )
+
+
+async def _describe_live_consumer_groups(
+    *,
+    admin: AIOKafkaAdminClient,
+    candidates: list[str],
+    topic: str,
+    bootstrap_servers: str,
+    principal: str | None,
+    owner: ModelConsumerGroupOwner | None = None,
+) -> tuple[str, ...]:
+    """Describe serially, close the admin, then evaluate shared denial semantics.
+
+    The caller hands over a started client after listing candidates. Closing
+    before state evaluation preserves the existing probe's cleanup ordering.
+    """
+    from aiokafka.errors import GroupAuthorizationFailedError
+
+    try:
         if not candidates:
             return ()
         if len(candidates) > _MAX_LIVE_CONSUMER_GROUP_DESCRIBE_CANDIDATES:
