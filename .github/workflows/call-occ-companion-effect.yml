@@ -139,7 +139,7 @@ jobs:
       (github.event.action != 'edited' || github.event.changes.body) &&
       (contains(github.event.pull_request.title, 'OMN-') ||
        contains(github.event.pull_request.head.ref, 'OMN-'))
-    uses: OmniNode-ai/omniclaude/.github/workflows/call-occ-companion-effect-reusable.yml@dev
+    uses: OmniNode-ai/omniclaude/.github/workflows/call-occ-companion-effect-reusable.yml@c86c9fe6330c789614126f5f106bfb1be364b20d # .github/sibling-pins.yaml
     # OMN-18012: the dev lane declares SASL, so the publisher needs the
     # KAFKA_SASL_* credentials. The broker is still resolved from omnimarket's
     # committed overlay, never from a secret.
@@ -198,7 +198,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: OmniNode-ai/omnimarket
-          ref: dev
+          ref: b1b406d0c8a6f935fb84da27f0464882b6639ff0 # .github/sibling-pins.yaml
           path: .occ-companion-effect-src
           persist-credentials: false
           sparse-checkout: |

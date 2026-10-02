@@ -95,7 +95,7 @@ jobs:
     with:
       contracts-dir: contracts
       receipts-dir: drift/dod_receipts
-      core-ref: dev
+      core-ref: 1e69bec909f245be511803191554e5b340def0b7 # .github/sibling-pins.yaml
 
   hostile-review:
     needs: occ-preflight
@@ -151,8 +151,9 @@ jobs:
         run: |
           for attempt in {1..4}; do
             rm -rf ../omniintelligence
-            if git clone --depth=1 --filter=blob:none --branch dev \
-              https://github.com/OmniNode-ai/omniintelligence.git ../omniintelligence; then
+            if git clone --filter=blob:none --no-checkout \
+              https://github.com/OmniNode-ai/omniintelligence.git ../omniintelligence \
+              && git -C ../omniintelligence checkout --quiet 51e1cb356453ad325d76aea57ab371cf975df3a4; then # .github/sibling-pins.yaml
               exit 0
             fi
             sleep $((attempt * 10))
@@ -164,8 +165,9 @@ jobs:
         run: |
           for attempt in {1..4}; do
             rm -rf ../omnibase_core_dep
-            if git clone --depth=1 --filter=blob:none --branch dev \
-              https://github.com/OmniNode-ai/omnibase_core.git ../omnibase_core_dep; then
+            if git clone --filter=blob:none --no-checkout \
+              https://github.com/OmniNode-ai/omnibase_core.git ../omnibase_core_dep \
+              && git -C ../omnibase_core_dep checkout --quiet 1e69bec909f245be511803191554e5b340def0b7; then # .github/sibling-pins.yaml
               exit 0
             fi
             sleep $((attempt * 10))
@@ -177,8 +179,9 @@ jobs:
         run: |
           for attempt in {1..4}; do
             rm -rf ../omnibase_compat
-            if git clone --depth=1 --filter=blob:none --branch dev \
-              https://github.com/OmniNode-ai/omnibase_compat.git ../omnibase_compat; then
+            if git clone --filter=blob:none --no-checkout \
+              https://github.com/OmniNode-ai/omnibase_compat.git ../omnibase_compat \
+              && git -C ../omnibase_compat checkout --quiet 65aed95fa710748654e37d5c15c5446e779fdf52; then # .github/sibling-pins.yaml
               exit 0
             fi
             sleep $((attempt * 10))

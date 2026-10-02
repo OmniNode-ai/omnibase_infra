@@ -55,7 +55,8 @@ jobs:
           set -euo pipefail
           rm -rf .ci/omnibase_core
           for attempt in 1 2 3 4; do
-            if git clone --depth=1 https://github.com/OmniNode-ai/omnibase_core.git .ci/omnibase_core; then
+            if git clone --filter=blob:none --no-checkout https://github.com/OmniNode-ai/omnibase_core.git .ci/omnibase_core \
+              && git -C .ci/omnibase_core checkout --quiet 1e69bec909f245be511803191554e5b340def0b7; then # .github/sibling-pins.yaml
               exit 0
             fi
             rm -rf .ci/omnibase_core

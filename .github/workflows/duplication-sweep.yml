@@ -78,7 +78,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnidash
-          ref: dev
+          ref: cc628179717f4830bdd6c5a5e1b8d0c7bc4042ff # .github/sibling-pins.yaml
           path: sweep-home/omnidash
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           sparse-checkout: |
@@ -89,7 +89,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniclaude
-          ref: dev
+          ref: c86c9fe6330c789614126f5f106bfb1be364b20d # .github/sibling-pins.yaml
           path: sweep-home/omniclaude
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           sparse-checkout: |
@@ -100,7 +100,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/onex_change_control
-          ref: dev
+          ref: 802b5f7101f4c49f8b30e8deda3d4c5d024c5710 # .github/sibling-pins.yaml
           path: sweep-home/onex_change_control
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           sparse-checkout: |
