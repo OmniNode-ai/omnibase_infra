@@ -77,19 +77,24 @@ class ModelDelegateTransportRefusal(BaseModel):
         ),
     )
     # cli-own-vocabulary: refusal reasons onex delegate itself invents; no contract owns them
-    reason: Literal["broker_unreachable", "locus_probe_refused"] = Field(
-        ...,
-        description=(
-            "Which transport stage stopped the run. 'broker_unreachable' is "
-            "a connect that exhausted its retry policy while the run was "
-            "being dispatched. 'locus_probe_refused' is the earlier, cheaper "
-            "refusal: the pre-dispatch probe could not confirm a live "
-            "consumer group on the command topic, so nothing was published. "
-            "They are different failures with different remedies -- the "
-            "first says the broker is sick, the second says the lane may "
-            "simply not be running -- and collapsing them would send the "
-            "reader to the wrong place half the time."
-        ),
+    reason: Literal["broker_unreachable", "locus_probe_refused", "sasl_refused"] = (
+        Field(
+            ...,
+            description=(
+                "Which transport stage stopped the run. 'broker_unreachable' is "
+                "a connect that exhausted its retry policy while the run was "
+                "being dispatched. 'locus_probe_refused' is the earlier, cheaper "
+                "refusal: the pre-dispatch probe could not confirm a live "
+                "consumer group on the command topic, so nothing was published. "
+                "'sasl_refused' is the probe reaching the broker and the broker "
+                "rejecting this machine's SASL login (OMN-19452). They are "
+                "different failures with different remedies -- the first says "
+                "the broker is sick, the second says the lane may simply not be "
+                "running, the third says the address is right and the identity "
+                "is not -- and collapsing them would send the reader to the "
+                "wrong place half the time."
+            ),
+        )
     )
     correlation_id: UUID = Field(
         ...,
@@ -195,5 +200,17 @@ class ModelDelegateTransportRefusal(BaseModel):
         description=(
             "The final failure's message, sanitized. Empty only if the "
             "exception carried none."
+        ),
+    )
+    remediation: str = Field(
+        default="",
+        description=(
+            "The operator's next step, written by the CLI from the failure "
+            "class and the lane it selected, or empty when the class has no "
+            "single remedy. It is a field of its own rather than part of "
+            "transport_error because that message is run through the receipt "
+            "sanitizer, which redacts the whole text on a credential-shaped "
+            "word -- and a command that names the lane login contains one. "
+            "It carries commands and a lane id only, never a secret."
         ),
     )

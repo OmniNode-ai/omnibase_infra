@@ -157,9 +157,11 @@ from omnibase_infra.cli.delegate_lane import (
 from omnibase_infra.cli.delegate_lane_credentials import (
     DelegateLaneCredentialError,
     resolve_lane_client_transport_for,
+    sasl_refusal_remediation,
 )
 from omnibase_infra.cli.delegate_locus import (
     DelegateLocusRefusedError,
+    DelegateLocusSaslRefusedError,
     contract_terminal_topic,
     resolve_delegate_locus,
 )
@@ -207,6 +209,7 @@ from omnibase_infra.cli.protocol_drift_guard_verdict import (
 )
 from omnibase_infra.cli.protocol_execution_budget import ProtocolExecutionBudget
 from omnibase_infra.cli.receipt_mode import (
+    DelegatePhaseStopwatch,
     capture_log_path,
     default_emit_socket_path,
     run_receipt_mode,
@@ -220,6 +223,7 @@ from omnibase_infra.cli.task_class_registry import (
 )
 from omnibase_infra.cli.workspace_reconcile import make_workspace_reconciler
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
+from omnibase_infra.enums.enum_delegate_phase import EnumDelegatePhase
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.lane_client_transport_binding import (
     bind_lane_client_transport,
@@ -233,6 +237,9 @@ from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy imp
 )
 from omnibase_infra.handlers.handler_workspace_runtime_config_materializer import (
     HandlerWorkspaceRuntimeConfigMaterializer,
+)
+from omnibase_infra.models.delegation.model_delegate_phase_durations import (
+    ModelDelegatePhaseDurations,
 )
 from omnibase_infra.runtime_identity import collect_runtime_identity
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
@@ -511,6 +518,24 @@ def _drift_guard_receipt_block(
     if drift_guard is None:
         return {}
     return {"drift_guard": drift_guard.as_receipt_fields()}
+
+
+def _phase_durations_receipt_block(
+    phase_durations: ModelDelegatePhaseDurations | None,
+) -> dict[str, object]:
+    """Per-phase client durations, as a receipt fragment (OMN-19452).
+
+    Always present, so a reader never has to ask whether a receipt predates the
+    field. A phase the run never reached is ``null`` and a caller that measured
+    nothing (``None``) writes every phase as ``null``; neither is ever a zero,
+    which would read as a phase that was instant.
+    """
+    durations = (
+        phase_durations
+        if phase_durations is not None
+        else ModelDelegatePhaseDurations()
+    )
+    return {"phase_durations": durations.model_dump(mode="json")}
 
 
 def _config_overrides_receipt_block(
@@ -797,6 +822,7 @@ def _write_unattributed_run_files(
     drift_guard: ProtocolDriftGuardVerdict | None = None,
     config_overrides: tuple[ModelDelegateEnvConfigOverride, ...] = (),
     requested_backend_id: str | None = None,
+    phase_durations: ModelDelegatePhaseDurations | None = None,
 ) -> None:
     """Persist a terminally-failed delegation that attributed no route.
 
@@ -852,6 +878,7 @@ def _write_unattributed_run_files(
                 **addressing.as_run_file_fields(),
                 **_drift_guard_receipt_block(drift_guard),
                 **_config_overrides_receipt_block(config_overrides),
+                **_phase_durations_receipt_block(phase_durations),
             },
             indent=2,
             sort_keys=True,
@@ -899,6 +926,7 @@ def _write_transport_refusal_run_files(
     task_type_resolution: str,
     addressing: ModelDelegateRunAddressing,
     envelope: dict[str, object] | None = None,
+    phase_durations: ModelDelegatePhaseDurations | None = None,
 ) -> None:
     """Persist the three files for a delegation that never reached the broker.
 
@@ -956,6 +984,7 @@ def _write_transport_refusal_run_files(
                 "attempts": [],
                 "receipt": envelope,
                 **addressing.as_run_file_fields(),
+                **_phase_durations_receipt_block(phase_durations),
             },
             indent=2,
             sort_keys=True,
@@ -1109,6 +1138,7 @@ def _write_local_run_files(
     command_topic: str = "",
     contract_path: Path | None = None,
     payload_path: Path | None = None,
+    phase_durations: ModelDelegatePhaseDurations | None = None,
 ) -> None:
     """Persist local delegation output and the accepted route evidence.
 
@@ -1173,6 +1203,7 @@ def _write_local_run_files(
             task_type_resolution=task_type_resolution,
             addressing=addressing,
             envelope=envelope,
+            phase_durations=phase_durations,
         )
         return
 
@@ -1225,6 +1256,7 @@ def _write_local_run_files(
             drift_guard=drift_guard,
             config_overrides=config_overrides,
             requested_backend_id=requested_backend_id,
+            phase_durations=phase_durations,
         )
         return
 
@@ -1281,6 +1313,7 @@ def _write_local_run_files(
                 **addressing.as_run_file_fields(),
                 **_drift_guard_receipt_block(drift_guard),
                 **_config_overrides_receipt_block(config_overrides),
+                **_phase_durations_receipt_block(phase_durations),
             },
             indent=2,
             sort_keys=True,
@@ -2471,7 +2504,14 @@ def run_delegate(
     even if the inner call is stuck in non-cooperative blocking I/O. A
     backstop trip returns exit code 1 with a clear stderr message instead of
     hanging indefinitely.
+
+    The receipt's ``phase_durations`` (OMN-19452) time the client's phases:
+    startup here, the locus probe here, and the bus connect, reply subscribe,
+    publish and terminal wait inside the runtime, which reports them through
+    the stopwatch handed to ``run_receipt_mode``.
     """
+    phase_stopwatch = DelegatePhaseStopwatch()
+    phase_stopwatch.begin(EnumDelegatePhase.STARTUP)
     # OMN-13930: ``DELEGATE_NODE_NAME`` is an omnimarket-provided node, so
     # this surface carries the same stale/absent co-install exposure as
     # ``onex skill`` and ``onex node`` -- it was simply the one of the three
@@ -2737,21 +2777,23 @@ def run_delegate(
         # defect being closed is an invocation that silently ran in-process and
         # was then read as evidence about a lane it never reached, so this path
         # never degrades, it stops.
+        phase_stopwatch.end(EnumDelegatePhase.STARTUP)
         locus_probe_started = time.monotonic()
         try:
-            locus_decision = resolve_delegate_locus(
-                requested=locus,
-                bus=bus,
-                # OMN-16871: the RESOLVED address, not the raw flag. The
-                # deployed-lane probe asks whether a live consumer group is bound
-                # to the command topic; asking that of one broker and then
-                # publishing to another is a probe of a lane the run never
-                # reaches, which is the OMN-17295 instrument defect in a second
-                # place.
-                kafka_bootstrap=resolved_bootstrap,
-                contract_path=contract_path,
-                shared_bus_value=BUS_KAFKA,
-            )
+            with phase_stopwatch.phase(EnumDelegatePhase.LOCUS_PROBE):
+                locus_decision = resolve_delegate_locus(
+                    requested=locus,
+                    bus=bus,
+                    # OMN-16871: the RESOLVED address, not the raw flag. The
+                    # deployed-lane probe asks whether a live consumer group is
+                    # bound to the command topic; asking that of one broker and
+                    # then publishing to another is a probe of a lane the run
+                    # never reaches, which is the OMN-17295 instrument defect in
+                    # a second place.
+                    kafka_bootstrap=resolved_bootstrap,
+                    contract_path=contract_path,
+                    shared_bus_value=BUS_KAFKA,
+                )
         except DelegateLocusRefusedError as exc:
             # OMN-18925 / C16: the SECOND transport exit, and the one a
             # genuinely unreachable broker takes. The probe refuses here
@@ -2769,9 +2811,21 @@ def run_delegate(
             # that is simply not running rather than a sick broker, and those
             # two send a reader to different places.
             attempts_permitted, bound_seconds = _resolve_transport_bound()
+            # OMN-19452: a broker that rejected the SASL login is a different
+            # finding from one that could not be confirmed, with a different
+            # remedy -- the identity, not the address -- so it is typed apart
+            # and carries the command that fixes it.
+            sasl_refused = isinstance(exc, DelegateLocusSaslRefusedError)
+            remediation = (
+                sasl_refusal_remediation(
+                    lane=lane_target.lane if lane_target is not None else None
+                )
+                if sasl_refused
+                else ""
+            )
             _write_transport_refusal_run_files(
                 refusal=ModelDelegateTransportRefusal(
-                    reason="locus_probe_refused",
+                    reason="sasl_refused" if sasl_refused else "locus_probe_refused",
                     correlation_id=correlation_id,
                     bus=bus,
                     locus=(locus or EnumDelegateLocus.DEPLOYED_LANE.value),
@@ -2781,6 +2835,7 @@ def run_delegate(
                     elapsed_seconds=time.monotonic() - locus_probe_started,
                     transport_error_type=type(exc).__name__,
                     transport_error=sanitize_error_string(str(exc)),
+                    remediation=remediation,
                 ),
                 run_id=str(run_id),
                 state_root=state_root,
@@ -2794,7 +2849,19 @@ def run_delegate(
                     dispatch_target=None,
                     transport_authority=transport_authority,
                 ),
+                phase_durations=phase_stopwatch.durations(),
             )
+            if sasl_refused:
+                lane_context = (
+                    f" [lane '{lane_target.lane}', broker "
+                    f"{lane_target.bootstrap_servers}, declared in "
+                    f"{lane_target.declared_in}]"
+                    if lane_target is not None
+                    else ""
+                )
+                raise click.ClickException(
+                    f"{exc}{lane_context} {remediation}"
+                ) from exc
             if lane_target is not None:
                 # OMN-19193: a default workspace run lands on a declared lane,
                 # so a lane that is down refuses the operator's ordinary
@@ -2858,6 +2925,8 @@ def run_delegate(
                     # the receipt was the wrong one's.
                     host_handlers=locus_decision.locus is EnumDelegateLocus.IN_PROCESS,
                     locus_decision=locus_decision,
+                    # OMN-19452: the runtime reports its bus phases here.
+                    phase_stopwatch=phase_stopwatch,
                     # OMN-20124: the default output is for a person. --json keeps
                     # the one-receipt-JSON-line contract for programs.
                     receipt_renderer=(
@@ -2922,6 +2991,10 @@ def run_delegate(
                         command_topic=locus_decision.command_topic,
                         contract_path=contract_path,
                         payload_path=payload_path,
+                        # OMN-19452: read when the callback runs, after the
+                        # runtime has finished, so every phase it reached is
+                        # closed.
+                        phase_durations=phase_stopwatch.durations(),
                     ),
                 )
         except DelegateTimeoutExceededError as exc:
