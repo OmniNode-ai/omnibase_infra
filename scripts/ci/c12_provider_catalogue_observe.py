@@ -52,9 +52,10 @@ from typing import Any
 ROUTE_PREFIX = "/v1/tenants/me/inference-credentials"
 
 # A provider id no catalogue offers and no platform rung backs. Used as the
-# unbacked injection and as a refused-at-intake case. OMN-17373 records it as
-# deliberately absent.
-UNBACKED_PROVIDER = "openai"
+# unbacked injection and as a refused-at-intake case. It was ``openai`` until
+# OMN-17373 offered openai as a customer-only row; an injection must name a
+# provider the catalogue does not carry, so it is ``mistral`` now.
+UNBACKED_PROVIDER = "mistral"
 
 # Claude ids the intake model must refuse. Two spellings, because the deployed
 # pattern is a case-insensitive substring match and a regression to an exact
@@ -104,6 +105,24 @@ def _claude_hits(pattern: Any, rows: list[dict[str, Any]]) -> list[str]:
             if pattern.search(value):
                 hits.append(value)
     return hits
+
+
+def _customer_only(rows: list[dict[str, Any]]) -> list[str]:
+    """Providers every one of whose rows declares ``mirrors_house_rung: false``.
+
+    The platform holds no key for these (OMN-17373, openai), so no house rung
+    can back them. The SAME derivation the deployed omnimarket parity test and
+    the no-house validator apply, read from the RAW rows. This reports which
+    providers the catalogue exempts; whether the exemption is legitimate is the
+    grader's call against its own declared list.
+    """
+    mirroring: dict[str, bool] = {}
+    for row in rows:
+        name = str(row.get("provider", "")).strip()
+        mirroring[name] = mirroring.get(name, False) or (
+            row.get("mirrors_house_rung", True) is not False
+        )
+    return sorted(name for name, any_mirror in mirroring.items() if not any_mirror)
 
 
 def _findings(fn: Any, rows: list[dict[str, Any]], rungs: list[dict[str, Any]]) -> Any:
@@ -164,11 +183,14 @@ def observe(app_root: str) -> dict[str, Any]:
     rows = house.read_catalogue_rows()
     rungs = house.read_platform_rungs()
     house_slugs = sorted(byok.house_keyed_provider_slugs(rungs))
+    customer_only = _customer_only(rows)
+    house_offered = [p for p in offered if p not in customer_only]
     gap = byok.catalogue_parity_gap(
-        house_slugs, offered=offered, not_offered=not_offered
+        house_slugs, offered=house_offered, not_offered=not_offered
     )
     obs["shipped"] = {
         "offered": offered,
+        "customer_only": customer_only,
         "not_offered": not_offered,
         "rung_count": len(rungs),
         "house_keyed_slugs": house_slugs,
@@ -220,7 +242,9 @@ def observe(app_root: str) -> dict[str, Any]:
     neg: dict[str, Any] = {}
 
     g = byok.catalogue_parity_gap(
-        house_slugs, offered=[*offered, UNBACKED_PROVIDER], not_offered=not_offered
+        house_slugs,
+        offered=[*house_offered, UNBACKED_PROVIDER],
+        not_offered=not_offered,
     )
     neg["parity_unbacked"] = {
         "injected": UNBACKED_PROVIDER,
@@ -228,17 +252,25 @@ def observe(app_root: str) -> dict[str, Any]:
         "missing_from_catalogue": list(g.missing_from_catalogue),
     }
 
-    declared = sorted({*offered, *not_offered})
+    declared = sorted({*house_offered, *not_offered})
     dropped = declared[0] if declared else None
     g = byok.catalogue_parity_gap(
         house_slugs,
-        offered=[p for p in offered if p != dropped],
+        offered=[p for p in house_offered if p != dropped],
         not_offered=[p for p in not_offered if p != dropped],
     )
     neg["parity_missing"] = {
         "dropped": dropped,
         "unbacked_in_catalogue": list(g.unbacked_in_catalogue),
         "missing_from_catalogue": list(g.missing_from_catalogue),
+    }
+
+    exempt_row = copy.deepcopy(rows[0]) if rows else {}
+    exempt_row["provider"] = UNBACKED_PROVIDER
+    exempt_row["mirrors_house_rung"] = False
+    neg["customer_only_self_exemption"] = {
+        "injected": UNBACKED_PROVIDER,
+        "customer_only": _customer_only([*rows, exempt_row]),
     }
 
     claude_row = copy.deepcopy(rows[0]) if rows else {}

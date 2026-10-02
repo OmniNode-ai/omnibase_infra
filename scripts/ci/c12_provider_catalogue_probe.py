@@ -83,7 +83,14 @@ DEFAULT_APP_ROOT: Final[str] = "/app"
 CLAUDE_RE: Final[re.Pattern[str]] = re.compile(r"anthropic|claude", re.IGNORECASE)
 
 # Must match the observer's constants; pinned by a test.
-UNBACKED_PROVIDER: Final[str] = "openai"
+UNBACKED_PROVIDER: Final[str] = "mistral"
+
+# Providers the catalogue may offer with no house rung behind them: the platform
+# holds no key, the customer's own key pays (OMN-17373). Declared HERE, not read
+# back from the catalogue: a row that declares ``mirrors_house_rung: false`` on
+# its own authority would otherwise exempt itself from the parity clause. An
+# exemption the catalogue declares for a provider not on this list stays RED.
+CUSTOMER_ONLY_PROVIDERS: Final[tuple[str, ...]] = ("openai",)
 CLAUDE_PROVIDERS: Final[tuple[str, ...]] = ("anthropic", "Claude-3")
 SYNTHETIC_TOKEN_PROVIDER: Final[str] = "c12probe"
 ROUTE_PREFIX: Final[str] = "/v1/tenants/me/inference-credentials"
@@ -234,7 +241,23 @@ def grade(obs: dict[str, Any]) -> Record:
         bool(house),
         f"house_keyed_slugs={house!r} over rung_count={_get(obs, 'shipped', 'rung_count')!r}",
     )
-    declared = set(offered or []) | set(not_offered or [])
+    customer_only = _str_list(_get(obs, "shipped", "customer_only"))
+    exempt = set(customer_only or [])
+    add(
+        "parity",
+        "customer_only_exemptions_are_declared_here",
+        customer_only is not None
+        and exempt <= set(CUSTOMER_ONLY_PROVIDERS)
+        and exempt <= set(offered or []),
+        f"customer_only={customer_only!r} declared={list(CUSTOMER_ONLY_PROVIDERS)!r}",
+    )
+    add(
+        "parity",
+        "customer_only_has_no_house_rung",
+        customer_only is not None and house is not None and not exempt & set(house),
+        f"customer_only={customer_only!r} house_keyed_slugs={house!r}",
+    )
+    declared = (set(offered or []) - exempt) | set(not_offered or [])
     add(
         "parity",
         "declared_equals_handler_backed",
@@ -242,7 +265,8 @@ def grade(obs: dict[str, Any]) -> Record:
         and not_offered is not None
         and house is not None
         and declared == set(house),
-        f"offered+not_offered={sorted(declared)!r} handler_backed={house!r}",
+        f"(offered-customer_only)+not_offered={sorted(declared)!r} "
+        f"handler_backed={house!r} customer_only={sorted(exempt)!r}",
     )
     add(
         "parity",
@@ -349,6 +373,15 @@ def grade(obs: dict[str, Any]) -> Record:
         and _get(pm, "missing_from_catalogue") == [dropped]
         and _get(pm, "unbacked_in_catalogue") == [],
         f"parity_missing={pm if pm is not _ABSENT else '<absent>'!r}",
+    )
+    ce = _get(neg, "customer_only_self_exemption")
+    add(
+        "negative",
+        "customer_only_self_exemption_detected",
+        _get(ce, "injected") == UNBACKED_PROVIDER
+        and UNBACKED_PROVIDER in (_str_list(_get(ce, "customer_only")) or [])
+        and UNBACKED_PROVIDER not in CUSTOMER_ONLY_PROVIDERS,
+        f"customer_only_self_exemption={ce if ce is not _ABSENT else '<absent>'!r}",
     )
     cr = _get(neg, "claude_row")
     cr_hits = _get(cr, "claude_hits")

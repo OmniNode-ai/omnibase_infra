@@ -4,10 +4,9 @@
 """Offline grading tests for the C12 provider-catalogue producer (OMN-19195).
 
 ``tests/fixtures/omn19195/lane_healthy.json`` is the observer's output as
-recorded on the lab dev lane's deployed ``onex-api`` container on 2026-09-22
-(image ``onex-lab/omnicloud-core:d2d30be4-20260922T194843Z``, omnimarket
-0.4.199). Every other case here is that recording with ONE observation broken,
-so each test says which property of the deployed subject the verdict turns on.
+recorded by running the observer against omnimarket d471dcb96d (the
+catalogue with the OMN-17373 customer-only openai row) on 2026-10-02. Every other case here is that recording with ONE observation
+broken, so each test says which property of the deployed subject the verdict turns on.
 Nothing here touches docker, the network or a lane.
 """
 
@@ -93,8 +92,28 @@ BROKEN: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
     ),
     (
         "unbacked row shipped",
-        _set(("shipped", "offered"), ["glm", "openai", "openrouter"]),
+        _set(
+            ("shipped", "offered"), ["gemini", "glm", "mistral", "openai", "openrouter"]
+        ),
         "declared_equals_handler_backed",
+    ),
+    (
+        "a self-declared customer-only exemption the grader does not list",
+        _set(("shipped", "customer_only"), ["mistral", "openai"]),
+        "customer_only_exemptions_are_declared_here",
+    ),
+    (
+        "a customer-only provider a house rung backs",
+        _set(
+            ("shipped", "house_keyed_slugs"),
+            ["gemini", "glm", "openai", "openrouter", "vertex"],
+        ),
+        "customer_only_has_no_house_rung",
+    ),
+    (
+        "the self-exemption derivation stopped biting",
+        _set(("negative", "customer_only_self_exemption", "customer_only"), ["openai"]),
+        "customer_only_self_exemption_detected",
     ),
     (
         "handler-backed provider missing",
@@ -175,8 +194,8 @@ BROKEN: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
     ),
     (
         "intake admits an unbacked provider",
-        _set(("intake", "openai"), {"accepted": True}),
-        "intake_refuses_openai",
+        _set(("intake", "mistral"), {"accepted": True}),
+        "intake_refuses_mistral",
     ),
     (
         "intake observation missing",
