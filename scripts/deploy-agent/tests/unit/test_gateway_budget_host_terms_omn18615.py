@@ -116,6 +116,7 @@ def _derive(tmp_path: Path, host: ModelHostConditions | None) -> object:
 def _idle_warm() -> ModelHostConditions:
     return probe_host_conditions(
         loadavg_reader=lambda: (1.2, 1.1, 1.0),
+        io_pressure_reader=lambda: None,
         cpu_count_reader=lambda: LAB_HOST_CPU_COUNT,
         builder_cache_reader=lambda: EnumBuildCacheState.WARM,
     )
@@ -124,6 +125,7 @@ def _idle_warm() -> ModelHostConditions:
 def _contended_cold(load1: float) -> ModelHostConditions:
     return probe_host_conditions(
         loadavg_reader=lambda: (load1, load1, load1),
+        io_pressure_reader=lambda: None,
         cpu_count_reader=lambda: LAB_HOST_CPU_COUNT,
         builder_cache_reader=lambda: EnumBuildCacheState.COLD,
     )
@@ -181,6 +183,7 @@ class TestTheGatewayCeilingMovesWithTheMachine:
 
         absurd = probe_host_conditions(
             loadavg_reader=lambda: (1_000_000.0, 1.0, 1.0),
+            io_pressure_reader=lambda: None,
             cpu_count_reader=lambda: 1,
             builder_cache_reader=lambda: EnumBuildCacheState.COLD,
         )

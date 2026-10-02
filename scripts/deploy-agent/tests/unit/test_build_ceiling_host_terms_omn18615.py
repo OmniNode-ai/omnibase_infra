@@ -118,6 +118,7 @@ def _derive(compose_files: tuple[str, ...], host: ModelHostConditions | None) ->
 def _idle_warm() -> ModelHostConditions:
     return probe_host_conditions(
         loadavg_reader=lambda: (1.2, 1.1, 1.0),
+        io_pressure_reader=lambda: None,
         cpu_count_reader=lambda: LAB_HOST_CPU_COUNT,
         builder_cache_reader=lambda: EnumBuildCacheState.WARM,
     )
@@ -126,6 +127,7 @@ def _idle_warm() -> ModelHostConditions:
 def _contended_cold(load1: float) -> ModelHostConditions:
     return probe_host_conditions(
         loadavg_reader=lambda: (load1, load1, load1),
+        io_pressure_reader=lambda: None,
         cpu_count_reader=lambda: LAB_HOST_CPU_COUNT,
         builder_cache_reader=lambda: EnumBuildCacheState.COLD,
     )
@@ -198,11 +200,13 @@ class TestAC1TheCeilingMovesWithTheMachine:
         compose_files = _recorded_model(tmp_path)
         quiet = probe_host_conditions(
             loadavg_reader=lambda: (2.0, 2.0, 2.0),
+            io_pressure_reader=lambda: None,
             cpu_count_reader=lambda: LAB_HOST_CPU_COUNT,
             builder_cache_reader=lambda: EnumBuildCacheState.WARM,
         )
         busy = probe_host_conditions(
             loadavg_reader=lambda: (97.0, 97.0, 97.0),
+            io_pressure_reader=lambda: None,
             cpu_count_reader=lambda: LAB_HOST_CPU_COUNT,
             builder_cache_reader=lambda: EnumBuildCacheState.WARM,
         )
@@ -216,11 +220,13 @@ class TestAC1TheCeilingMovesWithTheMachine:
         compose_files = _recorded_model(tmp_path)
         warm = probe_host_conditions(
             loadavg_reader=lambda: (2.0, 2.0, 2.0),
+            io_pressure_reader=lambda: None,
             cpu_count_reader=lambda: LAB_HOST_CPU_COUNT,
             builder_cache_reader=lambda: EnumBuildCacheState.WARM,
         )
         cold = probe_host_conditions(
             loadavg_reader=lambda: (2.0, 2.0, 2.0),
+            io_pressure_reader=lambda: None,
             cpu_count_reader=lambda: LAB_HOST_CPU_COUNT,
             builder_cache_reader=lambda: EnumBuildCacheState.COLD,
         )
@@ -251,6 +257,7 @@ class TestAC1UnreadableHostConditionsWiden:
 
         unknown = probe_host_conditions(
             loadavg_reader=_raises,
+            io_pressure_reader=lambda: None,
             cpu_count_reader=lambda: LAB_HOST_CPU_COUNT,
             builder_cache_reader=lambda: EnumBuildCacheState.WARM,
         )
@@ -268,6 +275,7 @@ class TestAC1UnreadableHostConditionsWiden:
 
         unknown = probe_host_conditions(
             loadavg_reader=lambda: (1.2, 1.1, 1.0),
+            io_pressure_reader=lambda: None,
             cpu_count_reader=lambda: LAB_HOST_CPU_COUNT,
             builder_cache_reader=_raises,
         )
@@ -283,6 +291,7 @@ class TestAC1UnreadableHostConditionsWiden:
         compose_files = _recorded_model(tmp_path)
         conditions = probe_host_conditions(
             loadavg_reader=lambda: (10.0, 10.0, 10.0),
+            io_pressure_reader=lambda: None,
             cpu_count_reader=lambda: 0,
             builder_cache_reader=lambda: EnumBuildCacheState.WARM,
         )
@@ -297,6 +306,7 @@ class TestAC1UnreadableHostConditionsWiden:
 
         conditions = probe_host_conditions(
             loadavg_reader=_raises,  # type: ignore[arg-type]
+            io_pressure_reader=lambda: None,
             cpu_count_reader=_raises,  # type: ignore[arg-type]
             builder_cache_reader=_raises,  # type: ignore[arg-type]
         )
@@ -313,6 +323,7 @@ class TestAC5BoundedAndFailClosedOnMutation:
         compose_files = _recorded_model(tmp_path)
         absurd = probe_host_conditions(
             loadavg_reader=lambda: (1_000_000.0, 1.0, 1.0),
+            io_pressure_reader=lambda: None,
             cpu_count_reader=lambda: 1,
             builder_cache_reader=lambda: EnumBuildCacheState.COLD,
         )
