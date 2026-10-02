@@ -184,6 +184,7 @@ migrations:
   forward/nodes/node_projection_claude_hook_events/0003_add_span_model_and_description.sql: expand-only
   forward/nodes/node_projection_claude_hook_events/0004_null_hashed_span_lineage.sql: forward-only # UPDATE
   forward/nodes/node_projection_claude_hook_events/0005_add_goal_id.sql: expand-only # additive: nullable uuid columns and a partial index
+  forward/nodes/node_projection_claude_hook_events/0006_add_lane_model_host_exit_code.sql: expand-only # additive: four nullable columns
   forward/nodes/node_projection_consumer_flow/0000_create_consumer_flow_windows.sql: forward-only # ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_consumer_flow/0001_add_projection_cursor.sql: forward-only # ALTER TABLE ALTER COLUMN; UNIQUE INDEX on an existing table
   forward/nodes/node_projection_consumer_flow/0001_reconcile_consumer_flow_window_columns.sql: forward-only # ALTER TABLE ALTER COLUMN
