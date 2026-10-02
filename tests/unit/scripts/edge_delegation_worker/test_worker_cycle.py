@@ -44,6 +44,8 @@ def _envelope(
     return ModelDelegationEnvelope(
         correlation_id=uuid4(),
         source_topic=topic,
+        source_partition=0,
+        source_offset=0,
         event_type="omnibase-infra.delegation-request",
         payload=payload,
     )

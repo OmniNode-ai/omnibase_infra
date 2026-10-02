@@ -102,14 +102,6 @@
     },
     {
       "pair": "kafka-consumer-commit-unbounded",
-      "path": "scripts/edge_delegation_worker/delegation_channel.py",
-      "line_sha256_12": "d8ecd33191aa",
-      "occurrences": 1,
-      "ticket": "OMN-18631",
-      "note": "await self._consumer.commit()"
-    },
-    {
-      "pair": "kafka-consumer-commit-unbounded",
       "path": "src/omnibase_infra/nodes/node_dlq_replay_effect/engine_dlq_replay.py",
       "line_sha256_12": "d8ecd33191aa",
       "occurrences": 1,
