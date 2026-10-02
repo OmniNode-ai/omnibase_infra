@@ -32,14 +32,24 @@
 #     restore precondition: only a HUMAN-set prior completed state is
 #     restorable -- automation-set or indeterminate provenance fails
 #     closed as SKIPPED_PRIOR_DONE_NOT_HUMAN_SET.
+#   - OMN-20368 (v1.2.0): a re-flip writes a Done state, and a Done state
+#     needs a PASS `dod_verify` receipt whose checks bind every acceptance
+#     criterion (the omnibase_core Done-write receipt rule, the same one the
+#     evidence-autoclose closer applies). After its existing guards the sweep
+#     now reads the ticket's current description, runs the verifier through
+#     `DoneWriteReceiptGuard` and, without a bound PASS receipt, leaves the
+#     ticket alone and records SKIPPED_NO_BOUND_RECEIPT (counted under
+#     tickets_skipped; dry run previews it). Every verifier failure (no launch,
+#     timeout, no JSON, no declared arm, no verdict) refuses alike. The request
+#     and result model fields are unchanged; the decision enum gains one value.
 #
 name: "node_sync_revert_watchdog_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 1
+  minor: 2
   patch: 0
-node_version: "1.1.0"
+node_version: "1.2.0"
 description: >
   Scheduled sweep detecting and correcting Linear's silent GitHub-sync Done-revert pattern (OMN-16536). Enumerates a team's recently-updated tickets, walks each ticket's FULL history newest-first (forward `first`/`after` pagination -- OMN-16762), finds the latest completed->non-completed transition, and classifies it via Linear's own actorId/botActor automation signature plus three fail-closed guards: no human comment nearby, no later human state change, and the restored completed state must itself have been human-set. Re-flips + comments only when all three clear. DRY-RUN by default; ONEX_SYNC_REVERT_WATCHDOG_DISABLED kill switch checked first.
 
@@ -136,6 +146,10 @@ dependencies:
     type: "library"
     library: "httpx"
     description: "Async HTTP client for the Linear GraphQL API."
+  - name: "dod_verify_receipt_guard"
+    type: "service"
+    description: "OMN-20368: `onex skill dod_verify <ticket> --execution-audience hosted`, run through DoneWriteReceiptGuard before a re-flip writes Done. A missing or unreadable verifier refuses the re-flip (SKIPPED_NO_BOUND_RECEIPT)."
+    required: false
 # Health check
 health_check:
   enabled: true
