@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import ast
 import json
+import signal
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -45,6 +46,7 @@ from omnibase_core.errors.model_onex_error import ModelOnexError
 from omnibase_infra.backends.auto_configure import EventBusResolutionAmbiguousError
 from omnibase_infra.cli import cli_delegate
 from omnibase_infra.cli.cli_delegate import (
+    DelegateCallerInterruptedError,
     DelegateCommand,
     DelegateTimeoutExceededError,
     delegate_command,
@@ -366,6 +368,14 @@ BRANCH_CASES: dict[str, BranchCase] = {
             "run_receipt_mode": _raises(
                 DelegateTimeoutExceededError("delegation exceeded its hard bound")
             ),
+        },
+    ),
+    "caller-interrupted": BranchCase(
+        covers="except DelegateCallerInterruptedError",
+        args=lambda tmp: _common(tmp),
+        reason="ended by SIGTERM",
+        patches={
+            "run_receipt_mode": _raises(DelegateCallerInterruptedError(signal.SIGTERM)),
         },
     ),
     "exit-without-a-receipt": BranchCase(
