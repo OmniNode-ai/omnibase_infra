@@ -1,0 +1,157 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20207 lab-tenant lane: a satellite host runs ONLY the runtime pair, as a
+# tenant of the .201 dev lane's shared Postgres, Redpanda and Valkey.
+#
+# Operator, 2026-09-30 ~22:55Z (OPERATOR-CONSENT, rolling ledger row 19808):
+# "all they need is the runtime" / "they can be tenants of the lab".
+#
+# RENDER (on the satellite, from its deployed dogfood bundle):
+#
+#   python3 scripts/render_lab_tenant_env.py --host <lab-101|lab-105> \
+#     --operator-env-file <host operator env> > <lab-tenant env file>
+#   docker compose -p omnibase-infra-lab-tenant \
+#     --env-file <dogfood .env> --env-file <dogfood operator env> \
+#     --env-file docker/runtime-policy.env --env-file <lab-tenant env file> \
+#     -f docker/docker-compose.dogfood.yml -f docker/docker-compose.lab-tenant.yml \
+#     --profile dogfood up -d omninode-runtime runtime-effects
+#
+# WHY AN OVERLAY ON THE DOGFOOD FILE
+#   The runtime pair a satellite runs today IS the dogfood file's pair: the same
+#   image, policy env, Bifrost overlay and strict-wiring binding. Copying 600
+#   lines to change where the pair's dependencies live would guarantee the copy
+#   drifts. So the pair is inherited and only three things are spelled here:
+#   a fence, the tenant's addresses, and a new identity.
+#
+# 1. THE FENCE. Every dogfood service that is not the runtime pair moves to a
+#    never-enabled profile: Postgres, Redpanda, its partition-cap one-shot,
+#    Valkey, the three migration services, the projection API and the two
+#    delegation fault fixtures. A `--profile dogfood up` of this project cannot
+#    create a dependency server, and `depends_on` is reset on the pair because
+#    compose refuses to start a service whose dependency is profile-disabled.
+#    The tenant's databases are migrated on .201 by the provisioning step, as
+#    the pre-PR slots' are, so no migration one-shot runs here and the
+#    satellite never holds the shared server's superuser credential.
+#
+# 2. THE TENANT'S ADDRESSES. Every value comes from deploy/lab/satellite-tenants.yaml
+#    through scripts/render_lab_tenant_env.py and is spelled `:?` here, with no
+#    default: an unset value aborts the render instead of starting a runtime on
+#    the dev lane's own namespace. Every DSN names the tenant's own role; none
+#    interpolates POSTGRES_USER, so no connection is the superuser and forced
+#    row-level security on the tenant tables stays enforced.
+#
+# 3. A NEW IDENTITY. Its own compose project, container names, network and
+#    volumes, so the dogfood project on the same host is untouched (its
+#    containers are stopped, never removed, once this pair is proven) and the
+#    rollback is `stop` here plus `start` there. ONEX_BOX_ID and the runtime
+#    addresses name the satellite; the dogfood file's omninode-pc is .201's.
+#
+# A PREMISE FOR NOTHING: not in GOVERNED_LANES or GRANT_INTERLOCK_LANES
+# (scripts/preflight_lane_deploy_attribution.py), sources no stability-proven
+# digest. Ports bind the loopback address only: 44085 main, 44086 effects,
+# read free by lsof on h101 and h105 on 2026-09-30.
+name: omnibase-infra-lab-tenant
+x-lab-tenant-fenced: &lab_tenant_fenced
+  profiles: !override ["lab-tenant-never-start-a-dependency"]
+x-lab-tenant-env: &lab_tenant_env
+  POSTGRES_HOST: "${LAB_TENANT_DEPENDENCY_HOST:?LAB_TENANT_DEPENDENCY_HOST must be set - rendered from deploy/lab/satellite-tenants.yaml by scripts/render_lab_tenant_env.py}"
+  POSTGRES_PORT: "${LAB_TENANT_POSTGRES_PORT:?LAB_TENANT_POSTGRES_PORT must be set}"
+  # HandlerRegistrationStoragePostgres reads the discrete POSTGRES_* variables
+  # rather than a DSN (OMN-9060); left at the dogfood default it would be the
+  # only superuser connection on a tenant whose every other one is fenced.
+  POSTGRES_USER: "role_omnibase_${LAB_TENANT_DB_SLOT:?LAB_TENANT_DB_SLOT must be set - the tenant's provision_db_slot.sh token}"
+  POSTGRES_PASSWORD: "${LAB_TENANT_ROLE_OMNIBASE_PASSWORD:?LAB_TENANT_ROLE_OMNIBASE_PASSWORD must be set in the host operator env file}"
+  POSTGRES_DB: "omnibase_infra_${LAB_TENANT_DB_SLOT}"
+  OMNIBASE_INFRA_DB_URL: "postgresql://role_omnibase_${LAB_TENANT_DB_SLOT}:${LAB_TENANT_ROLE_OMNIBASE_PASSWORD}@${LAB_TENANT_DEPENDENCY_HOST}:${LAB_TENANT_POSTGRES_PORT}/omnibase_infra_${LAB_TENANT_DB_SLOT}"
+  OMNIINTELLIGENCE_DB_URL: "postgresql://role_omniintelligence_${LAB_TENANT_DB_SLOT}:${LAB_TENANT_ROLE_OMNIINTELLIGENCE_PASSWORD:?LAB_TENANT_ROLE_OMNIINTELLIGENCE_PASSWORD must be set}@${LAB_TENANT_DEPENDENCY_HOST}:${LAB_TENANT_POSTGRES_PORT}/omniintelligence_${LAB_TENANT_DB_SLOT}"
+  OMNIDASH_ANALYTICS_DB_URL: "postgresql://role_omnidash_${LAB_TENANT_DB_SLOT}:${LAB_TENANT_ROLE_OMNIDASH_PASSWORD:?LAB_TENANT_ROLE_OMNIDASH_PASSWORD must be set}@${LAB_TENANT_DEPENDENCY_HOST}:${LAB_TENANT_POSTGRES_PORT}/omnidash_analytics_${LAB_TENANT_DB_SLOT}"
+  OMNIMEMORY_DB_URL: "postgresql://role_omnimemory_${LAB_TENANT_DB_SLOT}:${LAB_TENANT_ROLE_OMNIMEMORY_PASSWORD:?LAB_TENANT_ROLE_OMNIMEMORY_PASSWORD must be set}@${LAB_TENANT_DEPENDENCY_HOST}:${LAB_TENANT_POSTGRES_PORT}/omnimemory_${LAB_TENANT_DB_SLOT}"
+  OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime_${LAB_TENANT_DB_SLOT}:${LAB_TENANT_OMNINODE_RUNTIME_PASSWORD:?LAB_TENANT_OMNINODE_RUNTIME_PASSWORD must be set}@${LAB_TENANT_DEPENDENCY_HOST}:${LAB_TENANT_POSTGRES_PORT}/omnidash_analytics_${LAB_TENANT_DB_SLOT}"
+  ONEX_TENANT_DB_URL: "postgresql://tenant_projection_writer_${LAB_TENANT_DB_SLOT}:${LAB_TENANT_TENANT_PROJECTION_WRITER_PASSWORD:?LAB_TENANT_TENANT_PROJECTION_WRITER_PASSWORD must be set}@${LAB_TENANT_DEPENDENCY_HOST}:${LAB_TENANT_POSTGRES_PORT}/omnidash_analytics_${LAB_TENANT_DB_SLOT}"
+  ONEX_DB_SLOT: "${LAB_TENANT_DB_SLOT}"
+  KAFKA_BOOTSTRAP_SERVERS: "${LAB_TENANT_DEPENDENCY_HOST}:${LAB_TENANT_KAFKA_PORT:?LAB_TENANT_KAFKA_PORT must be set}"
+  KAFKA_BROKER_ALLOWLIST: "${LAB_TENANT_DEPENDENCY_HOST}:"
+  KAFKA_SECURITY_PROTOCOL: "${LAB_TENANT_KAFKA_SECURITY_PROTOCOL:?LAB_TENANT_KAFKA_SECURITY_PROTOCOL must be set}"
+  KAFKA_SASL_MECHANISM: "${LAB_TENANT_KAFKA_SASL_MECHANISM:?LAB_TENANT_KAFKA_SASL_MECHANISM must be set}"
+  KAFKA_SASL_USERNAME: "${LAB_TENANT_KAFKA_SASL_USERNAME:?LAB_TENANT_KAFKA_SASL_USERNAME must be set - the tenant's own bus principal, never the dev lane's superuser}"
+  KAFKA_SASL_PASSWORD: "${LAB_TENANT_KAFKA_SASL_PASSWORD:?LAB_TENANT_KAFKA_SASL_PASSWORD must be set in the host operator env file}"
+  KAFKA_TOPIC_NAMESPACE: "${LAB_TENANT_TOPIC_NAMESPACE:?LAB_TENANT_TOPIC_NAMESPACE must be set - tenant-<slug>, the onex-api tenant topic ACL prefix}"
+  KAFKA_ENVIRONMENT: "${LAB_TENANT_TOPIC_NAMESPACE}"
+  VALKEY_HOST: "${LAB_TENANT_DEPENDENCY_HOST}"
+  VALKEY_PORT: "${LAB_TENANT_VALKEY_PORT:?LAB_TENANT_VALKEY_PORT must be set}"
+  VALKEY_DB: "${LAB_TENANT_VALKEY_DB_INDEX:?LAB_TENANT_VALKEY_DB_INDEX must be set}"
+  VALKEY_PASSWORD: "${LAB_TENANT_VALKEY_PASSWORD:?LAB_TENANT_VALKEY_PASSWORD must be set in the host operator env file}"
+  ONEX_BOX_ID: "${LAB_TENANT_BOX_ID:?LAB_TENANT_BOX_ID must be set - this satellite's own box id, never the .201 box id}"
+services:
+  postgres: *lab_tenant_fenced
+  redpanda: *lab_tenant_fenced
+  redpanda-partition-cap: *lab_tenant_fenced
+  valkey: *lab_tenant_fenced
+  forward-migration: *lab_tenant_fenced
+  migration-gate: *lab_tenant_fenced
+  intelligence-migration: *lab_tenant_fenced
+  projection-api: *lab_tenant_fenced
+  dogfood-delegation-fault-429: *lab_tenant_fenced
+  dogfood-delegation-fault-503: *lab_tenant_fenced
+  omninode-runtime:
+    container_name: omninode-lab-tenant-runtime
+    image: "${LAB_TENANT_RUNTIME_IMAGE:?LAB_TENANT_RUNTIME_IMAGE must name the runtime image already on this host; this lane never builds}"
+    depends_on: !reset {}
+    environment:
+      !!merge <<: *lab_tenant_env
+      ONEX_RUNTIME_ADDRESS: "runtime://${LAB_TENANT_BOX_ID}/lab-tenant/main"
+      OTEL_SERVICE_NAME: omninode-lab-tenant-runtime-main
+      ONEX_RUNTIME_ID: lab-tenant-main
+      ONEX_GROUP_ID: "${LAB_TENANT_TOPIC_NAMESPACE}.runtime-main"
+      KAFKA_INSTANCE_ID: lab-tenant-main
+    ports: !override
+      - "127.0.0.1:44085:8085"
+    volumes: !override
+      - lab_tenant_runtime_logs:/app/logs
+      - lab_tenant_runtime_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dogfood.bifrost.yaml:/app/config/delegation/dogfood.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    labels: !override
+      - "com.omninode.lane=lab-tenant"
+      - "com.omninode.ticket=OMN-20207"
+      - "com.omninode.lane.class=lab-tenant"
+      - "com.omninode.runtime.id=lab-tenant-main"
+  runtime-effects:
+    container_name: omninode-lab-tenant-runtime-effects
+    image: "${LAB_TENANT_EFFECTS_IMAGE:?LAB_TENANT_EFFECTS_IMAGE must name the effects image already on this host; this lane never builds}"
+    depends_on: !reset {}
+    environment:
+      !!merge <<: *lab_tenant_env
+      ONEX_RUNTIME_ADDRESS: "runtime://${LAB_TENANT_BOX_ID}/lab-tenant/effects"
+      OTEL_SERVICE_NAME: omninode-lab-tenant-runtime-effects
+      ONEX_RUNTIME_ID: lab-tenant-effects
+      ONEX_GROUP_ID: "${LAB_TENANT_TOPIC_NAMESPACE}.runtime-effects"
+      KAFKA_INSTANCE_ID: lab-tenant-effects
+      OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "${LAB_TENANT_DEPENDENCY_HOST}:${LAB_TENANT_KAFKA_PORT}"
+    ports: !override
+      - "127.0.0.1:44086:8085"
+    volumes: !override
+      - lab_tenant_effects_logs:/app/logs
+      - lab_tenant_effects_data:/app/data
+      - ../contracts:/app/contracts:ro
+      - ./lane-overlays/dogfood.bifrost.yaml:/app/config/delegation/dogfood.bifrost.yaml:ro
+      - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
+    labels: !override
+      - "com.omninode.lane=lab-tenant"
+      - "com.omninode.ticket=OMN-20207"
+      - "com.omninode.lane.class=lab-tenant"
+      - "com.omninode.runtime.id=lab-tenant-effects"
+networks:
+  omnibase-infra-dogfood-network:
+    name: omnibase-infra-lab-tenant-network
+volumes:
+  lab_tenant_runtime_logs:
+    name: omninode-lab-tenant-runtime-logs
+  lab_tenant_runtime_data:
+    name: omninode-lab-tenant-runtime-data
+  lab_tenant_effects_logs:
+    name: omninode-lab-tenant-effects-logs
+  lab_tenant_effects_data:
+    name: omninode-lab-tenant-effects-data

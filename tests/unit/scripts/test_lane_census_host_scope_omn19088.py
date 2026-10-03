@@ -253,7 +253,7 @@ def test_the_101_replay_reports_only_its_own_lane() -> None:
     """
     plan = PLAN.build_plan(_dogfood_on(_HOST_101), MANIFEST)
     assert plan["host"] == "lab-101"
-    assert plan["lanes_checked"] == ["dogfood"]
+    assert plan["lanes_checked"] == ["dogfood", "lab-tenant"]
     assert set(plan["lanes_not_applicable"]) == _LANES_OFF_DOGFOOD_HOSTS | _LANES_105
     assert plan["findings"] == []
     assert plan["has_drift"] is False
@@ -282,7 +282,7 @@ def test_two_hosts_each_return_findings_only_for_their_own_lanes() -> None:
     assert lanes_201 <= _LANES_201
     assert "dogfood" in plan_201["lanes_not_applicable"]
 
-    assert {f["lane"] for f in plan_105["findings"]} <= {"dogfood"}
+    assert {f["lane"] for f in plan_105["findings"]} <= {"dogfood", "lab-tenant"}
     assert set(plan_105["lanes_not_applicable"]) == _LANES_OFF_DOGFOOD_HOSTS
 
 
@@ -433,7 +433,7 @@ def test_the_driver_scopes_to_the_host_it_runs_on(tmp_path: Path) -> None:
     assert proc.returncode in (0, 30), (proc.returncode, proc.stderr)
     plan = json.loads(proc.stdout.splitlines()[0])
     assert plan["host"] == "lab-105"
-    assert sorted(plan["lanes_checked"]) == ["dev-105", "dogfood"]
+    assert sorted(plan["lanes_checked"]) == ["dev-105", "dogfood", "lab-tenant"]
 
 
 # --- the planner run on its own, as the manifest's hand recipe runs it ----------

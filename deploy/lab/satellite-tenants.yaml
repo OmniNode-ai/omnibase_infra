@@ -1,0 +1,82 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Lab satellite hosts that run ONLY a runtime, as tenants of the .201 dev lane
+# (OMN-20207).
+#
+# WHAT THIS IS
+#   h101 (stickybeatz) and h105 (omnibook) each ran a whole dogfood stack: its
+#   own Postgres, Redpanda, Valkey, migrations and projection API beside the
+#   runtime pair. Operator, 2026-09-30 ~22:55Z (OPERATOR-CONSENT row 19808 of
+#   the rolling ledger): "all they need is the runtime" / "they can be tenants
+#   of the lab". This file declares, per host, the tenant resources that host's
+#   runtime uses on the .201 dev lane's shared servers, so the runtime-only
+#   overlay (docker/docker-compose.lab-tenant.yml) reads every per-host value
+#   from here and nothing per-host is spelled in the compose file.
+#
+# WHO READS IT
+#   scripts/render_lab_tenant_env.py renders one row into the non-secret env
+#   file the overlay's `:?` references need. Secrets are never in this file:
+#   `secret_env` names the variables the host's operator env file must carry
+#   (the tenant's own database roles, its bus login and the Valkey password),
+#   and the renderer refuses to render when any is absent.
+#
+# ISOLATION, PER AXIS (each value is the tenant's own, never the dev lane's)
+#   * bus topics:  KAFKA_TOPIC_NAMESPACE prefixes every physical topic
+#                  (OMN-18891) with `tenant-<slug>.`, the exact prefix onex-api's
+#                  tenant ACLs grant (kafka_acl_manager TENANT_TOPIC_PREFIX_TEMPLATE).
+#   * bus groups:  KAFKA_ENVIRONMENT composes every consumer group as
+#                  `tenant-<slug>.<service>...`, the tenant group ACL prefix.
+#   * bus login:   the tenant's own SCRAM principal, never the dev lane's
+#                  superuser. No sanctioned path issues one yet: see `gaps`.
+#   * database:    the tenant's own database set on the shared server, made by
+#                  scripts/provision_db_slot.sh with ONEX_DB_SLOT=<db_slot>; its
+#                  roles are non-superuser and non-BYPASSRLS (OMN-18892).
+#   * Valkey:      its own logical index (the pre-PR slots hold 1 and 2).
+#   * identity:    ONEX_BOX_ID and the runtime addresses name THIS host. The
+#                  dogfood file hardcodes omninode-pc, which is .201's identity.
+#
+# A PREMISE FOR NOTHING: a tenant runtime is outside GOVERNED_LANES and
+# GRANT_INTERLOCK_LANES and sources no stability-proven digest.
+schema: lab-satellite-tenants.v1
+# The lane whose shared servers every tenant below uses. Addresses are the
+# lane's external listeners as a satellite (and its Docker VM) reaches them over
+# the tailnet; read 2026-09-30 from h101 and h105 and from inside their VMs.
+dependency_lane:
+  lane: dev
+  compose_project: omnibase-infra
+  host: omninode-pc.tail75df5e.ts.net
+  postgres_port: 5436
+  kafka_port: 19092
+  kafka_security_protocol: SASL_PLAINTEXT
+  kafka_sasl_mechanism: SCRAM-SHA-256
+  valkey_port: 16379
+tenants:
+  - host: lab-105
+    hostname: omnibook
+    tenant_slug: lab-h105
+    db_slot: labh105
+    valkey_db_index: 3
+  - host: lab-101
+    hostname: Stickybeatz.local
+    tenant_slug: lab-h101
+    db_slot: labh101
+    valkey_db_index: 4
+# Variables every tenant host's operator env file must carry. Values never
+# appear in any repository, ledger row or log.
+secret_env:
+  - LAB_TENANT_KAFKA_SASL_USERNAME
+  - LAB_TENANT_KAFKA_SASL_PASSWORD
+  - LAB_TENANT_ROLE_OMNIBASE_PASSWORD
+  - LAB_TENANT_ROLE_OMNIINTELLIGENCE_PASSWORD
+  - LAB_TENANT_ROLE_OMNIDASH_PASSWORD
+  - LAB_TENANT_ROLE_OMNIMEMORY_PASSWORD
+  - LAB_TENANT_OMNINODE_RUNTIME_PASSWORD
+  - LAB_TENANT_TENANT_PROJECTION_WRITER_PASSWORD
+  - LAB_TENANT_VALKEY_PASSWORD
+# Known product gaps that keep a host on its local stack until closed.
+gaps:
+  - id: tenant-bus-login
+    summary: >-
+      No sanctioned path issues a tenant runtime its own SCRAM login and prefix ACLs on the dev-lane broker. onex-api's Redpanda ACL provider posts to an Admin API route Redpanda does not serve (404 on /v1/security/acls, v24.2.7), the dev lane's onex-api has no REDPANDA_ADMIN_URL so both existing tenants read acl_state DEFERRED_PENDING_MSK_ACLS, and scripts/lab_principal_issuer.py issues developer devices only, for delegate topics only.
+    ticket: OMN-20207

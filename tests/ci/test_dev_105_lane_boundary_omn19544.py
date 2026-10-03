@@ -388,17 +388,18 @@ def test_dev_105_lane_boundary_host_resolves_and_carries_dev_105() -> None:
     lanes_on_host = sorted(
         name for name, spec in manifest["lanes"].items() if HOST_ID in spec["hosts"]
     )
-    assert lanes_on_host == ["dev-105", "dogfood"]
+    assert lanes_on_host == ["dev-105", "dogfood", "lab-tenant"]
 
 
 def test_dev_105_lane_boundary_census_on_105_reads_clean() -> None:
     plan = _plan_on_105(_healthy_dev_105_rows(), [NETWORK])
     manifest = _manifest()
     assert plan["host"] == HOST_ID
-    assert sorted(plan["lanes_checked"]) == ["dev-105", "dogfood"]
+    assert sorted(plan["lanes_checked"]) == ["dev-105", "dogfood", "lab-tenant"]
     assert set(plan["lanes_not_applicable"]) == set(manifest["lanes"]) - {
         "dev-105",
         "dogfood",
+        "lab-tenant",
     }
     assert plan["findings"] == []
     assert plan["has_drift"] is False

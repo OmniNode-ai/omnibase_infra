@@ -278,6 +278,10 @@ NOT_RUNTIME_PATH_REASONS: dict[str, dict[str, str]] = {
         "docker/docker-compose.sim-202.yml": (
             "the sim-202 lane on .202, brought up by hand, never by a rebuild"
         ),
+        "docker/docker-compose.lab-tenant.yml": (
+            "the lab-tenant runtime pair on .101 and .105, brought up by hand "
+            "from the host's dogfood bundle, never by a rebuild"
+        ),
         "docker/docker-compose.dogfood.yml": (
             "the dogfood lanes on .101, .105 and .200, brought up by their "
             "owners, never by a rebuild"
