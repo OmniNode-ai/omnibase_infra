@@ -271,6 +271,7 @@ __all__ = [
     "build_backend_overrides",
     "resolve_default_bus",
     "load_supported_criteria",
+    "resolve_prompt_source",
     "run_delegate",
     "validate_request_against_contract",
 ]
@@ -2439,6 +2440,46 @@ def _timeout_receipt(
     )
 
 
+_STDIN_PROMPT_MARKER = "-"
+
+
+def resolve_prompt_source(prompt: str | None, prompt_file: str | None) -> str:
+    """Return the prompt text from the argument, a file, or stdin, unchanged.
+
+    The positional argument is bound by the OS limit on one command-line
+    argument (``MAX_ARG_STRLEN``, 128 KB on Linux), so a long multi-file task
+    cannot ride on it. ``--prompt-file PATH`` and ``-`` (on either the argument
+    or the flag) read the same text from a file or stdin and hand it to the
+    request path exactly as the argument would have: no stripping, no newline
+    translation.
+
+    Raises:
+        click.UsageError: both or neither source was given, the file cannot be
+            read as UTF-8, or the file or stdin held no text.
+    """
+    if prompt is not None and prompt_file is not None:
+        raise click.UsageError("Give either PROMPT or --prompt-file, not both.")
+    if prompt is None and prompt_file is None:
+        raise click.UsageError(
+            "Missing prompt: give PROMPT, --prompt-file PATH, or '-' to read stdin."
+        )
+    if prompt is not None and prompt != _STDIN_PROMPT_MARKER:
+        return prompt
+    source = prompt_file if prompt_file is not None else _STDIN_PROMPT_MARKER
+    try:
+        if source == _STDIN_PROMPT_MARKER:
+            text = sys.stdin.buffer.read().decode("utf-8")
+        else:
+            text = Path(source).read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        label = "stdin" if source == _STDIN_PROMPT_MARKER else repr(source)
+        raise click.UsageError(f"Cannot read the prompt from {label}: {exc}") from exc
+    if not text:
+        label = "stdin" if source == _STDIN_PROMPT_MARKER else repr(source)
+        raise click.UsageError(f"The prompt read from {label} is empty.")
+    return text
+
+
 # OMN-19006: every invocation that parses arguments leaves a receipt.
 #
 # ``receipt.json`` is the one surface every caller is told to read, and a
@@ -2763,7 +2804,20 @@ class DelegateCommand(click.Command):
 
 
 @click.command("delegate", cls=DelegateCommand)
-@click.argument("prompt")
+@click.argument("prompt", required=False)
+@click.option(
+    "--prompt-file",
+    "prompt_file",
+    type=str,
+    default=None,
+    help=(
+        "Read the prompt from this file, or from stdin when it is '-', instead "
+        "of taking it as the PROMPT argument. The text is passed through "
+        "unchanged, so it is not bound by the operating system's limit on one "
+        "command-line argument (about 128 KB on Linux). Give either PROMPT or "
+        "--prompt-file, not both; a PROMPT of '-' also reads stdin."
+    ),
+)
 @click.option(
     "--task-type",
     "task_type",
@@ -3063,7 +3117,8 @@ class DelegateCommand(click.Command):
     ),
 )
 def delegate_command(
-    prompt: str,
+    prompt: str | None,
+    prompt_file: str | None,
     task_type: str | None,
     task_class_alias: str | None,
     backend_id: str | None,
@@ -3127,6 +3182,8 @@ def delegate_command(
     Examples:
         onex delegate "explain what a calendar app needs"
         onex delegate "say hello in one word" --json  # force JSON on a terminal
+        onex delegate --prompt-file task.md --task-type code_generation
+        cat task.md | onex delegate - --task-type code_generation
         onex delegate "write a Python HTTP server" --task-type code_generation
         onex delegate "analyze the routing architecture" --max-tokens 4096
         onex delegate "hand off from the external client" --source external-client
@@ -3145,6 +3202,7 @@ def delegate_command(
     # parsing began, and files the receipt for any refusal under it, so the
     # body runs under the same ids rather than minting a second pair.
     run_id, correlation_id = _invocation_identity(click.get_current_context())
+    prompt = resolve_prompt_source(prompt, prompt_file)
     try:
         resolved_state_root = resolve_state_root(state_root)
     except ProtocolConfigurationError as exc:
