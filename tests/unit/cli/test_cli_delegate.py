@@ -1046,7 +1046,7 @@ class TestHardTimeoutBackstop:
         def _swallowing_run_receipt_mode(**_kwargs: object) -> int:
             exit_code = 1  # pre-initialized, exactly like receipt_mode.py:505
             try:
-                time.sleep(10)  # stands in for the hanging runtime.run() call
+                time.sleep(30)  # stands in for the hanging runtime.run() call
                 exit_code = 0  # pragma: no cover - never reached within the bound
             except Exception:
                 # Mirrors receipt_mode.py's real shape exactly (including the
@@ -1084,7 +1084,10 @@ class TestHardTimeoutBackstop:
         captured = capsys.readouterr()
 
         assert exit_code == 1
-        assert elapsed < 5, f"hung call was not aborted within bound: {elapsed}s"
+        # OMN-17427: the timeout path now files its receipts with fsync, so the
+        # bound leaves room for disk latency under -n auto; the 30 s hang is
+        # still cut short by a wide margin.
+        assert elapsed < 10, f"hung call was not aborted within bound: {elapsed}s"
         # The clear-error contract must fire from run_delegate's own
         # DelegateTimeoutExceededError handler — not an accidental exit code
         # falling out of the stub's own pre-initialized `exit_code = 1` after
