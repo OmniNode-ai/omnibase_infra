@@ -61,6 +61,27 @@ REAL_LISTENER_TAIL = (
     REPO_ROOT / "tests" / "ci" / "fixtures" / "runner_diag_real_tail.log.gz"
 )
 
+# OMN-20408: byte-faithful contiguous slices of two REAL runner 2.336.0 logs read
+# from the .201 fleet on 2026-10-03 (read-only docker exec), never edited. The
+# runner prints "Runner connect error" ONCE on the first consecutive failure and
+# writes no recovery line:
+#   * silent recovery: omninode-runner-1's Runner_20260930-213635-utc.log, from
+#     the 16:08:37Z connect error through retry traffic to the
+#     "Acknowledging runner request" / "Running job:" lines at 16:19-16:20Z.
+#   * idle quiet: omninode-deploy-runner's Runner_20260930-213637-utc.log, from
+#     the 15:55:34Z connect error through retry traffic to the log going quiet
+#     (the runner had 0 jobs, so no job line ever follows).
+REAL_2336_SILENT_RECOVERY = (
+    REPO_ROOT
+    / "tests"
+    / "ci"
+    / "fixtures"
+    / "runner_diag_real_2336_silent_recovery.log.gz"
+)
+REAL_2336_IDLE_QUIET = (
+    REPO_ROOT / "tests" / "ci" / "fixtures" / "runner_diag_real_2336_idle_quiet.log.gz"
+)
+
 
 def _run_healthcheck(
     runner_home: Path,
@@ -69,6 +90,7 @@ def _run_healthcheck(
     max_starts_per_hour: str | None = None,
     max_session_broken: str | None = None,
     session_state_check: str | None = None,
+    retry_quiet: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run healthcheck.sh against ``runner_home``.
 
@@ -87,6 +109,7 @@ def _run_healthcheck(
         ("RUNNER_HEALTH_MAX_LOG_STARTS_PER_HOUR", max_starts_per_hour),
         ("RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS", max_session_broken),
         ("RUNNER_HEALTH_SESSION_STATE_CHECK", session_state_check),
+        ("RUNNER_HEALTH_SESSION_RETRY_QUIET_SECONDS", retry_quiet),
     ):
         if value is None:
             env.pop(name, None)
@@ -1016,6 +1039,148 @@ class TestHealthcheckAgainstARealListenerLog:
         # The genuinely-broken markers must survive the narrowing.
         assert "Runner connect error" in patterns
         assert "TaskAgentSessionConflictException" in patterns
+
+
+def _make_newest_log_with_mtime(
+    runner_home: Path, body: str, age_seconds: float
+) -> Path:
+    """Write the newest Runner_*.log and back-date its mtime by ``age_seconds``.
+
+    Every other Runner_*.log is aged further back so the back-dated log is still
+    the one ``ls -t`` picks, while staying inside the layer-3 heartbeat window.
+    """
+    path = _write_session_log(runner_home, body)
+    now = time.time()
+    for existing in (runner_home / "_diag").glob("Runner_*.log"):
+        if existing != path:
+            os.utime(existing, (now - 3000, now - 3000))
+    os.utime(path, (now - age_seconds, now - age_seconds))
+    return path
+
+
+class TestHealthcheckRunner2336SilentRecovery:
+    """OMN-20408: runner 2.336.0 recovers from a dropped session WITHOUT a line.
+
+    Measured 2026-10-03 on the .201 fleet: every runner (busy or idle) read
+    Docker-unhealthy with the layer 3b message although the runners worked
+    (omninode-runner-1 ran 353 jobs). 2.336.0 prints ``Runner connect error``
+    once on the first consecutive failure, retries silently, and on recovery
+    writes none of the old connected markers (``Runner reconnected``,
+    ``Job message received`` count 0 in the newest log of all 48 containers).
+    The stamp was therefore never cleared and the grace always elapsed.
+    """
+
+    def _run(
+        self, home: Path, *, body: bytes, log_age: float, **kwargs: str
+    ) -> subprocess.CompletedProcess[str]:
+        listener = home / "bin" / "Runner.Listener"
+        proc = subprocess.Popen([str(listener)])
+        try:
+            time.sleep(0.5)
+            _make_newest_log_with_mtime(
+                home, gzip.decompress(body).decode("utf-8"), log_age
+            )
+            _age_stamp(home, 1800)
+            return _run_healthcheck(home, max_diag_age=None, **kwargs)
+        finally:
+            proc.kill()
+
+    def test_silent_recovery_reads_healthy_and_clears_stamp(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """Connect error, retry traffic, then ack + ``Running job:`` => healthy.
+
+        The log mtime is FRESH, so this is the connected-marker path, not the
+        retry-quiet path.
+        """
+        result = self._run(
+            synthetic_runner_home,
+            body=REAL_2336_SILENT_RECOVERY.read_bytes(),
+            log_age=0,
+        )
+        assert result.returncode == 0, (
+            "a session that carries Acknowledging runner request / Running job "
+            f"after its last connect error is connected: out={result.stdout}"
+        )
+        assert not (synthetic_runner_home / "_diag" / SESSION_STAMP_NAME).exists()
+
+    def test_retry_quiet_reads_healthy_and_clears_stamp(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """Idle runner: last marker is the connect error, retries stopped.
+
+        mtime 1200s old is outside the default 600s quiet window.
+        """
+        result = self._run(
+            synthetic_runner_home,
+            body=REAL_2336_IDLE_QUIET.read_bytes(),
+            log_age=1200,
+        )
+        assert result.returncode == 0, (
+            "a log whose retry traffic stopped >600s ago is a recovered session: "
+            f"out={result.stdout}"
+        )
+        assert not (synthetic_runner_home / "_diag" / SESSION_STAMP_NAME).exists()
+
+    def test_still_broken_with_fresh_retry_traffic_reads_unhealthy(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """Counterpart: same log, but still being written => still broken.
+
+        Green against origin/dev too (it already fails here); it pins that the
+        retry-quiet rule does not swallow a session that is still retrying.
+        """
+        result = self._run(
+            synthetic_runner_home,
+            body=REAL_2336_IDLE_QUIET.read_bytes(),
+            log_age=0,
+        )
+        assert result.returncode == 1, result.stdout
+        assert "broker session" in result.stdout.lower()
+
+    def test_retry_quiet_window_is_a_tunable_boundary(
+        self, synthetic_runner_home: Path
+    ) -> None:
+        """300s of quiet is inside the default 600s window => still broken;
+        the same log with a 120s window is quiet enough => healthy."""
+        body = REAL_2336_IDLE_QUIET.read_bytes()
+        inside = self._run(synthetic_runner_home, body=body, log_age=300)
+        assert inside.returncode == 1, inside.stdout
+        outside = self._run(
+            synthetic_runner_home, body=body, log_age=300, retry_quiet="120"
+        )
+        assert outside.returncode == 0, outside.stdout
+
+    @pytest.mark.parametrize("bad", ["0", "-5", "ten", "1.5"])
+    def test_invalid_retry_quiet_fails_closed(
+        self, synthetic_runner_home: Path, bad: str
+    ) -> None:
+        result = self._run(
+            synthetic_runner_home,
+            body=REAL_2336_IDLE_QUIET.read_bytes(),
+            log_age=1200,
+            retry_quiet=bad,
+        )
+        assert result.returncode == 1, result.stdout
+        assert "RETRY_QUIET_SECONDS" in result.stdout
+
+    def test_connected_vocabulary_has_the_2336_markers(self) -> None:
+        """Vocabulary guard: the markers 2.336.0 really writes on a live session,
+        plus the three older-runner ones, and still no SocketException."""
+        content = HEALTHCHECK.read_text(encoding="utf-8")
+        match = re.search(r"^\s*session_connected_patterns='([^']*)'", content, re.M)
+        assert match is not None, "session_connected_patterns must be literal"
+        patterns = match.group(1).split("|")
+        for marker in (
+            "Acknowledging runner request",
+            "Job request .* received",
+            "Running job:",
+            "Listening for Jobs",
+            "Runner reconnected",
+            "Job message received",
+        ):
+            assert marker in patterns, f"connected marker missing: {marker}"
+        assert not any("SocketException" in p for p in patterns)
 
 
 class TestEntrypointWatchdog:
