@@ -83,6 +83,21 @@ class ModelDelegateLocusDecision(BaseModel):
             "no deployed orchestrator to decide."
         ),
     )
+    downstream_command_topic: str = Field(
+        default="",
+        description=(
+            "Downstream chain command topic declared by the contract. Empty "
+            "when no chain is declared or the run is in-process."
+        ),
+    )
+    downstream_consumer_groups: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Consumer groups observed Stable on the downstream chain's command "
+            "topic at dispatch. Empty when no chain is declared or the run is "
+            "in-process."
+        ),
+    )
     consumer_bind_wait_seconds: float = Field(
         default=0.0,
         ge=0.0,
