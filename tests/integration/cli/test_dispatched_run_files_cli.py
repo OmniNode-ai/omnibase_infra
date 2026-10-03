@@ -182,14 +182,15 @@ class TestAnEmptyDirectoryIsNowLoud:
     def test_an_unresolvable_terminal_refuses_and_names_the_field(
         self, tmp_path: Path
     ) -> None:
+        receipt = self._receipt_without_a_terminal(
+            workflow=(
+                "/site-packages/omnimarket/nodes/"
+                "node_delegate_skill_orchestrator/contract.yaml"
+            )
+        )
         with pytest.raises(DelegateTerminalUnresolvedError) as raised:
             _write_local_run_files(
-                receipt=self._receipt_without_a_terminal(
-                    workflow=(
-                        "/site-packages/omnimarket/nodes/"
-                        "node_delegate_skill_orchestrator/contract.yaml"
-                    )
-                ),
+                receipt=receipt,
                 state_root=tmp_path,
                 addressing=_ADDRESSING,
                 prompt=_PROMPT,
@@ -197,7 +198,17 @@ class TestAnEmptyDirectoryIsNowLoud:
                 task_type_resolution="explicit",
             )
         assert "attempts" in str(raised.value)
-        assert not (tmp_path / "runs").exists()
+        # OMN-17427: the refusal still raises and still names the field. What
+        # changed is that the run is no longer left with nothing on disk: a
+        # ``failed`` receipt carries the same cause.
+        written = json.loads(
+            (tmp_path / "runs" / str(receipt.run_id) / "receipt.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert written["terminal_class"] == "failed"
+        assert written["terminal_recorded"] is False
+        assert "attempts" in written["failure_reason"]
 
     def test_another_nodes_run_is_still_silent(self, tmp_path: Path) -> None:
         """The refusal did not widen. Negative control on the class above."""
