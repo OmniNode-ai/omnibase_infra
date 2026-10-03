@@ -367,6 +367,61 @@ RUNTIME_MIGRATION_SERVICES: tuple[str, ...] = (
     "forward-migration",
     "migration-gate",
 )
+MIGRATION_TREE_PATHS: tuple[str, ...] = (
+    "docker/migrations",
+    "scripts/run-forward-migrations.sh",
+)
+
+
+def read_checkout_migration_fingerprint(repo_dir: str = REPO_DIR) -> str | None:
+    """Read the content identities of the checkout's migration tree and runner."""
+    try:
+        result = _run(
+            [
+                "git",
+                "-C",
+                repo_dir,
+                "rev-parse",
+                *[f"HEAD:{path}" for path in MIGRATION_TREE_PATHS],
+            ],
+            timeout=PHASE_TIMEOUTS[Phase.GIT],
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    objects = result.stdout.strip().splitlines()
+    if result.returncode != 0 or len(objects) != 2:
+        return None
+    return ":".join(objects)
+
+
+def read_applied_migration_fingerprint(
+    state_dir: Path, lane: EnumRuntimeLane
+) -> str | None:
+    """Read the last successful apply; missing or corrupt state is unknown."""
+    try:
+        document = json.loads(
+            (state_dir / f"forward-migration-applied.{lane.value}.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, ValueError):
+        return None
+    if not isinstance(document, dict):
+        return None
+    fingerprint = document.get("fingerprint")
+    return fingerprint if isinstance(fingerprint, str) and fingerprint else None
+
+
+def write_applied_migration_fingerprint(
+    state_dir: Path, lane: EnumRuntimeLane, fingerprint: str
+) -> None:
+    """Atomically record the migration content whose checks passed."""
+    _atomic_write_private_json(
+        state_dir / f"forward-migration-applied.{lane.value}.json",
+        {"fingerprint": fingerprint, "applied_at": datetime.now(UTC).isoformat()},
+    )
+
+
 REQUIRED_PROJECTION_TABLES: tuple[str, ...] = (
     "delegation_events",
     "node_service_registry",
@@ -1909,7 +1964,8 @@ class PreflightScriptUnavailableError(RuntimeError):
 
 
 class DeployExecutor:
-    def __init__(self) -> None:
+    def __init__(self, *, migration_record_dir: Path | None = None) -> None:
+        self._migration_record_dir = migration_record_dir
         # OMN-18057: services a phase left in a non-running state, and whether
         # per-container recovery then got them up. Read by the agent when it
         # builds the terminal event so residue is a recorded fact rather than
@@ -4745,12 +4801,25 @@ class DeployExecutor:
 
         on_phase_update(phase, PhaseStatus.SUCCESS)
 
+    def converge_forward_migration(self, *, lane: EnumRuntimeLane) -> str:
+        """Apply migration one-shots under the lane lock without restarting runtime."""
+        fingerprint = read_checkout_migration_fingerprint()
+        with lane_lock(
+            lane_config_for(lane).compose_project,
+            lane=lane.value,
+            ref=fingerprint or "migration-converge",
+            timeout=DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
+        ):
+            return self._ensure_runtime_migrations_ready(
+                lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME]
+            )
+
     def _ensure_runtime_migrations_ready(
         self,
         *,
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
         timeout: int = 300,
-    ) -> None:
+    ) -> str:
         """Run bounded migration services before a runtime-only restart.
 
         Runtime deploys intentionally use ``--no-deps`` so compose cannot walk
@@ -4758,6 +4827,7 @@ class DeployExecutor:
         one-shots are not core infra; they are the boot-order contract that
         applies pending projection DDL and exposes the migration health gate.
         """
+        fingerprint = read_checkout_migration_fingerprint()
         config = lane_config_for(lane)
         base_cmd = [
             "docker",
@@ -4847,6 +4917,12 @@ class DeployExecutor:
                     "Runtime migration preflight failed: missing "
                     f"omnidash_analytics.{table_name}"
                 )
+
+        if self._migration_record_dir is not None and fingerprint is not None:
+            write_applied_migration_fingerprint(
+                self._migration_record_dir, lane, fingerprint
+            )
+        return fingerprint or ""
 
     def verify(
         self,

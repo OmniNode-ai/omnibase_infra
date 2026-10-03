@@ -7831,7 +7831,20 @@ def _make_event_bus_callback(
                 dlq_topic=get_dlq_topic_for_original(topic),
             )
             if dlq_persisted:
-                if flow_counters is not None and consumer_group is not None:
+                from omnibase_infra.runtime.boundary_failure_terminal import (
+                    is_answered_caller_refusal,
+                )
+
+                # OMN-20410: a keyless tenant's refusal is answered by the
+                # terminal below and is already counted as a handler error; it
+                # is not this consumer's DLQ loss. Counted as one, a single
+                # keyless tenant read as a 100% projection total loss on the
+                # .201 dev lane and flapped the runtime container unhealthy.
+                if (
+                    flow_counters is not None
+                    and consumer_group is not None
+                    and not is_answered_caller_refusal(exc)
+                ):
                     flow_counters.record_dlq(consumer_group, topic)
                 logger.error(
                     "metric_name=boundary_swallow_prevented dlq_routed=true "

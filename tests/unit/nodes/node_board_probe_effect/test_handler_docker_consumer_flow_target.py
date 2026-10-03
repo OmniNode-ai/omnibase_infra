@@ -351,3 +351,67 @@ def test_negative_timeout_restores_the_exact_original_bytes(tmp_path: Path) -> N
     with pytest.raises(ConsumerFlowInputError, match="TimeoutExpired"):
         run_negative(tmp_path, ["fake-pytest"], tmp_path, runner=run)
     assert target.read_bytes() == original
+
+
+@pytest.mark.parametrize("heals_at", [400.0, None])
+def test_unhealthy_lane_waits_for_convergence_and_retries_once(
+    tmp_path: Path, heals_at: float | None
+) -> None:
+    """OMN-20410: one unhealthy settle window is not a verdict.
+
+    The .201 dev runtime flaps unhealthy for a few minutes at a time (C28 run
+    37146175477 went INDETERMINATE on exactly that), so the observation waits a
+    second settle window before giving up. A lane that never converges still
+    reads unreadable, which grades INDETERMINATE and never PASS.
+    """
+    target = tmp_path / script.WIRING_MODULE
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        "\n".join(
+            f'def {f}():\n    flow_counters.register("group")\n'
+            for f in script.BRANCHES.values()
+        )
+    )
+    fake = FakeIO()
+    clock = [0.0]
+
+    def sleep(seconds: float) -> None:
+        clock[0] += seconds
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        proc = fake.run(argv, **kwargs)
+        if argv[1] == "inspect" and (heals_at is None or clock[0] < heals_at):
+            body = json.loads(proc.stdout)
+            body[0]["State"]["Health"]["Status"] = "unhealthy"
+            proc.stdout = json.dumps(body)
+        return proc
+
+    adapter = HandlerDockerConsumerFlowTarget(
+        runner=run,
+        urlopen=fake.http,
+        sleep=sleep,
+        monotonic=lambda: clock[0],
+        repo_root=tmp_path,
+    )
+    request = ModelConsumerFlowRequest(
+        subject_lane="dev",
+        docker_bin="fake-docker",
+        samples=2,
+        sample_interval=0,
+        settle_seconds=300,
+        injection_wait=0,
+        pytest_cmd="fake-pytest",
+        scratch=tmp_path,
+    )
+    observed = asyncio.run(adapter.observe(request))
+    outcome = grade_consumer_flow(request, observed).outcome
+    if heals_at is not None:
+        assert observed.read_ok, observed.read_error
+        assert outcome == "PASS"
+        return
+    assert not observed.read_ok
+    assert "not running and healthy" in str(observed.read_error)
+    assert "after 2 settle window(s)" in str(observed.read_error)
+    assert clock[0] >= 2 * request.settle_seconds
+    assert outcome == "INDETERMINATE"
+    assert not any(argv[0] == "fake-pytest" for argv, _ in fake.calls)

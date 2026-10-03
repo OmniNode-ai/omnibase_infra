@@ -347,6 +347,8 @@ jobs:
         with:
           lanes-json: ${{ vars.LAB_LANES_JSON }}
           require: ingress_url gateway_url
+          # OMN-19811: run 37125721313 resolved the lane mid-deploy.
+          deploy-wait-seconds: ${{ github.event.inputs.deploy_wait_seconds || '2400' }}
 
       # OMN-19811. Run 36202173467 (2026-09-25T23:44Z) went RED with
       # terminal_missing because deploy-agent job 193cfeda recreated
@@ -505,6 +507,12 @@ jobs:
           ONEX_ALLOW_OMNIMARKET_DRIFT: "1"
         run: |
           set -uo pipefail
+          # Lane resolution and the probe share one deploy wait budget
+          # (OMN-19811): the job's timeout was sized for ONE wait, so the probe
+          # gets what the resolver did not spend. awk, not $(( )): a dispatch
+          # input is data, and bash arithmetic would evaluate it as code.
+          DEPLOY_WAIT_SECONDS=$(awk -v total="${DEPLOY_WAIT_SECONDS}" -v spent="${LANE_WAITED_SECONDS:-0}" 'BEGIN { left = total - spent; print (left > 0 ? left : 0) }')
+          export DEPLOY_WAIT_SECONDS
           # NOT `set -e`: a non-zero dispatch is itself a finding and must
           # still produce a receipt. The verdict step below is what decides
           # the job's exit status.

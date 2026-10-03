@@ -64,7 +64,8 @@
 #   request.
 #
 # UNREADABLE IS INDETERMINATE
-#   A lane container not running and healthy after the settle window, a boot
+#   A lane container not running and healthy after two settle windows (one
+#   window that runs out is retried once, OMN-20410), a boot
 #   that changed under the run twice, or refused Docker/HTTP/database reads
 #   produce INDETERMINATE. Only PASS has success status; onex node exits
 #   nonzero otherwise. The handler writes the observation and verdict to the
