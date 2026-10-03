@@ -250,6 +250,65 @@ async def test_llm_inference_contract_runs_through_inmemory_runtime_bus(
         await bus.close()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "credential_fields",
+    [
+        pytest.param({"api_key": "sk-literal-on-the-topic"}, id="literal-api-key"),
+        pytest.param(
+            {"provider_config": {"api_key": "sk-literal-on-the-topic"}},
+            id="literal-key-in-provider-config",
+        ),
+        pytest.param(
+            {"api_key_ref": "llm.gemini.api_key"}, id="ref-with-no-resolver-wired"
+        ),
+    ],
+)
+async def test_llm_inference_runtime_refuses_literal_or_unresolvable_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    credential_fields: dict[str, object],
+) -> None:
+    """OMN-17106: nothing reaches the provider unless a ref resolves."""
+    captured = _install_fake_http(monkeypatch)
+
+    bus = EventBusInmemory(environment="test", group="llm-contract-refusal")
+    await bus.start()
+    try:
+        published: list[bytes] = []
+
+        async def collect_response(message: ModelEventMessage) -> None:
+            published.append(bytes(message.value))
+
+        await bus.subscribe(
+            RESPONSE_TOPIC,
+            group_id="response-collector",
+            on_message=collect_response,
+        )
+        await _wire_runtime(bus)
+
+        command: dict[str, object] = {
+            "correlation_id": str(uuid4()),
+            "model": "gemini-2.5-pro",
+            "messages": [{"role": "user", "content": "ping"}],
+            "endpoint_url": GEMINI_ENDPOINT,
+        }
+        command.update(credential_fields)
+        await bus.publish(
+            COMMAND_TOPIC,
+            None,
+            json.dumps(command).encode("utf-8"),
+            None,
+        )
+        await asyncio.sleep(0.5)
+
+        assert captured.empty()
+        # The refusal is terminalized on the response topic; it must not
+        # carry the literal back out.
+        assert all(b"sk-literal-on-the-topic" not in raw for raw in published)
+    finally:
+        await bus.close()
+
+
 @pytest.mark.kafka
 @pytest.mark.skipif(
     not KAFKA_AVAILABLE,
