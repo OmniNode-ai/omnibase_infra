@@ -168,8 +168,9 @@ class BranchCase:
     """A substring the receipt's ``failure_reason`` must carry."""
     patches: dict[str, Callable[..., object]] = field(default_factory=dict)
     expected_stage: str | None = None
-    """``refusal.stage`` the funnel records; ``None`` when the dispatch path
-    writes the receipt itself (the transport refusal)."""
+    """``refusal.stage`` the funnel records; ``None`` when a dispatch path
+    writes the receipt itself (the transport refusal, the settle of a run that
+    returned non-zero) and the funnel only has to leave it alone."""
 
 
 _KEY_VALUE_ERROR = "except ValueError"
@@ -370,9 +371,8 @@ BRANCH_CASES: dict[str, BranchCase] = {
     "exit-without-a-receipt": BranchCase(
         covers=_KEY_SYS_EXIT,
         args=lambda tmp: _common(tmp),
-        reason="exited with 1",
+        reason="exit",
         patches={"run_receipt_mode": lambda **_: 1},
-        expected_stage="exit_without_receipt",
     ),
 }
 
@@ -641,6 +641,13 @@ class TestEveryWayAnyCallbackCanEndIsAnswered:
         _, receipt = _sole_receipt(state_root)
         assert receipt["status"] == "failed"
         assert receipt["failure_reason"]
+        refusal = receipt["refusal"]
+        assert isinstance(refusal, dict)
+        assert refusal["stage"] in {
+            "refused_before_dispatch",
+            "exit_without_receipt",
+            "unhandled_error",
+        }
 
     def test_a_receipt_the_body_wrote_under_the_run_id_is_never_replaced(
         self, tmp_path: Path
