@@ -10,7 +10,7 @@ keys do not extend lists).
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 import yaml
@@ -63,3 +63,38 @@ def test_creds_volume_is_kept(services: dict[str, dict[str, object]]) -> None:
         volumes = services[f"omnipc2-ci-runner-{n}"]["volumes"]
         assert isinstance(volumes, list)
         assert f"omnipc2-ci-runner-{n}-creds:/home/runner/.runner-creds" in volumes
+
+
+# OMN-20210: the job workspace and the TMPDIR that pytest and uv builds use.
+JOB_DIR_TARGETS = {
+    "work": "/home/runner/actions-runner/_work",
+    "tmp": "/home/runner/tmp",
+}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("n", range(1, 17))
+def test_each_runner_keeps_its_job_workspace_and_tmpdir_on_scratch(
+    services: dict[str, dict[str, object]], n: int
+) -> None:
+    """Job checkouts, venvs and temp files leave the boot NVMe."""
+    volumes = services[f"omnipc2-ci-runner-{n}"]["volumes"]
+    assert isinstance(volumes, list)
+    for name, target in JOB_DIR_TARGETS.items():
+        expected = f"/scratch/runners/{n}/{name}:{target}"
+        assert expected in volumes, expected
+    environment = services[f"omnipc2-ci-runner-{n}"]["environment"]
+    assert isinstance(environment, dict)
+    assert environment["TMPDIR"] == JOB_DIR_TARGETS["tmp"]
+
+
+@pytest.mark.unit
+def test_no_bind_mount_hides_the_image_tmp(
+    services: dict[str, dict[str, object]],
+) -> None:
+    """The image bakes omni-ci-bin and omni-ci-metadata under the root temp dir."""
+    for n in range(1, 17):
+        volumes = services[f"omnipc2-ci-runner-{n}"]["volumes"]
+        assert isinstance(volumes, list)
+        targets = [PurePosixPath(str(v).split(":")[1]) for v in volumes]
+        assert PurePosixPath("/") / "tmp" not in targets
