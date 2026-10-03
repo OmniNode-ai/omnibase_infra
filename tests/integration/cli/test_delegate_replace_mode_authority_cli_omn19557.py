@@ -21,6 +21,7 @@ exactly as the real installed omnimarket's quality gate would resolve them.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -71,8 +72,9 @@ class TestReplaceModeWithoutAcceptanceAuthorityIsRefusedAtTheFlag:
         """RED before the fix: this reached dispatch and climbed the ladder.
 
         Exit code 2, the refusal names every acceptance-capable slug so the
-        caller's next attempt can pick one, and no run directory is created —
-        the whole point is refusing before the (expensive) dispatch call.
+        caller's next attempt can pick one, and nothing is dispatched (the one
+        run directory is the refusal receipt, OMN-19006) — the whole point is
+        refusing before the (expensive) dispatch call.
         """
         args = ["draft a pull request body"]
         for criterion in _CODEX_C2_CRITERIA:
@@ -94,7 +96,13 @@ class TestReplaceModeWithoutAcceptanceAuthorityIsRefusedAtTheFlag:
         assert "omnimarket is NOT INSTALLED" not in result.output, (
             "the authority refusal must precede the drift guard"
         )
-        assert not (tmp_path / "runs").exists(), "no run may be created"
+        # OMN-19006: a refusal leaves a receipt naming it, and still dispatches
+        # nothing: the one run is the refusal, and no request payload was written.
+        (run_dir,) = (tmp_path / "runs").iterdir()
+        receipt = json.loads((run_dir / "receipt.json").read_text(encoding="utf-8"))
+        assert receipt["terminal_class"] == "refused"
+        assert "can never be accepted" in receipt["failure_reason"]
+        assert not (tmp_path / "tmp").exists(), "no request payload may be written"
 
     def test_declaring_a_response_contract_is_its_own_authority_and_proceeds_past_the_check(
         self, tmp_path: Path

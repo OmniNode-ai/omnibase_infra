@@ -96,7 +96,13 @@ from omnibase_infra.cli.model_delegate_locus_decision import (
 )
 from omnibase_infra.cli.model_receipt_runtime_summary import ModelReceiptRuntimeSummary
 from omnibase_infra.enums.enum_delegate_phase import EnumDelegatePhase
-from omnibase_infra.errors import InfraConnectionError, InfraTimeoutError
+from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraTimeoutError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
 from omnibase_infra.models.delegation.model_delegate_phase_durations import (
     ModelDelegatePhaseDurations,
 )
@@ -788,6 +794,82 @@ def _print_full_output_on_capture_failure(
         click.echo(runtime_error, nl=False)
     if workflow_data:
         click.echo(json.dumps(workflow_data, indent=2))
+
+
+# --- State-root resolution (OMN-19232) --------------------------------------
+#
+# Resolution order, first match wins: the explicit ``--state-root`` flag, the
+# ``ONEX_STATE_DIR`` environment variable, then ``~/.onex_state``. Never the
+# working directory: a cwd-relative default made a receipt's location depend on
+# where the caller stood, so a lane that ran from its worktree left its
+# receipts there. The environment and default roots follow the rule
+# ``omnibase_core`` applies to its own ``$ONEX_STATE_DIR/tickets``: never under
+# ``~/.claude`` (CLAUDE.md agent-session write rule). Fail-fast (Operating
+# Rule 8): a relative ``ONEX_STATE_DIR``, a root under ``~/.claude`` and an
+# unresolvable home all raise instead of falling back to a cwd-dependent path.
+
+STATE_DIR_ENV_VAR = "ONEX_STATE_DIR"
+DEFAULT_STATE_DIR_NAME = ".onex_state"
+
+#: Operator-facing statement of the resolution order, reused by option help.
+STATE_ROOT_RESOLUTION_ORDER = (
+    "the --state-root flag, then the ONEX_STATE_DIR environment variable, "
+    "then the home default ~/.onex_state"
+)
+
+
+def _refuse_state_root(message: str) -> ProtocolConfigurationError:
+    context = ModelInfraErrorContext.with_correlation(
+        transport_type=EnumInfraTransportType.FILESYSTEM,
+        operation="resolve_state_root",
+    )
+    return ProtocolConfigurationError(message, context=context)
+
+
+def _state_root_home() -> Path:
+    try:
+        return Path.home()
+    except (RuntimeError, KeyError) as exc:
+        raise _refuse_state_root(
+            "cannot resolve the home directory for the default state root "
+            f"~/{DEFAULT_STATE_DIR_NAME}: set {STATE_DIR_ENV_VAR} or pass --state-root"
+        ) from exc
+
+
+def resolve_state_root(explicit: Path | None = None) -> Path:
+    """Return the absolute state root: flag, then ``ONEX_STATE_DIR``, then home.
+
+    Args:
+        explicit: The ``--state-root`` value, or ``None`` when the flag was not
+            given. An explicit value is the operator's own choice and is only
+            made absolute against the cwd they typed it in.
+
+    Raises:
+        ProtocolConfigurationError: ``ONEX_STATE_DIR`` is relative, a resolved
+            environment or default root lies under ``~/.claude``, or no home
+            directory can be resolved.
+    """
+    if explicit is not None:
+        return explicit.expanduser().resolve(strict=False)
+
+    from_env = os.environ.get(STATE_DIR_ENV_VAR, "")
+    if from_env:
+        candidate = Path(from_env).expanduser()
+        if not candidate.is_absolute():
+            raise _refuse_state_root(
+                f"{STATE_DIR_ENV_VAR} must be an absolute path (got a relative "
+                "value, which would depend on the working directory)"
+            )
+        root = candidate.resolve(strict=False)
+        source = STATE_DIR_ENV_VAR
+    else:
+        root = (_state_root_home() / DEFAULT_STATE_DIR_NAME).resolve(strict=False)
+        source = f"the default ~/{DEFAULT_STATE_DIR_NAME}"
+
+    claude_root = (_state_root_home() / ".claude").resolve(strict=False)
+    if root == claude_root or claude_root in root.parents:
+        raise _refuse_state_root(f"{source} must not point under ~/.claude")
+    return root
 
 
 def _resolve_artifact_store_root(state_root: Path) -> Path:

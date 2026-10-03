@@ -117,8 +117,9 @@ import signal
 import sys
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
@@ -209,9 +210,11 @@ from omnibase_infra.cli.protocol_drift_guard_verdict import (
 )
 from omnibase_infra.cli.protocol_execution_budget import ProtocolExecutionBudget
 from omnibase_infra.cli.receipt_mode import (
+    STATE_ROOT_RESOLUTION_ORDER,
     DelegatePhaseStopwatch,
     capture_log_path,
     default_emit_socket_path,
+    resolve_state_root,
     run_receipt_mode,
 )
 from omnibase_infra.cli.store_developer_profile import StoreDeveloperProfile
@@ -224,6 +227,7 @@ from omnibase_infra.cli.task_class_registry import (
 from omnibase_infra.cli.workspace_reconcile import make_workspace_reconciler
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 from omnibase_infra.enums.enum_delegate_phase import EnumDelegatePhase
+from omnibase_infra.enums.enum_delegate_refusal_stage import EnumDelegateRefusalStage
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.lane_client_transport_binding import (
     bind_lane_client_transport,
@@ -241,6 +245,9 @@ from omnibase_infra.handlers.handler_workspace_runtime_config_materializer impor
 from omnibase_infra.models.delegation.model_delegate_phase_durations import (
     ModelDelegatePhaseDurations,
 )
+from omnibase_infra.models.delegation.model_delegate_refusal import (
+    ModelDelegateRefusal,
+)
 from omnibase_infra.runtime_identity import collect_runtime_identity
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
@@ -254,6 +261,7 @@ __all__ = [
     "DEFAULT_BUS",
     "LOCUS_CHOICES",
     "DelegateTimeoutExceededError",
+    "DelegateCommand",
     "build_backend_overrides",
     "resolve_default_bus",
     "load_supported_criteria",
@@ -899,6 +907,10 @@ def _write_unattributed_run_files(
                 "prompt": prompt,
                 "task_type": task_type,
                 "task_type_resolution": task_type_resolution,
+                # OMN-19232: where the run dir lives, absolute, so a reader
+                # holding only run.json finds the receipt without the
+                # caller's cwd.
+                "state_root": str(run_dir.parent.parent),
                 **addressing.as_run_file_fields(),
             },
             indent=2,
@@ -911,7 +923,8 @@ def _write_unattributed_run_files(
         + "): "
         + " ".join(
             str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
-        ),
+        )
+        + f" state_root={run_dir.parent.parent}",
         err=True,
     )
 
@@ -1001,6 +1014,10 @@ def _write_transport_refusal_run_files(
                 "prompt": prompt,
                 "task_type": task_type,
                 "task_type_resolution": task_type_resolution,
+                # OMN-19232: where the run dir lives, absolute, so a reader
+                # holding only run.json finds the receipt without the
+                # caller's cwd.
+                "state_root": str(run_dir.parent.parent),
                 **addressing.as_run_file_fields(),
             },
             indent=2,
@@ -1013,7 +1030,8 @@ def _write_transport_refusal_run_files(
         + ", no rung ran): "
         + " ".join(
             str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
-        ),
+        )
+        + f" state_root={run_dir.parent.parent}",
         err=True,
     )
 
@@ -1335,6 +1353,10 @@ def _write_local_run_files(
                 "prompt": prompt,
                 "task_type": task_type,
                 "task_type_resolution": task_type_resolution,
+                # OMN-19232: where the run dir lives, absolute, so a reader
+                # holding only run.json finds the receipt without the
+                # caller's cwd.
+                "state_root": str(run_dir.parent.parent),
                 **addressing.as_run_file_fields(),
             },
             indent=2,
@@ -1345,7 +1367,8 @@ def _write_local_run_files(
         "delegate artifacts: "
         + " ".join(
             str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
-        ),
+        )
+        + f" state_root={run_dir.parent.parent}",
         err=True,
     )
 
@@ -2044,7 +2067,330 @@ def _timeout_receipt(
     )
 
 
-@click.command("delegate")
+# OMN-19006: every invocation that parses arguments leaves a receipt.
+#
+# ``receipt.json`` is the one surface every caller is told to read, and a
+# delegation that ended before dispatch wrote none: ``delegate-fanout`` passes a
+# flag the command does not have, click refuses it with exit 2 before a line of
+# the command body runs, and the caller's row is "no run directory was created"
+# with the cause on the last line of a stderr file.
+#
+# The fix is one funnel and not a receipt per refusal. ``DelegateCommand`` mints
+# the run's identity when argument parsing begins, hands it to the command body,
+# and answers every way the command can end without a receipt of its own:
+#
+# * argument parsing fails (an unknown flag, a missing PROMPT, a bad choice);
+# * the body raises a ``click.ClickException`` (every refusal that runs before
+#   the broker is touched), or anything else;
+# * the body exits non-zero, or is interrupted, with no receipt on disk.
+#
+# A receipt a dispatch path wrote under the run's id is never replaced: the
+# funnel only fills the gap, so a dispatched run keeps the receipt its own writer
+# made, and a new early return that nobody gave a writer is covered on the day it
+# is added.
+
+#: ``click.Context.meta`` keys the funnel mints the run's identity under, so the
+#: command body runs under the same ids the funnel would write a receipt for.
+_RUN_ID_META_KEY = "omnibase_infra.delegate.run_id"
+_CORRELATION_ID_META_KEY = "omnibase_infra.delegate.correlation_id"
+
+_STATE_ROOT_FLAG = "--state-root"
+
+_USAGE_REMEDY = (
+    "Nothing was dispatched, so nothing ran and nothing was spent. Correct the "
+    "invocation as the message says; `onex delegate --help` lists every "
+    "accepted argument and option."
+)
+_REFUSAL_REMEDY = (
+    "Nothing was dispatched, so nothing ran and nothing was spent. The message "
+    "names what was refused; change that and run the command again."
+)
+_UNHANDLED_REMEDY = (
+    "Nothing was dispatched. The command raised an error no check names; "
+    "report the error type and message with this run id."
+)
+_EXIT_REMEDY = (
+    "The command ended with this exit code on a path that writes no receipt of "
+    "its own. stderr of the invocation holds the cause."
+)
+
+
+#: A credential carried in the text: userinfo in a URL, a ``key=value`` pair whose
+#: key names a secret, or key material.
+_URL_USERINFO = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/\s@]+@")
+_SECRET_PAIR = re.compile(
+    r"(?P<key>(?:pass(?:word|wd)?|secret|(?:api[_-]?|access[_-]?|auth[_-]?)?"
+    r"(?:key|token))\s*=\s*)(?P<value>[^\s,;]+)",
+    re.IGNORECASE,
+)
+_KEY_MATERIAL = re.compile(
+    r"-----BEGIN[^-]*-----.*?(?:-----END[^-]*-----|$)", re.DOTALL
+)
+_REFUSAL_TEXT_LIMIT = 2000
+
+
+def _redact_refusal_text(text: str) -> str:
+    """Remove credentials from a refusal's text and keep every word of the cause.
+
+    :func:`~omnibase_infra.utils.util_error_sanitization.sanitize_error_string`
+    withholds a whole message when it contains any of a list of words, and one of
+    them is ``token``: the refusal ``--caller-lane 'two words' is not a lane
+    token`` came out as ``[REDACTED - potentially sensitive data]``, which is the
+    bare, unactionable receipt this module exists to remove. A refusal's message
+    is the flag and the rule it broke, so the credentials are taken out of it and
+    the rest is kept.
+    """
+    text = _KEY_MATERIAL.sub("[REDACTED key material]", text)
+    text = _URL_USERINFO.sub(r"\g<scheme>[REDACTED]@", text)
+    text = _SECRET_PAIR.sub(r"\g<key>[REDACTED]", text)
+    if len(text) > _REFUSAL_TEXT_LIMIT:
+        return text[:_REFUSAL_TEXT_LIMIT] + "... [truncated]"
+    return text
+
+
+def _invocation_identity(ctx: click.Context) -> tuple[uuid.UUID, uuid.UUID]:
+    """The ``(run_id, correlation_id)`` the funnel minted for this invocation."""
+    run_id = ctx.meta[_RUN_ID_META_KEY]
+    correlation_id = ctx.meta[_CORRELATION_ID_META_KEY]
+    if not isinstance(run_id, uuid.UUID) or not isinstance(correlation_id, uuid.UUID):
+        raise TypeError("the delegate funnel's identity was not minted as UUIDs")
+    return run_id, correlation_id
+
+
+def _write_refusal_run_files(
+    *,
+    refusal: ModelDelegateRefusal,
+    run_id: uuid.UUID,
+    correlation_id: uuid.UUID,
+    state_root: Path,
+    prompt: str,
+    task_type: str,
+) -> Path:
+    """Persist the three run files for a delegation that was never dispatched.
+
+    The same directory, filenames and atomic write as every other writer of this
+    command, so a caller that reads a failed delegation reads this one.
+    ``route_attributed`` is false and no backend, model, tier or endpoint is
+    named: nothing was selected. ``terminal_failure_cause`` is ``None`` for the
+    reason the transport refusal states: the failure enum is provider-side and a
+    command that never ran says nothing about a provider. The cause is in
+    ``failure_reason`` and ``refusal``.
+
+    Returns the run directory.
+    """
+    run_dir = (state_root / "runs" / str(run_id)).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _atomic_write_text(run_dir / "result.txt", "")
+    _atomic_write_text(
+        run_dir / "receipt.json",
+        json.dumps(
+            {
+                "receipt_id": str(correlation_id),
+                "correlation_id": str(correlation_id),
+                "run_id": str(run_id),
+                "route_attributed": False,
+                "route_unattributed": (
+                    "the command ended before dispatch, so no rung ran "
+                    f"({refusal.stage.value})"
+                ),
+                "status": EnumSkillResultStatus.FAILED.value,
+                "terminal_class": "refused",
+                "terminal_failure_cause": None,
+                "terminal_recorded": False,
+                "failure_reason": f"{refusal.message} {refusal.remedy}",
+                "refusal": refusal.model_dump(mode="json"),
+                "written_at": datetime.now(UTC).isoformat(),
+                "writer_pid": os.getpid(),
+                "attempts": [],
+                "receipt": None,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+    )
+    _atomic_write_text(
+        run_dir / "run.json",
+        json.dumps(
+            {
+                "run_id": str(run_id),
+                "correlation_id": str(correlation_id),
+                "routing_tier": None,
+                "route_attributed": False,
+                "prompt": prompt,
+                "task_type": task_type,
+                "task_type_resolution": "unresolved",
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+    )
+    click.echo(
+        f"delegate artifacts (REFUSED -- {refusal.stage.value}, nothing dispatched): "
+        + " ".join(
+            str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
+        ),
+        err=True,
+    )
+    return run_dir
+
+
+def _funnel_state_root(explicit: Path | None) -> Path | None:
+    """The root a refusal receipt is filed under: the command's own rule.
+
+    The flag is the operator's own choice and is used as given; without it the
+    root resolves exactly as the command body resolves it (OMN-19232), never
+    against the working directory. ``None`` when no root can be resolved (a
+    relative ``ONEX_STATE_DIR``, a root under ``~/.claude``): there is then no
+    place the receipt belongs, and the cause goes to stderr instead.
+    """
+    if explicit is not None:
+        return explicit
+    try:
+        return resolve_state_root(None)
+    except ProtocolConfigurationError as exc:
+        click.echo(
+            f"onex delegate: no refusal receipt was written: {exc.message}",
+            err=True,
+        )
+        return None
+
+
+def _state_root_from_arguments(arguments: Sequence[str]) -> Path | None:
+    """Read ``--state-root`` out of raw arguments that did not parse.
+
+    Argument parsing may have failed before the option was read, and the
+    receipt belongs where the caller said state lives.
+    """
+    for index, argument in enumerate(arguments):
+        if argument == _STATE_ROOT_FLAG and index + 1 < len(arguments):
+            return Path(arguments[index + 1])
+        if argument.startswith(f"{_STATE_ROOT_FLAG}="):
+            return Path(argument.partition("=")[2])
+    return None
+
+
+class DelegateCommand(click.Command):
+    """``onex delegate``, with a receipt for every way it can end (OMN-19006)."""
+
+    def _file_refusal(
+        self,
+        ctx: click.Context,
+        *,
+        refusal: ModelDelegateRefusal,
+        state_root: Path | None,
+    ) -> None:
+        """Write the refusal receipt; a failure to write never hides the cause."""
+        if state_root is None:
+            return
+        run_id, correlation_id = _invocation_identity(ctx)
+        params = ctx.params
+        try:
+            _write_refusal_run_files(
+                refusal=refusal,
+                run_id=run_id,
+                correlation_id=correlation_id,
+                state_root=state_root,
+                prompt=str(params.get("prompt") or ""),
+                task_type=str(
+                    params.get("task_type") or params.get("task_class_alias") or ""
+                ),
+            )
+        except OSError as exc:
+            click.echo(
+                f"onex delegate: could not write the refusal receipt for run "
+                f"{run_id}: {_redact_refusal_text(str(exc))}",
+                err=True,
+            )
+
+    def _receipt_exists(self, ctx: click.Context, state_root: Path | None) -> bool:
+        if state_root is None:
+            return False
+        run_id, _ = _invocation_identity(ctx)
+        return (state_root / "runs" / str(run_id) / "receipt.json").exists()
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        ctx.meta[_RUN_ID_META_KEY] = uuid.uuid4()
+        ctx.meta[_CORRELATION_ID_META_KEY] = uuid.uuid4()
+        # Click's parser consumes the list it is given, so the raw arguments
+        # (where ``--state-root`` may still be) are kept before it runs.
+        given = list(args)
+        try:
+            return super().parse_args(ctx, args)
+        except click.ClickException as exc:
+            self._file_refusal(
+                ctx,
+                refusal=ModelDelegateRefusal(
+                    stage=EnumDelegateRefusalStage.ARGUMENT_PARSING,
+                    error_type=type(exc).__name__,
+                    message=_redact_refusal_text(exc.format_message()),
+                    remedy=_USAGE_REMEDY,
+                    exit_code=exc.exit_code,
+                ),
+                state_root=_funnel_state_root(_state_root_from_arguments(given)),
+            )
+            raise
+
+    def invoke(self, ctx: click.Context) -> object:
+        explicit = ctx.params.get("state_root")
+        state_root = _funnel_state_root(
+            Path(explicit) if explicit is not None else None
+        )
+        try:
+            return super().invoke(ctx)
+        except (click.exceptions.Exit, click.exceptions.Abort):
+            raise
+        except click.ClickException as exc:
+            if not self._receipt_exists(ctx, state_root):
+                self._file_refusal(
+                    ctx,
+                    refusal=ModelDelegateRefusal(
+                        stage=EnumDelegateRefusalStage.REFUSED_BEFORE_DISPATCH,
+                        error_type=type(exc).__name__,
+                        message=_redact_refusal_text(exc.format_message()),
+                        remedy=(
+                            _USAGE_REMEDY
+                            if isinstance(exc, click.UsageError)
+                            else _REFUSAL_REMEDY
+                        ),
+                        exit_code=exc.exit_code,
+                    ),
+                    state_root=state_root,
+                )
+            raise
+        except (SystemExit, KeyboardInterrupt) as exc:
+            code = exc.code if isinstance(exc, SystemExit) else 130
+            if code not in (None, 0) and not self._receipt_exists(ctx, state_root):
+                self._file_refusal(
+                    ctx,
+                    refusal=ModelDelegateRefusal(
+                        stage=EnumDelegateRefusalStage.EXIT_WITHOUT_RECEIPT,
+                        error_type=type(exc).__name__,
+                        message=_redact_refusal_text(
+                            f"onex delegate exited with {code!r}"
+                        ),
+                        remedy=_EXIT_REMEDY,
+                        exit_code=code if isinstance(code, int) else 1,
+                    ),
+                    state_root=state_root,
+                )
+            raise
+        except Exception as exc:
+            if not self._receipt_exists(ctx, state_root):
+                self._file_refusal(
+                    ctx,
+                    refusal=ModelDelegateRefusal(
+                        stage=EnumDelegateRefusalStage.UNHANDLED_ERROR,
+                        error_type=type(exc).__name__,
+                        message=_redact_refusal_text(str(exc) or type(exc).__name__),
+                        remedy=_UNHANDLED_REMEDY,
+                        exit_code=1,
+                    ),
+                    state_root=state_root,
+                )
+            raise
+
+
+@click.command("delegate", cls=DelegateCommand)
 @click.argument("prompt")
 @click.option(
     "--task-type",
@@ -2231,9 +2577,14 @@ def _timeout_receipt(
 @click.option(
     "--state-root",
     type=click.Path(path_type=Path),
-    default=".onex_state",
-    show_default=True,
-    help="Root directory for disk state, scratch payloads, and captures.",
+    default=None,
+    help=(
+        "Root directory for disk state, scratch payloads, captures, and "
+        "runs/<run_id>/ receipts. Resolved in this order: "
+        + STATE_ROOT_RESOLUTION_ORDER
+        + ". Never the working directory. The resolved absolute root is "
+        "printed on the 'delegate artifacts' line and recorded in run.json."
+    ),
 )
 @click.option(
     "--timeout",
@@ -2354,7 +2705,7 @@ def delegate_command(
     locus: str,
     lane: str | None,
     kafka_bootstrap: str | None,
-    state_root: Path,
+    state_root: Path | None,
     timeout: int | None,
     verbose: bool,
     emit_socket: Path | None,
@@ -2378,6 +2729,14 @@ def delegate_command(
     the human form. Exits non-zero on failure in every form. RuntimeLocal logs
     go to a capture file + the content-addressed artifact store, never to
     stdout.
+
+    State root (OMN-19232): runs/<run_id>/{result.txt,receipt.json,run.json}
+    are written under one root resolved in this order: the --state-root flag,
+    then the ONEX_STATE_DIR environment variable (absolute), then the home
+    default ~/.onex_state. It is never the working directory, so the same
+    receipt is found at the same place from any cwd. The resolved absolute
+    root is printed as state_root= on the "delegate artifacts" line and
+    recorded as state_root in run.json.
 
     Known failure class, handler-budget timeout (OMN-18838): a receipt whose
     error reads "delegation exceeded the handler execution budget of Ns and
@@ -2410,6 +2769,14 @@ def delegate_command(
     if force_json and force_human:
         raise click.UsageError("--json and --human are mutually exclusive.")
     json_output = force_json or not (force_human or _stdout_is_tty())
+    # OMN-19006: the command class minted this run's identity when argument
+    # parsing began, and files the receipt for any refusal under it, so the
+    # body runs under the same ids rather than minting a second pair.
+    run_id, correlation_id = _invocation_identity(click.get_current_context())
+    try:
+        resolved_state_root = resolve_state_root(state_root)
+    except ProtocolConfigurationError as exc:
+        raise click.UsageError(exc.message) from exc
     try:
         ticket_id, ticket_resolution = resolve_delegate_ticket(ticket, cwd=Path.cwd())
         caller = resolve_delegate_caller(
@@ -2434,7 +2801,7 @@ def delegate_command(
             locus=EnumDelegateLocus(locus),
             lane=lane,
             kafka_bootstrap=kafka_bootstrap,
-            state_root=state_root,
+            state_root=resolved_state_root,
             timeout=timeout,
             verbose=verbose,
             emit_socket=emit_socket,
@@ -2444,6 +2811,8 @@ def delegate_command(
             ticket_resolution=ticket_resolution,
             caller=caller,
             json_output=json_output,
+            run_id=run_id,
+            correlation_id=correlation_id,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -2475,6 +2844,8 @@ def run_delegate(
     ticket_resolution: str = "none",
     caller: ModelDelegateCaller | None = None,
     json_output: bool = True,
+    run_id: uuid.UUID | None = None,
+    correlation_id: uuid.UUID | None = None,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -2752,13 +3123,17 @@ def run_delegate(
     # probe that authenticated differently from the publish would refuse
     # before the publish was ever attempted, and would report the wrong cause.
     with _bind_lane_transport(lane_transport):
-        run_id = uuid.uuid4()
+        # OMN-19006: the CLI entry mints both when argument parsing begins, so a
+        # refusal anywhere above this line is filed under the run's own ids.
+        # A caller that is not the CLI entry (a test, a library caller) gets
+        # a fresh pair here.
+        run_id = run_id or uuid.uuid4()
         # OMN-14397: minted fresh per invocation — never reused/cached across runs
         # sharing a working directory or state-root — and threaded explicitly into
         # the payload so it becomes the delegate request's correlation_id rather
         # than an implicit default decided downstream. Kept a UUID object here;
         # only stringified at the JSON payload boundary in _write_payload.
-        correlation_id = uuid.uuid4()
+        correlation_id = correlation_id or uuid.uuid4()
         payload_path = _write_payload(
             prompt=prompt,
             task_type=resolved_task_type,

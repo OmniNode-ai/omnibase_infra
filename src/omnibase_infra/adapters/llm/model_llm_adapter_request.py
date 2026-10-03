@@ -33,9 +33,9 @@ class ModelLlmAdapterRequest(BaseModel):
         max_tokens: Maximum tokens to generate, or None for default.
         temperature: Sampling temperature, or None for default.
         timeout_seconds: HTTP request timeout in seconds applied to the
-            downstream inference call. Mirrors the bounds enforced on
-            ``ModelLlmInferenceRequest.timeout_seconds`` (1.0-600.0
-            inclusive, default 30.0). Owned by the calling node contract /
+            downstream inference call. Capped at 600.0, inside the
+            1.0-1800.0 bounds of ``ModelLlmInferenceRequest.timeout_seconds``
+            (default 30.0). Owned by the calling node contract /
             endpoint config -- never read from environment variables here.
 
     Warning:
@@ -88,8 +88,8 @@ class ModelLlmAdapterRequest(BaseModel):
         le=600.0,
         description=(
             "HTTP request timeout in seconds applied to the downstream "
-            "inference call. Bounds match ModelLlmInferenceRequest "
-            "(1.0-600.0). Contract-owned; do not source from env vars."
+            "inference call. Adapter cap, within ModelLlmInferenceRequest "
+            "bounds (1.0-1800.0). Contract-owned; do not source from env vars."
         ),
     )
 

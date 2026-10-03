@@ -1,3 +1,33 @@
+## v0.38.63 (2026-10-03)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.63 by the scheduled release train.
+- 21 release-relevant commit(s) merged since v0.38.61.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.61
+- fix: one ModelLlmInferenceRequest, contract names the handler module (#4498)
+- fix: name the handler-budget timeout as a failure class in onex delegate help (#4494)
+- fix: infra Done writes need a bound PASS receipt; the closer shares the rule (#4478)
+- chore(deps): bump omnibase-core to 0.47.31 (#4489)
+- fix: the delegate dispatch gate proves the downstream delegation chain, not only the first hop (#4463)
+- fix: onex delegate in-process hands handlers the untimed bus (#4485)
+- feat: add paid and local model entries to pricing manifest (#4480)
+- feat: onex delegate names the lane login on a SASL refusal and times each client phase (#4471)
+- perf: lazy-load package exports so the delegate import stays cheap (#4470)
+- fix: a bound workspace resolves its transport through a copy materialised from origin/main (#4462)
+- fix: the DLQ replay node does not quarantine the gateway's own quarantine records again (#4461)
+- fix: scripts/ledger_lock.py refuses ledger writes under a test runner (#4452)
+- fix(cli): resolve detached registry provenance for delegation (#4440)
+- chore: advance omnimarket contract pin to 4f0457644982 (#4424)
+- fix: a DLQ replay run summary is logged, not published onto the quarantine sink (#4435)
+- fix: runner spread declaration and a fleet canary that sums every action pool (#4431)
+- fix: onex delegate derives a caller lane when no rule names one, so no CLI run writes a null caller_lane (#4427)
+- fix: C28 measures the end of a full final page instead of assuming truncation (#4421)
+- chore(deps): bump omnibase-core to 0.47.28 (#4414)
+- chore: advance omnimarket contract pin to 303aff486dfb (#4404)
+- fix: the application-database SQL lint never reads an unquoted reserved key word as a relation target (#4413)
+
 ## v0.38.61 (2026-10-01)
 
 ### Release
