@@ -190,6 +190,10 @@ Environment=KAFKA_SASL_ENV_PREFIX=DEV_
 ExecStartPre=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/preflight_port_free.sh 8098
 ExecStart=/data/omninode/omnibase_infra/scripts/deploy-agent/deploy/deploy-agent-launch.sh
 Restart=on-failure
+# OMN-20410: on-failure counts a SIGTERM exit as clean. earlyoom SIGTERMed this
+# agent at 2026-10-03T16:09:11Z and systemd left the dev lane with no deploy
+# agent for three hours. An explicit `systemctl --user stop` still stops it.
+RestartForceExitStatus=SIGTERM
 RestartSec=5
 StandardOutput=journal
 StandardError=journal

@@ -24,6 +24,7 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_consta
 )
 from omnibase_infra.nodes.node_board_probe_effect.handlers._error_consumer_flow_input import (
     ConsumerFlowInputError,
+    ConsumerFlowLaneUnsettledError,
 )
 from omnibase_infra.nodes.node_board_probe_effect.models.typed_dict_consumer_flow import (
     TypedDictConsumerFlowIdentity,
@@ -89,7 +90,7 @@ class ConsumerFlowLane:
             if not unsettled:
                 return ident
             if self.monotonic() >= deadline:
-                raise ConsumerFlowInputError(
+                raise ConsumerFlowLaneUnsettledError(
                     f"lane containers not running and healthy after {settle_seconds:.0f}s: {unsettled}"
                 )
             self.sleep(poll)

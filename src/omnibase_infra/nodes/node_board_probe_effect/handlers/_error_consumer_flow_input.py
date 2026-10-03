@@ -5,3 +5,7 @@
 
 class ConsumerFlowInputError(RuntimeError):
     """Could not look: return read_ok=False, never a negative finding."""
+
+
+class ConsumerFlowLaneUnsettledError(ConsumerFlowInputError):
+    """One settle window ran out; wait one more before grading (OMN-20410)."""
