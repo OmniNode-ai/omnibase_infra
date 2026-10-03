@@ -1373,6 +1373,21 @@ def _write_local_run_files(
     )
 
 
+def describe_local_evidence_destination() -> str:
+    """Name the local SQLite file and table an in-memory run records into.
+
+    The path comes from omnimarket's own ``default_evidence_db_path`` so this
+    line cannot drift from the file the projection writes. When omnimarket is
+    unresolvable the line names only the directory the file lives in.
+    """
+    try:
+        module = importlib.import_module("omnimarket.projection.sqlite_database")
+        location = f"database file {module.default_evidence_db_path()}"
+    except (ImportError, AttributeError):
+        location = "a local database file under ~/.omninode/delegation/"
+    return f"{location}, table delegation_events"
+
+
 def resolve_default_bus(
     *,
     kafka_bootstrap: str | None = None,
@@ -3033,9 +3048,12 @@ def run_delegate(
             # the receipt stream on stdout stays clean.
             logger.warning(
                 "onex delegate: using inmemory event bus (%s) — this "
-                "delegation's evidence will land in the local SQLite fallback, "
-                "NOT the shared delegation_events projection",
+                "delegation's record is written only on this machine, to %s. "
+                "That is a local SQLite table which shares its name with the "
+                "shared delegation_events projection but is not it: nothing "
+                "is sent to the shared lab projection.",
                 reason,
+                describe_local_evidence_destination(),
             )
     else:
         # OMN-17304: an explicit --bus is tier 1 of the shared resolution
