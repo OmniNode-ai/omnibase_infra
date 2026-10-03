@@ -23,6 +23,9 @@ from typing import Final, cast
 
 import httpx
 
+from omnibase_core.models.ticket.model_done_write_decision import (
+    ModelDoneWriteDecision,
+)
 from omnibase_infra.adapters.project_tracker.model_stub_comment import ModelStubComment
 from omnibase_infra.adapters.project_tracker.model_stub_issue import ModelStubIssue
 from omnibase_infra.adapters.project_tracker.model_stub_project import ModelStubProject
@@ -34,6 +37,11 @@ from omnibase_infra.errors import (
     InfraTimeoutError,
     ModelInfraErrorContext,
     ModelTimeoutErrorContext,
+)
+from omnibase_infra.handlers.done_write_receipt_guard import (
+    DoneWriteReceiptGuard,
+    DoneWriteRefusedError,
+    is_done_state,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
@@ -146,6 +154,18 @@ mutation UpdateIssue($id: String!, $input: IssueUpdateInput!) {
 }
 """
 )
+
+_QUERY_GET_WORKFLOW_STATE: Final[str] = """
+query GetWorkflowState($id: String!) {
+    workflowState(id: $id) { id name type }
+}
+"""
+
+# `IssueUpdateInput` takes the target state as `stateId`; the name-shaped keys
+# are listed too, because a caller that spells the target differently must not
+# get around the Done gate by spelling.
+_STATE_ID_UPDATE_KEY: Final[str] = "stateId"
+_STATE_NAME_UPDATE_KEYS: Final[tuple[str, ...]] = ("state", "status")
 
 _MUTATION_ADD_COMMENT: Final[str] = (
     """
@@ -328,6 +348,7 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
         endpoint: str = DEFAULT_LINEAR_GRAPHQL_ENDPOINT,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
         client: httpx.AsyncClient | None = None,
+        done_write_guard: DoneWriteReceiptGuard | None = None,
     ) -> None:
         """Construct the Linear GraphQL adapter.
 
@@ -340,6 +361,8 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
                 to inject a mock transport). When provided, the adapter does
                 NOT take ownership — the caller is responsible for closing
                 it. Otherwise the adapter constructs and owns its client.
+            done_write_guard: The Done-write receipt gate (OMN-20368). Defaults
+                to the real one, which runs ``onex skill dod_verify``.
 
         Raises:
             InfraAuthenticationError: If no Linear credential is available.
@@ -381,6 +404,11 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
             headers=self._request_headers,
         )
         self._connected: bool = False
+        self._done_write_guard: DoneWriteReceiptGuard = (
+            done_write_guard
+            if done_write_guard is not None
+            else DoneWriteReceiptGuard()
+        )
 
         self._init_circuit_breaker(
             threshold=5,
@@ -555,6 +583,11 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
         # any schema validation errors.
         graphql_input: dict[str, object] = dict(updates)
 
+        # OMN-20368. A write whose target state is a Done state needs a PASS
+        # dod_verify receipt that binds every acceptance criterion. Every other
+        # state write, and every write that names no state, is unchanged.
+        await self._enforce_done_write_gate(issue_id, updates)
+
         data = await self._execute(
             _MUTATION_UPDATE_ISSUE,
             operation="update_issue",
@@ -567,6 +600,53 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
         if not isinstance(issue, dict):
             raise KeyError(f"Issue not found: {issue_id}")
         return _issue_from_graphql(issue)
+
+    async def _target_state_is_done(self, updates: dict[str, str]) -> bool:
+        """Whether ``updates`` writes a Done state.
+
+        A ``stateId`` is resolved against Linear (the id alone says nothing). A
+        target that cannot be classified raises: an unclassifiable state write
+        is refused rather than waved through as "probably not Done".
+        """
+        state_id = updates.get(_STATE_ID_UPDATE_KEY)
+        if state_id is not None:
+            data = await self._execute(
+                _QUERY_GET_WORKFLOW_STATE,
+                operation="get_workflow_state",
+                variables={"id": state_id},
+            )
+            state = data.get("workflowState") if isinstance(data, dict) else None
+            if not isinstance(state, dict) or not state:
+                raise DoneWriteRefusedError(
+                    state_id,
+                    ModelDoneWriteDecision(
+                        allowed=False,
+                        reason=(
+                            f"workflow state {state_id!r} could not be resolved, "
+                            "so the write cannot be shown not to be a Done "
+                            "write (OMN-20368)."
+                        ),
+                    ),
+                )
+            if is_done_state(
+                str(state.get("name") or ""), str(state.get("type") or "")
+            ):
+                return True
+        for key in _STATE_NAME_UPDATE_KEYS:
+            named = updates.get(key)
+            if named is not None and is_done_state(named, named):
+                return True
+        return False
+
+    async def _enforce_done_write_gate(
+        self, issue_id: str, updates: dict[str, str]
+    ) -> None:
+        if not await self._target_state_is_done(updates):
+            return
+        issue = await self.get_issue(issue_id)
+        await self._done_write_guard.enforce(
+            ticket_id=issue.identifier, description=issue.description or ""
+        )
 
     async def search_issues(self, query: str, limit: int = 50) -> list[ModelStubIssue]:
         data = await self._execute(

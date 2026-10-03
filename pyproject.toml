@@ -43,7 +43,12 @@ dependencies = [
     # `>=FLOOR,<NEXT_MINOR_OF_FLOOR` and admits the override's exact version.
     # A dependency cascade moves only the override on a patch release; a
     # change that starts to need a newer core raises FLOOR by hand.
-    "omnibase-core>=0.47.24,<0.48.0",
+    # OMN-20368: FLOOR raised 0.47.24 -> 0.47.31. The Done-write guard,
+    # `omnibase_infra.handlers.done_write_receipt_guard`, imports
+    # `omnibase_core.handlers.handler_done_write_receipt_gate` and
+    # `omnibase_core.models.ticket.model_done_write_decision`, first released in
+    # omnibase-core 0.47.31 (core#1852). A resolve below it fails at import.
+    "omnibase-core>=0.47.31,<0.48.0",
     "omnibase-spi==0.23.5",
     # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
     "omnibase-compat==0.5.7",

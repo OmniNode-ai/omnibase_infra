@@ -190,6 +190,9 @@ class FakeLinearClient:
     async def fetch_team_states(self, team_id, timeout):
         return self._team_states
 
+    async def fetch_issue_description(self, issue_id, timeout):
+        return "## Acceptance Criteria\n- **AC1**: the ticket is restored\n", ""
+
     async def update_issue_state(self, issue_id, state_id, timeout):
         self.state_updates.append((issue_id, state_id))
         return self._update_state_result

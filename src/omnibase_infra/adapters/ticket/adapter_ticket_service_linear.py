@@ -7,6 +7,13 @@ search via list_tickets filters) against the Linear GraphQL API.
 Write operations (create_ticket, update_ticket_status, add_comment)
 raise NotImplementedError — they will be wired in a future ticket.
 
+Done writes (OMN-20368): ``update_ticket_status`` is the one write that already
+has its Done gate. A Done target is checked against the shared Done-write
+receipt gate (a PASS dod_verify receipt binding every acceptance criterion)
+BEFORE anything else, so the gate is in place the day the write is wired and a
+Done request without a receipt is refused rather than reaching the stub. Every
+other status is unchanged.
+
 Constructor Injection:
     ``linear_api_key`` is required and must be provided by the caller
     (e.g. from ``os.environ["LINEAR_API_KEY"]``). The adapter does NOT
@@ -31,6 +38,10 @@ from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
     InfraUnavailableError,
+)
+from omnibase_infra.handlers.done_write_receipt_guard import (
+    DoneWriteReceiptGuard,
+    is_done_state,
 )
 from omnibase_infra.models.errors.model_infra_error_context import (
     ModelInfraErrorContext,
@@ -183,12 +194,18 @@ class AdapterTicketLinear:
         self,
         linear_api_key: str,
         timeout: float = _DEFAULT_TIMEOUT_SECONDS,
+        done_write_guard: DoneWriteReceiptGuard | None = None,
     ) -> None:
         if not linear_api_key:
             raise ValueError("AdapterTicketLinear requires a non-empty linear_api_key")
         self._api_key = linear_api_key
         self._timeout = timeout
         self._client: httpx.AsyncClient | None = None
+        self._done_write_guard = (
+            done_write_guard
+            if done_write_guard is not None
+            else DoneWriteReceiptGuard()
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -425,11 +442,23 @@ class AdapterTicketLinear:
         )
 
     async def update_ticket_status(self, ticket_id: str, status: str) -> bool:
-        """Update ticket status. Not yet implemented.
+        """Update ticket status. The write itself is deferred to OMN-7587.
+
+        A Done target is checked against the shared Done-write receipt gate
+        first (OMN-20368); any other status goes straight to the deferred write.
 
         Raises:
-            NotImplementedError: Always.
+            DoneWriteRefusedError: A Done target with no PASS dod_verify
+                receipt that binds every acceptance criterion.
+            NotImplementedError: Otherwise, always.
         """
+        if is_done_state(name=status):
+            ticket = await self.get_ticket(ticket_id)
+            description = ticket.get("description")
+            await self._done_write_guard.enforce(
+                ticket_id=str(ticket.get("identifier") or ticket_id),
+                description=description if isinstance(description, str) else "",
+            )
         raise NotImplementedError(  # stub-ok: write methods deferred to OMN-7587
             "AdapterTicketLinear.update_ticket_status is not yet implemented "
             "(OMN-7587: write methods deferred)"
