@@ -25,11 +25,17 @@ WHAT THIS IS
     already used in this repo.
 
     ``0``  the CLI accepted the prompt and exited 0
-    ``1``  the CLI refused or exited non-zero (the record names why)
+    ``1``  the CLI refused or exited non-zero (other CLI codes pass through)
     ``2``  the probe itself could not run (the `onex` binary is not on PATH,
-           or the subprocess call raised before producing a returncode).
+           or the subprocess timed out before producing a returncode).
            Deliberately distinct from ``1``: "I could not run the probe" is
            not "the front door is broken".
+
+    The record and FAIL line name the failing leg: probe-cannot-run,
+    probe-timeout, runner-env, lane-declaration, lane-login, broker-route, or
+    front-door.
+    Runner environment, credential, and broker failures must be distinguishable
+    from a refusal by the delegation front door itself.
 
 WHY THIS RUNNER, AND WHY OUTSIDE THE RUNTIME CONTAINER
     AC2 asks for the probe to run "outside the runtime container": unlike
@@ -56,6 +62,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -72,6 +79,89 @@ PROBE_PROMPT = "Reply with exactly the word: ok"
 PROBE_LANE = "dev"
 DEFAULT_TIMEOUT_S = 90.0
 _TAIL_CHARS = 2000
+LEG_PROBE_CANNOT_RUN = "probe-cannot-run"
+LEG_PROBE_TIMEOUT = "probe-timeout"
+LEG_RUNNER_ENV = "runner-env"
+LEG_LANE_DECLARATION = "lane-declaration"
+LEG_LANE_LOGIN = "lane-login"
+LEG_BROKER_ROUTE = "broker-route"
+LEG_FRONT_DOOR = "front-door"
+
+
+def classify_failure(
+    *, stderr: str, timeout_reason: str | None, spawn_error: bool
+) -> tuple[str, str]:
+    """Name the earliest failing leg so runner faults do not blame the front door.
+
+    Prefer the CLI's final Error line over diagnostic chatter so the cause is
+    useful even when drift and identity diagnostics surround the actual refusal.
+    """
+    if spawn_error:
+        return LEG_PROBE_CANNOT_RUN, " ".join(
+            (stderr or timeout_reason or "no stderr output").split()
+        )[:240]
+    if timeout_reason is not None:
+        return LEG_PROBE_TIMEOUT, " ".join(timeout_reason.split())[:240]
+
+    leg = LEG_FRONT_DOOR
+    for candidate, markers in (
+        (
+            LEG_RUNNER_ENV,
+            (
+                "task_class_authority",
+                "omnimarket is not installed",
+                "task-class contract",
+                "ONEX_ALLOW_OMNIMARKET_DRIFT",
+            ),
+        ),
+        (
+            LEG_LANE_DECLARATION,
+            (
+                "the lane declaration",
+                "cannot locate the lane declaration",
+                "is not usable",
+            ),
+        ),
+        (
+            LEG_LANE_LOGIN,
+            (
+                "holds no identity",
+                "DelegateLaneCredentialError",
+                "Half a credential",
+                "requires non-empty credential fields",
+                "SaslAuthenticationFailed",
+                "Authentication failed",
+            ),
+        ),
+        (
+            LEG_BROKER_ROUTE,
+            (
+                "KafkaConnectionError",
+                "NoBrokersAvailable",
+                "Unable to bootstrap",
+                "Connection closed",
+                "Connection refused",
+            ),
+        ),
+    ):
+        if any(marker in stderr for marker in markers):
+            leg = candidate
+            break
+
+    lines = stderr.splitlines()
+    errors = [
+        line.removeprefix("Error:").strip()
+        for line in lines
+        if line.startswith("Error:")
+    ]
+    evidence = [
+        line.strip()
+        for line in lines
+        if line.strip()
+        and not line.startswith(("drift_guard:", "identity:", "controller:"))
+    ]
+    cause = errors[-1] if errors else evidence[-1] if evidence else "no stderr output"
+    return leg, " ".join(cause.split())[:240]
 
 
 class _CompletedLike(Protocol):
@@ -108,6 +198,8 @@ class ModelR1ProbeResult(BaseModel):
     stdout_tail: str
     stderr_tail: str
     timeout_reason: str | None = None
+    leg: str = ""
+    named_cause: str = ""
 
 
 def _default_runner(
@@ -137,6 +229,12 @@ def run_probe(
         # TimeoutExpired/TimeoutError: the CLI hung past --timeout-s.
         # OSError (covers FileNotFoundError): no `onex` on PATH.
         duration = time.monotonic() - started
+        is_timeout = isinstance(exc, (subprocess.TimeoutExpired, TimeoutError))
+        leg, named_cause = classify_failure(
+            stderr=str(exc),
+            timeout_reason=str(exc) if is_timeout else None,
+            spawn_error=not is_timeout,
+        )
         return ModelR1ProbeResult(
             argv=argv,
             lane=PROBE_LANE,
@@ -146,8 +244,17 @@ def run_probe(
             stdout_tail="",
             stderr_tail="",
             timeout_reason=str(exc),
+            leg=leg,
+            named_cause=named_cause,
         )
     duration = time.monotonic() - started
+    leg, named_cause = (
+        classify_failure(
+            stderr=completed.stderr or "", timeout_reason=None, spawn_error=False
+        )
+        if completed.returncode != 0
+        else ("", "")
+    )
     return ModelR1ProbeResult(
         argv=argv,
         lane=PROBE_LANE,
@@ -157,6 +264,8 @@ def run_probe(
         stdout_tail=(completed.stdout or "")[-_TAIL_CHARS:],
         stderr_tail=(completed.stderr or "")[-_TAIL_CHARS:],
         timeout_reason=None,
+        leg=leg,
+        named_cause=named_cause,
     )
 
 
@@ -167,15 +276,36 @@ def record_result(result: ModelR1ProbeResult, out_path: Path) -> int:
     return result.exit_code
 
 
+def append_summary(result: ModelR1ProbeResult, summary_path: Path) -> None:
+    """Keep each run's verdict and terminal evidence visible in the job summary.
+
+    Append so another probe or step's evidence is retained in GITHUB_STEP_SUMMARY.
+    """
+    with summary_path.open("a", encoding="utf-8") as summary:
+        summary.write(
+            f"\n## R1 front-door probe: {'OK' if result.ok else 'FAIL'}\n\n"
+            f"- exit code: {result.exit_code}\n"
+            f"- leg: {result.leg}\n"
+            f"- named cause: {result.named_cause}\n"
+            f"- duration: {result.duration_s:.1f}s\n"
+            f"- argv: {' '.join(result.argv)}\n\n"
+            f"### stdout_tail\n\n```\n{result.stdout_tail}\n```\n\n"
+            f"### stderr_tail\n\n```\n{result.stderr_tail}\n```\n"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--onex-bin", default="onex")
     parser.add_argument("--timeout-s", type=float, default=DEFAULT_TIMEOUT_S)
     parser.add_argument("--record", type=Path, default=Path("r1-front-door-probe.json"))
+    parser.add_argument("--summary-file", type=Path, default=None)
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
 
     result = run_probe(onex_bin=args.onex_bin, timeout_s=args.timeout_s)
     exit_code = record_result(result, args.record)
+    if args.summary_file is not None:
+        append_summary(result, args.summary_file)
 
     if result.ok:
         print(
@@ -183,12 +313,14 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         print(
-            f"[r1-front-door-probe] FAIL: exit={result.exit_code} in "
-            f"{result.duration_s:.1f}s (lane={result.lane}); "
-            f"timeout_reason={result.timeout_reason!r}; "
-            f"stderr_tail={result.stderr_tail!r}",
+            f"[r1-front-door-probe] FAIL leg={result.leg} exit={result.exit_code} in "
+            f"{result.duration_s:.1f}s (lane={result.lane}): {result.named_cause}",
             file=sys.stderr,
         )
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            print(
+                f"::error title=R1 front-door probe ({result.leg})::{result.named_cause}"
+            )
     return exit_code
 
 

@@ -32,6 +32,10 @@ from types import ModuleType
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -95,12 +99,17 @@ def _git(repo: Path, *args: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        env=scrub_git_location_env(),
     ).stdout.strip()
 
 
 def _init_clone(repo: Path) -> str:
     repo.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init", "--quiet", str(repo)], check=True)
+    subprocess.run(
+        ["git", "init", "--quiet", str(repo)],
+        check=True,
+        env=scrub_git_location_env(),
+    )
     _git(repo, "config", "user.email", "t@example.invalid")
     _git(repo, "config", "user.name", "t")
     (repo / "README.md").write_text("x\n", encoding="utf-8")
@@ -414,3 +423,85 @@ def test_cli_runs_on_a_bare_python3_with_no_project_venv() -> None:
         check=False,
     )
     assert proc.returncode == 0, proc.stderr
+
+
+def test_governed_dists_match_the_sibling_clone_manifest(vm: ModuleType) -> None:
+    manifest = _REPO_ROOT / "scripts" / "runtime_build" / "sibling_clone_manifest.sh"
+    proc = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"; printf "%s\\n" "${SIBLING_CLONE_MANIFEST_DIST_NAMES[@]}"',
+            "bash",
+            str(manifest),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert (
+        tuple(dist for dist in proc.stdout.splitlines() if dist != "omnimarket")
+        == vm.GOVERNED_DISTS
+    )
+
+
+@pytest.mark.parametrize("missing", [None, "commit", "omnibase-spi"])
+def test_floor_from_venv_stamps_observed_build_or_preserves_existing_floor(
+    tmp_path: Path, missing: str | None
+) -> None:
+    site = tmp_path / "site-packages"
+    commit = "a" * 40
+    versions = {"omnibase-infra": "0.38.16", "omnibase-spi": "0.19.0"}
+    lock = tmp_path / "uv.lock"
+    lock.write_text(
+        "".join(
+            f'[[package]]\nname = "{name}"\nversion = "0.1.0"\n' for name in versions
+        ),
+        encoding="utf-8",
+    )
+    for name, version in versions.items():
+        if missing != name:
+            _make_dist(site, name.replace("-", "_"), version)
+    # Present but not lock-governed: neither this nor omnimarket's version is a floor key.
+    _make_dist(site, "omnibase_core", "0.47.28")
+    _make_dist(site, "omnimarket", "0.4.11", None if missing == "commit" else commit)
+    floor = tmp_path / ".onex-workspace-floor.json"
+    previous = b'{"prior": "proven floor"}\n'
+    floor.write_bytes(previous)
+
+    proc = subprocess.run(
+        [
+            "python3",
+            "-I",
+            str(_MODULE_PATH),
+            "floor-from-venv",
+            "--site-packages",
+            str(site),
+            "--lock",
+            str(lock),
+            "--omni-home",
+            str(tmp_path),
+            "--output",
+            str(floor),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if missing is not None:
+        assert proc.returncode != 0
+        assert floor.read_bytes() == previous
+        expected = "omnimarket commit" if missing == "commit" else missing
+        assert expected in proc.stderr
+        assert "cannot stamp floor" in proc.stderr
+        assert not floor.with_suffix(".json.tmp").exists()
+    else:
+        assert proc.returncode == 0, proc.stderr
+        document = json.loads(floor.read_bytes())
+        assert document["distributions"] == {
+            name.replace("-", "_"): version for name, version in versions.items()
+        }
+        assert document["omnimarket_commit"] == commit
+        assert document["omni_home"] == str(tmp_path)
+        assert document["schema"] == "onex.workspace.floor.v1"

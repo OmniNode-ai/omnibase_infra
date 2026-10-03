@@ -29,12 +29,16 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Protocol
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from omnibase_core.types import JsonType
 from scripts.edge_delegation_worker.models import ModelDelegationEnvelope
 from scripts.edge_delegation_worker.topic_constants import INBOUND_TOPICS
+
+if TYPE_CHECKING:
+    from aiokafka.structs import TopicPartition
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +73,8 @@ class ProtocolDelegationChannel(Protocol):
 class _KafkaMessageLike(Protocol):
     value: bytes
     topic: str
+    partition: int
+    offset: int
     headers: list[tuple[str, bytes]]
 
 
@@ -78,7 +84,7 @@ class ProtocolAsyncKafkaConsumer(Protocol):
     async def start(self) -> None: ...
     async def stop(self) -> None: ...
     async def getone(self) -> _KafkaMessageLike: ...
-    async def commit(self) -> None: ...
+    async def commit(self, offsets: Mapping[TopicPartition, int]) -> None: ...
 
 
 class ProtocolAsyncKafkaProducer(Protocol):
@@ -120,6 +126,8 @@ def _decode_envelope(message: _KafkaMessageLike) -> ModelDelegationEnvelope | No
         return ModelDelegationEnvelope(
             correlation_id=UUID(str(decoded["correlation_id"])),
             source_topic=message.topic,
+            source_partition=message.partition,
+            source_offset=message.offset,
             event_type=str(decoded.get("event_type", "")),
             payload=decoded.get("payload", {}),
             headers={k: v.decode("utf-8", "replace") for k, v in message.headers},
@@ -178,7 +186,20 @@ class AiokafkaDelegationChannel:
         await self._producer.send_and_wait(topic, json.dumps(body).encode("utf-8"))
 
     async def ack(self, envelope: ModelDelegationEnvelope) -> None:
-        await self._consumer.commit()
+        """Commit only the claimed record, never the consumer's fetch position.
+
+        Bounded to the record's own coordinates (OMN-18613 / OMN-18631).
+        """
+        # Defer aiokafka's import cost, as in build_kafka_channel.
+        from aiokafka.structs import TopicPartition
+
+        await self._consumer.commit(
+            {
+                TopicPartition(envelope.source_topic, envelope.source_partition): (
+                    envelope.source_offset + 1
+                )
+            }
+        )
 
     async def nack(self, envelope: ModelDelegationEnvelope, *, reason: str) -> None:
         logger.warning(

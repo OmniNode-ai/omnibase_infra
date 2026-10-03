@@ -76,20 +76,22 @@ See Also
 - Runtime kernel: omnibase_infra.runtime.service_kernel
 """
 
-# Do not hardcode versions here; version is sourced from distribution metadata.
+import importlib
 from importlib.metadata import PackageNotFoundError, version
+from types import ModuleType
+from typing import TYPE_CHECKING
 
+# Do not hardcode versions here; version is sourced from distribution metadata.
 try:
     __version__ = version("omnibase-infra")
 except PackageNotFoundError:
     __version__ = "0.0.0-dev"
 
-from . import (
-    enums,
-    models,
-    nodes,
-    utils,
-)
+if TYPE_CHECKING:
+    from . import enums, models, nodes, utils
+
+# OMN-19444: Lazy imports keep `onex <cmd> --help` fast.
+_LAZY_SUBMODULES: frozenset[str] = frozenset({"enums", "models", "nodes", "utils"})
 
 # Public API exports - only stable, documented modules are exposed at package level.
 # Internal modules (dlq, errors, event_bus, handlers, idempotency, mixins, plugins,
@@ -105,3 +107,15 @@ __all__: list[str] = [
     "nodes",
     "utils",
 ]
+
+
+def __getattr__(name: str) -> ModuleType:
+    if name in _LAZY_SUBMODULES:
+        module = importlib.import_module(f"{__name__}.{name}")
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *__all__})

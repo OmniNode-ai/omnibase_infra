@@ -134,6 +134,9 @@
 # therefore always passes an explicit OMNIMARKET_REF of the local clone HEAD.
 # Advancing the clone is a separate concern and a separate actor (pull-all.sh,
 # or the periodic tick that calls this script after a successful ff-only pull).
+# Onboarding and floor restoration use --proven: before installing, position
+# the clone at the floor's omnimarket commit, or the CI-proven sibling pin if
+# the floor has no commit. This mode never writes or restamps the floor.
 #
 # ============================================================================
 # ...AND WHY THE VERDICT STILL HAS TO MENTION origin/dev (OMN-17295)
@@ -157,22 +160,24 @@
 # are deliberate and are asserted by
 # tests/scripts/test_reconcile_clone_origin_drift_omn17295.py:
 #
-#   1. It NEVER fetches. `--check` exempts itself from the OMN-17366 ownership
-#      plan on the grounds that a read-only probe writes nothing -- and a fetch
+#   1. This observation NEVER fetches. `--check` exempts itself from the
+#      OMN-17366 ownership plan because a read-only probe writes nothing -- a fetch
 #      writes, depositing objects, refs and reflogs. On the `.201` root cron
 #      that is exactly how 1118 root-owned paths ended up inside operator-owned
 #      clones. The target is read AS LAST FETCHED and the report says so;
 #      reconcile-host.sh is the actor that fetches, under an ownership plan.
-#   2. It NEVER advances a clone. There is exactly one clone reconciler
-#      (scripts/runtime_build/reconcile_deploy_clones.sh, OMN-17291) and one
+#   2. Ordinary repair NEVER advances a clone. The clone reconciler
+#      (scripts/runtime_build/reconcile_deploy_clones.sh, OMN-17291) and the
 #      venv reconciler (this file), composed by reconcile-host.sh. A
 #      fast-forward added here would be the third implementation that
 #      composition exists to prevent, and AC5 says to coordinate with OMN-17291
 #      rather than duplicate its reconciler.
+#      --proven explicitly restores a proven commit, fetching once if absent
+#      and checking out detached as the clone owner; it never follows dev head.
 #
 # Detection is therefore verdict-bearing in `--check` and report-only in the
-# repair path: the repair path's exit code answers for the surfaces this script
-# actually writes, and a clone it is forbidden to touch is not one of them.
+# repair path: ordinary repair's exit code answers for the venv surfaces it
+# writes. --proven separately proves the clone reached the requested commit.
 # Convergence is preserved because the command the message names is
 # reconcile-host.sh, not this script's own repair mode.
 #
@@ -248,11 +253,15 @@
 #
 # ----------------------------------------------------------------------------
 # Usage:
-#   reconcile-workspace-venvs.sh [--check] [--verbose] [--omni-home PATH]
+#   reconcile-workspace-venvs.sh [--check | --proven] [--verbose] [--omni-home PATH]
 #                                [--branch NAME]
 #
 #     --check       Report the verdict and mutate NOTHING. This is the mode the
 #                   SessionStart line and any read-only probe must use.
+#     --proven      Restore omnimarket to the proven commit before installing:
+#                   .onex-workspace-floor.json's omnimarket_commit first, then
+#                   .github/sibling-pins.yaml's pins.omnimarket. Refuse if neither
+#                   is readable. Never stamp the floor. Invalid with --check.
 #     --verbose     Echo each collaborator command before running it.
 #     --omni-home   Canonical registry root, overriding $OMNI_HOME. An explicit
 #                   argument exists so an in-process caller (the CLI drift
@@ -316,12 +325,14 @@ readonly EXIT_INDETERMINATE=3
 
 
 MODE="repair"
+PROVEN=0
 VERBOSE=0
 OMNI_HOME_ARG=""
 BRANCH="dev"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --check) MODE="check" ;;
+    --proven) PROVEN=1 ;;
     --verbose) VERBOSE=1 ;;
     --omni-home)
       shift
@@ -350,6 +361,11 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
+
+if [[ "$PROVEN" -eq 1 && "$MODE" == "check" ]]; then
+  echo "reconcile-workspace-venvs.sh: --proven cannot be used with --check" >&2
+  exit "$EXIT_INDETERMINATE"
+fi
 
 # The explicit argument wins over the ambient variable: a caller that resolved
 # the root already must not be silently overridden by whatever the surrounding
@@ -936,9 +952,8 @@ trace "uv resolved to $UV_BIN"
 # --------------------------------------------------------------------------- #
 # Pure observations (the future NodeCompute inputs)
 # --------------------------------------------------------------------------- #
-# Local `git rev-parse HEAD` only -- never `ls-remote`. Advancing the clone is
-# somebody else's job; this script reconciles the venv to whatever is checked
-# out, which is precisely what the drift guard compares against.
+# Local `git rev-parse HEAD` only -- never `ls-remote`. Ordinary repair tracks
+# the checked-out clone; --proven restores it before this observation.
 market_head() {
   git -C "$MARKET_CLONE" rev-parse HEAD 2>/dev/null || true
 }
@@ -1610,12 +1625,59 @@ fail() {
   exit "$EXIT_FAILED"
 }
 
+restore_proven_market() (
+  # Isolate the clone's ownership plan from the venv plan used by run_repair.
+  local proven="" dirty head rc=0
+  local floor="$OMNI_HOME/.onex-workspace-floor.json"
+  local pins="$INFRA_DIR/.github/sibling-pins.yaml"
+  if [[ -r "$floor" ]]; then
+    proven="$(sed -n 's/.*"omnimarket_commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$floor" | awk 'NR == 1 {print; exit}')"
+  fi
+  if [[ -z "$proven" && -r "$pins" ]]; then
+    proven="$(awk '
+      /^pins:[[:space:]]*$/ { inpins = 1; next }
+      inpins && /^[^[:space:]#]/ { inpins = 0 }
+      inpins && /^[[:space:]]+omnimarket:[[:space:]]*/ {
+        sub(/^[[:space:]]+omnimarket:[[:space:]]*/, "")
+        sub(/[[:space:]]*#.*/, "")
+        gsub(/["\047[:space:]]/, "")
+        print; exit
+      }
+    ' "$pins")"
+  fi
+  if [[ -z "$proven" ]]; then
+    say "INDETERMINATE: no proven omnimarket commit in $floor or $pins"
+    exit "$EXIT_INDETERMINATE"
+  fi
+  [[ "$proven" =~ ^[[:xdigit:]]{40}$ ]] || fail "invalid proven omnimarket commit: $proven"
+  head="$(market_head)"
+  [[ "$head" != "$proven" ]] || return 0
+  dirty="$(git -C "$MARKET_CLONE" status --porcelain)" || fail "cannot read clone status: $MARKET_CLONE"
+  [[ -z "$dirty" ]] || fail "dirty clone $MARKET_CLONE; cannot restore proven commit $proven" \
+    "Commit or remove the local changes, then run:" \
+    "  bash ${BASH_SOURCE[0]} --omni-home $OMNI_HOME --proven"
+
+  rp_plan_privileges "$MARKET_CLONE" || rc=$?
+  if [[ "$rc" -ne 0 ]]; then
+    say "INDETERMINATE: cannot write $MARKET_CLONE as its owner ($RP_OWNER)."
+    exit "$EXIT_INDETERMINATE"
+  fi
+  if ! git -C "$MARKET_CLONE" cat-file -e "${proven}^{commit}" 2>/dev/null; then
+    as_owner git -C "$MARKET_CLONE" fetch --quiet origin || fail "could not fetch proven commit $proven for $MARKET_CLONE"
+    git -C "$MARKET_CLONE" cat-file -e "${proven}^{commit}" 2>/dev/null || \
+      fail "proven commit $proven is absent from $MARKET_CLONE after fetching origin"
+  fi
+  as_owner git -C "$MARKET_CLONE" checkout --quiet --detach "$proven" || \
+    fail "could not restore $MARKET_CLONE to proven commit $proven"
+  [[ "$(market_head)" == "$proven" ]] || fail "$MARKET_CLONE did not reach proven commit $proven"
+)
+
 run_repair() {
   local head installed need_lock=0 need_provider=0
 
-  # Report-only on this path. The exit code below answers for the surfaces this
-  # script WRITES, and a clone it is forbidden to touch is not one of them --
-  # so a stale clone must not turn a successful venv reconcile into a failure
+  # Branch drift is report-only on this path: --proven restores a chosen commit
+  # rather than tracking origin, and ordinary repair writes only the venvs.
+  # A stale clone must not turn a successful venv reconcile into a failure
   # for pull-all.sh or the CLI drift guard, both of which read that status.
   # Saying nothing, though, is how the venv gets pinned to a stale commit with
   # a clean "reconciled" line over the top of it.
@@ -1625,6 +1687,9 @@ run_repair() {
     say_clone_stale_remedy
   fi
 
+  if [[ "$PROVEN" -eq 1 ]]; then
+    restore_proven_market || exit $?
+  fi
   head="$(market_head)"
   if [[ -z "$head" ]]; then
     say "INDETERMINATE: could not read HEAD of $MARKET_CLONE"

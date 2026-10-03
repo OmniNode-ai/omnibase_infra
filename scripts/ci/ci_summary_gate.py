@@ -41,7 +41,8 @@ Three independent checks; all must be satisfied for success:
    gate — UNLESS it is the poller itself or one of a small, explicit
    :data:`SOFT_ALLOWLIST` of jobs that already exist in ``ci.yml`` as non-gating
    (advisory / warn-only / not in ci-summary's ``needs`` / not a required
-   context). This sweep is what makes the poller *stricter* than the old gate:
+   context). The sweep also WAITS for non-exempt running rows without a verdict
+   (PENDING, re-polled). This makes the poller *stricter* than the old gate:
    the old ``tests-gate`` greens when ``test-parallel`` is ``skipped``, so a
    failure in ``detect-changes`` / ``plugin-env-service-completeness`` /
    ``compose-required-env-coverage`` / ``contract-path-preflight`` (which skip
@@ -2851,7 +2852,8 @@ def evaluate(
         )
     )
 
-    # (3) Default-deny sweep over every OTHER present+completed job.
+    # (3) Default-deny sweep over every OTHER present job: fail decided refusals
+    #     and WAIT for running rows without a verdict (PENDING, re-polled).
     sweep_failures = sorted(
         j.name
         for name, j in latest.items()
@@ -2860,6 +2862,15 @@ def evaluate(
         and not _is_allowlisted(name, allowlist)
         and is_decided(j)
         and j.conclusion not in GOOD_CONCLUSIONS
+    )
+    sweep_running = sorted(
+        j.name
+        for name, j in latest.items()
+        if name != self_name
+        and name not in gate_names
+        and not _is_allowlisted(name, allowlist)
+        and j.status != "completed"
+        and not is_decided(j)
     )
 
     # Completeness anchor: every gate must be present AND completed.
@@ -2943,7 +2954,10 @@ def evaluate(
     # the same row reds with a named reason, and the caller's deadline still
     # converts a sustained PENDING into FAILURE.
     all_unresolved = (
-        gate_missing_or_pending + external_unresolved + ext_sweep_provisional
+        gate_missing_or_pending
+        + sweep_running
+        + external_unresolved
+        + ext_sweep_provisional
     )
 
     def _verdict(label: str) -> str:
@@ -2962,6 +2976,7 @@ def evaluate(
             external_provisional,
             docs_only=docs_only,
             relaxed=relaxed,
+            sweep_running=sweep_running,
             sweep_names=ext_sweep_names,
             sweep_external_failures=ext_sweep_failures,
             sweep_in_flight=ext_sweep_in_flight,
@@ -2995,6 +3010,7 @@ def _report(
     *,
     docs_only: bool = False,
     relaxed: frozenset[str] = frozenset(),
+    sweep_running: list[str] | None = None,
     sweep_names: list[str] | None = None,
     sweep_external_failures: list[str] | None = None,
     sweep_in_flight: list[str] | None = None,
@@ -3047,6 +3063,11 @@ def _report(
         lines.append(f"  skippable-gate failures: {', '.join(skippable_failures)}")
     if sweep_failures:
         lines.append(f"  default-deny sweep failures: {', '.join(sweep_failures)}")
+    if sweep_running:
+        lines.append(
+            "  default-deny sweep rows still running (PENDING, re-polled): "
+            + ", ".join(sweep_running)
+        )
     if gate_missing_or_pending:
         lines.append(f"  gates missing/pending: {', '.join(gate_missing_or_pending)}")
     if external_contexts:
