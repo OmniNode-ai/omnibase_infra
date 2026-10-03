@@ -78,6 +78,9 @@ local:
     - valkey
     - forward-migration
     - migration-gate
+    # OMN-20113: record the laptop's own tenant for delegation slug resolution;
+    # no onex-api or tenant-registry writer fills the mirror on this bundle.
+    - local-tenant-registry-seed
     - omninode-runtime
     - runtime-effects
     # The delegation_events writer. It is a standalone projection runner, not
