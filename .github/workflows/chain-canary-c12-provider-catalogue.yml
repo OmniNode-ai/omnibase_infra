@@ -78,9 +78,9 @@ name: Chain Canary — C12 provider catalogue
 on:
   schedule:
     # Hourly at :27 (OMN-17427; was 4x/day). Offset from C28 (:03), the C11
-    # producer (:10), chain-canary (:41), C16 (:48), dev-lane-liveness
-    # (:07/:22/:37/:52) and sync-revert-watchdog (:00 even hours) so no two
-    # scheduled probes contend for the runner minute.
+    # producer (:10), chain-canary (:41 odd hours), C16 (:29 at 3,9,15,21),
+    # dev-lane-liveness (:07/:22/:37/:52) and sync-revert-watchdog (:00 even
+    # hours) so no two scheduled probes contend for the runner minute.
     - cron: '27 * * * *'
   workflow_dispatch:
     inputs:

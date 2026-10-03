@@ -75,11 +75,10 @@ name: Chain Canary — C16 receipt identity
 
 on:
   schedule:
-    # Hourly at :48 (OMN-17427; was 4x/day at :29). Offset from C28 (:03),
-    # the C11 probe (:10), C12 (:27), chain-canary (:41), dev-lane-liveness
-    # (:07/:22/:37/:52) and sync-revert-watchdog (:00 even hours) so no two
-    # scheduled probes contend for one runner minute.
-    - cron: '48 * * * *'
+    # 4x/day at :29, offset from chain-canary (:41 odd hours), the C11 probe
+    # (:17), dev-lane-liveness (:07/:22/:37/:52) and sync-revert-watchdog
+    # (:00 even hours) so no two scheduled probes contend for one runner minute.
+    - cron: '29 3,9,15,21 * * *'
   workflow_dispatch:
     inputs:
       gateway_url:

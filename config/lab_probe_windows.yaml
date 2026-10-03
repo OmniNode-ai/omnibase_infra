@@ -49,7 +49,7 @@ probes:
     name: chain canary
     repo: omnibase_infra
     workflow: .github/workflows/chain-canary.yml
-    cron: ['41 * * * *']
+    cron: ['41 1,3,5,7,9,11,13,15,17,19,21,23 * * *']
     lane: dev
     lane_source: job_name
     max_duration_minutes: 65
@@ -57,7 +57,7 @@ probes:
     name: receipt identity
     repo: omnibase_infra
     workflow: .github/workflows/chain-canary-c16-receipt-identity.yml
-    cron: ['48 * * * *']
+    cron: ['29 3,9,15,21 * * *']
     lane: dev
     lane_source: job_name
     max_duration_minutes: 15
