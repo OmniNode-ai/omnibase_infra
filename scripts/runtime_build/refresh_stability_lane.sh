@@ -52,7 +52,7 @@
 #                           days (2026-07-26, 2026-07-27) are why this is required.
 #   ONEX_DEPLOY_GRANT_ACK   Comma-separated grant ids. This refresh is REFUSED
 #                           while unconsumed, unexpired prod-promotion grants at
-#                           onex_change_control@main pin the lane's proof —
+#                           omninode_infra@main pin the lane's proof —
 #                           refreshing invalidates the stability-proven premise
 #                           those grants rest on. Proceeding requires naming EVERY
 #                           live grant id (the acknowledgement is recorded).
@@ -506,7 +506,7 @@ log "mode            : ${MODE}"
 # would otherwise be unattributed and un-interlocked.
 #
 # Refuses when ONEX_DEPLOY_REASON is absent/placeholder, or when unconsumed,
-# unexpired prod-promotion grants at onex_change_control@main pin this lane's
+# unexpired prod-promotion grants at omninode_infra@main pin this lane's
 # proof (acknowledge each grant id via ONEX_DEPLOY_GRANT_ACK to proceed on the
 # record). Fails closed when grant state cannot be resolved.
 # =============================================================================
