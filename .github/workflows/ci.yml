@@ -195,7 +195,7 @@ jobs:
     with:
       contracts-dir: contracts
       receipts-dir: drift/dod_receipts
-      core-ref: 1e69bec909f245be511803191554e5b340def0b7 # .github/sibling-pins.yaml
+      core-ref: f43f97629182f463d233b564b19a2b27d4fc4888 # .github/sibling-pins.yaml
 
   # =============================================================================
   # Phase 0 - Zone filter (OMN-10475)
@@ -569,7 +569,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_core
-          ref: 1e69bec909f245be511803191554e5b340def0b7 # .github/sibling-pins.yaml
+          ref: f43f97629182f463d233b564b19a2b27d4fc4888 # .github/sibling-pins.yaml
           path: .ci/omnibase_core
           token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
 
@@ -629,7 +629,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnibase_core
-          ref: 1e69bec909f245be511803191554e5b340def0b7 # .github/sibling-pins.yaml
+          ref: f43f97629182f463d233b564b19a2b27d4fc4888 # .github/sibling-pins.yaml
           path: .ci/omnibase_core
           token: ${{ secrets.OMNIBASE_CORE_TOKEN || secrets.GITHUB_TOKEN }}
 

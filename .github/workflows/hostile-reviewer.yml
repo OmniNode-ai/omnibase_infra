@@ -95,7 +95,7 @@ jobs:
     with:
       contracts-dir: contracts
       receipts-dir: drift/dod_receipts
-      core-ref: 1e69bec909f245be511803191554e5b340def0b7 # .github/sibling-pins.yaml
+      core-ref: f43f97629182f463d233b564b19a2b27d4fc4888 # .github/sibling-pins.yaml
 
   hostile-review:
     needs: occ-preflight
@@ -167,7 +167,7 @@ jobs:
             rm -rf ../omnibase_core_dep
             if git clone --filter=blob:none --no-checkout \
               https://github.com/OmniNode-ai/omnibase_core.git ../omnibase_core_dep \
-              && git -C ../omnibase_core_dep checkout --quiet 1e69bec909f245be511803191554e5b340def0b7; then # .github/sibling-pins.yaml
+              && git -C ../omnibase_core_dep checkout --quiet f43f97629182f463d233b564b19a2b27d4fc4888; then # .github/sibling-pins.yaml
               exit 0
             fi
             sleep $((attempt * 10))
