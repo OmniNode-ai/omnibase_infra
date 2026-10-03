@@ -1,0 +1,59 @@
+schema_version: "1.0.0"
+ticket_id: OMN-13966
+title: onex delegate admits every declared task class by explicit name and refuses an unroutable one in the contract's words
+summary: The delegate CLI reads its task-class vocabulary from the registry, admits an internal routable class by explicit name, and refuses an unroutable class with the contract-declared status, capability, tracking id and reason and never the word unknown.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn13966
+    statement: Every class the task-class contract declares must be reachable through the product CLI or refused for its declared reason.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: an explicit --task-type naming an internal routable class is admitted while the help lists exactly the authority''s classes -- falsifier: uv run pytest tests/unit/cli/test_cli_registry_vocabulary.py -q -k "internal_class_is_admitted or help_lists_exactly"'
+      - id: AC2
+        statement: 'AC2: an explicit unroutable class is refused with the contract-declared status, capability, tracking id and reason, never with the word unknown -- falsifier: uv run pytest tests/unit/cli/test_cli_registry_vocabulary.py -q -k unroutable_class_is_refused'
+      - id: AC3
+        statement: 'AC3: the CLI admitted set cannot drift from the contract because it keeps no list and follows the registry at invocation time -- falsifier: uv run pytest tests/unit/cli/test_cli_registry_vocabulary.py -q -k "follows_the_registry or not_declare"'
+evidence_requirements:
+  - kind: tests
+    description: The CLI tests run against a stand-in registry declaring classes that exist in no production contract, so a CLI keeping its own list would fail.
+    command: uv run pytest tests/unit/cli/test_cli_registry_vocabulary.py -q -k "an_internal_class_is_admitted_by_explicit_name or help_lists_exactly_the_authoritys_classes"
+  - kind: tests
+    description: The CLI test asserts the contract's words reach the refusal.
+    command: uv run pytest tests/unit/cli/test_cli_registry_vocabulary.py -q -k an_unroutable_class_is_refused_in_the_contracts_words
+  - kind: tests
+    description: The CLI tests change the registry between invocations and assert the help and the flag follow it.
+    command: uv run pytest tests/unit/cli/test_cli_registry_vocabulary.py -q -k "help_follows_the_registry_at_invocation_time or a_class_the_authority_does_not_declare_is_refused_by_the_flag"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-13966-ac1
+    description: The CLI tests run against a stand-in registry declaring classes that exist in no production contract, so a CLI keeping its own list would fail.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_cli_registry_vocabulary.py -q -k "an_internal_class_is_admitted_by_explicit_name or help_lists_exactly_the_authoritys_classes"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-13966-ac2
+    description: The CLI test asserts the contract's words reach the refusal.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_cli_registry_vocabulary.py -q -k an_unroutable_class_is_refused_in_the_contracts_words
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-13966-ac3
+    description: The CLI tests change the registry between invocations and assert the help and the flag follow it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_cli_registry_vocabulary.py -q -k "help_follows_the_registry_at_invocation_time or a_class_the_authority_does_not_declare_is_refused_by_the_flag"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

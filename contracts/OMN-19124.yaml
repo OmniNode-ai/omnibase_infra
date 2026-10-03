@@ -1,0 +1,70 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19124
+title: A delegate caller can name the rung, and the receipt says it was chosen
+summary: onex delegate declares a backend pin option written under the contract field, an unpinned run is unchanged, a violated pin is refused by name with the semantics asserted, and the receipt records the pin and how the rung was selected.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19124
+    statement: A caller must be able to choose a cloud rung rather than only a task class, with stated pin-failure semantics and a receipt that distinguishes chosen from walked-to.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: omitting the flag reproduces today''s cheapest-first resolution unchanged -- falsifier: uv run pytest tests/unit/cli/test_delegate_backend_pin_omn19124.py -q -k "no_pin or unpinned"'
+      - id: AC3
+        statement: 'AC3: the pin-failure semantics are asserted, pin-or-refuse -- falsifier: uv run pytest tests/unit/cli/test_delegate_backend_pin_omn19124.py -q -k "another_rung or escalation_off_the_pin or different_backend"'
+      - id: AC4
+        statement: 'AC4: the pin is visible on the receipt so it says the rung was chosen rather than walked to -- falsifier: uv run pytest tests/unit/cli/test_delegate_backend_pin_omn19124.py -q -k "records_the_pin or says_cheapest_first or recorded_on_the_receipt"'
+      - id: AC5
+        statement: 'AC5: RED taken first -- falsifier: a pull request whose evidence shows no failing run before the fix'
+evidence_requirements:
+  - kind: tests
+    description: The tests assert no backend key is written without the flag, an unpinned receipt is never refused for its rung and says cheapest_first, and the unpinned command line is unchanged.
+    command: uv run pytest tests/unit/cli/test_delegate_backend_pin_omn19124.py tests/integration/cli/test_delegate_backend_pin_cli_omn19124.py -q -k "no_pin_writes_no_backend_key_at_all or unpinned_receipt or unpinned_command_line_is_unchanged or absent_flag_stays_absent"
+  - kind: tests
+    description: The tests assert a completed run on another rung is refused by name, a substitution of a different backend is refused, a real escalation off the pin still refuses, and a terminally failed run is not re-reported as a pin violation.
+    command: uv run pytest tests/unit/cli/test_delegate_backend_pin_omn19124.py tests/integration/cli/test_delegate_backend_pin_cli_omn19124.py -q -k "another_rung or another_backend or different_backend or escalation_off_the_pin or not_re_reported_as_a_pin_violation or accepted"
+  - kind: tests
+    description: The tests assert a pinned receipt records the pin, the selection mode and whether the pin was honoured, and a violated pin is recorded on the receipt and not only on stderr.
+    command: uv run pytest tests/unit/cli/test_delegate_backend_pin_omn19124.py -q -k "records_the_pin_and_how_the_rung_was_selected or says_cheapest_first or violated_pin_is_recorded_on_the_receipt or honoured"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19124-ac2
+    description: The tests assert no backend key is written without the flag, an unpinned receipt is never refused for its rung and says cheapest_first, and the unpinned command line is unchanged.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_backend_pin_omn19124.py tests/integration/cli/test_delegate_backend_pin_cli_omn19124.py -q -k "no_pin_writes_no_backend_key_at_all or unpinned_receipt or unpinned_command_line_is_unchanged or absent_flag_stays_absent"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-19124-ac3
+    description: The tests assert a completed run on another rung is refused by name, a substitution of a different backend is refused, a real escalation off the pin still refuses, and a terminally failed run is not re-reported as a pin violation.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_backend_pin_omn19124.py tests/integration/cli/test_delegate_backend_pin_cli_omn19124.py -q -k "another_rung or another_backend or different_backend or escalation_off_the_pin or not_re_reported_as_a_pin_violation or accepted"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-19124-ac4
+    description: The tests assert a pinned receipt records the pin, the selection mode and whether the pin was honoured, and a violated pin is recorded on the receipt and not only on stderr.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_backend_pin_omn19124.py -q -k "records_the_pin_and_how_the_rung_was_selected or says_cheapest_first or violated_pin_is_recorded_on_the_receipt or honoured"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn-19124-ac5
+    description: The merged pull request body records the unit module run against unmodified origin/dev with nine failures and one control pass.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh pr view 3965 --repo OmniNode-ai/omnibase_infra --json body --jq .body | grep -Eq '9 failed, 1 passed'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5

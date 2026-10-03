@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20385
+title: In-process onex delegate no longer fails on the phase-timed bus subscribe
+summary: The delegate phase-timed bus forwards the positional subscribe call the dispatch port makes, and the in-process runtime hands handlers the untimed in-memory bus so the local dispatch port is selected.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20385
+    statement: An in-process onex delegate must reach its provider with the phase timer wrapping the bus instead of failing with a subscribe TypeError.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: an in-process onex delegate reaches its provider with the phase timer wrapping the bus, called the way the omnimarket dispatch port calls subscribe -- falsifier: uv run pytest tests/unit/cli/test_delegate_timed_bus_passthrough_omn20381.py -q -k subscribe_forwards_positional_arguments'
+      - id: AC2
+        statement: 'AC2: the in-process runtime no longer fails with the subscribe TypeError -- falsifier: uv run pytest tests/integration/cli/test_delegate_timed_bus_passthrough_omn20381.py tests/integration/cli/test_delegate_in_process_handler_bus_omn20381.py'
+evidence_requirements:
+  - kind: tests
+    description: The unit tests call DelegatePhaseTimedBus.subscribe(topic, None, handler, group_id=...) positionally as the dispatch port does and assert the arguments reach the inner bus, including a subscribe during client traffic.
+    command: uv run pytest tests/unit/cli/test_delegate_timed_bus_passthrough_omn20381.py -q -k "subscribe_forwards_positional_arguments_and_callback or subscribe_during_client_traffic"
+  - kind: tests
+    description: The integration tests drive the real timed runtime in receipt mode with runtime-style positional subscribe and inline re-entrant publish, and assert the handler receives the untimed in-memory bus so the local dispatch port is the one selected. This is the receipt-mode seam; a live provider call is not part of this check.
+    command: uv run pytest tests/integration/cli/test_delegate_timed_bus_passthrough_omn20381.py tests/integration/cli/test_delegate_in_process_handler_bus_omn20381.py tests/unit/cli/test_delegate_timed_bus_passthrough_omn20381.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20385-ac1
+    description: The unit tests call DelegatePhaseTimedBus.subscribe(topic, None, handler, group_id=...) positionally as the dispatch port does and assert the arguments reach the inner bus, including a subscribe during client traffic.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_timed_bus_passthrough_omn20381.py -q -k "subscribe_forwards_positional_arguments_and_callback or subscribe_during_client_traffic"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20385-ac2
+    description: The integration tests drive the real timed runtime in receipt mode with runtime-style positional subscribe and inline re-entrant publish, and assert the handler receives the untimed in-memory bus so the local dispatch port is the one selected. This is the receipt-mode seam; a live provider call is not part of this check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_delegate_timed_bus_passthrough_omn20381.py tests/integration/cli/test_delegate_in_process_handler_bus_omn20381.py tests/unit/cli/test_delegate_timed_bus_passthrough_omn20381.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
