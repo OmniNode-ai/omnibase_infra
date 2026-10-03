@@ -33,6 +33,7 @@ from omnibase_infra.cli import cli_delegate, cli_node
 from omnibase_infra.cli.store_developer_profile import StoreDeveloperProfile
 from tests.helpers.cli_registry_stand_in import (
     install_stand_in_registry,
+    use_initialised_install,
     wiring_authority,
 )
 from tests.helpers.cli_registry_stand_in.node_delegate_stand_in.model_stand_in_delegate_request import (
@@ -73,6 +74,12 @@ def _no_developer_lane_binding(
         "StoreDeveloperProfile",
         lambda *, onex_home: StoreDeveloperProfile(onex_home=empty_home),
     )
+
+
+@pytest.fixture(autouse=True)
+def _initialised_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give ``onex delegate`` an install that has minted its identity (OMN-17427)."""
+    use_initialised_install(monkeypatch)
 
 
 @pytest.fixture(autouse=True)

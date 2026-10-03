@@ -77,6 +77,8 @@ class ModelTimeoutlessDelegateRequest(BaseModel):
     that refused every flagged run. It accepts ``metadata``, the map every
     released request model declares, because the command always sends a
     caller lane there (OMN-20299), even with every caller variable cleared.
+    It accepts ``tenant_id`` for the same reason: omnimarket has declared it
+    since v0.4.7 (OMN-14349), and the command stamps it (OMN-17427).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -86,6 +88,7 @@ class ModelTimeoutlessDelegateRequest(BaseModel):
     task_type: str = ""
     source: str = ""
     metadata: dict[str, str] = Field(default_factory=dict)
+    tenant_id: str | None = None
 
 
 class HandlerTimeoutlessNoop(HandlerCorrelatedNoop):
