@@ -2,18 +2,17 @@
 # SPDX-License-Identifier: MIT
 """``scripts/onex`` below the floor: peer-lock wait and a refusal that names its cause.
 
-OMN-20111. When the wrapper's own reconcile is DECLINED because a peer holds the
-host lock, the peer is doing the very work that would clear the refusal, so the
-wrapper waits a bounded time, re-reading the floor, instead of refusing while a
+OMN-20111. When a peer holds the host lock, the peer is doing the very work
+that would clear the refusal, so the wrapper waits a bounded time, re-reading
+the floor, instead of refusing while a
 stamp is seconds away. Waiting never lowers the bar: a floor that is still not
 OK when the wait ends is refused exactly as before.
 
-When it does refuse, it names the failing dispatch-premise surface and the
-command that clears it, read from the last reconcile receipt, and separates the
-failures that do not block delegation.
+When no floor is known, the refusal names failing dispatch-premise surfaces
+from the last reconcile receipt. A BELOW refusal names only the proven restore.
 
-Hermetic: a stub reconciler that exits with a chosen status, a hand-written
-floor and receipt, and a fake CLI entrypoint that records its argv.
+Hermetic: a peer lock directory, a hand-written floor and receipt, and a fake
+CLI entrypoint that records its argv.
 """
 
 from __future__ import annotations
@@ -115,11 +114,6 @@ class _Workspace:
         tmp.write_text(payload, encoding="utf-8")
         tmp.replace(self.floor)
 
-    def stub_reconciler(self, exit_code: int) -> None:
-        script = self.scripts_dir / "reconcile-host.sh"
-        script.write_text(f"#!/usr/bin/env bash\nexit {exit_code}\n", encoding="utf-8")
-        script.chmod(0o755)
-
     def write_receipt(self) -> None:
         self.receipt.write_text(
             "{\n"
@@ -168,11 +162,10 @@ def ws(tmp_path: Path) -> _Workspace:
 def test_a_peer_that_stamps_the_floor_within_the_wait_lets_delegate_run(
     ws: _Workspace,
 ) -> None:
-    """When a peer reconcile exits 4 and removes its lock after stamping a good
-    floor, the wrapper must poll, notice the lock is gone, re-read the floor,
+    """When a peer removes its lock after stamping a good floor, the wrapper
+    must poll, notice the lock is gone, re-read the floor,
     print the proof message to stderr, and exec the entrypoint (sentinel 41)."""
     ws.write_floor(STALE)
-    ws.stub_reconciler(4)
     ws.lock_dir.mkdir()
 
     def _peer_finishes() -> None:
@@ -201,7 +194,6 @@ def test_a_peer_holding_the_lock_past_the_budget_still_refuses(ws: _Workspace) -
     wrapper must stop waiting, refuse with exit 3, and never exec the venv
     entrypoint."""
     ws.write_floor(STALE)
-    ws.stub_reconciler(4)
     ws.lock_dir.mkdir()
     t0 = time.monotonic()
     proc = ws.run("delegate", "x", wait_s=2, poll_s=1)
@@ -218,7 +210,6 @@ def test_a_peer_that_finishes_without_proving_the_floor_refuses(ws: _Workspace) 
     must stop polling immediately (well under the full budget) and refuse with
     the 'finished after about' message instead of exec'ing the entrypoint."""
     ws.write_floor(STALE)
-    ws.stub_reconciler(4)
     ws.lock_dir.mkdir()
     timer = threading.Timer(2.0, ws.lock_dir.rmdir)
     timer.start()
@@ -241,8 +232,6 @@ def test_the_refusal_names_the_blocking_surface_and_its_clearing_command(
     failing dispatch-premise surface with its verdict and the receipt timestamp,
     print the clearing remedy, demark non-blocking failures, and stay silent
     about surfaces already at target."""
-    ws.write_floor(STALE)
-    ws.stub_reconciler(2)
     ws.write_receipt()
     proc = ws.run("delegate", "x")
     assert proc.returncode == _EXIT_BELOW_FLOOR, proc.stderr
@@ -262,26 +251,9 @@ def test_a_refusal_with_no_receipt_says_so(ws: _Workspace) -> None:
     """When the wrapper refuses and no reconcile receipt exists on disk it must
     still refuse with exit 3 and say the floor is blocked by unknown surfaces
     rather than staying silent or crashing."""
-    ws.write_floor(STALE)
-    ws.stub_reconciler(2)
     proc = ws.run("delegate", "x")
     assert proc.returncode == _EXIT_BELOW_FLOOR, proc.stderr
     assert "no reconcile receipt" in proc.stderr
-
-
-def test_a_failed_reconcile_does_not_wait(ws: _Workspace) -> None:
-    """A reconcile that fails for a reason other than a peer lock (exit 2) must
-    refuse immediately without entering the peer-lock poll loop, so the wait
-    budget message never appears and the run finishes quickly."""
-    ws.write_floor(STALE)
-    ws.stub_reconciler(2)
-    ws.lock_dir.mkdir()
-    t0 = time.monotonic()
-    proc = ws.run("delegate", "x", wait_s=30, poll_s=1)
-    elapsed = time.monotonic() - t0
-    assert proc.returncode == _EXIT_BELOW_FLOOR, proc.stderr
-    assert "waiting up to" not in proc.stderr
-    assert elapsed < 20
 
 
 def test_an_ordinary_subcommand_never_waits(ws: _Workspace) -> None:
@@ -289,7 +261,6 @@ def test_an_ordinary_subcommand_never_waits(ws: _Workspace) -> None:
     plain subcommand must exec straight through to the venv entrypoint even
     with a stale floor and a live peer lock, never printing wait messages."""
     ws.write_floor(STALE)
-    ws.stub_reconciler(4)
     ws.lock_dir.mkdir()
     t0 = time.monotonic()
     proc = ws.run("info", wait_s=30, poll_s=1)

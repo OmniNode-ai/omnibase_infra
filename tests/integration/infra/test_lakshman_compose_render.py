@@ -560,3 +560,25 @@ def test_operator_registry_binding_cannot_join_the_dev_consumer_group() -> None:
     assert "lakshman.omnimarket-projections.tenant-registry-writer.consume.v1" in text
     assert "env:OMNINODE_INTERNAL_DB_URL" in text
     assert "local.omnimarket-projections.tenant-registry-writer.consume.v1" not in text
+
+
+@pytest.mark.integration
+def test_runtime_effects_carries_the_projection_read_binding() -> None:
+    """OMN-20159: the /skill edge reaches node_projection_read_effect in
+    runtime-effects, and with no binding every read is refused
+    ``projection_binding_unconfigured``. The binding must name the database the
+    lane's projection API reads ``delegation_events`` from, or the two read paths
+    answer different rows for the same request.
+    """
+    effects = _compose_config_json()["services"]["runtime-effects"]
+    assert effects["environment"]["OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY"] == (
+        "/etc/onex/projection-runtime-binding.yaml"
+    )
+    binding = next(
+        Path(mount["source"])
+        for mount in effects.get("volumes", [])
+        if mount["target"] == "/etc/onex/projection-runtime-binding.yaml"
+    )
+    text = binding.read_text(encoding="utf-8")
+    assert "env:OMNIDASH_ANALYTICS_DB_URL" in text
+    assert "lakshman.omnimarket-projections.runtime-read.consume.v1" in text

@@ -53,6 +53,7 @@ from scripts.ci.ci_summary_gate import (
     latest_check_run_by_name,
     latest_check_run_rows,
     resolve_check_run_event,
+    strict_gates_for_event,
     validate_sweep_exclusions,
 )
 
@@ -189,6 +190,87 @@ def _job(
 def _all_gates(conclusion: str = "success") -> list[dict[str, object]]:
     """A full, passing snapshot: every strict + skippable gate present+good."""
     return [_job(g, conclusion) for g in (*STRICT_GATE_JOBS, *SKIPPABLE_GATE_JOBS)]
+
+
+class TestRunningRowsHoldTheVerdictOmn20066:
+    """In-run rows without a verdict must hold CI Summary at PENDING."""
+
+    @pytest.mark.parametrize("status", ["queued", "in_progress", "waiting", "pending"])
+    def test_running_unregistered_job_cannot_conclude_success(
+        self, status: str
+    ) -> None:
+        """Every running status holds an otherwise passing snapshot."""
+        jobs = _all_gates() + [_job("Some New Job", None, status=status)]
+        code, report = evaluate(jobs, run_attempt=1)
+        assert code == EXIT_PENDING, report
+        assert (
+            "  default-deny sweep rows still running (PENDING, re-polled): Some New Job"
+            in report
+        )
+
+    @pytest.mark.parametrize("status", ["queued", "in_progress", "waiting", "pending"])
+    def test_merge_group_running_unregistered_job_holds_pending(
+        self, status: str
+    ) -> None:
+        """Merge-group gates also wait for unregistered in-run rows."""
+        strict_gates = strict_gates_for_event("merge_group")
+        jobs = [_job(g, "success") for g in (*strict_gates, *SKIPPABLE_GATE_JOBS)]
+        jobs.append(_job("Some New Job", None, status=status))
+        code, report = evaluate(jobs, run_attempt=1, strict_gates=strict_gates)
+        assert code == EXIT_PENDING, report
+        assert "Some New Job" in report
+
+    def test_running_job_then_completed_success_concludes_success(self) -> None:
+        """A successful completion clears the running row's pending verdict."""
+        jobs = _all_gates() + [_job("Some New Job", None, status="in_progress")]
+        jobs[-1] = _job("Some New Job", "success")
+        code, report = evaluate(jobs, run_attempt=1)
+        assert code == EXIT_SUCCESS, report
+        assert "default-deny sweep rows still running" not in report
+
+    def test_running_job_then_completed_failure_fails(self) -> None:
+        """A failed completion remains a default-deny sweep failure."""
+        jobs = _all_gates() + [_job("Some New Job", None, status="in_progress")]
+        jobs[-1] = _job("Some New Job", "failure")
+        code, report = evaluate(jobs, run_attempt=1)
+        assert code == EXIT_FAILURE, report
+        assert "default-deny sweep failures: Some New Job" in report
+        assert "default-deny sweep rows still running" not in report
+
+    def test_failure_wins_over_a_running_row(self) -> None:
+        """A completed failure takes precedence over an undecided row."""
+        jobs = _all_gates() + [
+            _job("Failed New Job", "failure"),
+            _job("Some New Job", None, status="in_progress"),
+        ]
+        code, report = evaluate(jobs, run_attempt=1)
+        assert code == EXIT_FAILURE, report
+        assert "default-deny sweep failures: Failed New Job" in report
+
+    @pytest.mark.parametrize(
+        "name", ["Test-Failure Ratchet Gate", "zone-filter / detect", "CI Summary"]
+    )
+    def test_allowlisted_running_rows_do_not_hold(self, name: str) -> None:
+        """Advisory rows, reusable prefixes and the poller itself stay exempt."""
+        jobs = _all_gates() + [_job(name, None, status="in_progress")]
+        code, report = evaluate(jobs, run_attempt=1)
+        assert code == EXIT_SUCCESS, report
+
+    def test_only_ci_cascade_reason_graph_needs_ci_summary(self) -> None:
+        """Every job waiting on CI Summary must be allowlisted.
+
+        The poller now waits for every non-allowlisted row, so a job that waits
+        on CI Summary without an allowlist entry would deadlock the poller
+        until its deadline.
+        """
+        workflow = _load_workflow(CI_WORKFLOW)
+        for job_id, job in workflow["jobs"].items():
+            needs = job.get("needs", [])
+            if isinstance(needs, str):
+                needs = [needs]
+            if "ci-summary" in needs:
+                display_name = job.get("name") or job_id
+                assert display_name in SOFT_ALLOWLIST, display_name
 
 
 class TestDelegationSeamGateOmn20183:
@@ -3308,9 +3390,10 @@ class TestRunningRowWithFailureConclusionOmn20077:
     def test_running_failure_row_a_running_job_with_no_conclusion_is_not_a_verdict(
         self,
     ) -> None:
+        """Layer 3 waits for an undecided row to carry a verdict (OMN-20066)."""
         jobs = [
             *_all_gates("success"),
             _job("Some Other Job", None, status="in_progress"),
         ]
         code, report = evaluate(jobs)
-        assert code == EXIT_SUCCESS, report
+        assert code == EXIT_PENDING, report

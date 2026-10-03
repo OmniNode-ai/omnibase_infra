@@ -1,0 +1,8 @@
+# OMN-20159: the lakshman lane runtime-effects read binding for
+# node_projection_read_effect. No credential material in this overlay.
+# The database is the one the lane's projection API reads delegation_events
+# from, so the /skill edge and :3002 answer the same rows. The consumer group
+# is distinct from every writer group on this lane and from every other lane.
+kafka_bootstrap_servers: "redpanda:9092"
+kafka_consumer_group: "lakshman.omnimarket-projections.runtime-read.consume.v1"
+database_url_secret_ref: "env:OMNIDASH_ANALYTICS_DB_URL"
