@@ -119,6 +119,7 @@ import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
@@ -222,6 +223,9 @@ from omnibase_infra.cli.task_class_registry import (
     resolve_task_class,
 )
 from omnibase_infra.cli.workspace_reconcile import make_workspace_reconciler
+from omnibase_infra.enums.enum_delegate_incomplete_class import (
+    EnumDelegateIncompleteClass,
+)
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 from omnibase_infra.enums.enum_delegate_phase import EnumDelegatePhase
 from omnibase_infra.errors import ProtocolConfigurationError
@@ -253,6 +257,7 @@ __all__ = [
     "BUS_CHOICES",
     "DEFAULT_BUS",
     "LOCUS_CHOICES",
+    "DelegateCallerInterruptedError",
     "DelegateTimeoutExceededError",
     "build_backend_overrides",
     "resolve_default_bus",
@@ -1018,6 +1023,277 @@ def _write_transport_refusal_run_files(
     )
 
 
+def _write_incomplete_run_files(
+    *,
+    run_id: str,
+    correlation_id: str,
+    terminal_class: EnumDelegateIncompleteClass,
+    status: EnumSkillResultStatus,
+    failure_reason: str,
+    known: dict[str, object],
+    state_root: Path,
+    prompt: str,
+    task_type: str,
+    task_type_resolution: str,
+    addressing: ModelDelegateRunAddressing,
+    envelope: dict[str, object] | None = None,
+    phase_durations: ModelDelegatePhaseDurations | None = None,
+    announce: bool = True,
+) -> Path:
+    """Persist the three run files for a delegation that left no terminal (OMN-17427).
+
+    The same writer shape as :func:`_write_transport_refusal_run_files`, for the
+    other ways a dispatched run ends without a terminal to resolve: the caller's
+    own timeout (``in_flight`` left behind by a kill, ``interrupted`` when the
+    kill was catchable), this CLI's hard timeout (``timeout``), and a run whose
+    receipt holds no terminal payload (``failed``). Measured 2026-10-03 on the
+    ``.201`` lane: four runs with a ``delegation_events`` row and no
+    ``receipt.json`` because the caller's 300 s limit ended the process first,
+    and two runs that failed with nothing on disk because the receipt held no
+    terminal payload to write from.
+
+    Route attribution is fail-closed exactly as it is for an unattributed run:
+    nothing ran to completion on any named rung, so none is named. ``known``
+    carries what this invocation can state about the run (the declared bound,
+    the elapsed wait, the topic, the runtime's own error) and nothing it would
+    have to guess; an outcome it cannot see is reported as unknown by being
+    absent, never filled in.
+
+    Returns the run directory.
+    """
+    run_dir = (state_root / "runs" / run_id).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _atomic_write_text(run_dir / "result.txt", "")
+    _atomic_write_text(
+        run_dir / "receipt.json",
+        json.dumps(
+            {
+                "receipt_id": correlation_id,
+                "correlation_id": correlation_id,
+                "run_id": run_id,
+                "route_attributed": False,
+                "route_unattributed": (
+                    "no delegation terminal was recorded for this run, so no "
+                    "rung is attributed"
+                ),
+                "status": status.value,
+                "terminal_class": terminal_class.value,
+                "terminal_failure_cause": None,
+                "failure_reason": failure_reason,
+                "terminal_recorded": False,
+                "written_at": datetime.now(UTC).isoformat(),
+                "writer_pid": os.getpid(),
+                "attempts": [],
+                "receipt": envelope,
+                **known,
+                **addressing.as_run_file_fields(),
+                **_phase_durations_receipt_block(phase_durations),
+            },
+            indent=2,
+            sort_keys=True,
+            default=str,
+        ),
+    )
+    _atomic_write_text(
+        run_dir / "run.json",
+        json.dumps(
+            {
+                "run_id": run_id,
+                "correlation_id": correlation_id,
+                "routing_tier": None,
+                "route_attributed": False,
+                "prompt": prompt,
+                "task_type": task_type,
+                "task_type_resolution": task_type_resolution,
+                **addressing.as_run_file_fields(),
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+    )
+    if announce:
+        click.echo(
+            f"delegate artifacts (NO TERMINAL -- {terminal_class.value}): "
+            + " ".join(
+                str(run_dir / name)
+                for name in ("result.txt", "receipt.json", "run.json")
+            ),
+            err=True,
+        )
+    return run_dir
+
+
+def _unterminalized_receipt_fields(
+    envelope: dict[str, object],
+    *,
+    reason: str,
+) -> tuple[EnumDelegateIncompleteClass, dict[str, object]]:
+    """Classify a delegation receipt that carries no terminal, and what it knew.
+
+    ``timeout`` when the runtime's own workflow result says so, ``failed`` for
+    every other way of ending without a terminal payload. The runtime's error
+    and type ride along so the receipt names the cause the capture log holds
+    rather than only the resolver's "no resolvable terminal".
+    """
+    result = envelope.get("result")
+    summary = result if isinstance(result, dict) else {}
+    workflow_result = str(summary.get("workflow_result") or "")
+    terminal_class = (
+        EnumDelegateIncompleteClass.TIMEOUT
+        if workflow_result == "timeout"
+        else EnumDelegateIncompleteClass.FAILED
+    )
+    known: dict[str, object] = {
+        "workflow_result": workflow_result or None,
+        "runtime_error_type": str(summary.get("runtime_error_type") or "") or None,
+        "runtime_error": sanitize_error_string(str(summary.get("error") or "")) or None,
+        "terminal_payload": summary.get("terminal_payload"),
+        "resolution_error": sanitize_error_string(reason),
+    }
+    return terminal_class, known
+
+
+def _write_unterminalized_run_files(
+    *,
+    envelope: dict[str, object],
+    reason: str,
+    state_root: Path,
+    prompt: str,
+    task_type: str,
+    task_type_resolution: str,
+    addressing: ModelDelegateRunAddressing,
+    phase_durations: ModelDelegatePhaseDurations | None,
+) -> None:
+    """Write the receipt for a delegation receipt that holds no terminal (OMN-17427)."""
+    terminal_class, known = _unterminalized_receipt_fields(envelope, reason=reason)
+    _write_incomplete_run_files(
+        run_id=str(envelope["run_id"]),
+        correlation_id=str(envelope["correlation_id"]),
+        terminal_class=terminal_class,
+        status=EnumSkillResultStatus.FAILED,
+        failure_reason=sanitize_error_string(reason),
+        known=known,
+        state_root=state_root,
+        prompt=prompt,
+        task_type=task_type,
+        task_type_resolution=task_type_resolution,
+        addressing=addressing,
+        envelope=envelope,
+        phase_durations=phase_durations,
+    )
+
+
+def _file_in_flight_receipt(
+    *,
+    run_id: str,
+    correlation_id: str,
+    declared_timeout: int,
+    locus_decision: ModelDelegateLocusDecision,
+    state_root: Path,
+    prompt: str,
+    task_type: str,
+    task_type_resolution: str,
+    addressing: ModelDelegateRunAddressing,
+    phase_durations: ModelDelegatePhaseDurations,
+) -> None:
+    """File the provisional receipt before the terminal wait (OMN-17427).
+
+    ``status`` is ``pending`` and ``terminal_recorded`` is false: it says the
+    command was dispatched under this run and correlation id and that nothing
+    has been recorded since. It is not an outcome. A process that finishes
+    replaces it; one that is killed leaves it, and a reader that finds it after
+    the process has gone knows the run ended without a terminal, with the ids
+    to look it up by. A failure to write it is reported and does not stop the
+    delegation: the terminal receipt writer has the same directory to write to
+    and will say so if the directory is the problem.
+    """
+    try:
+        _write_incomplete_run_files(
+            run_id=run_id,
+            correlation_id=correlation_id,
+            terminal_class=EnumDelegateIncompleteClass.IN_FLIGHT,
+            status=EnumSkillResultStatus.PENDING,
+            failure_reason=(
+                "dispatched; no terminal recorded yet. If this file is still the "
+                "receipt after the process has exited, the caller ended the "
+                "process before a terminal arrived"
+            ),
+            known={
+                "declared_timeout_seconds": declared_timeout,
+                "command_topic": locus_decision.command_topic,
+                "broker": locus_decision.broker,
+            },
+            state_root=state_root,
+            prompt=prompt,
+            task_type=task_type,
+            task_type_resolution=task_type_resolution,
+            addressing=addressing,
+            phase_durations=phase_durations,
+            announce=False,
+        )
+    except OSError as exc:
+        click.echo(
+            f"onex delegate: could not file the in-flight receipt for run {run_id}: "
+            f"{sanitize_error_string(str(exc))}",
+            err=True,
+        )
+
+
+def _settle_in_flight_receipt(
+    *,
+    run_id: str,
+    correlation_id: str,
+    exit_code: int,
+    state_root: Path,
+    prompt: str,
+    task_type: str,
+    task_type_resolution: str,
+    addressing: ModelDelegateRunAddressing,
+    phase_durations: ModelDelegatePhaseDurations,
+) -> None:
+    """Replace a still-provisional receipt once the run has ended (OMN-17427).
+
+    Reads the receipt this run filed. Anything but the in-flight one is a
+    terminal writer's own receipt and is left exactly as written. The in-flight
+    one means the run finished (this function runs after it) without a writer
+    replacing it, so it is rewritten as ``failed`` and says so; the writer's own
+    error is on stderr and in the capture log, and is not guessed at here.
+    """
+    receipt_path = state_root / "runs" / run_id / "receipt.json"
+    try:
+        current = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if (
+        not isinstance(current, dict)
+        or current.get("terminal_class") != EnumDelegateIncompleteClass.IN_FLIGHT.value
+    ):
+        return
+    _write_incomplete_run_files(
+        run_id=run_id,
+        correlation_id=correlation_id,
+        terminal_class=EnumDelegateIncompleteClass.FAILED,
+        status=EnumSkillResultStatus.FAILED,
+        failure_reason=(
+            "the run ended with exit code "
+            f"{exit_code} and no terminal receipt writer replaced the in-flight "
+            "receipt; the cause is on stderr and in the capture log"
+        ),
+        known={
+            "exit_code": exit_code,
+            "declared_timeout_seconds": current.get("declared_timeout_seconds"),
+            "command_topic": current.get("command_topic"),
+            "broker": current.get("broker"),
+        },
+        state_root=state_root,
+        prompt=prompt,
+        task_type=task_type,
+        task_type_resolution=task_type_resolution,
+        addressing=addressing,
+        phase_durations=phase_durations,
+    )
+
+
 def _transport_refusal_from_receipt(
     *,
     envelope: dict[str, object],
@@ -1214,21 +1490,50 @@ def _write_local_run_files(
     try:
         result = _delegation_result(envelope)
     except DelegatePrePublishFailureError as exc:
-        # OMN-19131: the run never published, so there are no route files to
+        # OMN-19131: the run never published, so there are no ROUTE files to
         # write and no terminal was lost. Still RAISED, never returned quietly
         # (the OMN-18569 guarantee), but carrying what refused the run: the
         # field, the model and the capture log. ``run_receipt_mode`` puts it on
         # stderr where the unresolved-terminal sentence used to be, the receipt
         # on stdout already carries the same cause, and the exit is non-zero.
-        raise DelegatePrePublishFailureError(
-            _pre_publish_failure_message(
-                exc,
-                envelope,
-                contract_path=contract_path,
-                payload_path=payload_path,
-                state_root=state_root,
-            )
-        ) from exc
+        message = _pre_publish_failure_message(
+            exc,
+            envelope,
+            contract_path=contract_path,
+            payload_path=payload_path,
+            state_root=state_root,
+        )
+        # OMN-17427: the cause is also written down. Every lane is told to read
+        # the terminal from ``receipt.json``, and a refused run left none.
+        _write_unterminalized_run_files(
+            envelope=envelope,
+            reason=message,
+            state_root=state_root,
+            prompt=prompt,
+            task_type=task_type,
+            task_type_resolution=task_type_resolution,
+            addressing=addressing,
+            phase_durations=phase_durations,
+        )
+        raise DelegatePrePublishFailureError(message) from exc
+    except DelegateTerminalUnresolvedError as exc:
+        # OMN-17427: two runs on the .201 lane failed with a receipt holding no
+        # terminal payload and left no ``receipt.json``: the resolver raised
+        # (correctly: it is the OMN-18569 refusal to stay quiet) and the raise
+        # skipped the writer. Write what the receipt does hold -- the runtime's
+        # own error and the class it ended in -- then raise, so the exit stays
+        # non-zero and stderr keeps its sentence.
+        _write_unterminalized_run_files(
+            envelope=envelope,
+            reason=str(exc),
+            state_root=state_root,
+            prompt=prompt,
+            task_type=task_type,
+            task_type_resolution=task_type_resolution,
+            addressing=addressing,
+            phase_durations=phase_durations,
+        )
+        raise
     if result is None:
         return
     _require_completed_terminal_evidence(
@@ -1985,6 +2290,46 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous_handler)
+
+
+class DelegateCallerInterruptedError(BaseException):
+    """The caller ended this process with a signal it lets a process answer (OMN-17427).
+
+    A caller's own timeout is the common way a delegation ends with no terminal:
+    ``landing_text.py`` gives the command 300 s and kills it. ``SIGTERM`` and
+    ``SIGHUP`` (and ``SIGINT`` from a terminal) can be answered, so this
+    process writes its receipt before it exits; ``SIGKILL`` cannot, which is why
+    the provisional receipt is filed before the wait as well.
+
+    A :class:`BaseException` for the same reason as
+    :class:`DelegateTimeoutExceededError`: ``run_receipt_mode`` and the runtime
+    wrap the blocking call in broad ``except Exception`` blocks that would
+    otherwise swallow the signal.
+    """
+
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+        super().__init__(f"onex delegate: ended by {signal.Signals(signum).name}")
+
+
+@contextmanager
+def _caller_interrupt_guard() -> Iterator[None]:
+    """Turn the signals a caller ends a command with into one typed exception."""
+    caught = tuple(
+        getattr(signal, name)
+        for name in ("SIGTERM", "SIGHUP", "SIGINT")
+        if hasattr(signal, name)
+    )
+
+    def _on_signal(signum: int, frame: object) -> None:
+        raise DelegateCallerInterruptedError(signum)
+
+    previous = {signum: signal.signal(signum, _on_signal) for signum in caught}
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler if handler is not None else signal.SIG_DFL)
 
 
 def _timeout_receipt(
@@ -2930,8 +3275,28 @@ def run_delegate(
                     f"awaiting the lane's terminal for up to {terminal_wait_seconds} s",
                     err=True,
                 )
-            with _hard_timeout(terminal_wait_seconds + _HARD_TIMEOUT_GRACE_SECONDS):
-                return run_receipt_mode(
+            # OMN-17427: a caller that ends this process with SIGKILL (its own
+            # timeout, 300 s on the landing lanes) can be answered by nothing
+            # here, so the receipt that names the run is on disk BEFORE the
+            # wait. The terminal receipt replaces it atomically; what is left
+            # behind by a kill says plainly that no terminal was recorded.
+            _file_in_flight_receipt(
+                run_id=str(run_id),
+                correlation_id=str(correlation_id),
+                declared_timeout=terminal_wait_seconds,
+                locus_decision=locus_decision,
+                state_root=state_root,
+                prompt=prompt,
+                task_type=resolved_task_type,
+                task_type_resolution=resolution,
+                addressing=addressing,
+                phase_durations=phase_stopwatch.durations(),
+            )
+            with (
+                _caller_interrupt_guard(),
+                _hard_timeout(terminal_wait_seconds + _HARD_TIMEOUT_GRACE_SECONDS),
+            ):
+                exit_code = run_receipt_mode(
                     node_name=DELEGATE_NODE_NAME,
                     contract_path=contract_path,
                     input_path=payload_path,
@@ -2946,6 +3311,10 @@ def run_delegate(
                     # venv, while the lane executes the real one — two runs, and
                     # the receipt was the wrong one's.
                     host_handlers=locus_decision.locus is EnumDelegateLocus.IN_PROCESS,
+                    # OMN-17427: the run id this CLI names to the caller and
+                    # files the provisional receipt under is the run id the
+                    # terminal receipt lands in, not a second one.
+                    run_id=run_id,
                     locus_decision=locus_decision,
                     # OMN-19452: the runtime reports its bus phases here.
                     phase_stopwatch=phase_stopwatch,
@@ -3019,6 +3388,23 @@ def run_delegate(
                         phase_durations=phase_stopwatch.durations(),
                     ),
                 )
+            # OMN-17427: a run that returned normally but whose writer did not
+            # replace the in-flight receipt (a writer that raised, a renderer
+            # that stopped it) must not leave "pending" behind a finished
+            # process. Settled here, from the exit code this process is about
+            # to return.
+            _settle_in_flight_receipt(
+                run_id=str(run_id),
+                correlation_id=str(correlation_id),
+                exit_code=exit_code,
+                state_root=state_root,
+                prompt=prompt,
+                task_type=resolved_task_type,
+                task_type_resolution=resolution,
+                addressing=addressing,
+                phase_durations=phase_stopwatch.durations(),
+            )
+            return exit_code
         except DelegateTimeoutExceededError as exc:
             # OMN-17516. The human-facing line stays (OMN-14397 added it and a
             # test pins it), and the caller that parses stdout now gets the one
@@ -3041,6 +3427,31 @@ def run_delegate(
                 consumer_groups=locus_decision.lane_consumer_groups,
             )
             click.echo(f"{exc} Queue: {queue_depth.describe()}.", err=True)
+            # OMN-17427: the timeout is also the run's receipt on disk. Both
+            # branches below end the run, so the file is written before either.
+            elapsed_seconds = time.monotonic() - dispatch_started
+            _write_incomplete_run_files(
+                run_id=str(run_id),
+                correlation_id=str(correlation_id),
+                terminal_class=EnumDelegateIncompleteClass.TIMEOUT,
+                status=EnumSkillResultStatus.FAILED,
+                failure_reason=sanitize_error_string(str(exc)),
+                known={
+                    "declared_timeout_seconds": terminal_wait_seconds,
+                    "grace_seconds": _HARD_TIMEOUT_GRACE_SECONDS,
+                    "elapsed_seconds": elapsed_seconds,
+                    "terminal_topic": contract_terminal_topic(contract_path),
+                    "command_topic": locus_decision.command_topic,
+                    "broker": locus_decision.broker,
+                    "queue_depth": queue_depth.model_dump(mode="json"),
+                },
+                state_root=state_root,
+                prompt=prompt,
+                task_type=resolved_task_type,
+                task_type_resolution=resolution,
+                addressing=addressing,
+                phase_durations=phase_stopwatch.durations(),
+            )
             if not json_output:
                 click.echo(
                     f"onex delegate failed: timed out waiting for the result "
@@ -3053,7 +3464,7 @@ def run_delegate(
                     correlation_id=correlation_id,
                     run_id=run_id,
                     declared_timeout=terminal_wait_seconds,
-                    elapsed_seconds=time.monotonic() - dispatch_started,
+                    elapsed_seconds=elapsed_seconds,
                     bus=bus,
                     locus_decision=locus_decision,
                     contract_path=contract_path,
@@ -3061,3 +3472,29 @@ def run_delegate(
                 ).model_dump_json()
             )
             return 1
+        except DelegateCallerInterruptedError as exc:
+            # OMN-17427: the caller's own timeout (or Ctrl-C) ended the wait.
+            # No broker probe: the caller has already spent its deadline and a
+            # second wait here is how a SIGTERM becomes a SIGKILL.
+            _write_incomplete_run_files(
+                run_id=str(run_id),
+                correlation_id=str(correlation_id),
+                terminal_class=EnumDelegateIncompleteClass.INTERRUPTED,
+                status=EnumSkillResultStatus.FAILED,
+                failure_reason=str(exc),
+                known={
+                    "signal": signal.Signals(exc.signum).name,
+                    "declared_timeout_seconds": terminal_wait_seconds,
+                    "elapsed_seconds": time.monotonic() - dispatch_started,
+                    "command_topic": locus_decision.command_topic,
+                    "broker": locus_decision.broker,
+                },
+                state_root=state_root,
+                prompt=prompt,
+                task_type=resolved_task_type,
+                task_type_resolution=resolution,
+                addressing=addressing,
+                phase_durations=phase_stopwatch.durations(),
+            )
+            click.echo(f"{exc} (run {run_id}, correlation {correlation_id})", err=True)
+            return 128 + exc.signum

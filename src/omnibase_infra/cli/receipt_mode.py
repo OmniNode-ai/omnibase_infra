@@ -988,6 +988,7 @@ def run_receipt_mode(
     locus_decision: ModelDelegateLocusDecision | None = None,
     receipt_renderer: Callable[[object], bool] | None = None,
     phase_stopwatch: DelegatePhaseStopwatch | None = None,
+    run_id: uuid.UUID | None = None,
 ) -> int:
     """Serialize receipt mode and restore its process-global state on exit."""
     with _RECEIPT_MODE_LOCK_STATE.lock:
@@ -1015,6 +1016,7 @@ def run_receipt_mode(
                 locus_decision=locus_decision,
                 receipt_renderer=receipt_renderer,
                 phase_stopwatch=phase_stopwatch,
+                run_id=run_id,
             )
         except BaseException as exc:
             operation_error = exc
@@ -1073,6 +1075,7 @@ def _run_receipt_mode(
     locus_decision: ModelDelegateLocusDecision | None = None,
     receipt_renderer: Callable[[object], bool] | None = None,
     phase_stopwatch: DelegatePhaseStopwatch | None = None,
+    run_id: uuid.UUID | None = None,
 ) -> int:
     """Execute the node and print exactly one ``ModelSkillResult`` JSON.
 
@@ -1108,11 +1111,18 @@ def _run_receipt_mode(
     bus reports connect, subscribe, publish and the wait for the terminal to
     it; ``None`` (every other caller) builds the plain runtime, unchanged.
 
+    ``run_id`` is the identity of this run when the caller minted one; ``None``
+    mints a fresh one.
+
     Returns the process exit code (the runtime's exit code; 1 when the
     runtime raised before producing a workflow result).
     """
     state_root = state_root.resolve()
-    run_id = uuid.uuid4()
+    # OMN-17427: a caller that already told someone this run's id (``onex
+    # delegate`` prints it and files a provisional receipt under it before the
+    # wait) hands it in, so the run directory the caller named is the one the
+    # final receipt lands in. ``None`` keeps the fresh id every other caller gets.
+    run_id = run_id if run_id is not None else uuid.uuid4()
     # One correlation id shared by the skill-started / skill-completed pair so
     # the skill_executions projection can join the two rows (OMN-13830). This is
     # decided BEFORE the run because the started event fires before the body.
