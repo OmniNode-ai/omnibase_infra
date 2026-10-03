@@ -1,3 +1,21 @@
+## v0.38.64 (2026-10-03)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.64 by the scheduled release train.
+- 9 release-relevant commit(s) merged since v0.38.63.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.63
+- chore(deps): bump omnibase-core to 0.47.32 (#4505)
+- fix: onex delegate stamps the request with its install's tenant (#4503)
+- feat: onex delegate accepts the prompt from a file or stdin (#4501)
+- fix: a deployed-lane reply timeout is a typed failure, not a usage error (#4509)
+- fix: onex delegate says where the local record went (#4497)
+- fix: onex delegate state root: flag, then ONEX_STATE_DIR, then ~/.onex_state (#4510)
+- fix: subcontract wiring callback binds the consumed envelope so retry-path outputs carry the tenant (#4508)
+- fix: replace literal api_key with api_key_ref in LLM command (#4499)
+- fix: onex delegate leaves a receipt for every exit before dispatch (#4511)
+
 ## v0.38.63 (2026-10-03)
 
 ### Release
