@@ -42,6 +42,10 @@ let any caller re-introduce the defect. The absence is the enforcement.
 ``INDETERMINATE`` fails closed. This is the same posture CLAUDE.md rule 12 takes
 on prod health -- "could not determine" is never "fine" -- applied to host state.
 
+The proven floor is stamped by ``reconcile-host.sh`` on a verified full
+reconcile, or by an onboarding run after its delegation passed. Onboarding's
+``floor-from-venv`` reads the installed build without advancing any clone.
+
 WHY STDLIB-ONLY, AND WHY IT READS DIRECTORIES RATHER THAN IMPORTING
 Two independent reasons, both load-bearing:
 
@@ -80,6 +84,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 FLOOR_SCHEMA = "onex.workspace.floor.v1"
+GOVERNED_DISTS = ("omnibase-infra", "omnibase-core", "omnibase-spi", "omnibase-compat")
 
 EXIT_OK = 0
 EXIT_FAIL = 1
@@ -308,11 +313,11 @@ def write_floor(
 ) -> Path:
     """Stamp the proven floor.
 
-    Only ever called on a reconcile where every surface the dispatch build is
-    made from verdicted ok (``is_dispatch_premise`` in reconcile-host.sh,
-    OMN-20111), so the floor always describes a state that was once *proven*
-    rather than one that was merely attempted. A failure on any of those
-    surfaces leaves the previous floor in place.
+    Called by reconcile-host.sh on a verified full reconcile (every dispatch
+    premise verdicted ok, ``is_dispatch_premise``, OMN-20111), or by an
+    onboarding run after its delegation passed. The floor describes a build
+    that was proven rather than merely attempted. Failed reconciliation or
+    delegation leaves the previous floor in place.
 
     The emitted shape is a consumed contract, not an implementation detail:
     ``scripts/onex`` parses this in awk with no JSON parser, so the indentation
@@ -413,6 +418,42 @@ def _cmd_floor(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_floor_from_venv(args: argparse.Namespace) -> int:
+    """Stamp installed metadata after an onboarding delegation has passed."""
+    site_packages = Path(args.site_packages)
+    commit = observe_installed_commit(site_packages, "omnimarket")
+    if not commit:
+        print(
+            "cannot stamp floor: installed omnimarket commit is missing",
+            file=sys.stderr,
+        )
+        return EXIT_FAIL
+    try:
+        targets = lock_targets(Path(args.lock), list(GOVERNED_DISTS))
+    except OSError as exc:
+        print(f"cannot stamp floor: cannot read lock: {exc}", file=sys.stderr)
+        return EXIT_FAIL
+    distributions: dict[str, str] = {}
+    for dist in targets:
+        name = dist.replace("-", "_")
+        version = observe_installed_version(site_packages, name)
+        if not version:
+            print(
+                f"cannot stamp floor: lock-governed {dist} is not installed",
+                file=sys.stderr,
+            )
+            return EXIT_FAIL
+        distributions[name] = version
+    path = write_floor(
+        output=Path(args.output),
+        omni_home=Path(args.omni_home),
+        distributions=distributions,
+        omnimarket_commit=commit,
+    )
+    print(f"floor stamped: {path}")
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="reconcile_verify_movement.py",
@@ -448,6 +489,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--distribution", action="append", default=[])
     p.add_argument("--omnimarket-commit", default=None)
     p.set_defaults(func=_cmd_floor)
+
+    p = sub.add_parser(
+        "floor-from-venv", help="stamp installed build after onboarding passed"
+    )
+    p.add_argument("--site-packages", required=True)
+    p.add_argument("--lock", required=True)
+    p.add_argument("--omni-home", required=True)
+    p.add_argument("--output", required=True)
+    p.set_defaults(func=_cmd_floor_from_venv)
 
     return parser
 
