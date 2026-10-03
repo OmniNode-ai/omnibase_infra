@@ -2379,6 +2379,18 @@ def delegate_command(
     go to a capture file + the content-addressed artifact store, never to
     stdout.
 
+    Known failure class, handler-budget timeout (OMN-18838): a receipt whose
+    error reads "delegation exceeded the handler execution budget of Ns and
+    was cancelled" (terminal cause "timeout") means the deployed handler hit
+    its own execution budget, which is measured from pickup and never exceeds
+    the 240s task-class ceiling. It is not a broker or network fault: a
+    transport failure writes a transport-class terminal (OMN-19043) instead,
+    so do not start by suspecting the bus. Read queue_wait_ms and
+    execution_duration_ms in the receipt, and the per-rung latency on each
+    attempt: a long queue wait means the job sat behind other work, a long
+    rung latency means a slow model. If the prompt itself is large, split the
+    prompt into one delegation per ticket rather than raising the budget.
+
     \b
     Examples:
         onex delegate "explain what a calendar app needs"
