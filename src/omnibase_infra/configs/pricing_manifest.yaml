@@ -381,3 +381,148 @@ models:
       min_samples: 20
       query: llm_call_metrics usage_source=API created_at>=now-7d
       authoritative: false
+  claude-haiku-4-5:
+    input_cost_per_1k: 0.001
+    output_cost_per_1k: 0.005
+    effective_date: '2026-10-02'
+    confidence: LOW_CONFIDENCE
+    source: FALLBACK_PROVIDER_DOCUMENTATION
+    sample_count: 0
+    evidence:
+      generated_at: '2026-10-02T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
+      source_url: https://platform.claude.com/docs/en/about-claude/pricing
+      retrieved_at: '2026-10-02'
+      note: Claude pricing Model pricing table, Haiku 4.5 base tokens at $1 input / $5 output per MTok, first-party API rate.
+  claude-sonnet-4-6:
+    input_cost_per_1k: 0.003
+    output_cost_per_1k: 0.015
+    effective_date: '2026-10-02'
+    confidence: LOW_CONFIDENCE
+    source: FALLBACK_PROVIDER_DOCUMENTATION
+    sample_count: 0
+    evidence:
+      generated_at: '2026-10-02T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
+      source_url: https://platform.claude.com/docs/en/about-claude/pricing
+      retrieved_at: '2026-10-02'
+      note: Claude pricing Model pricing table, Sonnet 4.6 base tokens at $3 input / $15 output per MTok, first-party API rate.
+  claude-opus-4-5:
+    input_cost_per_1k: 0.005
+    output_cost_per_1k: 0.025
+    effective_date: '2026-10-02'
+    confidence: LOW_CONFIDENCE
+    source: FALLBACK_PROVIDER_DOCUMENTATION
+    sample_count: 0
+    evidence:
+      generated_at: '2026-10-02T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
+      source_url: https://platform.claude.com/docs/en/about-claude/pricing
+      retrieved_at: '2026-10-02'
+      note: Claude pricing Model pricing table, Opus 4.5 base tokens at $5 input / $25 output per MTok, first-party API rate.
+  gemini-2.5-flash:
+    input_cost_per_1k: 0.0003
+    output_cost_per_1k: 0.0025
+    effective_date: '2026-10-02'
+    confidence: LOW_CONFIDENCE
+    source: FALLBACK_PROVIDER_DOCUMENTATION
+    sample_count: 0
+    evidence:
+      generated_at: '2026-10-02T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
+      source_url: https://ai.google.dev/gemini-api/docs/pricing
+      retrieved_at: '2026-10-02'
+      note: Gemini API pricing Gemini 2.5 Flash Standard paid tier table, $0.30 text input / $2.50 output per MTok, first-party API rate.
+  gemini-2.5-flash-lite:
+    input_cost_per_1k: 0.0001
+    output_cost_per_1k: 0.0004
+    effective_date: '2026-10-02'
+    confidence: LOW_CONFIDENCE
+    source: FALLBACK_PROVIDER_DOCUMENTATION
+    sample_count: 0
+    evidence:
+      generated_at: '2026-10-02T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
+      source_url: https://ai.google.dev/gemini-api/docs/pricing
+      retrieved_at: '2026-10-02'
+      note: Gemini API pricing Gemini 2.5 Flash-Lite Standard paid tier table, $0.10 text input / $0.40 output per MTok, first-party API rate.
+  qwen3.8:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: '2026-10-02'
+    note: Local model served by SGLang on .201:8000 (historical served id) - zero API cost
+    confidence: LOW_CONFIDENCE
+    source: LOCAL_ZERO_API_COST_POLICY
+    sample_count: 0
+    evidence:
+      generated_at: '2026-10-02T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
+  Qwen3.8-27B:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: '2026-10-02'
+    note: Local model served by vLLM NVFP4 on .201:8000 - zero API cost
+    confidence: LOW_CONFIDENCE
+    source: LOCAL_ZERO_API_COST_POLICY
+    sample_count: 0
+    evidence:
+      generated_at: '2026-10-02T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
+  Qwen3-Coder-30B:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: '2026-10-02'
+    note: Local model served by vLLM - zero API cost
+    confidence: LOW_CONFIDENCE
+    source: LOCAL_ZERO_API_COST_POLICY
+    sample_count: 0
+    evidence:
+      generated_at: '2026-10-02T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
+  DeepSeek-R1-14B:
+    input_cost_per_1k: 0.0
+    output_cost_per_1k: 0.0
+    effective_date: '2026-10-02'
+    note: Local model served by vLLM - zero API cost
+    confidence: LOW_CONFIDENCE
+    source: LOCAL_ZERO_API_COST_POLICY
+    sample_count: 0
+    evidence:
+      generated_at: '2026-10-02T00:00:00+00:00'
+      sample_window_days: 7
+      sample_count: 0
+      min_samples: 20
+      query: llm_call_metrics usage_source=API created_at>=now-7d
+      authoritative: false
