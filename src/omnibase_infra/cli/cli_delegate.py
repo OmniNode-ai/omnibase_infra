@@ -2385,11 +2385,12 @@ def delegate_command(
     its own execution budget, which is measured from pickup and never exceeds
     the 240s task-class ceiling. It is not a broker or network fault: a
     transport failure writes a transport-class terminal (OMN-19043) instead,
-    so do not start by suspecting the bus. Read queue_wait_ms and
-    execution_duration_ms in the receipt, and the per-rung latency on each
-    attempt: a long queue wait means the job sat behind other work, a long
-    rung latency means a slow model. If the prompt itself is large, split the
-    prompt into one delegation per ticket rather than raising the budget.
+    so do not start by suspecting the bus. Read queue_wait_ms,
+    execution_duration_ms and budget_evidence in the receipt, and
+    metrics.latency_ms, the rung latency: a long queue wait means the job sat
+    behind other work, a long rung latency means a slow model. If the prompt
+    itself is large, split the prompt into one delegation per ticket rather
+    than raising the budget.
 
     \b
     Examples:
