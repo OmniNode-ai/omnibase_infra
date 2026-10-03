@@ -32,6 +32,13 @@
 #   (omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request,
 #   timeout_seconds le=1800.0, matching max_timeout_seconds); the same-named shared
 #   class with le=600.0 was deleted. (2026-10-03)
+# OMN-17106: ModelLlmInferenceCommand no longer carries a literal api key.
+#   The api_key field is replaced by api_key_ref (a secret name, never the
+#   secret), extra=forbid refuses a literal api_key, and provider_config
+#   entries with credential-like names are refused. HandlerLlmInferenceCommand
+#   resolves the ref through an optional secret resolver just before the
+#   outbound call and no longer falls back to provider_config["api_key"].
+#   Bumps MINOR: the command wire shape changed. (2026-10-03)
 # Copyright (c) 2026 OmniNode Team
 #
 # ONEX Node Contract
@@ -46,8 +53,8 @@ contract_name: "node_llm_inference_effect"
 node_name: "node_llm_inference_effect"
 contract_version:
   major: 1
-  minor: 5
-  patch: 1
+  minor: 6
+  patch: 0
 node_version:
   major: 0
   minor: 1
