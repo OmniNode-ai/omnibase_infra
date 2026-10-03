@@ -217,11 +217,13 @@ fi
 #     broken session that is still retrying keeps writing, so its mtime stays
 #     fresh and the grace applies unchanged.
 #
-#     LIMITS. A recovery with neither a job line nor a quiet log (an idle runner
-#     whose ~50-minute token refresh just wrote, or one with other chatter) is
-#     still reported broken once the grace elapses, until it goes quiet or takes
-#     a job. The quiet rule measures the log, not the registry: only the GitHub
-#     registry is authoritative (runner-fleet-canary).
+#     LIMITS. A recovery with neither a job line nor a quiet log (other chatter
+#     that keeps the newest Runner log fresh for longer than the grace) is still
+#     reported broken once the grace elapses, until it goes quiet or takes a job.
+#     The ~50-minute idle token refresh does NOT trip this: it re-stamps, and the
+#     quiet window (600s) is shorter than the grace (900s). The quiet rule
+#     measures the log, not the registry: only the GitHub registry is
+#     authoritative (runner-fleet-canary).
 if [[ "${RUNNER_HEALTH_SESSION_STATE_CHECK}" != "0" ]]; then
   if ! [[ "${RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS}" =~ ^[0-9]+$ ]] ||
     [[ "${RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS}" -lt 1 ]]; then
