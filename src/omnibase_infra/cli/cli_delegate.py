@@ -210,9 +210,11 @@ from omnibase_infra.cli.protocol_drift_guard_verdict import (
 )
 from omnibase_infra.cli.protocol_execution_budget import ProtocolExecutionBudget
 from omnibase_infra.cli.receipt_mode import (
+    STATE_ROOT_RESOLUTION_ORDER,
     DelegatePhaseStopwatch,
     capture_log_path,
     default_emit_socket_path,
+    resolve_state_root,
     run_receipt_mode,
 )
 from omnibase_infra.cli.store_developer_profile import StoreDeveloperProfile
@@ -905,6 +907,10 @@ def _write_unattributed_run_files(
                 "prompt": prompt,
                 "task_type": task_type,
                 "task_type_resolution": task_type_resolution,
+                # OMN-19232: where the run dir lives, absolute, so a reader
+                # holding only run.json finds the receipt without the
+                # caller's cwd.
+                "state_root": str(run_dir.parent.parent),
                 **addressing.as_run_file_fields(),
             },
             indent=2,
@@ -917,7 +923,8 @@ def _write_unattributed_run_files(
         + "): "
         + " ".join(
             str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
-        ),
+        )
+        + f" state_root={run_dir.parent.parent}",
         err=True,
     )
 
@@ -1007,6 +1014,10 @@ def _write_transport_refusal_run_files(
                 "prompt": prompt,
                 "task_type": task_type,
                 "task_type_resolution": task_type_resolution,
+                # OMN-19232: where the run dir lives, absolute, so a reader
+                # holding only run.json finds the receipt without the
+                # caller's cwd.
+                "state_root": str(run_dir.parent.parent),
                 **addressing.as_run_file_fields(),
             },
             indent=2,
@@ -1019,7 +1030,8 @@ def _write_transport_refusal_run_files(
         + ", no rung ran): "
         + " ".join(
             str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
-        ),
+        )
+        + f" state_root={run_dir.parent.parent}",
         err=True,
     )
 
@@ -1341,6 +1353,10 @@ def _write_local_run_files(
                 "prompt": prompt,
                 "task_type": task_type,
                 "task_type_resolution": task_type_resolution,
+                # OMN-19232: where the run dir lives, absolute, so a reader
+                # holding only run.json finds the receipt without the
+                # caller's cwd.
+                "state_root": str(run_dir.parent.parent),
                 **addressing.as_run_file_fields(),
             },
             indent=2,
@@ -1351,7 +1367,8 @@ def _write_local_run_files(
         "delegate artifacts: "
         + " ".join(
             str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
-        ),
+        )
+        + f" state_root={run_dir.parent.parent}",
         err=True,
     )
 
@@ -2217,40 +2234,54 @@ def _write_refusal_run_files(
     return run_dir
 
 
-def _state_root_from_arguments(
-    arguments: Sequence[str], *, default: Path | None
-) -> Path:
+def _funnel_state_root(explicit: Path | None) -> Path | None:
+    """The root a refusal receipt is filed under: the command's own rule.
+
+    The flag is the operator's own choice and is used as given; without it the
+    root resolves exactly as the command body resolves it (OMN-19232), never
+    against the working directory. ``None`` when no root can be resolved (a
+    relative ``ONEX_STATE_DIR``, a root under ``~/.claude``): there is then no
+    place the receipt belongs, and the cause goes to stderr instead.
+    """
+    if explicit is not None:
+        return explicit
+    try:
+        return resolve_state_root(None)
+    except ProtocolConfigurationError as exc:
+        click.echo(
+            f"onex delegate: no refusal receipt was written: {exc.message}",
+            err=True,
+        )
+        return None
+
+
+def _state_root_from_arguments(arguments: Sequence[str]) -> Path | None:
     """Read ``--state-root`` out of raw arguments that did not parse.
 
     Argument parsing may have failed before the option was read, and the
-    receipt belongs where the caller said state lives. The default is the
-    option's own, never a second spelling of it.
+    receipt belongs where the caller said state lives.
     """
     for index, argument in enumerate(arguments):
         if argument == _STATE_ROOT_FLAG and index + 1 < len(arguments):
             return Path(arguments[index + 1])
         if argument.startswith(f"{_STATE_ROOT_FLAG}="):
             return Path(argument.partition("=")[2])
-    return default if default is not None else Path(".onex_state")
+    return None
 
 
 class DelegateCommand(click.Command):
     """``onex delegate``, with a receipt for every way it can end (OMN-19006)."""
-
-    def _state_root_default(self) -> Path | None:
-        for param in self.params:
-            if param.name == "state_root" and param.default is not None:
-                return Path(str(param.default))
-        return None
 
     def _file_refusal(
         self,
         ctx: click.Context,
         *,
         refusal: ModelDelegateRefusal,
-        state_root: Path,
+        state_root: Path | None,
     ) -> None:
         """Write the refusal receipt; a failure to write never hides the cause."""
+        if state_root is None:
+            return
         run_id, correlation_id = _invocation_identity(ctx)
         params = ctx.params
         try:
@@ -2271,7 +2302,9 @@ class DelegateCommand(click.Command):
                 err=True,
             )
 
-    def _receipt_exists(self, ctx: click.Context, state_root: Path) -> bool:
+    def _receipt_exists(self, ctx: click.Context, state_root: Path | None) -> bool:
+        if state_root is None:
+            return False
         run_id, _ = _invocation_identity(ctx)
         return (state_root / "runs" / str(run_id) / "receipt.json").exists()
 
@@ -2293,14 +2326,15 @@ class DelegateCommand(click.Command):
                     remedy=_USAGE_REMEDY,
                     exit_code=exc.exit_code,
                 ),
-                state_root=_state_root_from_arguments(
-                    given, default=self._state_root_default()
-                ),
+                state_root=_funnel_state_root(_state_root_from_arguments(given)),
             )
             raise
 
     def invoke(self, ctx: click.Context) -> object:
-        state_root = Path(ctx.params.get("state_root") or ".onex_state")
+        explicit = ctx.params.get("state_root")
+        state_root = _funnel_state_root(
+            Path(explicit) if explicit is not None else None
+        )
         try:
             return super().invoke(ctx)
         except (click.exceptions.Exit, click.exceptions.Abort):
@@ -2543,9 +2577,14 @@ class DelegateCommand(click.Command):
 @click.option(
     "--state-root",
     type=click.Path(path_type=Path),
-    default=".onex_state",
-    show_default=True,
-    help="Root directory for disk state, scratch payloads, and captures.",
+    default=None,
+    help=(
+        "Root directory for disk state, scratch payloads, captures, and "
+        "runs/<run_id>/ receipts. Resolved in this order: "
+        + STATE_ROOT_RESOLUTION_ORDER
+        + ". Never the working directory. The resolved absolute root is "
+        "printed on the 'delegate artifacts' line and recorded in run.json."
+    ),
 )
 @click.option(
     "--timeout",
@@ -2666,7 +2705,7 @@ def delegate_command(
     locus: str,
     lane: str | None,
     kafka_bootstrap: str | None,
-    state_root: Path,
+    state_root: Path | None,
     timeout: int | None,
     verbose: bool,
     emit_socket: Path | None,
@@ -2690,6 +2729,14 @@ def delegate_command(
     the human form. Exits non-zero on failure in every form. RuntimeLocal logs
     go to a capture file + the content-addressed artifact store, never to
     stdout.
+
+    State root (OMN-19232): runs/<run_id>/{result.txt,receipt.json,run.json}
+    are written under one root resolved in this order: the --state-root flag,
+    then the ONEX_STATE_DIR environment variable (absolute), then the home
+    default ~/.onex_state. It is never the working directory, so the same
+    receipt is found at the same place from any cwd. The resolved absolute
+    root is printed as state_root= on the "delegate artifacts" line and
+    recorded as state_root in run.json.
 
     Known failure class, handler-budget timeout (OMN-18838): a receipt whose
     error reads "delegation exceeded the handler execution budget of Ns and
@@ -2727,6 +2774,10 @@ def delegate_command(
     # body runs under the same ids rather than minting a second pair.
     run_id, correlation_id = _invocation_identity(click.get_current_context())
     try:
+        resolved_state_root = resolve_state_root(state_root)
+    except ProtocolConfigurationError as exc:
+        raise click.UsageError(exc.message) from exc
+    try:
         ticket_id, ticket_resolution = resolve_delegate_ticket(ticket, cwd=Path.cwd())
         caller = resolve_delegate_caller(
             caller_lane, cwd=Path.cwd(), environ=os.environ
@@ -2750,7 +2801,7 @@ def delegate_command(
             locus=EnumDelegateLocus(locus),
             lane=lane,
             kafka_bootstrap=kafka_bootstrap,
-            state_root=state_root,
+            state_root=resolved_state_root,
             timeout=timeout,
             verbose=verbose,
             emit_socket=emit_socket,
