@@ -113,7 +113,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 9ee310c4f26db276ca408a62e0cca2f51bd30a05 # .github/sibling-pins.yaml
+          ref: 8eb05661fbb3a4c9bcf7d3aab6ea3f2dcd40430f # .github/sibling-pins.yaml
           path: .probe-workspace/omnimarket
           persist-credentials: false
           fetch-depth: 1
