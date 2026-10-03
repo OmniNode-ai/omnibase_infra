@@ -8,7 +8,6 @@ These models are domain-level models used across multiple LLM-related nodes
 Available Models:
     - ModelLlmFunctionCall: Concrete function invocation from an LLM
     - ModelLlmFunctionDef: JSON-Schema description of a callable function
-    - ModelLlmInferenceRequest: Input model for the LLM inference effect node
     - ModelLlmInferenceResponse: LLM inference output with text XOR tool_calls invariant
     - ModelLlmMessage: Chat message for multi-turn LLM conversations
     - ModelLlmToolCall: Tool call returned by the model
@@ -33,9 +32,6 @@ from omnibase_infra.models.llm.adapter_llm_usage_to_contract import (
 )
 from omnibase_infra.models.llm.model_llm_function_call import ModelLlmFunctionCall
 from omnibase_infra.models.llm.model_llm_function_def import ModelLlmFunctionDef
-from omnibase_infra.models.llm.model_llm_inference_request import (
-    ModelLlmInferenceRequest,
-)
 from omnibase_infra.models.llm.model_llm_inference_response import (
     ModelLlmInferenceResponse,
 )
@@ -48,7 +44,6 @@ from omnibase_infra.models.llm.model_llm_usage import ModelLlmUsage
 __all__ = [
     "ModelLlmFunctionCall",
     "ModelLlmFunctionDef",
-    "ModelLlmInferenceRequest",
     "ModelLlmInferenceResponse",
     "ModelLlmMessage",
     "ModelLlmToolCall",
