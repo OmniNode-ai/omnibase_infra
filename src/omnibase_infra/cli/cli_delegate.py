@@ -117,7 +117,7 @@ import signal
 import sys
 import time
 import uuid
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -262,6 +262,11 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DELEGATE_NODE_NAME",
     "DELEGATE_SOURCE",
+    "INSTALL_IDENTITY_MODULE",
+    "TENANT_OVERLAY_ENV",
+    "DelegateTenantRefusedError",
+    "read_install_identity",
+    "resolve_delegate_tenant",
     "BUS_CHOICES",
     "DEFAULT_BUS",
     "LOCUS_CHOICES",
@@ -2116,6 +2121,106 @@ def _wire_criteria_mode(criteria_mode: str | None) -> str | None:
     return None if criteria_mode is None else criteria_mode.replace("-", "_")
 
 
+# --- OMN-17427: the tenant a request is stamped with ---------------------------
+#
+# Resolve the tenant an ``onex delegate`` request is stamped with (OMN-17427).
+#
+# ``ModelDelegateSkillRequest`` has declared ``tenant_id`` since OMN-14058, and
+# the producer already carries a request's tenant onto the quality-gate verdict.
+# This CLI never wrote the field, so a request reached a deployed lane with no
+# tenant, the lane had nothing to carry, and the projection writer dead-lettered
+# the verdict (845 of 856 completions measured 2026-10-03).
+#
+# The CLI is the only place that can stamp it. A deployed lane has no local
+# store, so it cannot read the identity of the install the command was typed on.
+#
+# THE IDENTITY. The install's own: the one ``onex local init`` mints once and
+# records in the local store, which is the identity a customer's install carries.
+# Where a tenant overlay is declared it arrives as ``ONEX_TENANT_ID``, the same
+# variable the delegate handler already reads, and it wins, so the stamp is the
+# tenant the handler would have resolved had the lane held it. Lab usage goes
+# through this path as one tenant; there is no second internal system and no
+# fallback tenant.
+#
+# NOTHING HERE IS A DEFAULT. Every branch returns a stamp that was declared or
+# minted, or refuses naming ``onex local init``. The one request that carries no
+# stamp is the in-process one on an install that has not initialised, and that
+# is the documented OMN-19966 path: the local dispatch port mints the install's
+# identity on its first delegation, before any provider is called, and says so
+# on stderr. Refusing there would put back the refusal OMN-19966 removed.
+#
+# The identity reader lives in omnimarket, which this package may not import at
+# module scope (``contract_registry``). It is resolved when the command runs, the
+# way :func:`omnibase_infra.cli.cli_delegate.load_supported_criteria` resolves
+# the criteria vocabulary, and :func:`read_install_identity` is the one seam.
+
+#: The variable a tenant overlay declares. The delegate handler reads the same
+#: name (``Settings.onex_tenant_id``), so producer and handler agree.
+TENANT_OVERLAY_ENV = "ONEX_TENANT_ID"
+
+#: Where this install's minted identity is read from, by module path and never
+#: imported at module scope.
+INSTALL_IDENTITY_MODULE = "omnimarket.local_deployment.tenant_identity"
+
+_INIT_COMMAND = "onex local init"
+
+
+class DelegateTenantRefusedError(Exception):
+    """No tenant could be named for the request, and none will be invented."""
+
+
+def read_install_identity() -> str | None:
+    """Return this install's minted tenant identity, or ``None`` if it has none.
+
+    A recorded-but-corrupt identity is a refusal, not ``None``: "never minted"
+    and "minted and unreadable" call for different repairs.
+    """
+    try:
+        module = importlib.import_module(INSTALL_IDENTITY_MODULE)
+        reader = module.read_local_tenant_identity
+        error_type = module.LocalTenantIdentityError
+    except (ImportError, AttributeError) as exc:
+        raise DelegateTenantRefusedError(
+            f"this install's tenant identity cannot be read: {INSTALL_IDENTITY_MODULE} "
+            f"is not resolvable ({type(exc).__name__}). onex delegate stamps every "
+            "request with the tenant of the install it runs under, and omnimarket "
+            "owns that identity."
+        ) from exc
+    try:
+        identity = reader()
+    except error_type as exc:
+        raise DelegateTenantRefusedError(str(exc)) from exc
+    return None if identity is None else str(identity.tenant_uuid)
+
+
+def resolve_delegate_tenant(
+    *, in_process: bool, environ: Mapping[str, str]
+) -> str | None:
+    """The tenant to stamp on the request, or ``None`` only for the OMN-19966 path.
+
+    Precedence: a declared tenant overlay, then this install's minted identity.
+    With neither, a request bound for a deployed lane is refused, because that
+    lane would dead-letter its verdict. An in-process request on an install that
+    never initialised carries no stamp and the local port mints the identity on
+    the first delegation.
+    """
+    declared = environ.get(TENANT_OVERLAY_ENV, "").strip()
+    if declared:
+        return declared
+    minted = read_install_identity()
+    if minted is not None:
+        return minted
+    if in_process:
+        return None
+    raise DelegateTenantRefusedError(
+        "this install has never minted a tenant identity, so there is no tenant "
+        "to stamp on the request and a deployed lane could not attribute its "
+        f"verdict. Run `{_INIT_COMMAND}` once on this machine. No identity is "
+        f"invented, and no request is sent without one. (A declared tenant "
+        f"overlay sets {TENANT_OVERLAY_ENV}.)"
+    )
+
+
 def _request_payload(
     *,
     prompt: str,
@@ -2131,6 +2236,7 @@ def _request_payload(
     backend_id: str | None = None,
     ticket_id: str | None = None,
     caller: ModelDelegateCaller | None = None,
+    tenant_id: str | None = None,
 ) -> dict[str, object]:
     """Build the delegate request, setting only the fields the caller supplied."""
     payload: dict[str, object] = {
@@ -2173,6 +2279,12 @@ def _request_payload(
         payload["metadata"] = metadata
     if caller is not None and caller.session_id is not None:
         payload["session_id"] = caller.session_id
+    # OMN-17427: the tenant of the install the command runs under, written to
+    # the ``tenant_id`` field the request model has declared since OMN-14058.
+    # Omitted entirely when unresolved (the in-process first-delegation path),
+    # like every other optional field here.
+    if tenant_id is not None:
+        payload["tenant_id"] = tenant_id
     return payload
 
 
@@ -2193,6 +2305,7 @@ def _write_payload(
     backend_id: str | None = None,
     ticket_id: str | None = None,
     caller: ModelDelegateCaller | None = None,
+    tenant_id: str | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -2247,6 +2360,7 @@ def _write_payload(
         backend_id=backend_id,
         ticket_id=ticket_id,
         caller=caller,
+        tenant_id=tenant_id,
     )
     payload_path.write_text(
         json.dumps(payload),
@@ -3567,6 +3681,17 @@ def run_delegate(
         # than an implicit default decided downstream. Kept a UUID object here;
         # only stringified at the JSON payload boundary in _write_payload.
         correlation_id = correlation_id or uuid.uuid4()
+        # OMN-17427: name the tenant BEFORE anything is written or probed, so an
+        # install with no identity refuses with nothing sent. A request that
+        # reached a deployed lane untenanted had its verdict dead-lettered.
+        try:
+            tenant_id = resolve_delegate_tenant(
+                in_process=locus is EnumDelegateLocus.IN_PROCESS
+                or (locus is EnumDelegateLocus.AUTO and bus != BUS_KAFKA),
+                environ=os.environ,
+            )
+        except DelegateTenantRefusedError as exc:
+            raise click.ClickException(str(exc)) from exc
         payload_path = _write_payload(
             prompt=prompt,
             task_type=resolved_task_type,
@@ -3585,6 +3710,7 @@ def run_delegate(
             correlation_id=correlation_id,
             ticket_id=ticket_id,
             caller=caller,
+            tenant_id=tenant_id,
         )
         # OMN-19514: say which ticket the run carries and how it was chosen,
         # beside the task-class line, so a derived ticket is never silent.

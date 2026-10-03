@@ -80,6 +80,7 @@ from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 from omnibase_infra.runtime_identity import collect_runtime_identity
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 from tests.helpers.cli_registry_stand_in import (
+    STAND_IN_INSTALL_TENANT,
     install_stand_in_registry,
     wiring_authority,
 )
@@ -364,6 +365,7 @@ class TestPayloadScratch:
             "source": DELEGATE_SOURCE,
             "max_tokens": 4096,
             "requested_timeout_seconds": 60,
+            "tenant_id": STAND_IN_INSTALL_TENANT,
         }
 
     def test_explicit_task_type_overrides_classification(

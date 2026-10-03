@@ -48,6 +48,7 @@ from omnibase_infra.cli import cli_delegate
 from omnibase_infra.cli.cli_delegate import (
     DelegateCallerInterruptedError,
     DelegateCommand,
+    DelegateTenantRefusedError,
     DelegateTimeoutExceededError,
     delegate_command,
 )
@@ -344,6 +345,17 @@ BRANCH_CASES: dict[str, BranchCase] = {
                 DelegateLaneCredentialError(
                     "this machine holds no identity for the lane"
                 )
+            )
+        },
+        expected_stage="refused_before_dispatch",
+    ),
+    "tenant-unnamed": BranchCase(
+        covers="except DelegateTenantRefusedError",
+        args=lambda tmp: _common(tmp),
+        reason="no tenant could be named for the request",
+        patches={
+            "resolve_delegate_tenant": _raises(
+                DelegateTenantRefusedError("no tenant could be named for the request")
             )
         },
         expected_stage="refused_before_dispatch",
