@@ -99,7 +99,7 @@ from uuid import uuid4
 import httpx
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
-from omnibase_infra.handlers.handler_done_write_receipt_guard import (
+from omnibase_infra.handlers.done_write_receipt_guard import (
     DoneWriteReceiptGuard,
 )
 from omnibase_infra.nodes.node_sync_revert_watchdog_effect.models.enum_prior_done_actor_kind import (

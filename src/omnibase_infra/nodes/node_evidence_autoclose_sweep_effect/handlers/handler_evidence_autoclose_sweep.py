@@ -213,10 +213,10 @@ from omnibase_infra.gate_binding import (
     gate_binding_line,
     resolve_gate_binding,
 )
-from omnibase_infra.handlers.handler_done_write_receipt_guard import (
+from omnibase_infra.handlers.done_write_receipt_guard import (
     reap_timed_out_process as _reap_timed_out_process,
 )
-from omnibase_infra.handlers.handler_done_write_receipt_guard import (
+from omnibase_infra.handlers.done_write_receipt_guard import (
     run_dod_verify_command,
 )
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.cascade_supersession import (

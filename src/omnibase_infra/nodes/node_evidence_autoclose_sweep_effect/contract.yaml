@@ -482,7 +482,7 @@
 #     sync-revert watchdog and the Linear adapters apply the same rule instead
 #     of a private copy. This node's handler now imports it, and the dod_verify
 #     argv helper, process reaper and subprocess runner moved to
-#     `omnibase_infra.handlers.handler_done_write_receipt_guard`, unchanged in
+#     `omnibase_infra.handlers.done_write_receipt_guard`, unchanged in
 #     behaviour. The old infra module paths re-export the core types. No
 #     input/output model changed and the verdict is unchanged, so neither
 #     contract_version nor node_version moves: bumping node_version would

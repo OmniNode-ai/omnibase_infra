@@ -1402,7 +1402,7 @@ class TestRealSubprocessReaping:
     async def test_reap_helper_kills_a_still_running_process(self):
         import asyncio
 
-        from omnibase_infra.handlers.handler_done_write_receipt_guard import (
+        from omnibase_infra.handlers.done_write_receipt_guard import (
             reap_timed_out_process as _reap_timed_out_process,
         )
 
@@ -1420,7 +1420,7 @@ class TestRealSubprocessReaping:
     async def test_reap_helper_is_a_noop_for_an_already_exited_process(self):
         import asyncio
 
-        from omnibase_infra.handlers.handler_done_write_receipt_guard import (
+        from omnibase_infra.handlers.done_write_receipt_guard import (
             reap_timed_out_process as _reap_timed_out_process,
         )
 

@@ -14,6 +14,11 @@ Fail-closed at every step. A verifier that cannot be launched, times out,
 prints no JSON, declares no receipt arm, or reaches no verdict is a refusal:
 "I could not check" never resolves to "so I will write".
 
+This is a guard, not an ONEX handler: it defines no ``handler_type`` or
+``handler_category`` and implements no handler protocol, so the module name does
+not carry the ``handler_`` prefix that ``tests/ci/test_handler_architecture_invariants.py``
+reserves for handler classes.
+
 Callers: the sync-revert watchdog re-flip, and the generic Linear adapters
 (``AdapterTicketLinear``, ``AdapterLinearGraphQLProjectTracker``) for any write
 whose target state is a Done state. Writes to any other state do not touch

@@ -22,7 +22,7 @@ from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adap
 from omnibase_infra.adapters.ticket.adapter_ticket_service_linear import (
     AdapterTicketLinear,
 )
-from omnibase_infra.handlers.handler_done_write_receipt_guard import (
+from omnibase_infra.handlers.done_write_receipt_guard import (
     DoneWriteReceiptGuard,
     DoneWriteRefusedError,
     is_done_state,

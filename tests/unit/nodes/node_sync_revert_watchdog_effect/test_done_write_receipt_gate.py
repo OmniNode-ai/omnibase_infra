@@ -14,7 +14,7 @@ from datetime import timedelta
 
 import pytest
 
-from omnibase_infra.handlers.handler_done_write_receipt_guard import (
+from omnibase_infra.handlers.done_write_receipt_guard import (
     DoneWriteReceiptGuard,
 )
 from omnibase_infra.nodes.node_sync_revert_watchdog_effect.handlers.handler_sync_revert_watchdog import (

@@ -38,7 +38,7 @@ from omnibase_infra.errors import (
     ModelInfraErrorContext,
     ModelTimeoutErrorContext,
 )
-from omnibase_infra.handlers.handler_done_write_receipt_guard import (
+from omnibase_infra.handlers.done_write_receipt_guard import (
     DoneWriteReceiptGuard,
     DoneWriteRefusedError,
     is_done_state,
