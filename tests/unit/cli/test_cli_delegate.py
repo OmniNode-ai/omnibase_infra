@@ -2438,7 +2438,14 @@ class TestUnresolvableTerminalFailsLoudly:
         message = str(raised.value)
         assert "terminal_payload: absent" in message
         assert "handler_result: absent" in message
-        assert not (tmp_path / "runs").exists()
+        # OMN-17427: the refusal still raises, and the run is no longer left
+        # without a receipt -- the receipt carries the same cause.
+        written = json.loads(
+            (tmp_path / "runs" / str(receipt.run_id) / "receipt.json").read_text()
+        )
+        assert written["terminal_class"] == "failed"
+        assert written["terminal_recorded"] is False
+        assert "terminal_payload: absent" in written["failure_reason"]
 
     def test_terminal_of_an_unrecognised_shape_names_the_absent_field(
         self, tmp_path: Path
