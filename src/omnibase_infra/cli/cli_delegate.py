@@ -2234,40 +2234,54 @@ def _write_refusal_run_files(
     return run_dir
 
 
-def _state_root_from_arguments(
-    arguments: Sequence[str], *, default: Path | None
-) -> Path:
+def _funnel_state_root(explicit: Path | None) -> Path | None:
+    """The root a refusal receipt is filed under: the command's own rule.
+
+    The flag is the operator's own choice and is used as given; without it the
+    root resolves exactly as the command body resolves it (OMN-19232), never
+    against the working directory. ``None`` when no root can be resolved (a
+    relative ``ONEX_STATE_DIR``, a root under ``~/.claude``): there is then no
+    place the receipt belongs, and the cause goes to stderr instead.
+    """
+    if explicit is not None:
+        return explicit
+    try:
+        return resolve_state_root(None)
+    except ProtocolConfigurationError as exc:
+        click.echo(
+            f"onex delegate: no refusal receipt was written: {exc.message}",
+            err=True,
+        )
+        return None
+
+
+def _state_root_from_arguments(arguments: Sequence[str]) -> Path | None:
     """Read ``--state-root`` out of raw arguments that did not parse.
 
     Argument parsing may have failed before the option was read, and the
-    receipt belongs where the caller said state lives. The default is the
-    option's own, never a second spelling of it.
+    receipt belongs where the caller said state lives.
     """
     for index, argument in enumerate(arguments):
         if argument == _STATE_ROOT_FLAG and index + 1 < len(arguments):
             return Path(arguments[index + 1])
         if argument.startswith(f"{_STATE_ROOT_FLAG}="):
             return Path(argument.partition("=")[2])
-    return default if default is not None else Path(".onex_state")
+    return None
 
 
 class DelegateCommand(click.Command):
     """``onex delegate``, with a receipt for every way it can end (OMN-19006)."""
-
-    def _state_root_default(self) -> Path | None:
-        for param in self.params:
-            if param.name == "state_root" and param.default is not None:
-                return Path(str(param.default))
-        return None
 
     def _file_refusal(
         self,
         ctx: click.Context,
         *,
         refusal: ModelDelegateRefusal,
-        state_root: Path,
+        state_root: Path | None,
     ) -> None:
         """Write the refusal receipt; a failure to write never hides the cause."""
+        if state_root is None:
+            return
         run_id, correlation_id = _invocation_identity(ctx)
         params = ctx.params
         try:
@@ -2288,7 +2302,9 @@ class DelegateCommand(click.Command):
                 err=True,
             )
 
-    def _receipt_exists(self, ctx: click.Context, state_root: Path) -> bool:
+    def _receipt_exists(self, ctx: click.Context, state_root: Path | None) -> bool:
+        if state_root is None:
+            return False
         run_id, _ = _invocation_identity(ctx)
         return (state_root / "runs" / str(run_id) / "receipt.json").exists()
 
@@ -2310,14 +2326,15 @@ class DelegateCommand(click.Command):
                     remedy=_USAGE_REMEDY,
                     exit_code=exc.exit_code,
                 ),
-                state_root=_state_root_from_arguments(
-                    given, default=self._state_root_default()
-                ),
+                state_root=_funnel_state_root(_state_root_from_arguments(given)),
             )
             raise
 
     def invoke(self, ctx: click.Context) -> object:
-        state_root = Path(ctx.params.get("state_root") or ".onex_state")
+        explicit = ctx.params.get("state_root")
+        state_root = _funnel_state_root(
+            Path(explicit) if explicit is not None else None
+        )
         try:
             return super().invoke(ctx)
         except (click.exceptions.Exit, click.exceptions.Abort):

@@ -58,6 +58,7 @@ from omnibase_infra.cli.delegate_locus import (
 )
 from omnibase_infra.cli.omnimarket_drift_guard import OmnimarketDriftError
 from omnibase_infra.cli.task_class_registry import TaskClassContractError
+from omnibase_infra.errors import ProtocolConfigurationError
 from tests.fixtures.handler_correlated_noop import (
     HandlerCorrelatedNoop,
     ModelCorrelatedNoopRequest,
@@ -250,6 +251,17 @@ BRANCH_CASES: dict[str, BranchCase] = {
         covers=_KEY_KAFKA_WITHOUT_BUS,
         args=lambda tmp: [*_common(tmp, with_bus=False), "--kafka-bootstrap", "h:1"],
         reason="--kafka-bootstrap is only valid with --bus kafka",
+        expected_stage="refused_before_dispatch",
+    ),
+    "state-root-unresolvable": BranchCase(
+        covers="except ProtocolConfigurationError",
+        args=lambda tmp: _common(tmp),
+        reason="ONEX_STATE_DIR must be an absolute path",
+        patches={
+            "resolve_state_root": _raises(
+                ProtocolConfigurationError("ONEX_STATE_DIR must be an absolute path")
+            )
+        },
         expected_stage="refused_before_dispatch",
     ),
     "install-drift": BranchCase(
@@ -556,13 +568,40 @@ class TestArgumentParsingFailuresLeaveAReceipt:
         _, receipt = _sole_receipt(state_root)
         assert "PROMPT" in str(receipt["failure_reason"])
 
-    def test_with_no_state_root_given_the_option_default_is_used(
-        self, tmp_path: Path
+    def test_with_no_state_root_given_onex_state_dir_is_used(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """OMN-19232: the command's own resolution order, never the cwd."""
+        env_root = tmp_path / "env-state"
+        monkeypatch.setenv("ONEX_STATE_DIR", str(env_root))
         result = CliRunner().invoke(delegate_command, [_PROMPT, "--no-such-flag"])
         assert result.exit_code == 2
-        _, receipt = _sole_receipt(tmp_path / "cwd" / ".onex_state")
+        _, receipt = _sole_receipt(env_root)
         assert "--no-such-flag" in str(receipt["failure_reason"])
+        assert not (tmp_path / "cwd" / ".onex_state").exists()
+
+    def test_with_nothing_set_the_home_default_is_used(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.delenv("ONEX_STATE_DIR", raising=False)
+        monkeypatch.setenv("HOME", str(home))
+        result = CliRunner().invoke(delegate_command, [_PROMPT, "--no-such-flag"])
+        assert result.exit_code == 2
+        _, receipt = _sole_receipt(home / ".onex_state")
+        assert "--no-such-flag" in str(receipt["failure_reason"])
+        assert not (tmp_path / "cwd" / ".onex_state").exists()
+
+    def test_an_unresolvable_root_says_so_and_writes_nothing_under_the_cwd(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("ONEX_STATE_DIR", "relative/state")
+        result = CliRunner().invoke(delegate_command, [_PROMPT, "--no-such-flag"])
+        assert result.exit_code == 2
+        assert "no refusal receipt was written" in result.output
+        assert "ONEX_STATE_DIR must be an absolute path" in result.output
+        assert list((tmp_path / "cwd").iterdir()) == []
 
     def test_help_is_not_a_refusal_and_writes_nothing(self, tmp_path: Path) -> None:
         result = CliRunner().invoke(
