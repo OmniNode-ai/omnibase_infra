@@ -119,10 +119,12 @@ name: Chain Canary
 
 on:
   schedule:
-    # Every 2 hours at :41 — deliberately offset from sync-revert-watchdog
-    # (:00 even hours) and dev-lane-liveness (:07/:22/:37/:52) so three
-    # scheduled probes never contend for the same runner minute.
-    - cron: '41 1,3,5,7,9,11,13,15,17,19,21,23 * * *'
+    # Hourly at :41 (OMN-17427; was every 2 hours) — deliberately offset from
+    # sync-revert-watchdog (:00 even hours) and dev-lane-liveness
+    # (:07/:22/:37/:52) so three scheduled probes never contend for the same
+    # runner minute. The concurrency group below queues a tick behind a
+    # running canary, so a run longer than an hour never overlaps the next.
+    - cron: '41 * * * *'
   workflow_dispatch:
     inputs:
       probe_url:

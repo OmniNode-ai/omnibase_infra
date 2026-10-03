@@ -88,9 +88,10 @@ def test_scheduled_and_manually_dispatchable(workflow: dict[str, object]) -> Non
     schedule = triggers["schedule"]
     assert isinstance(schedule, list) and schedule
     cron = schedule[0]["cron"]
-    # Explicit hour list, not a `*/2` or Quartz-style `1/2` step: the latter
-    # is not portable across cron parsers and would silently never fire.
-    assert cron == "41 1,3,5,7,9,11,13,15,17,19,21,23 * * *"
+    # Hourly (OMN-17427, the board's STABILITY_HEAD streak needs more ticks
+    # per day than every 2 hours gave): a plain `*` hour field, not a
+    # Quartz-style step, which is not portable across cron parsers.
+    assert cron == "41 * * * *"
 
 
 @pytest.mark.unit

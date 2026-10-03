@@ -74,10 +74,11 @@ name: Chain Canary — C28 consumer flow
 
 on:
   schedule:
-    # 4x/day at :13, offset from C11 (:17), C12 (:27), C16 (:29),
-    # chain-canary (:41 odd hours), provider-rung (:47), dev-lane-liveness
-    # (:07/:22/:37/:52) and sync-revert-watchdog (:00 even hours).
-    - cron: '13 0,6,12,18 * * *'
+    # Hourly at :03 (OMN-17427; was 4x/day at :13). Offset from C11 (:10),
+    # C12 (:27), chain-canary (:41), C16 (:48), provider-rung (:47),
+    # dev-lane-liveness (:07/:22/:37/:52) and sync-revert-watchdog (:00 even
+    # hours).
+    - cron: '3 * * * *'
   workflow_dispatch:
     inputs:
       base_url:
