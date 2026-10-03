@@ -177,6 +177,8 @@ from omnibase_infra.cli.delegate_queue_depth import (
 )
 from omnibase_infra.cli.delegate_terminal_resolver import (
     DelegateTerminalUnresolvedError,
+    is_reply_timeout,
+    reply_timeout_error,
     resolve_delegate_terminal,
 )
 from omnibase_infra.cli.model_delegate_caller import ModelDelegateCaller
@@ -438,6 +440,9 @@ def _delegation_result(envelope: dict[str, object]) -> ModelDelegateTerminal | N
         return None
     if pre_publish_failure_from_receipt(envelope) is not None:
         raise DelegatePrePublishFailureError(pre_publish_failure_error(envelope))
+    # OMN-20386: a published command the lane never answered is a timeout, said
+    # as one, whatever the carriers hold; only an absent terminal reaches here.
+    reply_timeout = is_reply_timeout(result)
 
     refusals: list[str] = []
     for field in _TERMINAL_CARRIER_FIELDS:
@@ -449,6 +454,8 @@ def _delegation_result(envelope: dict[str, object]) -> ModelDelegateTerminal | N
             return resolve_delegate_terminal(carrier)
         except DelegateTerminalUnresolvedError as exc:
             refusals.append(f"{field}: {exc}")
+    if reply_timeout:
+        raise reply_timeout_error(envelope)
     raise DelegateTerminalUnresolvedError(
         "delegate receipt carries no resolvable delegation terminal, so the "
         "customer artifacts cannot be written -- " + "; ".join(refusals)
@@ -802,6 +809,11 @@ def _delegate_receipt_evidence_error(
             payload_path=payload_path,
             state_root=state_root,
         )
+    except DelegateTerminalUnresolvedError as exc:
+        # OMN-20386: returned, not raised. This error is a ``ValueError`` and
+        # ``delegate_command`` turns every ``ValueError`` into a usage error:
+        # exit 2, a ``Usage:`` banner, and the run-file writer never reached.
+        return str(exc)
     if result is None:
         return "delegate receipt carries no delegation terminal"
     try:
@@ -1153,6 +1165,7 @@ def _unterminalized_receipt_fields(
         "runtime_error_type": str(summary.get("runtime_error_type") or "") or None,
         "runtime_error": sanitize_error_string(str(summary.get("error") or "")) or None,
         "terminal_payload": summary.get("terminal_payload"),
+        "wire_correlation_id": summary.get("wire_correlation_id") or None,
         "resolution_error": sanitize_error_string(reason),
     }
     return terminal_class, known

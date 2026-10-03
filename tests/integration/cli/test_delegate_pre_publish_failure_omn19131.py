@@ -52,6 +52,7 @@ from omnibase_infra.cli.delegate_pre_publish_failure import (
     pre_publish_failure_from_receipt,
 )
 from omnibase_infra.cli.delegate_terminal_resolver import (
+    DelegateReplyTimeoutError,
     DelegateTerminalUnresolvedError,
 )
 from omnibase_infra.cli.model_receipt_runtime_summary import (
@@ -300,6 +301,9 @@ class TestPrePublishClassification:
             _delegation_result(envelope)
         assert not isinstance(raised.value, DelegatePrePublishFailureError)
         assert _TERMINAL_SENTENCE in str(raised.value)
+        # OMN-20386: and it names the cause, so the caller is not left to infer it.
+        assert isinstance(raised.value, DelegateReplyTimeoutError)
+        assert "cause timeout" in str(raised.value)
 
     def test_completed_run_without_a_terminal_is_not_pre_publish(self) -> None:
         """OMN-18569's completed-but-empty shape keeps failing closed as before."""
