@@ -1817,6 +1817,8 @@ class TestLocalRunArtifacts:
             # OMN-18305: a customer can see that a class was chosen for them,
             # and how, without re-reading the prompt.
             "task_type_resolution": "explicit",
+            # OMN-19232: the absolute root the run dir sits under.
+            "state_root": str(tmp_path.resolve()),
         }
 
     def test_attributes_no_route_without_an_accepted_attempt(

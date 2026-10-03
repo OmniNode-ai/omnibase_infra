@@ -209,9 +209,11 @@ from omnibase_infra.cli.protocol_drift_guard_verdict import (
 )
 from omnibase_infra.cli.protocol_execution_budget import ProtocolExecutionBudget
 from omnibase_infra.cli.receipt_mode import (
+    STATE_ROOT_RESOLUTION_ORDER,
     DelegatePhaseStopwatch,
     capture_log_path,
     default_emit_socket_path,
+    resolve_state_root,
     run_receipt_mode,
 )
 from omnibase_infra.cli.store_developer_profile import StoreDeveloperProfile
@@ -899,6 +901,10 @@ def _write_unattributed_run_files(
                 "prompt": prompt,
                 "task_type": task_type,
                 "task_type_resolution": task_type_resolution,
+                # OMN-19232: where the run dir lives, absolute, so a reader
+                # holding only run.json finds the receipt without the
+                # caller's cwd.
+                "state_root": str(run_dir.parent.parent),
                 **addressing.as_run_file_fields(),
             },
             indent=2,
@@ -911,7 +917,8 @@ def _write_unattributed_run_files(
         + "): "
         + " ".join(
             str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
-        ),
+        )
+        + f" state_root={run_dir.parent.parent}",
         err=True,
     )
 
@@ -1001,6 +1008,10 @@ def _write_transport_refusal_run_files(
                 "prompt": prompt,
                 "task_type": task_type,
                 "task_type_resolution": task_type_resolution,
+                # OMN-19232: where the run dir lives, absolute, so a reader
+                # holding only run.json finds the receipt without the
+                # caller's cwd.
+                "state_root": str(run_dir.parent.parent),
                 **addressing.as_run_file_fields(),
             },
             indent=2,
@@ -1013,7 +1024,8 @@ def _write_transport_refusal_run_files(
         + ", no rung ran): "
         + " ".join(
             str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
-        ),
+        )
+        + f" state_root={run_dir.parent.parent}",
         err=True,
     )
 
@@ -1335,6 +1347,10 @@ def _write_local_run_files(
                 "prompt": prompt,
                 "task_type": task_type,
                 "task_type_resolution": task_type_resolution,
+                # OMN-19232: where the run dir lives, absolute, so a reader
+                # holding only run.json finds the receipt without the
+                # caller's cwd.
+                "state_root": str(run_dir.parent.parent),
                 **addressing.as_run_file_fields(),
             },
             indent=2,
@@ -1345,7 +1361,8 @@ def _write_local_run_files(
         "delegate artifacts: "
         + " ".join(
             str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
-        ),
+        )
+        + f" state_root={run_dir.parent.parent}",
         err=True,
     )
 
@@ -2231,9 +2248,14 @@ def _timeout_receipt(
 @click.option(
     "--state-root",
     type=click.Path(path_type=Path),
-    default=".onex_state",
-    show_default=True,
-    help="Root directory for disk state, scratch payloads, and captures.",
+    default=None,
+    help=(
+        "Root directory for disk state, scratch payloads, captures, and "
+        "runs/<run_id>/ receipts. Resolved in this order: "
+        + STATE_ROOT_RESOLUTION_ORDER
+        + ". Never the working directory. The resolved absolute root is "
+        "printed on the 'delegate artifacts' line and recorded in run.json."
+    ),
 )
 @click.option(
     "--timeout",
@@ -2354,7 +2376,7 @@ def delegate_command(
     locus: str,
     lane: str | None,
     kafka_bootstrap: str | None,
-    state_root: Path,
+    state_root: Path | None,
     timeout: int | None,
     verbose: bool,
     emit_socket: Path | None,
@@ -2378,6 +2400,14 @@ def delegate_command(
     the human form. Exits non-zero on failure in every form. RuntimeLocal logs
     go to a capture file + the content-addressed artifact store, never to
     stdout.
+
+    State root (OMN-19232): runs/<run_id>/{result.txt,receipt.json,run.json}
+    are written under one root resolved in this order: the --state-root flag,
+    then the ONEX_STATE_DIR environment variable (absolute), then the home
+    default ~/.onex_state. It is never the working directory, so the same
+    receipt is found at the same place from any cwd. The resolved absolute
+    root is printed as state_root= on the "delegate artifacts" line and
+    recorded as state_root in run.json.
 
     Known failure class, handler-budget timeout (OMN-18838): a receipt whose
     error reads "delegation exceeded the handler execution budget of Ns and
@@ -2411,6 +2441,10 @@ def delegate_command(
         raise click.UsageError("--json and --human are mutually exclusive.")
     json_output = force_json or not (force_human or _stdout_is_tty())
     try:
+        resolved_state_root = resolve_state_root(state_root)
+    except ProtocolConfigurationError as exc:
+        raise click.UsageError(exc.message) from exc
+    try:
         ticket_id, ticket_resolution = resolve_delegate_ticket(ticket, cwd=Path.cwd())
         caller = resolve_delegate_caller(
             caller_lane, cwd=Path.cwd(), environ=os.environ
@@ -2434,7 +2468,7 @@ def delegate_command(
             locus=EnumDelegateLocus(locus),
             lane=lane,
             kafka_bootstrap=kafka_bootstrap,
-            state_root=state_root,
+            state_root=resolved_state_root,
             timeout=timeout,
             verbose=verbose,
             emit_socket=emit_socket,
