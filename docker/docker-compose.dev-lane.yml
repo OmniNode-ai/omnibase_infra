@@ -1986,6 +1986,40 @@ services:
       # three redirect URLs above name a reserved never-resolvable host.
       STRIPE_API_KEY: ${STRIPE_API_KEY:?STRIPE_API_KEY must be set - main.py reads it at import; the dev lane uses a generated sentinel from render_dev_lane_tenant_path_env.sh and reaches no Stripe endpoint, NEVER a real key}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?STRIPE_WEBHOOK_SECRET must be set - generated sentinel, see render_dev_lane_tenant_path_env.sh}
+      # -- BYOK credential intake store (OMN-18829) ---------------------------
+      # POST /v1/tenants/me/inference-credentials runs
+      # omnimarket.projection.credential_publisher.register_inference_credential,
+      # whose _build_secret_store() needs all five INFISICAL_* bootstrap names
+      # and raises CredentialStoreConfigurationError (a 503 naming the missing
+      # names) when any is blank. Without this block every BYOK registration on
+      # the lane was that 503, measured on .201 2026-10-03T22:11:26Z.
+      #
+      # The identity is onex-api's OWN, not the runtime's: on .201 it is
+      # dev-lane-onex-api-tenant-credentials, whose project role grants create
+      # and edit on environment dev, path /tenant-inference-credentials, and
+      # nothing else (no read, no delete, no other path) -- the same split as
+      # onex-dev's onex-store-resolver identity, narrowed to the write the
+      # intake performs. It is deliberately NOT bound from the runtime anchor's
+      # ONEX_RUNTIME_INFISICAL_* names, which carry a project-admin identity.
+      #
+      # `:-` and not `:?`, deliberately: this file is layered by the .105,
+      # .200 and .202 dev lanes and the pre-PR slots, none of which hold this
+      # identity. A blank value does not degrade silently -- the publisher
+      # refuses the write with a legible 503 naming every blank variable
+      # (OMN-17349 AC1) -- so the failure stays on the one route that needs
+      # the store instead of failing every service's compose render on hosts
+      # that never register a customer key. Values come from the operator env
+      # file on the host (ONEX_API_INFISICAL_*), never from this file.
+      #
+      # The environment slug and folder are pinned, not inherited: the slug is
+      # the one value whose wrong answer is dangerous (it used to default to
+      # "prod"), and the dev lane writes to environment dev and nowhere else.
+      INFISICAL_ADDR: ${ONEX_API_INFISICAL_ADDR:-}
+      INFISICAL_PROJECT_ID: ${ONEX_API_INFISICAL_PROJECT_ID:-}
+      INFISICAL_CLIENT_ID: ${ONEX_API_INFISICAL_CLIENT_ID:-}
+      INFISICAL_CLIENT_SECRET: ${ONEX_API_INFISICAL_CLIENT_SECRET:-}
+      INFISICAL_ENVIRONMENT_SLUG: "dev"
+      INFISICAL_TENANT_CREDENTIAL_SECRET_PATH: "/tenant-inference-credentials"
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
       ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
       PYTHONUNBUFFERED: "1"
