@@ -1669,7 +1669,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 9ee310c4f26db276ca408a62e0cca2f51bd30a05 # .github/sibling-pins.yaml
+          ref: 1de0507584f5603c139dc1f2e3df0391ec753d1a # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -1904,7 +1904,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 9ee310c4f26db276ca408a62e0cca2f51bd30a05 # .github/sibling-pins.yaml
+          ref: 1de0507584f5603c139dc1f2e3df0391ec753d1a # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1920,7 +1920,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 9ee310c4f26db276ca408a62e0cca2f51bd30a05 # .github/sibling-pins.yaml
+          ref: 1de0507584f5603c139dc1f2e3df0391ec753d1a # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4893,7 +4893,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 9ee310c4f26db276ca408a62e0cca2f51bd30a05 # .github/sibling-pins.yaml
+          ref: 1de0507584f5603c139dc1f2e3df0391ec753d1a # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4909,7 +4909,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 9ee310c4f26db276ca408a62e0cca2f51bd30a05 # .github/sibling-pins.yaml
+          ref: 1de0507584f5603c139dc1f2e3df0391ec753d1a # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 

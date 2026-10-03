@@ -326,7 +326,10 @@ def test_local_lane_tenant_is_optional_and_injected_into_every_runtime_service()
     for name, manifest in resolved.manifests.items():
         assert "ONEX_TENANT_ID" not in manifest.required_env
         env = services[name].get("environment", {})
-        if manifest.layer == EnumInfraLayer.RUNTIME:
+        if (
+            manifest.layer == EnumInfraLayer.RUNTIME
+            or name == "local-tenant-registry-seed"
+        ):
             assert env["ONEX_TENANT_ID"] == "${ONEX_TENANT_ID:-}"
         else:
             assert "ONEX_TENANT_ID" not in env
@@ -748,6 +751,95 @@ def _services(compose: dict[str, object]) -> dict[str, dict[str, object]]:
     services = compose["services"]
     assert isinstance(services, dict)
     return services
+
+
+def _seed_script() -> str:
+    """The seed one-shot's shell, as the container's ``sh -c`` receives it."""
+    svc = _services(_render("local"))["local-tenant-registry-seed"]
+    assert svc["entrypoint"] == ["/bin/sh", "-c"]
+    command = svc["command"]
+    assert isinstance(command, list) and len(command) == 1
+    return str(command[0]).replace("$$", "$")
+
+
+def _run_seed(tmp_path: Path, tenant: str) -> subprocess.CompletedProcess[str]:
+    """Run the seed shell against a stub ``psql`` that logs its arguments."""
+    calls = tmp_path / "psql-calls"
+    psql = tmp_path / "psql"
+    psql.write_text(
+        '#!/bin/sh\necho "$*" >> "$PSQL_CALLS"\ncat > /dev/null\n'
+        "echo 00000000-0000-0000-0000-000000000001\n",
+        encoding="utf-8",
+    )
+    psql.chmod(0o755)
+    return subprocess.run(
+        ["sh", "-c", _seed_script()],
+        env={
+            **os.environ,
+            "ONEX_TENANT_ID": tenant,
+            "POSTGRES_PASSWORD": "unused",
+            "POSTGRES_HOST": "postgres",
+            "POSTGRES_PORT": "5432",
+            "POSTGRES_USER": "postgres",
+            "NODE_POSTGRES_DB": "omnidash_analytics",
+            "PATH": f"{tmp_path}:{os.environ.get('PATH', '')}",
+            "PSQL_CALLS": str(calls),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_local_render_seeds_its_tenant_after_migrations() -> None:
+    svc = _services(_render("local"))["local-tenant-registry-seed"]
+    assert svc["restart"] == "no"
+    assert svc["depends_on"] == {"migration-gate": {"condition": "service_healthy"}}
+    env = svc["environment"]
+    assert isinstance(env, dict)
+    assert env["ONEX_TENANT_ID"] == "${ONEX_TENANT_ID:-}"
+    assert env["NODE_POSTGRES_DB"] == "omnidash_analytics"
+
+
+def test_only_local_bundle_lists_the_tenant_registry_seed() -> None:
+    bundles = yaml.safe_load(
+        (_REPO / "docker" / "catalog" / "bundles.yaml").read_text(encoding="utf-8")
+    )
+    assert [
+        name
+        for name, bundle in bundles.items()
+        if "local-tenant-registry-seed" in bundle.get("services", [])
+    ] == ["local"]
+
+
+def test_local_tenant_registry_seed_preserves_existing_mappings() -> None:
+    script = _seed_script()
+    assert "INSERT INTO tenant_registry_mirror" in script
+    assert "ON CONFLICT (tenant_slug) DO NOTHING" in script
+    assert "md5('omninode-local-tenant:' || :'slug')::uuid" in script
+
+
+def test_local_tenant_registry_seed_records_the_tenant(tmp_path: Path) -> None:
+    result = _run_seed(tmp_path, "local-dd95787510f8")
+    assert result.returncode == 0, result.stderr
+    assert "tenant local-dd95787510f8 -> " in result.stdout
+    calls = (tmp_path / "psql-calls").read_text(encoding="utf-8").splitlines()
+    assert len(calls) == 2
+    assert all("slug=local-dd95787510f8" in call for call in calls)
+
+
+@pytest.mark.parametrize("tenant", ["", "Bad Slug!"])
+def test_local_tenant_registry_seed_skips_database_for_empty_or_invalid_tenant(
+    tmp_path: Path, tenant: str
+) -> None:
+    result = _run_seed(tmp_path, tenant)
+    if tenant:
+        assert result.returncode != 0
+        assert "invalid ONEX_TENANT_ID" in result.stderr
+    else:
+        assert result.returncode == 0
+        assert "no tenant, nothing to record" in result.stdout
+    assert not (tmp_path / "psql-calls").exists()
 
 
 def test_local_render_carries_the_services_the_pages_read() -> None:
