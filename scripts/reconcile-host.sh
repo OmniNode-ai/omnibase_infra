@@ -84,6 +84,21 @@
 # unrelated failure still fails the verdict, alerts and exits non-zero; it just
 # no longer freezes the floor.
 #
+# A REFUSED CLONE NAMES ITS OWNER (OMN-20403)
+# ----------------------------------------------------------------------------
+# A clone that verdicts DID_NOT_MOVE (or UNHEALTHY) is explained, not just
+# refused: the dirty tracked paths, the index mtime, and the ledger lane whose
+# CLAIM last named those paths (or `unowned`), read from $ONEX_LEDGER_PATH.
+# The same line is written into the receipt, so `scripts/onex` repeats it when
+# it refuses with exit 3. In repair mode the second consecutive refusal of the
+# same clone at the same index state and dirty-path digest saves a patch of the
+# staged and dirty diff under $OMNI_HOME/.onex_state/dirty-clone-backups and
+# appends exactly one MSG through scripts/ledger_lock.py (to the owner; `unowned`
+# goes to=operator). A changed index resets the count; --check reports and
+# writes nothing. A git lock file older than the clone step budget is named with
+# its age and the `rm -f` that clears it: printed, never run. Nothing here
+# discards, resets, stashes or cleans a clone.
+#
 # ----------------------------------------------------------------------------
 # Usage:
 #   reconcile-host.sh [--check] [--verbose] [--omni-home PATH] [--branch NAME]
@@ -104,6 +119,9 @@
 #                                   reported separately (default: 7200 seconds)
 #   ONEX_RECONCILE_ALERT_CMD        command receiving the alert text on argv;
 #                                   defaults to the Slack chat.postMessage path
+#   ONEX_LEDGER_PATH                the rolling ledger, read for the owner of a
+#                                   refused clone's paths and appended to with
+#                                   the MSG; unset means the owner is `unknown`
 #   ONEX_RECONCILE_RECEIPT          receipt path (default
 #                                   $OMNI_HOME/.onex-workspace-reconcile.json)
 #   SLACK_BOT_TOKEN, SLACK_CHANNEL_ID   default alert transport (best effort)
@@ -158,7 +176,7 @@ while [[ $# -gt 0 ]]; do
       BRANCH="$1"
       ;;
     --branch=*) BRANCH="${1#--branch=}" ;;
-    -h|--help) sed -n '2,110p' "${BASH_SOURCE[0]}"; exit "$EXIT_OK" ;;
+    -h|--help) sed -n '2,127p' "${BASH_SOURCE[0]}"; exit "$EXIT_OK" ;;
     *) echo "reconcile-host.sh: unknown argument: $1" >&2; exit "$EXIT_INDETERMINATE" ;;
   esac
   shift
@@ -529,6 +547,10 @@ ${text}" '{channel:$channel,text:$text}')" >/dev/null 2>&1 || true
 FAILURES=()
 DISPATCH_FAILURES=()
 SURFACE_LINES=()
+# Index-aligned with SURFACE_LINES: the owner line of a refused clone, or empty
+# (OMN-20403). A parallel array, not a fourth `|` field, because the detail text
+# is free and the receipt reader below splits on `|`.
+SURFACE_OWNERS=()
 
 # Does the dispatch build depend on this surface? (OMN-20111)
 #
@@ -584,6 +606,7 @@ surface_remedy() { # surface verdict
 
 record() { # surface verdict detail
   SURFACE_LINES+=("$1|$2|$3")
+  SURFACE_OWNERS+=("")
   case "$2" in
     MOVED|ALREADY_AT_TARGET) say "  $1: $2 ($3)" ;;
     *)
@@ -693,6 +716,30 @@ fetch_all() {
   done
 }
 
+# Who owns the work in a refused clone, and what else is in the way (OMN-20403).
+# Runs for a clone whose verdict just failed. The verifier reads the clone and the
+# ledger, and in repair mode keeps the consecutive-refusal count, saves a patch
+# of the staged diff and appends the one MSG; this script removes nothing from a
+# clone and runs none of the printed commands.
+explain_refused_clone() { # repo clone
+  local repo="$1" clone="$2" last tag text owner_line=""
+  local -a args
+  last=$(( ${#SURFACE_LINES[@]} - 1 ))
+  case "${SURFACE_LINES[$last]}" in
+    "clone:$repo|MOVED|"*|"clone:$repo|ALREADY_AT_TARGET|"*) return 0 ;;
+  esac
+  args=(--clone "$clone" --repo "$repo" --state-dir "$OMNI_HOME/.onex_state"
+        --ledger "${ONEX_LEDGER_PATH:-}" --ledger-lock "$SCRIPT_DIR/ledger_lock.py"
+        --lock-age-s "$STEP_TIMEOUT_SECONDS")
+  [[ "$MODE" == "repair" ]] && args+=(--record)
+  while IFS=$'\t' read -r tag text; do
+    say "    $text"
+    [[ "$tag" == "owner" && -z "$owner_line" ]] && owner_line="$text"
+  done < <(as_owner "$PYTHON_BIN" "$VERIFIER" clone-refusal "${args[@]}" || \
+             say "clone-refusal report failed for $repo (exit $?)")
+  SURFACE_OWNERS[last]="${owner_line#owner: }"
+}
+
 declare -a before_heads=()
 say "surfaces under $OMNI_HOME (branch $BRANCH): clones=${#present_clones[@]}"
 
@@ -739,6 +786,7 @@ for repo in "${present_clones[@]}"; do
     # repair is a dead end.
     record "clone:$repo" "UNHEALTHY" "${health_reason:-clone is not checkout-capable}"
   fi
+  explain_refused_clone "$repo" "$clone"
   idx=$((idx + 1))
 done
 
@@ -949,8 +997,11 @@ path_onex_shadow_check
   printf '  "mode": "%s",\n  "omni_home": "%s",\n  "branch": "%s",\n' "$MODE" "$OMNI_HOME" "$BRANCH"
   printf '  "surfaces": [\n'
   sep=""
+  oi=0
   for line in "${SURFACE_LINES[@]}"; do
     IFS='|' read -r s v d < <(printf '%s\n' "$line")
+    owner="${SURFACE_OWNERS[$oi]}"
+    oi=$((oi + 1))
     premise=false
     is_dispatch_premise "$s" && premise=true
     remedy=""
@@ -961,10 +1012,10 @@ path_onex_shadow_check
     # ONE LINE PER SURFACE, and the key order is a consumed contract:
     # `scripts/onex` reads failing surfaces and their remedies back out of this
     # file with awk when it refuses (OMN-20111), because its hot path starts no
-    # interpreter. Keep `surface`, `verdict`, `dispatch_premise` and `remedy`
-    # ahead of `detail` on the element's own line.
-    printf '%s    {"surface": "%s", "verdict": "%s", "dispatch_premise": %s, "remedy": "%s", "detail": "%s"}' \
-      "$sep" "$s" "$v" "$premise" "${remedy//\"/\'}" "${d//\"/\'}"
+    # interpreter. Keep `surface`, `verdict`, `dispatch_premise`, `remedy` and
+    # `owner` ahead of `detail` on the element's own line (owner: OMN-20403).
+    printf '%s    {"surface": "%s", "verdict": "%s", "dispatch_premise": %s, "remedy": "%s", "owner": "%s", "detail": "%s"}' \
+      "$sep" "$s" "$v" "$premise" "${remedy//\"/\'}" "${owner//\"/\'}" "${d//\"/\'}"
     # $'...' , not "..." (OMN-17800). Bash interprets \n only in ANSI-C quoting,
     # and this value is then handed to printf as a %s ARGUMENT, where printf does
     # not interpret escapes either -- so `sep=",\n"` wrote the literal three

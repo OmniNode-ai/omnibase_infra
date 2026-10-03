@@ -410,8 +410,9 @@ _await_peer_reconcile() {
 
 # Name what blocks the floor and the command that clears it (OMN-20111), from
 # the last reconcile's receipt. `reconcile-host.sh` writes one surface per line
-# with its verdict, whether it is part of the dispatch premise, and its remedy;
-# one awk reads them back. This runs only on the refusal path, so it costs the
+# with its verdict, whether it is part of the dispatch premise, its remedy and,
+# for a refused clone, its owner (OMN-20403: the ledger lane whose CLAIM last
+# named the staged paths, or `unowned`); one awk reads them back. This runs only on the refusal path, so it costs the
 # hot path nothing.
 _explain_blocking_surfaces() {
   if [[ ! -f "$RECONCILE_RECEIPT" ]]; then
@@ -431,9 +432,9 @@ _explain_blocking_surfaces() {
     /"surface": "/ {
       v = field($0, "verdict")
       if (v == "MOVED" || v == "ALREADY_AT_TARGET") next
-      s = field($0, "surface"); r = field($0, "remedy")
-      if ($0 ~ /"dispatch_premise": true/) { nb++; bs[nb] = s " " v; br[nb] = r }
-      else { no++; os[no] = s " " v }
+      s = field($0, "surface"); r = field($0, "remedy"); w = field($0, "owner")
+      if ($0 ~ /"dispatch_premise": true/) { nb++; bs[nb] = s " " v; br[nb] = r; bw[nb] = w }
+      else { no++; os[no] = s " " v; ow[no] = w }
     }
     END {
       if (nb == 0) {
@@ -441,10 +442,12 @@ _explain_blocking_surfaces() {
       }
       for (i = 1; i <= nb; i++) {
         printf "[onex]   blocking : %s (last reconcile %s)\n", bs[i], at
+        if (bw[i] != "") printf "[onex]   owner    : %s\n", bw[i]
         if (br[i] != "") printf "[onex]   clears by: %s\n", br[i]
       }
       for (i = 1; i <= no; i++) {
         printf "[onex]   not blocking delegation: %s\n", os[i]
+        if (ow[i] != "") printf "[onex]   owner    : %s\n", ow[i]
       }
     }
   ' "$RECONCILE_RECEIPT" >&2
