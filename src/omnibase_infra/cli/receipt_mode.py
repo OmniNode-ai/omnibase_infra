@@ -1480,7 +1480,15 @@ def _run_receipt_mode(
         validation_error = receipt_validator(receipt)
         if validation_error is not None:
             summary = ModelReceiptRuntimeSummary(
-                workflow_result="error",
+                # OMN-20386: a published command the lane never answered keeps
+                # the runtime's own word for it. Rewriting it as ``error`` would
+                # take the cause off the receipt the caller reads.
+                workflow_result=(
+                    workflow_result.value
+                    if workflow_result is EnumWorkflowResult.TIMEOUT
+                    and workflow_data.get("wire_correlation_id")
+                    else "error"
+                ),
                 exit_code=1,
                 workflow=str(contract_path),
                 handler_locus=_json_str(workflow_data.get("handler_locus")),
