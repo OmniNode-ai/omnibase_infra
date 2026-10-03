@@ -34,7 +34,7 @@ recreated, or restarted. It enforces two rules:
    impossible on this path and traceable after the fact everywhere else.
 
 2. **GRANT INTERLOCK (fail-closed, refuse-by-default).** When the target lane is
-   ``stability-test`` and ``onex_change_control`` carries unconsumed, unexpired
+   ``stability-test`` and ``omninode_infra`` carries unconsumed, unexpired
    prod-promotion grants at ``@main``, the deploy REFUSES and names every live
    grant. The only override is an explicit acknowledgement
    (``ONEX_DEPLOY_GRANT_ACK``) that must name **each** live ``grant_id``; the
@@ -43,7 +43,7 @@ recreated, or restarted. It enforces two rules:
    stale acknowledgement left in an environment cannot pre-authorize a grant
    that did not exist when it was set.
 
-   Grant state is resolved from ``onex_change_control@main`` (never a PR
+   Grant state is resolved from ``omninode_infra@main`` (never a PR
    branch), exactly like the OMN-13418 resolver's I/O boundary. If that state
    cannot be established — no clone, fetch failure, unparseable YAML, malformed
    entry — the verdict is ``UNREADABLE`` and the deploy REFUSES. Indeterminate
@@ -138,7 +138,7 @@ GRANT_INTERLOCK_LANES: frozenset[str] = frozenset({"stability-test"})
 #:   `stability-proven` digest and never appears in a promotion's evidence
 #:   chain, so no rebuild of one can erode a live prod grant -- which is the
 #:   only thing the interlock protects. Extending the interlock here would
-#:   additionally gate an ordinary branch build on resolving the change-control
+#:   additionally gate an ordinary branch build on resolving the omninode_infra
 #:   repository at `@main`, making a pre-PR check fail when a governance
 #:   surface is unreachable. That is a worse gate than none: it would push
 #:   branch authors off the sanctioned entrypoint.
@@ -152,7 +152,10 @@ POOL_LANES: frozenset[str] = frozenset({"prepr-1", "prepr-2"})
 #: the reason check actually reads.
 REASON_REQUIRED_LANES: frozenset[str] = GOVERNED_LANES | POOL_LANES
 
-#: The grant registry path inside the ``onex_change_control`` repo.
+#: OMN-20068: the prod-promotion registry moved from onex_change_control.
+GRANTS_REPO_NAME = "omninode_infra"
+
+#: The grant registry path inside the ``omninode_infra`` repo.
 GRANTS_REPO_RELPATH = "grants/prod_promotion_grants.yaml"
 
 #: The ref the grant registry is resolved from. Never a PR branch (OMN-13418).
@@ -474,7 +477,7 @@ def _parent_command() -> str:
 
 
 def fetch_grant_bytes_from_main(grants_repo: Path) -> tuple[bytes, str]:
-    """Read the grant registry from ``onex_change_control@main``.
+    """Read the grant registry from ``omninode_infra@main``.
 
     Returns ``(raw_bytes, resolved_commit_sha)``. Raises :class:`OSError` /
     :class:`subprocess.SubprocessError` derivatives on any failure so the caller
@@ -575,9 +578,9 @@ def resolve_grant_block(
             "grants_sha256": "",
             "live_grants": [],
             "errors": [
-                "no onex_change_control clone resolved (set OMNI_HOME or pass "
+                f"no {GRANTS_REPO_NAME} clone resolved (set OMNI_HOME or pass "
                 "--grants-repo) — cannot establish live grant state at "
-                f"onex_change_control@{GRANTS_REF}"
+                f"{GRANTS_REPO_NAME}@{GRANTS_REF}"
             ],
         }
 
@@ -681,7 +684,7 @@ def build_record(
         "grant_guard": {
             "applies": lane in GRANT_INTERLOCK_LANES,
             "verdict": verdict,
-            "grants_ref": f"onex_change_control@{GRANTS_REF}",
+            "grants_ref": f"{GRANTS_REPO_NAME}@{GRANTS_REF}",
             "source": grant_block.get("source", ""),
             "grants_commit": grant_block.get("grants_commit", ""),
             "grants_sha256": grant_block.get("grants_sha256", ""),
@@ -725,11 +728,11 @@ def write_record(record: Mapping[str, Any], record_dir: Path) -> dict[str, str]:
 
 
 def default_grants_repo(env: Mapping[str, str]) -> Path | None:
-    """Resolve the ``onex_change_control`` clone from ``OMNI_HOME`` (may be None)."""
+    """Resolve the ``omninode_infra`` clone from ``OMNI_HOME`` (may be None)."""
     omni_home = env.get("OMNI_HOME", "").strip()
     if not omni_home:
         return None
-    return Path(omni_home) / "onex_change_control"
+    return Path(omni_home) / GRANTS_REPO_NAME
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -758,7 +761,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--grants-repo",
         default="",
-        help="onex_change_control clone (default: $OMNI_HOME/onex_change_control).",
+        help=f"{GRANTS_REPO_NAME} clone (default: $OMNI_HOME/{GRANTS_REPO_NAME}).",
     )
     parser.add_argument(
         "--grants-file",

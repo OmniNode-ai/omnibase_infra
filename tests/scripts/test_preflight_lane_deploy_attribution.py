@@ -18,7 +18,7 @@ id, and a durable attribution record either way.
 Everything here is hermetic — the grant registry is a real file passed via
 ``--grants-file`` (or a real local git repo for the ``@main`` resolution test),
 evaluation time is pinned with ``--now``, records are written to ``tmp_path``.
-No lane is contacted, no network is used, and no real ``onex_change_control@main``
+No lane is contacted, no network is used, and no real ``omninode_infra@main``
 is required. Faithful dependency substitution, not mocks: the code path under
 test is the one deploy-runtime.sh actually invokes.
 """
@@ -36,6 +36,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "preflight_lane_deploy_attribution.py"
@@ -176,6 +180,7 @@ def test_stability_deploy_allowed_with_real_reason(tmp_path: Path) -> None:
     assert record["ticket"] == "OMN-15181"
     assert record["lane"] == "stability-test"
     assert record["grant_guard"]["verdict"] == "CLEAR"
+    assert record["grant_guard"]["grants_ref"] == "omninode_infra@main"
     # Attribution must actually identify somebody, not just exist as a key.
     assert record["actor"]["identity"]
     assert record["actor"]["host"]
@@ -356,7 +361,7 @@ def test_unreadable_grant_state_fails_closed(tmp_path: Path, content: str) -> No
 
 @pytest.mark.unit
 def test_missing_grant_source_fails_closed(tmp_path: Path) -> None:
-    """No resolvable onex_change_control clone == UNREADABLE, not CLEAR."""
+    """No resolvable omninode_infra clone == UNREADABLE, not CLEAR."""
     result = _run(
         [
             "--lane",
@@ -376,6 +381,23 @@ def test_missing_grant_source_fails_closed(tmp_path: Path) -> None:
     )
     assert result.returncode == 1
     assert _record(result)["grant_guard"]["verdict"] == "UNREADABLE"
+
+
+@pytest.mark.unit
+def test_unresolved_grants_clone_names_omninode_infra() -> None:
+    result = _run(
+        ["--lane", "stability-test", "--now", NOW, "--check-only", "--json"],
+        env_overrides={
+            "ONEX_DEPLOY_REASON": "OMN-20068 verify promotion registry migration"
+        },
+    )
+    assert result.returncode == 1
+    record = _record(result)
+    assert record["grant_guard"]["verdict"] == "UNREADABLE"
+    assert "no omninode_infra clone resolved" in " ".join(
+        record["grant_guard"]["errors"]
+    )
+    assert "no omninode_infra clone resolved" in " ".join(record["refusal_reasons"])
 
 
 @pytest.mark.unit
@@ -421,10 +443,14 @@ def test_allowed_deploy_writes_durable_record(tmp_path: Path) -> None:
     assert logged["lane"] == "stability-test"
     assert logged["reason"].startswith("OMN-15218")
     assert logged["actor"]["identity"]
+    assert logged["grant_guard"]["grants_ref"] == "omninode_infra@main"
+    assert _record(result)["grant_guard"]["grants_ref"] == "omninode_infra@main"
 
     records = list((record_dir / "deploy-attribution").glob("*.json"))
     assert len(records) == 1
-    assert json.loads(records[0].read_text(encoding="utf-8"))["result"] == "ALLOW"
+    written = json.loads(records[0].read_text(encoding="utf-8"))
+    assert written["result"] == "ALLOW"
+    assert written["grant_guard"]["grants_ref"] == "omninode_infra@main"
 
 
 @pytest.mark.unit
@@ -470,7 +496,7 @@ def test_grant_state_resolves_from_origin_main(tmp_path: Path) -> None:
 
     Built against a real local git remote so the ``@main`` anchor (the
     anti-self-issue property of the whole grant scheme) is exercised, without any
-    network or a real onex_change_control.
+    network or a real omninode_infra.
     """
     env = {
         **os.environ,
@@ -480,7 +506,10 @@ def test_grant_state_resolves_from_origin_main(tmp_path: Path) -> None:
 
     def git(cwd: Path, *args: str) -> None:
         subprocess.run(
-            ["git", "-C", str(cwd), *args], check=True, capture_output=True, env=env
+            ["git", "-C", str(cwd), *args],
+            check=True,
+            capture_output=True,
+            env=scrub_git_location_env(env),
         )
 
     upstream = tmp_path / "upstream"
@@ -494,12 +523,12 @@ def test_grant_state_resolves_from_origin_main(tmp_path: Path) -> None:
     git(upstream, "add", "-A")
     git(upstream, "commit", "-m", "grant")
 
-    clone = tmp_path / "onex_change_control"
+    clone = tmp_path / "omninode_infra"
     subprocess.run(
         ["git", "clone", str(upstream), str(clone)],
         check=True,
         capture_output=True,
-        env=env,
+        env=scrub_git_location_env(env),
     )
 
     # The working tree says "no grants"; origin/main says otherwise. The
@@ -512,8 +541,30 @@ def test_grant_state_resolves_from_origin_main(tmp_path: Path) -> None:
     assert block["verdict"] == "LIVE_GRANTS"
     assert block["live_grants"][0]["grant_id"] == LIVE_GRANT["grant_id"]
 
+    result = _run(
+        ["--lane", "stability-test", "--now", NOW, "--check-only", "--json"],
+        env_overrides={
+            "OMNI_HOME": str(tmp_path),
+            "ONEX_DEPLOY_REASON": "OMN-20068 verify promotion registry migration",
+        },
+    )
+    assert result.returncode == 1
+    record = _record(result)
+    assert record["grant_guard"]["verdict"] == "LIVE_GRANTS"
+    assert record["grant_guard"]["grants_ref"] == "omninode_infra@main"
+    assert record["grant_guard"]["grants_commit"] == commit
+
 
 # --- pure helpers ------------------------------------------------------------
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [({"OMNI_HOME": "/x"}, Path("/x/omninode_infra")), ({}, None)],
+)
+def test_default_grants_repo(env: dict[str, str], expected: Path | None) -> None:
+    assert _mod.default_grants_repo(env) == expected
 
 
 @pytest.mark.unit

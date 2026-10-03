@@ -65,6 +65,11 @@ def test_preflight_script_exists_and_is_the_single_source_of_truth() -> None:
 
 
 @pytest.mark.unit
+def test_grant_interlock_help_names_omninode_infra() -> None:
+    assert "grants exist at omninode_infra@main; proceeding" in _script_text()
+
+
+@pytest.mark.unit
 def test_defines_and_calls_the_attribution_guard() -> None:
     text = _script_text()
     assert re.search(r"^guard_lane_deploy_attribution\s*\(\)", text, re.MULTILINE)
