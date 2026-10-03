@@ -43,12 +43,12 @@ recreated, or restarted. It enforces two rules:
    stale acknowledgement left in an environment cannot pre-authorize a grant
    that did not exist when it was set.
 
-   Grant state is resolved from ``omninode_infra@main`` (never a PR
-   branch), exactly like the OMN-13418 resolver's I/O boundary. If that state
-   cannot be established — no clone, fetch failure, unparseable YAML, malformed
-   entry — the verdict is ``UNREADABLE`` and the deploy REFUSES. Indeterminate
-   grant state is not a pass; it needs the ``unreadable-grant-state``
-   acknowledgement token to proceed.
+   ``CLEAR`` or ``LIVE_GRANTS`` requires a successful read at the canonical
+   anchor ``github.com/OmniNode-ai/omninode_infra@main:grants/prod_promotion_grants.yaml``;
+   a missing clone or file, an unreachable/404 repo, an unparseable or malformed
+   file, a clone whose origin is not the canonical remote, and any
+   ``--grants-file`` read are ``UNREADABLE``. Indeterminate grant state REFUSES
+   unless the ``unreadable-grant-state`` acknowledgement token is given.
 
 Layering note: ``omnibase_infra`` must not import ``omnimarket`` (where the
 OMN-13439 grant resolver EFFECT lives). The grant FILE is the contract surface
@@ -56,9 +56,10 @@ OMN-13439 grant resolver EFFECT lives). The grant FILE is the contract surface
 or market repos, the same way the resolver imports nothing from
 ``onex_change_control``.
 
-Test seam: every I/O boundary is injectable. ``--grants-file`` substitutes a
-local file for the ``@main`` fetch and ``--now`` pins evaluation time, so the
-whole verdict table is exercised hermetically — no lane contact, no network, no
+Test seam: ``--grants-file`` is a diagnostic read that always refuses unless the
+unreadable sentinel is given, and ``--now`` pins evaluation time. Real local git
+repos with the canonical origin redirected offline by clone-local ``insteadOf``
+exercise the whole verdict table hermetically — no lane contact, no network, no
 real ``@main`` dependency (faithful dependency substitution, not mocks).
 
 Usage::
@@ -88,13 +89,15 @@ import getpass
 import hashlib
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -155,11 +158,18 @@ REASON_REQUIRED_LANES: frozenset[str] = GOVERNED_LANES | POOL_LANES
 #: OMN-20068: the prod-promotion registry moved from onex_change_control.
 GRANTS_REPO_NAME = "omninode_infra"
 
+#: The only remote whose main can prove CLEAR (OMN-20068). Deliberately no env
+#: var or CLI flag can override it: an override is itself the wrong-anchor hole.
+GRANTS_CANONICAL_REMOTE = "github.com/OmniNode-ai/omninode_infra"
+
 #: The grant registry path inside the ``omninode_infra`` repo.
 GRANTS_REPO_RELPATH = "grants/prod_promotion_grants.yaml"
 
 #: The ref the grant registry is resolved from. Never a PR branch (OMN-13418).
 GRANTS_REF = "main"
+
+#: The canonical repository, ref, and path used in grant diagnostics and records.
+GRANTS_ANCHOR = f"{GRANTS_CANONICAL_REMOTE}@{GRANTS_REF}:{GRANTS_REPO_RELPATH}"
 
 #: Env var carrying the mandatory human reason for the deploy.
 ENV_REASON = "ONEX_DEPLOY_REASON"
@@ -248,7 +258,30 @@ class PreflightError(RuntimeError):
     """Usage / environment error (exit 2). Never a policy refusal."""
 
 
+class GrantAnchorMismatchError(ValueError):
+    """The clone's origin cannot establish canonical live grant state."""
+
+
 # --- pure helpers ------------------------------------------------------------
+
+
+def normalize_remote_url(url: str) -> str:
+    """Normalize network git remotes without retaining credentials.
+
+    Local paths and file URLs have a distinct prefix and cannot prove CLEAR.
+    """
+    cleaned = url.strip().rstrip("/").removesuffix(".git")
+    if cleaned.startswith("file://"):
+        return f"local:{cleaned.removeprefix('file://')}"
+    parsed = urlsplit(cleaned)
+    if parsed.scheme.lower() in {"ssh", "https", "http", "git"}:
+        return f"{parsed.hostname or ''}/{parsed.path.lstrip('/')}".lower()
+    scp = re.fullmatch(r"(?:[^/@:]+@)?([^/:]+):(.+)", cleaned)
+    if scp is not None:
+        return f"{scp[1]}/{scp[2]}".lower()
+    # Anything else is a path to git, including a bare ``host/owner/repo``
+    # (a relative directory), so it can never equal the canonical remote.
+    return f"local:{cleaned}"
 
 
 def lane_from_compose_project(compose_project: str) -> str:
@@ -477,12 +510,14 @@ def _parent_command() -> str:
 
 
 def fetch_grant_bytes_from_main(grants_repo: Path) -> tuple[bytes, str]:
-    """Read the grant registry from ``omninode_infra@main``.
+    """Read the grant registry from the canonical remote's ``main``.
 
     Returns ``(raw_bytes, resolved_commit_sha)``. Raises :class:`OSError` /
-    :class:`subprocess.SubprocessError` derivatives on any failure so the caller
-    can fail closed. Never falls back to the working tree or a PR branch — the
-    ``@main`` anchor is the anti-self-issue property of the whole grant scheme.
+    :class:`subprocess.SubprocessError` derivatives or
+    :class:`GrantAnchorMismatchError` on failure so the caller can fail closed.
+    The canonical-remote check and explicit fetch refspec are part of the
+    anchor: never use a different remote, stale origin/main, working tree, or
+    PR branch to establish grant state.
     """
     if not (grants_repo / ".git").exists():
         raise FileNotFoundError(f"not a git clone: {grants_repo}")
@@ -508,9 +543,28 @@ def fetch_grant_bytes_from_main(grants_repo: Path) -> tuple[bytes, str]:
             )
         return completed.stdout
 
-    # Refresh first: a stale local origin/main would hide a grant that landed
-    # minutes ago, which is exactly the window this interlock exists to cover.
-    _git("fetch", "origin", GRANTS_REF, "--quiet")
+    try:
+        origin_url = _git("config", "--get", "remote.origin.url").strip()
+    except ChildProcessError as exc:
+        raise ChildProcessError(
+            f"grant registry clone {grants_repo} has no origin remote"
+        ) from exc
+    normalized = normalize_remote_url(origin_url)
+    if normalized != GRANTS_CANONICAL_REMOTE.lower():
+        raise GrantAnchorMismatchError(
+            f"grant registry clone {grants_repo} tracks {normalized} as origin, "
+            f"not the canonical anchor {GRANTS_CANONICAL_REMOTE}; a registry read "
+            "from any other anchor cannot prove that no live grant exists"
+        )
+
+    # Refresh origin/main explicitly: a narrowed/single-branch fetch refspec
+    # must not leave stale grant state hiding a grant that just landed on main.
+    _git(
+        "fetch",
+        "--quiet",
+        "origin",
+        f"+refs/heads/{GRANTS_REF}:refs/remotes/origin/{GRANTS_REF}",
+    )
     commit = _git("rev-parse", f"origin/{GRANTS_REF}").strip()
     raw = subprocess.run(
         [
@@ -528,7 +582,9 @@ def fetch_grant_bytes_from_main(grants_repo: Path) -> tuple[bytes, str]:
     )
     if raw.returncode != 0:
         raise ChildProcessError(
-            f"git show origin/{GRANTS_REF}:{GRANTS_REPO_RELPATH} failed: {raw.stderr.decode(errors='replace').strip()}"
+            f"{GRANTS_REPO_RELPATH} is absent or unreadable at "
+            f"{GRANTS_CANONICAL_REMOTE}@{GRANTS_REF} (commit {commit}): "
+            f"{raw.stderr.decode(errors='replace').strip()}"
         )
     return raw.stdout, commit
 
@@ -552,8 +608,8 @@ def resolve_grant_block(
         }
 
     if grants_file is not None:
-        # Offline / test substitution: the exact same evaluation over a local
-        # file. Used by the unit suite and by an operator diagnosing a verdict.
+        # Diagnostic reads can describe a file but cannot establish canonical
+        # state. Even listed live grants need the UNREADABLE sentinel to proceed.
         try:
             raw = grants_file.read_bytes()
         except OSError as exc:
@@ -566,6 +622,21 @@ def resolve_grant_block(
                 "errors": [f"could not read grant registry file: {exc}"],
             }
         block = evaluate_grant_state(raw, now=now)
+        if block["verdict"] in {
+            EnumGrantVerdict.CLEAR.value,
+            EnumGrantVerdict.LIVE_GRANTS.value,
+        }:
+            error = (
+                f"--grants-file {grants_file} is not the canonical anchor {GRANTS_ANCHOR}; "
+                "an offline read can show what a file says but cannot prove that "
+                "no live grant exists"
+            )
+            if block["live_grants"]:
+                live_ids = ",".join(grant["grant_id"] for grant in block["live_grants"])
+                error += f"; the file lists live grant(s): {live_ids}"
+            block["verdict"] = EnumGrantVerdict.UNREADABLE.value
+            block["live_grants"] = []
+            block["errors"].append(error)
         block["source"] = str(grants_file)
         block["grants_commit"] = ""
         return block
@@ -580,7 +651,7 @@ def resolve_grant_block(
             "errors": [
                 f"no {GRANTS_REPO_NAME} clone resolved (set OMNI_HOME or pass "
                 "--grants-repo) — cannot establish live grant state at "
-                f"{GRANTS_REPO_NAME}@{GRANTS_REF}"
+                f"{GRANTS_ANCHOR}"
             ],
         }
 
@@ -588,17 +659,17 @@ def resolve_grant_block(
         raw, commit = fetch_grant_bytes_from_main(grants_repo)
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
         # Fail closed on ANY resolution failure: missing clone (FileNotFoundError),
-        # failed fetch/show (ChildProcessError, an OSError), timeout
-        # (subprocess.TimeoutExpired), or a decode/format surprise.
+        # anchor mismatch (GrantAnchorMismatchError), failed fetch/show
+        # (ChildProcessError, an OSError), timeout (subprocess.TimeoutExpired),
+        # or a decode/format surprise. Missing files and mis-scoped tokens can
+        # produce 404: a private repo answers 404, not 403 ("repository not found").
         return {
             "verdict": EnumGrantVerdict.UNREADABLE.value,
             "source": f"{grants_repo}@origin/{GRANTS_REF}",
             "grants_commit": "",
             "grants_sha256": "",
             "live_grants": [],
-            "errors": [
-                f"could not resolve grant registry at origin/{GRANTS_REF}: {exc}"
-            ],
+            "errors": [f"could not resolve grant registry at {GRANTS_ANCHOR}: {exc}"],
         }
 
     block = evaluate_grant_state(raw, now=now)
@@ -766,7 +837,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--grants-file",
         default="",
-        help="Read grant state from this file instead of @main (offline/test).",
+        help="Diagnostic offline read; can never yield CLEAR (requires unreadable sentinel).",
     )
     parser.add_argument(
         "--now", default="", help="ISO-8601 evaluation time (default: now, UTC)."
