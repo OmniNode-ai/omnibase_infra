@@ -28,6 +28,17 @@
 #   a free-form mapping and can still carry a key under a dict entry, which no
 #   field type reaches -- the dead-letter publisher's field-name redaction is
 #   what covers that case. (2026-09-14)
+# OMN-17104: input_model now names the module the handlers import
+#   (omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request,
+#   timeout_seconds le=1800.0, matching max_timeout_seconds); the same-named shared
+#   class with le=600.0 was deleted. (2026-10-03)
+# OMN-17106: ModelLlmInferenceCommand no longer carries a literal api key.
+#   The api_key field is replaced by api_key_ref (a secret name, never the
+#   secret), extra=forbid refuses a literal api_key, and provider_config
+#   entries with credential-like names are refused. HandlerLlmInferenceCommand
+#   resolves the ref through an optional secret resolver just before the
+#   outbound call and no longer falls back to provider_config["api_key"].
+#   Bumps MINOR: the command wire shape changed. (2026-10-03)
 # Copyright (c) 2026 OmniNode Team
 #
 # ONEX Node Contract
@@ -42,8 +53,8 @@ contract_name: "node_llm_inference_effect"
 node_name: "node_llm_inference_effect"
 contract_version:
   major: 1
-  minor: 5
-  patch: 1
+  minor: 6
+  patch: 0
 node_version:
   major: 0
   minor: 1
@@ -57,13 +68,13 @@ description: >
 runtime_profiles:
   - effects
 # Strongly typed I/O models
-# Note: These models live in the shared omnibase_infra.models.llm package.
-# They are shared across all LLM inference handlers (OpenAI-compatible)
-# to ensure a single canonical request/response contract for the inference effect layer.
-# Migrated from omnibase_infra.nodes.effects.models (OMN-3989).
+# Note: ModelLlmInferenceRequest lives in this node's models package and is the
+# single request class the handlers import (OMN-17104, DR-10); the shared
+# omnibase_infra.models.llm copy with a divergent shape and a 600s timeout
+# ceiling was deleted. ModelLlmInferenceResponse stays in the shared package.
 input_model:
   name: "ModelLlmInferenceRequest"
-  module: "omnibase_infra.models.llm"
+  module: "omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request"
   description: "Input model containing LLM inference parameters, routing configuration, optional direct endpoint_url override, optional EnumUsageSource-backed compute usage provenance, and an optional additive extra_body map for provider-specific request-body fields (OMN-12816, e.g. chat_template_kwargs.enable_thinking)."
 output_model:
   name: "ModelLlmInferenceResponse"
