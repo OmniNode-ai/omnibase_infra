@@ -205,6 +205,7 @@ def _pin_host(monkeypatch: pytest.MonkeyPatch) -> None:
         "probe_host_conditions",
         lambda: probe_host_conditions(
             loadavg_reader=lambda: (1.0, 1.0, 1.0),
+            io_pressure_reader=lambda: None,
             cpu_count_reader=lambda: 32,
             builder_cache_reader=lambda: EnumBuildCacheState.WARM,
         ),

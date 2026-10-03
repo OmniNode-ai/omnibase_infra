@@ -106,6 +106,13 @@
 #                           ->  ordinary subcommand: run, after ONE loud warning
 #   at or above floor       ->  silent, both
 #
+# An evidence invocation never reconciles or stamps the floor. If a peer holds
+# the host lock, it waits for that reconcile to prove the floor. Otherwise a
+# BELOW refusal names the workspace reconciler's --proven restore; UNKNOWN
+# names the host reconciler because there is no proven floor to restore.
+# Onboarding installs the proven set, and stamps a new floor only after its
+# delegation passes. It cannot promote attempted commits during that run.
+#
 # A venv AHEAD of the floor is fine and says nothing: dev-tip dogfooding means
 # the installed version legitimately leads the last stamped floor. An omnimarket
 # commit that merely DIFFERS is not "ahead" -- there is no ordering on commits --
@@ -127,9 +134,6 @@ set -uo pipefail
 
 readonly EXIT_REFUSED=2
 readonly EXIT_BELOW_FLOOR=3
-# reconcile-host.sh's "a live peer holds the lock" status (OMN-18608). It is not
-# a verdict: the peer is reconciling right now, so the wrapper waits for it.
-readonly RECONCILE_EXIT_DECLINED=4
 
 # Subcommands that mint durable artifacts -- receipts, attestations, gate
 # verdicts, ledger writes, dispatched work whose output is quoted as evidence.
@@ -447,47 +451,45 @@ _explain_blocking_surfaces() {
 }
 
 _enforce_floor() {
-  local result detail rc
+  local result detail
   result="$(_floor_verdict)"
   [[ "$result" == "OK" ]] && return 0
   detail="${result#*:}"
 
   if _is_evidence_invocation "$@"; then
-    # Self-heal once before refusing -- the same policy this wrapper already
-    # applies to a missing entrypoint, and the same single owner of repair.
-    # It runs ONLY on the evidence path: that is where a refusal would otherwise
-    # brick a fresh checkout (which has no floor until something reconciles it),
-    # and it is the only path where the cost is justified. An ordinary command
-    # below floor stays cheap and just warns.
-    #
-    # This is not a bypass. If the reconcile cannot prove the workspace, the
-    # verdict is still not OK and the refusal below still fires.
-    if [[ "${ONEX_WRAPPER_NO_RECONCILE:-0}" != "1" && -f "$HOST_RECONCILER" ]]; then
-      _say "below the proven floor ($detail) — reconciling once before refusing."
-      rc=0
-      bash "$HOST_RECONCILER" --omni-home "$OMNI_HOME" >&2 || rc=$?
-      if [[ "$rc" -eq "$RECONCILE_EXIT_DECLINED" ]]; then
-        _await_peer_reconcile && return 0
-      fi
+    # A peer tick may finish proving the floor; this invocation never repairs
+    # or restamps the build it is about to judge.
+    if [[ -d "$RECONCILE_LOCK_DIR" ]]; then
+      _await_peer_reconcile && return 0
       result="$(_floor_verdict)"
       [[ "$result" == "OK" ]] && return 0
       detail="${result#*:}"
     fi
     _say "REFUSED: this workspace is below the proven floor, and this command mints evidence."
     _say "  reason   : $detail"
-    _explain_blocking_surfaces
     _say "  floor    : $FLOOR_FILE"
     _say "  command  : onex $*"
     _say "  Running it would produce a receipt from a build nobody chose (OMN-16932)."
-    _say "  Clear the blocking surface above, or reconcile, then retry:"
-    _say "    bash $HOST_RECONCILER --omni-home $OMNI_HOME"
+    if [[ "$result" == BELOW:* ]]; then
+      _say "  Restore the proven set, then retry:"
+      _say "    bash $RECONCILER --omni-home $OMNI_HOME --proven"
+    else
+      _explain_blocking_surfaces
+      _say "  Reconcile to establish a proven floor, then retry:"
+      _say "    bash $HOST_RECONCILER --omni-home $OMNI_HOME"
+    fi
     exit "$EXIT_BELOW_FLOOR"
   fi
 
   _say "WARNING: this workspace is below the proven floor."
   _say "  reason   : $detail"
-  _say "  Proceeding because this command does not mint evidence. Reconcile with:"
-  _say "    bash $HOST_RECONCILER --omni-home $OMNI_HOME"
+  if [[ "$result" == BELOW:* ]]; then
+    _say "  Proceeding because this command does not mint evidence. Restore the proven set with:"
+    _say "    bash $RECONCILER --omni-home $OMNI_HOME --proven"
+  else
+    _say "  Proceeding because this command does not mint evidence. Reconcile with:"
+    _say "    bash $HOST_RECONCILER --omni-home $OMNI_HOME"
+  fi
 }
 
 # --------------------------------------------------------------------------- #

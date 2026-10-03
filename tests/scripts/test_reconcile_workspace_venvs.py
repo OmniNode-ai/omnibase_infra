@@ -38,6 +38,7 @@ That is OMN-16366 (reversed drift), and it is asserted here directly.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -431,6 +432,148 @@ class _Workspace:
 @pytest.fixture
 def ws(tmp_path: Path) -> _Workspace:
     return _Workspace(tmp_path / "omni_home")
+
+
+def test_proven_restores_the_floor_commit_and_installs_it(ws: _Workspace) -> None:
+    proven = ws.market_head
+    _advance(ws.omnimarket, "newer")
+    ws.set_installed_commit("0" * _SHA_LEN)
+    floor = ws.root / ".onex-workspace-floor.json"
+    previous = json.dumps({"omnimarket_commit": proven}, indent=2).encode() + b"\n"
+    floor.write_bytes(previous)
+    pins = ws.infra / ".github" / "sibling-pins.yaml"
+    pins.parent.mkdir()
+    pins.write_text(
+        f"pins:\n  omnimarket: {_git('rev-parse', 'HEAD', cwd=ws.omnimarket)}\n",
+        encoding="utf-8",
+    )
+
+    proc = ws.run("--proven")
+
+    assert proc.returncode == _EXIT_OK, proc.stdout + proc.stderr
+    assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == proven
+    assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=ws.omnimarket) == "HEAD"
+    assert ws.install_refs() == [proven]
+    assert floor.read_bytes() == previous
+
+
+@pytest.mark.parametrize("floor_commit", [None, ""])
+def test_proven_uses_the_ci_pin_without_a_floor_commit(
+    ws: _Workspace, floor_commit: str | None
+) -> None:
+    proven = ws.market_head
+    _advance(ws.omnimarket, "newer")
+    ws.set_installed_commit("0" * _SHA_LEN)
+    floor = ws.root / ".onex-workspace-floor.json"
+    if floor_commit is not None:
+        floor.write_text(
+            json.dumps({"omnimarket_commit": floor_commit}), encoding="utf-8"
+        )
+    pins = ws.infra / ".github" / "sibling-pins.yaml"
+    pins.parent.mkdir()
+    pins.write_text(f"pins:\n  omnimarket: {proven}\n", encoding="utf-8")
+    previous = floor.read_bytes() if floor.exists() else None
+
+    proc = ws.run("--proven")
+
+    assert proc.returncode == _EXIT_OK, proc.stdout + proc.stderr
+    assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == proven
+    assert ws.install_refs() == [proven]
+    assert (floor.read_bytes() if floor.exists() else None) == previous
+
+
+def test_proven_refuses_to_move_a_dirty_clone(ws: _Workspace) -> None:
+    newer = _advance(ws.omnimarket, "newer")
+    (ws.omnimarket / "f.txt").write_text("uncommitted", encoding="utf-8")
+    floor = ws.root / ".onex-workspace-floor.json"
+    floor.write_text(
+        json.dumps({"omnimarket_commit": ws.market_head}), encoding="utf-8"
+    )
+    previous = floor.read_bytes()
+
+    proc = ws.run("--proven")
+
+    assert proc.returncode == _EXIT_FAILED, proc.stdout + proc.stderr
+    assert "dirty" in proc.stdout.lower()
+    assert str(ws.omnimarket) in proc.stdout
+    assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == newer
+    assert floor.read_bytes() == previous
+    assert not ws.install_refs()
+
+
+@pytest.mark.parametrize("args", [("--proven", "--check"), ("--check", "--proven")])
+def test_proven_with_check_is_a_usage_error(
+    ws: _Workspace, args: tuple[str, str]
+) -> None:
+    proc = ws.run(*args)
+
+    assert proc.returncode == _EXIT_INDETERMINATE
+    assert "--proven cannot be used with --check" in proc.stderr
+    assert not ws.uv_calls()
+
+
+def test_proven_requires_a_readable_floor_commit_or_ci_pin(ws: _Workspace) -> None:
+    proc = ws.run("--proven")
+
+    assert proc.returncode == _EXIT_INDETERMINATE
+    assert "no proven omnimarket commit" in proc.stdout
+    assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == ws.market_head
+    assert not ws.install_refs()
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_proven_fetches_a_missing_commit_and_refuses_if_still_absent(
+    ws: _Workspace, available: bool
+) -> None:
+    origin = _make_clone(ws.root, "market_origin")
+    remote_commit = _advance(origin, "only-at-origin")
+    proven = remote_commit if available else "f" * _SHA_LEN
+    _git("remote", "add", "origin", str(origin), cwd=ws.omnimarket)
+    floor = ws.root / ".onex-workspace-floor.json"
+    floor.write_text(json.dumps({"omnimarket_commit": proven}), encoding="utf-8")
+    previous = floor.read_bytes()
+
+    proc = ws.run("--proven")
+
+    assert (ws.omnimarket / ".git" / "FETCH_HEAD").exists()
+    assert floor.read_bytes() == previous
+    if available:
+        assert proc.returncode == _EXIT_OK, proc.stdout + proc.stderr
+        assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == proven
+        assert ws.install_refs() == [proven]
+    else:
+        assert proc.returncode == _EXIT_FAILED, proc.stdout + proc.stderr
+        assert "absent" in proc.stdout
+        assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == ws.market_head
+        assert not ws.install_refs()
+
+
+def test_proven_at_head_leaves_a_dirty_clone_and_branch_unchanged(
+    ws: _Workspace,
+) -> None:
+    (ws.omnimarket / "f.txt").write_text("uncommitted", encoding="utf-8")
+    floor = ws.root / ".onex-workspace-floor.json"
+    floor.write_text(
+        json.dumps({"omnimarket_commit": ws.market_head}), encoding="utf-8"
+    )
+    previous = floor.read_bytes()
+
+    proc = ws.run("--proven")
+
+    assert proc.returncode == _EXIT_OK, proc.stdout + proc.stderr
+    assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=ws.omnimarket) == "dev"
+    assert (ws.omnimarket / "f.txt").read_text(encoding="utf-8") == "uncommitted"
+    assert floor.read_bytes() == previous
+    assert not ws.install_refs()
+    assert not (ws.omnimarket / ".git" / "FETCH_HEAD").exists()
+
+
+def test_help_documents_proven_restoration(ws: _Workspace) -> None:
+    proc = ws.run("--help")
+
+    assert proc.returncode == _EXIT_OK
+    assert "--proven      Restore omnimarket to the proven commit" in proc.stdout
+    assert "Never stamp the floor. Invalid with --check." in proc.stdout
 
 
 # --------------------------------------------------------------------------- #

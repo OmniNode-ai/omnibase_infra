@@ -196,7 +196,52 @@ def test_below_floor_warns_but_runs_an_ordinary_subcommand(ws: _Workspace) -> No
 
     assert proc.returncode == _SENTINEL_OK
     assert proc.stderr.count("WARNING: this workspace is below the proven floor.") == 1
+    assert (
+        f"bash {ws.scripts}/reconcile-workspace-venvs.sh --omni-home {ws.root} --proven"
+        in proc.stderr
+    )
+    assert "reconcile-host.sh" not in proc.stderr
     assert ws.argv_log.read_text(encoding="utf-8").strip() == "info"
+
+
+@pytest.mark.parametrize("has_floor", [True, False])
+def test_delegate_never_runs_a_host_reconciler_that_would_stamp_the_floor(
+    ws: _Workspace, has_floor: bool
+) -> None:
+    ws.install_dist("omnibase_compat", "0.5.5")
+    if has_floor:
+        ws.write_floor({"omnibase_compat": "0.5.6"})
+    previous = ws.floor.read_bytes() if has_floor else None
+    good_floor = ws.root / "good-floor.json"
+    good_floor.write_text(
+        json.dumps({"distributions": {"omnibase_compat": "0.5.5"}}, indent=2),
+        encoding="utf-8",
+    )
+    marker = ws.root / "host-reconciler-ran"
+    (ws.scripts / "reconcile-host.sh").write_text(
+        f'#!/usr/bin/env bash\ntouch "{marker}"\ncp "{good_floor}" "{ws.floor}"\n',
+        encoding="utf-8",
+    )
+
+    proc = ws.run("delegate", "x")
+
+    assert proc.returncode == _EXIT_BELOW_FLOOR, proc.stderr
+    assert not marker.exists()
+    assert not ws.argv_log.exists()
+    if has_floor:
+        assert ws.floor.read_bytes() == previous
+        assert (
+            f"bash {ws.scripts}/reconcile-workspace-venvs.sh --omni-home {ws.root} --proven"
+            in proc.stderr
+        )
+        assert "reconcile-host.sh" not in proc.stderr
+        assert "blocking :" not in proc.stderr
+    else:
+        assert not ws.floor.exists()
+        assert (
+            f"bash {ws.scripts}/reconcile-host.sh --omni-home {ws.root}" in proc.stderr
+        )
+        assert "reconcile-workspace-venvs.sh" not in proc.stderr
 
 
 def test_missing_distribution_reads_as_below_floor(ws: _Workspace) -> None:

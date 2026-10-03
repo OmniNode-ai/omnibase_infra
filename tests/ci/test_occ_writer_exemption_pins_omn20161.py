@@ -70,8 +70,13 @@ def test_occ_preflight_callers_are_all_present() -> None:
     assert files == {"ci.yml", "hostile-reviewer.yml"}
 
 
-@pytest.mark.parametrize(("name", "gate", "ref"), _callers())
-def test_caller_pin_is_the_writer_exemption_sha(name: str, gate: str, ref: str) -> None:
+@pytest.mark.parametrize(
+    ("name", "gate", "ref"),
+    [c for c in _callers() if c[1] == "occ-preflight"],
+)
+def test_occ_preflight_pin_is_the_writer_exemption_sha(
+    name: str, gate: str, ref: str
+) -> None:
     assert ref == EXPECTED_PIN, (
         f"{name} pins {gate}.yml at {ref}; advance it to {EXPECTED_PIN} so the OCC "
         "writer app exemption (omnibase_core#1820) applies. occ-preflight callers "
@@ -79,8 +84,19 @@ def test_caller_pin_is_the_writer_exemption_sha(name: str, gate: str, ref: str) 
     )
 
 
-@pytest.mark.parametrize("gate", GATES)
-def test_pinned_workflow_carries_writer_app_exemption(gate: str) -> None:
-    text = _fetch_core_file(EXPECTED_PIN, f".github/workflows/{gate}.yml")
+@pytest.mark.parametrize(
+    ("name", "ref"),
+    [(n, r) for n, g, r in _callers() if g == "receipt-gate"],
+)
+def test_receipt_gate_pin_carries_writer_app_exemption(name: str, ref: str) -> None:
+    """The receipt-gate caller advances past #1820 (OMN-20375), so read its own pin."""
+    assert re.fullmatch(r"[0-9a-f]{40}", ref), f"{name} pins receipt-gate.yml at {ref}"
+    text = _fetch_core_file(ref, ".github/workflows/receipt-gate.yml")
+    assert WRITER_APP in text
+    assert PIN_PROBE_FLAG in text
+
+
+def test_occ_preflight_pinned_workflow_carries_writer_app_exemption() -> None:
+    text = _fetch_core_file(EXPECTED_PIN, ".github/workflows/occ-preflight.yml")
     assert WRITER_APP in text
     assert PIN_PROBE_FLAG in text

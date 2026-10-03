@@ -11,11 +11,12 @@ and the floor kept the old commit, so ``scripts/onex`` refused every
 These tests pin both halves of the fix end to end, through the real
 ``reconcile-host.sh`` and the real ``scripts/onex``:
 
-* an unrelated dirty clone fails the verdict and alerts, but no longer holds the
-  floor, so delegation proceeds;
+* an unrelated dirty clone fails the verdict and alerts, but does not prevent
+  an explicit host reconcile from stamping the dispatch floor;
+* a delegate attempt below the floor refuses without invoking that reconcile;
 * a failure on a surface the dispatch build is made from (the omnimarket clone,
   the dispatch venv) still withholds the floor, and the wrapper still refuses,
-  now naming the blocking surface and the command that clears it.
+  now naming the command that restores the proven set.
 
 Same hermetic fixture as ``test_reconcile_host_omn17307.py``: throwaway git
 repositories, a hand-built ``site-packages``, stubbed delegates.
@@ -168,28 +169,28 @@ def test_an_unrelated_dirty_clone_still_stamps_the_dispatch_floor(
     assert receipt["dispatch_premise_failures"] == 0
 
 
-def test_delegate_runs_through_the_wrapper_with_an_unrelated_dirty_clone(
+def test_delegate_refuses_without_restamping_with_an_unrelated_dirty_clone(
     ws: Workspace,
 ) -> None:
     """The incident replayed through the wrapper: stale floor, dirty core clone.
 
-    The wrapper finds the floor below the installed omnimarket, runs the real
-    reconciler once, which fails on omnibase_core but stamps the dispatch floor,
-    and the delegate proceeds.
+    The wrapper refuses the unproven build and leaves reconciliation to an
+    explicit operator command or a scheduled tick.
     """
     _dirty_core_clone(ws)
     _market_at_head(ws)
     _lock(ws)
     _no_op_delegates(ws)
-    _stale_floor(ws)
+    previous = _stale_floor(ws)
     _install_wrapper(ws)
 
     proc = _run_wrapper(ws, "delegate", "reply with ok")
 
-    assert proc.returncode == _SENTINEL_OK, proc.stderr
-    assert "REFUSED" not in proc.stderr
-    argv_log = ws.root / "argv.log"
-    assert argv_log.read_text(encoding="utf-8").strip() == "delegate reply with ok"
+    assert proc.returncode == _EXIT_BELOW_FLOOR, proc.stderr
+    assert "REFUSED" in proc.stderr
+    assert ws.floor.read_text(encoding="utf-8") == previous
+    assert not ws.delegate_witness.exists()
+    assert not (ws.root / "argv.log").exists()
 
 
 # --------------------------------------------------------------------------- #
@@ -265,17 +266,19 @@ def test_the_wrapper_still_refuses_a_real_venv_mismatch_and_names_it(
     _write_dist(ws.site_packages, "omnimarket", "0.4.11", commit="b" * 40)
     _lock(ws)
     _no_op_delegates(ws)
-    _stale_floor(ws)
+    previous = _stale_floor(ws)
     _install_wrapper(ws)
 
     proc = _run_wrapper(ws, "delegate", "x")
 
     assert proc.returncode == _EXIT_BELOW_FLOOR, proc.stderr
     assert "REFUSED" in proc.stderr
-    assert "blocking : venv:omnimarket DID_NOT_MOVE" in proc.stderr
-    assert "clears by: bash " in proc.stderr
-    assert "reconcile-workspace-venvs.sh" in proc.stderr
-    assert "not blocking delegation: clone:omnibase_core DID_NOT_MOVE" in proc.stderr
+    assert "omnimarket installed" in proc.stderr
+    assert f"reconcile-workspace-venvs.sh --omni-home {ws.root} --proven" in proc.stderr
+    assert "reconcile-host.sh" not in proc.stderr
+    assert "blocking :" not in proc.stderr
+    assert ws.floor.read_text(encoding="utf-8") == previous
+    assert not ws.delegate_witness.exists()
     assert not (ws.root / "argv.log").exists(), "the CLI must not have run"
 
 

@@ -90,9 +90,6 @@ from omnibase_core.protocols.runtime.protocol_local_runtime_bus import (
     ProtocolLocalRuntimeBus,
     UnsubscribeCallback,
 )
-from omnibase_core.protocols.runtime.protocol_local_runtime_message import (
-    ProtocolLocalRuntimeMessage,
-)
 from omnibase_core.runtime.runtime_local import RuntimeLocal
 from omnibase_infra.cli.model_delegate_locus_decision import (
     ModelDelegateLocusDecision,
@@ -881,13 +878,18 @@ class DelegatePhaseStopwatch:
 
 
 class DelegatePhaseTimedBus:
-    """Time runtime bus operations while preserving their results."""
+    """Time the client's bus calls, forwarding their arguments unchanged."""
 
     def __init__(
         self, inner: ProtocolLocalRuntimeBus, stopwatch: DelegatePhaseStopwatch
     ) -> None:
         self._inner = inner
         self._stopwatch = stopwatch
+
+    @property
+    def inner(self) -> ProtocolLocalRuntimeBus:
+        """The runtime's own bus, which in-process handlers receive (OMN-20381)."""
+        return self._inner
 
     async def start(self) -> None:
         """Record connection time, including a failed connection attempt."""
@@ -900,25 +902,30 @@ class DelegatePhaseTimedBus:
             self._stopwatch.end(EnumDelegatePhase.TERMINAL_WAIT)
         await self._inner.close()
 
-    async def publish(self, topic: str, key: object, value: bytes) -> object:
-        """Time publication and begin terminal waiting only after success."""
+    async def publish(self, topic: str, *args: object, **kwargs: object) -> object:
+        """Skip inline handler timing and avoid restarting terminal wait (OMN-20381)."""
+        publish = cast("Callable[..., Awaitable[object]]", self._inner.publish)
+        if self._stopwatch.is_running(EnumDelegatePhase.PUBLISH):
+            return await publish(topic, *args, **kwargs)
         with self._stopwatch.phase(EnumDelegatePhase.PUBLISH):
-            result = await self._inner.publish(topic, key, value)
-        self._stopwatch.begin(EnumDelegatePhase.TERMINAL_WAIT)
+            result = await publish(topic, *args, **kwargs)
+        if not self._stopwatch.is_running(EnumDelegatePhase.TERMINAL_WAIT):
+            self._stopwatch.begin(EnumDelegatePhase.TERMINAL_WAIT)
         return result
 
     async def subscribe(
-        self,
-        topic: str,
-        *,
-        on_message: Callable[[ProtocolLocalRuntimeMessage], Awaitable[None]],
-        group_id: str,
+        self, topic: str, *args: object, **kwargs: object
     ) -> UnsubscribeCallback:
-        """Accumulate subscription time and return the inner callback unchanged."""
+        """Preserve handler subscription arguments without nested timing (OMN-20381)."""
+        subscribe = cast(
+            "Callable[..., Awaitable[UnsubscribeCallback]]", self._inner.subscribe
+        )
+        if self._stopwatch.is_running(
+            EnumDelegatePhase.PUBLISH
+        ) or self._stopwatch.is_running(EnumDelegatePhase.REPLY_SUBSCRIBE):
+            return await subscribe(topic, *args, **kwargs)
         with self._stopwatch.phase(EnumDelegatePhase.REPLY_SUBSCRIBE):
-            return await self._inner.subscribe(
-                topic, on_message=on_message, group_id=group_id
-            )
+            return await subscribe(topic, *args, **kwargs)
 
 
 class DelegatePhaseTimedRuntime(RuntimeLocal):
@@ -936,6 +943,23 @@ class DelegatePhaseTimedRuntime(RuntimeLocal):
     def _create_event_bus(self) -> ProtocolLocalRuntimeBus:
         """Observe the runtime's chosen bus through the shared stopwatch."""
         return DelegatePhaseTimedBus(super()._create_event_bus(), self._phase_stopwatch)
+
+    def _instantiate_handler(
+        self,
+        module_name: str,
+        class_name: str,
+        *,
+        bus: ProtocolLocalRuntimeBus | None = None,
+    ) -> object:
+        """Inject the untimed bus: handlers pick their dispatch port by its type.
+
+        omnimarket's delegate skill takes its in-process port only for an
+        ``EventBusInmemory``; handed the timing wrapper it took the deployed-lane
+        port and failed (OMN-20381).
+        """
+        if isinstance(bus, DelegatePhaseTimedBus):
+            bus = bus.inner
+        return super()._instantiate_handler(module_name, class_name, bus=bus)
 
 
 def _runtime_factory(
