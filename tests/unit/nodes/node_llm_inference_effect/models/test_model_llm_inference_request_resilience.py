@@ -7,13 +7,8 @@ Targets ``omnibase_infra.nodes.node_llm_inference_effect.models
 model actually consumed by ``HandlerLlmOpenaiCompatible`` (the HTTP
 OpenAI-compatible path used by e.g. the hostile-reviewer local models).
 
-Note: a differently-implemented, same-named ``ModelLlmInferenceRequest``
-also exists at ``omnibase_infra.models.llm.model_llm_inference_request``
-(consumed by the CLI-subprocess handler path) and already has its own
-``timeout_seconds``/``max_retries`` bounds tests under this same test
-directory (``test_model_llm_inference_request.py``) -- that file imports
-the OTHER model despite living in this directory; do not confuse the two
-when extending either.
+This is the only ``ModelLlmInferenceRequest``: the same-named shared copy at
+``omnibase_infra.models.llm`` was deleted under OMN-17104.
 
 Reference: OMN-15115 -- qwen3-review-b's timeout was pinned at this model's
 previous ``le=600.0`` ceiling (the max the schema allowed), which made a

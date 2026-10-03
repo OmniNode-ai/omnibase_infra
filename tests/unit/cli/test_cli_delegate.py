@@ -80,6 +80,7 @@ from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
 from omnibase_infra.runtime_identity import collect_runtime_identity
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 from tests.helpers.cli_registry_stand_in import (
+    STAND_IN_INSTALL_TENANT,
     install_stand_in_registry,
     wiring_authority,
 )
@@ -364,6 +365,7 @@ class TestPayloadScratch:
             "source": DELEGATE_SOURCE,
             "max_tokens": 4096,
             "requested_timeout_seconds": 60,
+            "tenant_id": STAND_IN_INSTALL_TENANT,
         }
 
     def test_explicit_task_type_overrides_classification(
@@ -1044,7 +1046,7 @@ class TestHardTimeoutBackstop:
         def _swallowing_run_receipt_mode(**_kwargs: object) -> int:
             exit_code = 1  # pre-initialized, exactly like receipt_mode.py:505
             try:
-                time.sleep(10)  # stands in for the hanging runtime.run() call
+                time.sleep(30)  # stands in for the hanging runtime.run() call
                 exit_code = 0  # pragma: no cover - never reached within the bound
             except Exception:
                 # Mirrors receipt_mode.py's real shape exactly (including the
@@ -1082,7 +1084,10 @@ class TestHardTimeoutBackstop:
         captured = capsys.readouterr()
 
         assert exit_code == 1
-        assert elapsed < 5, f"hung call was not aborted within bound: {elapsed}s"
+        # OMN-17427: the timeout path now files its receipts with fsync, so the
+        # bound leaves room for disk latency under -n auto; the 30 s hang is
+        # still cut short by a wide margin.
+        assert elapsed < 10, f"hung call was not aborted within bound: {elapsed}s"
         # The clear-error contract must fire from run_delegate's own
         # DelegateTimeoutExceededError handler — not an accidental exit code
         # falling out of the stub's own pre-initialized `exit_code = 1` after
@@ -1817,6 +1822,8 @@ class TestLocalRunArtifacts:
             # OMN-18305: a customer can see that a class was chosen for them,
             # and how, without re-reading the prompt.
             "task_type_resolution": "explicit",
+            # OMN-19232: the absolute root the run dir sits under.
+            "state_root": str(tmp_path.resolve()),
         }
 
     def test_attributes_no_route_without_an_accepted_attempt(
@@ -2436,7 +2443,14 @@ class TestUnresolvableTerminalFailsLoudly:
         message = str(raised.value)
         assert "terminal_payload: absent" in message
         assert "handler_result: absent" in message
-        assert not (tmp_path / "runs").exists()
+        # OMN-17427: the refusal still raises, and the run is no longer left
+        # without a receipt -- the receipt carries the same cause.
+        written = json.loads(
+            (tmp_path / "runs" / str(receipt.run_id) / "receipt.json").read_text()
+        )
+        assert written["terminal_class"] == "failed"
+        assert written["terminal_recorded"] is False
+        assert "terminal_payload: absent" in written["failure_reason"]
 
     def test_terminal_of_an_unrecognised_shape_names_the_absent_field(
         self, tmp_path: Path

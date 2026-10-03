@@ -40,19 +40,26 @@ from omnibase_infra.backends.backend_probe import (
     ConsumerGroupDescribeDeniedError,
     ConsumerGroupLivenessUnknownError,
     ConsumerGroupSaslRefusedError,
+    live_chain_consumer_groups,
     live_consumer_groups,
 )
 from omnibase_infra.backends.model_consumer_group_owner import ModelConsumerGroupOwner
 from omnibase_infra.cli.model_delegate_locus_decision import ModelDelegateLocusDecision
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
+from omnibase_infra.models.delegation.model_delegate_downstream_chain import (
+    ModelDelegateDownstreamChain,
+)
 
 __all__ = [
+    "DOWNSTREAM_CHAIN_STAGE",
+    "DelegateDownstreamChainRefusedError",
     "REBIND_WINDOW_FAILURE_CLASS",
     "DelegateLocusAclRefusedError",
     "DelegateLocusRefusedError",
     "DelegateLocusSaslRefusedError",
     "contract_command_topic",
     "contract_consumer_owner",
+    "contract_downstream_chain",
     "contract_terminal_topic",
     "orchestrator_distribution",
     "resolve_delegate_locus",
@@ -77,6 +84,10 @@ _LIVENESS_TIMEOUT_SECONDS = 5.0
 # lane that is rebinding. The class name is in the refusal text and the wait
 # log so a search for either lands on the runbook entry.
 REBIND_WINDOW_FAILURE_CLASS = "delegate-consumer-rebind-window"
+
+# OMN-20209. The stage a refusal names when the first hop is live and the
+# chain it hands the request to is not; see ``contract_downstream_chain``.
+DOWNSTREAM_CHAIN_STAGE = "downstream-delegation-chain"
 
 # How long a dispatched run waits for a consumer group to bind before it
 # refuses. Measured on the .201 dev lane after omnibase_infra#3939 removed the
@@ -108,6 +119,15 @@ class DelegateLocusRefusedError(RuntimeError):
     """
 
 
+class DelegateDownstreamChainRefusedError(DelegateLocusRefusedError):
+    """The first hop is live but the chain it hands the request to is not.
+
+    The deployed orchestrator would accept the command and then wait its whole
+    execution budget, reported to the caller as a hang. The class name is what
+    the transport refusal records as ``transport_error_type``.
+    """
+
+
 class DelegateLocusAclRefusedError(DelegateLocusRefusedError):
     """The refusal is a missing broker grant, not a missing lane (OMN-19914).
 
@@ -121,6 +141,15 @@ class DelegateLocusAclRefusedError(DelegateLocusRefusedError):
     def __init__(self, message: str, *, group_ids: tuple[str, ...]) -> None:
         super().__init__(message)
         self.group_ids = group_ids
+
+
+def _load_contract(text: str) -> object:
+    """Parse contract YAML: the one place this module reads a contract.
+
+    Every reader here parses installed package contracts, so they share one
+    loader rather than each carrying its own exemption.
+    """
+    return yaml.safe_load(text)  # yaml-safe-load-ok: contract is trusted package data
 
 
 class DelegateLocusSaslRefusedError(DelegateLocusRefusedError):
@@ -153,9 +182,7 @@ def contract_terminal_topic(contract_path: Path) -> str:
     says so in that field, which is itself a finding worth having.
     """
     try:
-        raw = yaml.safe_load(  # yaml-safe-load-ok: contract is trusted package data
-            contract_path.read_text(encoding="utf-8")
-        )
+        raw = _load_contract(contract_path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError):
         return ""
     if not isinstance(raw, dict):
@@ -181,9 +208,7 @@ def contract_command_topic(contract_path: Path) -> str:
         DelegateLocusRefusedError: the contract declares no command topic.
     """
     try:
-        raw = yaml.safe_load(  # yaml-safe-load-ok: contract is trusted package data
-            contract_path.read_text(encoding="utf-8")
-        )
+        raw = _load_contract(contract_path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as exc:
         raise DelegateLocusRefusedError(
             f"cannot read the delegate contract at {contract_path}: {exc}"
@@ -208,9 +233,7 @@ def contract_consumer_owner(contract_path: Path) -> ModelConsumerGroupOwner:
         DelegateLocusRefusedError: the contract is unreadable or has no node name.
     """
     try:
-        raw = yaml.safe_load(  # yaml-safe-load-ok: contract is trusted package data
-            contract_path.read_text(encoding="utf-8")
-        )
+        raw = _load_contract(contract_path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError, UnicodeError) as exc:
         raise DelegateLocusRefusedError(
             f"cannot read the delegate contract at {contract_path}: {exc}"
@@ -222,6 +245,114 @@ def contract_consumer_owner(contract_path: Path) -> ModelConsumerGroupOwner:
             "so its consumer group owner cannot be checked"
         )
     return ModelConsumerGroupOwner(service=_ORCHESTRATOR_DISTRIBUTION, node=name)
+
+
+def contract_downstream_chain(
+    contract_path: Path,
+) -> ModelDelegateDownstreamChain | None:
+    """Resolve the chain the deployed orchestrator hands work to (OMN-20209).
+
+    The delegate-skill orchestrator is the first hop only: it republishes every
+    command to the topic its contract declares under
+    ``delegation_runtime_dispatch.topics.command`` and waits its whole
+    execution budget for that chain's terminal. Measured on the .201 dev lane
+    on 2026-10-02 between 06:52Z and 08:08Z: the first hop was ``Stable`` and
+    picked every command up within 168 ms, the runtime hosting the downstream
+    consumer was crash-looping, and each run came back ``status=timeout``
+    with ``attempts=[]`` after 300 s, by which time every caller had killed
+    the CLI. A probe of the first hop alone admitted all of them.
+
+    The consumer is found among the sibling node contracts, never by name: the
+    one contract that subscribes to the downstream command topic and publishes
+    its completion topic. Its live group id cannot be derived from that name
+    (a runtime plugin names it), so the probe identifies it by the contract's
+    whole subscription footprint instead.
+
+    Returns:
+        The chain, or ``None`` when the contract declares no downstream
+        dispatch, in which case only the first hop can be proven.
+
+    Raises:
+        DelegateLocusRefusedError: the declaration is malformed, or zero or
+            several installed contracts match it.
+    """
+    try:
+        raw = _load_contract(contract_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError, UnicodeError) as exc:
+        raise DelegateLocusRefusedError(
+            f"cannot read the delegate contract at {contract_path}: {exc}"
+        ) from exc
+    if not isinstance(raw, dict) or "delegation_runtime_dispatch" not in raw:
+        return None
+    dispatch = raw["delegation_runtime_dispatch"]
+    topics = dispatch.get("topics") if isinstance(dispatch, dict) else None
+    resolved_topics: dict[str, str] = {}
+    for field in ("command", "completed"):
+        value = topics.get(field) if isinstance(topics, dict) else None
+        if not isinstance(value, str) or not value:
+            raise DelegateLocusRefusedError(
+                f"the delegate contract at {contract_path} declares no non-empty "
+                f"string delegation_runtime_dispatch.topics.{field}"
+            )
+        resolved_topics[field] = value
+    command = resolved_topics["command"]
+    completed = resolved_topics["completed"]
+    matches: list[ModelDelegateDownstreamChain] = []
+    for path in sorted(contract_path.parent.parent.glob("*/contract.yaml")):
+        if path == contract_path:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+            if command not in text:
+                continue
+            sibling = _load_contract(text)
+        except (OSError, yaml.YAMLError, UnicodeError):
+            continue
+        if not isinstance(sibling, dict):
+            continue
+        event_bus = sibling.get("event_bus")
+        if not isinstance(event_bus, dict):
+            continue
+        subscribed = event_bus.get("subscribe_topics")
+        published = event_bus.get("publish_topics")
+        if (
+            not isinstance(subscribed, list)
+            or command not in subscribed
+            or not isinstance(published, list)
+            or completed not in published
+        ):
+            continue
+        name = sibling.get("name")
+        if not isinstance(name, str) or not name:
+            raise DelegateLocusRefusedError(
+                f"the downstream consumer contract at {path} declares no string name"
+            )
+        if any(not isinstance(topic, str) or not topic for topic in subscribed):
+            raise DelegateLocusRefusedError(
+                f"the downstream consumer contract {name} at {path} declares "
+                "invalid event_bus.subscribe_topics"
+            )
+        matches.append(
+            ModelDelegateDownstreamChain(
+                command_topic=command,
+                completed_topic=completed,
+                consumer_contract=name,
+                consumer_contract_path=str(path),
+                subscribe_topics=tuple(subscribed),
+            )
+        )
+    if len(matches) != 1:
+        names = (
+            ": " + ", ".join(match.consumer_contract for match in matches)
+            if len(matches) > 1
+            else ""
+        )
+        raise DelegateLocusRefusedError(
+            f"downstream command topic '{command}' has {len(matches)} matching "
+            f"consumer contracts{names}; a dispatched run would wait on a chain "
+            "no single installed contract declares"
+        )
+    return matches[0]
 
 
 def orchestrator_distribution() -> str:
@@ -342,6 +473,13 @@ def resolve_delegate_locus(
 
     command_topic = contract_command_topic(contract_path)
     owner = contract_consumer_owner(contract_path)
+    downstream = contract_downstream_chain(contract_path)
+    if downstream is None:
+        logger.info(
+            "onex delegate: contract %s declares no downstream delegation chain; "
+            "only the first hop is proven",
+            contract_path,
+        )
     if kafka_bootstrap is None:
         # OMN-16871. This used to mean "let the client read
         # KAFKA_BOOTSTRAP_SERVERS", so the probe asked whichever lane the
@@ -356,23 +494,25 @@ def resolve_delegate_locus(
             "--lane <lane id> so the probe and the publish name the same "
             "broker (OMN-16871)."
         )
-    groups, bind_wait_seconds = _assert_dispatch_viable(
+    groups, downstream_groups, bind_wait_seconds = _assert_dispatch_viable(
         command_topic=command_topic,
         kafka_bootstrap=kafka_bootstrap,
         owner=owner,
+        downstream=downstream,
     )
     broker = kafka_bootstrap
     logger.info(
         "onex delegate: execution locus DEPLOYED-LANE (%s) — publishing to "
         "'%s' on %s; %d live consumer group(s) bound: %s. The accept/climb "
         "decision is made THERE, not by %s, which supplies only the wire "
-        "description",
+        "description; downstream consumer groups: %s",
         resolved_from,
         command_topic,
         broker,
         len(groups),
         ", ".join(groups),
         distribution,
+        ", ".join(downstream_groups),
     )
     return ModelDelegateLocusDecision(
         locus=locus,
@@ -382,16 +522,22 @@ def resolve_delegate_locus(
         command_topic=command_topic,
         broker=broker,
         lane_consumer_groups=groups,
+        downstream_command_topic=downstream.command_topic if downstream else "",
+        downstream_consumer_groups=downstream_groups,
         consumer_bind_wait_seconds=bind_wait_seconds,
     )
 
 
 def _assert_dispatch_viable(
-    *, command_topic: str, kafka_bootstrap: str, owner: ModelConsumerGroupOwner
-) -> tuple[tuple[str, ...], float]:
-    """Refuse unless the contract's node is consuming the command topic.
+    *,
+    command_topic: str,
+    kafka_bootstrap: str,
+    owner: ModelConsumerGroupOwner,
+    downstream: ModelDelegateDownstreamChain | None = None,
+) -> tuple[tuple[str, ...], tuple[str, ...], float]:
+    """Refuse unless the first hop and any declared downstream chain are live.
 
-    Returns the live groups and the seconds spent waiting for them to bind.
+    Returns first-hop groups, downstream groups, and seconds spent waiting.
 
     Three outcomes, two of which refuse:
 
@@ -416,6 +562,7 @@ def _assert_dispatch_viable(
         command_topic: Exact topic this dispatch publishes to.
         kafka_bootstrap: Broker address resolved for this run.
         owner: Contract service and node whose live groups are required.
+        downstream: Optional declared chain sharing the same rebind wait bound.
     """
     started = _monotonic()
     probes = 0
@@ -454,9 +601,45 @@ def _assert_dispatch_viable(
                 "address, or pass --bus inmemory --locus in-process to run it locally on "
                 "purpose."
             ) from exc
+        downstream_groups: tuple[str, ...] = ()
+        if groups and downstream is not None:
+            try:
+                downstream_groups = live_chain_consumer_groups(
+                    command_topic=downstream.command_topic,
+                    subscribe_topics=downstream.subscribe_topics,
+                    bootstrap_servers=kafka_bootstrap,
+                    timeout=_LIVENESS_TIMEOUT_SECONDS,
+                )
+            except ConsumerGroupDescribeDeniedError as exc:
+                raise DelegateLocusAclRefusedError(
+                    f"cannot confirm {DOWNSTREAM_CHAIN_STAGE} is consuming "
+                    f"'{downstream.command_topic}': {exc} Add the grant to the "
+                    "lane's declared broker ACLs and apply them, or pass "
+                    "--bus inmemory --locus in-process to run it here on purpose.",
+                    group_ids=exc.group_ids,
+                ) from exc
+            except ConsumerGroupLivenessUnknownError as exc:
+                raise DelegateDownstreamChainRefusedError(
+                    f"cannot confirm {DOWNSTREAM_CHAIN_STAGE} is consuming "
+                    f"'{downstream.command_topic}' for {downstream.consumer_contract} "
+                    f"({exc}). The first-hop groups were live: {', '.join(groups)}. "
+                    "Fix the broker probe, or pass --bus inmemory --locus "
+                    "in-process to run it here on purpose."
+                ) from exc
         waited = _monotonic() - started
-        if groups:
-            if probes > 1:
+        if groups and (downstream is None or downstream_groups):
+            if probes > 1 and downstream is not None:
+                logger.warning(
+                    "onex delegate: %s consumer %s bound to '%s' after %.1f s "
+                    "and %d probes (%s): the lane was rebinding, not down",
+                    DOWNSTREAM_CHAIN_STAGE,
+                    downstream.consumer_contract,
+                    downstream.command_topic,
+                    waited,
+                    probes,
+                    REBIND_WINDOW_FAILURE_CLASS,
+                )
+            elif probes > 1:
                 logger.warning(
                     "onex delegate: a consumer group bound to '%s' after "
                     "%.1f s and %d probes (%s, OMN-18843): the lane was "
@@ -466,8 +649,22 @@ def _assert_dispatch_viable(
                     probes,
                     REBIND_WINDOW_FAILURE_CLASS,
                 )
-            return groups, waited
+            return groups, downstream_groups, waited
         if waited + _REBIND_POLL_SECONDS > _REBIND_WAIT_SECONDS:
+            if groups and downstream is not None:
+                raise DelegateDownstreamChainRefusedError(
+                    f"no live consumer group is bound at {DOWNSTREAM_CHAIN_STAGE} "
+                    f"to '{downstream.command_topic}' for "
+                    f"{downstream.consumer_contract}. The first-hop groups WERE "
+                    f"live: {', '.join(groups)}. Waited {waited:.1f} s over "
+                    f"{probes} probes, the bound for the "
+                    f"{REBIND_WINDOW_FAILURE_CLASS} class "
+                    f"({_REBIND_WAIT_SECONDS:.0f} s). The deployed orchestrator "
+                    "would accept the command and then wait its whole execution "
+                    "budget, reported to the caller as a hang. Start the runtime "
+                    "that hosts that consumer, or pass --bus inmemory --locus "
+                    "in-process to run it here on purpose."
+                )
             raise DelegateLocusRefusedError(
                 f"no live consumer group is bound to '{command_topic}' for "
                 f"{owner.service}.{owner.node} — there "
@@ -480,13 +677,26 @@ def _assert_dispatch_viable(
                 "that consumes this topic, or pass --bus inmemory --locus in-process to run "
                 "it here on purpose."
             )
-        logger.warning(
-            "onex delegate: no consumer group is bound to '%s' yet (%s, "
-            "OMN-18843): waited %.1f of %.0f s, re-probing in %.0f s",
-            command_topic,
-            REBIND_WINDOW_FAILURE_CLASS,
-            waited,
-            _REBIND_WAIT_SECONDS,
-            _REBIND_POLL_SECONDS,
-        )
+        if groups and downstream is not None:
+            logger.warning(
+                "onex delegate: %s has no consumer group bound to '%s' for %s "
+                "yet (%s): waited %.1f of %.0f s, re-probing in %.0f s",
+                DOWNSTREAM_CHAIN_STAGE,
+                downstream.command_topic,
+                downstream.consumer_contract,
+                REBIND_WINDOW_FAILURE_CLASS,
+                waited,
+                _REBIND_WAIT_SECONDS,
+                _REBIND_POLL_SECONDS,
+            )
+        else:
+            logger.warning(
+                "onex delegate: no consumer group is bound to '%s' yet (%s, "
+                "OMN-18843): waited %.1f of %.0f s, re-probing in %.0f s",
+                command_topic,
+                REBIND_WINDOW_FAILURE_CLASS,
+                waited,
+                _REBIND_WAIT_SECONDS,
+                _REBIND_POLL_SECONDS,
+            )
         _sleep(_REBIND_POLL_SECONDS)

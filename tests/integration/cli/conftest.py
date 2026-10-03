@@ -15,9 +15,18 @@ from __future__ import annotations
 
 import pytest
 
-from tests.helpers.cli_registry_stand_in import use_stand_in_registry
+from tests.helpers.cli_registry_stand_in import (
+    use_initialised_install,
+    use_stand_in_registry,
+)
 
 
 @pytest.fixture(autouse=True)
 def stand_in_registry(monkeypatch: pytest.MonkeyPatch) -> None:
     use_stand_in_registry(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def _initialised_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give ``onex delegate`` an install that has minted its identity (OMN-17427)."""
+    use_initialised_install(monkeypatch)

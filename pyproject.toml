@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.38.63"
+version = "0.38.64"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{ name = "OmniNode.ai", email = "contact@omninode.ai" }]
 license = {text = "MIT"}
@@ -43,7 +43,12 @@ dependencies = [
     # `>=FLOOR,<NEXT_MINOR_OF_FLOOR` and admits the override's exact version.
     # A dependency cascade moves only the override on a patch release; a
     # change that starts to need a newer core raises FLOOR by hand.
-    "omnibase-core>=0.47.24,<0.48.0",
+    # OMN-20368: FLOOR raised 0.47.24 -> 0.47.31. The Done-write guard,
+    # `omnibase_infra.handlers.done_write_receipt_guard`, imports
+    # `omnibase_core.handlers.handler_done_write_receipt_gate` and
+    # `omnibase_core.models.ticket.model_done_write_decision`, first released in
+    # omnibase-core 0.47.31 (core#1852). A resolve below it fails at import.
+    "omnibase-core>=0.47.31,<0.48.0",
     "omnibase-spi==0.23.5",
     # OMN-14190: canonical OCC stamp schema lives in omnibase_compat (OMN-14223).
     "omnibase-compat==0.5.7",
@@ -271,7 +276,7 @@ override-dependencies = [
     # OMN-19749: released omnibase-core 0.47.24 (PyPI, OMN-18595) carries
     # omnibase_core#1786's runtime lane declaration types this draft needs; the
     # temporary git-rev override below is removed in the same change.
-    "omnibase-core==0.47.28",
+    "omnibase-core==0.47.32",
     "omnibase-spi==0.23.5",
     "omnibase-compat==0.5.7",
 ]

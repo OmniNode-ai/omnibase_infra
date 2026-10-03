@@ -248,6 +248,7 @@ migrations:
   forward/nodes/node_projection_delegation/0050_delegation_summary_excludes_fixture_savings.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
   forward/nodes/node_projection_delegation/0051_delegation_events_failed_outcome_backfill.sql: forward-only # UPDATE (data rewrite)
   forward/nodes/node_projection_delegation/0052_delegation_events_trace_and_routing.sql: expand-only
+  forward/nodes/node_projection_delegation/0053_delegation_events_finish_reason_truncated.sql: expand-only
   forward/nodes/node_projection_delegation_disposition/0000_create_delegation_dispositions.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT; ROW LEVEL SECURITY; DROP
   forward/nodes/node_projection_delegation_disposition/0001_grant_tenant_projection_writer_delegation_dispositions.sql: expand-only
   forward/nodes/node_projection_delegation_disposition/0002_force_rls_delegation_dispositions.sql: forward-only # ENABLE/FORCE ROW LEVEL SECURITY; DROP
@@ -362,6 +363,7 @@ migrations:
   forward/nodes/node_projection_savings/091_savings_estimates_house_tenant_uuid_backfill.sql: forward-only # UPDATE (house slug -> house UUID); ALTER TABLE ALTER COLUMN SET DEFAULT; transaction-scoped CREATE/DROP POLICY inside one DO block
   forward/nodes/node_projection_savings/092_restore_savings_views_security_invoker.sql: forward-only # ALTER VIEW
   forward/nodes/node_projection_savings/093_savings_series_persisted_baseline.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
+  forward/nodes/node_projection_savings/093_savings_series_recorded_model.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_savings/094_savings_overview_local_token_pct.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab

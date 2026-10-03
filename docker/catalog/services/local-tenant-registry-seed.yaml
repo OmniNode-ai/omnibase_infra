@@ -1,0 +1,75 @@
+# OMN-20113: a laptop has no onex-api and no tenant-registry writer to fill
+# tenant_registry_mirror, so the delegation projection writer could not resolve
+# the tenant `make tenant-local` mints and sent every delegation to its DLQ.
+# This one-shot records that tenant, and nothing else. Listed ONLY in the
+# `local` bundle. The uuid is a function of the slug, so one slug keeps one uuid
+# across volume resets; an existing mapping is never rewritten.
+name: local-tenant-registry-seed
+description: One-shot seed of the laptop tenant in tenant_registry_mirror
+image: postgres:16-alpine
+layer: infrastructure
+container_name: omnibase-infra-local-tenant-registry-seed
+required_env:
+  - POSTGRES_PASSWORD
+hardcoded_env:
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: '5432'
+  NODE_POSTGRES_DB: omnidash_analytics
+  ONEX_TENANT_ID: '${ONEX_TENANT_ID:-}'
+operational_defaults:
+  POSTGRES_USER: postgres
+ports: null
+healthcheck: null
+volumes: []
+depends_on:
+  - service: migration-gate
+    condition: service_healthy
+restart: 'no'
+resources:
+  cpus: '0.25'
+  memory: 128M
+  cpus_reservation: '0.1'
+  memory_reservation: 64M
+entrypoint:
+  - /bin/sh
+  - -c
+# `$$` is compose's escape for a `$` the container's shell expands.
+command:
+  - |
+    set -eu
+    tenant="$${ONEX_TENANT_ID:-}"
+    if [ -z "$$tenant" ]; then
+      echo "[local-tenant-registry-seed] no tenant, nothing to record"
+      exit 0
+    fi
+    export LC_ALL=C
+    case "$$tenant" in
+      [!a-z0-9]*|*[!a-z0-9-]*) valid=false ;;
+      *) valid=true ;;
+    esac
+    if [ "$$valid" = false ] || [ "$${#tenant}" -gt 63 ]; then
+      echo "[local-tenant-registry-seed] invalid ONEX_TENANT_ID: expected ^[a-z0-9][a-z0-9-]{0,62}$$" >&2
+      exit 1
+    fi
+    export PGPASSWORD="$$POSTGRES_PASSWORD" PGHOST="$$POSTGRES_HOST" PGPORT="$$POSTGRES_PORT" PGUSER="$$POSTGRES_USER" PGDATABASE="$$NODE_POSTGRES_DB"
+    psql -X -v ON_ERROR_STOP=1 -v slug="$$tenant" <<'SQL'
+    INSERT INTO tenant_registry_mirror
+      (tenant_slug, tenant_uuid, display_name, status,
+       registry_created_at, observed_at, source_event_id)
+    VALUES (:'slug', md5('omninode-local-tenant:' || :'slug')::uuid,
+            'local stack', 'active', now(), now(), 'make-tenant-local')
+    ON CONFLICT (tenant_slug) DO NOTHING;
+    SQL
+    tenant_uuid="$$(psql -X -At -v ON_ERROR_STOP=1 -v slug="$$tenant" <<'SQL'
+    SELECT tenant_uuid FROM tenant_registry_mirror WHERE tenant_slug = :'slug';
+    SQL
+    )"
+    if [ -z "$$tenant_uuid" ]; then
+      echo "[local-tenant-registry-seed] no mirror row for tenant $$tenant" >&2
+      exit 1
+    fi
+    echo "[local-tenant-registry-seed] tenant $$tenant -> $$tenant_uuid"
+labels:
+  com.omninode.service: local-tenant-registry-seed
+  com.omninode.layer: infrastructure
+  com.omninode.ticket: OMN-20113

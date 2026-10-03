@@ -52,6 +52,11 @@ class EnumSyncRevertWatchdogDecision(StrEnum):
     # Fails closed on BOT and UNKNOWN alike; see
     # EnumPriorDoneActorKind.
     SKIPPED_PRIOR_DONE_NOT_HUMAN_SET = "skipped_prior_done_not_human_set"
+    # OMN-20368: the re-flip writes a Done state, and a Done state needs a PASS
+    # dod_verify receipt that binds every acceptance criterion. None exists (or
+    # the verifier could not be read), so the ticket is left as it is and the
+    # reason is recorded. Fails closed on every verifier failure alike.
+    SKIPPED_NO_BOUND_RECEIPT = "skipped_no_bound_receipt"
     # Linear read (issues/history/comments) or write (issueUpdate/
     # commentCreate) call failed or returned GraphQL errors.
     ERROR_LINEAR_API = "error_linear_api"

@@ -8,14 +8,8 @@ Exports node-specific models and re-exports shared effect models
 for convenience.
 
 Node-specific:
-    ModelLlmInferenceRequest: Node-local input request model used by the
-        handler implementations. This is a **different class** from the
-        shared ``omnibase_infra.nodes.effects.models.ModelLlmInferenceRequest``
-        (which is the canonical contract-level model referenced in
-        contract.yaml). The node-local version is a simpler, handler-facing
-        model that uses raw ``dict`` messages and omits tracing/resilience
-        fields. Handlers import from this location; the contract I/O models
-        point to the shared package version.
+    ModelLlmInferenceRequest: The single input request model, imported by the
+        handlers and named by ``input_model`` in contract.yaml (OMN-17104).
 
 Re-exported from shared effect models:
     ModelLlmInferenceResponse: Canonical inference response
