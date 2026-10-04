@@ -259,6 +259,20 @@ def test_a_deploy_that_outlasts_the_budget_is_red_and_says_so(
     assert "LANE_NAME" not in written
 
 
+@pytest.mark.parametrize("ready_at", [22, 10_000], ids=["recovers", "stays-down"])
+def test_deploy_budget_keeps_the_final_partial_poll(
+    ready_at: float, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A remaining fraction of a poll still belongs to the deploy wait budget."""
+    budget = 23
+    world = World(ready_at=ready_at, busy_until=10_000)
+    code, written = _run(tmp_path, monkeypatch, world, [LANE_A], wait=str(budget))
+    assert code == (0 if ready_at <= budget else 1)
+    assert world.now == budget
+    assert world.sleeps[-1] == budget % POLL_SECONDS
+    assert ("LANE_NAME" in written) == (code == 0)
+
+
 def test_a_deploy_that_ends_with_the_ingress_still_down_is_red(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

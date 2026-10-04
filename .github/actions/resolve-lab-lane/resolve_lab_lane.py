@@ -383,10 +383,11 @@ def main(environ: Mapping[str, str] | None = None) -> int:
                     + " | ".join((busy or pre_busy).values())
                 )
                 waited = 0.0
-            if now - started + poll > wait_budget:
+            remaining = wait_budget - (now - started)
+            if remaining <= 0:
                 end_reason = "budget exhausted"
                 break
-            time.sleep(poll)
+            time.sleep(min(poll, remaining))
             lane, tried = choose_lane(
                 lanes, require, lambda url: http_health(url, timeout), match
             )
