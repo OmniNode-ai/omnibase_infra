@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "0.38.35",
-  "protocol_count": 24,
+  "package_version": "0.38.66",
+  "protocol_count": 25,
   "protocols": {
     "ProtocolAutoWiringManifestLike": {
       "runtime_checkable": false,
@@ -1121,6 +1121,33 @@
               "default": null
             }
           ],
+          "return_annotation": "None"
+        }
+      }
+    },
+    "ProtocolRuntimeLogProducer": {
+      "runtime_checkable": false,
+      "method_count": 2,
+      "methods": {
+        "send": {
+          "parameters": [
+            {
+              "name": "topic",
+              "kind": "POSITIONAL_OR_KEYWORD",
+              "annotation": "str",
+              "default": null
+            },
+            {
+              "name": "value",
+              "kind": "KEYWORD_ONLY",
+              "annotation": "bytes",
+              "default": null
+            }
+          ],
+          "return_annotation": "object"
+        },
+        "stop": {
+          "parameters": [],
           "return_annotation": "None"
         }
       }

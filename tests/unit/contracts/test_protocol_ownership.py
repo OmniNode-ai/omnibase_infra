@@ -74,6 +74,7 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     "ProtocolSnapshotStore": "protocols/protocol_snapshot_store.py",
     "ProtocolAutoWiringManifestLike": "protocols/protocol_auto_wiring_manifest_like.py",  # [RUNTIME] OMN-8623 manifest shape for health monitor DI
     "ProtocolDispatchResultApplier": "protocols/protocol_dispatch_result_applier.py",  # [RUNTIME] OMN-9550 auto-wired handler output application boundary
+    "ProtocolRuntimeLogProducer": "protocols/protocol_runtime_log_producer.py",  # [RUNTIME] OMN-19992 producer seam (send/stop) RuntimeLogEventBridge publishes through; satisfied by AIOKafkaProducer and the in-memory runtime-log publisher. Infra-local: bound to this repo's runtime log bridge
     "ProtocolKafkaAdminLike": "protocols/protocol_kafka_admin_like.py",  # [RUNTIME] OMN-8623 Kafka admin client boundary for health monitor DI
     "ProtocolRejoinableConsumer": "protocols/protocol_rejoinable_consumer.py",  # [RUNTIME] OMN-18640 the consumer surface the coordinator-loss rejoin supervisor measures and rebuilds
     "ProtocolConsumerSyncSource": "protocols/protocol_consumer_sync_source.py",  # [RUNTIME] OMN-18640 the event-bus surface the consumer_sync readiness dimension reads. Infra-local, not spi: the health monitor is handed a ProtocolEventBusLike and must ask a transport whether it can answer at all, rather than isinstance-ing one concrete Kafka class

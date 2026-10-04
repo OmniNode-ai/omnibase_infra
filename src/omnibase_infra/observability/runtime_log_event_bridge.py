@@ -43,7 +43,9 @@ from omnibase_infra.models.health.model_runtime_error_event import (
 from omnibase_infra.topics import topic_keys
 
 if TYPE_CHECKING:
-    from aiokafka import AIOKafkaProducer
+    from omnibase_infra.protocols.protocol_runtime_log_producer import (
+        ProtocolRuntimeLogProducer,
+    )
 
 # Bridge's own logger -- must never be captured by the bridge itself
 _bridge_logger = logging.getLogger(f"{__name__}._bridge")
@@ -143,7 +145,7 @@ class RuntimeLogEventBridge(logging.Handler):
 
     def __init__(
         self,
-        producer: AIOKafkaProducer,
+        producer: ProtocolRuntimeLogProducer,
         *,
         topic: str | None = None,
         queue_size: int = _DEFAULT_QUEUE_SIZE,
@@ -153,7 +155,8 @@ class RuntimeLogEventBridge(logging.Handler):
         """Initialize the bridge.
 
         Args:
-            producer: An already-started AIOKafkaProducer.
+            producer: An already-started producer (Kafka, or the in-memory
+                bus adapter on a native runtime).
             topic: Topic to emit to.
             queue_size: Max queue size for decoupling.
             hostname: Machine hostname.
