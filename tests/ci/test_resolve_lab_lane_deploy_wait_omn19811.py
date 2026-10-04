@@ -95,6 +95,8 @@ class World:
         busy_until: float,
         busy_payload: dict[str, Any] | None = None,
         agent_readable: bool = True,
+        probe_cost: float = 0.0,
+        unreadable_from: float | None = None,
     ) -> None:
         self.now = 0.0
         self.sleeps: list[float] = []
@@ -103,6 +105,8 @@ class World:
         self.busy_until = busy_until
         self.busy_payload = busy_payload or DEPLOYING
         self.agent_readable = agent_readable
+        self.probe_cost = probe_cost
+        self.unreadable_from = unreadable_from
 
     def monotonic(self) -> float:
         return self.now
@@ -114,11 +118,14 @@ class World:
     def health(self, url: str, timeout: float) -> str | None:
         if url.startswith("http://10.0.0.1:") and self.now >= self.ready_at:
             return None
+        self.now += self.probe_cost  # a surface that times out costs its timeout
         return "no answer (URLError: [Errno 111] Connection refused)"
 
     def read_agent(self, url: str, timeout: float) -> dict[str, Any] | None:
         self.agent_reads.append(url)
         if not self.agent_readable:
+            return None
+        if self.unreadable_from is not None and self.now >= self.unreadable_from:
             return None
         if self.now < self.busy_until:
             return self.busy_payload
@@ -292,6 +299,139 @@ def test_a_lane_that_answers_is_chosen_without_any_wait(
     assert written["LANE_NAME"] == "lane-b"
     assert world.sleeps == []
     assert "LANE_WAITED_SECONDS" not in written
+
+
+# --- OMN-20509: the settle window ------------------------------------------
+#
+# Scheduled run 37179200279 (2026-10-04T05:12Z, sha d73707229) went RED at lane
+# resolution. Deploy job b53aa040 had released the lane at 05:02:36Z and its
+# settle worker ran k3s image imports until 05:12:58Z, so the deploy agent
+# reported ``state=settling`` the whole time. The resolver spent its probe
+# timeouts on the lane surfaces (05:12:33Z-05:13:03Z) BEFORE it first read the
+# agent; by then the settle had finished, the agent had re-exec'd (back on
+# :8098 within half a second) and reported idle, so it never waited. The lane
+# answered a few polls later.
+
+SETTLE_PROBE_COST = 15.0  # two required surfaces, 15 s each: the 30 s check
+SETTLE_ENDS_DURING_CHECK = 20.0
+
+
+@pytest.mark.parametrize(
+    "after_settle",
+    [
+        pytest.param({}, id="idle-after-the-check"),
+        pytest.param({"unreadable_from": SETTLE_ENDS_DURING_CHECK}, id="unreadable"),
+    ],
+)
+def test_settle_window_busy_before_the_lane_check_is_waited_out(
+    after_settle: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 05:12Z timeline: settling at the first agent read, idle or refusing
+    after the lane check, lane answers some polls later."""
+    world = World(
+        ready_at=SETTLE_ENDS_DURING_CHECK + 30,
+        busy_until=SETTLE_ENDS_DURING_CHECK,
+        busy_payload=SETTLING,
+        probe_cost=SETTLE_PROBE_COST,
+        **after_settle,
+    )
+    code, written = _run(tmp_path, monkeypatch, world, [LANE_A])
+    assert code == 0
+    assert written["LANE_NAME"] == "lane-a"
+    assert float(written["LANE_WAITED_SECONDS"]) > 0
+
+
+def test_settle_window_wait_names_the_busy_read_that_justified_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    world = World(
+        ready_at=10_000,
+        busy_until=SETTLE_ENDS_DURING_CHECK,
+        busy_payload=SETTLING,
+        probe_cost=SETTLE_PROBE_COST,
+    )
+    code, _ = _run(tmp_path, monkeypatch, world, [LANE_A])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "lab lane deploy wait started" in out
+    assert "state=settling" in out
+    assert "::error::no declared lab lane answers" in out
+
+
+@pytest.mark.parametrize(
+    "agent",
+    [
+        pytest.param({"busy_until": 0}, id="idle-throughout"),
+        pytest.param(
+            {"busy_until": 10_000, "agent_readable": False}, id="unreadable-throughout"
+        ),
+    ],
+)
+def test_down_outside_deploy_is_red_without_waiting_and_names_every_lane(
+    agent: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """AC2: an agent that is never readable-and-busy never buys a wait, even
+    though the lane check now costs probe timeouts."""
+    world = World(ready_at=10_000, probe_cost=SETTLE_PROBE_COST, **agent)
+    monkeypatch.setattr(world, "health", lambda url, timeout: "no answer (timed out)")
+    code, written = _run(tmp_path, monkeypatch, world, [LANE_A, LANE_B])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert world.sleeps == []
+    assert "lane-a" in out and "lane-b" in out
+    assert "lab lane deploy wait started" not in out
+    assert "LANE_NAME" not in written
+
+
+def test_settle_window_grace_is_bounded_when_the_lane_never_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A busy read before the check buys the wait, not an open-ended one: once
+    the agent has been not-busy for the grace the wait ends RED."""
+    world = World(
+        ready_at=10_000,
+        busy_until=SETTLE_ENDS_DURING_CHECK,
+        busy_payload=SETTLING,
+        probe_cost=SETTLE_PROBE_COST,
+    )
+    code, _ = _run(tmp_path, monkeypatch, world, [LANE_A])
+    assert code == 1
+    assert world.sleeps, "the busy pre-read must have bought at least one poll"
+    assert sum(world.sleeps) <= resolver.SETTLE_GRACE_SECONDS + 2 * POLL_SECONDS
+    assert sum(world.sleeps) < BUDGET_SECONDS
+
+
+def test_settle_window_grace_never_outruns_the_deploy_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = World(
+        ready_at=10_000,
+        busy_until=SETTLE_ENDS_DURING_CHECK,
+        busy_payload=SETTLING,
+        probe_cost=SETTLE_PROBE_COST,
+    )
+    budget = 20
+    code, _ = _run(tmp_path, monkeypatch, world, [LANE_A], wait=str(budget))
+    assert code == 1
+    assert world.sleeps
+    assert sum(world.sleeps) <= budget
+
+
+def test_settle_window_wait_stays_opt_in_and_reads_no_agent_without_a_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = World(ready_at=10_000, busy_until=10_000, busy_payload=SETTLING)
+    code, _ = _run(tmp_path, monkeypatch, world, [LANE_A], wait="0")
+    assert code == 1
+    assert world.sleeps == []
+    assert world.agent_reads == []
 
 
 # --- the agent reader, over a real socket ----------------------------------
