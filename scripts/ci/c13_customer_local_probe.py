@@ -885,6 +885,22 @@ def _run_step(
     }
 
 
+def delegate_runs_root(env: Mapping[str, str]) -> Path:
+    """Return the directory ``onex delegate`` writes its run directories under.
+
+    Since omnibase_infra 0.38.64 (OMN-19232) the CLI's state root is the
+    ``--state-root`` flag, then an absolute ``ONEX_STATE_DIR``, then
+    ``$HOME/.onex_state``, and never the working directory. The probe passes no
+    flag and the customer's environment binds no ``ONEX_STATE_DIR``, so this is
+    the customer's own ``$HOME/.onex_state/runs``: the default every customer
+    gets (OMN-20505).
+    """
+    state_dir = env.get("ONEX_STATE_DIR", "")
+    if state_dir and Path(state_dir).is_absolute():
+        return Path(state_dir) / "runs"
+    return Path(env["HOME"]) / ".onex_state" / "runs"
+
+
 def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     # First: a public model host is refused before anything else is checked or run.
     model_host = validate_model_host(args.model_host)
@@ -960,9 +976,9 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     )
     # The negative control's own run directory is set aside so the configured
     # run's files are the only ones the three_files clause can find.
-    runs_root = workdir / ".onex_state" / "runs"
+    runs_root = delegate_runs_root(base_env)
     if runs_root.exists():
-        runs_root.rename(workdir / ".onex_state" / "runs.unconfigured")
+        runs_root.rename(runs_root.with_name("runs.unconfigured"))
 
     tokens_before_configured = tokens_predicted(base_url)
     steps["configured"] = _run_step(

@@ -363,3 +363,41 @@ def test_the_hosted_workflow_is_retired() -> None:
     assert not (
         REPO_ROOT / ".github" / "workflows" / "c29-customer-byo-key-delegation.yml"
     ).exists()
+
+
+@pytest.mark.unit
+def test_the_run_files_are_read_from_the_state_root_the_cli_resolves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-20505: since omnibase_infra 0.38.64 (OMN-19232) onex delegate writes
+    its run directory under ONEX_STATE_DIR, else $HOME/.onex_state, never the
+    working directory. The customer's environment binds no ONEX_STATE_DIR, so
+    the probe must read the customer's $HOME/.onex_state."""
+    import argparse
+
+    from tests.ci._fake_delegate_cli_omn20505 import install_fakes
+
+    home, bin_dir, work, strace = install_fakes(tmp_path)
+    monkeypatch.setattr(probe.shutil, "which", lambda _name: str(strace))
+    monkeypatch.setattr(probe, "find_source_trees", lambda _roots: [])
+    monkeypatch.setenv("C29_TEST_KEY", "sk-or-test-not-a-real-key")
+    args = argparse.Namespace(
+        key_env="C29_TEST_KEY",
+        provider="openrouter",
+        customer_home=str(home),
+        customer_bin=str(bin_dir),
+        workdir=str(work),
+        trace_dir=str(tmp_path / "traces"),
+        step_timeout="60",
+        prompt="p",
+    )
+
+    obs = probe.observe_live(args)
+
+    assert obs["steps"]["keyed"]["returncode"] == 0, obs["steps"]["keyed"]
+    assert obs["run_dir"] == str(
+        home.resolve() / ".onex_state" / "runs" / "run-configured"
+    )
+    assert obs["run_files"]["result.txt"] == "the answer"
+    assert "ONEX_STATE_DIR" not in obs["customer_env_keys"]
+    assert (home / ".onex_state" / "runs.keyless" / "run-unconfigured").is_dir()
