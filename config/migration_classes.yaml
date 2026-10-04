@@ -250,6 +250,7 @@ migrations:
   forward/nodes/node_projection_delegation/0052_delegation_events_trace_and_routing.sql: expand-only
   forward/nodes/node_projection_delegation/0053_delegation_events_finish_reason_truncated.sql: expand-only
   forward/nodes/node_projection_delegation/0054_delegation_events_backend_id_and_host.sql: expand-only
+  forward/nodes/node_projection_delegation/0055_model_routing_local_call_share.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
   forward/nodes/node_projection_delegation_disposition/0000_create_delegation_dispositions.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT; ROW LEVEL SECURITY; DROP
   forward/nodes/node_projection_delegation_disposition/0001_grant_tenant_projection_writer_delegation_dispositions.sql: expand-only
   forward/nodes/node_projection_delegation_disposition/0002_force_rls_delegation_dispositions.sql: forward-only # ENABLE/FORCE ROW LEVEL SECURITY; DROP
@@ -333,6 +334,7 @@ migrations:
   forward/nodes/node_projection_demo_readiness/0001_grant_omninode_runtime_demo_readiness_latest.sql: expand-only
   forward/nodes/node_projection_metering_summary/0000_create_metering_summary.sql: forward-only # UNIQUE INDEX on created table
   forward/nodes/node_projection_metering_summary/0001_grant_tenant_projection_writer_metering_summary.sql: expand-only
+  forward/nodes/node_projection_metering_summary/0002_metering_summary_savings_per_measured_run.sql: expand-only
   forward/nodes/node_projection_lab_container_memory/0000_create_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_lab_container_memory/0001_grant_omninode_runtime_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_topic_activity/0000_create_topic_activity.sql: forward-only # ALTER TABLE on the created table
