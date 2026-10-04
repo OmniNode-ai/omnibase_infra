@@ -371,6 +371,9 @@ class OrphanedDispatch:
     correlation_id: UUID
     record_coordinate: tuple[int, int] | None
     started_at: float
+    #: Loop time the dispatch was abandoned; the OMN-20464 degraded grace runs
+    #: from here, not from ``started_at``.
+    abandoned_at: float
 
     def describe(self, now: float) -> str:
         partition, offset = self.record_coordinate or (None, None)
@@ -2889,6 +2892,7 @@ class EventBusKafka(
                 correlation_id=correlation_id,
                 record_coordinate=record_coordinate,
                 started_at=started_at,
+                abandoned_at=loop.time(),
             ),
         )
         partition, offset = record_coordinate or (None, None)
@@ -2987,10 +2991,13 @@ class EventBusKafka(
         except RuntimeError:
             now = time.monotonic()
         orphans = list(self._orphaned_dispatches.values())
+        grace = self._config.consumer_dispatch_orphan_degraded_grace_seconds
+        degrading = sum(1 for orphan in orphans if now - orphan.abandoned_at < grace)
         return ModelDispatchDeadlineStatus(
             deadline_seconds=self._config.effective_dispatch_deadline_seconds,
             orphan_limit=self._config.consumer_dispatch_orphan_limit,
             orphaned_dispatches=len(orphans),
+            degrading_orphans=degrading,
             deadline_expiries_total=self._dispatch_deadline_expiries,
             oldest_orphan_age_seconds=(
                 max(0.0, now - orphans[0].started_at) if orphans else 0.0

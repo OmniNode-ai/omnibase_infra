@@ -1,501 +1,314 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Pre-publish classification and refusal diagnostics without a runtime or bus."""
+"""Pre-publish classification and actionable, payload-safe diagnostics."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
-from uuid import UUID
 
 import pytest
-from pydantic import BaseModel, ConfigDict, RootModel, field_validator
+from pydantic import BaseModel, ConfigDict
 
-from omnibase_infra.cli import cli_delegate
 from omnibase_infra.cli import delegate_pre_publish_failure as failure
-from omnibase_infra.cli.delegate_terminal_resolver import (
-    DelegateTerminalUnresolvedError,
-)
-from omnibase_infra.cli.model_delegate_run_addressing import ModelDelegateRunAddressing
-from omnibase_infra.cli.model_delegate_transport_refusal import (
-    ModelDelegateTransportRefusal,
-)
-from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
-
-pytestmark = pytest.mark.unit
-
-_RUN_ID = "11111111-1111-4111-8111-111111111111"
-_CORRELATION_ID = "22222222-2222-4222-8222-222222222222"
-_CONNECTION = "postgresql://fixture_user:fixture_password@db.example:5432/app"
-_MODEL_PATH = "fixture_models.Request"
 
 
-class ModelRequest(BaseModel):
+class ModelRequiredRequest(BaseModel):
+    """A runtime-supplied identity is required, and CLI extras are refused."""
+
     model_config = ConfigDict(extra="forbid")
-    count: int
+    correlation_id: str
 
 
 class ModelNestedRequest(BaseModel):
-    request: ModelRequest
+    """Exercise a refusal location containing both a field and an index."""
+
+    values: list[int]
 
 
-class ModelSensitiveRequest(BaseModel):
-    connection: str
-
-    @field_validator("connection")
-    @classmethod
-    def refuse_connection(cls, value: str) -> str:
-        raise ValueError(f"cannot connect to {value}")
+_MODEL_PATH = f"{__name__}.ModelRequiredRequest"
+_PAYLOAD_SENTINEL = "synthetic-private-payload-value"
+_RUNTIME_SENTINEL = "synthetic-private-runtime-detail"
 
 
-def _envelope(**summary: object) -> dict[str, object]:
+def _receipt(**overrides: object) -> dict[str, object]:
+    result: dict[str, object] = {
+        "workflow_result": "failed",
+        "runtime_error_type": "ValidationError",
+        "error": _RUNTIME_SENTINEL,
+    }
+    result.update(overrides)
     return {
-        "run_id": _RUN_ID,
-        "correlation_id": _CORRELATION_ID,
-        "duration_ms": 1250,
-        "result_model": (
-            "omnibase_infra.cli.model_receipt_runtime_summary.ModelReceiptRuntimeSummary"
-        ),
-        "result": {
-            "workflow_result": "failed",
-            "wire_correlation_id": None,
-            "runtime_error_is_transport": False,
-            "terminal_payload": None,
-            "handler_result": None,
-            **summary,
-        },
+        "run_id": "test-run",
+        "result_model": "omnibase_infra.cli.ModelReceiptRuntimeSummary",
+        "result": result,
     }
 
 
-@pytest.fixture
-def payload(tmp_path: Path) -> Path:
-    path = tmp_path / "payload.json"
-    path.write_text('{"count": 1}', encoding="utf-8")
-    return path
+@pytest.fixture(autouse=True)
+def isolated_distributions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the diagnostic independent of installed packages on the host."""
+    monkeypatch.setattr(failure.metadata, "packages_distributions", dict)
 
 
 @pytest.fixture
-def contract(tmp_path: Path) -> Path:
-    path = tmp_path / "contract.yaml"
-    path.write_text(f"input_model: {_MODEL_PATH}\n", encoding="utf-8")
-    return path
-
-
-@pytest.fixture
-def request_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        failure.importlib,
-        "import_module",
-        lambda name: SimpleNamespace(Request=ModelRequest),
+def paths(tmp_path: Path) -> tuple[Path, Path, Path]:
+    contract = tmp_path / "contract.yaml"
+    contract.write_text(f"input_model: {_MODEL_PATH}\n", encoding="utf-8")
+    payload = tmp_path / "payload.json"
+    payload.write_text(
+        json.dumps({"correlation_id": _PAYLOAD_SENTINEL}), encoding="utf-8"
     )
+    return contract, payload, tmp_path / "capture.log"
 
 
-@pytest.mark.parametrize("result", [None, [], "failed", 1])
-def test_non_summary_result_is_not_pre_publish(result: object) -> None:
-    envelope = _envelope()
+def _describe(paths: tuple[Path, Path, Path]) -> str:
+    contract, payload, capture = paths
+    envelope = _receipt()
+    assert failure.pre_publish_failure_from_receipt(envelope) is envelope["result"]
+    message = failure.describe_pre_publish_failure(
+        envelope=envelope,
+        contract_path=contract,
+        payload_path=payload,
+        capture_log_path=capture,
+    )
+    assert "delegate run test-run failed before publish (ValidationError):" in message
+    assert "no command reached the broker" in message
+    assert "The deployed lane is not implicated." in message
+    assert f"Payload: {payload.resolve()}. Capture log: {capture}." in message
+    assert _PAYLOAD_SENTINEL not in message
+    assert _RUNTIME_SENTINEL not in message
+    return message
+
+
+@pytest.mark.parametrize("result", [None, [], "failed", 0])
+def test_non_summary_results_are_not_pre_publish(result: object) -> None:
+    envelope = _receipt()
     envelope["result"] = result
     assert failure.pre_publish_failure_from_receipt(envelope) is None
 
 
-@pytest.mark.parametrize("result_model", [None, "", "other.ModelResult"])
-def test_wrong_result_model_is_not_pre_publish(result_model: object) -> None:
-    envelope = _envelope()
+@pytest.mark.parametrize("result_model", [None, "", "ModelOtherResult"])
+def test_other_result_models_are_not_pre_publish(result_model: object) -> None:
+    envelope = _receipt()
     envelope["result_model"] = result_model
     assert failure.pre_publish_failure_from_receipt(envelope) is None
 
 
 @pytest.mark.parametrize(
-    "summary",
+    "overrides",
     [
         {"workflow_result": "completed"},
-        {"wire_correlation_id": _CORRELATION_ID},
+        {"wire_correlation_id": "published-command"},
         {"runtime_error_is_transport": True},
         {"terminal_payload": {}},
-        {"terminal_payload": False},
         {"handler_result": {}},
-        {"handler_result": ""},
+        {"terminal_payload": False},
     ],
     ids=[
         "completed",
         "published",
         "transport",
         "terminal",
-        "false-terminal",
         "handler",
-        "empty-handler",
+        "false-terminal",
     ],
 )
-def test_other_failure_classes_are_excluded(summary: dict[str, object]) -> None:
-    assert failure.pre_publish_failure_from_receipt(_envelope(**summary)) is None
+def test_receipts_with_completion_or_publish_evidence_are_excluded(
+    overrides: dict[str, object],
+) -> None:
+    assert failure.pre_publish_failure_from_receipt(_receipt(**overrides)) is None
 
 
 @pytest.mark.parametrize("workflow_result", ["failed", "error", "timeout", "", None])
-def test_pre_publish_returns_the_original_summary(workflow_result: object) -> None:
-    envelope = _envelope(workflow_result=workflow_result)
+def test_incomplete_runs_without_publish_evidence_are_classified(
+    workflow_result: object,
+) -> None:
+    envelope = _receipt(
+        workflow_result=workflow_result, terminal_payload=None, handler_result=None
+    )
     assert failure.pre_publish_failure_from_receipt(envelope) is envelope["result"]
+    message = failure.pre_publish_failure_error(envelope)
+    assert "failed before publish (ValidationError)" in message
+    assert "there is no delegation terminal to look for" in message
+    assert _RUNTIME_SENTINEL not in message
 
 
-def test_missing_optional_summary_fields_still_classify() -> None:
-    envelope = _envelope()
-    envelope["result"] = {}
-    assert failure.pre_publish_failure_from_receipt(envelope) is envelope["result"]
-
-
-@pytest.mark.parametrize("runtime_error_type", [None, "", "ValidationError"])
-def test_base_error_names_run_and_type_without_echoing_error(
-    runtime_error_type: object,
+@pytest.mark.parametrize("result", [None, {}, {"runtime_error_type": None}])
+def test_base_message_without_error_type_does_not_invent_a_cause(
+    result: object,
 ) -> None:
     message = failure.pre_publish_failure_error(
-        _envelope(runtime_error_type=runtime_error_type, error=_CONNECTION)
+        {"run_id": "test-run", "result": result}
     )
-    assert _RUN_ID in message
-    assert "failed before publish" in message
-    assert "no resolvable delegation terminal" not in message
-    assert ("(ValidationError)" in message) is bool(runtime_error_type)
-    assert _CONNECTION not in message
-
-
-def test_base_error_accepts_a_non_summary_result() -> None:
-    assert "failed before publish" in failure.pre_publish_failure_error(
-        {"result": None}
-    )
-
-
-def test_pre_publish_error_keeps_the_resolver_catch_contract() -> None:
-    error = failure.DelegatePrePublishFailureError("before publish")
-    assert isinstance(error, DelegateTerminalUnresolvedError)
-    assert str(error) == "before publish"
+    assert message.startswith("delegate run test-run failed before publish:")
+    assert "The deployed lane is not implicated." in message
 
 
 @pytest.mark.parametrize(
-    ("document", "expected"),
+    "contract_text",
     [
-        ("input_model: fixture_models.Request", _MODEL_PATH),
-        ("input_model: {module: fixture_models, class: Request}", _MODEL_PATH),
-        ("input_model: {module: fixture_models, name: Request}", _MODEL_PATH),
-        (
-            "input_model: {module: fixture_models, class: Request, name: Other}",
-            _MODEL_PATH,
-        ),
-        (
-            "input_model: {module: fixture_models, class: '', name: Request}",
-            _MODEL_PATH,
-        ),
-        ("[]", None),
-        ("null", None),
-        ("{}", None),
-        ("input_model: Request", None),
-        ("input_model: 42", None),
-        ("input_model: {module: '', class: Request}", None),
-        ("input_model: {module: fixture_models, class: ''}", None),
-        ("input_model: {module: 42, class: Request}", None),
-        ("input_model: {module: fixture_models, class: 42}", None),
-        ("input_model: [", None),
+        "input_model: [",
+        "- not-a-mapping\n",
+        "",
+        "input_model: UndottedModel\n",
+        "input_model: 17\n",
+        "input_model: {module: '', class: ModelRequiredRequest}\n",
+        "input_model: {module: tests, class: ''}\n",
+        "input_model: {module: 17, class: ModelRequiredRequest}\n",
+        "input_model: {module: tests, class: 17}\n",
     ],
 )
-def test_contract_model_forms(
-    tmp_path: Path, document: str, expected: str | None
+def test_unusable_contract_does_not_guess_a_refusing_field(
+    paths: tuple[Path, Path, Path],
+    contract_text: str,
 ) -> None:
-    path = tmp_path / "contract.yaml"
-    path.write_text(document, encoding="utf-8")
-    assert failure._request_model_path(path) == expected
+    paths[0].write_text(contract_text, encoding="utf-8")
+    message = _describe(paths)
+    assert f"The request model could not be read from {paths[0]}" in message
+    assert "the refusing field is not named here" in message
+    assert "Cause:" not in message
 
 
-def test_missing_contract_has_no_model(tmp_path: Path) -> None:
-    assert failure._request_model_path(tmp_path / "absent.yaml") is None
-
-
-@pytest.mark.parametrize("distributions", [None, [], ["missing"]])
-def test_distribution_not_found(
-    monkeypatch: pytest.MonkeyPatch, distributions: list[str] | None
+def test_missing_contract_points_to_the_capture_log(
+    paths: tuple[Path, Path, Path],
 ) -> None:
-    monkeypatch.setattr(
-        failure.metadata,
-        "packages_distributions",
-        lambda: {"fixture_models": distributions},
+    paths[0].unlink()
+    assert "The request model could not be read" in _describe(paths)
+
+
+@pytest.mark.parametrize("model_key", ["class", "name"])
+def test_mapping_contract_resolves_the_model_and_reports_valid_payload(
+    paths: tuple[Path, Path, Path],
+    model_key: str,
+) -> None:
+    paths[0].write_text(
+        f"input_model:\n  module: {__name__}\n  {model_key}: ModelRequiredRequest\n",
+        encoding="utf-8",
     )
+    message = _describe(paths)
+    assert f"not a field-level refusal by {_MODEL_PATH}" in message
+    assert "the payload validates against the model" in message
+    assert "The runtime's own error is in the capture log." in message
 
-    def missing_version(name: str) -> str:
-        raise failure.metadata.PackageNotFoundError(name)
 
-    monkeypatch.setattr(failure.metadata, "version", missing_version)
+@pytest.mark.parametrize(
+    ("model_path", "expected"),
+    [
+        ("missing_pre_publish_test_module.Request", "could not be imported"),
+        (f"{__name__}.MissingRequest", "could not be imported"),
+        ("builtins.str", "is not a pydantic model"),
+        ("builtins.len", "is not a pydantic model"),
+    ],
+)
+def test_unavailable_model_reports_why_the_field_is_unknown(
+    paths: tuple[Path, Path, Path],
+    model_path: str,
+    expected: str,
+) -> None:
+    paths[0].write_text(f"input_model: {model_path}\n", encoding="utf-8")
+    message = _describe(paths)
+    assert f"not a field-level refusal by {model_path}" in message
+    assert f"the request model {expected}" in message
+    assert "The runtime's own error is in the capture log." in message
+
+
+@pytest.mark.parametrize(
+    "payload_text", [None, '{"private": "' + _PAYLOAD_SENTINEL + '"']
+)
+def test_unreadable_payload_reports_the_read_failure(
+    paths: tuple[Path, Path, Path],
+    payload_text: str | None,
+) -> None:
+    if payload_text is None:
+        paths[1].unlink()
+    else:
+        paths[1].write_text(payload_text, encoding="utf-8")
+    message = _describe(paths)
+    assert "not a field-level refusal" in message
+    assert "the payload file could not be read" in message
+    assert "The runtime's own error is in the capture log." in message
+
+
+def test_runtime_injected_missing_fields_are_not_reported_as_cli_refusals(
+    paths: tuple[Path, Path, Path],
+) -> None:
+    paths[1].write_text("{}", encoding="utf-8")
+    message = _describe(paths)
+    assert "not a field-level refusal" in message
+    assert "the model refused no field this CLI supplied" in message
+    assert "`correlation_id` missing" not in message
+
+
+def test_extra_field_is_named_without_its_private_value_or_missing_defaults(
+    paths: tuple[Path, Path, Path],
+) -> None:
+    paths[1].write_text(
+        json.dumps({"requested_timeout_seconds": _PAYLOAD_SENTINEL}), encoding="utf-8"
+    )
+    message = _describe(paths)
+    assert f"Cause: the request payload was refused by {_MODEL_PATH}" in message
     assert (
-        failure._distribution_of(_MODEL_PATH)
-        == "fixture_models (distribution not found)"
+        "`requested_timeout_seconds` extra_forbidden: Extra inputs are not permitted"
+        in message
     )
+    assert "`correlation_id` missing" not in message
 
 
-def test_distribution_skips_missing_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_nested_refusal_location_names_the_index_without_private_input(
+    paths: tuple[Path, Path, Path],
+) -> None:
+    model_path = f"{__name__}.ModelNestedRequest"
+    paths[0].write_text(f"input_model: {model_path}\n", encoding="utf-8")
+    paths[1].write_text(json.dumps({"values": [_PAYLOAD_SENTINEL]}), encoding="utf-8")
+    message = _describe(paths)
+    assert f"Cause: the request payload was refused by {model_path}" in message
+    assert "`values.0` int_parsing: Input should be a valid integer" in message
+
+
+def test_non_mapping_payload_reports_the_root_without_private_input(
+    paths: tuple[Path, Path, Path],
+) -> None:
+    paths[1].write_text(json.dumps(_PAYLOAD_SENTINEL), encoding="utf-8")
+    message = _describe(paths)
+    assert "`<root>` model_type: Input should be a valid dictionary" in message
+
+
+@pytest.mark.parametrize(
+    ("distributions", "versions", "provider"),
+    [
+        ([], {}, "tests (distribution not found)"),
+        (["absent-test-dist"], {}, "tests (distribution not found)"),
+        (
+            ["test-request-dist"],
+            {"test-request-dist": "1.2.3"},
+            "test-request-dist 1.2.3",
+        ),
+        (
+            ["absent-test-dist", "test-request-dist"],
+            {"test-request-dist": "1.2.3"},
+            "test-request-dist 1.2.3",
+        ),
+    ],
+    ids=["no-provider", "stale-provider", "installed-provider", "stale-then-installed"],
+)
+def test_diagnostic_names_the_available_distribution_or_an_explicit_fallback(
+    paths: tuple[Path, Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    distributions: list[str],
+    versions: dict[str, str],
+    provider: str,
+) -> None:
     monkeypatch.setattr(
-        failure.metadata,
-        "packages_distributions",
-        lambda: {"fixture_models": ["missing", "fixture-models"]},
+        failure.metadata, "packages_distributions", lambda: {"tests": distributions}
     )
 
     def version(name: str) -> str:
-        if name == "missing":
+        if name not in versions:
             raise failure.metadata.PackageNotFoundError(name)
-        return "1.2.3"
+        return versions[name]
 
     monkeypatch.setattr(failure.metadata, "version", version)
-    assert failure._distribution_of(_MODEL_PATH) == "fixture-models 1.2.3"
-
-
-@pytest.mark.parametrize("kind", ["import", "attribute"])
-def test_unimportable_model(
-    monkeypatch: pytest.MonkeyPatch, payload: Path, kind: str
-) -> None:
-    def import_model(name: str) -> SimpleNamespace:
-        assert name == "fixture_models"
-        if kind == "import":
-            raise ImportError("fixture unavailable")
-        return SimpleNamespace()
-
-    monkeypatch.setattr(failure.importlib, "import_module", import_model)
-    refusals, reason = failure._field_refusals(_MODEL_PATH, payload)
-    assert refusals == []
-    assert "the request model could not be imported" in reason
-
-
-@pytest.mark.parametrize("model", [object, 42])
-def test_non_pydantic_model(
-    monkeypatch: pytest.MonkeyPatch, payload: Path, model: object
-) -> None:
-    monkeypatch.setattr(
-        failure.importlib, "import_module", lambda name: SimpleNamespace(Request=model)
-    )
-    assert failure._field_refusals(_MODEL_PATH, payload) == (
-        [],
-        "the request model is not a pydantic model",
-    )
-
-
-@pytest.mark.parametrize("document", [None, "{invalid json"])
-def test_unreadable_payload(
-    request_model: None, payload: Path, document: str | None
-) -> None:
-    if document is None:
-        payload.unlink()
-    else:
-        payload.write_text(document, encoding="utf-8")
-    refusals, reason = failure._field_refusals(_MODEL_PATH, payload)
-    assert refusals == []
-    assert "the payload file could not be read" in reason
-
-
-@pytest.mark.parametrize(
-    ("document", "expected"),
-    [
-        ("{}", "the model refused no field this CLI supplied"),
-        ('{"count": 1}', "the payload validates against the model"),
-    ],
-)
-def test_no_field_refusal(
-    request_model: None, payload: Path, document: str, expected: str
-) -> None:
-    payload.write_text(document, encoding="utf-8")
-    assert failure._field_refusals(_MODEL_PATH, payload) == ([], expected)
-
-
-def test_field_refusals_filter_missing_and_omit_input(
-    request_model: None, payload: Path
-) -> None:
-    payload.write_text(
-        json.dumps({"extra": _CONNECTION, "another": True}), encoding="utf-8"
-    )
-    refusals, reason = failure._field_refusals(_MODEL_PATH, payload)
-    assert reason == ""
-    assert refusals == [
-        "`extra` extra_forbidden: Extra inputs are not permitted",
-        "`another` extra_forbidden: Extra inputs are not permitted",
-    ]
-    assert _CONNECTION not in str(refusals)
-
-
-@pytest.mark.parametrize(
-    ("model", "raw", "location"),
-    [
-        (ModelNestedRequest, {"request": {"count": "bad"}}, "request.count"),
-        (RootModel[int], "bad", "<root>"),
-    ],
-)
-def test_nested_and_root_refusal_locations(
-    monkeypatch: pytest.MonkeyPatch,
-    payload: Path,
-    model: type[BaseModel],
-    raw: object,
-    location: str,
-) -> None:
-    monkeypatch.setattr(
-        failure.importlib, "import_module", lambda name: SimpleNamespace(Request=model)
-    )
-    payload.write_text(json.dumps(raw), encoding="utf-8")
-    refusals, reason = failure._field_refusals(_MODEL_PATH, payload)
-    assert reason == ""
-    assert len(refusals) == 1
-    assert refusals[0].startswith(f"`{location}` int_parsing:")
-
-
-@pytest.mark.parametrize("document", ['{"count": 1}', '{"count": 1, "extra": true}'])
-def test_description_names_evidence_and_does_not_guess(
-    request_model: None,
-    monkeypatch: pytest.MonkeyPatch,
-    contract: Path,
-    payload: Path,
-    document: str,
-) -> None:
-    monkeypatch.setattr(
-        failure, "_distribution_of", lambda path: "fixture-models 1.2.3"
-    )
-    payload.write_text(document, encoding="utf-8")
-    message = failure.describe_pre_publish_failure(
-        envelope=_envelope(),
-        contract_path=contract,
-        payload_path=payload,
-        capture_log_path=payload.parent / "capture.log",
-    )
-    assert _MODEL_PATH in message
-    assert "fixture-models 1.2.3" in message
-    assert f"Payload: {payload.resolve()}" in message
-    assert f"Capture log: {payload.parent / 'capture.log'}" in message
-    if "extra" in document:
-        assert "`extra` extra_forbidden" in message
-        assert "not a field-level refusal" not in message
-    else:
-        assert "not a field-level refusal" in message
-        assert "the payload validates against the model" in message
-
-
-def test_description_without_contract(payload: Path) -> None:
-    message = failure.describe_pre_publish_failure(
-        envelope=_envelope(),
-        contract_path=payload.parent / "absent.yaml",
-        payload_path=payload,
-        capture_log_path=payload.parent / "capture.log",
-    )
-    assert "The request model could not be read" in message
-    assert "Cause:" not in message
-    assert "capture.log" in message
-
-
-@pytest.mark.parametrize("source", ["validation", "import", "read"])
-def test_diagnostic_errors_never_expose_credentials(
-    monkeypatch: pytest.MonkeyPatch, contract: Path, payload: Path, source: str
-) -> None:
-    def import_model(name: str) -> SimpleNamespace:
-        if source == "import":
-            raise ImportError(f"unavailable at {_CONNECTION}")
-        return SimpleNamespace(Request=ModelSensitiveRequest)
-
-    monkeypatch.setattr(failure.importlib, "import_module", import_model)
-    monkeypatch.setattr(
-        failure, "_distribution_of", lambda path: "fixture-models 1.2.3"
-    )
-    payload.write_text(json.dumps({"connection": _CONNECTION}), encoding="utf-8")
-    if source == "read":
-        read_text = Path.read_text
-
-        def read(path: Path, *args: object, **kwargs: object) -> str:
-            if path == payload:
-                raise OSError(f"unavailable at {_CONNECTION}")
-            return read_text(path, encoding="utf-8")
-
-        monkeypatch.setattr(Path, "read_text", read)
-    message = failure.describe_pre_publish_failure(
-        envelope=_envelope(),
-        contract_path=contract,
-        payload_path=payload,
-        capture_log_path=payload.parent / "capture.log",
-    )
-    assert _CONNECTION not in message
-    assert "fixture_password" not in message
-    assert "[REDACTED" in message
-    assert _MODEL_PATH in message
-    assert "capture.log" in message
-
-
-@pytest.mark.parametrize("correlation_id", [_CORRELATION_ID, UUID(_CORRELATION_ID)])
-def test_typed_transport_refusal_and_written_envelope(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, correlation_id: str | UUID
-) -> None:
-    monkeypatch.setattr(cli_delegate, "_resolve_transport_bound", lambda: (3, 12.5))
-    addressing = ModelDelegateRunAddressing(
-        locus=EnumDelegateLocus.DEPLOYED_LANE, bus="kafka", lane="dev"
-    )
-    envelope = _envelope(
-        runtime_error_is_transport=True,
-        runtime_error_type="InfraConnectionError",
-        error=f"connection failed: {_CONNECTION}",
-    )
-    envelope["correlation_id"] = correlation_id
-    assert failure.pre_publish_failure_from_receipt(envelope) is None
-    refusal = cli_delegate._transport_refusal_from_receipt(
-        envelope=envelope,
-        addressing=addressing,
-        broker="db.example:5432",
-        command_topic="fixture-topic",
-    )
-    assert isinstance(refusal, ModelDelegateTransportRefusal)
-    assert refusal.model_dump(mode="json") == {
-        "awaited": "broker_connection",
-        "reason": "broker_unreachable",
-        "correlation_id": _CORRELATION_ID,
-        "bus": "kafka",
-        "locus": "deployed-lane",
-        "broker": "db.example:5432",
-        "command_topic": "fixture-topic",
-        "attempts_permitted": 3,
-        "bound_seconds": 12.5,
-        "elapsed_seconds": 1.25,
-        "transport_error_type": "InfraConnectionError",
-        "transport_error": "[REDACTED - potentially sensitive data]",
-        "remediation": "",
-    }
-    cli_delegate._write_transport_refusal_run_files(
-        refusal=refusal,
-        run_id=_RUN_ID,
-        state_root=tmp_path,
-        prompt="fixture",
-        task_type="document",
-        task_type_resolution="explicit",
-        addressing=addressing,
-    )
-    run_dir = tmp_path / "runs" / _RUN_ID
-    receipt = json.loads((run_dir / "receipt.json").read_text(encoding="utf-8"))
-    run = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-    assert (
-        receipt["receipt_id"]
-        == receipt["correlation_id"]
-        == run["correlation_id"]
-        == _CORRELATION_ID
-    )
-    assert receipt["run_id"] == run["run_id"] == _RUN_ID
-    assert receipt["status"] == "failed"
-    assert receipt["terminal_class"] == "transport"
-    assert receipt["terminal_failure_cause"] is None
-    assert receipt["attempts"] == []
-    assert receipt["route_attributed"] is False
-    assert receipt["transport_refusal"] == refusal.model_dump(mode="json")
-    assert (run_dir / "result.txt").read_text(encoding="utf-8") == ""
-    for path in run_dir.iterdir():
-        assert "fixture_password" not in path.read_text(encoding="utf-8")
-
-
-@pytest.mark.parametrize("correlation_id", [None, "not-a-uuid"])
-def test_transport_refusal_rejects_invalid_correlation(
-    monkeypatch: pytest.MonkeyPatch, correlation_id: object
-) -> None:
-    monkeypatch.setattr(cli_delegate, "_resolve_transport_bound", lambda: (3, 12.5))
-    envelope = _envelope(
-        runtime_error_is_transport=True, runtime_error_type="InfraConnectionError"
-    )
-    envelope["correlation_id"] = correlation_id
-    with pytest.raises(ValueError):
-        cli_delegate._transport_refusal_from_receipt(
-            envelope=envelope,
-            addressing=ModelDelegateRunAddressing(
-                locus=EnumDelegateLocus.DEPLOYED_LANE, bus="kafka"
-            ),
-        )
+    message = _describe(paths)
+    assert f"{_MODEL_PATH} ({provider})" in message

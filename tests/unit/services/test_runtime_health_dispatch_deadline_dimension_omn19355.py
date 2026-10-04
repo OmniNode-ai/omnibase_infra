@@ -37,6 +37,7 @@ def _status(orphaned: int, *, limit: int = 3) -> ModelDispatchDeadlineStatus:
         deadline_seconds=600.0,
         orphan_limit=limit,
         orphaned_dispatches=orphaned,
+        degrading_orphans=orphaned,
         deadline_expiries_total=orphaned,
         oldest_orphan_age_seconds=612.0 if orphaned else 0.0,
         orphans=tuple(ORPHAN for _ in range(orphaned)),
