@@ -161,17 +161,19 @@ STACKS: dict[str, _Stack] = {
         main_services=_MAIN,
         env={"ONEX_PREPR_SLOT": "2"},
     ),
-    "prod": _Stack(
-        files=("docker-compose.infra.yml", "docker-compose.prod.yml"),
-        lane="onex-prod",
-        main_services=_MAIN,
-    ),
 }
 
 #: Compose files that are not a deployed lane stack of their own. A file in
 #: this set must define no service that runs the ``main`` profile, and the
 #: reason it needs no lane is what the value says.
 NOT_A_LANE_STACK: dict[str, str] = {
+    "docker-compose.prod.yml": (
+        "the retired .201 prod compose project: production is the AWS onex-prod "
+        "namespace (OMN-18320) and OMN-19494's own scope drops onex-prod until "
+        "staging works; a line here would also be a runtime-affecting path, "
+        "whose merge fires the dev lane's rebuild trigger, and a prod change "
+        "takes the prod promotion gate (CLAUDE.md rules 2a and 12)"
+    ),
     "docker-compose.e2e.yml": (
         "an ephemeral CI stack whose runtime sets no RUNTIME_PROFILE, so it "
         "resolves to the `default` profile (runtime_profile.py), which owns no "
