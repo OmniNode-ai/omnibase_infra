@@ -1,0 +1,1320 @@
+{
+  "arm": "local-stack",
+  "controller_ntp": {
+    "delay_ms": 17.144,
+    "method": "sntp-inprocess",
+    "offset_ms": 46.651,
+    "offsets_ms": [
+      45.977,
+      45.982,
+      46.651,
+      43.026
+    ],
+    "samples": 4,
+    "server": "time.apple.com"
+  },
+  "finished_at": "2026-10-01T00:18:28.431547Z",
+  "harness_sha": "edceb7af38913c2b7f9a6c52e432f6213d7ff631",
+  "host": "h101",
+  "kind": "satellite",
+  "params": {
+    "allow_restart": false,
+    "arm": "local-stack",
+    "container_probe": false,
+    "dep_compose_project": "omnibase-infra",
+    "dep_postgres_container": "omnibase-infra-postgres",
+    "dep_rate_seconds": 30.0,
+    "dep_redpanda_container": "omnibase-infra-redpanda",
+    "dep_redpanda_metrics_url": null,
+    "dependency": false,
+    "health_url": null,
+    "host": "h101",
+    "lane": "lab-tenant-bench",
+    "n_health": 5,
+    "n_proj": 50,
+    "n_rtt": 200,
+    "out_dir": "benchmarks/lab-tenant/results/20261001T001541Z",
+    "placement_module": [],
+    "probe_timeout": 900.0,
+    "proj_timeout": 30.0,
+    "proj_warmup": 3,
+    "remote_collect": false,
+    "remote_dependency": false,
+    "rep_gap": 20.0,
+    "reps": 3,
+    "restart_timeout": 900.0,
+    "run_id": "",
+    "skip_placement": false,
+    "summarize": null,
+    "target": null,
+    "warmup": 10
+  },
+  "remote_python": "/opt/homebrew/bin/python3.13",
+  "reps": [
+    {
+      "placement": {
+        "controller": {
+          "admission_min_free_gb": 10.0,
+          "admission_refusal": "mem_avail 7.1G < 10G; macOS memory pressure level 2 >= 2",
+          "cap": 3,
+          "cores": 12,
+          "describe": "h101:cores=12,load1=3.5,free_gb=7.1,pressure=2,coauthor=false,placed=0,cap=3,slots=0,login=claude,ADMISSION-REFUSED(mem_avail 7.1G < 10G; macOS memory pressure level 2 >= 2)",
+          "error": null,
+          "load1": 3.55,
+          "mem_avail_gb": 7.146,
+          "mem_pressure": 2,
+          "path": "~/.omninode/landing-controller/skills/merge-drain/scripts/landing_placement.py",
+          "slots": 0
+        },
+        "plugin_cache": {
+          "admission_min_free_gb": 10.0,
+          "admission_refusal": "mem_avail 7.1G < 10G; macOS memory pressure level 2 >= 2",
+          "cap": 6,
+          "cores": 12,
+          "describe": "h101:cores=12,load1=3.5,free_gb=7.1,pressure=2,coauthor=false,placed=0,cap=6,slots=1,login=claude,ADMISSION-REFUSED(mem_avail 7.1G < 10G; macOS memory pressure level 2 >= 2)",
+          "error": null,
+          "load1": 3.55,
+          "mem_avail_gb": 7.119,
+          "mem_pressure": 2,
+          "path": "~/.claude/plugins/cache/omninode-internal/omni/0.4.151/skills/merge-drain/scripts/landing_placement.py",
+          "slots": 1
+        }
+      },
+      "remote": {
+        "arm": "local-stack",
+        "cold_start": {
+          "last_started_at": {
+            "omninode-dogfood-runtime": "2026-09-28T11:45:22.9209915Z",
+            "omninode-dogfood-runtime-effects": "2026-09-28T11:45:22.923560417Z"
+          },
+          "skipped": "timed restart runs only with --allow-restart on the lab-tenant arm"
+        },
+        "cpu": {
+          "load1": 3.84,
+          "load15": 3.33,
+          "load5": 3.25,
+          "ncpu": 12
+        },
+        "finished_at": "2026-10-01T00:17:12.166588Z",
+        "hostname": "Stickybeatz.local",
+        "memory": {
+          "docker_info": {
+            "MemTotal": 24895844352,
+            "NCPU": 10,
+            "ServerVersion": "29.8.0"
+          },
+          "docker_settings": {
+            "Cpus": 10,
+            "DiskSizeMiB": 1572864,
+            "MemoryMiB": 24320,
+            "SwapMiB": 4096
+          },
+          "docker_stats": [
+            {
+              "cpu_percent": 0.0,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 438409625,
+              "name": "omninode-mini-runner-1",
+              "pids": 20
+            },
+            {
+              "cpu_percent": 11.99,
+              "mem_limit_bytes": 1610612736,
+              "mem_used_bytes": 550816972,
+              "name": "omninode-dogfood-runtime-effects",
+              "pids": 36
+            },
+            {
+              "cpu_percent": 17.64,
+              "mem_limit_bytes": 1610612736,
+              "mem_used_bytes": 686292992,
+              "name": "omninode-dogfood-runtime",
+              "pids": 34
+            },
+            {
+              "cpu_percent": 0.32,
+              "mem_limit_bytes": 1610612736,
+              "mem_used_bytes": 325058560,
+              "name": "omnimarket-dogfood-projection-api",
+              "pids": 13
+            },
+            {
+              "cpu_percent": 0.0,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 1634729,
+              "name": "omnibase-infra-dogfood-migration-gate",
+              "pids": 2
+            },
+            {
+              "cpu_percent": 0.09,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 212022067,
+              "name": "omnibase-infra-dogfood-postgres",
+              "pids": 13
+            },
+            {
+              "cpu_percent": 14.16,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 2120640102,
+              "name": "omnibase-infra-dogfood-redpanda",
+              "pids": 3
+            },
+            {
+              "cpu_percent": 0.31,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 10403971,
+              "name": "omnibase-infra-dogfood-valkey",
+              "pids": 6
+            }
+          ],
+          "docker_vm": {
+            "footprint_bytes": 25769803776,
+            "processes": [
+              {
+                "footprint_bytes": 25769803776,
+                "pid": 12302,
+                "rss_bytes": 6050906112
+              }
+            ],
+            "rss_bytes": 6050906112
+          },
+          "hw_memsize_bytes": 34359738368,
+          "pressure_level": 2,
+          "swapusage": {
+            "free_mib": 1818.5,
+            "total_mib": 9216.0,
+            "used_mib": 7397.5
+          },
+          "vm_stat": {
+            "active_bytes": 7337541632,
+            "available_bytes": 7399440384,
+            "compressed_bytes": 15880470528,
+            "free_bytes": 70385664,
+            "inactive_bytes": 7301070848,
+            "page_size": 16384,
+            "purgeable_bytes": 294912,
+            "speculative_bytes": 27983872,
+            "stored_in_compressor_bytes": 42315710464,
+            "wired_bytes": 2977841152
+          }
+        },
+        "ntp": {
+          "delay_ms": 12.347,
+          "method": "sntp-inprocess",
+          "offset_ms": 4.252,
+          "offsets_ms": [
+            5.438,
+            5.044,
+            4.252,
+            4.435
+          ],
+          "samples": 4,
+          "server": "time.apple.com"
+        },
+        "probe": {
+          "bus": {
+            "cleanup": {
+              "group:dogfood.bench-lab-tenant.20261001t001659-1a318f.echo": "absent",
+              "topic:bench.lab-tenant.20261001t001659-1a318f.ack": "deleted",
+              "topic:bench.lab-tenant.20261001t001659-1a318f.req": "deleted"
+            },
+            "commit": {
+              "max_ms": 2.731,
+              "mean_ms": 0.266,
+              "min_ms": 0.169,
+              "n": 200,
+              "p50_ms": 0.236,
+              "p95_ms": 0.339,
+              "p99_ms": 0.575
+            },
+            "created": [
+              "bench.lab-tenant.20261001t001659-1a318f.req",
+              "bench.lab-tenant.20261001t001659-1a318f.ack"
+            ],
+            "failures": 0,
+            "groups": [
+              "dogfood.bench-lab-tenant.20261001t001659-1a318f.echo"
+            ],
+            "oneway": {
+              "max_ms": 1.401,
+              "mean_ms": 0.151,
+              "min_ms": 0.106,
+              "n": 200,
+              "p50_ms": 0.133,
+              "p95_ms": 0.219,
+              "p99_ms": 0.288
+            },
+            "roundtrip": {
+              "max_ms": 3.144,
+              "mean_ms": 0.576,
+              "min_ms": 0.392,
+              "n": 200,
+              "p50_ms": 0.522,
+              "p95_ms": 0.775,
+              "p99_ms": 1.71
+            },
+            "topics": [
+              "bench.lab-tenant.20261001t001659-1a318f.req",
+              "bench.lab-tenant.20261001t001659-1a318f.ack"
+            ],
+            "warmup": 10
+          },
+          "bus_config": {
+            "bootstrap": "redpanda:9092",
+            "environment": "dogfood",
+            "security_protocol": "PLAINTEXT",
+            "topic_namespace": ""
+          },
+          "bus_oneway": {
+            "max_ms": 1.401,
+            "mean_ms": 0.151,
+            "min_ms": 0.106,
+            "n": 200,
+            "p50_ms": 0.133,
+            "p95_ms": 0.219,
+            "p99_ms": 0.288
+          },
+          "bus_roundtrip": {
+            "max_ms": 3.144,
+            "mean_ms": 0.576,
+            "min_ms": 0.392,
+            "n": 200,
+            "p50_ms": 0.522,
+            "p95_ms": 0.775,
+            "p99_ms": 1.71
+          },
+          "finished_at": "2026-10-01T00:17:11.618212Z",
+          "health": {
+            "first_ms": 9.922,
+            "max_ms": 9.922,
+            "mean_ms": 2.538,
+            "min_ms": 0.55,
+            "n": 5,
+            "p50_ms": 0.708,
+            "p95_ms": 8.119,
+            "p99_ms": 9.562,
+            "status_codes": [
+              200,
+              200,
+              200,
+              200,
+              200
+            ]
+          },
+          "postgres_host": "postgres",
+          "projection": {
+            "cleanup": {
+              "event_ledger_rows_deleted": 53,
+              "topic_trimmed_to": 218
+            },
+            "database_env": "OMNIBASE_INFRA_DB_URL",
+            "delivered": 53,
+            "log_after": {
+              "high": 218,
+              "low": 165
+            },
+            "log_before": {
+              "high": 165,
+              "low": 165
+            },
+            "max_ms": 8.063,
+            "mean_ms": 6.806,
+            "min_ms": 5.549,
+            "n": 50,
+            "p50_ms": 6.71,
+            "p95_ms": 8.045,
+            "p99_ms": 8.061,
+            "publish_ack": {
+              "max_ms": 0.349,
+              "mean_ms": 0.212,
+              "min_ms": 0.147,
+              "n": 50,
+              "p50_ms": 0.206,
+              "p95_ms": 0.275,
+              "p99_ms": 0.326
+            },
+            "table": "event_ledger",
+            "timeouts": 0,
+            "topic": "onex.evt.steel-onslaught.match-terminal.v1",
+            "warmup": 3
+          },
+          "role": "container-probe",
+          "started_at": "2026-10-01T00:17:03.685332Z"
+        },
+        "role": "remote-collect",
+        "runtime": {
+          "omninode-dogfood-runtime": {
+            "compose_project": "omnibase-infra-dogfood",
+            "health": "healthy",
+            "healthcheck_url": "http://localhost:8085/health",
+            "image": "omnibase-infra-dogfood-omninode-runtime",
+            "last_health_probe": "2026-10-01T00:16:49.388217846Z",
+            "present": true,
+            "restart_count": 0,
+            "started_at": "2026-09-28T11:45:22.9209915Z",
+            "status": "running"
+          },
+          "omninode-dogfood-runtime-effects": {
+            "compose_project": "omnibase-infra-dogfood",
+            "health": "healthy",
+            "healthcheck_url": "http://localhost:8085/health",
+            "image": "omnibase-infra-dogfood-runtime-effects",
+            "last_health_probe": "2026-10-01T00:16:58.376467794Z",
+            "present": true,
+            "restart_count": 0,
+            "started_at": "2026-09-28T11:45:22.923560417Z",
+            "status": "running"
+          }
+        },
+        "started_at": "2026-10-01T00:16:59.643859Z"
+      },
+      "rep": 1,
+      "run_id": "20261001t001659-1a318f"
+    },
+    {
+      "placement": {
+        "controller": {
+          "admission_min_free_gb": 10.0,
+          "admission_refusal": "mem_avail 7.1G < 10G; macOS memory pressure level 2 >= 2",
+          "cap": 3,
+          "cores": 12,
+          "describe": "h101:cores=12,load1=2.7,free_gb=7.1,pressure=2,coauthor=false,placed=0,cap=3,slots=0,login=claude,ADMISSION-REFUSED(mem_avail 7.1G < 10G; macOS memory pressure level 2 >= 2)",
+          "error": null,
+          "load1": 2.69,
+          "mem_avail_gb": 7.142,
+          "mem_pressure": 2,
+          "path": "~/.omninode/landing-controller/skills/merge-drain/scripts/landing_placement.py",
+          "slots": 0
+        },
+        "plugin_cache": {
+          "admission_min_free_gb": 10.0,
+          "admission_refusal": "mem_avail 7.1G < 10G; macOS memory pressure level 2 >= 2",
+          "cap": 6,
+          "cores": 12,
+          "describe": "h101:cores=12,load1=2.7,free_gb=7.1,pressure=2,coauthor=false,placed=0,cap=6,slots=1,login=claude,ADMISSION-REFUSED(mem_avail 7.1G < 10G; macOS memory pressure level 2 >= 2)",
+          "error": null,
+          "load1": 2.66,
+          "mem_avail_gb": 7.126,
+          "mem_pressure": 2,
+          "path": "~/.claude/plugins/cache/omninode-internal/omni/0.4.151/skills/merge-drain/scripts/landing_placement.py",
+          "slots": 1
+        }
+      },
+      "remote": {
+        "arm": "local-stack",
+        "cold_start": {
+          "last_started_at": {
+            "omninode-dogfood-runtime": "2026-09-28T11:45:22.9209915Z",
+            "omninode-dogfood-runtime-effects": "2026-09-28T11:45:22.923560417Z"
+          },
+          "skipped": "timed restart runs only with --allow-restart on the lab-tenant arm"
+        },
+        "cpu": {
+          "load1": 3.02,
+          "load15": 3.27,
+          "load5": 3.11,
+          "ncpu": 12
+        },
+        "finished_at": "2026-10-01T00:17:49.108828Z",
+        "hostname": "Stickybeatz.local",
+        "memory": {
+          "docker_info": {
+            "MemTotal": 24895844352,
+            "NCPU": 10,
+            "ServerVersion": "29.8.0"
+          },
+          "docker_settings": {
+            "Cpus": 10,
+            "DiskSizeMiB": 1572864,
+            "MemoryMiB": 24320,
+            "SwapMiB": 4096
+          },
+          "docker_stats": [
+            {
+              "cpu_percent": 0.0,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 437361049,
+              "name": "omninode-mini-runner-1",
+              "pids": 19
+            },
+            {
+              "cpu_percent": 15.79,
+              "mem_limit_bytes": 1610612736,
+              "mem_used_bytes": 550502400,
+              "name": "omninode-dogfood-runtime-effects",
+              "pids": 36
+            },
+            {
+              "cpu_percent": 19.44,
+              "mem_limit_bytes": 1610612736,
+              "mem_used_bytes": 686607564,
+              "name": "omninode-dogfood-runtime",
+              "pids": 34
+            },
+            {
+              "cpu_percent": 0.36,
+              "mem_limit_bytes": 1610612736,
+              "mem_used_bytes": 324848844,
+              "name": "omnimarket-dogfood-projection-api",
+              "pids": 13
+            },
+            {
+              "cpu_percent": 0.0,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 1851785,
+              "name": "omnibase-infra-dogfood-migration-gate",
+              "pids": 2
+            },
+            {
+              "cpu_percent": 0.15,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 211602636,
+              "name": "omnibase-infra-dogfood-postgres",
+              "pids": 13
+            },
+            {
+              "cpu_percent": 12.46,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 2120640102,
+              "name": "omnibase-infra-dogfood-redpanda",
+              "pids": 3
+            },
+            {
+              "cpu_percent": 0.32,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 10428088,
+              "name": "omnibase-infra-dogfood-valkey",
+              "pids": 6
+            }
+          ],
+          "docker_vm": {
+            "footprint_bytes": 25769803776,
+            "processes": [
+              {
+                "footprint_bytes": 25769803776,
+                "pid": 12302,
+                "rss_bytes": 6687916032
+              }
+            ],
+            "rss_bytes": 6687916032
+          },
+          "hw_memsize_bytes": 34359738368,
+          "pressure_level": 2,
+          "swapusage": {
+            "free_mib": 802.44,
+            "total_mib": 8192.0,
+            "used_mib": 7389.56
+          },
+          "vm_stat": {
+            "active_bytes": 7650394112,
+            "available_bytes": 7695400960,
+            "compressed_bytes": 15283912704,
+            "free_bytes": 62914560,
+            "inactive_bytes": 7621935104,
+            "page_size": 16384,
+            "purgeable_bytes": 425984,
+            "speculative_bytes": 10551296,
+            "stored_in_compressor_bytes": 41614311424,
+            "wired_bytes": 2964750336
+          }
+        },
+        "ntp": {
+          "delay_ms": 14.386,
+          "method": "sntp-inprocess",
+          "offset_ms": 4.619,
+          "offsets_ms": [
+            5.704,
+            6.268,
+            4.619
+          ],
+          "samples": 3,
+          "server": "time.apple.com"
+        },
+        "probe": {
+          "bus": {
+            "cleanup": {
+              "group:dogfood.bench-lab-tenant.20261001t001733-40d06e.echo": "absent",
+              "topic:bench.lab-tenant.20261001t001733-40d06e.ack": "deleted",
+              "topic:bench.lab-tenant.20261001t001733-40d06e.req": "deleted"
+            },
+            "commit": {
+              "max_ms": 0.386,
+              "mean_ms": 0.271,
+              "min_ms": 0.225,
+              "n": 200,
+              "p50_ms": 0.265,
+              "p95_ms": 0.321,
+              "p99_ms": 0.351
+            },
+            "created": [
+              "bench.lab-tenant.20261001t001733-40d06e.req",
+              "bench.lab-tenant.20261001t001733-40d06e.ack"
+            ],
+            "failures": 0,
+            "groups": [
+              "dogfood.bench-lab-tenant.20261001t001733-40d06e.echo"
+            ],
+            "oneway": {
+              "max_ms": 0.28,
+              "mean_ms": 0.15,
+              "min_ms": 0.113,
+              "n": 200,
+              "p50_ms": 0.146,
+              "p95_ms": 0.197,
+              "p99_ms": 0.225
+            },
+            "roundtrip": {
+              "max_ms": 0.895,
+              "mean_ms": 0.588,
+              "min_ms": 0.498,
+              "n": 200,
+              "p50_ms": 0.577,
+              "p95_ms": 0.705,
+              "p99_ms": 0.804
+            },
+            "topics": [
+              "bench.lab-tenant.20261001t001733-40d06e.req",
+              "bench.lab-tenant.20261001t001733-40d06e.ack"
+            ],
+            "warmup": 10
+          },
+          "bus_config": {
+            "bootstrap": "redpanda:9092",
+            "environment": "dogfood",
+            "security_protocol": "PLAINTEXT",
+            "topic_namespace": ""
+          },
+          "bus_oneway": {
+            "max_ms": 0.28,
+            "mean_ms": 0.15,
+            "min_ms": 0.113,
+            "n": 200,
+            "p50_ms": 0.146,
+            "p95_ms": 0.197,
+            "p99_ms": 0.225
+          },
+          "bus_roundtrip": {
+            "max_ms": 0.895,
+            "mean_ms": 0.588,
+            "min_ms": 0.498,
+            "n": 200,
+            "p50_ms": 0.577,
+            "p95_ms": 0.705,
+            "p99_ms": 0.804
+          },
+          "finished_at": "2026-10-01T00:17:48.577847Z",
+          "health": {
+            "first_ms": 10.036,
+            "max_ms": 10.036,
+            "mean_ms": 2.681,
+            "min_ms": 0.734,
+            "n": 5,
+            "p50_ms": 0.845,
+            "p95_ms": 8.236,
+            "p99_ms": 9.676,
+            "status_codes": [
+              200,
+              200,
+              200,
+              200,
+              200
+            ]
+          },
+          "postgres_host": "postgres",
+          "projection": {
+            "cleanup": {
+              "event_ledger_rows_deleted": 53,
+              "topic_trimmed_to": 271
+            },
+            "database_env": "OMNIBASE_INFRA_DB_URL",
+            "delivered": 53,
+            "log_after": {
+              "high": 271,
+              "low": 218
+            },
+            "log_before": {
+              "high": 218,
+              "low": 218
+            },
+            "max_ms": 7.978,
+            "mean_ms": 6.808,
+            "min_ms": 5.538,
+            "n": 50,
+            "p50_ms": 6.823,
+            "p95_ms": 7.879,
+            "p99_ms": 7.963,
+            "publish_ack": {
+              "max_ms": 0.266,
+              "mean_ms": 0.181,
+              "min_ms": 0.137,
+              "n": 50,
+              "p50_ms": 0.175,
+              "p95_ms": 0.237,
+              "p99_ms": 0.262
+            },
+            "table": "event_ledger",
+            "timeouts": 0,
+            "topic": "onex.evt.steel-onslaught.match-terminal.v1",
+            "warmup": 3
+          },
+          "role": "container-probe",
+          "started_at": "2026-10-01T00:17:40.618817Z"
+        },
+        "role": "remote-collect",
+        "runtime": {
+          "omninode-dogfood-runtime": {
+            "compose_project": "omnibase-infra-dogfood",
+            "health": "healthy",
+            "healthcheck_url": "http://localhost:8085/health",
+            "image": "omnibase-infra-dogfood-omninode-runtime",
+            "last_health_probe": "2026-10-01T00:17:19.416277554Z",
+            "present": true,
+            "restart_count": 0,
+            "started_at": "2026-09-28T11:45:22.9209915Z",
+            "status": "running"
+          },
+          "omninode-dogfood-runtime-effects": {
+            "compose_project": "omnibase-infra-dogfood",
+            "health": "healthy",
+            "healthcheck_url": "http://localhost:8085/health",
+            "image": "omnibase-infra-dogfood-runtime-effects",
+            "last_health_probe": "2026-10-01T00:17:28.400502294Z",
+            "present": true,
+            "restart_count": 0,
+            "started_at": "2026-09-28T11:45:22.923560417Z",
+            "status": "running"
+          }
+        },
+        "started_at": "2026-10-01T00:17:34.043369Z"
+      },
+      "rep": 2,
+      "run_id": "20261001t001733-40d06e"
+    },
+    {
+      "placement": {
+        "controller": {
+          "admission_min_free_gb": 10.0,
+          "admission_refusal": "mem_avail 7.2G < 10G; macOS memory pressure level 2 >= 2",
+          "cap": 3,
+          "cores": 12,
+          "describe": "h101:cores=12,load1=3.8,free_gb=7.2,pressure=2,coauthor=false,placed=0,cap=3,slots=0,login=claude,ADMISSION-REFUSED(mem_avail 7.2G < 10G; macOS memory pressure level 2 >= 2)",
+          "error": null,
+          "load1": 3.76,
+          "mem_avail_gb": 7.176,
+          "mem_pressure": 2,
+          "path": "~/.omninode/landing-controller/skills/merge-drain/scripts/landing_placement.py",
+          "slots": 0
+        },
+        "plugin_cache": {
+          "admission_min_free_gb": 10.0,
+          "admission_refusal": "mem_avail 7.2G < 10G; macOS memory pressure level 2 >= 2",
+          "cap": 6,
+          "cores": 12,
+          "describe": "h101:cores=12,load1=3.8,free_gb=7.2,pressure=2,coauthor=false,placed=0,cap=6,slots=1,login=claude,ADMISSION-REFUSED(mem_avail 7.2G < 10G; macOS memory pressure level 2 >= 2)",
+          "error": null,
+          "load1": 3.76,
+          "mem_avail_gb": 7.154,
+          "mem_pressure": 2,
+          "path": "~/.claude/plugins/cache/omninode-internal/omni/0.4.151/skills/merge-drain/scripts/landing_placement.py",
+          "slots": 1
+        }
+      },
+      "remote": {
+        "arm": "local-stack",
+        "cold_start": {
+          "last_started_at": {
+            "omninode-dogfood-runtime": "2026-09-28T11:45:22.9209915Z",
+            "omninode-dogfood-runtime-effects": "2026-09-28T11:45:22.923560417Z"
+          },
+          "skipped": "timed restart runs only with --allow-restart on the lab-tenant arm"
+        },
+        "cpu": {
+          "load1": 3.01,
+          "load15": 3.25,
+          "load5": 3.08,
+          "ncpu": 12
+        },
+        "finished_at": "2026-10-01T00:18:26.708401Z",
+        "hostname": "Stickybeatz.local",
+        "memory": {
+          "docker_info": {
+            "MemTotal": 24895844352,
+            "NCPU": 10,
+            "ServerVersion": "29.8.0"
+          },
+          "docker_settings": {
+            "Cpus": 10,
+            "DiskSizeMiB": 1572864,
+            "MemoryMiB": 24320,
+            "SwapMiB": 4096
+          },
+          "docker_stats": [
+            {
+              "cpu_percent": 0.0,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 437361049,
+              "name": "omninode-mini-runner-1",
+              "pids": 19
+            },
+            {
+              "cpu_percent": 10.68,
+              "mem_limit_bytes": 1610612736,
+              "mem_used_bytes": 550502400,
+              "name": "omninode-dogfood-runtime-effects",
+              "pids": 36
+            },
+            {
+              "cpu_percent": 15.38,
+              "mem_limit_bytes": 1610612736,
+              "mem_used_bytes": 686292992,
+              "name": "omninode-dogfood-runtime",
+              "pids": 34
+            },
+            {
+              "cpu_percent": 0.28,
+              "mem_limit_bytes": 1610612736,
+              "mem_used_bytes": 324534272,
+              "name": "omnimarket-dogfood-projection-api",
+              "pids": 13
+            },
+            {
+              "cpu_percent": 4.16,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 1998585,
+              "name": "omnibase-infra-dogfood-migration-gate",
+              "pids": 2
+            },
+            {
+              "cpu_percent": 1.55,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 210973491,
+              "name": "omnibase-infra-dogfood-postgres",
+              "pids": 13
+            },
+            {
+              "cpu_percent": 12.0,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 2119566360,
+              "name": "omnibase-infra-dogfood-redpanda",
+              "pids": 3
+            },
+            {
+              "cpu_percent": 0.28,
+              "mem_limit_bytes": 24900072898,
+              "mem_used_bytes": 10936647,
+              "name": "omnibase-infra-dogfood-valkey",
+              "pids": 6
+            }
+          ],
+          "docker_vm": {
+            "footprint_bytes": 25769803776,
+            "processes": [
+              {
+                "footprint_bytes": 25769803776,
+                "pid": 12302,
+                "rss_bytes": 6737297408
+              }
+            ],
+            "rss_bytes": 6737297408
+          },
+          "hw_memsize_bytes": 34359738368,
+          "pressure_level": 2,
+          "swapusage": {
+            "free_mib": 802.44,
+            "total_mib": 8192.0,
+            "used_mib": 7389.56
+          },
+          "vm_stat": {
+            "active_bytes": 7675822080,
+            "available_bytes": 7723515904,
+            "compressed_bytes": 15233777664,
+            "free_bytes": 64290816,
+            "inactive_bytes": 7650951168,
+            "page_size": 16384,
+            "purgeable_bytes": 294912,
+            "speculative_bytes": 8273920,
+            "stored_in_compressor_bytes": 41627320320,
+            "wired_bytes": 2961293312
+          }
+        },
+        "ntp": {
+          "delay_ms": 15.037,
+          "method": "sntp-inprocess",
+          "offset_ms": 4.629,
+          "offsets_ms": [
+            4.185,
+            4.629,
+            4.723
+          ],
+          "samples": 3,
+          "server": "time.apple.com"
+        },
+        "probe": {
+          "bus": {
+            "cleanup": {
+              "group:dogfood.bench-lab-tenant.20261001t001810-7991a7.echo": "absent",
+              "topic:bench.lab-tenant.20261001t001810-7991a7.ack": "deleted",
+              "topic:bench.lab-tenant.20261001t001810-7991a7.req": "deleted"
+            },
+            "commit": {
+              "max_ms": 1.015,
+              "mean_ms": 0.288,
+              "min_ms": 0.21,
+              "n": 200,
+              "p50_ms": 0.275,
+              "p95_ms": 0.372,
+              "p99_ms": 0.516
+            },
+            "created": [
+              "bench.lab-tenant.20261001t001810-7991a7.req",
+              "bench.lab-tenant.20261001t001810-7991a7.ack"
+            ],
+            "failures": 0,
+            "groups": [
+              "dogfood.bench-lab-tenant.20261001t001810-7991a7.echo"
+            ],
+            "oneway": {
+              "max_ms": 0.335,
+              "mean_ms": 0.163,
+              "min_ms": 0.114,
+              "n": 200,
+              "p50_ms": 0.155,
+              "p95_ms": 0.226,
+              "p99_ms": 0.306
+            },
+            "roundtrip": {
+              "max_ms": 1.489,
+              "mean_ms": 0.626,
+              "min_ms": 0.482,
+              "n": 200,
+              "p50_ms": 0.605,
+              "p95_ms": 0.779,
+              "p99_ms": 0.889
+            },
+            "topics": [
+              "bench.lab-tenant.20261001t001810-7991a7.req",
+              "bench.lab-tenant.20261001t001810-7991a7.ack"
+            ],
+            "warmup": 10
+          },
+          "bus_config": {
+            "bootstrap": "redpanda:9092",
+            "environment": "dogfood",
+            "security_protocol": "PLAINTEXT",
+            "topic_namespace": ""
+          },
+          "bus_oneway": {
+            "max_ms": 0.335,
+            "mean_ms": 0.163,
+            "min_ms": 0.114,
+            "n": 200,
+            "p50_ms": 0.155,
+            "p95_ms": 0.226,
+            "p99_ms": 0.306
+          },
+          "bus_roundtrip": {
+            "max_ms": 1.489,
+            "mean_ms": 0.626,
+            "min_ms": 0.482,
+            "n": 200,
+            "p50_ms": 0.605,
+            "p95_ms": 0.779,
+            "p99_ms": 0.889
+          },
+          "finished_at": "2026-10-01T00:18:26.186907Z",
+          "health": {
+            "first_ms": 9.979,
+            "max_ms": 9.979,
+            "mean_ms": 2.69,
+            "min_ms": 0.749,
+            "n": 5,
+            "p50_ms": 0.956,
+            "p95_ms": 8.176,
+            "p99_ms": 9.619,
+            "status_codes": [
+              200,
+              200,
+              200,
+              200,
+              200
+            ]
+          },
+          "postgres_host": "postgres",
+          "projection": {
+            "cleanup": {
+              "event_ledger_rows_deleted": 53,
+              "topic_trimmed_to": 324
+            },
+            "database_env": "OMNIBASE_INFRA_DB_URL",
+            "delivered": 53,
+            "log_after": {
+              "high": 324,
+              "low": 271
+            },
+            "log_before": {
+              "high": 271,
+              "low": 271
+            },
+            "max_ms": 13.252,
+            "mean_ms": 7.316,
+            "min_ms": 5.691,
+            "n": 50,
+            "p50_ms": 7.557,
+            "p95_ms": 8.163,
+            "p99_ms": 10.79,
+            "publish_ack": {
+              "max_ms": 0.477,
+              "mean_ms": 0.231,
+              "min_ms": 0.163,
+              "n": 50,
+              "p50_ms": 0.207,
+              "p95_ms": 0.379,
+              "p99_ms": 0.467
+            },
+            "table": "event_ledger",
+            "timeouts": 0,
+            "topic": "onex.evt.steel-onslaught.match-terminal.v1",
+            "warmup": 3
+          },
+          "role": "container-probe",
+          "started_at": "2026-10-01T00:18:17.884952Z"
+        },
+        "role": "remote-collect",
+        "runtime": {
+          "omninode-dogfood-runtime": {
+            "compose_project": "omnibase-infra-dogfood",
+            "health": "healthy",
+            "healthcheck_url": "http://localhost:8085/health",
+            "image": "omnibase-infra-dogfood-omninode-runtime",
+            "last_health_probe": "2026-10-01T00:17:49.449050971Z",
+            "present": true,
+            "restart_count": 0,
+            "started_at": "2026-09-28T11:45:22.9209915Z",
+            "status": "running"
+          },
+          "omninode-dogfood-runtime-effects": {
+            "compose_project": "omnibase-infra-dogfood",
+            "health": "healthy",
+            "healthcheck_url": "http://localhost:8085/health",
+            "image": "omnibase-infra-dogfood-runtime-effects",
+            "last_health_probe": "2026-10-01T00:17:58.424547169Z",
+            "present": true,
+            "restart_count": 0,
+            "started_at": "2026-09-28T11:45:22.923560417Z",
+            "status": "running"
+          }
+        },
+        "started_at": "2026-10-01T00:18:10.957104Z"
+      },
+      "rep": 3,
+      "run_id": "20261001t001810-7991a7"
+    }
+  ],
+  "schema": "bench-lab-tenant.v1",
+  "started_at": "2026-10-01T00:16:59.293857Z",
+  "summary": {
+    "bus_oneway.p50_ms": {
+      "max": 0.155,
+      "median": 0.146,
+      "min": 0.133,
+      "n": 3,
+      "spread": 0.022
+    },
+    "bus_oneway.p95_ms": {
+      "max": 0.226,
+      "median": 0.219,
+      "min": 0.197,
+      "n": 3,
+      "spread": 0.029
+    },
+    "bus_oneway.p99_ms": {
+      "max": 0.306,
+      "median": 0.288,
+      "min": 0.225,
+      "n": 3,
+      "spread": 0.081
+    },
+    "bus_roundtrip.p50_ms": {
+      "max": 0.605,
+      "median": 0.577,
+      "min": 0.522,
+      "n": 3,
+      "spread": 0.083
+    },
+    "bus_roundtrip.p95_ms": {
+      "max": 0.779,
+      "median": 0.775,
+      "min": 0.705,
+      "n": 3,
+      "spread": 0.074
+    },
+    "bus_roundtrip.p99_ms": {
+      "max": 1.71,
+      "median": 0.889,
+      "min": 0.804,
+      "n": 3,
+      "spread": 0.906
+    },
+    "health.p50_ms": {
+      "max": 0.956,
+      "median": 0.845,
+      "min": 0.708,
+      "n": 3,
+      "spread": 0.248
+    },
+    "health.p95_ms": {
+      "max": 8.236,
+      "median": 8.176,
+      "min": 8.119,
+      "n": 3,
+      "spread": 0.117
+    },
+    "health.p99_ms": {
+      "max": 9.676,
+      "median": 9.619,
+      "min": 9.562,
+      "n": 3,
+      "spread": 0.114
+    },
+    "mem.container.omnibase-infra-dogfood-migration-gate_mib": {
+      "max": 1.9,
+      "median": 1.8,
+      "min": 1.6,
+      "n": 3,
+      "spread": 0.3
+    },
+    "mem.container.omnibase-infra-dogfood-postgres_mib": {
+      "max": 202.2,
+      "median": 201.8,
+      "min": 201.2,
+      "n": 3,
+      "spread": 1.0
+    },
+    "mem.container.omnibase-infra-dogfood-redpanda_mib": {
+      "max": 2022.4,
+      "median": 2022.4,
+      "min": 2021.4,
+      "n": 3,
+      "spread": 1.0
+    },
+    "mem.container.omnibase-infra-dogfood-valkey_mib": {
+      "max": 10.4,
+      "median": 9.9,
+      "min": 9.9,
+      "n": 3,
+      "spread": 0.5
+    },
+    "mem.container.omnimarket-dogfood-projection-api_mib": {
+      "max": 310.0,
+      "median": 309.8,
+      "min": 309.5,
+      "n": 3,
+      "spread": 0.5
+    },
+    "mem.container.omninode-dogfood-runtime-effects_mib": {
+      "max": 525.3,
+      "median": 525.0,
+      "min": 525.0,
+      "n": 3,
+      "spread": 0.3
+    },
+    "mem.container.omninode-dogfood-runtime_mib": {
+      "max": 654.8,
+      "median": 654.5,
+      "min": 654.5,
+      "n": 3,
+      "spread": 0.3
+    },
+    "mem.container.omninode-mini-runner-1_mib": {
+      "max": 418.1,
+      "median": 417.1,
+      "min": 417.1,
+      "n": 3,
+      "spread": 1.0
+    },
+    "mem.containers.total_gb": {
+      "max": 4.047,
+      "median": 4.046,
+      "min": 4.044,
+      "n": 3,
+      "spread": 0.003
+    },
+    "mem.docker_vm.configured_gb": {
+      "max": 23.75,
+      "median": 23.75,
+      "min": 23.75,
+      "n": 3,
+      "spread": 0.0
+    },
+    "mem.docker_vm.footprint_gb": {
+      "max": 24.0,
+      "median": 24.0,
+      "min": 24.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "mem.docker_vm.rss_gb": {
+      "max": 6.275,
+      "median": 6.229,
+      "min": 5.635,
+      "n": 3,
+      "spread": 0.64
+    },
+    "mem.host.active_gb": {
+      "max": 7.149,
+      "median": 7.125,
+      "min": 6.834,
+      "n": 3,
+      "spread": 0.315
+    },
+    "mem.host.available_gb": {
+      "max": 7.193,
+      "median": 7.167,
+      "min": 6.891,
+      "n": 3,
+      "spread": 0.302
+    },
+    "mem.host.compressed_gb": {
+      "max": 14.79,
+      "median": 14.234,
+      "min": 14.188,
+      "n": 3,
+      "spread": 0.602
+    },
+    "mem.host.free_gb": {
+      "max": 0.066,
+      "median": 0.06,
+      "min": 0.059,
+      "n": 3,
+      "spread": 0.007
+    },
+    "mem.host.inactive_gb": {
+      "max": 7.126,
+      "median": 7.098,
+      "min": 6.8,
+      "n": 3,
+      "spread": 0.326
+    },
+    "mem.host.pressure_level": {
+      "max": 2.0,
+      "median": 2.0,
+      "min": 2.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "mem.host.speculative_gb": {
+      "max": 0.026,
+      "median": 0.01,
+      "min": 0.008,
+      "n": 3,
+      "spread": 0.018
+    },
+    "mem.host.swap_used_mib": {
+      "max": 7397.5,
+      "median": 7389.56,
+      "min": 7389.56,
+      "n": 3,
+      "spread": 7.94
+    },
+    "mem.host.wired_gb": {
+      "max": 2.773,
+      "median": 2.761,
+      "min": 2.758,
+      "n": 3,
+      "spread": 0.015
+    },
+    "ntp.host_offset_ms": {
+      "max": 4.629,
+      "median": 4.619,
+      "min": 4.252,
+      "n": 3,
+      "spread": 0.377
+    },
+    "placement.controller.admitted": {
+      "max": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "placement.controller.load1": {
+      "max": 3.76,
+      "median": 3.55,
+      "min": 2.69,
+      "n": 3,
+      "spread": 1.07
+    },
+    "placement.controller.mem_avail_gb": {
+      "max": 7.176,
+      "median": 7.146,
+      "min": 7.142,
+      "n": 3,
+      "spread": 0.034
+    },
+    "placement.controller.slots": {
+      "max": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "placement.plugin_cache.admitted": {
+      "max": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "placement.plugin_cache.load1": {
+      "max": 3.76,
+      "median": 3.55,
+      "min": 2.66,
+      "n": 3,
+      "spread": 1.1
+    },
+    "placement.plugin_cache.mem_avail_gb": {
+      "max": 7.154,
+      "median": 7.126,
+      "min": 7.119,
+      "n": 3,
+      "spread": 0.035
+    },
+    "placement.plugin_cache.slots": {
+      "max": 1.0,
+      "median": 1.0,
+      "min": 1.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "projection.p50_ms": {
+      "max": 7.557,
+      "median": 6.823,
+      "min": 6.71,
+      "n": 3,
+      "spread": 0.847
+    },
+    "projection.p95_ms": {
+      "max": 8.163,
+      "median": 8.045,
+      "min": 7.879,
+      "n": 3,
+      "spread": 0.284
+    },
+    "projection.p99_ms": {
+      "max": 10.79,
+      "median": 8.061,
+      "min": 7.963,
+      "n": 3,
+      "spread": 2.827
+    },
+    "projection.timeouts": {
+      "max": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 3,
+      "spread": 0.0
+    }
+  },
+  "target": "192.168.86.101",
+  "ticket": "OMN-20213"
+}

@@ -1,0 +1,1209 @@
+{
+  "arm": "local-stack",
+  "controller_ntp": {
+    "delay_ms": 16.616,
+    "method": "sntp-inprocess",
+    "offset_ms": 46.928,
+    "offsets_ms": [
+      47.688,
+      46.989,
+      46.928,
+      47.185
+    ],
+    "samples": 4,
+    "server": "time.apple.com"
+  },
+  "finished_at": "2026-10-01T00:21:01.158679Z",
+  "harness_sha": "edceb7af38913c2b7f9a6c52e432f6213d7ff631",
+  "host": "h201",
+  "kind": "dependency",
+  "params": {
+    "allow_restart": false,
+    "arm": "local-stack",
+    "container_probe": false,
+    "dep_compose_project": "omnibase-infra",
+    "dep_postgres_container": "omnibase-infra-postgres",
+    "dep_rate_seconds": 30.0,
+    "dep_redpanda_container": "omnibase-infra-redpanda",
+    "dep_redpanda_metrics_url": null,
+    "dependency": true,
+    "health_url": null,
+    "host": "h201",
+    "lane": "lab-tenant-bench",
+    "n_health": 5,
+    "n_proj": 50,
+    "n_rtt": 200,
+    "out_dir": "benchmarks/lab-tenant/results/20261001T001541Z",
+    "placement_module": [],
+    "probe_timeout": 900.0,
+    "proj_timeout": 30.0,
+    "proj_warmup": 3,
+    "remote_collect": false,
+    "remote_dependency": false,
+    "rep_gap": 20.0,
+    "reps": 3,
+    "restart_timeout": 900.0,
+    "run_id": "",
+    "skip_placement": false,
+    "summarize": null,
+    "target": null,
+    "warmup": 10
+  },
+  "remote_python": "/usr/bin/python3",
+  "reps": [
+    {
+      "dependency": {
+        "cpu": {
+          "busy_cores": 5.29,
+          "load1": 11.75,
+          "load15": 12.87,
+          "load5": 10.84,
+          "ncpu": 32
+        },
+        "dev_lane_containers": {
+          "count": 26,
+          "cpu_percent_total": 48.86,
+          "mem_total_gb": 2.665,
+          "min_uptime_s": 1418.4,
+          "project": "omnibase-infra",
+          "rows": [
+            {
+              "cpu_percent": 11.25,
+              "mem_used_bytes": 492935577,
+              "name": "omninode-runtime-effects",
+              "started_at": "2026-09-30T23:55:28.412125434Z"
+            },
+            {
+              "cpu_percent": 0.53,
+              "mem_used_bytes": 37161533,
+              "name": "omnibase-infra-runtime-worker-1",
+              "started_at": "2026-09-30T23:55:28.419068156Z"
+            },
+            {
+              "cpu_percent": 0.1,
+              "mem_used_bytes": 16609443,
+              "name": "omninode-contract-resolver",
+              "started_at": "2026-09-30T23:55:28.406129787Z"
+            },
+            {
+              "cpu_percent": 15.35,
+              "mem_used_bytes": 726558310,
+              "name": "omninode-runtime",
+              "started_at": "2026-09-30T23:55:28.147265391Z"
+            },
+            {
+              "cpu_percent": 0.1,
+              "mem_used_bytes": 16682844,
+              "name": "omnibase-intelligence-api",
+              "started_at": "2026-09-30T23:55:28.153459138Z"
+            },
+            {
+              "cpu_percent": 0.95,
+              "mem_used_bytes": 35997614,
+              "name": "omnimarket-tenant-projection-writer",
+              "started_at": "2026-09-30T23:55:26.412881981Z"
+            },
+            {
+              "cpu_percent": 0.15,
+              "mem_used_bytes": 15319695,
+              "name": "omninode-agent-actions-consumer",
+              "started_at": "2026-09-30T23:55:26.512976333Z"
+            },
+            {
+              "cpu_percent": 1.34,
+              "mem_used_bytes": 17668505,
+              "name": "omninode-context-audit-consumer",
+              "started_at": "2026-09-30T23:55:26.563117464Z"
+            },
+            {
+              "cpu_percent": 0.15,
+              "mem_used_bytes": 19472056,
+              "name": "omninode-skill-lifecycle-consumer",
+              "started_at": "2026-09-30T23:55:26.442897217Z"
+            },
+            {
+              "cpu_percent": 0.15,
+              "mem_used_bytes": 20468203,
+              "name": "omnimarket-projection-tenant-registry-writer",
+              "started_at": "2026-09-30T23:55:26.206991307Z"
+            },
+            {
+              "cpu_percent": 0.16,
+              "mem_used_bytes": 16420700,
+              "name": "omnimarket-projection-registration-writer",
+              "started_at": "2026-09-30T23:55:26.237263801Z"
+            },
+            {
+              "cpu_percent": 0.67,
+              "mem_used_bytes": 23393730,
+              "name": "onex-api",
+              "started_at": "2026-09-30T23:55:26.536320674Z"
+            },
+            {
+              "cpu_percent": 0.85,
+              "mem_used_bytes": 581632,
+              "name": "omnibase-infra-autoheal",
+              "started_at": "2026-09-30T23:55:26.170364537Z"
+            },
+            {
+              "cpu_percent": 0.14,
+              "mem_used_bytes": 17605591,
+              "name": "omnimarket-projection-tenant-credentials-writer",
+              "started_at": "2026-09-30T23:55:26.490438736Z"
+            },
+            {
+              "cpu_percent": 0.18,
+              "mem_used_bytes": 16546529,
+              "name": "omnimarket-projection-savings-writer",
+              "started_at": "2026-09-30T23:55:26.522905647Z"
+            },
+            {
+              "cpu_percent": 0.06,
+              "mem_used_bytes": 11974737,
+              "name": "omnimarket-projection-api",
+              "started_at": "2026-09-30T23:55:26.370027813Z"
+            },
+            {
+              "cpu_percent": 0.17,
+              "mem_used_bytes": 16819159,
+              "name": "omnimarket-projection-delegation-writer",
+              "started_at": "2026-09-30T23:55:26.300816823Z"
+            },
+            {
+              "cpu_percent": 0.16,
+              "mem_used_bytes": 18643681,
+              "name": "omninode-infra-routing-decisions-consumer",
+              "started_at": "2026-09-30T23:55:26.552953714Z"
+            },
+            {
+              "cpu_percent": 0.19,
+              "mem_used_bytes": 19293798,
+              "name": "omnimarket-projection-live-events-writer",
+              "started_at": "2026-09-30T23:55:26.503323314Z"
+            },
+            {
+              "cpu_percent": 0.0,
+              "mem_used_bytes": 618496,
+              "name": "omnibase-infra-migration-gate",
+              "started_at": "2026-09-30T23:54:17.149867745Z"
+            },
+            {
+              "cpu_percent": 1.4,
+              "mem_used_bytes": 164207001,
+              "name": "omnibase-infra-infisical",
+              "started_at": "2026-09-30T21:36:29.308678896Z"
+            },
+            {
+              "cpu_percent": 0.04,
+              "mem_used_bytes": 42551214,
+              "name": "omnibase-infra-keycloak",
+              "started_at": "2026-09-30T21:36:27.336048705Z"
+            },
+            {
+              "cpu_percent": 1.98,
+              "mem_used_bytes": 173224755,
+              "name": "omnibase-infra-postgres",
+              "started_at": "2026-09-30T21:36:26.379661419Z"
+            },
+            {
+              "cpu_percent": 0.23,
+              "mem_used_bytes": 4026531,
+              "name": "omnibase-infra-valkey",
+              "started_at": "2026-09-30T21:36:29.552718694Z"
+            },
+            {
+              "cpu_percent": 12.19,
+              "mem_used_bytes": 903977369,
+              "name": "omnibase-infra-redpanda",
+              "started_at": "2026-09-30T21:36:26.80729586Z"
+            },
+            {
+              "cpu_percent": 0.37,
+              "mem_used_bytes": 33114030,
+              "name": "omnibase-infra-phoenix",
+              "started_at": "2026-09-30T21:36:29.933881274Z"
+            }
+          ]
+        },
+        "finished_at": "2026-10-01T00:19:06.372808Z",
+        "hostname": "omninode-pc",
+        "memory": {
+          "Cached": 2.499,
+          "MemAvailable": 69.065,
+          "MemFree": 2.263,
+          "MemTotal": 91.958,
+          "SwapFree": 155.656,
+          "SwapTotal": 200.0,
+          "psi_some": "some avg10=1.25 avg60=2.35 avg300=1.56 total=120369204"
+        },
+        "ntp": {
+          "delay_ms": 8.273,
+          "method": "sntp-inprocess",
+          "offset_ms": -1.614,
+          "offsets_ms": [
+            -4.117,
+            -1.614,
+            -2.468,
+            -1.243
+          ],
+          "samples": 4,
+          "server": "time.apple.com"
+        },
+        "postgres": {
+          "connections_per_db": {
+            "<none>": 5,
+            "infisical_db": 3,
+            "keycloak": 1,
+            "omnibase_infra": 19,
+            "omnidash_analytics": 17,
+            "omniintelligence": 1,
+            "omninode_cloud": 2,
+            "postgres": 1
+          },
+          "container": "omnibase-infra-postgres",
+          "rc": 0,
+          "rows": [
+            {
+              "count": 19,
+              "datname": "omnibase_infra",
+              "state": "idle",
+              "usename": "postgres"
+            },
+            {
+              "count": 11,
+              "datname": "omnidash_analytics",
+              "state": "idle",
+              "usename": "omninode_runtime"
+            },
+            {
+              "count": 4,
+              "datname": "<none>",
+              "state": "",
+              "usename": "<none>"
+            },
+            {
+              "count": 3,
+              "datname": "infisical_db",
+              "state": "idle",
+              "usename": "postgres"
+            },
+            {
+              "count": 3,
+              "datname": "omnidash_analytics",
+              "state": "idle",
+              "usename": "role_omnidash"
+            },
+            {
+              "count": 2,
+              "datname": "omninode_cloud",
+              "state": "idle",
+              "usename": "role_omninode"
+            },
+            {
+              "count": 2,
+              "datname": "omnidash_analytics",
+              "state": "idle",
+              "usename": "tenant_projection_writer"
+            },
+            {
+              "count": 1,
+              "datname": "omniintelligence",
+              "state": "idle",
+              "usename": "postgres"
+            },
+            {
+              "count": 1,
+              "datname": "postgres",
+              "state": "active",
+              "usename": "postgres"
+            },
+            {
+              "count": 1,
+              "datname": "keycloak",
+              "state": "idle",
+              "usename": "postgres"
+            },
+            {
+              "count": 1,
+              "datname": "omnidash_analytics",
+              "state": "idle in transaction",
+              "usename": "omninode_runtime"
+            },
+            {
+              "count": 1,
+              "datname": "<none>",
+              "state": "",
+              "usename": "postgres"
+            }
+          ],
+          "total": 49
+        },
+        "redpanda": {
+          "interval_s": 30.33,
+          "rates_per_s": {
+            "bytes_consume": 292387.045,
+            "bytes_follower_consume": 0.0,
+            "bytes_produce": 138004.086,
+            "records_fetched": 58.29,
+            "records_fetched.tenant-omn20213-proof-f7ff": 0.0,
+            "records_fetched.tenant-omninode": 0.0,
+            "records_fetched.tenant-onex-lab-house": 0.0,
+            "records_produced": 50.773,
+            "records_produced.tenant-omn20213-proof-f7ff": 0.0,
+            "records_produced.tenant-omninode": 0.0,
+            "records_produced.tenant-onex-lab-house": 0.0
+          }
+        },
+        "redpanda_metrics_url": "http://0.0.0.0:9644/public_metrics",
+        "role": "remote-dependency",
+        "started_at": "2026-10-01T00:18:29.057270Z"
+      },
+      "rep": 1
+    },
+    {
+      "dependency": {
+        "cpu": {
+          "busy_cores": 25.02,
+          "load1": 35.38,
+          "load15": 14.59,
+          "load5": 16.45,
+          "ncpu": 32
+        },
+        "dev_lane_containers": {
+          "count": 26,
+          "cpu_percent_total": 65.97,
+          "mem_total_gb": 2.592,
+          "min_uptime_s": 1478.2,
+          "project": "omnibase-infra",
+          "rows": [
+            {
+              "cpu_percent": 10.95,
+              "mem_used_bytes": 540016640,
+              "name": "omninode-runtime-effects",
+              "started_at": "2026-09-30T23:55:28.412125434Z"
+            },
+            {
+              "cpu_percent": 0.52,
+              "mem_used_bytes": 39499857,
+              "name": "omnibase-infra-runtime-worker-1",
+              "started_at": "2026-09-30T23:55:28.419068156Z"
+            },
+            {
+              "cpu_percent": 0.1,
+              "mem_used_bytes": 16745758,
+              "name": "omninode-contract-resolver",
+              "started_at": "2026-09-30T23:55:28.406129787Z"
+            },
+            {
+              "cpu_percent": 27.9,
+              "mem_used_bytes": 721210572,
+              "name": "omninode-runtime",
+              "started_at": "2026-09-30T23:55:28.147265391Z"
+            },
+            {
+              "cpu_percent": 0.09,
+              "mem_used_bytes": 17448304,
+              "name": "omnibase-intelligence-api",
+              "started_at": "2026-09-30T23:55:28.153459138Z"
+            },
+            {
+              "cpu_percent": 0.78,
+              "mem_used_bytes": 39499857,
+              "name": "omnimarket-tenant-projection-writer",
+              "started_at": "2026-09-30T23:55:26.412881981Z"
+            },
+            {
+              "cpu_percent": 0.13,
+              "mem_used_bytes": 16840130,
+              "name": "omninode-agent-actions-consumer",
+              "started_at": "2026-09-30T23:55:26.512976333Z"
+            },
+            {
+              "cpu_percent": 0.13,
+              "mem_used_bytes": 17825792,
+              "name": "omninode-context-audit-consumer",
+              "started_at": "2026-09-30T23:55:26.563117464Z"
+            },
+            {
+              "cpu_percent": 0.16,
+              "mem_used_bytes": 19472056,
+              "name": "omninode-skill-lifecycle-consumer",
+              "started_at": "2026-09-30T23:55:26.442897217Z"
+            },
+            {
+              "cpu_percent": 0.12,
+              "mem_used_bytes": 19409141,
+              "name": "omnimarket-projection-tenant-registry-writer",
+              "started_at": "2026-09-30T23:55:26.206991307Z"
+            },
+            {
+              "cpu_percent": 0.13,
+              "mem_used_bytes": 16819159,
+              "name": "omnimarket-projection-registration-writer",
+              "started_at": "2026-09-30T23:55:26.237263801Z"
+            },
+            {
+              "cpu_percent": 0.92,
+              "mem_used_bytes": 25386024,
+              "name": "onex-api",
+              "started_at": "2026-09-30T23:55:26.536320674Z"
+            },
+            {
+              "cpu_percent": 0.0,
+              "mem_used_bytes": 585728,
+              "name": "omnibase-infra-autoheal",
+              "started_at": "2026-09-30T23:55:26.170364537Z"
+            },
+            {
+              "cpu_percent": 0.14,
+              "mem_used_bytes": 17574133,
+              "name": "omnimarket-projection-tenant-credentials-writer",
+              "started_at": "2026-09-30T23:55:26.490438736Z"
+            },
+            {
+              "cpu_percent": 0.13,
+              "mem_used_bytes": 16714301,
+              "name": "omnimarket-projection-savings-writer",
+              "started_at": "2026-09-30T23:55:26.522905647Z"
+            },
+            {
+              "cpu_percent": 0.09,
+              "mem_used_bytes": 15487467,
+              "name": "omnimarket-projection-api",
+              "started_at": "2026-09-30T23:55:26.370027813Z"
+            },
+            {
+              "cpu_percent": 0.15,
+              "mem_used_bytes": 16399728,
+              "name": "omnimarket-projection-delegation-writer",
+              "started_at": "2026-09-30T23:55:26.300816823Z"
+            },
+            {
+              "cpu_percent": 0.14,
+              "mem_used_bytes": 19063111,
+              "name": "omninode-infra-routing-decisions-consumer",
+              "started_at": "2026-09-30T23:55:26.552953714Z"
+            },
+            {
+              "cpu_percent": 0.21,
+              "mem_used_bytes": 19587399,
+              "name": "omnimarket-projection-live-events-writer",
+              "started_at": "2026-09-30T23:55:26.503323314Z"
+            },
+            {
+              "cpu_percent": 0.0,
+              "mem_used_bytes": 618496,
+              "name": "omnibase-infra-migration-gate",
+              "started_at": "2026-09-30T23:54:17.149867745Z"
+            },
+            {
+              "cpu_percent": 0.69,
+              "mem_used_bytes": 93386178,
+              "name": "omnibase-infra-infisical",
+              "started_at": "2026-09-30T21:36:29.308678896Z"
+            },
+            {
+              "cpu_percent": 0.04,
+              "mem_used_bytes": 27535605,
+              "name": "omnibase-infra-keycloak",
+              "started_at": "2026-09-30T21:36:27.336048705Z"
+            },
+            {
+              "cpu_percent": 10.27,
+              "mem_used_bytes": 138307174,
+              "name": "omnibase-infra-postgres",
+              "started_at": "2026-09-30T21:36:26.379661419Z"
+            },
+            {
+              "cpu_percent": 0.15,
+              "mem_used_bytes": 4292870,
+              "name": "omnibase-infra-valkey",
+              "started_at": "2026-09-30T21:36:29.552718694Z"
+            },
+            {
+              "cpu_percent": 11.74,
+              "mem_used_bytes": 894749900,
+              "name": "omnibase-infra-redpanda",
+              "started_at": "2026-09-30T21:36:26.80729586Z"
+            },
+            {
+              "cpu_percent": 0.29,
+              "mem_used_bytes": 28269608,
+              "name": "omnibase-infra-phoenix",
+              "started_at": "2026-09-30T21:36:29.933881274Z"
+            }
+          ]
+        },
+        "finished_at": "2026-10-01T00:20:06.203992Z",
+        "hostname": "omninode-pc",
+        "memory": {
+          "Cached": 4.2,
+          "MemAvailable": 66.804,
+          "MemFree": 0.961,
+          "MemTotal": 91.958,
+          "SwapFree": 153.548,
+          "SwapTotal": 200.0,
+          "psi_some": "some avg10=17.40 avg60=8.82 avg300=3.34 total=127175625"
+        },
+        "ntp": {
+          "delay_ms": 8.626,
+          "method": "sntp-inprocess",
+          "offset_ms": -1.589,
+          "offsets_ms": [
+            -1.589,
+            -2.823,
+            -2.66,
+            -1.914
+          ],
+          "samples": 4,
+          "server": "time.apple.com"
+        },
+        "postgres": {
+          "connections_per_db": {
+            "<none>": 5,
+            "infisical_db": 7,
+            "keycloak": 1,
+            "omnibase_infra": 17,
+            "omnidash_analytics": 10,
+            "omniintelligence": 1,
+            "omninode_cloud": 2,
+            "postgres": 1
+          },
+          "container": "omnibase-infra-postgres",
+          "rc": 0,
+          "rows": [
+            {
+              "count": 17,
+              "datname": "omnibase_infra",
+              "state": "idle",
+              "usename": "postgres"
+            },
+            {
+              "count": 7,
+              "datname": "infisical_db",
+              "state": "idle",
+              "usename": "postgres"
+            },
+            {
+              "count": 7,
+              "datname": "omnidash_analytics",
+              "state": "idle",
+              "usename": "omninode_runtime"
+            },
+            {
+              "count": 4,
+              "datname": "<none>",
+              "state": "",
+              "usename": "<none>"
+            },
+            {
+              "count": 3,
+              "datname": "omnidash_analytics",
+              "state": "idle",
+              "usename": "role_omnidash"
+            },
+            {
+              "count": 2,
+              "datname": "omninode_cloud",
+              "state": "idle",
+              "usename": "role_omninode"
+            },
+            {
+              "count": 1,
+              "datname": "omniintelligence",
+              "state": "idle",
+              "usename": "postgres"
+            },
+            {
+              "count": 1,
+              "datname": "postgres",
+              "state": "active",
+              "usename": "postgres"
+            },
+            {
+              "count": 1,
+              "datname": "keycloak",
+              "state": "idle",
+              "usename": "postgres"
+            },
+            {
+              "count": 1,
+              "datname": "<none>",
+              "state": "",
+              "usename": "postgres"
+            }
+          ],
+          "total": 44
+        },
+        "redpanda": {
+          "interval_s": 32.8,
+          "rates_per_s": {
+            "bytes_consume": 293165.033,
+            "bytes_follower_consume": 0.0,
+            "bytes_produce": 91410.488,
+            "records_fetched": 86.537,
+            "records_fetched.tenant-omn20213-proof-f7ff": 0.061,
+            "records_fetched.tenant-omninode": 0.0,
+            "records_fetched.tenant-onex-lab-house": 0.0,
+            "records_produced": 30.492,
+            "records_produced.tenant-omn20213-proof-f7ff": 0.0,
+            "records_produced.tenant-omninode": 0.0,
+            "records_produced.tenant-onex-lab-house": 0.0
+          }
+        },
+        "redpanda_metrics_url": "http://0.0.0.0:9644/public_metrics",
+        "role": "remote-dependency",
+        "started_at": "2026-10-01T00:19:26.741994Z"
+      },
+      "rep": 2
+    },
+    {
+      "dependency": {
+        "cpu": {
+          "busy_cores": 10.56,
+          "load1": 36.26,
+          "load15": 16.26,
+          "load5": 20.83,
+          "ncpu": 32
+        },
+        "dev_lane_containers": {
+          "count": 26,
+          "cpu_percent_total": 63.27,
+          "mem_total_gb": 3.018,
+          "min_uptime_s": 1533.0,
+          "project": "omnibase-infra",
+          "rows": [
+            {
+              "cpu_percent": 18.45,
+              "mem_used_bytes": 860146892,
+              "name": "omninode-runtime-effects",
+              "started_at": "2026-09-30T23:55:28.412125434Z"
+            },
+            {
+              "cpu_percent": 0.62,
+              "mem_used_bytes": 44994396,
+              "name": "omnibase-infra-runtime-worker-1",
+              "started_at": "2026-09-30T23:55:28.419068156Z"
+            },
+            {
+              "cpu_percent": 0.11,
+              "mem_used_bytes": 16787701,
+              "name": "omninode-contract-resolver",
+              "started_at": "2026-09-30T23:55:28.406129787Z"
+            },
+            {
+              "cpu_percent": 19.63,
+              "mem_used_bytes": 743230668,
+              "name": "omninode-runtime",
+              "started_at": "2026-09-30T23:55:28.147265391Z"
+            },
+            {
+              "cpu_percent": 0.1,
+              "mem_used_bytes": 17521704,
+              "name": "omnibase-intelligence-api",
+              "started_at": "2026-09-30T23:55:28.153459138Z"
+            },
+            {
+              "cpu_percent": 1.01,
+              "mem_used_bytes": 44155535,
+              "name": "omnimarket-tenant-projection-writer",
+              "started_at": "2026-09-30T23:55:26.412881981Z"
+            },
+            {
+              "cpu_percent": 0.15,
+              "mem_used_bytes": 20111687,
+              "name": "omninode-agent-actions-consumer",
+              "started_at": "2026-09-30T23:55:26.512976333Z"
+            },
+            {
+              "cpu_percent": 1.33,
+              "mem_used_bytes": 17993564,
+              "name": "omninode-context-audit-consumer",
+              "started_at": "2026-09-30T23:55:26.563117464Z"
+            },
+            {
+              "cpu_percent": 0.2,
+              "mem_used_bytes": 19587399,
+              "name": "omninode-skill-lifecycle-consumer",
+              "started_at": "2026-09-30T23:55:26.442897217Z"
+            },
+            {
+              "cpu_percent": 0.17,
+              "mem_used_bytes": 19597885,
+              "name": "omnimarket-projection-tenant-registry-writer",
+              "started_at": "2026-09-30T23:55:26.206991307Z"
+            },
+            {
+              "cpu_percent": 0.19,
+              "mem_used_bytes": 16871587,
+              "name": "omnimarket-projection-registration-writer",
+              "started_at": "2026-09-30T23:55:26.237263801Z"
+            },
+            {
+              "cpu_percent": 0.57,
+              "mem_used_bytes": 31121735,
+              "name": "onex-api",
+              "started_at": "2026-09-30T23:55:26.536320674Z"
+            },
+            {
+              "cpu_percent": 0.0,
+              "mem_used_bytes": 585728,
+              "name": "omnibase-infra-autoheal",
+              "started_at": "2026-09-30T23:55:26.170364537Z"
+            },
+            {
+              "cpu_percent": 0.19,
+              "mem_used_bytes": 17857249,
+              "name": "omnimarket-projection-tenant-credentials-writer",
+              "started_at": "2026-09-30T23:55:26.490438736Z"
+            },
+            {
+              "cpu_percent": 0.17,
+              "mem_used_bytes": 16756244,
+              "name": "omnimarket-projection-savings-writer",
+              "started_at": "2026-09-30T23:55:26.522905647Z"
+            },
+            {
+              "cpu_percent": 0.11,
+              "mem_used_bytes": 15550382,
+              "name": "omnimarket-projection-api",
+              "started_at": "2026-09-30T23:55:26.370027813Z"
+            },
+            {
+              "cpu_percent": 0.17,
+              "mem_used_bytes": 16462643,
+              "name": "omnimarket-projection-delegation-writer",
+              "started_at": "2026-09-30T23:55:26.300816823Z"
+            },
+            {
+              "cpu_percent": 1.67,
+              "mem_used_bytes": 19566428,
+              "name": "omninode-infra-routing-decisions-consumer",
+              "started_at": "2026-09-30T23:55:26.552953714Z"
+            },
+            {
+              "cpu_percent": 0.2,
+              "mem_used_bytes": 19681771,
+              "name": "omnimarket-projection-live-events-writer",
+              "started_at": "2026-09-30T23:55:26.503323314Z"
+            },
+            {
+              "cpu_percent": 0.0,
+              "mem_used_bytes": 618496,
+              "name": "omnibase-infra-migration-gate",
+              "started_at": "2026-09-30T23:54:17.149867745Z"
+            },
+            {
+              "cpu_percent": 0.69,
+              "mem_used_bytes": 122054246,
+              "name": "omnibase-infra-infisical",
+              "started_at": "2026-09-30T21:36:29.308678896Z"
+            },
+            {
+              "cpu_percent": 0.07,
+              "mem_used_bytes": 52743372,
+              "name": "omnibase-infra-keycloak",
+              "started_at": "2026-09-30T21:36:27.336048705Z"
+            },
+            {
+              "cpu_percent": 7.11,
+              "mem_used_bytes": 158439833,
+              "name": "omnibase-infra-postgres",
+              "started_at": "2026-09-30T21:36:26.379661419Z"
+            },
+            {
+              "cpu_percent": 0.22,
+              "mem_used_bytes": 4042260,
+              "name": "omnibase-infra-valkey",
+              "started_at": "2026-09-30T21:36:29.552718694Z"
+            },
+            {
+              "cpu_percent": 9.74,
+              "mem_used_bytes": 915931136,
+              "name": "omnibase-infra-redpanda",
+              "started_at": "2026-09-30T21:36:26.80729586Z"
+            },
+            {
+              "cpu_percent": 0.4,
+              "mem_used_bytes": 28426895,
+              "name": "omnibase-infra-phoenix",
+              "started_at": "2026-09-30T21:36:29.933881274Z"
+            }
+          ]
+        },
+        "finished_at": "2026-10-01T00:21:01.050338Z",
+        "hostname": "omninode-pc",
+        "memory": {
+          "Cached": 9.761,
+          "MemAvailable": 67.072,
+          "MemFree": 14.501,
+          "MemTotal": 91.958,
+          "SwapFree": 153.599,
+          "SwapTotal": 200.0,
+          "psi_some": "some avg10=0.71 avg60=6.53 avg300=3.95 total=131613196"
+        },
+        "ntp": {
+          "delay_ms": 7.366,
+          "method": "sntp-inprocess",
+          "offset_ms": -2.245,
+          "offsets_ms": [
+            1.036,
+            -2.245,
+            -2.779,
+            -6.266
+          ],
+          "samples": 4,
+          "server": "time.apple.com"
+        },
+        "postgres": {
+          "connections_per_db": {
+            "<none>": 5,
+            "infisical_db": 6,
+            "keycloak": 1,
+            "omnibase_infra": 19,
+            "omnidash_analytics": 10,
+            "omniintelligence": 1,
+            "omninode_cloud": 2,
+            "postgres": 1
+          },
+          "container": "omnibase-infra-postgres",
+          "rc": 0,
+          "rows": [
+            {
+              "count": 19,
+              "datname": "omnibase_infra",
+              "state": "idle",
+              "usename": "postgres"
+            },
+            {
+              "count": 7,
+              "datname": "omnidash_analytics",
+              "state": "idle",
+              "usename": "omninode_runtime"
+            },
+            {
+              "count": 6,
+              "datname": "infisical_db",
+              "state": "idle",
+              "usename": "postgres"
+            },
+            {
+              "count": 4,
+              "datname": "<none>",
+              "state": "",
+              "usename": "<none>"
+            },
+            {
+              "count": 3,
+              "datname": "omnidash_analytics",
+              "state": "idle",
+              "usename": "role_omnidash"
+            },
+            {
+              "count": 2,
+              "datname": "omninode_cloud",
+              "state": "idle",
+              "usename": "role_omninode"
+            },
+            {
+              "count": 1,
+              "datname": "omniintelligence",
+              "state": "idle",
+              "usename": "postgres"
+            },
+            {
+              "count": 1,
+              "datname": "postgres",
+              "state": "active",
+              "usename": "postgres"
+            },
+            {
+              "count": 1,
+              "datname": "keycloak",
+              "state": "idle",
+              "usename": "postgres"
+            },
+            {
+              "count": 1,
+              "datname": "<none>",
+              "state": "",
+              "usename": "postgres"
+            }
+          ],
+          "total": 45
+        },
+        "redpanda": {
+          "interval_s": 30.28,
+          "rates_per_s": {
+            "bytes_consume": 142845.28,
+            "bytes_follower_consume": 0.0,
+            "bytes_produce": 98001.868,
+            "records_fetched": 11.329,
+            "records_fetched.tenant-omn20213-proof-f7ff": 0.0,
+            "records_fetched.tenant-omninode": 0.0,
+            "records_fetched.tenant-onex-lab-house": 0.0,
+            "records_produced": 33.658,
+            "records_produced.tenant-omn20213-proof-f7ff": 0.0,
+            "records_produced.tenant-omninode": 0.0,
+            "records_produced.tenant-onex-lab-house": 0.0
+          }
+        },
+        "redpanda_metrics_url": "http://0.0.0.0:9644/public_metrics",
+        "role": "remote-dependency",
+        "started_at": "2026-10-01T00:20:26.411972Z"
+      },
+      "rep": 3
+    }
+  ],
+  "schema": "bench-lab-tenant.v1",
+  "started_at": "2026-10-01T00:18:28.741176Z",
+  "summary": {
+    "cpu.busy_cores": {
+      "max": 25.02,
+      "median": 10.56,
+      "min": 5.29,
+      "n": 3,
+      "spread": 19.73
+    },
+    "cpu.load1": {
+      "max": 36.26,
+      "median": 35.38,
+      "min": 11.75,
+      "n": 3,
+      "spread": 24.51
+    },
+    "cpu.load15": {
+      "max": 16.26,
+      "median": 14.59,
+      "min": 12.87,
+      "n": 3,
+      "spread": 3.39
+    },
+    "cpu.load5": {
+      "max": 20.83,
+      "median": 16.45,
+      "min": 10.84,
+      "n": 3,
+      "spread": 9.99
+    },
+    "cpu.ncpu": {
+      "max": 32.0,
+      "median": 32.0,
+      "min": 32.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "dev_lane.count": {
+      "max": 26.0,
+      "median": 26.0,
+      "min": 26.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "dev_lane.cpu_percent_total": {
+      "max": 65.97,
+      "median": 63.27,
+      "min": 48.86,
+      "n": 3,
+      "spread": 17.11
+    },
+    "dev_lane.mem_total_gb": {
+      "max": 3.018,
+      "median": 2.665,
+      "min": 2.592,
+      "n": 3,
+      "spread": 0.426
+    },
+    "dev_lane.min_uptime_s": {
+      "max": 1533.0,
+      "median": 1478.2,
+      "min": 1418.4,
+      "n": 3,
+      "spread": 114.6
+    },
+    "mem.Cached_gb": {
+      "max": 9.761,
+      "median": 4.2,
+      "min": 2.499,
+      "n": 3,
+      "spread": 7.262
+    },
+    "mem.MemAvailable_gb": {
+      "max": 69.065,
+      "median": 67.072,
+      "min": 66.804,
+      "n": 3,
+      "spread": 2.261
+    },
+    "mem.MemFree_gb": {
+      "max": 14.501,
+      "median": 2.263,
+      "min": 0.961,
+      "n": 3,
+      "spread": 13.54
+    },
+    "mem.MemTotal_gb": {
+      "max": 91.958,
+      "median": 91.958,
+      "min": 91.958,
+      "n": 3,
+      "spread": 0.0
+    },
+    "mem.SwapFree_gb": {
+      "max": 155.656,
+      "median": 153.599,
+      "min": 153.548,
+      "n": 3,
+      "spread": 2.108
+    },
+    "mem.SwapTotal_gb": {
+      "max": 200.0,
+      "median": 200.0,
+      "min": 200.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "pg.connections.<none>": {
+      "max": 5.0,
+      "median": 5.0,
+      "min": 5.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "pg.connections.infisical_db": {
+      "max": 7.0,
+      "median": 6.0,
+      "min": 3.0,
+      "n": 3,
+      "spread": 4.0
+    },
+    "pg.connections.keycloak": {
+      "max": 1.0,
+      "median": 1.0,
+      "min": 1.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "pg.connections.omnibase_infra": {
+      "max": 19.0,
+      "median": 19.0,
+      "min": 17.0,
+      "n": 3,
+      "spread": 2.0
+    },
+    "pg.connections.omnidash_analytics": {
+      "max": 17.0,
+      "median": 10.0,
+      "min": 10.0,
+      "n": 3,
+      "spread": 7.0
+    },
+    "pg.connections.omniintelligence": {
+      "max": 1.0,
+      "median": 1.0,
+      "min": 1.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "pg.connections.omninode_cloud": {
+      "max": 2.0,
+      "median": 2.0,
+      "min": 2.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "pg.connections.postgres": {
+      "max": 1.0,
+      "median": 1.0,
+      "min": 1.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "pg.connections_total": {
+      "max": 49.0,
+      "median": 45.0,
+      "min": 44.0,
+      "n": 3,
+      "spread": 5.0
+    },
+    "redpanda.bytes_consume_per_s": {
+      "max": 293165.033,
+      "median": 292387.045,
+      "min": 142845.28,
+      "n": 3,
+      "spread": 150319.753
+    },
+    "redpanda.bytes_follower_consume_per_s": {
+      "max": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "redpanda.bytes_produce_per_s": {
+      "max": 138004.086,
+      "median": 98001.868,
+      "min": 91410.488,
+      "n": 3,
+      "spread": 46593.598
+    },
+    "redpanda.records_fetched.tenant-omn20213-proof-f7ff_per_s": {
+      "max": 0.061,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 3,
+      "spread": 0.061
+    },
+    "redpanda.records_fetched.tenant-omninode_per_s": {
+      "max": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "redpanda.records_fetched.tenant-onex-lab-house_per_s": {
+      "max": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "redpanda.records_fetched_per_s": {
+      "max": 86.537,
+      "median": 58.29,
+      "min": 11.329,
+      "n": 3,
+      "spread": 75.208
+    },
+    "redpanda.records_produced.tenant-omn20213-proof-f7ff_per_s": {
+      "max": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "redpanda.records_produced.tenant-omninode_per_s": {
+      "max": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "redpanda.records_produced.tenant-onex-lab-house_per_s": {
+      "max": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "n": 3,
+      "spread": 0.0
+    },
+    "redpanda.records_produced_per_s": {
+      "max": 50.773,
+      "median": 33.658,
+      "min": 30.492,
+      "n": 3,
+      "spread": 20.281
+    }
+  },
+  "target": "192.168.86.201",
+  "ticket": "OMN-20213"
+}
