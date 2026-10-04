@@ -555,6 +555,63 @@ class TestCiSummaryGate:
         assert code == EXIT_PENDING
         assert DEPLOY_AGENT_GATE in report
 
+    @pytest.mark.parametrize(
+        ("conclusion", "expected"),
+        [
+            ("success", EXIT_SUCCESS),
+            ("failure", EXIT_FAILURE),
+            ("skipped", EXIT_FAILURE),
+            (None, EXIT_PENDING),
+        ],
+    )
+    def test_node_migration_sync_gates_ci_summary(
+        self, conclusion: str | None, expected: int
+    ) -> None:
+        gate = "node-migration-sync / node-migration-sync"
+        assert gate in STRICT_GATE_JOBS
+        jobs = [j for j in _all_gates() if j["name"] != gate]
+        if conclusion is not None:
+            jobs.append(_job(gate, conclusion))
+        code, report = evaluate(jobs)
+        assert code == expected, report
+        if conclusion != "success":
+            assert gate in report
+
+    def test_node_migration_sync_is_called_unconditionally(self) -> None:
+        job = _load_workflow(CI_WORKFLOW)["jobs"]["node-migration-sync"]
+        assert job["name"] == "node-migration-sync"
+        assert job["uses"] == "./.github/workflows/node-migration-sync.yml"
+        assert job["secrets"] == "inherit"
+        assert "if" not in job
+        assert "needs" not in job
+        assert job.get("continue-on-error", False) is False
+
+        manifest = _load_workflow(REPO_ROOT / ".github/required-checks.yaml")
+        gate = "node-migration-sync / node-migration-sync"
+        declaration = next(row for row in manifest["gates"] if row["name"] == gate)
+        assert declaration["mode"] == "REQUIRED"
+        assert declaration["skip_semantics"] == "never"
+        assert declaration["workflow"] == "ci.yml"
+        assert declaration["reusable_workflow"] == "node-migration-sync.yml"
+        assert declaration["job_path"] == ["node-migration-sync", "node-migration-sync"]
+
+        called = _load_workflow(REPO_ROOT / ".github/workflows/node-migration-sync.yml")
+        assert called.get(True, called.get("on")) == {"workflow_call": None}
+        # A called workflow sees the caller's github.workflow: inheriting its
+        # concurrency key with cancel-in-progress would cancel the parent CI.
+        assert "concurrency" not in called
+        sync = called["jobs"]["node-migration-sync"]
+        assert sync["name"] == "node-migration-sync"
+        assert "if" not in sync
+        assert "needs" not in sync
+        assert sync.get("continue-on-error", False) is False
+        assert any(
+            "bash scripts/sync-node-migrations.sh --check" in step.get("run", "")
+            and 'exit "${rc}"' in step["run"]
+            and not step.get("continue-on-error", False)
+            for step in sync["steps"]
+        )
+
     def test_application_database_gate_is_strict_and_docs_only_gated(self) -> None:
         """OMN-15361 source and rebuilt-Docker controls must gate CI Summary.
 

@@ -13,24 +13,20 @@
 #   pattern_learning_artifacts was absent from omnidash_analytics on a clean
 #   redeploy and the golden-chain pattern_learning chain only passed via a live
 #   hot-fix (golden-chain sweep run12 Finding). This gate is the enforcement
-#   layer: every infra PR (and merge_group) re-runs the vendor --check against
+#   layer: CI calls this workflow on every infra PR (and merge_group) to check
 #   the current omnimarket dev tip, or an explicitly declared paired omnimarket
 #   PR branch, so an un-vendored or drifted node migration fails CI before
 #   merge without deadlocking market/infra cross-repo migration pairs.
+# OMN-14975: the called job is in CI's own run and STRICT_GATE_JOBS, so
+# node-migration-sync failures now block the required CI Summary context.
 
 name: node-migration-sync
 
 on:
-  pull_request:
-    branches: [main, dev]
-  push:
-    branches: [main]
+  workflow_call:
 
-concurrency:
-  # OMN-13949: cancel superseded PR runs to free saturated runners. merge_group
-  # entries carry a unique github.ref, so queue entries never cross-cancel.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+# CI owns the triggers and concurrency. In a called workflow github.workflow
+# names the caller; reusing its concurrency group would cancel the parent run.
 
 permissions:
   contents: read

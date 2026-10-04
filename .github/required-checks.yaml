@@ -163,13 +163,14 @@ gates:
     job_path: ["shell-hygiene"]
     skip_semantics: never
     rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if:, no path filter, pull_request trigger present (no merge_group on this workflow, but pull_request alone satisfies the PR-reachable-trigger requirement)."
-  - name: "node-migration-sync"
+  - name: "node-migration-sync / node-migration-sync"
     mode: REQUIRED
     producer_kind: local
-    workflow: node-migration-sync.yml
-    job_path: ["node-migration-sync"]
+    workflow: ci.yml
+    reusable_workflow: node-migration-sync.yml
+    job_path: ["node-migration-sync", "node-migration-sync"]
     skip_semantics: never
-    rationale: "Vendored-node migration drift gate (golden-chain sweep run12 finding). No job-level if:, no path filter, pull_request trigger present (no merge_group on this workflow, but pull_request alone satisfies the PR-reachable-trigger requirement). Live required status check on omnibase_infra dev branch protection."
+    rationale: "OMN-14975: unconditional reusable caller in ci.yml, registered in STRICT_GATE_JOBS so failure/skipped/absence cannot pass the required CI Summary. Live dev branch protection read 2026-10-04 requires only CI Summary; the old standalone context is not directly required. Caller covers pull_request and merge_group, with no path filter or job-level if:."
   - name: "contract-validation"
     mode: REQUIRED
     producer_kind: local
