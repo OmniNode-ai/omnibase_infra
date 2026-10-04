@@ -51,9 +51,9 @@ from omnibase_infra.runtime.secret_resolver import (
     config_declares_infisical_source,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 _DOCKER = _REPO_ROOT / "docker"
 _CONTRACT = _REPO_ROOT / "contracts" / "services" / "runtime_policy.contract.yaml"
 _POLICY_ENV = _DOCKER / "runtime-policy.env"
