@@ -508,7 +508,8 @@ class ModelKafkaEventBusConfig(BaseModel):
         description=(
             "Abandoned dispatches still running at which the bus reports "
             "itself UNHEALTHY so the supervisor replaces the process. Below "
-            "it, any abandoned dispatch reports DEGRADED. An abandoned "
+            "it, an abandoned dispatch reports DEGRADED until "
+            "consumer_dispatch_orphan_degraded_grace_seconds pass. An abandoned "
             "projection dispatch keeps its slot in the runtime-wide projection "
             "gate (PROJECTION_HANDLER_MAX_INFLIGHT = 8) and its worker in the "
             "default executor, so the limit sits well below 8: past it every "
@@ -517,6 +518,23 @@ class ModelKafkaEventBusConfig(BaseModel):
         ),
         ge=1,
         le=16,
+    )
+    consumer_dispatch_orphan_degraded_grace_seconds: float = Field(
+        default=300.0,
+        description=(
+            "OMN-20464. Seconds after being abandoned that a still-running "
+            "dispatch keeps the bus DEGRADED. Past it the dispatch stays "
+            "tracked, it still counts toward consumer_dispatch_orphan_limit "
+            "and still holds its projection gate slot, but it no longer "
+            "degrades the bus. A parked handler cannot be cancelled "
+            "(cancelling its awaiter would release the gate slot its thread "
+            "still occupies), and a container healthcheck that fails on "
+            "DEGRADED would otherwise stay unhealthy until the container is "
+            "replaced, over a record that is already quarantined. Only the "
+            "limit, which protects the gate, is allowed to fail the container."
+        ),
+        gt=0.0,
+        le=86_400.0,
     )
     consumer_shutdown_drain_seconds: float = Field(
         default=10.0,
