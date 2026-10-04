@@ -28,7 +28,7 @@ repos:
   # .onex_ratchets/canonical_file_shape_baseline.txt. CI runs the same module
   # at the same commit (job "Canonical File Shape (OMN-20304)").
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 33a8eb68b0f5f0e22fd8a574abd29caecea0d5fc
+    rev: f50d00fc7918d0b12ccd0d3497160325e32e7ac5
     hooks:
       - id: canonical-file-shape
         require_serial: true
