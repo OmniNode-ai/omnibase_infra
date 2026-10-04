@@ -23,6 +23,9 @@ import pytest
 
 pytestmark = pytest.mark.integration
 
+# The child imports the package from the source tree: hosted CI runs from a
+# checkout that does not install omnibase_infra into the interpreter.
+_SRC = Path(__file__).resolve().parents[3] / "src"
 _PATH = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"
 
 _GIT_ENV = {
@@ -81,6 +84,7 @@ def test_a_child_process_with_exported_git_variables_reads_the_named_clone(
     child_env = {
         "PATH": _PATH,
         "HOME": str(tmp_path),
+        "PYTHONPATH": str(_SRC),
         **_GIT_ENV,
         "GIT_DIR": str(lane / ".git"),
         "GIT_WORK_TREE": str(lane),
