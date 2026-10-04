@@ -51,16 +51,22 @@ backends:
   # 5474). A NEW backend id, added by this lane overlay (OMN-17099) — the
   # deleted local-reasoner id is not revived (OMN-16442). Probe recorded in
   # tests/fixtures/bifrost_served_models_probe.json (2026-09-22T22:39:22Z, from
-  # inside omninode-runtime-effects). context_window is llama.cpp's per-slot
-  # n_ctx. Reachable today by a per-run backend_id pin; placing it in the tier
-  # ladder so it takes unpinned traffic is OMN-19215.
+  # inside omninode-runtime-effects). context_window is the server's whole
+  # shared token pool: under --kv-unified every slot reports the pool as its
+  # n_ctx, so it is not one request's room. The per-slot fair share is
+  # pool / slots, declared in `endpoint_capacity` below, and max_tokens is sized
+  # against it (OMN-20490). Reachable today by a per-run backend_id pin; placing
+  # it in the tier ladder so it takes unpinned traffic is OMN-19215.
   # onex-allow-internal-ip OMN-19187 reason="typed dev-lane delegation contract"
   - backend_id: local-omnipc2-chat
     endpoint_url: "http://192.168.86.202:8000/v1/chat/completions"
     served_model_id: "Qwen3.8-27B"
     parameter_count: "27B"
     context_window: 65536
-    max_tokens: 16384
+    # OMN-20490: the share left after the prompt headroom, both from
+    # `endpoint_capacity` below. 16384 here was the whole per-slot share, so one
+    # request asking for it alongside any prompt could exhaust the pool.
+    max_tokens: 4096
     timeout_ms: 300000
     provider: local
     tier: local
@@ -71,12 +77,16 @@ backends:
       - refactoring
       - documentation
     # OMN-19215: placed in the local tier after the two .201 rungs it backs.
-    # 65536 is llama.cpp's per-slot n_ctx above (OMN-20240, re-probed
-    # 2026-10-01; one KV pool shared by the four slots under --kv-unified). `mode: spread` (AC4, RULING
+    # 65536 is llama.cpp's whole token pool (OMN-20240, re-probed 2026-10-01;
+    # one KV pool shared by the four slots under --kv-unified), the ceiling the
+    # router applies to a prompt, not one slot's share. `mode: spread` (AC4, RULING
     # ledger:4257) also gives it a share of those rungs' first-choice traffic:
     # the routing authority picks .201 or .202 per request by a stable hash of
     # the correlation id, and a transport failure on either retries the other.
-    # A prompt larger than 65536 tokens always stays on .201. Each engine
+    # A prompt larger than 65536 tokens always stays on .201. A prompt over the
+    # per-slot share declared in `endpoint_capacity` still routes here, and fits
+    # only while the other slots leave the pool free; narrowing this ceiling to
+    # the share is a routing change this overlay does not make (OMN-20490). Each engine
     # enforces its own four-slot limit (.201 vLLM --max-num-seqs 4, .202
     # llama.cpp --parallel 4).
     placement:
