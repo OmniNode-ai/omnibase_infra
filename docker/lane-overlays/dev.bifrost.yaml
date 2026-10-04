@@ -138,3 +138,26 @@ backends:
         - planning
         - research
         - escalation
+# OMN-20490: the token capacity of the one unified-pool endpoint this lane binds
+# a backend to. llama.cpp on .202 runs `--kv-unified --parallel 4 -c 65536`
+# (read back from /props and /slots, 2026-10-04): ONE 65536-token pool shared by
+# four slots, and every slot reports that pool as its n_ctx. Under four
+# concurrent requests the bound that holds is the fair share, pool / slots; a
+# request past it exhausts the pool and the server answers HTTP 500 "Context
+# size has been exceeded". `tests/ci/test_bifrost_endpoint_capacity.py` holds
+# every binding on this endpoint, in every committed overlay, to
+# max_tokens + prompt_headroom_tokens <= pool_tokens / parallel_slots.
+#
+# prompt_headroom_tokens is sized from delegation_events (real rows, attempts
+# answered HTTP 200 by local-omnipc2-chat, 2026-09-28 to 2026-10-04, n=1882):
+# prompt tokens p50 = 12301 and 68.6% of prompts are at most 12288; output
+# tokens p99 = 3142, max 8478, and 3 of 1882 passed 4096. The share is spent
+# on the prompt first, because the prompt is the large side: a 4096 headroom
+# would leave 45.4% of the routed prompts outside the share, 12288 leaves
+# 31.4%, and the output cap it costs (4096) is above the 99th percentile of what
+# the rung answered.
+endpoint_capacity:
+  - endpoint: "192.168.86.202:8000"
+    pool_tokens: 65536
+    parallel_slots: 4
+    prompt_headroom_tokens: 12288
