@@ -16,6 +16,7 @@ the receipt or the exit code.
 from __future__ import annotations
 
 import json
+import os
 import socket
 import time
 from pathlib import Path
@@ -25,6 +26,10 @@ import pytest
 from click.testing import CliRunner
 from pydantic import JsonValue
 
+from omnibase_core.artifacts.artifact_store import ArtifactStore
+from omnibase_core.enums.artifacts.enum_artifact_retention_class import (
+    EnumArtifactRetentionClass,
+)
 from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_infra.cli import cli_skill
@@ -50,6 +55,11 @@ RESULT_MODEL = (
 @pytest.fixture(autouse=True)
 def _clear_registry_cache() -> None:
     load_skill_registry.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _artifact_store_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
 
 
 def _contract(tmp_path: Path) -> Path:
@@ -310,3 +320,147 @@ def test_a_skill_with_no_declared_lane_never_publishes(
         ["compliance_sweep", "--state-root", str(tmp_path / "state")],
     )
     assert result.exit_code == 0, result.output
+
+
+@pytest.mark.parametrize("status", ["verified", "failed"])
+def test_terminal_envelope_is_retained_before_broker_access(
+    tmp_path: Path, status: str
+) -> None:
+    verdict = _verdict(status)
+    publisher = _RecordingPublisher()
+
+    def _resolve(_lane: str) -> ModelSkillTerminalPublishTarget:
+        # Broker/credential resolution can fail too; retain evidence first.
+        blobs = [p for p in (tmp_path / "artifacts").glob("*/*") if p.suffix != ".json"]
+        assert len(blobs) == 1
+        assert json.loads(blobs[0].read_bytes())["payload"] == verdict
+        return _target()
+
+    report = publish_skill_terminal_event(
+        receipt=_success_receipt(verdict)
+        if status == "verified"
+        else _failure_receipt(verdict),
+        result_model=RESULT_MODEL,
+        contract_path=_contract(tmp_path),
+        lane="dev",
+        resolve_target=_resolve,
+        publisher=publisher,
+    )
+    assert report.outcome is EnumSkillTerminalPublishOutcome.PUBLISHED
+    assert report.artifact_ref is not None
+    # A fresh store instance verifies the bytes that were actually published.
+    [(_, _, _, value)] = publisher.calls
+    assert ArtifactStore().read(report.artifact_ref) == value
+    assert (
+        ArtifactStore().read_meta(report.artifact_ref).retention_class
+        is EnumArtifactRetentionClass.TICKET
+    )
+    assert report.artifact_ref.ref in report.render()
+
+
+def test_broker_failure_leaves_a_readable_terminal_artifact(tmp_path: Path) -> None:
+    verdict = _verdict("failed")
+
+    def _refuse(_lane: str) -> ModelSkillTerminalPublishTarget:
+        raise RuntimeError("broker unavailable")
+
+    report = publish_skill_terminal_event(
+        receipt=_failure_receipt(verdict),
+        result_model=RESULT_MODEL,
+        contract_path=_contract(tmp_path),
+        lane="dev",
+        resolve_target=_refuse,
+    )
+    assert report.outcome is EnumSkillTerminalPublishOutcome.FAILED
+    assert report.artifact_ref is not None
+    assert json.loads(ArtifactStore().read(report.artifact_ref))["payload"] == verdict
+    assert report.artifact_ref.ref in report.render()
+
+
+def test_artifact_failure_prevents_terminal_publication(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    blocked_root = tmp_path / "not-a-directory"
+    blocked_root.write_text("occupied", encoding="utf-8")
+    monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(blocked_root))
+    publisher = _RecordingPublisher()
+    report = publish_skill_terminal_event(
+        receipt=_success_receipt(_verdict("verified")),
+        result_model=RESULT_MODEL,
+        contract_path=_contract(tmp_path),
+        lane="dev",
+        resolve_target=lambda _lane: _target(),
+        publisher=publisher,
+    )
+    assert report.outcome is EnumSkillTerminalPublishOutcome.FAILED
+    assert report.artifact_ref is None
+    assert publisher.calls == []
+
+
+@pytest.mark.parametrize("override", [False, True])
+def test_cli_retains_terminal_under_its_state_root_without_leaking_environment(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, override: bool
+) -> None:
+    monkeypatch.delenv("ONEX_ARTIFACT_STORE_ROOT")
+    if override:
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "configured"))
+    original_root = os.environ.get("ONEX_ARTIFACT_STORE_ROOT")
+    monkeypatch.delenv("OMNI_HOME", raising=False)
+    monkeypatch.setattr(cli_skill, "check_omnimarket_drift", lambda **_: None)
+    monkeypatch.setattr(
+        cli_skill, "_resolve_packaged_contract", lambda _n: _contract(tmp_path)
+    )
+    verdict = _verdict("verified")
+
+    def _dispatch(**kwargs: object) -> int:
+        callback = kwargs["receipt_callback"]
+        assert callable(callback)
+        callback(_success_receipt(verdict))
+        return 0
+
+    def _refuse(_lane: str, **_: object) -> ModelSkillTerminalPublishTarget:
+        raise RuntimeError("broker unavailable")
+
+    monkeypatch.setattr(cli_skill, "run_receipt_mode", _dispatch)
+    monkeypatch.setattr(cli_skill, "resolve_skill_terminal_target", _refuse)
+    state_root = tmp_path / "state"
+    result = CliRunner().invoke(
+        run_skill_by_name,
+        ["dod_verify", "OMN-19152", "--state-root", str(state_root)],
+    )
+    assert result.exit_code == 0, result.output
+    artifact_root = tmp_path / "configured" if override else state_root / "artifacts"
+    blobs = [p for p in artifact_root.glob("*/*") if p.suffix != ".json"]
+    assert len(blobs) == 1
+    assert json.loads(blobs[0].read_bytes())["payload"] == verdict
+    assert "artifact_ref=sha256:" in result.output
+    assert os.environ.get("ONEX_ARTIFACT_STORE_ROOT") == original_root
+
+
+def test_a_new_attempt_does_not_replace_the_failed_attempt(tmp_path: Path) -> None:
+    verdict = _verdict("failed")
+    publisher = _RecordingPublisher()
+    failed = publish_skill_terminal_event(
+        receipt=_failure_receipt(verdict),
+        result_model=RESULT_MODEL,
+        contract_path=_contract(tmp_path),
+        lane="dev",
+        resolve_target=lambda _lane: _target(),
+        publisher=publisher,
+    )
+    assert failed.artifact_ref is not None
+    first_bytes = ArtifactStore().read(failed.artifact_ref)
+    verdict.update(status="verified", completed_at="2026-09-25T01:00:10+00:00")
+    passed = publish_skill_terminal_event(
+        receipt=_success_receipt(verdict),
+        result_model=RESULT_MODEL,
+        contract_path=_contract(tmp_path),
+        lane="dev",
+        resolve_target=lambda _lane: _target(),
+        publisher=publisher,
+    )
+    assert passed.outcome is EnumSkillTerminalPublishOutcome.PUBLISHED
+    assert passed.artifact_ref is not None
+    assert passed.artifact_ref != failed.artifact_ref
+    assert ArtifactStore().read(failed.artifact_ref) == first_bytes
+    assert json.loads(ArtifactStore().read(passed.artifact_ref))["payload"] == verdict
