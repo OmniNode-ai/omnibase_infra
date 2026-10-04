@@ -42,13 +42,20 @@ WHAT IT WRITES
     of the chosen lane (lists as JSON). ``GITHUB_OUTPUT``: ``name``, ``lane``
     (the whole entry as JSON) and every field under its own name.
 
-DEPLOY WAIT (OMN-19811)
+DEPLOY WAIT (OMN-19811, OMN-20509)
     ``LANE_DEPLOY_WAIT_SECONDS`` opts into a bounded wait when no lane answers.
     Eligible lanes' declared deploy agents must report readable, busy state;
     idle or unreadable agents alone never justify waiting. Poll every
     ``LANE_DEPLOY_POLL_SECONDS`` (default 15), then try the ordered lanes again.
     A successful wait exports ``LANE_WAITED_SECONDS``, rounded up, so the probe
     can share the same budget. The default budget of 0 keeps a single shot.
+
+    The agents are read once BEFORE the first lane check as well as after it:
+    the check spends its probe timeouts first, and a settle that ends inside
+    them (the agent re-execs, then reports idle) would otherwise leave nothing
+    to see. A busy pre-read counts as busy evidence for the wait. When an agent
+    then reads idle or unreadable, the lane gets ``SETTLE_GRACE_SECONDS`` more
+    to come back before the wait ends RED; the budget still bounds all of it.
 
 NO RESPONDER IS RED, NEVER A SKIP
     An empty or unset list, a malformed entry, or no eligible lane answering
@@ -77,6 +84,11 @@ FIELD_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 HOST_LOCAL_NAMES = frozenset(
     {"localhost", "host.docker.internal", "gateway.docker.internal"}
 )
+# OMN-20509: how long a lane keeps being waited for once its deploy agent stops
+# reading busy. The agent leaves ``settling`` a moment before the lane's
+# surfaces answer again (run 37179200279: the settle ended 05:12:58Z, after
+# the lane had spent the preceding minutes timing out under image imports).
+SETTLE_GRACE_SECONDS = 60.0
 
 
 class OverlayError(ValueError):
@@ -232,6 +244,22 @@ def deploy_agent_busy_reason(snapshot: Mapping[str, Any]) -> str | None:
     return f"{ahead} command(s) queued"
 
 
+def _busy_agents(
+    candidates: Sequence[Mapping[str, Any]], timeout: float, note: str = ""
+) -> dict[str, str]:
+    """Lane name -> busy detail for every candidate whose agent reads busy now."""
+    busy: dict[str, str] = {}
+    for candidate in candidates:
+        snapshot = read_deploy_agent(candidate["deploy_agent_url"], timeout)
+        reason = deploy_agent_busy_reason(snapshot) if snapshot is not None else None
+        if reason is not None:
+            busy[candidate["name"]] = (
+                f"{candidate['name']} agent {candidate['deploy_agent_url']}: "
+                f"{reason}{note}"
+            )
+    return busy
+
+
 def choose_lane(
     lanes: Sequence[Mapping[str, Any]],
     require: Sequence[str],
@@ -309,42 +337,53 @@ def main(environ: Mapping[str, str] | None = None) -> int:
     except OverlayError as exc:
         _say(f"::error::{exc}")
         return 1
+    candidates = [
+        candidate
+        for candidate in lanes
+        if all(candidate.get(field) == want for field, want in match.items())
+        and all(field in candidate for field in require)
+        and "deploy_agent_url" in candidate
+    ]
+    # Before the lane check: it spends its probe timeouts first, and a settle
+    # that ends inside them leaves an idle agent behind (OMN-20509).
+    pre_busy = (
+        _busy_agents(candidates, timeout, " (read before the lane check)")
+        if wait_budget > 0
+        else {}
+    )
     lane, tried = choose_lane(
         lanes, require, lambda url: http_health(url, timeout), match
     )
     waited: float | None = None
     wait_detail = ""
     if lane is None and wait_budget > 0:
-        candidates = [
-            candidate
-            for candidate in lanes
-            if all(candidate.get(field) == want for field, want in match.items())
-            and all(field in candidate for field in require)
-            and "deploy_agent_url" in candidate
-        ]
         started = time.monotonic()
-        last_busy: dict[str, str] = {}
+        last_busy = dict(pre_busy)
+        saw_busy = bool(pre_busy)
+        not_busy_since: float | None = None
         end_reason = "no readable busy deploy agent"
         while lane is None:
-            busy: list[str] = []
-            for candidate in candidates:
-                snapshot = read_deploy_agent(candidate["deploy_agent_url"], timeout)
-                reason = (
-                    deploy_agent_busy_reason(snapshot) if snapshot is not None else None
-                )
-                if reason is not None:
-                    detail = (
-                        f"{candidate['name']} agent {candidate['deploy_agent_url']}: "
-                        f"{reason}"
-                    )
-                    busy.append(detail)
-                    last_busy[candidate["name"]] = detail
-            if not busy:
+            busy = _busy_agents(candidates, timeout)
+            last_busy.update(busy)
+            now = time.monotonic()
+            if busy:
+                saw_busy = True
+                not_busy_since = None
+            elif not saw_busy:
                 break
+            else:
+                if not_busy_since is None:
+                    not_busy_since = now
+                if now - not_busy_since >= SETTLE_GRACE_SECONDS:
+                    end_reason = f"deploy agent not busy for {SETTLE_GRACE_SECONDS:g}s"
+                    break
             if waited is None:
-                _say("lab lane deploy wait started -- " + " | ".join(busy))
+                _say(
+                    "lab lane deploy wait started -- "
+                    + " | ".join((busy or pre_busy).values())
+                )
                 waited = 0.0
-            if time.monotonic() - started + poll > wait_budget:
+            if now - started + poll > wait_budget:
                 end_reason = "budget exhausted"
                 break
             time.sleep(poll)

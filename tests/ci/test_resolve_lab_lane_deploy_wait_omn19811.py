@@ -262,12 +262,15 @@ def test_a_deploy_that_outlasts_the_budget_is_red_and_says_so(
 def test_a_deploy_that_ends_with_the_ingress_still_down_is_red(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The agent going idle ends the wait: a lane whose redeploy finished and
-    whose ingress still refuses is down, and waiting longer would hide that."""
-    world = World(ready_at=10_000, busy_until=40)
+    """The agent going idle ends the wait after the settle grace (OMN-20509): a
+    lane whose redeploy finished and whose ingress still refuses is down, and
+    waiting to the end of the budget would hide that."""
+    deploy_ends = 10
+    world = World(ready_at=10_000, busy_until=deploy_ends)
     code, _ = _run(tmp_path, monkeypatch, world, [LANE_A])
     assert code == 1
-    assert world.now <= 40 + POLL_SECONDS
+    assert world.now <= deploy_ends + resolver.SETTLE_GRACE_SECONDS + 2 * POLL_SECONDS
+    assert world.now < BUDGET_SECONDS
 
 
 @pytest.mark.parametrize("wait", [None, "0"])
