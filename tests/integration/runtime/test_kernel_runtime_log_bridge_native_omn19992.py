@@ -28,10 +28,10 @@ from omnibase_infra.runtime.service_kernel import bootstrap
 from omnibase_infra.topics import topic_keys
 from omnibase_infra.topics.service_topic_registry import ServiceTopicRegistry
 from tests.conftest import check_service_registry_available
-from tests.unit.runtime.conftest import force_inmemory_runtime_config
+from tests.unit.runtime import conftest as runtime_conftest
 
 pytestmark = [
-    pytest.mark.unit,
+    pytest.mark.integration,
     pytest.mark.skipif(
         not check_service_registry_available(),
         reason="service_registry unavailable (omnibase_core circular import)",
@@ -42,6 +42,10 @@ pytestmark = [
 # budget is far smaller; 10 s keeps a regression from hanging the suite.
 PUBLISH_BOUND_SECONDS = 10.0
 FINGERPRINT_LENGTH = 16
+
+
+# Reuse the unit-suite fixture under a local name (fixtures register by attribute).
+wire_infrastructure_mock = runtime_conftest.mock_wire_infrastructure
 
 
 class _ForcedHandlerError(RuntimeError):
@@ -75,9 +79,9 @@ async def test_native_kernel_publishes_runtime_error_event(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     native_bus: EventBusInmemory,
-    mock_wire_infrastructure: MagicMock,
+    wire_infrastructure_mock: MagicMock,
 ) -> None:
-    force_inmemory_runtime_config(monkeypatch, tmp_path)
+    runtime_conftest.force_inmemory_runtime_config(monkeypatch, tmp_path)
     monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
     monkeypatch.setenv("ENABLE_RUNTIME_LOG_BRIDGE", "true")
     topic = ServiceTopicRegistry.from_defaults().resolve(topic_keys.RUNTIME_ERROR)
