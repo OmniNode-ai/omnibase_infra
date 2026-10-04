@@ -1,3 +1,17 @@
+## v0.38.65 (2026-10-04)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.65 by the scheduled release train.
+- 5 release-relevant commit(s) merged since v0.38.64.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.64
+- fix: size local-omnipc2-chat max_tokens to its slot share of the .202 pool (#4542)
+- fix(cli): sanitise delegate pre-publish failure diagnostics (#4525)
+- fix: C28 pins rpk to the broker's internal listener (#4527)
+- fix: an abandoned dispatch stops degrading the bus after a bounded grace (#4540)
+- fix: keyless-tenant refusals stop flapping the dev runtime; C28 waits out one unhealthy window (#4536)
+
 ## v0.38.64 (2026-10-03)
 
 ### Release
