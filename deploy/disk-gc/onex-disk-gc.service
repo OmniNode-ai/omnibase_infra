@@ -28,7 +28,7 @@ After=docker.service
 [Service]
 Type=oneshot
 
-# Resolve OMNI_HOME for the runtime user on .201.
+# The installer renders the selected registry root into this default.
 Environment="OMNI_HOME=%h/Code/omni_home"
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 
@@ -60,15 +60,15 @@ ExecStartPre=/bin/mkdir -p %h/.local/log/onex
 # Disposition and evidence: deploy/disk-gc/README-worktree-prune.md
 
 # 2. Conservative docker/disk GC honoring the versioned keep-list.
-ExecStart=/bin/bash %h/Code/omni_home/omnibase_infra/scripts/disk-gc.sh --execute
+ExecStart=/bin/bash "${OMNI_HOME}/omnibase_infra/scripts/disk-gc.sh" --execute
 
 # 3. Conservative volume GC. Only unused anonymous volumes and unused ephemeral
 #    boot Redpanda volumes are removable; linked lane/runtime Redpanda volumes
 #    are never removed by this pass.
-ExecStart=/bin/bash %h/Code/omni_home/omnibase_infra/scripts/docker-volume-gc.sh --execute
+ExecStart=/bin/bash "${OMNI_HOME}/omnibase_infra/scripts/docker-volume-gc.sh" --execute
 
 # 4. Watermark alert ratchet (non-zero exit on breach is expected; do not fail the unit).
-ExecStart=-/bin/bash %h/Code/omni_home/omnibase_infra/scripts/disk-watermark-check.sh --mount /data
+ExecStart=-/bin/bash "${OMNI_HOME}/omnibase_infra/scripts/disk-watermark-check.sh" --mount /data
 
 StandardOutput=journal
 StandardError=journal
