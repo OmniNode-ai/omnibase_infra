@@ -3957,6 +3957,15 @@ jobs:
       contents: read
     uses: ./.github/workflows/deploy-agent-tests.yml
 
+  # OMN-14975: run vendor sync inside this run so the required CI Summary
+  # observes it. The exact caller/inner name is registered as a STRICT gate.
+  node-migration-sync:
+    name: node-migration-sync
+    permissions:
+      contents: read
+    uses: ./.github/workflows/node-migration-sync.yml
+    secrets: inherit
+
   # OMN-18926. The sanitized legacy-RDS fixture proof is the ONLY leg anywhere that
   # builds `omnidash_analytics` from EMPTY and runs the real
   # scripts/run-forward-migrations.sh over the real corpus, twice, asserting
