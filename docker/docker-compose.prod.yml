@@ -139,6 +139,11 @@ services:
       ONEX_BOX_ID: omninode-pc
       ONEX_RUNTIME_ID: prod-main
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/prod/main
+      # OMN-19494 (LO4): this runtime names its lane (see the same block in
+      # docker-compose.judge.yml for why). Literal, main runtime only. A
+      # repository declaration only: nothing here deploys, applies or restarts
+      # anything, and a prod change still takes the prod promotion gate.
+      ONEX_RUNTIME_LANE: "onex-prod"
       ONEX_RUNTIME_CAPABILITIES: ${PROD_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set PROD_RUNTIME_MAIN_CAPABILITIES}
       ONEX_GROUP_ID: onex-prod-runtime-main
       KAFKA_INSTANCE_ID: prod-main

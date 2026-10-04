@@ -113,6 +113,11 @@ services:
     environment:
       ONEX_BOX_ID: omnipc2
       ONEX_RUNTIME_ADDRESS: runtime://omnipc2/dogfood/main
+      # OMN-19494 (LO4): this lane's own id. The dogfood file under this
+      # overlay declares `dogfood`, and an environment key survives a layer
+      # that does not repeat it, so without this line the simulation stack
+      # would name itself as the dogfood lane. Literal, main runtime only.
+      ONEX_RUNTIME_LANE: "sim-202"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/sim-202.bifrost.yaml
       OTEL_SERVICE_NAME: omninode-sim-202-runtime-main
     ports: !override

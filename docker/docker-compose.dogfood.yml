@@ -464,6 +464,10 @@ services:
     environment:
       !!merge <<: [*dogfood-runtime-env, *dogfood-strict-wiring-env]
       RUNTIME_PROFILE: main
+      # OMN-19494 (LO4): this runtime names its lane (see the same block in
+      # docker-compose.judge.yml for why). Literal, main runtime only.
+      # docker-compose.sim-202.yml layers over this file and must override it.
+      ONEX_RUNTIME_LANE: "dogfood"
       OTEL_SERVICE_NAME: omninode-dogfood-runtime-main
       ONEX_RUNTIME_ID: dogfood-main
       ONEX_RUNTIME_ADDRESS: runtime://omninode-pc/dogfood/main
