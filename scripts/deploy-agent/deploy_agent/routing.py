@@ -321,25 +321,34 @@ class GitTableAtRef:
             argv, capture_output=True, text=True, check=False, timeout=timeout
         )
 
+    def _git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        """One git call, with a timeout turned into ``RoutingTableError``.
+
+        OMN-20527: a ``git fetch`` that outran ``GIT_TIMEOUT_SECONDS`` raised
+        ``subprocess.TimeoutExpired`` out of ``poll_and_accept`` and killed the
+        dev-200 agent (2026-10-01 17:06 local, launchd last exit 1). An
+        unreadable table already has a defined outcome -- the caller takes the
+        default route with a ``routing_table_unreadable_at_ref`` warning -- and
+        a slow fetch is one more way of being unreadable, not a reason to die.
+        """
+        try:
+            return self._run(
+                ["git", "-C", self.repo_dir, *args], timeout=GIT_TIMEOUT_SECONDS
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RoutingTableError(
+                f"git {args[0]} timed out after {GIT_TIMEOUT_SECONDS}s in {self.repo_dir}"
+            ) from exc
+
     def _has_commit(self, sha: str) -> bool:
-        probe = self._run(
-            ["git", "-C", self.repo_dir, "cat-file", "-e", f"{sha}^{{commit}}"],
-            timeout=GIT_TIMEOUT_SECONDS,
-        )
-        return probe.returncode == 0
+        return self._git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0
 
     def __call__(self, sha: str) -> ModelRoutingTable | None:
         if not self._has_commit(sha):
-            self._run(
-                ["git", "-C", self.repo_dir, "fetch", "--quiet", "--no-tags", "origin"],
-                timeout=GIT_TIMEOUT_SECONDS,
-            )
+            self._git("fetch", "--quiet", "--no-tags", "origin")
             if not self._has_commit(sha):
                 raise RoutingTableError(f"commit {sha} is not in {self.repo_dir}")
-        shown = self._run(
-            ["git", "-C", self.repo_dir, "show", f"{sha}:{ROUTING_TABLE_RELPATH}"],
-            timeout=GIT_TIMEOUT_SECONDS,
-        )
+        shown = self._git("show", f"{sha}:{ROUTING_TABLE_RELPATH}")
         if shown.returncode != 0:
             # The commit exists, so a failed show means the file is absent there.
             return None
