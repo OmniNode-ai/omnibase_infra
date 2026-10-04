@@ -559,11 +559,13 @@ services:
       ONEX_GROUP_ID: onex-lakshman-runtime-effects
       KAFKA_INSTANCE_ID: lakshman-effects
       OMNIBASE_INFRA_SAVINGS_KAFKA_BOOTSTRAP_SERVERS: "redpanda:9092"
-      # OMN-20159: node_projection_read_effect runs here and reads through the
-      # runtime binding; without it the /skill edge refuses every read with
-      # projection_binding_unconfigured. The same binding is the delegation
-      # evidence target of node_delegate_skill_orchestrator in this container.
-      OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY: /etc/onex/projection-runtime-binding.yaml
+      # OMN-20159: node_projection_read_effect runs here and reads through its
+      # own read binding; without it the /skill edge refuses every read with
+      # projection_binding_unconfigured. This is deliberately NOT the runtime
+      # binding variable: that one also selects node_delegate_skill_orchestrator's
+      # claim store and evidence store, which must keep their container-local
+      # SQLite files rather than log in as the read-only reader (omnimarket#3364).
+      OMNIMARKET_PROJECTION_READ_BINDING_OVERLAY: /etc/onex/projection-read-binding.yaml
     ports: !override
       - "${LAKSHMAN_RUNTIME_EFFECTS_PORT:?runtime policy contract must set LAKSHMAN_RUNTIME_EFFECTS_PORT}:8085"
     stop_grace_period: 90s
@@ -572,7 +574,7 @@ services:
       - lakshman_effects_data:/app/data
       - ../contracts:/app/contracts:ro
       - ./lane-overlays/lakshman.bifrost.yaml:/app/config/delegation/lakshman.bifrost.yaml:ro
-      - ./projection-runtime-binding/lakshman-runtime-read.yaml:/etc/onex/projection-runtime-binding.yaml:ro
+      - ./projection-runtime-binding/lakshman-runtime-read.yaml:/etc/onex/projection-read-binding.yaml:ro
       - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]

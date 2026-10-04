@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).parent.parent.parent.parent
 COMPOSE_FILE = "docker/docker-compose.lakshman.yml"
@@ -562,23 +563,115 @@ def test_operator_registry_binding_cannot_join_the_dev_consumer_group() -> None:
     assert "local.omnimarket-projections.tenant-registry-writer.consume.v1" not in text
 
 
+# OMN-20159: the /skill edge reaches node_projection_read_effect in
+# runtime-effects. That node reads through its OWN binding variable, apart from
+# the runtime binding variable, because the runtime binding also selects the
+# delegate-skill claim store and evidence store: a reader's login must never
+# become their write principal (omnimarket#3364). The failure modes below are
+# the ones the wiring can get wrong.
+_READ_BINDING_ENV = "OMNIMARKET_PROJECTION_READ_BINDING_OVERLAY"
+_READ_BINDING_TARGET = "/etc/onex/projection-read-binding.yaml"
+_RUNTIME_BINDING_ENV = "OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY"
+_RUNTIME_BINDING_TARGET = "/etc/onex/projection-runtime-binding.yaml"
+
+
+def _mounts_at(service: dict[str, Any], target: str) -> list[dict[str, Any]]:
+    return [m for m in service.get("volumes", []) if m.get("target") == target]
+
+
+def _effects_read_binding_file() -> tuple[dict[str, Any], Path]:
+    effects = _compose_config_json()["services"]["runtime-effects"]
+    mounts = _mounts_at(effects, _READ_BINDING_TARGET)
+    assert len(mounts) == 1, f"expected one read-binding mount, got {mounts}"
+    return effects, Path(mounts[0]["source"])
+
+
 @pytest.mark.integration
 def test_runtime_effects_carries_the_projection_read_binding() -> None:
-    """OMN-20159: the /skill edge reaches node_projection_read_effect in
-    runtime-effects, and with no binding every read is refused
-    ``projection_binding_unconfigured``. The binding must name the database the
-    lane's projection API reads ``delegation_events`` from, or the two read paths
-    answer different rows for the same request.
+    """The variable, the mount target and the file must agree, or every read is
+    refused ``projection_binding_unconfigured``. The file must name the database
+    the lane's projection API reads ``delegation_events`` from, or the two read
+    paths answer different rows for the same request.
     """
-    effects = _compose_config_json()["services"]["runtime-effects"]
-    assert effects["environment"]["OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY"] == (
-        "/etc/onex/projection-runtime-binding.yaml"
-    )
-    binding = next(
-        Path(mount["source"])
-        for mount in effects.get("volumes", [])
-        if mount["target"] == "/etc/onex/projection-runtime-binding.yaml"
-    )
+    effects, binding = _effects_read_binding_file()
+    assert effects["environment"][_READ_BINDING_ENV] == _READ_BINDING_TARGET
+    assert binding.name == "lakshman-runtime-read.yaml"
     text = binding.read_text(encoding="utf-8")
     assert "env:OMNIDASH_ANALYTICS_DB_URL" in text
     assert "lakshman.omnimarket-projections.runtime-read.consume.v1" in text
+
+
+@pytest.mark.integration
+def test_read_binding_is_mounted_read_only() -> None:
+    effects, _ = _effects_read_binding_file()
+    (mount,) = _mounts_at(effects, _READ_BINDING_TARGET)
+    assert mount.get("type") == "bind"
+    assert mount.get("read_only") is True, (
+        "the read binding must be a read-only mount; a writable one lets a "
+        "compromised container rewrite its own database identity"
+    )
+
+
+@pytest.mark.integration
+def test_runtime_effects_has_no_runtime_binding_so_the_claim_store_stays_local() -> (
+    None
+):
+    """The runtime binding variable selects node_delegate_skill_orchestrator's
+    claim store and evidence store. Set on runtime-effects with the reader's
+    login, it moved the claim store onto a database the reader cannot write
+    (the dev lane's UndefinedTable on delegate_skill_command_claims, 2026-10-02,
+    Jonah's comment 9ae3af90 on OMN-20159). With only the read variable, both
+    stores resolve their container-local SQLite files.
+    """
+    effects = _compose_config_json()["services"]["runtime-effects"]
+    assert _RUNTIME_BINDING_ENV not in effects["environment"]
+    assert _mounts_at(effects, _RUNTIME_BINDING_TARGET) == []
+
+
+@pytest.mark.integration
+def test_only_runtime_effects_carries_the_read_binding() -> None:
+    """The main runtime and every writer keep their own shape: the read variable
+    is on runtime-effects alone, and the tenant-registry writer still carries
+    its runtime binding (its write principal)."""
+    services = _compose_config_json()["services"]
+    carriers = {
+        name
+        for name, service in services.items()
+        if _READ_BINDING_ENV in service.get("environment", {})
+        or _mounts_at(service, _READ_BINDING_TARGET)
+    }
+    assert carriers == {"runtime-effects"}
+    runtime = services["omninode-runtime"]
+    assert _RUNTIME_BINDING_ENV not in runtime.get("environment", {})
+    assert _mounts_at(runtime, _RUNTIME_BINDING_TARGET) == []
+    writer = services["projection-tenant-registry-writer"]
+    assert writer["environment"][_RUNTIME_BINDING_ENV] == _RUNTIME_BINDING_TARGET
+
+
+@pytest.mark.integration
+def test_read_binding_holds_a_secret_reference_never_a_value() -> None:
+    effects, binding = _effects_read_binding_file()
+    document = yaml.safe_load(binding.read_text(encoding="utf-8"))
+    assert document["database_url_secret_ref"] == "env:OMNIDASH_ANALYTICS_DB_URL"
+    assert "://" not in str(document["database_url_secret_ref"])
+    assert "://" not in effects["environment"][_READ_BINDING_ENV]
+
+
+@pytest.mark.integration
+def test_read_binding_consumer_group_is_unique_among_the_lane_bindings() -> None:
+    """A shared group would split one consumer's events across two services."""
+    services = _compose_config_json()["services"]
+    groups: dict[str, str] = {}
+    for name, service in services.items():
+        for target in (_READ_BINDING_TARGET, _RUNTIME_BINDING_TARGET):
+            for mount in _mounts_at(service, target):
+                group = yaml.safe_load(Path(mount["source"]).read_text("utf-8"))[
+                    "kafka_consumer_group"
+                ]
+                assert group not in groups, (
+                    f"{name} and {groups[group]} share consumer group {group}"
+                )
+                groups[group] = name
+    assert groups["lakshman.omnimarket-projections.runtime-read.consume.v1"] == (
+        "runtime-effects"
+    )
