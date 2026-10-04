@@ -973,6 +973,41 @@ services:
       # binding, and role_omnidash cannot write
       # omninode_internal.delegate_skill_command_claims (OMN-17427). The /skill read
       # edge needs the claim store to resolve a write principal separately first (OMN-20159).
+      #
+      # -- BYOK credential READ (OMN-20533) ------------------------------------
+      # onex-api (below) writes a tenant's provider key to Infisical env dev,
+      # folder /tenant-inference-credentials, under a minted ref; the provider
+      # call that needs it runs HERE. With the house-only config every tenant
+      # ref failed closed ("could not be resolved from the secret store"), 4 of
+      # 4 lab-tenant runs on 2026-10-04 09:33-09:50Z.
+      #
+      # The config is the contract's process-level variant for effects (house
+      # mappings plus the tenant_inference_credentials namespace rule,
+      # contracts/services/runtime_policy.contract.yaml). The identity is
+      # effects' OWN: on .201 it is dev-lane-runtime-effects-tenant-credentials,
+      # whose project role grants secrets READ on environment dev, path
+      # /tenant-inference-credentials, and nothing else -- not onex-api's
+      # create/edit identity and not the base anchor's ONEX_RUNTIME_INFISICAL_*
+      # names. Values come from the operator env file on the host
+      # (RUNTIME_EFFECTS_INFISICAL_*), never from this file.
+      #
+      # `:-` and not `:?` on the identity, because the dev-105, dev-200, dev-202
+      # and pre-PR overlays layer this file and hold no such identity; compose
+      # interpolates each file before merging, so a `:?` here would fail their
+      # render even though each of them rebinds runtime-effects to the house
+      # config. On THIS lane a blank identity is still loud: the namespace rule
+      # makes effects build its Infisical handler at wiring time and refuse,
+      # naming every blank INFISICAL_* variable (handler_wiring
+      # build_lane_infisical_handler).
+      #
+      # The slug is pinned for the same reason as onex-api's: its wrong answer
+      # is the dangerous one, and this lane reads environment dev only.
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DEV_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DEV_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON}
+      INFISICAL_ADDR: ${RUNTIME_EFFECTS_INFISICAL_ADDR:-}
+      INFISICAL_PROJECT_ID: ${RUNTIME_EFFECTS_INFISICAL_PROJECT_ID:-}
+      INFISICAL_CLIENT_ID: ${RUNTIME_EFFECTS_INFISICAL_CLIENT_ID:-}
+      INFISICAL_CLIENT_SECRET: ${RUNTIME_EFFECTS_INFISICAL_CLIENT_SECRET:-}
+      INFISICAL_ENVIRONMENT_SLUG: "dev"
     healthcheck:
       test:
         - CMD
