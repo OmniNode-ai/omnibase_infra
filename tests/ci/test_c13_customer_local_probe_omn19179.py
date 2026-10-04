@@ -552,3 +552,51 @@ def test_the_llamacpp_token_counter_still_reads() -> None:
 def test_a_server_with_no_token_counter_cannot_prove_the_positive_control() -> None:
     with pytest.raises(probe.ProbeInputError):
         probe.tokens_predicted_from_metrics("process_cpu_seconds_total 1\n")
+
+
+@pytest.mark.unit
+def test_the_runs_root_is_where_the_delegate_cli_writes_its_run(tmp_path: Path) -> None:
+    """OMN-20505: since omnibase_infra 0.38.64 (OMN-19232) onex delegate writes
+    its run directory under ONEX_STATE_DIR, else $HOME/.onex_state, never the
+    working directory. Reading the working directory found no files on
+    2026-10-04 for a delegation that succeeded (run 37173664469). A fake CLI
+    honouring exactly that order runs in the customer's environment, and the
+    probe's runs root must be where its run landed."""
+    import subprocess
+
+    from tests.ci._fake_delegate_cli_omn20505 import install_fakes
+
+    home, bin_dir, work, _strace = install_fakes(tmp_path)
+    work.mkdir()
+    env = {"HOME": str(home), "PATH": f"{bin_dir}:/usr/bin:/bin", "LANG": "C.UTF-8"}
+    subprocess.run(
+        [str(bin_dir / "onex"), "delegate", "p"], env=env, cwd=work, check=False
+    )
+
+    runs_root = probe.delegate_runs_root(env)
+    assert (runs_root / "run-unconfigured" / "receipt.json").is_file()
+    assert runs_root == home / ".onex_state" / "runs"
+    assert not (work / ".onex_state").exists()
+
+
+@pytest.mark.unit
+def test_an_absolute_onex_state_dir_moves_the_runs_root(tmp_path: Path) -> None:
+    env = {"HOME": str(tmp_path / "home"), "ONEX_STATE_DIR": str(tmp_path / "s")}
+    assert probe.delegate_runs_root(env) == tmp_path / "s" / "runs"
+    relative = {"HOME": str(tmp_path / "home"), "ONEX_STATE_DIR": "rel"}
+    assert (
+        probe.delegate_runs_root(relative) == tmp_path / "home" / ".onex_state" / "runs"
+    )
+
+
+@pytest.mark.unit
+def test_the_live_session_reads_runs_from_the_customer_state_root() -> None:
+    """The customer environment binds no ONEX_STATE_DIR (the C13 config
+    surface), so the live session must take its runs root from the customer's
+    own environment and never from the working directory."""
+    import inspect
+
+    source = inspect.getsource(probe.observe_live)
+    assert "runs_root = delegate_runs_root(base_env)" in source
+    assert 'workdir / ".onex_state"' not in source
+    assert "ONEX_STATE_DIR" not in source
