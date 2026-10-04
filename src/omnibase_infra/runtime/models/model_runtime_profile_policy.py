@@ -79,4 +79,25 @@ class ModelRuntimeProfilePolicy(BaseModel):
         if len(namespace_names) != len(set(namespace_names)):
             msg = "runtime profile secret resolver namespace names must be unique"
             raise ValueError(msg)
+        # OMN-20533: a process-level rule is rendered into the same resolver
+        # config as the profile's, so it needs the same config path and may
+        # not reuse a namespace name the profile (or itself) already declares.
+        for process_name, process in self.processes.items():
+            if not process.secret_resolver_namespaces:
+                continue
+            if not self.secret_resolver_config_path.strip():
+                msg = (
+                    f"runtime process {process_name!r} declares secret resolver "
+                    "namespaces but its profile has no config path"
+                )
+                raise ValueError(msg)
+            combined = namespace_names + [
+                rule.namespace for rule in process.secret_resolver_namespaces
+            ]
+            if len(combined) != len(set(combined)):
+                msg = (
+                    f"runtime process {process_name!r} secret resolver namespace "
+                    "names must be unique across the process and its profile"
+                )
+                raise ValueError(msg)
         return self

@@ -200,6 +200,17 @@ services:
     container_name: omninode-dev-202-runtime-effects
     environment:
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml
+      # OMN-20533: docker-compose.dev-lane.yml binds runtime-effects to the .201
+      # dev lane's tenant-credential READ config and its own Infisical identity.
+      # This lane holds no such identity, so it rebinds the house-only config
+      # and the base anchor's identity names; without this, effects would demand
+      # a store identity at boot and refuse.
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON}
+      INFISICAL_ADDR: ${ONEX_RUNTIME_INFISICAL_ADDR:-}
+      INFISICAL_PROJECT_ID: ${ONEX_RUNTIME_INFISICAL_PROJECT_ID:-}
+      INFISICAL_CLIENT_ID: ${ONEX_RUNTIME_INFISICAL_CLIENT_ID:-}
+      INFISICAL_CLIENT_SECRET: ${ONEX_RUNTIME_INFISICAL_CLIENT_SECRET:-}
+      INFISICAL_ENVIRONMENT_SLUG: ""
     ports: !override
       - "127.0.0.1:61086:8085"
       - "172.17.0.1:61086:8085"

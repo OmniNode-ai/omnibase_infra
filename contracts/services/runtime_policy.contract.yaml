@@ -194,6 +194,28 @@ profiles:
         omnimemory_enabled: false
         omnimemory_memgraph_host: ""
         publish_introspection: false
+        # OMN-20533: the READ half of BYOK on the .201 dev lane. onex-api writes
+        # a tenant's provider key to Infisical env dev, folder
+        # /tenant-inference-credentials, under a ref minted per request
+        # (cred_{tenant}_{provider}_{uuid4hex}), and the tenant overlay routes
+        # that tenant to the ref. The provider call runs here, in
+        # runtime-effects, and with only the profile's env mappings every such
+        # ref failed closed with "could not be resolved from the secret store"
+        # (4 of 4 lab-tenant runs, 2026-10-04 09:33-09:50Z). Same rule, same
+        # folder, as the onex-dev runtime ConfigMap in omninode_infra.
+        #
+        # Process-level, not profile-level: an Infisical rule makes the process
+        # demand a store identity at boot, and only effects reads a tenant
+        # credential. It renders as DEV_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON,
+        # which docker-compose.dev-lane.yml binds for the .201 dev lane with
+        # that lane's read-only identity (RUNTIME_EFFECTS_INFISICAL_*); the
+        # dev-105, dev-200, dev-202 and pre-PR overlays rebind the house-only
+        # DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON.
+        secret_resolver_namespaces:
+          - namespace: tenant_inference_credentials
+            ref_pattern: "^cred_[A-Za-z0-9._:-]+_[A-Za-z0-9_-]+_[0-9a-f]{32}$"
+            source_type: infisical
+            source_path_template: "/tenant-inference-credentials/{ref}"
       # OMN-18114: the TENANT-domain projection CARRIER. Optional per lane and
       # declared only by the two lab lanes that deploy it.
       #

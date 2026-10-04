@@ -55,6 +55,10 @@
 ALPHA_INVITE_ADMIN_SECRET
 DEV_KAFKA_SASL_PASSWORD
 DEV_KAFKA_SASL_USERNAME
+# OMN-20533 provenance: runtime-effects' resolver config with the tenant
+# credential namespace rule. Contract-rendered into docker/runtime-policy.env,
+# never an operator value.
+DEV_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON
 KEYCLOAK_ADMIN_CLIENT_SECRET
 # OMN-17530 provenance: the onex-api service image tag. An image tag, never a
 # credential; resolved from the operator env store, which is why it has no
