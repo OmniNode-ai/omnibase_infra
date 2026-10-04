@@ -23,6 +23,9 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from omnibase_infra.models.delegation.model_bifrost_lane_endpoint_capacity import (
+    ModelBifrostLaneEndpointCapacity,
+)
 from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
     EnumBifrostLaneLocale,
 )
@@ -55,6 +58,11 @@ class ModelBifrostLaneOverlay(BaseModel):
     #: overlay CONTENT.
     locale: EnumBifrostLaneLocale
     backends: tuple[ModelBifrostLaneBackendBinding, ...]
+    #: OMN-20490. The token capacity of each unified-pool endpoint this lane
+    #: binds a backend to. Declarative only: the renderer does not write it into
+    #: the rendered contract, and ``tests/ci/test_bifrost_endpoint_capacity.py``
+    #: holds every binding on these endpoints to the share they declare.
+    endpoint_capacity: tuple[ModelBifrostLaneEndpointCapacity, ...] = ()
 
     @field_validator("schema_version")
     @classmethod
@@ -72,6 +80,13 @@ class ModelBifrostLaneOverlay(BaseModel):
             raise ValueError(
                 f"lane {self.lane!r}: backends must not contain duplicate "
                 f"backend_id values, got {backend_keys}"
+            )
+
+        capacity_endpoints = [capacity.endpoint for capacity in self.endpoint_capacity]
+        if len(capacity_endpoints) != len(set(capacity_endpoints)):
+            raise ValueError(
+                f"lane {self.lane!r}: endpoint_capacity must not declare an "
+                f"endpoint twice, got {capacity_endpoints}"
             )
 
         if self.locale is EnumBifrostLaneLocale.CLOUD:
