@@ -20,7 +20,7 @@ import pytest
 
 from omnibase_infra.cli import omnimarket_drift_guard as guard
 
-pytestmark = pytest.mark.integration
+pytestmark = pytest.mark.unit
 
 
 def _git(cwd: Path, *args: str) -> str:
