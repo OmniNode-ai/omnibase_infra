@@ -124,6 +124,13 @@ def pr_binding_outside(item_id: object, *, repo: str, pr_number: int) -> str | N
 # A check's ``cwd`` of ``${OMNI_HOME}/<repo>[/<path>]`` names the repo checkout
 # it runs in (``ModelDodCheck.cwd``; the producer's ``behavior_proof_cwd`` and
 # ``ADMISSIBILITY_VALIDATOR_CWD``).
+#
+# Execution scope (OMN-19267): an item declaring ``execution_scope:
+# local_done_gate`` (OMN-15392, ``ModelDodItem.execution_scope``) is not
+# evaluated by hosted compliance. The pinned checker (onex_change_control
+# 91f5b691, 2026-07-24) predates that field (7a56bb68, 2026-07-30) and executes
+# such an item anyway, so the driver reports it and does not run it.
+_EXECUTION_SCOPE_LOCAL_DONE_GATE = "local_done_gate"
 _DECLARED_REPO_CWD = re.compile(r"^\$\{OMNI_HOME\}/(?P<repo>[^/$]+)(?:/|$)")
 
 
@@ -179,6 +186,18 @@ def install_pr_scope(checker: ModuleType) -> None:
             item_id = item.get("id") if isinstance(item, dict) else None
             other = pr_binding_outside(item_id, repo=repo, pr_number=pr_number)
             owner = declared_repo_outside(item, repo=repo)
+            if (
+                isinstance(item, dict)
+                and item.get("execution_scope") == _EXECUTION_SCOPE_LOCAL_DONE_GATE
+            ):
+                print(
+                    f"\n[DoD {item_id}]\n  [-] execution_scope: NOT-EVALUATED "
+                    "[local_done_gate] -- hosted contract compliance is not an "
+                    "authorized consumer; the local Done gate executes this item. "
+                    "Not run and not counted here.",
+                    flush=True,
+                )
+                continue
             if other is None and owner is not None:
                 print(
                     f"\n[DoD {item_id}]\n  [~] repo_scope: NOT THIS REPO'S ITEM -- "
