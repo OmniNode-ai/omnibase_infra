@@ -17,7 +17,10 @@ field parity with the runtime's success-path applier.
 Fail-soft by construction: :func:`publish_skill_terminal_event` never raises.
 A missing lane declaration, a missing identity, an unreachable broker and a
 timeout each come back as a ``FAILED`` report, and the caller keeps the exit
-code the dispatch produced.
+code the dispatch produced. Before accessing the broker, retain the exact
+terminal envelope in the existing content-addressed artifact store. A storage
+failure prevents publication; a broker failure reports the retained reference
+for recovery. This local capture does not prove off-host delivery.
 
 The broker address and the SASL identity are resolved exactly as
 ``onex delegate --lane <lane>`` resolves them; nothing here reads an ambient
@@ -37,6 +40,11 @@ from uuid import UUID
 import yaml
 from pydantic import JsonValue
 
+from omnibase_core.artifacts.artifact_store import ArtifactStore
+from omnibase_core.enums.artifacts.enum_artifact_retention_class import (
+    EnumArtifactRetentionClass,
+)
+from omnibase_core.models.artifacts.model_artifact_ref import ModelArtifactRef
 from omnibase_infra.cli.delegate_lane import resolve_lane_target
 from omnibase_infra.cli.delegate_lane_credentials import (
     resolve_lane_client_transport_for,
@@ -155,11 +163,13 @@ def publish_skill_terminal_event(
     lane: str,
     resolve_target: Callable[[str], ModelSkillTerminalPublishTarget],
     publisher: SkillTerminalPublisher | None = None,
+    artifact_store_factory: Callable[[], ArtifactStore] = ArtifactStore,
     timeout_seconds: float = 5.0,
 ) -> ModelSkillTerminalPublishReport:
     """Publish the receipt's handler result to its terminal topic. Never raises."""
     topic = ""
     correlation_id: UUID | None = None
+    artifact_ref: ModelArtifactRef | None = None
     try:
         result = _handler_result(receipt, result_model)
         if result is None:
@@ -178,6 +188,15 @@ def publish_skill_terminal_event(
             payload=json.dumps(result).encode("utf-8"),
             terminal_topics={topic},
         )
+        artifact_ref = artifact_store_factory().write_blob(
+            value,
+            media_type="application/json",
+            artifact_kind="skill_terminal_envelope",
+            source_system="onex_cli",
+            scope_ref=result_model,
+            correlation_id=str(correlation_id),
+            retention_class=EnumArtifactRetentionClass.TICKET,
+        )
         target = resolve_target(lane)
         publish = publisher or _publish_to_kafka
         asyncio.run(
@@ -189,6 +208,7 @@ def publish_skill_terminal_event(
             lane=lane,
             topic=topic,
             correlation_id=correlation_id,
+            artifact_ref=artifact_ref,
             detail=f"{type(exc).__name__}: {sanitize_error_message(exc)}",
         )
     return ModelSkillTerminalPublishReport(
@@ -196,4 +216,5 @@ def publish_skill_terminal_event(
         lane=lane,
         topic=topic,
         correlation_id=correlation_id,
+        artifact_ref=artifact_ref,
     )

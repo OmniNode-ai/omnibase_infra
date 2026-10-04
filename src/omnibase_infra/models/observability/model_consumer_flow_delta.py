@@ -56,7 +56,10 @@ class ModelConsumerFlowDelta(BaseModel):
             and must materialize as ``UNKNOWN``, never as zero traffic.
         messages_in: Envelopes handed to the dispatch engine.
         messages_out: Envelopes successfully published by the handler's result.
-        messages_dlq: Envelopes routed to a DLQ or the platform quarantine sink.
+        messages_dlq: Envelopes routed to a DLQ or the platform quarantine sink,
+            except a keyless tenant's answered refusal, which is a refused
+            request rather than lost input and counts only as a handler error
+            (OMN-20410).
         handler_errors: Dispatches whose handler raised.
         declares_output: Whether the subscription's handler contract declares
             at least one bus publish topic. ``None`` means not known.

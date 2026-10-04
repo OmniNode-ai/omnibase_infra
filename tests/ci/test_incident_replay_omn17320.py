@@ -111,6 +111,7 @@ def test_the_shipped_denylist_does_not_fire_on_this_artifact() -> None:
     )
 
 
+@pytest.mark.timeout(300)
 def test_the_artifact_carries_no_real_denylisted_identifier() -> None:
     """The fixture itself must satisfy the rule the guard enforces."""
     result = subprocess.run(

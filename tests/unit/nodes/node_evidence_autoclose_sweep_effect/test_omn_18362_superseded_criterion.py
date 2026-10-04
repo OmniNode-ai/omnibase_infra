@@ -29,12 +29,20 @@ from typing import Any
 
 import pytest
 
+from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    acceptance_criteria_items as _acceptance_criteria_items,
+)
+from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    canonical_ac_label as _canonical_ac_label,
+)
+from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    declares_supersession as _declares_supersession,
+)
+from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    live_acceptance_criteria_items as _live_acceptance_criteria_items,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
     _ac_coverage_gap,
-    _acceptance_criteria_items,
-    _canonical_ac_label,
-    _declares_supersession,
-    _live_acceptance_criteria_items,
 )
 
 pytestmark = pytest.mark.unit

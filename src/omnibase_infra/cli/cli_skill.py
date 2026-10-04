@@ -48,6 +48,7 @@ from omnibase_infra.cli.prod_dispatch_locality_guard import (
     enforce_prod_dispatch_locality,
 )
 from omnibase_infra.cli.receipt_mode import (
+    create_receipt_artifact_store,
     default_emit_socket_path,
     run_receipt_mode,
 )
@@ -377,6 +378,7 @@ def run_skill_by_name(
             result_model=mapping.result_model,
             contract_path=contract_path,
             lane=mapping.publish_terminal_to_lane,
+            artifact_store_factory=lambda: create_receipt_artifact_store(state_root),
             resolve_target=lambda lane: resolve_skill_terminal_target(
                 lane, omni_home=omnibase_path
             ),

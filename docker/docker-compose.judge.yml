@@ -111,7 +111,8 @@ x-judge-runtime-env: &judge-runtime-env
   ONEX_STATE_ROOT: /app/data/.onex_state_judge
   ONEX_STATE_DIR: /app/data/.onex_state_judge
   ONEX_BOX_ID: judge-local
-  BIFROST_CONTRACT_PATH: ${BIFROST_CONTRACT_PATH:-/app/data/delegation/bifrost_delegation.yaml}
+  # OMN-12864, OMN-19076: Hardcode the container path to prevent host shell overrides.
+  BIFROST_CONTRACT_PATH: /app/data/delegation/bifrost_delegation.yaml
   # OMN-17150: THIS lane's typed Bifrost overlay, resolved from the lane pin.
   # The judge lane rendered via the renderer's old hardcoded default (which
   # named the dev lane's overlay file) while mounting no overlay at all — its

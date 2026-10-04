@@ -137,6 +137,9 @@ from omnibase_infra.runtime.delivery_context import (
     delivery_context_from_message,
     engine_type_accepts_delivery,
 )
+from omnibase_infra.runtime.dispatch_envelope_context import (
+    bind_dispatch_envelope,
+)
 from omnibase_infra.topics import TopicResolver, create_topic_resolver
 from omnibase_infra.utils import compute_consumer_group_id
 from omnibase_spi.protocols.runtime import ProtocolDispatchEngine
@@ -1001,7 +1004,13 @@ class EventBusSubcontractWiring(MixinConsumptionCounter):
 
                 # Apply dispatch result (publish output events + delegate intents)
                 if self._result_applier is not None and result is not None:
-                    await self._result_applier.apply(result, correlation_id)
+                    # OMN-19804: the engine binds the consumed envelope only
+                    # while the dispatcher runs, so by now the contextvar is
+                    # reset. The applier reads tenant_id and the causal edge
+                    # from it; without this bind every output published on
+                    # this path recorded neither.
+                    with bind_dispatch_envelope(envelope):
+                        await self._result_applier.apply(result, correlation_id)
 
                 # Success - commit offset if policy requires and clear retry count
                 if self._should_commit_after_handler():

@@ -96,7 +96,13 @@ from omnibase_infra.cli.model_delegate_locus_decision import (
 )
 from omnibase_infra.cli.model_receipt_runtime_summary import ModelReceiptRuntimeSummary
 from omnibase_infra.enums.enum_delegate_phase import EnumDelegatePhase
-from omnibase_infra.errors import InfraConnectionError, InfraTimeoutError
+from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
+from omnibase_infra.errors import (
+    InfraConnectionError,
+    InfraTimeoutError,
+    ModelInfraErrorContext,
+    ProtocolConfigurationError,
+)
 from omnibase_infra.models.delegation.model_delegate_phase_durations import (
     ModelDelegatePhaseDurations,
 )
@@ -790,6 +796,82 @@ def _print_full_output_on_capture_failure(
         click.echo(json.dumps(workflow_data, indent=2))
 
 
+# --- State-root resolution (OMN-19232) --------------------------------------
+#
+# Resolution order, first match wins: the explicit ``--state-root`` flag, the
+# ``ONEX_STATE_DIR`` environment variable, then ``~/.onex_state``. Never the
+# working directory: a cwd-relative default made a receipt's location depend on
+# where the caller stood, so a lane that ran from its worktree left its
+# receipts there. The environment and default roots follow the rule
+# ``omnibase_core`` applies to its own ``$ONEX_STATE_DIR/tickets``: never under
+# ``~/.claude`` (CLAUDE.md agent-session write rule). Fail-fast (Operating
+# Rule 8): a relative ``ONEX_STATE_DIR``, a root under ``~/.claude`` and an
+# unresolvable home all raise instead of falling back to a cwd-dependent path.
+
+STATE_DIR_ENV_VAR = "ONEX_STATE_DIR"
+DEFAULT_STATE_DIR_NAME = ".onex_state"
+
+#: Operator-facing statement of the resolution order, reused by option help.
+STATE_ROOT_RESOLUTION_ORDER = (
+    "the --state-root flag, then the ONEX_STATE_DIR environment variable, "
+    "then the home default ~/.onex_state"
+)
+
+
+def _refuse_state_root(message: str) -> ProtocolConfigurationError:
+    context = ModelInfraErrorContext.with_correlation(
+        transport_type=EnumInfraTransportType.FILESYSTEM,
+        operation="resolve_state_root",
+    )
+    return ProtocolConfigurationError(message, context=context)
+
+
+def _state_root_home() -> Path:
+    try:
+        return Path.home()
+    except (RuntimeError, KeyError) as exc:
+        raise _refuse_state_root(
+            "cannot resolve the home directory for the default state root "
+            f"~/{DEFAULT_STATE_DIR_NAME}: set {STATE_DIR_ENV_VAR} or pass --state-root"
+        ) from exc
+
+
+def resolve_state_root(explicit: Path | None = None) -> Path:
+    """Return the absolute state root: flag, then ``ONEX_STATE_DIR``, then home.
+
+    Args:
+        explicit: The ``--state-root`` value, or ``None`` when the flag was not
+            given. An explicit value is the operator's own choice and is only
+            made absolute against the cwd they typed it in.
+
+    Raises:
+        ProtocolConfigurationError: ``ONEX_STATE_DIR`` is relative, a resolved
+            environment or default root lies under ``~/.claude``, or no home
+            directory can be resolved.
+    """
+    if explicit is not None:
+        return explicit.expanduser().resolve(strict=False)
+
+    from_env = os.environ.get(STATE_DIR_ENV_VAR, "")
+    if from_env:
+        candidate = Path(from_env).expanduser()
+        if not candidate.is_absolute():
+            raise _refuse_state_root(
+                f"{STATE_DIR_ENV_VAR} must be an absolute path (got a relative "
+                "value, which would depend on the working directory)"
+            )
+        root = candidate.resolve(strict=False)
+        source = STATE_DIR_ENV_VAR
+    else:
+        root = (_state_root_home() / DEFAULT_STATE_DIR_NAME).resolve(strict=False)
+        source = f"the default ~/{DEFAULT_STATE_DIR_NAME}"
+
+    claude_root = (_state_root_home() / ".claude").resolve(strict=False)
+    if root == claude_root or claude_root in root.parents:
+        raise _refuse_state_root(f"{source} must not point under ~/.claude")
+    return root
+
+
 def _resolve_artifact_store_root(state_root: Path) -> Path:
     """Resolve the artifact store root for receipt-mode capture (boundary).
 
@@ -971,6 +1053,22 @@ def _runtime_factory(
     return functools.partial(DelegatePhaseTimedRuntime, phase_stopwatch=phase_stopwatch)
 
 
+def create_receipt_artifact_store(state_root: Path) -> ArtifactStore:
+    """Bind a store to this receipt's root without leaking process configuration.
+
+    Terminal capture runs after receipt mode has restored its environment.
+    Use the same root resolution and lock as receipt mode; the constructed
+    store retains its resolved root after the environment is restored.
+    """
+    with _RECEIPT_MODE_LOCK_STATE.lock:
+        previous_root = os.environ.get(ARTIFACT_STORE_ROOT_ENV)
+        try:
+            _resolve_artifact_store_root(state_root)
+            return ArtifactStore()
+        finally:
+            _restore_environment_value(ARTIFACT_STORE_ROOT_ENV, previous_root)
+
+
 def run_receipt_mode(
     *,
     node_name: str,
@@ -988,6 +1086,7 @@ def run_receipt_mode(
     locus_decision: ModelDelegateLocusDecision | None = None,
     receipt_renderer: Callable[[object], bool] | None = None,
     phase_stopwatch: DelegatePhaseStopwatch | None = None,
+    run_id: uuid.UUID | None = None,
 ) -> int:
     """Serialize receipt mode and restore its process-global state on exit."""
     with _RECEIPT_MODE_LOCK_STATE.lock:
@@ -1015,6 +1114,7 @@ def run_receipt_mode(
                 locus_decision=locus_decision,
                 receipt_renderer=receipt_renderer,
                 phase_stopwatch=phase_stopwatch,
+                run_id=run_id,
             )
         except BaseException as exc:
             operation_error = exc
@@ -1073,6 +1173,7 @@ def _run_receipt_mode(
     locus_decision: ModelDelegateLocusDecision | None = None,
     receipt_renderer: Callable[[object], bool] | None = None,
     phase_stopwatch: DelegatePhaseStopwatch | None = None,
+    run_id: uuid.UUID | None = None,
 ) -> int:
     """Execute the node and print exactly one ``ModelSkillResult`` JSON.
 
@@ -1108,11 +1209,18 @@ def _run_receipt_mode(
     bus reports connect, subscribe, publish and the wait for the terminal to
     it; ``None`` (every other caller) builds the plain runtime, unchanged.
 
+    ``run_id`` is the identity of this run when the caller minted one; ``None``
+    mints a fresh one.
+
     Returns the process exit code (the runtime's exit code; 1 when the
     runtime raised before producing a workflow result).
     """
     state_root = state_root.resolve()
-    run_id = uuid.uuid4()
+    # OMN-17427: a caller that already told someone this run's id (``onex
+    # delegate`` prints it and files a provisional receipt under it before the
+    # wait) hands it in, so the run directory the caller named is the one the
+    # final receipt lands in. ``None`` keeps the fresh id every other caller gets.
+    run_id = run_id if run_id is not None else uuid.uuid4()
     # One correlation id shared by the skill-started / skill-completed pair so
     # the skill_executions projection can join the two rows (OMN-13830). This is
     # decided BEFORE the run because the started event fires before the body.
@@ -1470,7 +1578,15 @@ def _run_receipt_mode(
         validation_error = receipt_validator(receipt)
         if validation_error is not None:
             summary = ModelReceiptRuntimeSummary(
-                workflow_result="error",
+                # OMN-20386: a published command the lane never answered keeps
+                # the runtime's own word for it. Rewriting it as ``error`` would
+                # take the cause off the receipt the caller reads.
+                workflow_result=(
+                    workflow_result.value
+                    if workflow_result is EnumWorkflowResult.TIMEOUT
+                    and workflow_data.get("wire_correlation_id")
+                    else "error"
+                ),
                 exit_code=1,
                 workflow=str(contract_path),
                 handler_locus=_json_str(workflow_data.get("handler_locus")),

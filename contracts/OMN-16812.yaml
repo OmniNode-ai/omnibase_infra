@@ -1,0 +1,59 @@
+schema_version: "1.0.0"
+ticket_id: OMN-16812
+title: A routing-reducer handler failure terminalizes the delegation with an attributed, non-retryable failure
+summary: When an auto-wired handler raises at the boundary, the runtime emits the declared failure terminal carrying the originating error class, the broker reads it as an immediate attributed failure, and a configuration error is not retryable while a transient failure stays retryable.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn16812
+    statement: A caller must receive the attributed failure the runtime already has in hand instead of waiting out the ingress budget.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a delegation whose routing handler raises produces a failure terminal correlation-exact at the real dispatch boundary, with the DLQ flag on or off and none when the offset is withheld -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_omn16812_boundary_failure_terminal.py -q -k "reducer_raise_emits or terminal_is_emitted_even_with_the_dlq_flag_off or no_terminal_when_the_offset_is_withheld"'
+      - id: AC2
+        statement: 'AC2: the terminal carries the originating error class as an attributed failure cause, not timeout and not empty -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_omn16812_boundary_failure_terminal.py -q -k "broker_reads or attribution"'
+      - id: AC3
+        statement: 'AC3: retryable reflects the underlying error, a configuration error is retryable false and a transient failure stays retryable -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_omn16812_boundary_failure_terminal.py -q -k "broker_reads or transient_failure_stays_retryable"'
+evidence_requirements:
+  - kind: tests
+    description: The boundary tests raise from a reducer handler and assert the declared failure terminal for the correlation.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_omn16812_boundary_failure_terminal.py -q -k "reducer_raise_emits_both_a_dlq_record_and_a_failure_terminal or terminal_is_emitted_even_with_the_dlq_flag_off or no_terminal_when_the_offset_is_withheld"
+  - kind: tests
+    description: The tests assert the caller-visible message names the ONEX code and that attribution walks a real exception chain.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_omn16812_boundary_failure_terminal.py -q -k "broker_reads_the_terminal_as_an_immediate_attributed_failure or attribution_reads_through_the_engine_flattened_message or attribution_walks_a_real_exception_chain"
+  - kind: tests
+    description: The tests assert retryable False for the configuration error read by the broker and True for a timeout, so the classifier does not answer one value for everything.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_omn16812_boundary_failure_terminal.py -q -k "broker_reads_the_terminal_as_an_immediate_attributed_failure or a_transient_failure_stays_retryable or ordinary_prose_in_a_message_is_not_mistaken"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-16812-ac1
+    description: The boundary tests raise from a reducer handler and assert the declared failure terminal for the correlation.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_omn16812_boundary_failure_terminal.py -q -k "reducer_raise_emits_both_a_dlq_record_and_a_failure_terminal or terminal_is_emitted_even_with_the_dlq_flag_off or no_terminal_when_the_offset_is_withheld"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-16812-ac2
+    description: The tests assert the caller-visible message names the ONEX code and that attribution walks a real exception chain.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_omn16812_boundary_failure_terminal.py -q -k "broker_reads_the_terminal_as_an_immediate_attributed_failure or attribution_reads_through_the_engine_flattened_message or attribution_walks_a_real_exception_chain"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-16812-ac3
+    description: The tests assert retryable False for the configuration error read by the broker and True for a timeout, so the classifier does not answer one value for everything.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_omn16812_boundary_failure_terminal.py -q -k "broker_reads_the_terminal_as_an_immediate_attributed_failure or a_transient_failure_stays_retryable or ordinary_prose_in_a_message_is_not_mistaken"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

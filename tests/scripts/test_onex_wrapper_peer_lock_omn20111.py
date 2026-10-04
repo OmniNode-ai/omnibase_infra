@@ -136,6 +136,7 @@ class _Workspace:
         *args: str,
         wait_s: int = 30,
         poll_s: int = 1,
+        overrides: dict[str, str | None] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         env = dict(os.environ)
         env["OMNI_HOME"] = str(self.root)
@@ -144,6 +145,12 @@ class _Workspace:
         env["ONEX_FLOOR_LOCK_POLL_S"] = str(poll_s)
         env.pop("ONEX_RECONCILE_RECEIPT", None)
         env.pop("ONEX_DISPATCH_VENV", None)
+        env.pop("ONEX_RECONCILE_STEP_TIMEOUT_S", None)
+        for key, value in (overrides or {}).items():
+            if value is None:
+                env.pop(key, None)
+            else:
+                env[key] = value
         return subprocess.run(
             ["bash", str(self.wrapper), *args],
             capture_output=True,
@@ -203,6 +210,107 @@ def test_a_peer_holding_the_lock_past_the_budget_still_refuses(ws: _Workspace) -
     assert "REFUSED" in proc.stderr
     assert not ws.argv_log.exists()
     assert elapsed >= 2, "the wrapper must actually wait out its budget"
+
+
+@pytest.mark.parametrize("wait_override", [None, "invalid"])
+@pytest.mark.parametrize("peer_proves_floor", [True, False])
+def test_default_wait_covers_a_cold_peer_past_five_minutes(
+    ws: _Workspace, wait_override: str | None, peer_proves_floor: bool
+) -> None:
+    """OMN-17427: a virtual clock exercises a cold pass and exhausted wait."""
+    ws.write_floor(STALE)
+    ws.lock_dir.mkdir()
+    good_floor = ws.root / "good-floor.json"
+    ws.write_floor(GOOD)
+    ws.floor.replace(good_floor)
+    ws.write_floor(STALE)
+    previous = ws.floor.read_bytes()
+    clock = ws.root / "clock"
+    clock.write_text("0\n", encoding="utf-8")
+    fake_bin = ws.root / "fake-bin"
+    fake_bin.mkdir()
+    sleep = fake_bin / "sleep"
+    sleep.write_text(
+        "#!/usr/bin/env bash\n"
+        f'elapsed=$(cat "{clock}")\n'
+        "elapsed=$((elapsed + $1))\n"
+        f'printf "%s\\n" "$elapsed" > "{clock}"\n'
+        + (
+            f'if (( elapsed >= 305 )); then cp "{good_floor}" "{ws.floor}"; fi\n'
+            if peer_proves_floor
+            else ""
+        ),
+        encoding="utf-8",
+    )
+    sleep.chmod(0o755)
+
+    proc = ws.run(
+        "delegate",
+        "hello",
+        poll_s=5,
+        overrides={
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "ONEX_FLOOR_LOCK_WAIT_S": wait_override,
+        },
+    )
+
+    assert "waiting up to 3660s" in proc.stderr
+    assert ws.lock_dir.is_dir(), "the wrapper must never reclaim its peer's lock"
+    if peer_proves_floor:
+        assert proc.returncode == _SENTINEL_OK, proc.stderr
+        assert "proved the floor after 305s" in proc.stderr
+        assert ws.argv_log.read_text(encoding="utf-8").strip() == "delegate hello"
+    else:
+        assert proc.returncode == _EXIT_BELOW_FLOOR, proc.stderr
+        assert "still holds the lock after 3660s" in proc.stderr
+        assert ws.floor.read_bytes() == previous
+        assert not ws.argv_log.exists()
+
+
+def test_default_wait_follows_the_configured_host_step_timeout(ws: _Workspace) -> None:
+    ws.write_floor(STALE)
+    ws.lock_dir.mkdir()
+    # No real wait is needed to observe the chosen budget: the peer completes
+    # without proving the floor on the first poll.
+    fake_bin = ws.root / "fake-bin"
+    fake_bin.mkdir()
+    sleep = fake_bin / "sleep"
+    sleep.write_text(f'#!/usr/bin/env bash\nrmdir "{ws.lock_dir}"\n', encoding="utf-8")
+    sleep.chmod(0o755)
+
+    proc = ws.run(
+        "delegate",
+        "hello",
+        overrides={
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "ONEX_FLOOR_LOCK_WAIT_S": None,
+            "ONEX_RECONCILE_STEP_TIMEOUT_S": "2400",
+        },
+    )
+
+    assert "waiting up to 4860s" in proc.stderr
+    assert proc.returncode == _EXIT_BELOW_FLOOR, proc.stderr
+    assert not ws.argv_log.exists()
+
+
+def test_proven_delegate_does_not_wait_on_a_peer_or_run_reconcile(
+    ws: _Workspace,
+) -> None:
+    ws.write_floor(GOOD)
+    ws.write_receipt()
+    ws.lock_dir.mkdir()
+    marker = ws.root / "reconciler-ran"
+    for name in ("reconcile-host.sh", "reconcile-workspace-venvs.sh"):
+        (ws.scripts_dir / name).write_text(
+            f'#!/usr/bin/env bash\ntouch "{marker}"\n', encoding="utf-8"
+        )
+
+    proc = ws.run("delegate", "hello", wait_s=0)
+
+    assert proc.returncode == _SENTINEL_OK, proc.stderr
+    assert "waiting up to" not in proc.stderr
+    assert not marker.exists()
+    assert ws.lock_dir.is_dir()
 
 
 def test_a_peer_that_finishes_without_proving_the_floor_refuses(ws: _Workspace) -> None:

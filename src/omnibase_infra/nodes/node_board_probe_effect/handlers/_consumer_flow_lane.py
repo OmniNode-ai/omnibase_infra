@@ -18,12 +18,14 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_consta
     ANALYTICS_DB,
     BOOT_CONTAINERS,
     BROKER_CONTAINER,
+    BROKER_INTERNAL_ADDRESS,
     EXPOSURE_TOPIC,
     LIVE_WINDOW_SQL,
     PG_CONTAINER,
 )
 from omnibase_infra.nodes.node_board_probe_effect.handlers._error_consumer_flow_input import (
     ConsumerFlowInputError,
+    ConsumerFlowLaneUnsettledError,
 )
 from omnibase_infra.nodes.node_board_probe_effect.models.typed_dict_consumer_flow import (
     TypedDictConsumerFlowIdentity,
@@ -89,7 +91,7 @@ class ConsumerFlowLane:
             if not unsettled:
                 return ident
             if self.monotonic() >= deadline:
-                raise ConsumerFlowInputError(
+                raise ConsumerFlowLaneUnsettledError(
                     f"lane containers not running and healthy after {settle_seconds:.0f}s: {unsettled}"
                 )
             self.sleep(poll)
@@ -117,7 +119,8 @@ class ConsumerFlowLane:
     # ---- broker (credential stays inside the broker container) -----------
     def rpk(self, *args: str, stdin: str | None = None, timeout: float = 60.0) -> str:
         script = (
-            'rpk "$@" -X user="$DEV_KAFKA_SASL_USERNAME" '
+            f'rpk "$@" -X brokers="{BROKER_INTERNAL_ADDRESS}" '
+            '-X user="$DEV_KAFKA_SASL_USERNAME" '
             '-X pass="$DEV_KAFKA_SASL_PASSWORD" -X sasl.mechanism=SCRAM-SHA-256'
         )
         return self._run(

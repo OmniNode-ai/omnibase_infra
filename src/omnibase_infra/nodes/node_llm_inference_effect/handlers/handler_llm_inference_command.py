@@ -10,7 +10,12 @@ from uuid import UUID, uuid4
 
 from omnibase_core.enums.cost import EnumUsageSource
 from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumInfraTransportType,
+)
+from omnibase_infra.errors import ModelInfraErrorContext, SecretResolutionError
 from omnibase_infra.mixins.mixin_llm_http_transport import MixinLlmHttpTransport
 from omnibase_infra.models.llm import ModelLlmInferenceResponse
 from omnibase_infra.nodes.node_llm_inference_effect.handlers.handler_llm_openai_compatible import (
@@ -28,6 +33,7 @@ from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_c
 from omnibase_infra.nodes.node_llm_inference_effect.models.model_llm_inference_request import (
     ModelLlmInferenceRequest,
 )
+from omnibase_infra.runtime.secret_resolver import SecretResolver
 
 
 class LlmInferenceCommandTransport(MixinLlmHttpTransport):
@@ -46,10 +52,14 @@ class HandlerLlmInferenceCommand:
     def __init__(
         self,
         inference_handler: HandlerLlmOpenaiCompatible | None = None,
+        secret_resolver: SecretResolver | None = None,
     ) -> None:
         self._inference_handler = inference_handler or HandlerLlmOpenaiCompatible(
             LlmInferenceCommandTransport()
         )
+        # OMN-17106: resolves a command's ``api_key_ref``. With none, a command
+        # that names a ref is refused rather than sent unauthenticated.
+        self._secret_resolver = secret_resolver
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -64,7 +74,8 @@ class HandlerLlmInferenceCommand:
         command: ModelLlmInferenceCommand,
     ) -> ModelHandlerOutput[None]:
         """Run an inference command and return contract-declared output events."""
-        request = self._build_request(command)
+        api_key = await self._resolve_api_key(command)
+        request = self._build_request(command, api_key=api_key)
         response = await self._inference_handler.handle(
             request,
             correlation_id=command.correlation_id,
@@ -82,9 +93,45 @@ class HandlerLlmInferenceCommand:
             processing_time_ms=response.latency_ms,
         )
 
+    async def _resolve_api_key(self, command: ModelLlmInferenceCommand) -> str | None:
+        """Resolve ``command.api_key_ref`` to the credential value (OMN-17106).
+
+        The single point where a secret value is read, immediately before the
+        outbound call. A command with no ref is unauthenticated by declaration;
+        a command with a ref that cannot be resolved is refused, never sent
+        without its Authorization header.
+        """
+        ref = command.api_key_ref
+        if ref is None:
+            return None
+        context = ModelInfraErrorContext.with_correlation(
+            correlation_id=command.correlation_id,
+            transport_type=EnumInfraTransportType.RUNTIME,
+            operation="resolve_api_key_ref",
+            target_name="node_llm_inference_effect",
+        )
+        # SECURITY: the ref names a secret, so it stays out of the message.
+        if self._secret_resolver is None:
+            raise SecretResolutionError(
+                "LLM inference command names an api_key_ref but this handler "
+                "has no secret resolver wired",
+                context=context,
+            )
+        secret = await self._secret_resolver.get_secret_async(
+            ref, required=True, correlation_id=command.correlation_id
+        )
+        if secret is None:
+            raise SecretResolutionError(
+                "LLM inference command api_key_ref resolved to no value",
+                context=context,
+            )
+        return secret.get_secret_value()
+
     def _build_request(
         self,
         command: ModelLlmInferenceCommand,
+        *,
+        api_key: str | None = None,
     ) -> ModelLlmInferenceRequest:
         endpoint_url = _optional_str(
             command.endpoint_url or command.provider_value("endpoint_url")
@@ -98,14 +145,6 @@ class HandlerLlmInferenceCommand:
                 f"model={command.model}"
             )
 
-        # OMN-18385: the single unwrap point for the command credential.
-        # ``_optional_str`` calls ``str()``, which on a ``SecretStr``
-        # yields the mask rather than the value -- so the secret is read
-        # out explicitly here before it is normalised.
-        _command_api_key = (
-            command.api_key.get_secret_value() if command.api_key is not None else None
-        )
-        api_key = _optional_str(_command_api_key or command.provider_value("api_key"))
         compute_usage_source = None
         if command.compute_usage_source is not None:
             compute_usage_source = EnumUsageSource(command.compute_usage_source)

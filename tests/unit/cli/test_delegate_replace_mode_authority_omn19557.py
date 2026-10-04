@@ -36,6 +36,7 @@ is in ``tests/integration/cli/test_delegate_criteria_cli.py``.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -118,7 +119,13 @@ class TestAnUnpassableReplacingSetIsRefused:
         assert result.exit_code == 2
         assert "can never be accepted" in result.output
         assert "omnimarket is NOT INSTALLED" not in result.output
-        assert not (tmp_path / "runs").exists(), "no run may be created"
+        # OMN-19006: a refusal leaves a receipt naming it, and still dispatches
+        # nothing: the one run is the refusal, and no request payload was written.
+        (run_dir,) = (tmp_path / "runs").iterdir()
+        receipt = json.loads((run_dir / "receipt.json").read_text(encoding="utf-8"))
+        assert receipt["terminal_class"] == "refused"
+        assert "can never be accepted" in receipt["failure_reason"]
+        assert not (tmp_path / "tmp").exists(), "no request payload may be written"
 
 
 @pytest.mark.usefixtures("_gate_resolvable")

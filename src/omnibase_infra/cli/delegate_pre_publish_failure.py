@@ -48,6 +48,7 @@ from pydantic import BaseModel, ValidationError
 from omnibase_infra.cli.delegate_terminal_resolver import (
     DelegateTerminalUnresolvedError,
 )
+from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 __all__ = [
     "DelegatePrePublishFailureError",
@@ -162,13 +163,18 @@ def _field_refusals(model_path: str, payload_path: Path) -> tuple[list[str], str
     try:
         model = getattr(importlib.import_module(module_name), class_name)
     except (ImportError, AttributeError) as exc:
-        return [], f"the request model could not be imported ({exc})"
+        return [], (
+            "the request model could not be imported "
+            f"({sanitize_error_string(str(exc))})"
+        )
     if not (isinstance(model, type) and issubclass(model, BaseModel)):
         return [], "the request model is not a pydantic model"
     try:
         raw = json.loads(payload_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        return [], f"the payload file could not be read ({exc})"
+        return [], (
+            f"the payload file could not be read ({sanitize_error_string(str(exc))})"
+        )
     try:
         model.model_validate(raw)
     except ValidationError as exc:
@@ -176,7 +182,7 @@ def _field_refusals(model_path: str, payload_path: Path) -> tuple[list[str], str
             "`{loc}` {type}: {msg}".format(
                 loc=".".join(str(part) for part in error.get("loc", ())) or "<root>",
                 type=error.get("type", "?"),
-                msg=error.get("msg", ""),
+                msg=sanitize_error_string(str(error.get("msg", ""))),
             )
             for error in exc.errors(include_url=False)
             if error.get("type") != "missing"

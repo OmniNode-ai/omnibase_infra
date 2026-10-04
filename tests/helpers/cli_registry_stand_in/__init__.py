@@ -29,9 +29,11 @@ from pydantic import BaseModel, ConfigDict, Field
 from omnibase_infra.cli import contract_registry
 
 __all__ = [
+    "STAND_IN_INSTALL_TENANT",
     "StandInExecutionBudget",
     "StandInTaskClassAuthority",
     "install_stand_in_registry",
+    "use_initialised_install",
     "use_stand_in_registry",
     "wiring_authority",
 ]
@@ -246,4 +248,25 @@ def use_stand_in_registry(
     )
     monkeypatch.setattr(
         cli_delegate, "_delegate_request_model", lambda: ModelStandInDelegateRequest
+    )
+
+
+#: The identity the stand-in install holds: a well-formed UUID, as
+#: ``onex local init`` mints one, naming no real install.
+STAND_IN_INSTALL_TENANT = "5d1c3a52-0f3e-4b7e-9a0b-6c1f2d7e8a90"
+
+
+def use_initialised_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give ``onex delegate`` an install that has minted its tenant identity.
+
+    omnibase_infra's test environment has no omnimarket, which owns the
+    identity reader, so the one seam is replaced (OMN-17427). A test of the
+    resolver itself patches it again to model an install that never ran
+    ``onex local init``.
+    """
+    from omnibase_infra.cli import cli_delegate
+
+    monkeypatch.delenv(cli_delegate.TENANT_OVERLAY_ENV, raising=False)
+    monkeypatch.setattr(
+        cli_delegate, "read_install_identity", lambda: STAND_IN_INSTALL_TENANT
     )

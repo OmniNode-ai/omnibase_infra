@@ -65,7 +65,7 @@ probes:
     name: negative paths
     repo: omnibase_infra
     workflow: .github/workflows/chain-canary-c11-negative-paths.yml
-    cron: ['17 2,8,14,20 * * *']
+    cron: ['10 * * * *']
     lane: dev
     lane_source: job_name
     max_duration_minutes: 10
@@ -73,7 +73,7 @@ probes:
     name: provider catalogue
     repo: omnibase_infra
     workflow: .github/workflows/chain-canary-c12-provider-catalogue.yml
-    cron: ['27 2,8,14,20 * * *']
+    cron: ['27 * * * *']
     lane: dev
     lane_source: job_name
     max_duration_minutes: 15
@@ -81,7 +81,7 @@ probes:
     name: consumer flow
     repo: omnibase_infra
     workflow: .github/workflows/chain-canary-c28-consumer-flow.yml
-    cron: ['13 0,6,12,18 * * *']
+    cron: ['3 * * * *']
     lane: dev
     lane_source: job_name
     max_duration_minutes: 35

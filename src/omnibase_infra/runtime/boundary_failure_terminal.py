@@ -74,6 +74,7 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 __all__ = [
     "ModelBoundaryFailureTerminal",
     "classify_boundary_failure",
+    "is_answered_caller_refusal",
 ]
 
 # Exception-chain walk depth. A boundary failure is at most a handful of frames
@@ -90,6 +91,12 @@ _ERROR_CLASS_TOKEN = re.compile(
 )
 # The canonical ONEX code shape, e.g. ``ONEX_CORE_041_INVALID_CONFIGURATION``.
 _ONEX_CODE_TOKEN = re.compile(r"(?<![A-Za-z0-9_])(ONEX_[A-Z0-9_]+)(?![A-Za-z0-9_])")
+
+# The one refusal code that is a fact about the CALLER, not about this platform:
+# the tenant registered no provider key (omnimarket customer_key_terminus). The
+# same class's other refusal -- customer work resolved to a platform-owned key --
+# is our routing defect and is deliberately not named here (OMN-20410).
+_CALLER_KEY_ABSENT_CODE = "ONEX_MARKET_CUSTOMER_PROVIDER_KEY_ABSENT"
 
 # Boundary-internal wrapper types. They describe WHERE the failure was noticed,
 # never WHAT failed, so they must not win the ``failure_class`` attribution over
@@ -378,3 +385,36 @@ def classify_boundary_failure(
         ),
         origin_topic=topic,
     )
+
+
+def is_answered_caller_refusal(exc: BaseException) -> bool:
+    """True when ``exc`` is a keyless tenant's refusal at the routing terminus.
+
+    OMN-20410. The consume boundary answers such a record with a typed,
+    non-retryable terminal that names the remediation (register a provider
+    key), so the caller is not left waiting and no replay can ever succeed. It
+    is a refused REQUEST, not a projection that lost its input, and it must not
+    count toward ``projection_dlq_saturation``: on the .201 dev lane one keyless
+    tenant's refusals alone read as a 100% total loss on
+    ``node_delegation_routing_reducer`` and flapped the runtime container
+    unhealthy for every probe that gates on it.
+
+    Both halves are required. The class name alone also covers the platform-key
+    refusal, which is our routing defect and must keep reading as loss; the code
+    alone could be quoted by an unrelated failure. Read the same way
+    :func:`classify_boundary_failure` reads a failure: the chain's types and
+    attributes first, then tokens in the engine-flattened message, because the
+    refusal object itself never reaches the boundary.
+    """
+    if (
+        EnumNonRetryableErrorCategory.CUSTOMER_KEY_REFUSED_ERROR.value
+        not in _candidate_class_names(exc)
+    ):
+        return False
+    for item in _exception_chain(exc):
+        code = getattr(item, "error_code", None)
+        if getattr(code, "value", code) == _CALLER_KEY_ABSENT_CODE:
+            return True
+        if _CALLER_KEY_ABSENT_CODE in _ONEX_CODE_TOKEN.findall(str(item)):
+            return True
+    return False

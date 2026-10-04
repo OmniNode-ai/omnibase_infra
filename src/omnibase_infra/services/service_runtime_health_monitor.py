@@ -534,8 +534,8 @@ def evaluate_dispatch_deadline(
 ) -> tuple[_HealthStatus, str]:
     """Grade the abandoned-dispatch dimension from whatever bus the kernel wired.
 
-    DEGRADED from the first abandoned dispatch: the consumer kept polling and
-    the record is quarantined, but a handler is parked somewhere in the process
+    DEGRADED while an abandoned dispatch is inside its degraded grace window
+    (OMN-20464): the consumer kept polling and the record is quarantined, but a handler is parked somewhere in the process
     holding what it held, and nothing in Python can stop it. CRITICAL at the
     bus's declared orphan limit, because CRITICAL is the grade that fails the
     container healthcheck irrespective of the lane's ``--degraded-policy``, and

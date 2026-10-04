@@ -976,6 +976,22 @@ def redact_key(value: Any, key: str, path: str, leaks: list[str]) -> Any:
     return value
 
 
+def delegate_runs_root(env: Mapping[str, str]) -> Path:
+    """Return the directory ``onex delegate`` writes its run directories under.
+
+    Since omnibase_infra 0.38.64 (OMN-19232) the CLI's state root is the
+    ``--state-root`` flag, then an absolute ``ONEX_STATE_DIR``, then
+    ``$HOME/.onex_state``, and never the working directory. The probe passes no
+    flag and the customer's environment binds no ``ONEX_STATE_DIR``, so this is
+    the customer's own ``$HOME/.onex_state/runs``: the default every customer
+    gets (OMN-20505).
+    """
+    state_dir = env.get("ONEX_STATE_DIR", "")
+    if state_dir and Path(state_dir).is_absolute():
+        return Path(state_dir) / "runs"
+    return Path(env["HOME"]) / ".onex_state" / "runs"
+
+
 def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     # Popped before anything is spawned, so no child ever inherits it.
     key = os.environ.pop(args.key_env, "")
@@ -1031,9 +1047,9 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     steps: dict[str, Any] = {}
     steps["init"] = run("init", [str(onex), "local", "init", "--json"])
     steps["keyless"] = run("keyless", [str(onex), "delegate", args.prompt])
-    runs_root = workdir / ".onex_state" / "runs"
+    runs_root = delegate_runs_root(customer_env)
     if runs_root.exists():
-        runs_root.rename(workdir / ".onex_state" / "runs.keyless")
+        runs_root.rename(runs_root.with_name("runs.keyless"))
     steps["secret_set"] = run(
         "secret_set",
         [str(onex), "secret", "set", spec.registration_ref],

@@ -41,6 +41,15 @@
 #     content, so seed /scratch/cache/runners/<N>/uv and .../ci-envs from the
 #     image and chown them to uid 1001 before the first recreate (the runner
 #     user). UV_LINK_MODE=copy because a hardlink cannot cross the bind mount.
+#   - each runner's job workspace (actions-runner/_work: checkouts, venvs,
+#     builds) and its TMPDIR (/home/runner/tmp, which pytest and uv builds use)
+#     are bind mounts under /scratch/runners/<N>/, so job IO stops landing on the
+#     boot NVMe (OMN-20210: nvme1n1 at 95 percent util and 200-700 ms write
+#     await with these in the writable layer). TMPDIR is a path of its own, not
+#     /tmp, because the image bakes the omni-ci-bin and omni-ci-metadata trees
+#     under /tmp and a bind mount there would hide them. Create both dirs owned
+#     by uid 1001 (tmp mode 1777) before the first recreate. Everything under
+#     /scratch/runners is disposable: a job re-checks-out what it needs.
 #
 # WHAT NO JOB HERE CAN SEE. The container binds nothing from the host except
 # the docker socket, the three hook scripts, the disk-admission marker
@@ -76,6 +85,7 @@ x-runner-base: &runner-base
     UV_CONCURRENT_INSTALLS: "1"
     UV_HTTP_TIMEOUT: "600"
     UV_LINK_MODE: copy
+    TMPDIR: /home/runner/tmp
   volumes:
     - /var/run/docker.sock:/var/run/docker.sock
     - ./runners/entrypoint.sh:/usr/local/bin/entrypoint.sh:ro
@@ -117,6 +127,8 @@ services:
       - /scratch/cache/runners/1/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/1/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/1/npm:/home/runner/.npm
+      - /scratch/runners/1/work:/home/runner/actions-runner/_work
+      - /scratch/runners/1/tmp:/home/runner/tmp
       - omnipc2-ci-runner-1-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-2:
     !!merge <<: *runner-base
@@ -138,6 +150,8 @@ services:
       - /scratch/cache/runners/2/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/2/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/2/npm:/home/runner/.npm
+      - /scratch/runners/2/work:/home/runner/actions-runner/_work
+      - /scratch/runners/2/tmp:/home/runner/tmp
       - omnipc2-ci-runner-2-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-3:
     !!merge <<: *runner-base
@@ -159,6 +173,8 @@ services:
       - /scratch/cache/runners/3/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/3/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/3/npm:/home/runner/.npm
+      - /scratch/runners/3/work:/home/runner/actions-runner/_work
+      - /scratch/runners/3/tmp:/home/runner/tmp
       - omnipc2-ci-runner-3-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-4:
     !!merge <<: *runner-base
@@ -180,6 +196,8 @@ services:
       - /scratch/cache/runners/4/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/4/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/4/npm:/home/runner/.npm
+      - /scratch/runners/4/work:/home/runner/actions-runner/_work
+      - /scratch/runners/4/tmp:/home/runner/tmp
       - omnipc2-ci-runner-4-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-5:
     !!merge <<: *runner-base
@@ -201,6 +219,8 @@ services:
       - /scratch/cache/runners/5/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/5/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/5/npm:/home/runner/.npm
+      - /scratch/runners/5/work:/home/runner/actions-runner/_work
+      - /scratch/runners/5/tmp:/home/runner/tmp
       - omnipc2-ci-runner-5-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-6:
     !!merge <<: *runner-base
@@ -222,6 +242,8 @@ services:
       - /scratch/cache/runners/6/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/6/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/6/npm:/home/runner/.npm
+      - /scratch/runners/6/work:/home/runner/actions-runner/_work
+      - /scratch/runners/6/tmp:/home/runner/tmp
       - omnipc2-ci-runner-6-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-7:
     !!merge <<: *runner-base
@@ -243,6 +265,8 @@ services:
       - /scratch/cache/runners/7/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/7/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/7/npm:/home/runner/.npm
+      - /scratch/runners/7/work:/home/runner/actions-runner/_work
+      - /scratch/runners/7/tmp:/home/runner/tmp
       - omnipc2-ci-runner-7-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-8:
     !!merge <<: *runner-base
@@ -264,6 +288,8 @@ services:
       - /scratch/cache/runners/8/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/8/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/8/npm:/home/runner/.npm
+      - /scratch/runners/8/work:/home/runner/actions-runner/_work
+      - /scratch/runners/8/tmp:/home/runner/tmp
       - omnipc2-ci-runner-8-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-9:
     !!merge <<: *runner-base
@@ -285,6 +311,8 @@ services:
       - /scratch/cache/runners/9/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/9/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/9/npm:/home/runner/.npm
+      - /scratch/runners/9/work:/home/runner/actions-runner/_work
+      - /scratch/runners/9/tmp:/home/runner/tmp
       - omnipc2-ci-runner-9-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-10:
     !!merge <<: *runner-base
@@ -306,6 +334,8 @@ services:
       - /scratch/cache/runners/10/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/10/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/10/npm:/home/runner/.npm
+      - /scratch/runners/10/work:/home/runner/actions-runner/_work
+      - /scratch/runners/10/tmp:/home/runner/tmp
       - omnipc2-ci-runner-10-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-11:
     !!merge <<: *runner-base
@@ -327,6 +357,8 @@ services:
       - /scratch/cache/runners/11/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/11/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/11/npm:/home/runner/.npm
+      - /scratch/runners/11/work:/home/runner/actions-runner/_work
+      - /scratch/runners/11/tmp:/home/runner/tmp
       - omnipc2-ci-runner-11-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-12:
     !!merge <<: *runner-base
@@ -348,6 +380,8 @@ services:
       - /scratch/cache/runners/12/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/12/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/12/npm:/home/runner/.npm
+      - /scratch/runners/12/work:/home/runner/actions-runner/_work
+      - /scratch/runners/12/tmp:/home/runner/tmp
       - omnipc2-ci-runner-12-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-13:
     !!merge <<: *runner-base
@@ -369,6 +403,8 @@ services:
       - /scratch/cache/runners/13/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/13/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/13/npm:/home/runner/.npm
+      - /scratch/runners/13/work:/home/runner/actions-runner/_work
+      - /scratch/runners/13/tmp:/home/runner/tmp
       - omnipc2-ci-runner-13-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-14:
     !!merge <<: *runner-base
@@ -390,6 +426,8 @@ services:
       - /scratch/cache/runners/14/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/14/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/14/npm:/home/runner/.npm
+      - /scratch/runners/14/work:/home/runner/actions-runner/_work
+      - /scratch/runners/14/tmp:/home/runner/tmp
       - omnipc2-ci-runner-14-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-15:
     !!merge <<: *runner-base
@@ -411,6 +449,8 @@ services:
       - /scratch/cache/runners/15/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/15/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/15/npm:/home/runner/.npm
+      - /scratch/runners/15/work:/home/runner/actions-runner/_work
+      - /scratch/runners/15/tmp:/home/runner/tmp
       - omnipc2-ci-runner-15-creds:/home/runner/.runner-creds
   omnipc2-ci-runner-16:
     !!merge <<: *runner-base
@@ -432,6 +472,8 @@ services:
       - /scratch/cache/runners/16/ms-playwright:/home/runner/.cache/ms-playwright
       - /scratch/cache/runners/16/ci-envs:/home/runner/.cache/omni/ci-envs
       - /scratch/cache/runners/16/npm:/home/runner/.npm
+      - /scratch/runners/16/work:/home/runner/actions-runner/_work
+      - /scratch/runners/16/tmp:/home/runner/tmp
       - omnipc2-ci-runner-16-creds:/home/runner/.runner-creds
 volumes:
   omnipc2-ci-runner-1-creds:

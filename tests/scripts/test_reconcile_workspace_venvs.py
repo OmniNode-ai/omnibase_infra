@@ -434,27 +434,71 @@ def ws(tmp_path: Path) -> _Workspace:
     return _Workspace(tmp_path / "omni_home")
 
 
-def test_proven_restores_the_floor_commit_and_installs_it(ws: _Workspace) -> None:
+def test_proven_installs_the_floor_commit_without_moving_the_clone(
+    ws: _Workspace,
+) -> None:
+    """OMN-17190: --proven installs the sha; the canonical clone stays put.
+
+    The previous restore ran ``git checkout --detach <proven>`` in the
+    canonical clone, which the OMN-17313 reference-transaction guard refuses on
+    every guarded host. The install needs only the commit object, so the clone
+    keeps its branch and its HEAD.
+    """
     proven = ws.market_head
-    _advance(ws.omnimarket, "newer")
+    newer = _advance(ws.omnimarket, "newer")
     ws.set_installed_commit("0" * _SHA_LEN)
     floor = ws.root / ".onex-workspace-floor.json"
     previous = json.dumps({"omnimarket_commit": proven}, indent=2).encode() + b"\n"
     floor.write_bytes(previous)
     pins = ws.infra / ".github" / "sibling-pins.yaml"
     pins.parent.mkdir()
-    pins.write_text(
-        f"pins:\n  omnimarket: {_git('rev-parse', 'HEAD', cwd=ws.omnimarket)}\n",
-        encoding="utf-8",
-    )
+    pins.write_text(f"pins:\n  omnimarket: {newer}\n", encoding="utf-8")
 
     proc = ws.run("--proven")
 
     assert proc.returncode == _EXIT_OK, proc.stdout + proc.stderr
-    assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == proven
-    assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=ws.omnimarket) == "HEAD"
+    assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == newer
+    assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=ws.omnimarket) == "dev"
     assert ws.install_refs() == [proven]
     assert floor.read_bytes() == previous
+
+
+def test_proven_never_updates_head_under_a_detach_refusing_guard(
+    ws: _Workspace,
+) -> None:
+    """The restore path survives the canonical-clone guard it used to trip.
+
+    A reference-transaction hook that denies every HEAD update stands in for
+    the OMN-17313 guard. The old restore failed here with "ref updates aborted
+    by hook"; the new one installs the proven sha and never asks to move HEAD.
+    """
+    proven = ws.market_head
+    newer = _advance(ws.omnimarket, "newer")
+    ws.set_installed_commit(newer)
+    hook = ws.omnimarket / ".git" / "hooks" / "reference-transaction"
+    hook.write_text(
+        "#!/usr/bin/env bash\n"
+        '[[ "$1" == "prepared" ]] || exit 0\n'
+        "while read -r _old _new ref; do\n"
+        '  if [[ "$ref" == "HEAD" ]]; then\n'
+        '    echo "ERROR: refused detaching HEAD in canonical clone" >&2\n'
+        "    exit 1\n"
+        "  fi\n"
+        "done\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+    floor = ws.root / ".onex-workspace-floor.json"
+    floor.write_text(json.dumps({"omnimarket_commit": proven}), encoding="utf-8")
+
+    proc = ws.run("--proven")
+
+    assert proc.returncode == _EXIT_OK, proc.stdout + proc.stderr
+    assert "refused detaching HEAD" not in proc.stdout + proc.stderr
+    assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == newer
+    assert _git("rev-parse", "--abbrev-ref", "HEAD", cwd=ws.omnimarket) == "dev"
+    assert ws.install_refs() == [proven]
 
 
 @pytest.mark.parametrize("floor_commit", [None, ""])
@@ -462,7 +506,7 @@ def test_proven_uses_the_ci_pin_without_a_floor_commit(
     ws: _Workspace, floor_commit: str | None
 ) -> None:
     proven = ws.market_head
-    _advance(ws.omnimarket, "newer")
+    newer = _advance(ws.omnimarket, "newer")
     ws.set_installed_commit("0" * _SHA_LEN)
     floor = ws.root / ".onex-workspace-floor.json"
     if floor_commit is not None:
@@ -477,14 +521,18 @@ def test_proven_uses_the_ci_pin_without_a_floor_commit(
     proc = ws.run("--proven")
 
     assert proc.returncode == _EXIT_OK, proc.stdout + proc.stderr
-    assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == proven
+    assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == newer
     assert ws.install_refs() == [proven]
     assert (floor.read_bytes() if floor.exists() else None) == previous
 
 
-def test_proven_refuses_to_move_a_dirty_clone(ws: _Workspace) -> None:
+def test_proven_installs_past_a_dirty_clone_without_touching_it(
+    ws: _Workspace,
+) -> None:
+    """Nothing in the clone is written, so local edits are no reason to refuse."""
     newer = _advance(ws.omnimarket, "newer")
     (ws.omnimarket / "f.txt").write_text("uncommitted", encoding="utf-8")
+    ws.set_installed_commit("0" * _SHA_LEN)
     floor = ws.root / ".onex-workspace-floor.json"
     floor.write_text(
         json.dumps({"omnimarket_commit": ws.market_head}), encoding="utf-8"
@@ -493,12 +541,11 @@ def test_proven_refuses_to_move_a_dirty_clone(ws: _Workspace) -> None:
 
     proc = ws.run("--proven")
 
-    assert proc.returncode == _EXIT_FAILED, proc.stdout + proc.stderr
-    assert "dirty" in proc.stdout.lower()
-    assert str(ws.omnimarket) in proc.stdout
+    assert proc.returncode == _EXIT_OK, proc.stdout + proc.stderr
     assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == newer
+    assert (ws.omnimarket / "f.txt").read_text(encoding="utf-8") == "uncommitted"
     assert floor.read_bytes() == previous
-    assert not ws.install_refs()
+    assert ws.install_refs() == [ws.market_head]
 
 
 @pytest.mark.parametrize("args", [("--proven", "--check"), ("--check", "--proven")])
@@ -521,31 +568,36 @@ def test_proven_requires_a_readable_floor_commit_or_ci_pin(ws: _Workspace) -> No
     assert not ws.install_refs()
 
 
-@pytest.mark.parametrize("available", [True, False])
-def test_proven_fetches_a_missing_commit_and_refuses_if_still_absent(
-    ws: _Workspace, available: bool
+@pytest.mark.parametrize("present", [True, False])
+def test_proven_refuses_a_commit_the_clone_has_not_reached(
+    ws: _Workspace, present: bool
 ) -> None:
+    """A proven sha outside the clone HEAD's history is refused, never fetched.
+
+    Installing it would leave the CLI drift guard (OMN-18814: ancestors only)
+    refusing the venv, and advancing the clone is reconcile-host.sh's job.
+    """
     origin = _make_clone(ws.root, "market_origin")
     remote_commit = _advance(origin, "only-at-origin")
-    proven = remote_commit if available else "f" * _SHA_LEN
     _git("remote", "add", "origin", str(origin), cwd=ws.omnimarket)
+    if present:
+        # Present as an object, but on a line the clone HEAD has not reached.
+        _git("fetch", "--quiet", "origin", cwd=ws.omnimarket)
+        (ws.omnimarket / ".git" / "FETCH_HEAD").unlink()
+    proven = remote_commit if present else "f" * _SHA_LEN
     floor = ws.root / ".onex-workspace-floor.json"
     floor.write_text(json.dumps({"omnimarket_commit": proven}), encoding="utf-8")
     previous = floor.read_bytes()
 
     proc = ws.run("--proven")
 
-    assert (ws.omnimarket / ".git" / "FETCH_HEAD").exists()
+    assert proc.returncode == _EXIT_FAILED, proc.stdout + proc.stderr
+    assert ("not in the history" if present else "absent") in proc.stdout
+    assert "reconcile-host.sh" in proc.stdout
+    assert not (ws.omnimarket / ".git" / "FETCH_HEAD").exists()
+    assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == ws.market_head
     assert floor.read_bytes() == previous
-    if available:
-        assert proc.returncode == _EXIT_OK, proc.stdout + proc.stderr
-        assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == proven
-        assert ws.install_refs() == [proven]
-    else:
-        assert proc.returncode == _EXIT_FAILED, proc.stdout + proc.stderr
-        assert "absent" in proc.stdout
-        assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == ws.market_head
-        assert not ws.install_refs()
+    assert not ws.install_refs()
 
 
 def test_proven_at_head_leaves_a_dirty_clone_and_branch_unchanged(

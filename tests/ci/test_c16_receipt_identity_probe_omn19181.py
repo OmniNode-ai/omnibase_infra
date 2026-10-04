@@ -406,6 +406,11 @@ def _scan(
     import sys
     import types
 
+    # The probe imports omnibase_infra.event_bus on first use, and that package
+    # imports aiokafka.abc, which the stub below is not a package for. Import it
+    # first so this file passes on its own, not only after another test has.
+    import omnibase_infra.event_bus.kafka_auth
+
     _FakeConsumer.batches = batches
     _FakeConsumer.end = end
     fake = types.ModuleType("aiokafka")

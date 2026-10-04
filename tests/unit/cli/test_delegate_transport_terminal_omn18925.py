@@ -215,7 +215,15 @@ class TestTransportFailureWritesTypedTerminal:
         with pytest.raises(DelegateTerminalUnresolvedError):
             _write(receipt, tmp_path)
 
-        assert not (tmp_path / "runs").exists()
+        # OMN-17427: the raise is the guarantee and stays. What changed is that
+        # the run is no longer left with nothing on disk: a ``failed`` receipt
+        # records the runtime's own cause, and it is NOT a transport refusal.
+        written = json.loads(
+            (tmp_path / "runs" / str(receipt.run_id) / "receipt.json").read_text()
+        )
+        assert written["terminal_class"] == "failed"
+        assert written["runtime_error_type"] == "ValidationError"
+        assert "transport_refusal" not in written
 
     def test_flag_without_an_error_type_does_not_fabricate_a_refusal(
         self, tmp_path: Path
@@ -232,7 +240,13 @@ class TestTransportFailureWritesTypedTerminal:
         with pytest.raises(DelegateTerminalUnresolvedError):
             _write(receipt, tmp_path)
 
-        assert not (tmp_path / "runs").exists()
+        # OMN-17427: still no refusal is fabricated; the run's receipt says
+        # ``failed`` and carries only what the runtime recorded.
+        written = json.loads(
+            (tmp_path / "runs" / str(receipt.run_id) / "receipt.json").read_text()
+        )
+        assert written["terminal_class"] == "failed"
+        assert "transport_refusal" not in written
 
 
 class TestUnreachableBrokerFailsFastAndTyped:
