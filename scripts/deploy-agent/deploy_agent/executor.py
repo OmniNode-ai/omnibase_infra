@@ -1083,6 +1083,127 @@ def _uv_sync_after_pull(agent_dir: str, boundary: EnumSelfUpdateBoundary) -> Non
         )
 
 
+#: Where ``_rebuild_tracking_branch_from_remote`` parks a HEAD that carried
+#: commits origin does not (OMN-20527). A ref, not a file, so ``git log`` and
+#: ``git bundle`` reach it and ``git gc`` never collects what it points at.
+SELF_UPDATE_PRESERVED_REF_PREFIX = "refs/deploy-agent/preserved"
+
+
+def _rebuild_tracking_branch_from_remote(
+    agent_dir: str,
+    branch: str,
+    remote_sha: str,
+    boundary: EnumSelfUpdateBoundary,
+    timeout: int,
+) -> bool:
+    """Put the clone on ``branch`` at ``remote_sha``, preserving local-only commits.
+
+    The rebuild-from-origin fallback for a clone that cannot fast-forward
+    (OMN-20527): it is on another branch, or its branch diverged. Measured on
+    .200 from 2026-09-25 to 2026-10-04, the dev-200 agent's clone sat on a
+    hand-made ``lab-200-proof`` branch nine commits off ``origin/dev``, every
+    ff-only pull failed, and the agent ran nine-day-old code.
+
+    Runs only after ``self_update``'s dirty-check passed, so the work tree
+    carries no tracked modification for ``checkout -B`` to discard. Commits
+    reachable from HEAD but not from ``remote_sha`` are first pinned under
+    ``SELF_UPDATE_PRESERVED_REF_PREFIX``; the branch HEAD was on is never
+    deleted. Returns True only when HEAD verifiably landed on ``remote_sha``.
+    """
+    head = _run(["git", "-C", agent_dir, "rev-parse", "HEAD"], timeout=timeout)
+    if head.returncode != 0:
+        logger.warning(
+            "self_update[boundary=%s]: rebuild refused, HEAD unreadable: %s",
+            boundary.value,
+            head.stderr[:200],
+        )
+        return False
+    head_sha = head.stdout.strip()
+
+    unique = _run(
+        ["git", "-C", agent_dir, "rev-list", "--count", f"{remote_sha}..{head_sha}"],
+        timeout=timeout,
+    )
+    if unique.returncode != 0:
+        logger.warning(
+            "self_update[boundary=%s]: rebuild refused, cannot count local-only "
+            "commits: %s",
+            boundary.value,
+            unique.stderr[:200],
+        )
+        return False
+    if unique.stdout.strip() not in ("", "0"):
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        preserved_ref = f"{SELF_UPDATE_PRESERVED_REF_PREFIX}/{stamp}-{head_sha[:12]}"
+        pinned = _run(
+            ["git", "-C", agent_dir, "update-ref", preserved_ref, head_sha],
+            timeout=timeout,
+        )
+        if pinned.returncode != 0:
+            logger.warning(
+                "self_update[boundary=%s]: rebuild refused, could not preserve "
+                "%s local-only commit(s) at %s: %s",
+                boundary.value,
+                unique.stdout.strip(),
+                head_sha[:12],
+                pinned.stderr[:200],
+            )
+            return False
+        logger.warning(
+            "self_update[boundary=%s]: preserved %s local-only commit(s) at %s "
+            "as %s friction_type=self_update_diverged_clone",
+            boundary.value,
+            unique.stdout.strip(),
+            head_sha[:12],
+            preserved_ref,
+        )
+
+    checkout = _run(
+        ["git", "-C", agent_dir, "checkout", "--quiet", "-B", branch, remote_sha],
+        timeout=timeout,
+    )
+    if checkout.returncode != 0:
+        logger.warning(
+            "self_update[boundary=%s]: rebuild of %s at %s failed (exit=%d), "
+            "skipping re-exec: %s",
+            boundary.value,
+            branch,
+            remote_sha[:12],
+            checkout.returncode,
+            checkout.stderr[:200],
+        )
+        return False
+    _run(
+        [
+            "git",
+            "-C",
+            agent_dir,
+            "branch",
+            f"--set-upstream-to=origin/{branch}",
+            branch,
+        ],
+        timeout=timeout,
+    )
+
+    landed = _run(["git", "-C", agent_dir, "rev-parse", "HEAD"], timeout=timeout)
+    if landed.returncode != 0 or landed.stdout.strip() != remote_sha:
+        logger.warning(
+            "self_update[boundary=%s]: rebuild did not land on %s (HEAD=%s), "
+            "skipping re-exec",
+            boundary.value,
+            remote_sha[:12],
+            landed.stdout.strip()[:12],
+        )
+        return False
+    logger.info(
+        "self_update[boundary=%s]: rebuilt %s from origin at %s",
+        boundary.value,
+        branch,
+        remote_sha[:12],
+    )
+    return True
+
+
 def _load_runtime_policy_env(path: Path | None = None) -> dict[str, str]:
     """Load contract-rendered runtime policy env values."""
     env_path = RUNTIME_POLICY_ENV_FILE if path is None else path
@@ -2389,20 +2510,52 @@ class DeployExecutor:
                 disk_sha[:12],
                 remote_sha[:12],
             )
-            pull_result = _run(
-                ["git", "-C", agent_dir, "pull", "--ff-only", "origin", branch],
+            # OMN-20527: a clone parked on another branch, or one whose branch
+            # carries commits origin does not, can never fast-forward. Before
+            # this, the ff-only pull below failed on every idle heartbeat for
+            # nine days on .200 (2578 logged failures) while the agent ran
+            # 2026-09-25 code. Such a clone is rebuilt from origin instead,
+            # with its local-only commits preserved first.
+            current_branch = _run(
+                ["git", "-C", agent_dir, "symbolic-ref", "--quiet", "--short", "HEAD"],
                 timeout=timeout,
-            )
-            if pull_result.returncode != 0:
+            ).stdout.strip()
+            if current_branch and current_branch != branch:
                 logger.warning(
-                    "self_update[boundary=%s]: git pull failed (exit=%d), skipping re-exec: %s",
+                    "self_update[boundary=%s]: clone is on %s, not the tracking "
+                    "branch %s; rebuilding %s from %s",
                     boundary.value,
-                    pull_result.returncode,
-                    pull_result.stderr[:200],
+                    current_branch,
+                    branch,
+                    branch,
+                    remote_ref,
                 )
-                return
-            # --ff-only onto origin/<branch> lands exactly there, so the
-            # post-pull HEAD is known without a second rev-parse.
+                if not _rebuild_tracking_branch_from_remote(
+                    agent_dir, branch, remote_sha, boundary, timeout
+                ):
+                    return
+            else:
+                pull_result = _run(
+                    ["git", "-C", agent_dir, "pull", "--ff-only", "origin", branch],
+                    timeout=timeout,
+                )
+                if pull_result.returncode != 0:
+                    logger.warning(
+                        "self_update[boundary=%s]: git pull failed (exit=%d), "
+                        "rebuilding %s from %s: %s",
+                        boundary.value,
+                        pull_result.returncode,
+                        branch,
+                        remote_ref,
+                        pull_result.stderr[:200],
+                    )
+                    if not _rebuild_tracking_branch_from_remote(
+                        agent_dir, branch, remote_sha, boundary, timeout
+                    ):
+                        return
+            # Either path lands HEAD exactly on origin/<branch> (the rebuild
+            # verifies it), so the post-update HEAD is known without a second
+            # rev-parse here.
             disk_sha = remote_sha
 
         # OMN-20037: even a current clone can have a stale installed unit.
