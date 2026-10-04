@@ -139,4 +139,9 @@ def test_094_is_the_last_savings_migration() -> None:
     names = sorted(p.name for p in SAVINGS.glob("09*.sql"))
     # Namespaced migrations are keyed by the full filename. OMN-20008 adds a
     # forward 094 successor without editing the applied local-share migration.
-    assert names[-1].startswith("094_savings_overview_")
+    # Pin both names in apply order: a prefix match would also pass for a
+    # misnamed or reordered successor, or a stray third 094 file.
+    assert names[-2:] == [
+        "094_savings_overview_local_token_pct.sql",
+        "094_savings_overview_measured_provenance.sql",
+    ]
