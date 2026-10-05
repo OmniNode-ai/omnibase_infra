@@ -329,7 +329,7 @@ migrations:
   forward/nodes/node_projection_routing_decision/0021_create_agent_routing_decisions.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT AGENT_ROUTING_DECISIONS_PKEY
   forward/nodes/node_projection_routing_decision/0022_agent_routing_decisions_tenant_id_and_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_projection_routing_decision/0023_grant_tenant_projection_writer_agent_routing_decisions.sql: expand-only
-  forward/nodes/node_projection_routing_feedback/0000_create_delegation_routing_feedback.sql: expand-only # additive
+  forward/nodes/node_projection_routing_feedback/0000_create_delegation_routing_feedback.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT
   forward/nodes/node_projection_routing_feedback/0001_grant_tenant_projection_writer_delegation_routing_feedback.sql: expand-only # additive
   forward/nodes/node_projection_runner_fleet/0000_create_runner_fleet_liveness.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_runner_fleet/0001_grant_omninode_runtime_runner_fleet_liveness.sql: expand-only
