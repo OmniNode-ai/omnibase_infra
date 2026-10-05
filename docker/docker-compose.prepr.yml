@@ -253,6 +253,13 @@ services:
       - "${PREPR_RUNTIME_MAIN_PORT:?PREPR_RUNTIME_MAIN_PORT must be set - the slot's reserved runtime port from prepr_slot_policy.py}:8085"
     environment:
       !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
+      # OMN-19494 (LO4): the slot's own lane id, `prepr-1` or `prepr-2`. This
+      # file layers over docker-compose.dev-lane.yml, which declares
+      # `compose-dev` on this very service, and an environment key survives a
+      # layer that does not repeat it: without this line a slot would name
+      # itself as the dev lane and key its health verdict onto the dev lane's
+      # lab lane-health row. ONEX_PREPR_SLOT is `:?` in the marker anchor above.
+      ONEX_RUNTIME_LANE: "prepr-${ONEX_PREPR_SLOT}"
       # Distinct from the dev lane's `onex-runtime-main`, so the two never
       # share a group even on a topic the namespace somehow failed to move.
       # Belt and braces with KAFKA_ENVIRONMENT, deliberately.
@@ -287,6 +294,17 @@ services:
     environment:
       !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
       ONEX_GROUP_ID: "prepr-${ONEX_PREPR_SLOT}-runtime-effects"
+      # OMN-20533: docker-compose.dev-lane.yml binds runtime-effects to the .201
+      # dev lane's tenant-credential READ config and its own Infisical identity.
+      # This lane holds no such identity, so it rebinds the house-only config
+      # and the base anchor's identity names; without this, effects would demand
+      # a store identity at boot and refuse.
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON}
+      INFISICAL_ADDR: ${ONEX_RUNTIME_INFISICAL_ADDR:-}
+      INFISICAL_PROJECT_ID: ${ONEX_RUNTIME_INFISICAL_PROJECT_ID:-}
+      INFISICAL_CLIENT_ID: ${ONEX_RUNTIME_INFISICAL_CLIENT_ID:-}
+      INFISICAL_CLIENT_SECRET: ${ONEX_RUNTIME_INFISICAL_CLIENT_SECRET:-}
+      INFISICAL_ENVIRONMENT_SLUG: ""
     volumes: !override
       - prepr_effects_logs:/app/logs
       - prepr_effects_data:/app/data

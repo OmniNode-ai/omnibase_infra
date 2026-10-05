@@ -49,6 +49,7 @@ PINNED_WORKFLOWS = (
     "duplication-sweep.yml",
     "exposure-reader-coverage.yml",
     "hostile-reviewer.yml",
+    "r1-front-door-probe.yml",
     "receipt-honesty.yml",
     "runtime-rebuild-trigger.yml",
     "skill-node-mapping-sync.yml",

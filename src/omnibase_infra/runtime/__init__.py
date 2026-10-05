@@ -50,240 +50,367 @@ and configuring the handler and policy ecosystem.
 
 from __future__ import annotations
 
-# isort: off
-# NOTE: Import order matters here to avoid circular import in omnibase_core.
-# The chain_aware_dispatch module imports ModelEventEnvelope which triggers complex
-# import chains in omnibase_core. By importing message_dispatch_engine first via
-# DispatchContextEnforcer, we warm the sys.modules cache before chain_aware_dispatch.
+import importlib
+from typing import TYPE_CHECKING
 
-from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
-from omnibase_infra.runtime.registry_dispatcher import (
-    ProtocolMessageDispatcher,
-    RegistryDispatcher,
-)
-from omnibase_infra.runtime.envelope_validator import (
-    PAYLOAD_REQUIRED_OPERATIONS,
-    validate_envelope,
-)
-from omnibase_infra.runtime.handler_registry import (
-    EVENT_BUS_INMEMORY,
-    EVENT_BUS_KAFKA,
-    HANDLER_TYPE_DATABASE,
-    HANDLER_TYPE_GRPC,
-    HANDLER_TYPE_HTTP,
-    HANDLER_TYPE_KAFKA,
-    HANDLER_TYPE_VALKEY,
-    RegistryError,
-    RegistryEventBusBinding,
-    RegistryProtocolBinding,
-    get_event_bus_class,
-    get_event_bus_registry,
-    get_handler_class,
-    get_handler_registry,
-)
+if TYPE_CHECKING:
+    # isort: off
+    # NOTE: Import order matters here to avoid circular import in omnibase_core.
+    # The chain_aware_dispatch module imports ModelEventEnvelope which triggers complex
+    # import chains in omnibase_core. By importing message_dispatch_engine first via
+    # DispatchContextEnforcer, we warm the sys.modules cache before chain_aware_dispatch.
 
-from omnibase_infra.runtime.service_kernel import bootstrap as kernel_bootstrap
-from omnibase_infra.runtime.service_kernel import load_runtime_config
-from omnibase_infra.runtime.service_kernel import main as kernel_main
-from omnibase_infra.runtime.service_kernel import validate_kafka_broker_allowlist
-from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
-from omnibase_infra.runtime.models import (
-    ModelContractLoadResult,
-    ModelProjectorNotificationConfig,
-    ModelRuntimeContractConfig,
-    ModelRuntimeSchedulerConfig,
-    ModelRuntimeSchedulerMetrics,
-    ModelRuntimeTick,
-    ModelSecurityConfig,
-    ModelStateTransitionNotification,
-    ModelTransitionNotificationPublisherMetrics,
-)
-from omnibase_infra.runtime.registry_policy import RegistryPolicy
-from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
-from omnibase_infra.runtime.protocols import (
-    ProtocolRuntimeScheduler,
-    ProtocolTransitionNotificationPublisher,
-)
-from omnibase_infra.runtime.mixins import (
-    ProtocolProjectorNotificationContext,
-)
-from omnibase_infra.runtime.registry import (
-    MessageTypeRegistryError,
-    ModelDomainConstraint,
-    ModelMessageTypeEntry,
-    ProtocolMessageTypeRegistry,
-    RegistryMessageType,
-)
-from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
-from omnibase_infra.runtime.runtime_scheduler import RuntimeScheduler
-from omnibase_infra.runtime.util_wiring import (
-    get_known_event_bus_kinds,
-    get_known_handler_types,
-    wire_custom_event_bus,
-    wire_custom_handler,
-    wire_default_handlers,
-    wire_handlers_from_contract,
-)
+    from omnibase_infra.runtime.dispatch_context_enforcer import DispatchContextEnforcer
+    from omnibase_infra.runtime.registry_dispatcher import (
+        ProtocolMessageDispatcher,
+        RegistryDispatcher,
+    )
+    from omnibase_infra.runtime.envelope_validator import (
+        PAYLOAD_REQUIRED_OPERATIONS,
+        validate_envelope,
+    )
+    from omnibase_infra.runtime.handler_registry import (
+        EVENT_BUS_INMEMORY,
+        EVENT_BUS_KAFKA,
+        HANDLER_TYPE_DATABASE,
+        HANDLER_TYPE_GRPC,
+        HANDLER_TYPE_HTTP,
+        HANDLER_TYPE_KAFKA,
+        HANDLER_TYPE_VALKEY,
+        RegistryError,
+        RegistryEventBusBinding,
+        RegistryProtocolBinding,
+        get_event_bus_class,
+        get_event_bus_registry,
+        get_handler_class,
+        get_handler_registry,
+    )
 
-# Container wiring (OMN-888)
-from omnibase_infra.runtime.util_container_wiring import (
-    get_compute_registry_from_container,
-    get_handler_node_introspected_from_container,
-    get_handler_node_registration_acked_from_container,
-    get_handler_registry_from_container,
-    get_handler_runtime_tick_from_container,
-    get_or_create_compute_registry,
-    get_or_create_policy_registry,
-    get_policy_registry_from_container,
-    get_projection_reader_from_container,
-    wire_infrastructure_services,
-    wire_registration_dispatchers,
-    wire_registration_handlers,
-)
+    from omnibase_infra.runtime.service_kernel import bootstrap as kernel_bootstrap
+    from omnibase_infra.runtime.service_kernel import load_runtime_config
+    from omnibase_infra.runtime.service_kernel import main as kernel_main
+    from omnibase_infra.runtime.service_kernel import validate_kafka_broker_allowlist
+    from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+    from omnibase_infra.runtime.models import (
+        ModelContractLoadResult,
+        ModelProjectorNotificationConfig,
+        ModelRuntimeContractConfig,
+        ModelRuntimeSchedulerConfig,
+        ModelRuntimeSchedulerMetrics,
+        ModelRuntimeTick,
+        ModelSecurityConfig,
+        ModelStateTransitionNotification,
+        ModelTransitionNotificationPublisherMetrics,
+    )
+    from omnibase_infra.runtime.registry_policy import RegistryPolicy
+    from omnibase_infra.runtime.protocol_policy import ProtocolPolicy
+    from omnibase_infra.runtime.protocols import (
+        ProtocolRuntimeScheduler,
+        ProtocolTransitionNotificationPublisher,
+    )
+    from omnibase_infra.runtime.mixins import (
+        ProtocolProjectorNotificationContext,
+    )
+    from omnibase_infra.runtime.registry import (
+        MessageTypeRegistryError,
+        ModelDomainConstraint,
+        ModelMessageTypeEntry,
+        ProtocolMessageTypeRegistry,
+        RegistryMessageType,
+    )
+    from omnibase_infra.runtime.runtime_host_process import RuntimeHostProcess
+    from omnibase_infra.runtime.runtime_scheduler import RuntimeScheduler
+    from omnibase_infra.runtime.util_wiring import (
+        get_known_event_bus_kinds,
+        get_known_handler_types,
+        wire_custom_event_bus,
+        wire_custom_handler,
+        wire_default_handlers,
+        wire_handlers_from_contract,
+    )
 
-# NOTE: Registration dispatchers (DispatcherNodeIntrospected, DispatcherRuntimeTick,
-# DispatcherNodeRegistrationAcked) moved to registration domain (OMN-1346).
-# IntrospectionEventRouter was replaced by EventBusSubcontractWiring +
-# MessageDispatchEngine (OMN-2050). Import dispatchers from:
-#   omnibase_infra.nodes.node_registration_orchestrator.dispatchers
+    # Container wiring (OMN-888)
+    from omnibase_infra.runtime.util_container_wiring import (
+        get_compute_registry_from_container,
+        get_handler_node_introspected_from_container,
+        get_handler_node_registration_acked_from_container,
+        get_handler_registry_from_container,
+        get_handler_runtime_tick_from_container,
+        get_or_create_compute_registry,
+        get_or_create_policy_registry,
+        get_policy_registry_from_container,
+        get_projection_reader_from_container,
+        wire_infrastructure_services,
+        wire_registration_dispatchers,
+        wire_registration_handlers,
+    )
 
-# Handler plugin loader (OMN-1132)
-from omnibase_infra.runtime.handler_plugin_loader import (
-    CONTRACT_YAML_FILENAME,
-    HANDLER_CONTRACT_FILENAME,
-    HandlerPluginLoader,
-    MAX_CONTRACT_SIZE,
-)
+    # NOTE: Registration dispatchers (DispatcherNodeIntrospected, DispatcherRuntimeTick,
+    # DispatcherNodeRegistrationAcked) moved to registration domain (OMN-1346).
+    # IntrospectionEventRouter was replaced by EventBusSubcontractWiring +
+    # MessageDispatchEngine (OMN-2050). Import dispatchers from:
+    #   omnibase_infra.nodes.node_registration_orchestrator.dispatchers
 
-# Handler bootstrap source (OMN-1087)
-from omnibase_infra.runtime.handler_bootstrap_source import (
-    HandlerBootstrapSource,
-    SOURCE_TYPE_BOOTSTRAP,
-)
+    # Handler plugin loader (OMN-1132)
+    from omnibase_infra.runtime.handler_plugin_loader import (
+        CONTRACT_YAML_FILENAME,
+        HANDLER_CONTRACT_FILENAME,
+        HandlerPluginLoader,
+        MAX_CONTRACT_SIZE,
+    )
 
-# Handler identity helper (OMN-1095)
+    # Handler bootstrap source (OMN-1087)
+    from omnibase_infra.runtime.handler_bootstrap_source import (
+        HandlerBootstrapSource,
+        SOURCE_TYPE_BOOTSTRAP,
+    )
+
+    # Handler source resolver (OMN-1095)
+    from omnibase_infra.runtime.handler_source_resolver import HandlerSourceResolver
+
+    # Handler contract config loader
+    from omnibase_infra.runtime.handler_contract_config_loader import (
+        MAX_CONTRACT_SIZE_BYTES,
+        extract_handler_config,
+        load_handler_contract_config,
+    )
+
+    # Binding config resolver (OMN-765)
+    from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
+    from omnibase_infra.runtime.protocol_handler_plugin_loader import (
+        ProtocolHandlerPluginLoader,
+    )
+
+    # Binding expression resolver (OMN-1518)
+    from omnibase_infra.runtime.binding_resolver import (
+        BindingExpressionParser,
+        OperationBindingResolver,
+        MAX_EXPRESSION_LENGTH,
+        MAX_PATH_SEGMENTS,
+        VALID_CONTEXT_PATHS,
+        VALID_SOURCES,
+    )
+
+    # Handler discovery protocol and implementation (OMN-1133)
+    from omnibase_infra.runtime.protocol_handler_discovery import (
+        ProtocolHandlerDiscovery,
+    )
+    from omnibase_infra.runtime.contract_handler_discovery import (
+        ContractHandlerDiscovery,
+    )
+
+    # Projector plugin loading and schema validation (OMN-1168, OMN-1169)
+    from omnibase_infra.runtime.projector_plugin_loader import (
+        ProjectorPluginLoader,
+    )
+    from omnibase_infra.runtime.projector_schema_manager import (
+        ProjectorSchemaError,
+        ProjectorSchemaValidator,
+    )
+    from omnibase_infra.runtime.projector_shell import ProjectorShell
+
+    # Invocation security enforcer (OMN-1098)
+    from omnibase_infra.runtime.invocation_security_enforcer import (
+        InvocationSecurityEnforcer,
+        SecurityViolationError,
+    )
+
+    # Security metadata validator (OMN-1137)
+    from omnibase_infra.runtime.security_metadata_validator import (
+        SecurityMetadataValidator,
+        validate_handler_security,
+    )
+
+    # Transition notification publisher and outbox (OMN-1139)
+    from omnibase_infra.runtime.constants_notification import FROM_STATE_INITIAL
+    from omnibase_infra.runtime.transition_notification_publisher import (
+        TransitionNotificationPublisher,
+    )
+    from omnibase_infra.runtime.transition_notification_outbox import (
+        TransitionNotificationOutbox,
+    )
+
+    # Topic-scoped publisher (OMN-1621)
+    from omnibase_infra.runtime.publisher_topic_scoped import PublisherTopicScoped
+
+    # Event bus subcontract wiring (OMN-1621)
+    from omnibase_infra.runtime.event_bus_subcontract_wiring import (
+        EventBusSubcontractWiring,
+        load_event_bus_subcontract,
+    )
+
+    # Request-response wiring (OMN-1742)
+    from omnibase_infra.runtime.request_response_wiring import RequestResponseWiring
+
+    # Runtime contract config loader (OMN-1519)
+    from omnibase_infra.runtime.runtime_contract_config_loader import (
+        RuntimeContractConfigLoader,
+    )
+
+    # Security constants (OMN-1519, OMN-2010)
+    from omnibase_infra.runtime.constants_security import (
+        ALLOW_NAMESPACE_OVERRIDE_ENV_VAR,
+        DOMAIN_PLUGIN_ENTRY_POINT_GROUP,
+        SECURITY_CONFIG_PATH_ENV_VAR,
+        TRUSTED_HANDLER_NAMESPACE_PREFIXES,
+        TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
+    )
+
+    # Kafka contract source (OMN-1654)
+    from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
+
+    # Baseline subscriptions (OMN-1696)
+    from omnibase_infra.runtime.baseline_subscriptions import (
+        BASELINE_CONTRACT_TOPICS,
+        BASELINE_PLATFORM_TOPICS,
+        get_baseline_topics,
+    )
+
+    # Contract dependency resolver (OMN-1732)
+    from omnibase_infra.runtime.contract_dependency_resolver import (
+        ContractDependencyResolver,
+    )
+
+    # Dependency materializer (OMN-1976)
+    from omnibase_infra.runtime.dependency_materializer import DependencyMaterializer
+
+    # Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
+    from omnibase_infra.runtime.chain_aware_dispatch import (
+        ChainAwareDispatcher,
+        propagate_chain_context,
+        validate_dispatch_chain,
+    )
+
+    # isort: on
+
+# Handler identity helper (OMN-1095). Imported eagerly because the function
+# `handler_identity` shares its name with its submodule: importing the submodule
+# rebinds the package attribute, so a lazy lookup would return the module or the
+# function depending on import order. The submodule has no heavy imports.
 from omnibase_infra.runtime.handler_identity import (
     HANDLER_IDENTITY_PREFIX,
     handler_identity,
 )
 
-# Handler source resolver (OMN-1095)
-from omnibase_infra.runtime.handler_source_resolver import HandlerSourceResolver
+# OMN-19444: Lazy imports keep `onex <cmd> --help` fast.
+_LAZY_EXPORTS: dict[str, str] = {
+    "ALLOW_NAMESPACE_OVERRIDE_ENV_VAR": "omnibase_infra.runtime.constants_security",
+    "BASELINE_CONTRACT_TOPICS": "omnibase_infra.runtime.baseline_subscriptions",
+    "BASELINE_PLATFORM_TOPICS": "omnibase_infra.runtime.baseline_subscriptions",
+    "BindingConfigResolver": "omnibase_infra.runtime.binding_config_resolver",
+    "BindingExpressionParser": "omnibase_infra.runtime.binding_resolver",
+    "CONTRACT_YAML_FILENAME": "omnibase_infra.runtime.handler_plugin_loader",
+    "ChainAwareDispatcher": "omnibase_infra.runtime.chain_aware_dispatch",
+    "ContractDependencyResolver": "omnibase_infra.runtime.contract_dependency_resolver",
+    "ContractHandlerDiscovery": "omnibase_infra.runtime.contract_handler_discovery",
+    "DOMAIN_PLUGIN_ENTRY_POINT_GROUP": "omnibase_infra.runtime.constants_security",
+    "DependencyMaterializer": "omnibase_infra.runtime.dependency_materializer",
+    "DispatchContextEnforcer": "omnibase_infra.runtime.dispatch_context_enforcer",
+    "EVENT_BUS_INMEMORY": "omnibase_infra.runtime.handler_registry",
+    "EVENT_BUS_KAFKA": "omnibase_infra.runtime.handler_registry",
+    "EventBusSubcontractWiring": "omnibase_infra.runtime.event_bus_subcontract_wiring",
+    "FROM_STATE_INITIAL": "omnibase_infra.runtime.constants_notification",
+    "HANDLER_CONTRACT_FILENAME": "omnibase_infra.runtime.handler_plugin_loader",
+    "HANDLER_TYPE_DATABASE": "omnibase_infra.runtime.handler_registry",
+    "HANDLER_TYPE_GRPC": "omnibase_infra.runtime.handler_registry",
+    "HANDLER_TYPE_HTTP": "omnibase_infra.runtime.handler_registry",
+    "HANDLER_TYPE_KAFKA": "omnibase_infra.runtime.handler_registry",
+    "HANDLER_TYPE_VALKEY": "omnibase_infra.runtime.handler_registry",
+    "HandlerBootstrapSource": "omnibase_infra.runtime.handler_bootstrap_source",
+    "HandlerPluginLoader": "omnibase_infra.runtime.handler_plugin_loader",
+    "HandlerSourceResolver": "omnibase_infra.runtime.handler_source_resolver",
+    "InvocationSecurityEnforcer": "omnibase_infra.runtime.invocation_security_enforcer",
+    "KafkaContractSource": "omnibase_infra.runtime.kafka_contract_source",
+    "MAX_CONTRACT_SIZE": "omnibase_infra.runtime.handler_plugin_loader",
+    "MAX_CONTRACT_SIZE_BYTES": "omnibase_infra.runtime.handler_contract_config_loader",
+    "MAX_EXPRESSION_LENGTH": "omnibase_infra.runtime.binding_resolver",
+    "MAX_PATH_SEGMENTS": "omnibase_infra.runtime.binding_resolver",
+    "MessageDispatchEngine": "omnibase_infra.runtime.message_dispatch_engine",
+    "MessageTypeRegistryError": "omnibase_infra.runtime.registry",
+    "ModelContractLoadResult": "omnibase_infra.runtime.models",
+    "ModelDomainConstraint": "omnibase_infra.runtime.registry",
+    "ModelMessageTypeEntry": "omnibase_infra.runtime.registry",
+    "ModelProjectorNotificationConfig": "omnibase_infra.runtime.models",
+    "ModelRuntimeContractConfig": "omnibase_infra.runtime.models",
+    "ModelRuntimeSchedulerConfig": "omnibase_infra.runtime.models",
+    "ModelRuntimeSchedulerMetrics": "omnibase_infra.runtime.models",
+    "ModelRuntimeTick": "omnibase_infra.runtime.models",
+    "ModelSecurityConfig": "omnibase_infra.runtime.models",
+    "ModelStateTransitionNotification": "omnibase_infra.runtime.models",
+    "ModelTransitionNotificationPublisherMetrics": "omnibase_infra.runtime.models",
+    "OperationBindingResolver": "omnibase_infra.runtime.binding_resolver",
+    "PAYLOAD_REQUIRED_OPERATIONS": "omnibase_infra.runtime.envelope_validator",
+    "ProjectorPluginLoader": "omnibase_infra.runtime.projector_plugin_loader",
+    "ProjectorSchemaError": "omnibase_infra.runtime.projector_schema_manager",
+    "ProjectorSchemaValidator": "omnibase_infra.runtime.projector_schema_manager",
+    "ProjectorShell": "omnibase_infra.runtime.projector_shell",
+    "ProtocolHandlerDiscovery": "omnibase_infra.runtime.protocol_handler_discovery",
+    "ProtocolHandlerPluginLoader": "omnibase_infra.runtime.protocol_handler_plugin_loader",
+    "ProtocolMessageDispatcher": "omnibase_infra.runtime.registry_dispatcher",
+    "ProtocolMessageTypeRegistry": "omnibase_infra.runtime.registry",
+    "ProtocolPolicy": "omnibase_infra.runtime.protocol_policy",
+    "ProtocolProjectorNotificationContext": "omnibase_infra.runtime.mixins",
+    "ProtocolRuntimeScheduler": "omnibase_infra.runtime.protocols",
+    "ProtocolTransitionNotificationPublisher": "omnibase_infra.runtime.protocols",
+    "PublisherTopicScoped": "omnibase_infra.runtime.publisher_topic_scoped",
+    "RegistryDispatcher": "omnibase_infra.runtime.registry_dispatcher",
+    "RegistryError": "omnibase_infra.runtime.handler_registry",
+    "RegistryEventBusBinding": "omnibase_infra.runtime.handler_registry",
+    "RegistryMessageType": "omnibase_infra.runtime.registry",
+    "RegistryPolicy": "omnibase_infra.runtime.registry_policy",
+    "RegistryProtocolBinding": "omnibase_infra.runtime.handler_registry",
+    "RequestResponseWiring": "omnibase_infra.runtime.request_response_wiring",
+    "RuntimeContractConfigLoader": "omnibase_infra.runtime.runtime_contract_config_loader",
+    "RuntimeHostProcess": "omnibase_infra.runtime.runtime_host_process",
+    "RuntimeScheduler": "omnibase_infra.runtime.runtime_scheduler",
+    "SECURITY_CONFIG_PATH_ENV_VAR": "omnibase_infra.runtime.constants_security",
+    "SOURCE_TYPE_BOOTSTRAP": "omnibase_infra.runtime.handler_bootstrap_source",
+    "SecurityMetadataValidator": "omnibase_infra.runtime.security_metadata_validator",
+    "SecurityViolationError": "omnibase_infra.runtime.invocation_security_enforcer",
+    "TRUSTED_HANDLER_NAMESPACE_PREFIXES": "omnibase_infra.runtime.constants_security",
+    "TRUSTED_PLUGIN_NAMESPACE_PREFIXES": "omnibase_infra.runtime.constants_security",
+    "TransitionNotificationOutbox": "omnibase_infra.runtime.transition_notification_outbox",
+    "TransitionNotificationPublisher": "omnibase_infra.runtime.transition_notification_publisher",
+    "VALID_CONTEXT_PATHS": "omnibase_infra.runtime.binding_resolver",
+    "VALID_SOURCES": "omnibase_infra.runtime.binding_resolver",
+    "extract_handler_config": "omnibase_infra.runtime.handler_contract_config_loader",
+    "get_baseline_topics": "omnibase_infra.runtime.baseline_subscriptions",
+    "get_compute_registry_from_container": "omnibase_infra.runtime.util_container_wiring",
+    "get_event_bus_class": "omnibase_infra.runtime.handler_registry",
+    "get_event_bus_registry": "omnibase_infra.runtime.handler_registry",
+    "get_handler_class": "omnibase_infra.runtime.handler_registry",
+    "get_handler_node_introspected_from_container": "omnibase_infra.runtime.util_container_wiring",
+    "get_handler_node_registration_acked_from_container": "omnibase_infra.runtime.util_container_wiring",
+    "get_handler_registry": "omnibase_infra.runtime.handler_registry",
+    "get_handler_registry_from_container": "omnibase_infra.runtime.util_container_wiring",
+    "get_handler_runtime_tick_from_container": "omnibase_infra.runtime.util_container_wiring",
+    "get_known_event_bus_kinds": "omnibase_infra.runtime.util_wiring",
+    "get_known_handler_types": "omnibase_infra.runtime.util_wiring",
+    "get_or_create_compute_registry": "omnibase_infra.runtime.util_container_wiring",
+    "get_or_create_policy_registry": "omnibase_infra.runtime.util_container_wiring",
+    "get_policy_registry_from_container": "omnibase_infra.runtime.util_container_wiring",
+    "get_projection_reader_from_container": "omnibase_infra.runtime.util_container_wiring",
+    "load_event_bus_subcontract": "omnibase_infra.runtime.event_bus_subcontract_wiring",
+    "load_handler_contract_config": "omnibase_infra.runtime.handler_contract_config_loader",
+    "load_runtime_config": "omnibase_infra.runtime.service_kernel",
+    "propagate_chain_context": "omnibase_infra.runtime.chain_aware_dispatch",
+    "validate_dispatch_chain": "omnibase_infra.runtime.chain_aware_dispatch",
+    "validate_envelope": "omnibase_infra.runtime.envelope_validator",
+    "validate_handler_security": "omnibase_infra.runtime.security_metadata_validator",
+    "validate_kafka_broker_allowlist": "omnibase_infra.runtime.service_kernel",
+    "wire_custom_event_bus": "omnibase_infra.runtime.util_wiring",
+    "wire_custom_handler": "omnibase_infra.runtime.util_wiring",
+    "wire_default_handlers": "omnibase_infra.runtime.util_wiring",
+    "wire_handlers_from_contract": "omnibase_infra.runtime.util_wiring",
+    "wire_infrastructure_services": "omnibase_infra.runtime.util_container_wiring",
+    "wire_registration_dispatchers": "omnibase_infra.runtime.util_container_wiring",
+    "wire_registration_handlers": "omnibase_infra.runtime.util_container_wiring",
+}
 
-# Handler contract config loader
-from omnibase_infra.runtime.handler_contract_config_loader import (
-    MAX_CONTRACT_SIZE_BYTES,
-    extract_handler_config,
-    load_handler_contract_config,
-)
-
-# Binding config resolver (OMN-765)
-from omnibase_infra.runtime.binding_config_resolver import BindingConfigResolver
-from omnibase_infra.runtime.protocol_handler_plugin_loader import (
-    ProtocolHandlerPluginLoader,
-)
-
-# Binding expression resolver (OMN-1518)
-from omnibase_infra.runtime.binding_resolver import (
-    BindingExpressionParser,
-    OperationBindingResolver,
-    MAX_EXPRESSION_LENGTH,
-    MAX_PATH_SEGMENTS,
-    VALID_CONTEXT_PATHS,
-    VALID_SOURCES,
-)
-
-# Handler discovery protocol and implementation (OMN-1133)
-from omnibase_infra.runtime.protocol_handler_discovery import (
-    ProtocolHandlerDiscovery,
-)
-from omnibase_infra.runtime.contract_handler_discovery import (
-    ContractHandlerDiscovery,
-)
-
-# Projector plugin loading and schema validation (OMN-1168, OMN-1169)
-from omnibase_infra.runtime.projector_plugin_loader import (
-    ProjectorPluginLoader,
-)
-from omnibase_infra.runtime.projector_schema_manager import (
-    ProjectorSchemaError,
-    ProjectorSchemaValidator,
-)
-from omnibase_infra.runtime.projector_shell import ProjectorShell
-
-# Invocation security enforcer (OMN-1098)
-from omnibase_infra.runtime.invocation_security_enforcer import (
-    InvocationSecurityEnforcer,
-    SecurityViolationError,
-)
-
-# Security metadata validator (OMN-1137)
-from omnibase_infra.runtime.security_metadata_validator import (
-    SecurityMetadataValidator,
-    validate_handler_security,
-)
-
-# Transition notification publisher and outbox (OMN-1139)
-from omnibase_infra.runtime.constants_notification import FROM_STATE_INITIAL
-from omnibase_infra.runtime.transition_notification_publisher import (
-    TransitionNotificationPublisher,
-)
-from omnibase_infra.runtime.transition_notification_outbox import (
-    TransitionNotificationOutbox,
-)
-
-# Topic-scoped publisher (OMN-1621)
-from omnibase_infra.runtime.publisher_topic_scoped import PublisherTopicScoped
-
-# Event bus subcontract wiring (OMN-1621)
-from omnibase_infra.runtime.event_bus_subcontract_wiring import (
-    EventBusSubcontractWiring,
-    load_event_bus_subcontract,
-)
-
-# Request-response wiring (OMN-1742)
-from omnibase_infra.runtime.request_response_wiring import RequestResponseWiring
-
-# Runtime contract config loader (OMN-1519)
-from omnibase_infra.runtime.runtime_contract_config_loader import (
-    RuntimeContractConfigLoader,
-)
-
-# Security constants (OMN-1519, OMN-2010)
-from omnibase_infra.runtime.constants_security import (
-    ALLOW_NAMESPACE_OVERRIDE_ENV_VAR,
-    DOMAIN_PLUGIN_ENTRY_POINT_GROUP,
-    SECURITY_CONFIG_PATH_ENV_VAR,
-    TRUSTED_HANDLER_NAMESPACE_PREFIXES,
-    TRUSTED_PLUGIN_NAMESPACE_PREFIXES,
-)
-
-# Kafka contract source (OMN-1654)
-from omnibase_infra.runtime.kafka_contract_source import KafkaContractSource
-
-# Baseline subscriptions (OMN-1696)
-from omnibase_infra.runtime.baseline_subscriptions import (
-    BASELINE_CONTRACT_TOPICS,
-    BASELINE_PLATFORM_TOPICS,
-    get_baseline_topics,
-)
-
-# Contract dependency resolver (OMN-1732)
-from omnibase_infra.runtime.contract_dependency_resolver import (
-    ContractDependencyResolver,
-)
-
-# Dependency materializer (OMN-1976)
-from omnibase_infra.runtime.dependency_materializer import DependencyMaterializer
-
-# Chain-aware dispatch (OMN-951) - must be imported LAST to avoid circular import
-from omnibase_infra.runtime.chain_aware_dispatch import (
-    ChainAwareDispatcher,
-    propagate_chain_context,
-    validate_dispatch_chain,
-)
-
-# isort: on
+_LAZY_ALIASES: dict[str, tuple[str, str]] = {
+    "kernel_bootstrap": ("omnibase_infra.runtime.service_kernel", "bootstrap"),
+    "kernel_main": ("omnibase_infra.runtime.service_kernel", "main"),
+}
 
 __all__: list[str] = [
     # Event bus kind constants
@@ -446,3 +573,22 @@ __all__: list[str] = [
     # Dependency materializer (OMN-1976)
     "DependencyMaterializer",
 ]
+
+
+def __getattr__(name: str) -> object:
+    if name in _LAZY_EXPORTS:
+        module = importlib.import_module(_LAZY_EXPORTS[name])
+        value: object = getattr(module, name)
+        globals()[name] = value
+        return value
+    if name in _LAZY_ALIASES:
+        module_name, attribute_name = _LAZY_ALIASES[name]
+        module = importlib.import_module(module_name)
+        value = getattr(module, attribute_name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *__all__})

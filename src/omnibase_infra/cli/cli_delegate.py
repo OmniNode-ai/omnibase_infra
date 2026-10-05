@@ -117,8 +117,9 @@ import signal
 import sys
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
@@ -157,9 +158,11 @@ from omnibase_infra.cli.delegate_lane import (
 from omnibase_infra.cli.delegate_lane_credentials import (
     DelegateLaneCredentialError,
     resolve_lane_client_transport_for,
+    sasl_refusal_remediation,
 )
 from omnibase_infra.cli.delegate_locus import (
     DelegateLocusRefusedError,
+    DelegateLocusSaslRefusedError,
     contract_terminal_topic,
     resolve_delegate_locus,
 )
@@ -174,6 +177,8 @@ from omnibase_infra.cli.delegate_queue_depth import (
 )
 from omnibase_infra.cli.delegate_terminal_resolver import (
     DelegateTerminalUnresolvedError,
+    is_reply_timeout,
+    reply_timeout_error,
     resolve_delegate_terminal,
 )
 from omnibase_infra.cli.model_delegate_caller import ModelDelegateCaller
@@ -207,8 +212,11 @@ from omnibase_infra.cli.protocol_drift_guard_verdict import (
 )
 from omnibase_infra.cli.protocol_execution_budget import ProtocolExecutionBudget
 from omnibase_infra.cli.receipt_mode import (
+    STATE_ROOT_RESOLUTION_ORDER,
+    DelegatePhaseStopwatch,
     capture_log_path,
     default_emit_socket_path,
+    resolve_state_root,
     run_receipt_mode,
 )
 from omnibase_infra.cli.store_developer_profile import StoreDeveloperProfile
@@ -219,7 +227,12 @@ from omnibase_infra.cli.task_class_registry import (
     resolve_task_class,
 )
 from omnibase_infra.cli.workspace_reconcile import make_workspace_reconciler
+from omnibase_infra.enums.enum_delegate_incomplete_class import (
+    EnumDelegateIncompleteClass,
+)
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
+from omnibase_infra.enums.enum_delegate_phase import EnumDelegatePhase
+from omnibase_infra.enums.enum_delegate_refusal_stage import EnumDelegateRefusalStage
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.lane_client_transport_binding import (
     bind_lane_client_transport,
@@ -231,6 +244,15 @@ from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy import (
     ModelKafkaConnectRetryPolicy,
 )
+from omnibase_infra.handlers.handler_workspace_runtime_config_materializer import (
+    HandlerWorkspaceRuntimeConfigMaterializer,
+)
+from omnibase_infra.models.delegation.model_delegate_phase_durations import (
+    ModelDelegatePhaseDurations,
+)
+from omnibase_infra.models.delegation.model_delegate_refusal import (
+    ModelDelegateRefusal,
+)
 from omnibase_infra.runtime_identity import collect_runtime_identity
 from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_DELEGATION_REQUEST
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
@@ -240,13 +262,21 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "DELEGATE_NODE_NAME",
     "DELEGATE_SOURCE",
+    "INSTALL_IDENTITY_MODULE",
+    "TENANT_OVERLAY_ENV",
+    "DelegateTenantRefusedError",
+    "read_install_identity",
+    "resolve_delegate_tenant",
     "BUS_CHOICES",
     "DEFAULT_BUS",
     "LOCUS_CHOICES",
+    "DelegateCallerInterruptedError",
     "DelegateTimeoutExceededError",
+    "DelegateCommand",
     "build_backend_overrides",
     "resolve_default_bus",
     "load_supported_criteria",
+    "resolve_prompt_source",
     "run_delegate",
     "validate_request_against_contract",
 ]
@@ -418,6 +448,9 @@ def _delegation_result(envelope: dict[str, object]) -> ModelDelegateTerminal | N
         return None
     if pre_publish_failure_from_receipt(envelope) is not None:
         raise DelegatePrePublishFailureError(pre_publish_failure_error(envelope))
+    # OMN-20386: a published command the lane never answered is a timeout, said
+    # as one, whatever the carriers hold; only an absent terminal reaches here.
+    reply_timeout = is_reply_timeout(result)
 
     refusals: list[str] = []
     for field in _TERMINAL_CARRIER_FIELDS:
@@ -429,6 +462,8 @@ def _delegation_result(envelope: dict[str, object]) -> ModelDelegateTerminal | N
             return resolve_delegate_terminal(carrier)
         except DelegateTerminalUnresolvedError as exc:
             refusals.append(f"{field}: {exc}")
+    if reply_timeout:
+        raise reply_timeout_error(envelope)
     raise DelegateTerminalUnresolvedError(
         "delegate receipt carries no resolvable delegation terminal, so the "
         "customer artifacts cannot be written -- " + "; ".join(refusals)
@@ -508,6 +543,24 @@ def _drift_guard_receipt_block(
     if drift_guard is None:
         return {}
     return {"drift_guard": drift_guard.as_receipt_fields()}
+
+
+def _phase_durations_receipt_block(
+    phase_durations: ModelDelegatePhaseDurations | None,
+) -> dict[str, object]:
+    """Per-phase client durations, as a receipt fragment (OMN-19452).
+
+    Always present, so a reader never has to ask whether a receipt predates the
+    field. A phase the run never reached is ``null`` and a caller that measured
+    nothing (``None``) writes every phase as ``null``; neither is ever a zero,
+    which would read as a phase that was instant.
+    """
+    durations = (
+        phase_durations
+        if phase_durations is not None
+        else ModelDelegatePhaseDurations()
+    )
+    return {"phase_durations": durations.model_dump(mode="json")}
 
 
 def _config_overrides_receipt_block(
@@ -764,6 +817,11 @@ def _delegate_receipt_evidence_error(
             payload_path=payload_path,
             state_root=state_root,
         )
+    except DelegateTerminalUnresolvedError as exc:
+        # OMN-20386: returned, not raised. This error is a ``ValueError`` and
+        # ``delegate_command`` turns every ``ValueError`` into a usage error:
+        # exit 2, a ``Usage:`` banner, and the run-file writer never reached.
+        return str(exc)
     if result is None:
         return "delegate receipt carries no delegation terminal"
     try:
@@ -794,6 +852,7 @@ def _write_unattributed_run_files(
     drift_guard: ProtocolDriftGuardVerdict | None = None,
     config_overrides: tuple[ModelDelegateEnvConfigOverride, ...] = (),
     requested_backend_id: str | None = None,
+    phase_durations: ModelDelegatePhaseDurations | None = None,
 ) -> None:
     """Persist a terminally-failed delegation that attributed no route.
 
@@ -849,6 +908,7 @@ def _write_unattributed_run_files(
                 **addressing.as_run_file_fields(),
                 **_drift_guard_receipt_block(drift_guard),
                 **_config_overrides_receipt_block(config_overrides),
+                **_phase_durations_receipt_block(phase_durations),
             },
             indent=2,
             sort_keys=True,
@@ -869,6 +929,10 @@ def _write_unattributed_run_files(
                 "prompt": prompt,
                 "task_type": task_type,
                 "task_type_resolution": task_type_resolution,
+                # OMN-19232: where the run dir lives, absolute, so a reader
+                # holding only run.json finds the receipt without the
+                # caller's cwd.
+                "state_root": str(run_dir.parent.parent),
                 **addressing.as_run_file_fields(),
             },
             indent=2,
@@ -881,7 +945,8 @@ def _write_unattributed_run_files(
         + "): "
         + " ".join(
             str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
-        ),
+        )
+        + f" state_root={run_dir.parent.parent}",
         err=True,
     )
 
@@ -896,6 +961,7 @@ def _write_transport_refusal_run_files(
     task_type_resolution: str,
     addressing: ModelDelegateRunAddressing,
     envelope: dict[str, object] | None = None,
+    phase_durations: ModelDelegatePhaseDurations | None = None,
 ) -> None:
     """Persist the three files for a delegation that never reached the broker.
 
@@ -953,9 +1019,114 @@ def _write_transport_refusal_run_files(
                 "attempts": [],
                 "receipt": envelope,
                 **addressing.as_run_file_fields(),
+                **_phase_durations_receipt_block(phase_durations),
             },
             indent=2,
             sort_keys=True,
+        ),
+    )
+    _atomic_write_text(
+        run_dir / "run.json",
+        json.dumps(
+            {
+                "run_id": run_id,
+                "correlation_id": correlation_id,
+                "routing_tier": None,
+                "route_attributed": False,
+                "prompt": prompt,
+                "task_type": task_type,
+                "task_type_resolution": task_type_resolution,
+                # OMN-19232: where the run dir lives, absolute, so a reader
+                # holding only run.json finds the receipt without the
+                # caller's cwd.
+                "state_root": str(run_dir.parent.parent),
+                **addressing.as_run_file_fields(),
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+    )
+    click.echo(
+        "delegate artifacts (TRANSPORT FAILURE -- "
+        + refusal.reason
+        + ", no rung ran): "
+        + " ".join(
+            str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
+        )
+        + f" state_root={run_dir.parent.parent}",
+        err=True,
+    )
+
+
+def _write_incomplete_run_files(
+    *,
+    run_id: str,
+    correlation_id: str,
+    terminal_class: EnumDelegateIncompleteClass,
+    status: EnumSkillResultStatus,
+    failure_reason: str,
+    known: dict[str, object],
+    state_root: Path,
+    prompt: str,
+    task_type: str,
+    task_type_resolution: str,
+    addressing: ModelDelegateRunAddressing,
+    envelope: dict[str, object] | None = None,
+    phase_durations: ModelDelegatePhaseDurations | None = None,
+    announce: bool = True,
+) -> Path:
+    """Persist the three run files for a delegation that left no terminal (OMN-17427).
+
+    The same writer shape as :func:`_write_transport_refusal_run_files`, for the
+    other ways a dispatched run ends without a terminal to resolve: the caller's
+    own timeout (``in_flight`` left behind by a kill, ``interrupted`` when the
+    kill was catchable), this CLI's hard timeout (``timeout``), and a run whose
+    receipt holds no terminal payload (``failed``). Measured 2026-10-03 on the
+    ``.201`` lane: four runs with a ``delegation_events`` row and no
+    ``receipt.json`` because the caller's 300 s limit ended the process first,
+    and two runs that failed with nothing on disk because the receipt held no
+    terminal payload to write from.
+
+    Route attribution is fail-closed exactly as it is for an unattributed run:
+    nothing ran to completion on any named rung, so none is named. ``known``
+    carries what this invocation can state about the run (the declared bound,
+    the elapsed wait, the topic, the runtime's own error) and nothing it would
+    have to guess; an outcome it cannot see is reported as unknown by being
+    absent, never filled in.
+
+    Returns the run directory.
+    """
+    run_dir = (state_root / "runs" / run_id).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _atomic_write_text(run_dir / "result.txt", "")
+    _atomic_write_text(
+        run_dir / "receipt.json",
+        json.dumps(
+            {
+                "receipt_id": correlation_id,
+                "correlation_id": correlation_id,
+                "run_id": run_id,
+                "route_attributed": False,
+                "route_unattributed": (
+                    "no delegation terminal was recorded for this run, so no "
+                    "rung is attributed"
+                ),
+                "status": status.value,
+                "terminal_class": terminal_class.value,
+                "terminal_failure_cause": None,
+                "failure_reason": failure_reason,
+                "terminal_recorded": False,
+                "written_at": datetime.now(UTC).isoformat(),
+                "writer_pid": os.getpid(),
+                "attempts": [],
+                "receipt": envelope,
+                **known,
+                **addressing.as_run_file_fields(),
+                **_phase_durations_receipt_block(phase_durations),
+            },
+            indent=2,
+            sort_keys=True,
+            default=str,
         ),
     )
     _atomic_write_text(
@@ -975,14 +1146,187 @@ def _write_transport_refusal_run_files(
             sort_keys=True,
         ),
     )
-    click.echo(
-        "delegate artifacts (TRANSPORT FAILURE -- "
-        + refusal.reason
-        + ", no rung ran): "
-        + " ".join(
-            str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
+    if announce:
+        click.echo(
+            f"delegate artifacts (NO TERMINAL -- {terminal_class.value}): "
+            + " ".join(
+                str(run_dir / name)
+                for name in ("result.txt", "receipt.json", "run.json")
+            ),
+            err=True,
+        )
+    return run_dir
+
+
+def _unterminalized_receipt_fields(
+    envelope: dict[str, object],
+    *,
+    reason: str,
+) -> tuple[EnumDelegateIncompleteClass, dict[str, object]]:
+    """Classify a delegation receipt that carries no terminal, and what it knew.
+
+    ``timeout`` when the runtime's own workflow result says so, ``failed`` for
+    every other way of ending without a terminal payload. The runtime's error
+    and type ride along so the receipt names the cause the capture log holds
+    rather than only the resolver's "no resolvable terminal".
+    """
+    result = envelope.get("result")
+    summary = result if isinstance(result, dict) else {}
+    workflow_result = str(summary.get("workflow_result") or "")
+    terminal_class = (
+        EnumDelegateIncompleteClass.TIMEOUT
+        if workflow_result == "timeout"
+        else EnumDelegateIncompleteClass.FAILED
+    )
+    known: dict[str, object] = {
+        "workflow_result": workflow_result or None,
+        "runtime_error_type": str(summary.get("runtime_error_type") or "") or None,
+        "runtime_error": sanitize_error_string(str(summary.get("error") or "")) or None,
+        "terminal_payload": summary.get("terminal_payload"),
+        "wire_correlation_id": summary.get("wire_correlation_id") or None,
+        "resolution_error": sanitize_error_string(reason),
+    }
+    return terminal_class, known
+
+
+def _write_unterminalized_run_files(
+    *,
+    envelope: dict[str, object],
+    reason: str,
+    state_root: Path,
+    prompt: str,
+    task_type: str,
+    task_type_resolution: str,
+    addressing: ModelDelegateRunAddressing,
+    phase_durations: ModelDelegatePhaseDurations | None,
+) -> None:
+    """Write the receipt for a delegation receipt that holds no terminal (OMN-17427)."""
+    terminal_class, known = _unterminalized_receipt_fields(envelope, reason=reason)
+    _write_incomplete_run_files(
+        run_id=str(envelope["run_id"]),
+        correlation_id=str(envelope["correlation_id"]),
+        terminal_class=terminal_class,
+        status=EnumSkillResultStatus.FAILED,
+        failure_reason=sanitize_error_string(reason),
+        known=known,
+        state_root=state_root,
+        prompt=prompt,
+        task_type=task_type,
+        task_type_resolution=task_type_resolution,
+        addressing=addressing,
+        envelope=envelope,
+        phase_durations=phase_durations,
+    )
+
+
+def _file_in_flight_receipt(
+    *,
+    run_id: str,
+    correlation_id: str,
+    declared_timeout: int,
+    locus_decision: ModelDelegateLocusDecision,
+    state_root: Path,
+    prompt: str,
+    task_type: str,
+    task_type_resolution: str,
+    addressing: ModelDelegateRunAddressing,
+    phase_durations: ModelDelegatePhaseDurations,
+) -> None:
+    """File the provisional receipt before the terminal wait (OMN-17427).
+
+    ``status`` is ``pending`` and ``terminal_recorded`` is false: it says the
+    command was dispatched under this run and correlation id and that nothing
+    has been recorded since. It is not an outcome. A process that finishes
+    replaces it; one that is killed leaves it, and a reader that finds it after
+    the process has gone knows the run ended without a terminal, with the ids
+    to look it up by. A failure to write it is reported and does not stop the
+    delegation: the terminal receipt writer has the same directory to write to
+    and will say so if the directory is the problem.
+    """
+    try:
+        _write_incomplete_run_files(
+            run_id=run_id,
+            correlation_id=correlation_id,
+            terminal_class=EnumDelegateIncompleteClass.IN_FLIGHT,
+            status=EnumSkillResultStatus.PENDING,
+            failure_reason=(
+                "dispatched; no terminal recorded yet. If this file is still the "
+                "receipt after the process has exited, the caller ended the "
+                "process before a terminal arrived"
+            ),
+            known={
+                "declared_timeout_seconds": declared_timeout,
+                "command_topic": locus_decision.command_topic,
+                "broker": locus_decision.broker,
+            },
+            state_root=state_root,
+            prompt=prompt,
+            task_type=task_type,
+            task_type_resolution=task_type_resolution,
+            addressing=addressing,
+            phase_durations=phase_durations,
+            announce=False,
+        )
+    except OSError as exc:
+        click.echo(
+            f"onex delegate: could not file the in-flight receipt for run {run_id}: "
+            f"{sanitize_error_string(str(exc))}",
+            err=True,
+        )
+
+
+def _settle_in_flight_receipt(
+    *,
+    run_id: str,
+    correlation_id: str,
+    exit_code: int,
+    state_root: Path,
+    prompt: str,
+    task_type: str,
+    task_type_resolution: str,
+    addressing: ModelDelegateRunAddressing,
+    phase_durations: ModelDelegatePhaseDurations,
+) -> None:
+    """Replace a still-provisional receipt once the run has ended (OMN-17427).
+
+    Reads the receipt this run filed. Anything but the in-flight one is a
+    terminal writer's own receipt and is left exactly as written. The in-flight
+    one means the run finished (this function runs after it) without a writer
+    replacing it, so it is rewritten as ``failed`` and says so; the writer's own
+    error is on stderr and in the capture log, and is not guessed at here.
+    """
+    receipt_path = state_root / "runs" / run_id / "receipt.json"
+    try:
+        current = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if (
+        not isinstance(current, dict)
+        or current.get("terminal_class") != EnumDelegateIncompleteClass.IN_FLIGHT.value
+    ):
+        return
+    _write_incomplete_run_files(
+        run_id=run_id,
+        correlation_id=correlation_id,
+        terminal_class=EnumDelegateIncompleteClass.FAILED,
+        status=EnumSkillResultStatus.FAILED,
+        failure_reason=(
+            "the run ended with exit code "
+            f"{exit_code} and no terminal receipt writer replaced the in-flight "
+            "receipt; the cause is on stderr and in the capture log"
         ),
-        err=True,
+        known={
+            "exit_code": exit_code,
+            "declared_timeout_seconds": current.get("declared_timeout_seconds"),
+            "command_topic": current.get("command_topic"),
+            "broker": current.get("broker"),
+        },
+        state_root=state_root,
+        prompt=prompt,
+        task_type=task_type,
+        task_type_resolution=task_type_resolution,
+        addressing=addressing,
+        phase_durations=phase_durations,
     )
 
 
@@ -1106,6 +1450,7 @@ def _write_local_run_files(
     command_topic: str = "",
     contract_path: Path | None = None,
     payload_path: Path | None = None,
+    phase_durations: ModelDelegatePhaseDurations | None = None,
 ) -> None:
     """Persist local delegation output and the accepted route evidence.
 
@@ -1170,6 +1515,7 @@ def _write_local_run_files(
             task_type_resolution=task_type_resolution,
             addressing=addressing,
             envelope=envelope,
+            phase_durations=phase_durations,
         )
         return
 
@@ -1180,21 +1526,50 @@ def _write_local_run_files(
     try:
         result = _delegation_result(envelope)
     except DelegatePrePublishFailureError as exc:
-        # OMN-19131: the run never published, so there are no route files to
+        # OMN-19131: the run never published, so there are no ROUTE files to
         # write and no terminal was lost. Still RAISED, never returned quietly
         # (the OMN-18569 guarantee), but carrying what refused the run: the
         # field, the model and the capture log. ``run_receipt_mode`` puts it on
         # stderr where the unresolved-terminal sentence used to be, the receipt
         # on stdout already carries the same cause, and the exit is non-zero.
-        raise DelegatePrePublishFailureError(
-            _pre_publish_failure_message(
-                exc,
-                envelope,
-                contract_path=contract_path,
-                payload_path=payload_path,
-                state_root=state_root,
-            )
-        ) from exc
+        message = _pre_publish_failure_message(
+            exc,
+            envelope,
+            contract_path=contract_path,
+            payload_path=payload_path,
+            state_root=state_root,
+        )
+        # OMN-17427: the cause is also written down. Every lane is told to read
+        # the terminal from ``receipt.json``, and a refused run left none.
+        _write_unterminalized_run_files(
+            envelope=envelope,
+            reason=message,
+            state_root=state_root,
+            prompt=prompt,
+            task_type=task_type,
+            task_type_resolution=task_type_resolution,
+            addressing=addressing,
+            phase_durations=phase_durations,
+        )
+        raise DelegatePrePublishFailureError(message) from exc
+    except DelegateTerminalUnresolvedError as exc:
+        # OMN-17427: two runs on the .201 lane failed with a receipt holding no
+        # terminal payload and left no ``receipt.json``: the resolver raised
+        # (correctly: it is the OMN-18569 refusal to stay quiet) and the raise
+        # skipped the writer. Write what the receipt does hold -- the runtime's
+        # own error and the class it ended in -- then raise, so the exit stays
+        # non-zero and stderr keeps its sentence.
+        _write_unterminalized_run_files(
+            envelope=envelope,
+            reason=str(exc),
+            state_root=state_root,
+            prompt=prompt,
+            task_type=task_type,
+            task_type_resolution=task_type_resolution,
+            addressing=addressing,
+            phase_durations=phase_durations,
+        )
+        raise
     if result is None:
         return
     _require_completed_terminal_evidence(
@@ -1222,6 +1597,7 @@ def _write_local_run_files(
             drift_guard=drift_guard,
             config_overrides=config_overrides,
             requested_backend_id=requested_backend_id,
+            phase_durations=phase_durations,
         )
         return
 
@@ -1278,6 +1654,7 @@ def _write_local_run_files(
                 **addressing.as_run_file_fields(),
                 **_drift_guard_receipt_block(drift_guard),
                 **_config_overrides_receipt_block(config_overrides),
+                **_phase_durations_receipt_block(phase_durations),
             },
             indent=2,
             sort_keys=True,
@@ -1299,6 +1676,10 @@ def _write_local_run_files(
                 "prompt": prompt,
                 "task_type": task_type,
                 "task_type_resolution": task_type_resolution,
+                # OMN-19232: where the run dir lives, absolute, so a reader
+                # holding only run.json finds the receipt without the
+                # caller's cwd.
+                "state_root": str(run_dir.parent.parent),
                 **addressing.as_run_file_fields(),
             },
             indent=2,
@@ -1309,9 +1690,25 @@ def _write_local_run_files(
         "delegate artifacts: "
         + " ".join(
             str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
-        ),
+        )
+        + f" state_root={run_dir.parent.parent}",
         err=True,
     )
+
+
+def describe_local_evidence_destination() -> str:
+    """Name the local SQLite file and table an in-memory run records into.
+
+    The path comes from omnimarket's own ``default_evidence_db_path`` so this
+    line cannot drift from the file the projection writes. When omnimarket is
+    unresolvable the line names only the directory the file lives in.
+    """
+    try:
+        module = importlib.import_module("omnimarket.projection.sqlite_database")
+        location = f"database file {module.default_evidence_db_path()}"
+    except (ImportError, AttributeError):
+        location = "a local database file under ~/.omninode/delegation/"
+    return f"{location}, table delegation_events"
 
 
 def resolve_default_bus(
@@ -1333,10 +1730,12 @@ def resolve_default_bus(
        :func:`omnibase_infra.runtime.service_kernel.resolve_embedded_runtime_config`:
        the ``ONEX_CONTRACTS_DIR`` BOOTSTRAP pointer names a contracts
        directory whose ``runtime/runtime_config.yaml`` is the configured
-       authority; with no pointer, a bound ``workspace_root`` answers with its
-       checked-in tier-1 runtime config (OMN-19193); with neither, the SHIPPED
-       tier-0 default runtime config answers — in-memory bus, ``local``
-       profile. An unconfigured install is still config-resolved.
+       authority; with no pointer or developer lane binding, a bound
+       ``workspace_root`` answers with its materialized ``origin/main`` tier-1
+       runtime config (OMN-19212), falling back to the working tree
+       (OMN-19193); with neither, the SHIPPED tier-0 default runtime config
+       answers — in-memory bus, ``local`` profile. An unconfigured install
+       is still config-resolved.
     2. ``config.event_bus.type`` from that configuration is passed as
        ``config_bus=`` — the tier the pre-ruling CLI skipped, which is what
        made ``~/.zshrc`` the transport authority.
@@ -1722,6 +2121,106 @@ def _wire_criteria_mode(criteria_mode: str | None) -> str | None:
     return None if criteria_mode is None else criteria_mode.replace("-", "_")
 
 
+# --- OMN-17427: the tenant a request is stamped with ---------------------------
+#
+# Resolve the tenant an ``onex delegate`` request is stamped with (OMN-17427).
+#
+# ``ModelDelegateSkillRequest`` has declared ``tenant_id`` since OMN-14058, and
+# the producer already carries a request's tenant onto the quality-gate verdict.
+# This CLI never wrote the field, so a request reached a deployed lane with no
+# tenant, the lane had nothing to carry, and the projection writer dead-lettered
+# the verdict (845 of 856 completions measured 2026-10-03).
+#
+# The CLI is the only place that can stamp it. A deployed lane has no local
+# store, so it cannot read the identity of the install the command was typed on.
+#
+# THE IDENTITY. The install's own: the one ``onex local init`` mints once and
+# records in the local store, which is the identity a customer's install carries.
+# Where a tenant overlay is declared it arrives as ``ONEX_TENANT_ID``, the same
+# variable the delegate handler already reads, and it wins, so the stamp is the
+# tenant the handler would have resolved had the lane held it. Lab usage goes
+# through this path as one tenant; there is no second internal system and no
+# fallback tenant.
+#
+# NOTHING HERE IS A DEFAULT. Every branch returns a stamp that was declared or
+# minted, or refuses naming ``onex local init``. The one request that carries no
+# stamp is the in-process one on an install that has not initialised, and that
+# is the documented OMN-19966 path: the local dispatch port mints the install's
+# identity on its first delegation, before any provider is called, and says so
+# on stderr. Refusing there would put back the refusal OMN-19966 removed.
+#
+# The identity reader lives in omnimarket, which this package may not import at
+# module scope (``contract_registry``). It is resolved when the command runs, the
+# way :func:`omnibase_infra.cli.cli_delegate.load_supported_criteria` resolves
+# the criteria vocabulary, and :func:`read_install_identity` is the one seam.
+
+#: The variable a tenant overlay declares. The delegate handler reads the same
+#: name (``Settings.onex_tenant_id``), so producer and handler agree.
+TENANT_OVERLAY_ENV = "ONEX_TENANT_ID"
+
+#: Where this install's minted identity is read from, by module path and never
+#: imported at module scope.
+INSTALL_IDENTITY_MODULE = "omnimarket.local_deployment.tenant_identity"
+
+_INIT_COMMAND = "onex local init"
+
+
+class DelegateTenantRefusedError(Exception):
+    """No tenant could be named for the request, and none will be invented."""
+
+
+def read_install_identity() -> str | None:
+    """Return this install's minted tenant identity, or ``None`` if it has none.
+
+    A recorded-but-corrupt identity is a refusal, not ``None``: "never minted"
+    and "minted and unreadable" call for different repairs.
+    """
+    try:
+        module = importlib.import_module(INSTALL_IDENTITY_MODULE)
+        reader = module.read_local_tenant_identity
+        error_type = module.LocalTenantIdentityError
+    except (ImportError, AttributeError) as exc:
+        raise DelegateTenantRefusedError(
+            f"this install's tenant identity cannot be read: {INSTALL_IDENTITY_MODULE} "
+            f"is not resolvable ({type(exc).__name__}). onex delegate stamps every "
+            "request with the tenant of the install it runs under, and omnimarket "
+            "owns that identity."
+        ) from exc
+    try:
+        identity = reader()
+    except error_type as exc:
+        raise DelegateTenantRefusedError(str(exc)) from exc
+    return None if identity is None else str(identity.tenant_uuid)
+
+
+def resolve_delegate_tenant(
+    *, in_process: bool, environ: Mapping[str, str]
+) -> str | None:
+    """The tenant to stamp on the request, or ``None`` only for the OMN-19966 path.
+
+    Precedence: a declared tenant overlay, then this install's minted identity.
+    With neither, a request bound for a deployed lane is refused, because that
+    lane would dead-letter its verdict. An in-process request on an install that
+    never initialised carries no stamp and the local port mints the identity on
+    the first delegation.
+    """
+    declared = environ.get(TENANT_OVERLAY_ENV, "").strip()
+    if declared:
+        return declared
+    minted = read_install_identity()
+    if minted is not None:
+        return minted
+    if in_process:
+        return None
+    raise DelegateTenantRefusedError(
+        "this install has never minted a tenant identity, so there is no tenant "
+        "to stamp on the request and a deployed lane could not attribute its "
+        f"verdict. Run `{_INIT_COMMAND}` once on this machine. No identity is "
+        f"invented, and no request is sent without one. (A declared tenant "
+        f"overlay sets {TENANT_OVERLAY_ENV}.)"
+    )
+
+
 def _request_payload(
     *,
     prompt: str,
@@ -1737,6 +2236,7 @@ def _request_payload(
     backend_id: str | None = None,
     ticket_id: str | None = None,
     caller: ModelDelegateCaller | None = None,
+    tenant_id: str | None = None,
 ) -> dict[str, object]:
     """Build the delegate request, setting only the fields the caller supplied."""
     payload: dict[str, object] = {
@@ -1779,6 +2279,12 @@ def _request_payload(
         payload["metadata"] = metadata
     if caller is not None and caller.session_id is not None:
         payload["session_id"] = caller.session_id
+    # OMN-17427: the tenant of the install the command runs under, written to
+    # the ``tenant_id`` field the request model has declared since OMN-14058.
+    # Omitted entirely when unresolved (the in-process first-delegation path),
+    # like every other optional field here.
+    if tenant_id is not None:
+        payload["tenant_id"] = tenant_id
     return payload
 
 
@@ -1799,6 +2305,7 @@ def _write_payload(
     backend_id: str | None = None,
     ticket_id: str | None = None,
     caller: ModelDelegateCaller | None = None,
+    tenant_id: str | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -1853,6 +2360,7 @@ def _write_payload(
         backend_id=backend_id,
         ticket_id=ticket_id,
         caller=caller,
+        tenant_id=tenant_id,
     )
     payload_path.write_text(
         json.dumps(payload),
@@ -1949,6 +2457,46 @@ def _hard_timeout(seconds: int) -> Iterator[None]:
         signal.signal(signal.SIGALRM, previous_handler)
 
 
+class DelegateCallerInterruptedError(BaseException):
+    """The caller ended this process with a signal it lets a process answer (OMN-17427).
+
+    A caller's own timeout is the common way a delegation ends with no terminal:
+    ``landing_text.py`` gives the command 300 s and kills it. ``SIGTERM`` and
+    ``SIGHUP`` (and ``SIGINT`` from a terminal) can be answered, so this
+    process writes its receipt before it exits; ``SIGKILL`` cannot, which is why
+    the provisional receipt is filed before the wait as well.
+
+    A :class:`BaseException` for the same reason as
+    :class:`DelegateTimeoutExceededError`: ``run_receipt_mode`` and the runtime
+    wrap the blocking call in broad ``except Exception`` blocks that would
+    otherwise swallow the signal.
+    """
+
+    def __init__(self, signum: int) -> None:
+        self.signum = signum
+        super().__init__(f"onex delegate: ended by {signal.Signals(signum).name}")
+
+
+@contextmanager
+def _caller_interrupt_guard() -> Iterator[None]:
+    """Turn the signals a caller ends a command with into one typed exception."""
+    caught = tuple(
+        getattr(signal, name)
+        for name in ("SIGTERM", "SIGHUP", "SIGINT")
+        if hasattr(signal, name)
+    )
+
+    def _on_signal(signum: int, frame: object) -> None:
+        raise DelegateCallerInterruptedError(signum)
+
+    previous = {signum: signal.signal(signum, _on_signal) for signum in caught}
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler if handler is not None else signal.SIG_DFL)
+
+
 def _timeout_receipt(
     *,
     correlation_id: uuid.UUID,
@@ -2006,8 +2554,384 @@ def _timeout_receipt(
     )
 
 
-@click.command("delegate")
-@click.argument("prompt")
+_STDIN_PROMPT_MARKER = "-"
+
+
+def resolve_prompt_source(prompt: str | None, prompt_file: str | None) -> str:
+    """Return the prompt text from the argument, a file, or stdin, unchanged.
+
+    The positional argument is bound by the OS limit on one command-line
+    argument (``MAX_ARG_STRLEN``, 128 KB on Linux), so a long multi-file task
+    cannot ride on it. ``--prompt-file PATH`` and ``-`` (on either the argument
+    or the flag) read the same text from a file or stdin and hand it to the
+    request path exactly as the argument would have: no stripping, no newline
+    translation.
+
+    Raises:
+        click.UsageError: both or neither source was given, the file cannot be
+            read as UTF-8, or the file or stdin held no text.
+    """
+    if prompt is not None and prompt_file is not None:
+        raise click.UsageError("Give either PROMPT or --prompt-file, not both.")
+    if prompt is None and prompt_file is None:
+        raise click.UsageError(
+            "Missing prompt: give PROMPT, --prompt-file PATH, or '-' to read stdin."
+        )
+    if prompt is not None and prompt != _STDIN_PROMPT_MARKER:
+        return prompt
+    source = prompt_file if prompt_file is not None else _STDIN_PROMPT_MARKER
+    try:
+        if source == _STDIN_PROMPT_MARKER:
+            text = sys.stdin.buffer.read().decode("utf-8")
+        else:
+            text = Path(source).read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        label = "stdin" if source == _STDIN_PROMPT_MARKER else repr(source)
+        raise click.UsageError(f"Cannot read the prompt from {label}: {exc}") from exc
+    if not text:
+        label = "stdin" if source == _STDIN_PROMPT_MARKER else repr(source)
+        raise click.UsageError(f"The prompt read from {label} is empty.")
+    return text
+
+
+# OMN-19006: every invocation that parses arguments leaves a receipt.
+#
+# ``receipt.json`` is the one surface every caller is told to read, and a
+# delegation that ended before dispatch wrote none: ``delegate-fanout`` passes a
+# flag the command does not have, click refuses it with exit 2 before a line of
+# the command body runs, and the caller's row is "no run directory was created"
+# with the cause on the last line of a stderr file.
+#
+# The fix is one funnel and not a receipt per refusal. ``DelegateCommand`` mints
+# the run's identity when argument parsing begins, hands it to the command body,
+# and answers every way the command can end without a receipt of its own:
+#
+# * argument parsing fails (an unknown flag, a missing PROMPT, a bad choice);
+# * the body raises a ``click.ClickException`` (every refusal that runs before
+#   the broker is touched), or anything else;
+# * the body exits non-zero, or is interrupted, with no receipt on disk.
+#
+# A receipt a dispatch path wrote under the run's id is never replaced: the
+# funnel only fills the gap, so a dispatched run keeps the receipt its own writer
+# made, and a new early return that nobody gave a writer is covered on the day it
+# is added.
+
+#: ``click.Context.meta`` keys the funnel mints the run's identity under, so the
+#: command body runs under the same ids the funnel would write a receipt for.
+_RUN_ID_META_KEY = "omnibase_infra.delegate.run_id"
+_CORRELATION_ID_META_KEY = "omnibase_infra.delegate.correlation_id"
+
+_STATE_ROOT_FLAG = "--state-root"
+
+_USAGE_REMEDY = (
+    "Nothing was dispatched, so nothing ran and nothing was spent. Correct the "
+    "invocation as the message says; `onex delegate --help` lists every "
+    "accepted argument and option."
+)
+_REFUSAL_REMEDY = (
+    "Nothing was dispatched, so nothing ran and nothing was spent. The message "
+    "names what was refused; change that and run the command again."
+)
+_UNHANDLED_REMEDY = (
+    "Nothing was dispatched. The command raised an error no check names; "
+    "report the error type and message with this run id."
+)
+_EXIT_REMEDY = (
+    "The command ended with this exit code on a path that writes no receipt of "
+    "its own. stderr of the invocation holds the cause."
+)
+
+
+#: A credential carried in the text: userinfo in a URL, a ``key=value`` pair whose
+#: key names a secret, or key material.
+_URL_USERINFO = re.compile(r"(?P<scheme>[A-Za-z][A-Za-z0-9+.-]*://)[^/\s@]+@")
+_SECRET_PAIR = re.compile(
+    r"(?P<key>(?:pass(?:word|wd)?|secret|(?:api[_-]?|access[_-]?|auth[_-]?)?"
+    r"(?:key|token))\s*=\s*)(?P<value>[^\s,;]+)",
+    re.IGNORECASE,
+)
+_KEY_MATERIAL = re.compile(
+    r"-----BEGIN[^-]*-----.*?(?:-----END[^-]*-----|$)", re.DOTALL
+)
+_REFUSAL_TEXT_LIMIT = 2000
+
+
+def _redact_refusal_text(text: str) -> str:
+    """Remove credentials from a refusal's text and keep every word of the cause.
+
+    :func:`~omnibase_infra.utils.util_error_sanitization.sanitize_error_string`
+    withholds a whole message when it contains any of a list of words, and one of
+    them is ``token``: the refusal ``--caller-lane 'two words' is not a lane
+    token`` came out as ``[REDACTED - potentially sensitive data]``, which is the
+    bare, unactionable receipt this module exists to remove. A refusal's message
+    is the flag and the rule it broke, so the credentials are taken out of it and
+    the rest is kept.
+    """
+    text = _KEY_MATERIAL.sub("[REDACTED key material]", text)
+    text = _URL_USERINFO.sub(r"\g<scheme>[REDACTED]@", text)
+    text = _SECRET_PAIR.sub(r"\g<key>[REDACTED]", text)
+    if len(text) > _REFUSAL_TEXT_LIMIT:
+        return text[:_REFUSAL_TEXT_LIMIT] + "... [truncated]"
+    return text
+
+
+def _invocation_identity(ctx: click.Context) -> tuple[uuid.UUID, uuid.UUID]:
+    """The ``(run_id, correlation_id)`` the funnel minted for this invocation."""
+    run_id = ctx.meta[_RUN_ID_META_KEY]
+    correlation_id = ctx.meta[_CORRELATION_ID_META_KEY]
+    if not isinstance(run_id, uuid.UUID) or not isinstance(correlation_id, uuid.UUID):
+        raise TypeError("the delegate funnel's identity was not minted as UUIDs")
+    return run_id, correlation_id
+
+
+def _write_refusal_run_files(
+    *,
+    refusal: ModelDelegateRefusal,
+    run_id: uuid.UUID,
+    correlation_id: uuid.UUID,
+    state_root: Path,
+    prompt: str,
+    task_type: str,
+) -> Path:
+    """Persist the three run files for a delegation that was never dispatched.
+
+    The same directory, filenames and atomic write as every other writer of this
+    command, so a caller that reads a failed delegation reads this one.
+    ``route_attributed`` is false and no backend, model, tier or endpoint is
+    named: nothing was selected. ``terminal_failure_cause`` is ``None`` for the
+    reason the transport refusal states: the failure enum is provider-side and a
+    command that never ran says nothing about a provider. The cause is in
+    ``failure_reason`` and ``refusal``.
+
+    Returns the run directory.
+    """
+    run_dir = (state_root / "runs" / str(run_id)).resolve()
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _atomic_write_text(run_dir / "result.txt", "")
+    _atomic_write_text(
+        run_dir / "receipt.json",
+        json.dumps(
+            {
+                "receipt_id": str(correlation_id),
+                "correlation_id": str(correlation_id),
+                "run_id": str(run_id),
+                "route_attributed": False,
+                "route_unattributed": (
+                    "the command ended before dispatch, so no rung ran "
+                    f"({refusal.stage.value})"
+                ),
+                "status": EnumSkillResultStatus.FAILED.value,
+                "terminal_class": "refused",
+                "terminal_failure_cause": None,
+                "terminal_recorded": False,
+                "failure_reason": f"{refusal.message} {refusal.remedy}",
+                "refusal": refusal.model_dump(mode="json"),
+                "written_at": datetime.now(UTC).isoformat(),
+                "writer_pid": os.getpid(),
+                "attempts": [],
+                "receipt": None,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+    )
+    _atomic_write_text(
+        run_dir / "run.json",
+        json.dumps(
+            {
+                "run_id": str(run_id),
+                "correlation_id": str(correlation_id),
+                "routing_tier": None,
+                "route_attributed": False,
+                "prompt": prompt,
+                "task_type": task_type,
+                "task_type_resolution": "unresolved",
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+    )
+    click.echo(
+        f"delegate artifacts (REFUSED -- {refusal.stage.value}, nothing dispatched): "
+        + " ".join(
+            str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
+        ),
+        err=True,
+    )
+    return run_dir
+
+
+def _funnel_state_root(explicit: Path | None) -> Path | None:
+    """The root a refusal receipt is filed under: the command's own rule.
+
+    The flag is the operator's own choice and is used as given; without it the
+    root resolves exactly as the command body resolves it (OMN-19232), never
+    against the working directory. ``None`` when no root can be resolved (a
+    relative ``ONEX_STATE_DIR``, a root under ``~/.claude``): there is then no
+    place the receipt belongs, and the cause goes to stderr instead.
+    """
+    if explicit is not None:
+        return explicit
+    try:
+        return resolve_state_root(None)
+    except ProtocolConfigurationError as exc:
+        click.echo(
+            f"onex delegate: no refusal receipt was written: {exc.message}",
+            err=True,
+        )
+        return None
+
+
+def _state_root_from_arguments(arguments: Sequence[str]) -> Path | None:
+    """Read ``--state-root`` out of raw arguments that did not parse.
+
+    Argument parsing may have failed before the option was read, and the
+    receipt belongs where the caller said state lives.
+    """
+    for index, argument in enumerate(arguments):
+        if argument == _STATE_ROOT_FLAG and index + 1 < len(arguments):
+            return Path(arguments[index + 1])
+        if argument.startswith(f"{_STATE_ROOT_FLAG}="):
+            return Path(argument.partition("=")[2])
+    return None
+
+
+class DelegateCommand(click.Command):
+    """``onex delegate``, with a receipt for every way it can end (OMN-19006)."""
+
+    def _file_refusal(
+        self,
+        ctx: click.Context,
+        *,
+        refusal: ModelDelegateRefusal,
+        state_root: Path | None,
+    ) -> None:
+        """Write the refusal receipt; a failure to write never hides the cause."""
+        if state_root is None:
+            return
+        run_id, correlation_id = _invocation_identity(ctx)
+        params = ctx.params
+        try:
+            _write_refusal_run_files(
+                refusal=refusal,
+                run_id=run_id,
+                correlation_id=correlation_id,
+                state_root=state_root,
+                prompt=str(params.get("prompt") or ""),
+                task_type=str(
+                    params.get("task_type") or params.get("task_class_alias") or ""
+                ),
+            )
+        except OSError as exc:
+            click.echo(
+                f"onex delegate: could not write the refusal receipt for run "
+                f"{run_id}: {_redact_refusal_text(str(exc))}",
+                err=True,
+            )
+
+    def _receipt_exists(self, ctx: click.Context, state_root: Path | None) -> bool:
+        if state_root is None:
+            return False
+        run_id, _ = _invocation_identity(ctx)
+        return (state_root / "runs" / str(run_id) / "receipt.json").exists()
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        ctx.meta[_RUN_ID_META_KEY] = uuid.uuid4()
+        ctx.meta[_CORRELATION_ID_META_KEY] = uuid.uuid4()
+        # Click's parser consumes the list it is given, so the raw arguments
+        # (where ``--state-root`` may still be) are kept before it runs.
+        given = list(args)
+        try:
+            return super().parse_args(ctx, args)
+        except click.ClickException as exc:
+            self._file_refusal(
+                ctx,
+                refusal=ModelDelegateRefusal(
+                    stage=EnumDelegateRefusalStage.ARGUMENT_PARSING,
+                    error_type=type(exc).__name__,
+                    message=_redact_refusal_text(exc.format_message()),
+                    remedy=_USAGE_REMEDY,
+                    exit_code=exc.exit_code,
+                ),
+                state_root=_funnel_state_root(_state_root_from_arguments(given)),
+            )
+            raise
+
+    def invoke(self, ctx: click.Context) -> object:
+        explicit = ctx.params.get("state_root")
+        state_root = _funnel_state_root(
+            Path(explicit) if explicit is not None else None
+        )
+        try:
+            return super().invoke(ctx)
+        except (click.exceptions.Exit, click.exceptions.Abort):
+            raise
+        except click.ClickException as exc:
+            if not self._receipt_exists(ctx, state_root):
+                self._file_refusal(
+                    ctx,
+                    refusal=ModelDelegateRefusal(
+                        stage=EnumDelegateRefusalStage.REFUSED_BEFORE_DISPATCH,
+                        error_type=type(exc).__name__,
+                        message=_redact_refusal_text(exc.format_message()),
+                        remedy=(
+                            _USAGE_REMEDY
+                            if isinstance(exc, click.UsageError)
+                            else _REFUSAL_REMEDY
+                        ),
+                        exit_code=exc.exit_code,
+                    ),
+                    state_root=state_root,
+                )
+            raise
+        except (SystemExit, KeyboardInterrupt) as exc:
+            code = exc.code if isinstance(exc, SystemExit) else 130
+            if code not in (None, 0) and not self._receipt_exists(ctx, state_root):
+                self._file_refusal(
+                    ctx,
+                    refusal=ModelDelegateRefusal(
+                        stage=EnumDelegateRefusalStage.EXIT_WITHOUT_RECEIPT,
+                        error_type=type(exc).__name__,
+                        message=_redact_refusal_text(
+                            f"onex delegate exited with {code!r}"
+                        ),
+                        remedy=_EXIT_REMEDY,
+                        exit_code=code if isinstance(code, int) else 1,
+                    ),
+                    state_root=state_root,
+                )
+            raise
+        except Exception as exc:
+            if not self._receipt_exists(ctx, state_root):
+                self._file_refusal(
+                    ctx,
+                    refusal=ModelDelegateRefusal(
+                        stage=EnumDelegateRefusalStage.UNHANDLED_ERROR,
+                        error_type=type(exc).__name__,
+                        message=_redact_refusal_text(str(exc) or type(exc).__name__),
+                        remedy=_UNHANDLED_REMEDY,
+                        exit_code=1,
+                    ),
+                    state_root=state_root,
+                )
+            raise
+
+
+@click.command("delegate", cls=DelegateCommand)
+@click.argument("prompt", required=False)
+@click.option(
+    "--prompt-file",
+    "prompt_file",
+    type=str,
+    default=None,
+    help=(
+        "Read the prompt from this file, or from stdin when it is '-', instead "
+        "of taking it as the PROMPT argument. The text is passed through "
+        "unchanged, so it is not bound by the operating system's limit on one "
+        "command-line argument (about 128 KB on Linux). Give either PROMPT or "
+        "--prompt-file, not both; a PROMPT of '-' also reads stdin."
+    ),
+)
 @click.option(
     "--task-type",
     "task_type",
@@ -2193,9 +3117,14 @@ def _timeout_receipt(
 @click.option(
     "--state-root",
     type=click.Path(path_type=Path),
-    default=".onex_state",
-    show_default=True,
-    help="Root directory for disk state, scratch payloads, and captures.",
+    default=None,
+    help=(
+        "Root directory for disk state, scratch payloads, captures, and "
+        "runs/<run_id>/ receipts. Resolved in this order: "
+        + STATE_ROOT_RESOLUTION_ORDER
+        + ". Never the working directory. The resolved absolute root is "
+        "printed on the 'delegate artifacts' line and recorded in run.json."
+    ),
 )
 @click.option(
     "--timeout",
@@ -2302,7 +3231,8 @@ def _timeout_receipt(
     ),
 )
 def delegate_command(
-    prompt: str,
+    prompt: str | None,
+    prompt_file: str | None,
     task_type: str | None,
     task_class_alias: str | None,
     backend_id: str | None,
@@ -2316,7 +3246,7 @@ def delegate_command(
     locus: str,
     lane: str | None,
     kafka_bootstrap: str | None,
-    state_root: Path,
+    state_root: Path | None,
     timeout: int | None,
     verbose: bool,
     emit_socket: Path | None,
@@ -2341,10 +3271,33 @@ def delegate_command(
     go to a capture file + the content-addressed artifact store, never to
     stdout.
 
+    State root (OMN-19232): runs/<run_id>/{result.txt,receipt.json,run.json}
+    are written under one root resolved in this order: the --state-root flag,
+    then the ONEX_STATE_DIR environment variable (absolute), then the home
+    default ~/.onex_state. It is never the working directory, so the same
+    receipt is found at the same place from any cwd. The resolved absolute
+    root is printed as state_root= on the "delegate artifacts" line and
+    recorded as state_root in run.json.
+
+    Known failure class, handler-budget timeout (OMN-18838): a receipt whose
+    error reads "delegation exceeded the handler execution budget of Ns and
+    was cancelled" (terminal cause "timeout") means the deployed handler hit
+    its own execution budget, which is measured from pickup and never exceeds
+    the 240s task-class ceiling. It is not a broker or network fault: a
+    transport failure writes a transport-class terminal (OMN-19043) instead,
+    so do not start by suspecting the bus. Read queue_wait_ms,
+    execution_duration_ms and budget_evidence in the receipt, and
+    metrics.latency_ms, the rung latency: a long queue wait means the job sat
+    behind other work, a long rung latency means a slow model. If the prompt
+    itself is large, split the prompt into one delegation per ticket rather
+    than raising the budget.
+
     \b
     Examples:
         onex delegate "explain what a calendar app needs"
         onex delegate "say hello in one word" --json  # force JSON on a terminal
+        onex delegate --prompt-file task.md --task-type code_generation
+        cat task.md | onex delegate - --task-type code_generation
         onex delegate "write a Python HTTP server" --task-type code_generation
         onex delegate "analyze the routing architecture" --max-tokens 4096
         onex delegate "hand off from the external client" --source external-client
@@ -2359,6 +3312,15 @@ def delegate_command(
     if force_json and force_human:
         raise click.UsageError("--json and --human are mutually exclusive.")
     json_output = force_json or not (force_human or _stdout_is_tty())
+    # OMN-19006: the command class minted this run's identity when argument
+    # parsing began, and files the receipt for any refusal under it, so the
+    # body runs under the same ids rather than minting a second pair.
+    run_id, correlation_id = _invocation_identity(click.get_current_context())
+    prompt = resolve_prompt_source(prompt, prompt_file)
+    try:
+        resolved_state_root = resolve_state_root(state_root)
+    except ProtocolConfigurationError as exc:
+        raise click.UsageError(exc.message) from exc
     try:
         ticket_id, ticket_resolution = resolve_delegate_ticket(ticket, cwd=Path.cwd())
         caller = resolve_delegate_caller(
@@ -2383,7 +3345,7 @@ def delegate_command(
             locus=EnumDelegateLocus(locus),
             lane=lane,
             kafka_bootstrap=kafka_bootstrap,
-            state_root=state_root,
+            state_root=resolved_state_root,
             timeout=timeout,
             verbose=verbose,
             emit_socket=emit_socket,
@@ -2393,6 +3355,8 @@ def delegate_command(
             ticket_resolution=ticket_resolution,
             caller=caller,
             json_output=json_output,
+            run_id=run_id,
+            correlation_id=correlation_id,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -2424,6 +3388,8 @@ def run_delegate(
     ticket_resolution: str = "none",
     caller: ModelDelegateCaller | None = None,
     json_output: bool = True,
+    run_id: uuid.UUID | None = None,
+    correlation_id: uuid.UUID | None = None,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -2466,7 +3432,14 @@ def run_delegate(
     even if the inner call is stuck in non-cooperative blocking I/O. A
     backstop trip returns exit code 1 with a clear stderr message instead of
     hanging indefinitely.
+
+    The receipt's ``phase_durations`` (OMN-19452) time the client's phases:
+    startup here, the locus probe here, and the bus connect, reply subscribe,
+    publish and terminal wait inside the runtime, which reports them through
+    the stopwatch handed to ``run_receipt_mode``.
     """
+    phase_stopwatch = DelegatePhaseStopwatch()
+    phase_stopwatch.begin(EnumDelegatePhase.STARTUP)
     # OMN-13930: ``DELEGATE_NODE_NAME`` is an omnimarket-provided node, so
     # this surface carries the same stale/absent co-install exposure as
     # ``onex skill`` and ``onex node`` -- it was simply the one of the three
@@ -2550,6 +3523,20 @@ def run_delegate(
             ).lane_binding()
         except ModelOnexError as exc:
             raise click.ClickException(str(exc)) from exc
+        if omni_home is not None:
+            materialization = HandlerWorkspaceRuntimeConfigMaterializer().materialize(
+                omni_home
+            )
+            if materialization.ok:
+                logger.info(
+                    "onex delegate: workspace runtime config materialised at %s",
+                    materialization.sha,
+                )
+            else:
+                logger.warning(
+                    "onex delegate: workspace runtime config materialisation failed: %s",
+                    materialization.detail,
+                )
         try:
             default_bus = resolve_default_bus(
                 workspace_root=omni_home, developer_lane_binding=lane_binding
@@ -2590,9 +3577,12 @@ def run_delegate(
             # the receipt stream on stdout stays clean.
             logger.warning(
                 "onex delegate: using inmemory event bus (%s) — this "
-                "delegation's evidence will land in the local SQLite fallback, "
-                "NOT the shared delegation_events projection",
+                "delegation's record is written only on this machine, to %s. "
+                "That is a local SQLite table which shares its name with the "
+                "shared delegation_events projection but is not it: nothing "
+                "is sent to the shared lab projection.",
                 reason,
+                describe_local_evidence_destination(),
             )
     else:
         # OMN-17304: an explicit --bus is tier 1 of the shared resolution
@@ -2680,13 +3670,28 @@ def run_delegate(
     # probe that authenticated differently from the publish would refuse
     # before the publish was ever attempted, and would report the wrong cause.
     with _bind_lane_transport(lane_transport):
-        run_id = uuid.uuid4()
+        # OMN-19006: the CLI entry mints both when argument parsing begins, so a
+        # refusal anywhere above this line is filed under the run's own ids.
+        # A caller that is not the CLI entry (a test, a library caller) gets
+        # a fresh pair here.
+        run_id = run_id or uuid.uuid4()
         # OMN-14397: minted fresh per invocation — never reused/cached across runs
         # sharing a working directory or state-root — and threaded explicitly into
         # the payload so it becomes the delegate request's correlation_id rather
         # than an implicit default decided downstream. Kept a UUID object here;
         # only stringified at the JSON payload boundary in _write_payload.
-        correlation_id = uuid.uuid4()
+        correlation_id = correlation_id or uuid.uuid4()
+        # OMN-17427: name the tenant BEFORE anything is written or probed, so an
+        # install with no identity refuses with nothing sent. A request that
+        # reached a deployed lane untenanted had its verdict dead-lettered.
+        try:
+            tenant_id = resolve_delegate_tenant(
+                in_process=locus is EnumDelegateLocus.IN_PROCESS
+                or (locus is EnumDelegateLocus.AUTO and bus != BUS_KAFKA),
+                environ=os.environ,
+            )
+        except DelegateTenantRefusedError as exc:
+            raise click.ClickException(str(exc)) from exc
         payload_path = _write_payload(
             prompt=prompt,
             task_type=resolved_task_type,
@@ -2705,6 +3710,7 @@ def run_delegate(
             correlation_id=correlation_id,
             ticket_id=ticket_id,
             caller=caller,
+            tenant_id=tenant_id,
         )
         # OMN-19514: say which ticket the run carries and how it was chosen,
         # beside the task-class line, so a derived ticket is never silent.
@@ -2718,21 +3724,23 @@ def run_delegate(
         # defect being closed is an invocation that silently ran in-process and
         # was then read as evidence about a lane it never reached, so this path
         # never degrades, it stops.
+        phase_stopwatch.end(EnumDelegatePhase.STARTUP)
         locus_probe_started = time.monotonic()
         try:
-            locus_decision = resolve_delegate_locus(
-                requested=locus,
-                bus=bus,
-                # OMN-16871: the RESOLVED address, not the raw flag. The
-                # deployed-lane probe asks whether a live consumer group is bound
-                # to the command topic; asking that of one broker and then
-                # publishing to another is a probe of a lane the run never
-                # reaches, which is the OMN-17295 instrument defect in a second
-                # place.
-                kafka_bootstrap=resolved_bootstrap,
-                contract_path=contract_path,
-                shared_bus_value=BUS_KAFKA,
-            )
+            with phase_stopwatch.phase(EnumDelegatePhase.LOCUS_PROBE):
+                locus_decision = resolve_delegate_locus(
+                    requested=locus,
+                    bus=bus,
+                    # OMN-16871: the RESOLVED address, not the raw flag. The
+                    # deployed-lane probe asks whether a live consumer group is
+                    # bound to the command topic; asking that of one broker and
+                    # then publishing to another is a probe of a lane the run
+                    # never reaches, which is the OMN-17295 instrument defect in
+                    # a second place.
+                    kafka_bootstrap=resolved_bootstrap,
+                    contract_path=contract_path,
+                    shared_bus_value=BUS_KAFKA,
+                )
         except DelegateLocusRefusedError as exc:
             # OMN-18925 / C16: the SECOND transport exit, and the one a
             # genuinely unreachable broker takes. The probe refuses here
@@ -2750,9 +3758,21 @@ def run_delegate(
             # that is simply not running rather than a sick broker, and those
             # two send a reader to different places.
             attempts_permitted, bound_seconds = _resolve_transport_bound()
+            # OMN-19452: a broker that rejected the SASL login is a different
+            # finding from one that could not be confirmed, with a different
+            # remedy -- the identity, not the address -- so it is typed apart
+            # and carries the command that fixes it.
+            sasl_refused = isinstance(exc, DelegateLocusSaslRefusedError)
+            remediation = (
+                sasl_refusal_remediation(
+                    lane=lane_target.lane if lane_target is not None else None
+                )
+                if sasl_refused
+                else ""
+            )
             _write_transport_refusal_run_files(
                 refusal=ModelDelegateTransportRefusal(
-                    reason="locus_probe_refused",
+                    reason="sasl_refused" if sasl_refused else "locus_probe_refused",
                     correlation_id=correlation_id,
                     bus=bus,
                     locus=(locus or EnumDelegateLocus.DEPLOYED_LANE.value),
@@ -2762,6 +3782,7 @@ def run_delegate(
                     elapsed_seconds=time.monotonic() - locus_probe_started,
                     transport_error_type=type(exc).__name__,
                     transport_error=sanitize_error_string(str(exc)),
+                    remediation=remediation,
                 ),
                 run_id=str(run_id),
                 state_root=state_root,
@@ -2775,7 +3796,19 @@ def run_delegate(
                     dispatch_target=None,
                     transport_authority=transport_authority,
                 ),
+                phase_durations=phase_stopwatch.durations(),
             )
+            if sasl_refused:
+                lane_context = (
+                    f" [lane '{lane_target.lane}', broker "
+                    f"{lane_target.bootstrap_servers}, declared in "
+                    f"{lane_target.declared_in}]"
+                    if lane_target is not None
+                    else ""
+                )
+                raise click.ClickException(
+                    f"{exc}{lane_context} {remediation}"
+                ) from exc
             if lane_target is not None:
                 # OMN-19193: a default workspace run lands on a declared lane,
                 # so a lane that is down refuses the operator's ordinary
@@ -2786,9 +3819,11 @@ def run_delegate(
                     f"{lane_target.bootstrap_servers}, declared in "
                     f"{lane_target.declared_in}] To run offline on purpose, pass "
                     "--bus inmemory: the explicit override, whose evidence stays "
-                    "in the local store."
+                    f"in the local store. (run {run_id}, correlation {correlation_id})"
                 ) from exc
-            raise click.ClickException(str(exc)) from exc
+            raise click.ClickException(
+                f"{exc} (run {run_id}, correlation {correlation_id})"
+            ) from exc
 
         # OMN-18810: the five addressing facts the two written files record,
         # built from the decision that was just PROVEN viable rather than
@@ -2822,8 +3857,35 @@ def run_delegate(
                 requested_timeout_seconds=timeout,
                 execution_budget=execution_budget,
             )
-            with _hard_timeout(terminal_wait_seconds + _HARD_TIMEOUT_GRACE_SECONDS):
-                return run_receipt_mode(
+            if locus_decision.locus is EnumDelegateLocus.DEPLOYED_LANE:
+                click.echo(
+                    f"dispatching: run {run_id} correlation {correlation_id} to "
+                    f"{locus_decision.command_topic} via {locus_decision.broker}; "
+                    f"awaiting the lane's terminal for up to {terminal_wait_seconds} s",
+                    err=True,
+                )
+            # OMN-17427: a caller that ends this process with SIGKILL (its own
+            # timeout, 300 s on the landing lanes) can be answered by nothing
+            # here, so the receipt that names the run is on disk BEFORE the
+            # wait. The terminal receipt replaces it atomically; what is left
+            # behind by a kill says plainly that no terminal was recorded.
+            _file_in_flight_receipt(
+                run_id=str(run_id),
+                correlation_id=str(correlation_id),
+                declared_timeout=terminal_wait_seconds,
+                locus_decision=locus_decision,
+                state_root=state_root,
+                prompt=prompt,
+                task_type=resolved_task_type,
+                task_type_resolution=resolution,
+                addressing=addressing,
+                phase_durations=phase_stopwatch.durations(),
+            )
+            with (
+                _caller_interrupt_guard(),
+                _hard_timeout(terminal_wait_seconds + _HARD_TIMEOUT_GRACE_SECONDS),
+            ):
+                exit_code = run_receipt_mode(
                     node_name=DELEGATE_NODE_NAME,
                     contract_path=contract_path,
                     input_path=payload_path,
@@ -2838,7 +3900,13 @@ def run_delegate(
                     # venv, while the lane executes the real one — two runs, and
                     # the receipt was the wrong one's.
                     host_handlers=locus_decision.locus is EnumDelegateLocus.IN_PROCESS,
+                    # OMN-17427: the run id this CLI names to the caller and
+                    # files the provisional receipt under is the run id the
+                    # terminal receipt lands in, not a second one.
+                    run_id=run_id,
                     locus_decision=locus_decision,
+                    # OMN-19452: the runtime reports its bus phases here.
+                    phase_stopwatch=phase_stopwatch,
                     # OMN-20124: the default output is for a person. --json keeps
                     # the one-receipt-JSON-line contract for programs.
                     receipt_renderer=(
@@ -2903,8 +3971,29 @@ def run_delegate(
                         command_topic=locus_decision.command_topic,
                         contract_path=contract_path,
                         payload_path=payload_path,
+                        # OMN-19452: read when the callback runs, after the
+                        # runtime has finished, so every phase it reached is
+                        # closed.
+                        phase_durations=phase_stopwatch.durations(),
                     ),
                 )
+            # OMN-17427: a run that returned normally but whose writer did not
+            # replace the in-flight receipt (a writer that raised, a renderer
+            # that stopped it) must not leave "pending" behind a finished
+            # process. Settled here, from the exit code this process is about
+            # to return.
+            _settle_in_flight_receipt(
+                run_id=str(run_id),
+                correlation_id=str(correlation_id),
+                exit_code=exit_code,
+                state_root=state_root,
+                prompt=prompt,
+                task_type=resolved_task_type,
+                task_type_resolution=resolution,
+                addressing=addressing,
+                phase_durations=phase_stopwatch.durations(),
+            )
+            return exit_code
         except DelegateTimeoutExceededError as exc:
             # OMN-17516. The human-facing line stays (OMN-14397 added it and a
             # test pins it), and the caller that parses stdout now gets the one
@@ -2927,6 +4016,31 @@ def run_delegate(
                 consumer_groups=locus_decision.lane_consumer_groups,
             )
             click.echo(f"{exc} Queue: {queue_depth.describe()}.", err=True)
+            # OMN-17427: the timeout is also the run's receipt on disk. Both
+            # branches below end the run, so the file is written before either.
+            elapsed_seconds = time.monotonic() - dispatch_started
+            _write_incomplete_run_files(
+                run_id=str(run_id),
+                correlation_id=str(correlation_id),
+                terminal_class=EnumDelegateIncompleteClass.TIMEOUT,
+                status=EnumSkillResultStatus.FAILED,
+                failure_reason=sanitize_error_string(str(exc)),
+                known={
+                    "declared_timeout_seconds": terminal_wait_seconds,
+                    "grace_seconds": _HARD_TIMEOUT_GRACE_SECONDS,
+                    "elapsed_seconds": elapsed_seconds,
+                    "terminal_topic": contract_terminal_topic(contract_path),
+                    "command_topic": locus_decision.command_topic,
+                    "broker": locus_decision.broker,
+                    "queue_depth": queue_depth.model_dump(mode="json"),
+                },
+                state_root=state_root,
+                prompt=prompt,
+                task_type=resolved_task_type,
+                task_type_resolution=resolution,
+                addressing=addressing,
+                phase_durations=phase_stopwatch.durations(),
+            )
             if not json_output:
                 click.echo(
                     f"onex delegate failed: timed out waiting for the result "
@@ -2939,7 +4053,7 @@ def run_delegate(
                     correlation_id=correlation_id,
                     run_id=run_id,
                     declared_timeout=terminal_wait_seconds,
-                    elapsed_seconds=time.monotonic() - dispatch_started,
+                    elapsed_seconds=elapsed_seconds,
                     bus=bus,
                     locus_decision=locus_decision,
                     contract_path=contract_path,
@@ -2947,3 +4061,29 @@ def run_delegate(
                 ).model_dump_json()
             )
             return 1
+        except DelegateCallerInterruptedError as exc:
+            # OMN-17427: the caller's own timeout (or Ctrl-C) ended the wait.
+            # No broker probe: the caller has already spent its deadline and a
+            # second wait here is how a SIGTERM becomes a SIGKILL.
+            _write_incomplete_run_files(
+                run_id=str(run_id),
+                correlation_id=str(correlation_id),
+                terminal_class=EnumDelegateIncompleteClass.INTERRUPTED,
+                status=EnumSkillResultStatus.FAILED,
+                failure_reason=str(exc),
+                known={
+                    "signal": signal.Signals(exc.signum).name,
+                    "declared_timeout_seconds": terminal_wait_seconds,
+                    "elapsed_seconds": time.monotonic() - dispatch_started,
+                    "command_topic": locus_decision.command_topic,
+                    "broker": locus_decision.broker,
+                },
+                state_root=state_root,
+                prompt=prompt,
+                task_type=resolved_task_type,
+                task_type_resolution=resolution,
+                addressing=addressing,
+                phase_durations=phase_stopwatch.durations(),
+            )
+            click.echo(f"{exc} (run {run_id}, correlation {correlation_id})", err=True)
+            return 128 + exc.signum

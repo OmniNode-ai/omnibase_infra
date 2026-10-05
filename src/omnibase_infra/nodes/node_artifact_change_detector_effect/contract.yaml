@@ -29,6 +29,7 @@ node_version:
   minor: 0
   patch: 0
 node_type: "EFFECT_GENERIC"
+runtime_profiles: [main]
 description: >
   Effect node that detects artifact-relevant code changes from three surfaces: GitHub PR webhook events, watchdog-based contract file system events, and manual reconcile commands from the CLI. Emits ModelUpdateTrigger events to onex.evt.artifact.change-detected.v1 for downstream impact analysis.
 

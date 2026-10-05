@@ -8,6 +8,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from omnibase_core.models.artifacts.model_artifact_ref import ModelArtifactRef
 from omnibase_infra.cli.enum_skill_terminal_publish_outcome import (
     EnumSkillTerminalPublishOutcome,
 )
@@ -22,18 +23,24 @@ class ModelSkillTerminalPublishReport(BaseModel):
     lane: str
     topic: str = ""
     correlation_id: UUID | None = None
+    artifact_ref: ModelArtifactRef | None = None
     detail: str = ""
 
     def render(self) -> str:
         """One stderr line naming the outcome."""
+        artifact = (
+            f" artifact_ref={self.artifact_ref.ref}"
+            if self.artifact_ref is not None
+            else ""
+        )
         if self.outcome is EnumSkillTerminalPublishOutcome.PUBLISHED:
             return (
                 f"onex skill: terminal published to lane {self.lane} topic "
-                f"{self.topic} correlation_id={self.correlation_id}"
+                f"{self.topic} correlation_id={self.correlation_id}{artifact}"
             )
         if self.outcome is EnumSkillTerminalPublishOutcome.FAILED:
             return (
-                f"onex skill: terminal publish failed for lane {self.lane} "
-                f"(verdict, receipt and exit code unchanged): {self.detail}"
+                f"onex skill: terminal publish failed for lane {self.lane} topic {self.topic} "
+                f"(verdict, receipt and exit code unchanged): {self.detail}{artifact}"
             )
         return f"onex skill: terminal not published ({self.outcome.value})"

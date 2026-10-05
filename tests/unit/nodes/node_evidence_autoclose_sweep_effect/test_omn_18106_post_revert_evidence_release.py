@@ -33,9 +33,11 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    has_verified_bound_check as _has_verified_bound_check,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
     HandlerEvidenceAutocloseSweep,
-    _has_verified_bound_check,
     _parse_iso_utc,
 )
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_decision import (

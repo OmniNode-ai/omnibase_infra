@@ -10,7 +10,7 @@ resolution-markers = [
 [manifest]
 overrides = [
     { name = "omnibase-compat", specifier = "==0.5.7" },
-    { name = "omnibase-core", specifier = "==0.47.28" },
+    { name = "omnibase-core", specifier = "==0.47.32" },
     { name = "omnibase-spi", specifier = "==0.23.5" },
 ]
 
@@ -2233,7 +2233,7 @@ wheels = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.47.28"
+version = "0.47.32"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "blake3" },
@@ -2250,14 +2250,14 @@ dependencies = [
     { name = "tree-sitter" },
     { name = "tree-sitter-python" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/56/0e/616973684cbc53b4b9f6061e4c48a380a6cf36445dc4f0ff62bbc2b6fefd/omnibase_core-0.47.28.tar.gz", hash = "sha256:9e1c6cb4c89526501239f47c529cb5e9bb4ceeb1121d0dbba1c5d0084c869c9a", size = 10187444, upload-time = "2026-10-01T09:55:30.404Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/de/34/00108308d7462e6b1bf5f536eb7735ddbf54dbb9e0c35d8ea19972f6391c/omnibase_core-0.47.32.tar.gz", hash = "sha256:5d1db15debad2e8c6c6a6923940583b3232b2d4c7314cec5826f629b72a5ae1b", size = 10326941, upload-time = "2026-10-03T07:55:18.687Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/59/96/0a352db874d89ad52889c286acbfa3fac92a53d5eec1246601f56effac84/omnibase_core-0.47.28-py3-none-any.whl", hash = "sha256:dcaeab1dfa3082c54671b03c58c81be971efdad7536af10b7183c5c5171b230a", size = 7246392, upload-time = "2026-10-01T09:55:28.076Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/33/3a07762b2d35f623389d2d5cb507c4483458b59112439d952d83b034cf47/omnibase_core-0.47.32-py3-none-any.whl", hash = "sha256:380dcbddc0fc79240f1eca1c981463cb3db6fc32d551dbfb347ed84a19044489", size = 7368004, upload-time = "2026-10-03T07:55:16.158Z" },
 ]
 
 [[package]]
 name = "omnibase-infra"
-version = "0.38.63"
+version = "0.38.66"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -2360,7 +2360,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.25.0,<3.0.0" },
     { name = "neo4j", specifier = ">=5.15.0,<7.0.0" },
     { name = "omnibase-compat", specifier = "==0.5.7" },
-    { name = "omnibase-core", specifier = ">=0.47.24,<0.48.0" },
+    { name = "omnibase-core", specifier = ">=0.47.31,<0.48.0" },
     { name = "omnibase-spi", specifier = "==0.23.5" },
     { name = "opentelemetry-api", specifier = ">=1.27.0,<2.0.0" },
     { name = "opentelemetry-exporter-otlp-proto-http", specifier = ">=1.27.0,<2.0.0" },

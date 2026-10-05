@@ -17,8 +17,29 @@
 #   a standing regression signal instead of a one-off manual proof.
 #
 #   The job's EXIT CODE is the probe's verdict (scripts/ci/r1_front_door_probe.py
-#   docstring has the full 0/1/2 table). This workflow only schedules it,
-#   asserts the record artifact is present and non-empty, and uploads it.
+#   docstring has the full 0/1/2 table and the named failing legs). This
+#   workflow schedules it, composes the environment the CLI needs, publishes
+#   the terminal and the exit code to the job summary, asserts the record
+#   artifact is present and non-empty, and uploads it.
+#
+# WHY THE JOB COMPOSES AN OMNIMARKET CO-INSTALL (OMN-19445 AC2)
+#   Every scheduled run from 2026-09-28 to 2026-10-02 (36382284153,
+#   36526484866, 36673726469, 36820075353, 36969176190) exited 1 at the probe
+#   step in under ten seconds, before any broker was dialled: `onex delegate`
+#   reads its task-class contract from an installed omnimarket
+#   (`onex.contracts:task_class_authority`), and `uv sync --locked` never
+#   installs omnimarket (it sits above infra in the layer graph, so it is a
+#   provider and not a dependency). The same command exits 0 from the lab host,
+#   whose dispatch venv carries the co-install. So the failure was this job's
+#   environment, not the front door -- and the old FAIL line did not say so.
+#   The job now checks omnimarket out at the sibling pin
+#   (.github/sibling-pins.yaml, never live dev), installs it from that commit
+#   into the job venv the way evidence-autoclose-sweep composes its dispatch
+#   venv, lays the checkout out as the workspace root the CLI reads the lane
+#   declaration from (OMNIBASE_PATH), and injects the dev-lane SCRAM secrets as
+#   environment, exactly as chain-canary does. The probe then names the leg
+#   that failed: runner-env, lane-declaration, lane-login, broker-route or
+#   front-door.
 #
 # WHY A LAB-POOL RUNNER, AND WHY OUTSIDE THE RUNTIME CONTAINER
 #   The lab lane's broker has no route from a GitHub-hosted runner, so the job
@@ -84,14 +105,117 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked --all-extras
 
+      # The pinned omnimarket: the task-class contract provider AND the owner of
+      # the lane declaration the CLI resolves `--lane dev` from. Laid out as a
+      # workspace root (`<root>/omnimarket/config/ci_bus_lanes.yaml`) because
+      # that is the path the CLI reads (OMNIBASE_PATH, below).
+      - name: Checkout omnimarket (pinned provider and lane declaration)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: 91b8bb1b8c7f35bc502ae1dc126eb95d4916c0ef # .github/sibling-pins.yaml
+          path: .probe-workspace/omnimarket
+          persist-credentials: false
+          fetch-depth: 1
+
+      # Layered on top of the synced venv, never resolved into it (omnibase-*
+      # is the layer beneath infra and infra's lock owns it; omninode-* siblings
+      # install --no-deps so their metadata cannot re-resolve that layer; the
+      # pure-PyPI leaves resolve normally). omnimarket itself installs from the
+      # checkout's own commit as a git requirement so the install records
+      # `vcs_info.commit_id` and the omnimarket drift guard reads
+      # installed == canonical.
+      - name: Co-install omnimarket into the job venv
+        run: |
+          set -euo pipefail
+          PYTHON_BIN="${GITHUB_WORKSPACE}/.venv/bin/python"
+          test -x "${PYTHON_BIN}"
+          OMNIMARKET_SHA="$(git -C .probe-workspace/omnimarket rev-parse HEAD)"
+          # actions/checkout at a sha leaves a detached HEAD, which the
+          # omnimarket drift guard refuses for a canonical clone ("it tracks no
+          # branch"). Attach the same commit to a local branch; the commit, and
+          # so installed == canonical, is unchanged.
+          git -C .probe-workspace/omnimarket checkout -q -B dev
+          python3 - "${RUNNER_TEMP}" <<'PYEOF'
+          import re
+          import sys
+          import tomllib
+          from pathlib import Path
+
+          out_dir = Path(sys.argv[1])
+          with open(".probe-workspace/omnimarket/pyproject.toml", "rb") as fh:
+              data = tomllib.load(fh)
+          no_deps = []
+          leaves = []
+          for dep in data["project"]["dependencies"]:
+              name = re.split(r"[<>=!~\[;\s]", dep, maxsplit=1)[0].strip().lower()
+              if name.startswith("omnibase-"):
+                  continue
+              if name.startswith("omninode-"):
+                  no_deps.append(dep)
+              else:
+                  leaves.append(dep)
+          if not no_deps and not leaves:
+              print(
+                  "FAIL: omnimarket declares no installable dependencies; the "
+                  "checkout or the parse is wrong.",
+                  file=sys.stderr,
+              )
+              raise SystemExit(1)
+          (out_dir / "omnimarket-no-deps.txt").write_text("\n".join(no_deps) + "\n")
+          (out_dir / "omnimarket-leaves.txt").write_text("\n".join(leaves) + "\n")
+          PYEOF
+          mapfile -t NO_DEPS < <(grep -v '^$' "${RUNNER_TEMP}/omnimarket-no-deps.txt" || true)
+          mapfile -t LEAVES < <(grep -v '^$' "${RUNNER_TEMP}/omnimarket-leaves.txt" || true)
+          if [ "${#LEAVES[@]}" -gt 0 ]; then
+            uv pip install --python "${PYTHON_BIN}" "${LEAVES[@]}"
+          fi
+          uv pip install --python "${PYTHON_BIN}" --no-deps ${NO_DEPS[@]+"${NO_DEPS[@]}"} \
+            "omnimarket @ git+https://github.com/OmniNode-ai/omnimarket@${OMNIMARKET_SHA}"
+          echo "omnimarket co-installed at ${OMNIMARKET_SHA}"
+
+      # The non-secret half of the dev lane's declared transport, from the same
+      # declaration and the same reader the CLI resolves `--lane` through, so
+      # the credential injected below is offered to the protocol the broker
+      # speaks. The credentials themselves never pass through this step.
+      - name: Resolve the declared lane transport
+        run: |
+          set -euo pipefail
+          .venv/bin/python -c "
+          import os, pathlib
+          from omnibase_infra.nodes.node_chain_canary_effect.lane_transport import (
+              lane_transport_env, load_lane_transport,
+          )
+          from scripts.ci.r1_front_door_probe import PROBE_LANE
+          transport = load_lane_transport(
+              pathlib.Path('.probe-workspace/omnimarket/config/ci_bus_lanes.yaml'),
+              PROBE_LANE,
+          )
+          print(f'lane {PROBE_LANE!r} declares {transport.bootstrap_servers} '
+                f'({transport.security_protocol}/{transport.sasl_mechanism})')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as handle:
+              for key, value in lane_transport_env(transport).items():
+                  handle.write(f'{key}={value}\n')
+          "
+
       - name: Run the R1 front-door probe and grade it
         id: probe
+        env:
+          # The workspace root the CLI reads `omnimarket/config/ci_bus_lanes.yaml`
+          # under (the sanctioned wrapper binds the same variable on a lab host).
+          OMNIBASE_PATH: ${{ github.workspace }}/.probe-workspace
+          # The org-wide dev-lane SCRAM secrets chain-canary.yml already uses,
+          # as ENVIRONMENT so no credential reaches argv or this log.
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
         run: |
           set -uo pipefail
           # NOT `set -e`: a non-zero probe is the verdict and must still write
           # its record before the job ends.
-          uv run python scripts/ci/r1_front_door_probe.py \
-            --record r1-front-door-probe.json
+          .venv/bin/python scripts/ci/r1_front_door_probe.py \
+            --onex-bin .venv/bin/onex \
+            --record r1-front-door-probe.json \
+            --summary-file "${GITHUB_STEP_SUMMARY}"
           status=$?
           echo "probe exit status: ${status}"
           exit "${status}"
@@ -100,7 +224,7 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          uv run python scripts/ci/assert_evidence_artifact.py \
+          .venv/bin/python scripts/ci/assert_evidence_artifact.py \
             --artifact r1-front-door-probe \
             --require r1-front-door-probe.json
 

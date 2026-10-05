@@ -23,12 +23,15 @@ import asyncio
 import logging
 import os
 import socket
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from omnibase_infra.backends.enum_probe_state import EnumProbeState
 from omnibase_infra.backends.model_consumer_group_owner import ModelConsumerGroupOwner
 from omnibase_infra.backends.model_probe_result import ModelProbeResult
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
+
+if TYPE_CHECKING:
+    from aiokafka.admin import AIOKafkaAdminClient
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +148,101 @@ class ConsumerGroupDescribeDeniedError(ConsumerGroupLivenessUnknownError):
         )
 
 
+class ConsumerGroupSaslRefusedError(ConsumerGroupLivenessUnknownError):
+    """The broker refused this client's SASL login, so nothing could be asked.
+
+    OMN-19452. A subclass of UNKNOWN because a refused login still cannot say
+    whether the topic is consumed, so every fail-closed caller keeps refusing.
+    It exists because the generic UNKNOWN text tells the operator to fix the
+    broker ADDRESS, and an address that answered the SASL handshake with a
+    verdict is not the thing that is wrong: the identity is.
+
+    aiokafka does not raise the verdict. ``AIOKafkaClient.bootstrap`` logs the
+    broker's ``SaslAuthenticationFailed`` on its own logger and then raises a
+    generic ``KafkaConnectionError: Unable to bootstrap``, so the cause is
+    recovered from that log record (see :class:`BootstrapCauseRecorder`).
+
+    The message deliberately avoids the substrings the receipt sanitizer
+    treats as credential-shaped (``util_error_sanitization.SENSITIVE_PATTERNS``
+    redacts the whole message on any hit, and the Kafka error class name is
+    one), so the principal and the finding survive into the written refusal.
+    The remedy is therefore not in this message: it names a command and is
+    carried by the typed ``remediation`` field of the delegate refusal.
+    """
+
+    def __init__(self, *, bootstrap_servers: str, principal: str | None) -> None:
+        self.bootstrap_servers = bootstrap_servers
+        self.principal = principal
+        who = f"principal '{principal}'" if principal else "this client's principal"
+        super().__init__(
+            f"the broker at {bootstrap_servers} refused the SASL login of {who} "
+            f"(Kafka error {_SASL_LOGIN_REFUSED_ERROR_CODE}), so no deployed "
+            "orchestrator could be confirmed and liveness is unknown."
+        )
+
+
+# Kafka's SASL_AUTHENTICATION_FAILED, named by number for the message above.
+_SASL_LOGIN_REFUSED_ERROR_CODE = 58
+
+
+class BootstrapCauseRecorder(logging.Handler):
+    """Collects the exceptions aiokafka logs while it bootstraps.
+
+    ``AIOKafkaClient.bootstrap`` swallows every ``KafkaError`` a connection
+    attempt raises, logs it as ``Unable connect to "%s:%s": %s`` with the
+    exception as the last argument, and raises ``KafkaConnectionError`` once
+    every address has failed. The exception instance is the only place the
+    broker's verdict survives, so it is read off the log record's arguments
+    rather than parsed out of the rendered text.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.causes: list[BaseException] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if isinstance(record.args, tuple):
+            self.causes.extend(
+                arg for arg in record.args if isinstance(arg, BaseException)
+            )
+
+
+async def _start_admin_naming_sasl_refusal(
+    admin: AIOKafkaAdminClient, *, bootstrap_servers: str, principal: str | None
+) -> None:
+    """Start an aiokafka admin client, raising a typed error on a SASL refusal.
+
+    Raises:
+        ConsumerGroupSaslRefusedError: the broker refused the SASL login,
+            whether the client raised it or only logged it before its generic
+            bootstrap failure.
+    """
+    from aiokafka.errors import (
+        AuthenticationFailedError,
+        KafkaConnectionError,
+        SaslAuthenticationFailed,
+    )
+
+    refusals = (AuthenticationFailedError, SaslAuthenticationFailed)
+    recorder = BootstrapCauseRecorder()
+    aiokafka_logger = logging.getLogger("aiokafka")
+    aiokafka_logger.addHandler(recorder)
+    try:
+        await admin.start()
+    except refusals as exc:
+        raise ConsumerGroupSaslRefusedError(
+            bootstrap_servers=bootstrap_servers, principal=principal
+        ) from exc
+    except KafkaConnectionError as exc:
+        if any(isinstance(cause, refusals) for cause in recorder.causes):
+            raise ConsumerGroupSaslRefusedError(
+                bootstrap_servers=bootstrap_servers, principal=principal
+            ) from exc
+        raise
+    finally:
+        aiokafka_logger.removeHandler(recorder)
+
+
 def live_consumer_groups(
     *,
     topic: str,
@@ -215,6 +313,104 @@ def live_consumer_groups(
         ) from exc
 
 
+def live_chain_consumer_groups(
+    *,
+    command_topic: str,
+    subscribe_topics: tuple[str, ...],
+    bootstrap_servers: str | None = None,
+    timeout: float = 5.0,
+) -> tuple[str, ...]:
+    """Return Stable command groups whose base subscribes to the entire chain.
+
+    OMN-20209. The runtime plugin chooses the base identity, so the contract's
+    complete subscription footprint identifies candidates without guessing a
+    group name. Measured on the .201 dev broker 2026-10-02: the delegation
+    orchestrator's groups are ``local.runtime_config.delegation-orchestrator``
+    on all nine topics its contract subscribes to, while a ledger projection
+    is also ``Stable`` on the command topic but consumes only three of them.
+    A topic-suffix match alone would have counted the projection as the
+    chain; requiring the whole footprint does not. Unknown liveness refuses
+    just as :func:`live_consumer_groups` does.
+    """
+    if command_topic not in subscribe_topics:
+        raise ValueError("subscribe_topics must include command_topic")
+    resolved = bootstrap_servers or os.getenv("KAFKA_BOOTSTRAP_SERVERS", "")
+    if not resolved:
+        raise ConsumerGroupLivenessUnknownError(
+            "no broker address: neither an explicit bootstrap nor "
+            "KAFKA_BOOTSTRAP_SERVERS is set"
+        )
+    try:
+        return asyncio.run(
+            _live_chain_consumer_groups_async(
+                command_topic=command_topic,
+                subscribe_topics=subscribe_topics,
+                bootstrap_servers=resolved,
+                timeout=timeout,
+            )
+        )
+    except ConsumerGroupLivenessUnknownError:
+        raise
+    except Exception as exc:
+        raise ConsumerGroupLivenessUnknownError(
+            f"could not list consumer groups on {resolved}: {exc}"
+        ) from exc
+
+
+async def _live_chain_consumer_groups_async(
+    *,
+    command_topic: str,
+    subscribe_topics: tuple[str, ...],
+    bootstrap_servers: str,
+    timeout: float,
+) -> tuple[str, ...]:
+    """Identify complete topic-scoped bases, then ask about their command state."""
+    if command_topic not in subscribe_topics:
+        raise ValueError("subscribe_topics must include command_topic")
+    from aiokafka.admin import AIOKafkaAdminClient
+
+    from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
+    from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_for
+
+    auth_kwargs = build_aiokafka_auth_kwargs_for(bootstrap_servers)
+    principal_value = auth_kwargs.get("sasl_plain_username")
+    principal = principal_value if isinstance(principal_value, str) else None
+    admin = AIOKafkaAdminClient(
+        bootstrap_servers=bootstrap_servers,
+        request_timeout_ms=int(timeout * 1000),
+        **auth_kwargs,
+    )
+    await _start_admin_naming_sasl_refusal(
+        admin, bootstrap_servers=bootstrap_servers, principal=principal
+    )
+    try:
+        await admin.describe_cluster()
+        listing = await admin.list_consumer_groups()
+        topics_by_base: dict[str, set[str]] = {}
+        for entry in listing:
+            if not entry:
+                continue
+            base, infix, topic = str(entry[0]).partition(TOPIC_SCOPE_INFIX)
+            if infix:
+                topics_by_base.setdefault(base, set()).add(topic)
+        required = set(subscribe_topics)
+        candidates = sorted(
+            base + TOPIC_SCOPE_INFIX + command_topic
+            for base, topics in topics_by_base.items()
+            if required.issubset(topics)
+        )
+    except BaseException:
+        await admin.close()
+        raise
+    return await _describe_live_consumer_groups(
+        admin=admin,
+        candidates=candidates,
+        topic=command_topic,
+        bootstrap_servers=bootstrap_servers,
+        principal=principal,
+    )
+
+
 async def _live_consumer_groups_async(
     *,
     topic: str,
@@ -252,7 +448,6 @@ async def _live_consumer_groups_async(
             describing candidates.
     """
     from aiokafka.admin import AIOKafkaAdminClient
-    from aiokafka.errors import GroupAuthorizationFailedError
 
     from omnibase_core.event_bus.util_consumer_group import TOPIC_SCOPE_INFIX
     from omnibase_infra.event_bus.kafka_auth import (
@@ -272,7 +467,9 @@ async def _live_consumer_groups_async(
         request_timeout_ms=int(timeout * 1000),
         **auth_kwargs,
     )
-    await admin.start()
+    await _start_admin_naming_sasl_refusal(
+        admin, bootstrap_servers=bootstrap_servers, principal=principal
+    )
     try:
         # Metadata FIRST, deliberately. A cluster that cannot describe itself
         # cannot be asked about consumers, and a client that answers the group
@@ -297,6 +494,36 @@ async def _live_consumer_groups_async(
                 and (owner is None or owner.matches(str(entry[0])))
             }
         )
+    except BaseException:
+        await admin.close()
+        raise
+    return await _describe_live_consumer_groups(
+        admin=admin,
+        candidates=candidates,
+        topic=topic,
+        bootstrap_servers=bootstrap_servers,
+        principal=principal,
+        owner=owner,
+    )
+
+
+async def _describe_live_consumer_groups(
+    *,
+    admin: AIOKafkaAdminClient,
+    candidates: list[str],
+    topic: str,
+    bootstrap_servers: str,
+    principal: str | None,
+    owner: ModelConsumerGroupOwner | None = None,
+) -> tuple[str, ...]:
+    """Describe serially, close the admin, then evaluate shared denial semantics.
+
+    The caller hands over a started client after listing candidates. Closing
+    before state evaluation preserves the existing probe's cleanup ordering.
+    """
+    from aiokafka.errors import GroupAuthorizationFailedError
+
+    try:
         if not candidates:
             return ()
         if len(candidates) > _MAX_LIVE_CONSUMER_GROUP_DESCRIBE_CANDIDATES:

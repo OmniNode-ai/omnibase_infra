@@ -17,4 +17,4 @@ concurrency:
 jobs:
   call:
     # @main is intentional — validate-docs.yml header states "Callers use @main"
-    uses: OmniNode-ai/omnibase_core/.github/workflows/validate-docs.yml@1e69bec909f245be511803191554e5b340def0b7 # .github/sibling-pins.yaml
+    uses: OmniNode-ai/omnibase_core/.github/workflows/validate-docs.yml@f43f97629182f463d233b564b19a2b27d4fc4888 # .github/sibling-pins.yaml

@@ -2,7 +2,8 @@
 # Docker healthcheck for the GitHub Actions runner container.
 # Tickets: OMN-12433 (egress), OMN-13915 (listener liveness + heartbeat
 #          freshness), OMN-15233 (threshold recalibration + orphan/crash-loop
-#          detection), OMN-15311 (broker session state — the fourth state).
+#          detection), OMN-15311 (broker session state — the fourth state),
+#          OMN-20408 (runner 2.336.0 recovers from a dropped session silently).
 #
 # History of what each layer catches:
 #   - The original check only asserted container liveness — 37/48 runners sat
@@ -37,6 +38,17 @@
 #     state-4 runner is counted as capacity by Docker and is suppressed from
 #     auto-bounce by runner-monitor.sh's local-listener evidence rule, so it
 #     silently absorbs zero jobs until something else restarts it.
+#   - OMN-20408 fixes a FALSE ALARM in layer 3b measured 2026-10-03: every runner
+#     container on .201 (busy and idle) read unhealthy with the broker-session
+#     message while the runners worked (omninode-runner-1 ran 353 jobs). Runner
+#     2.336.0 prints "Runner connect error" ONCE on the first consecutive
+#     failure, retries silently, and on recovery writes NONE of the connected
+#     markers this layer used to look for ("Runner reconnected" and "Job message
+#     received" occur 0 times in the newest log of all 48 runner containers;
+#     "Listening for Jobs" only at listener start). The stamp was never cleared
+#     and the grace always elapsed. Two fixes, see layer 3b: the markers 2.336.0
+#     really writes on a live session count as connected, and a log whose retry
+#     traffic has stopped counts as recovered.
 #
 # Tunables (env, defaults chosen for the 64-runner .201 fleet):
 #   RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS      heartbeat staleness threshold (4500)
@@ -49,6 +61,18 @@
 #                                           broken before the runner fails (900).
 #                                           A GRACE, not a threshold on a
 #                                           measurement — see layer 3b.
+#   RUNNER_HEALTH_SESSION_RETRY_QUIET_SECONDS  how long the newest Runner log may
+#                                           go unwritten, when its last session
+#                                           marker is a broken one, before the
+#                                           session counts as recovered (600).
+#                                           Positive integer, fail closed.
+#                                           CEILING: keep it at or below
+#                                           RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS
+#                                           so a quiet log clears the alarm no
+#                                           later than the grace would raise it
+#                                           for a fresh drop; above
+#                                           RUNNER_HEALTH_MAX_DIAG_AGE_SECONDS it
+#                                           is unreachable (layer 3 fails first).
 #   RUNNER_HEALTH_SESSION_STATE_CHECK       set to 0 to skip the broker-session
 #                                           layer entirely (fleet-wide kill
 #                                           switch by env, no file swap needed)
@@ -81,6 +105,12 @@ RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES="${RUNNER_HEALTH_LOG_RATE_WINDOW_MINUTES:-
 # and only cleared on restart. 900s therefore sits above every recovery
 # observed and below the shortest unrecovered case.
 RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS="${RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS:-900}"
+# OMN-20408: 600s (10 min). A still-broken session writes retry traffic every
+# minute or two (measured: "Sleeping for N seconds before retrying", token
+# "Attempt N of POST", "Back off N seconds"), so 10 minutes without a single
+# write to the newest Runner log means the retries stopped, which on 2.336.0
+# means the session recovered (recovery itself logs nothing).
+RUNNER_HEALTH_SESSION_RETRY_QUIET_SECONDS="${RUNNER_HEALTH_SESSION_RETRY_QUIET_SECONDS:-600}"
 RUNNER_HEALTH_SESSION_STATE_CHECK="${RUNNER_HEALTH_SESSION_STATE_CHECK:-1}"
 RUNNER_HEALTH_EGRESS_CHECK="${RUNNER_HEALTH_EGRESS_CHECK:-1}"
 
@@ -171,10 +201,39 @@ fi
 #     already use — deliberately NOT by parsing the log's "[YYYY-MM-DD HH:MM:SSZ]"
 #     prefix, which needs GNU `date -d` and would make the layer unexercisable
 #     on the BSD-date gate host.
+#
+#     RUNNER 2.336.0 (OMN-20408). Recovery from a dropped session is SILENT: the
+#     only session line is the first "Runner connect error", then retry traffic
+#     (Sleeping for N seconds before retrying / Attempt N of POST request to
+#     tokenghub... / Back off N seconds / Retriable exception), then nothing that
+#     says "reconnected". What a live session DOES write, once it takes work, is
+#     "BrokerMessageListener Acknowledging runner request '<id>'", "JobDispatcher
+#     Job request 0 for plan <id> job <id> received." and "Terminal WRITE LINE:
+#     ...Running job: <name>"; those count as connected. An IDLE runner writes
+#     none of them, so a second rule applies: when the last session marker is
+#     still a broken one but the newest Runner log has not been modified for
+#     RUNNER_HEALTH_SESSION_RETRY_QUIET_SECONDS, the retries have stopped and the
+#     session is treated as recovered (stamp deleted, as for any recovery). A
+#     broken session that is still retrying keeps writing, so its mtime stays
+#     fresh and the grace applies unchanged.
+#
+#     LIMITS. A recovery with neither a job line nor a quiet log (other chatter
+#     that keeps the newest Runner log fresh for longer than the grace) is still
+#     reported broken once the grace elapses, until it goes quiet or takes a job.
+#     The ~50-minute idle token refresh does NOT trip this: it re-stamps, and the
+#     quiet window (600s) is shorter than the grace (900s). The quiet rule
+#     measures the log, not the registry: only the GitHub registry is
+#     authoritative (runner-fleet-canary).
 if [[ "${RUNNER_HEALTH_SESSION_STATE_CHECK}" != "0" ]]; then
   if ! [[ "${RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS}" =~ ^[0-9]+$ ]] ||
     [[ "${RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS}" -lt 1 ]]; then
     echo "unhealthy: RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS='${RUNNER_HEALTH_MAX_SESSION_BROKEN_SECONDS}' is not a positive integer — refusing to guess a broker-session grace (fail closed)"
+    exit 1
+  fi
+
+  if ! [[ "${RUNNER_HEALTH_SESSION_RETRY_QUIET_SECONDS}" =~ ^[0-9]+$ ]] ||
+    [[ "${RUNNER_HEALTH_SESSION_RETRY_QUIET_SECONDS}" -lt 1 ]]; then
+    echo "unhealthy: RUNNER_HEALTH_SESSION_RETRY_QUIET_SECONDS='${RUNNER_HEALTH_SESSION_RETRY_QUIET_SECONDS}' is not a positive integer — refusing to guess a retry-quiet window (fail closed)"
     exit 1
   fi
 
@@ -195,7 +254,7 @@ if [[ "${RUNNER_HEALTH_SESSION_STATE_CHECK}" != "0" ]]; then
   # broken; WITHOUT it 0/64. A permanently-red check is a disabled check - the
   # same reasoning as the rate-vs-cumulative note in layer 4 below.
   # tests/ci/fixtures/runner_diag_real_tail.log.gz pins this to a real log tail.
-  session_connected_patterns='Listening for Jobs|Runner reconnected|Job message received'
+  session_connected_patterns='Listening for Jobs|Runner reconnected|Job message received|Acknowledging runner request|Job request .* received|Running job:'
   session_broken_patterns='Runner connect error|TaskAgentSessionConflictException|A session for this runner already exists|Unable to connect to the server|Failed to create session'
 
   # SC2012: `ls -t` is the portable newest-first ordering here; find -printf
@@ -219,6 +278,16 @@ if [[ "${RUNNER_HEALTH_SESSION_STATE_CHECK}" != "0" ]]; then
   if [[ -n "${last_broken_line}" ]]; then
     if [[ -z "${last_connected_line}" ]] || [[ "${last_broken_line}" -gt "${last_connected_line}" ]]; then
       session_is_broken=1
+    fi
+  fi
+
+  # Retry-quiet (OMN-20408): the last marker is a broken one, but the newest
+  # Runner log has gone unwritten for the quiet window, so the retry traffic of
+  # a broken session has stopped and 2.336.0 recovered without saying so.
+  if [[ "${session_is_broken}" -eq 1 ]]; then
+    session_quiet_minutes=$(((RUNNER_HEALTH_SESSION_RETRY_QUIET_SECONDS + 59) / 60))
+    if [[ -z "$(find "${newest_runner_log}" -mmin "-${session_quiet_minutes}" -print 2>/dev/null)" ]]; then
+      session_is_broken=0
     fi
   fi
 

@@ -412,3 +412,20 @@ def test_prod_drop_in_declares_its_plaintext_control_bus_transport() -> None:
     assert all(
         "KAFKA_SECURITY_PROTOCOL=PLAINTEXT" in line for line in exec_start_lines
     ), exec_start_lines
+
+
+def test_dev_unit_restarts_after_an_external_sigterm() -> None:
+    """OMN-20410: a SIGTERM from outside is not a clean stop of the dev agent.
+
+    On 2026-10-03 the .201 host ran out of memory and earlyoom sent SIGTERM to
+    the dev agent's python at 16:09:11Z. Restart=on-failure counts a SIGTERM
+    exit as clean, so systemd never restarted it and the dev lane had no deploy
+    agent until a lane started it by hand at 19:12Z. RestartForceExitStatus
+    makes that exit restart, while ``systemctl --user stop`` still stops the
+    unit (systemd never restarts a unit it was asked to stop).
+    """
+    text = (_DEPLOY_DIR / "deploy-agent-dev.service").read_text()
+    directives = [ln.strip() for ln in text.splitlines()]
+
+    assert "Restart=on-failure" in directives
+    assert "RestartForceExitStatus=SIGTERM" in directives

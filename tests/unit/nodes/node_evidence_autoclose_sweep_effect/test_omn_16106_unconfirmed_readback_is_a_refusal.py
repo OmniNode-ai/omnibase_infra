@@ -49,10 +49,12 @@ from uuid import uuid4
 
 import pytest
 
+from omnibase_core.handlers.handler_done_write_receipt_gate import (
+    acceptance_criteria_items as _acceptance_criteria_items,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
     HandlerEvidenceAutocloseSweep,
     _ac_coverage_gap,
-    _acceptance_criteria_items,
     _gate_binding_probe_target,
 )
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_evidence_autoclose_decision import (

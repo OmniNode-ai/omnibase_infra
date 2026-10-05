@@ -106,6 +106,9 @@ from omnibase_infra.protocols.protocol_projector_schema_validator import (
     ProtocolProjectorSchemaValidator,
 )
 from omnibase_infra.protocols.protocol_registry_metrics import ProtocolRegistryMetrics
+from omnibase_infra.protocols.protocol_runtime_log_producer import (
+    ProtocolRuntimeLogProducer,
+)
 from omnibase_infra.protocols.protocol_snapshot_publisher import (
     ProtocolSnapshotPublisher,
 )
@@ -136,6 +139,7 @@ __all__: list[str] = [
     "ProtocolPluginCompute",
     "ProtocolProjectorSchemaValidator",
     "ProtocolRegistryMetrics",
+    "ProtocolRuntimeLogProducer",
     "ProtocolSnapshotPublisher",
     "ProtocolSnapshotStore",
     "ProtocolTopicRegistry",

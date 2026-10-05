@@ -52,6 +52,7 @@ from omnibase_infra.cli.delegate_pre_publish_failure import (
     pre_publish_failure_from_receipt,
 )
 from omnibase_infra.cli.delegate_terminal_resolver import (
+    DelegateReplyTimeoutError,
     DelegateTerminalUnresolvedError,
 )
 from omnibase_infra.cli.model_receipt_runtime_summary import (
@@ -77,6 +78,8 @@ class ModelTimeoutlessDelegateRequest(BaseModel):
     that refused every flagged run. It accepts ``metadata``, the map every
     released request model declares, because the command always sends a
     caller lane there (OMN-20299), even with every caller variable cleared.
+    It accepts ``tenant_id`` for the same reason: omnimarket has declared it
+    since v0.4.7 (OMN-14349), and the command stamps it (OMN-17427).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -86,6 +89,7 @@ class ModelTimeoutlessDelegateRequest(BaseModel):
     task_type: str = ""
     source: str = ""
     metadata: dict[str, str] = Field(default_factory=dict)
+    tenant_id: str | None = None
 
 
 class HandlerTimeoutlessNoop(HandlerCorrelatedNoop):
@@ -300,6 +304,9 @@ class TestPrePublishClassification:
             _delegation_result(envelope)
         assert not isinstance(raised.value, DelegatePrePublishFailureError)
         assert _TERMINAL_SENTENCE in str(raised.value)
+        # OMN-20386: and it names the cause, so the caller is not left to infer it.
+        assert isinstance(raised.value, DelegateReplyTimeoutError)
+        assert "cause timeout" in str(raised.value)
 
     def test_completed_run_without_a_terminal_is_not_pre_publish(self) -> None:
         """OMN-18569's completed-but-empty shape keeps failing closed as before."""

@@ -42,6 +42,21 @@ WHAT IT WRITES
     of the chosen lane (lists as JSON). ``GITHUB_OUTPUT``: ``name``, ``lane``
     (the whole entry as JSON) and every field under its own name.
 
+DEPLOY WAIT (OMN-19811, OMN-20509)
+    ``LANE_DEPLOY_WAIT_SECONDS`` opts into a bounded wait when no lane answers.
+    Eligible lanes' declared deploy agents must report readable, busy state;
+    idle or unreadable agents alone never justify waiting. Poll every
+    ``LANE_DEPLOY_POLL_SECONDS`` (default 15), then try the ordered lanes again.
+    A successful wait exports ``LANE_WAITED_SECONDS``, rounded up, so the probe
+    can share the same budget. The default budget of 0 keeps a single shot.
+
+    The agents are read once BEFORE the first lane check as well as after it:
+    the check spends its probe timeouts first, and a settle that ends inside
+    them (the agent re-execs, then reports idle) would otherwise leave nothing
+    to see. A busy pre-read counts as busy evidence for the wait. When an agent
+    then reads idle or unreadable, the lane gets ``SETTLE_GRACE_SECONDS`` more
+    to come back before the wait ends RED; the budget still bounds all of it.
+
 NO RESPONDER IS RED, NEVER A SKIP
     An empty or unset list, a malformed entry, or no eligible lane answering
     exits 1 naming every lane tried and why. There is no default lane.
@@ -49,11 +64,14 @@ NO RESPONDER IS RED, NEVER A SKIP
 
 from __future__ import annotations
 
+import http.client
 import ipaddress
 import json
+import math
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
@@ -66,6 +84,11 @@ FIELD_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 HOST_LOCAL_NAMES = frozenset(
     {"localhost", "host.docker.internal", "gateway.docker.internal"}
 )
+# OMN-20509: how long a lane keeps being waited for once its deploy agent stops
+# reading busy. The agent leaves ``settling`` a moment before the lane's
+# surfaces answer again (run 37179200279: the settle ended 05:12:58Z, after
+# the lane had spent the preceding minutes timing out under image imports).
+SETTLE_GRACE_SECONDS = 60.0
 
 
 class OverlayError(ValueError):
@@ -144,6 +167,11 @@ def parse_lanes(raw: str) -> list[dict[str, Any]]:
     return lanes
 
 
+def _open(url: str, timeout: float) -> Any:
+    """The one urlopen in this file; every caller has checked the scheme."""
+    return urllib.request.urlopen(url, timeout=timeout)  # noqa: S310 -- scheme checked by the caller
+
+
 def http_health(url: str, timeout: float) -> str | None:
     """None when ``GET <url>/health`` answers 2xx, else why not. Never raises.
 
@@ -152,7 +180,7 @@ def http_health(url: str, timeout: float) -> str | None:
     if not url.startswith(("http://", "https://")):
         return f"refused scheme ({url})"
     try:
-        with urllib.request.urlopen(f"{url}/health", timeout=timeout) as response:  # noqa: S310 -- scheme checked above
+        with _open(f"{url}/health", timeout) as response:
             if 200 <= response.status < 300:
                 return None
             return f"HTTP {response.status}"
@@ -161,6 +189,75 @@ def http_health(url: str, timeout: float) -> str | None:
     except (urllib.error.URLError, OSError, ValueError) as exc:
         reason = getattr(exc, "reason", exc)
         return f"no answer ({type(exc).__name__}: {reason})"
+
+
+def read_deploy_agent(url: str, timeout: float) -> dict[str, Any] | None:
+    """Read /health even on HTTP 503, and best-effort /queue. Never raises."""
+    if not url.startswith(("http://", "https://")):
+        return None
+    base = url.rstrip("/")
+
+    def read_object(surface: str) -> dict[str, Any] | None:
+        # An unreadable agent is never deploy evidence: every way a read can
+        # fail below is None, and nothing else is swallowed.
+        try:
+            try:
+                response = _open(f"{base}/{surface}", timeout)
+            except urllib.error.HTTPError as exc:
+                response = exc  # An error status can still carry the agent's state.
+            with response:
+                body = json.load(response)
+        except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError):
+            return None
+        return body if isinstance(body, dict) else None
+
+    health = read_object("health")
+    if health is None:
+        return None
+    return {"health": health, "queue": read_object("queue")}
+
+
+def deploy_agent_busy_reason(snapshot: Mapping[str, Any]) -> str | None:
+    """Pure busy test, matching the canary snapshot and its queue freshness bound."""
+    health = snapshot.get("health")
+    if not isinstance(health, dict):
+        return None
+    state = health.get("state")
+    if state and state != "idle":
+        return f"state={state}"
+    if health.get("active_job"):
+        return "active_job"
+    last = health.get("last_result")
+    if isinstance(last, dict) and last.get("settling"):
+        return "settling"
+    queue = snapshot.get("queue")
+    if not isinstance(queue, dict):
+        return None
+    ahead = queue.get("commands_ahead")
+    if not isinstance(ahead, int) or isinstance(ahead, bool) or ahead <= 0:
+        return None
+    age = queue.get("control_topic_lag_age_seconds")
+    if age is not None and (
+        isinstance(age, bool) or not isinstance(age, (int, float)) or age > 120
+    ):
+        return None
+    return f"{ahead} command(s) queued"
+
+
+def _busy_agents(
+    candidates: Sequence[Mapping[str, Any]], timeout: float, note: str = ""
+) -> dict[str, str]:
+    """Lane name -> busy detail for every candidate whose agent reads busy now."""
+    busy: dict[str, str] = {}
+    for candidate in candidates:
+        snapshot = read_deploy_agent(candidate["deploy_agent_url"], timeout)
+        reason = deploy_agent_busy_reason(snapshot) if snapshot is not None else None
+        if reason is not None:
+            busy[candidate["name"]] = (
+                f"{candidate['name']} agent {candidate['deploy_agent_url']}: "
+                f"{reason}{note}"
+            )
+    return busy
 
 
 def choose_lane(
@@ -212,6 +309,20 @@ def _env_value(value: Any) -> str:
 
 def main(environ: Mapping[str, str] | None = None) -> int:
     env = os.environ if environ is None else environ
+    try:
+        wait_budget = float(env.get("LANE_DEPLOY_WAIT_SECONDS", "0"))
+        if not math.isfinite(wait_budget) or wait_budget < 0:
+            raise ValueError
+    except ValueError:
+        _say("::error::LANE_DEPLOY_WAIT_SECONDS must be a non-negative finite number")
+        return 1
+    try:
+        poll = float(env.get("LANE_DEPLOY_POLL_SECONDS", "15"))
+        if not math.isfinite(poll) or poll <= 0:
+            raise ValueError
+    except ValueError:
+        _say("::error::LANE_DEPLOY_POLL_SECONDS must be a positive finite number")
+        return 1
     require = [f for f in re.split(r"[\s,]+", env.get("LANE_REQUIRE", "")) if f]
     match: dict[str, str] = {}
     for pair in (p for p in re.split(r"[\s,]+", env.get("LANE_MATCH", "")) if p):
@@ -226,9 +337,70 @@ def main(environ: Mapping[str, str] | None = None) -> int:
     except OverlayError as exc:
         _say(f"::error::{exc}")
         return 1
+    candidates = [
+        candidate
+        for candidate in lanes
+        if all(candidate.get(field) == want for field, want in match.items())
+        and all(field in candidate for field in require)
+        and "deploy_agent_url" in candidate
+    ]
+    # Before the lane check: it spends its probe timeouts first, and a settle
+    # that ends inside them leaves an idle agent behind (OMN-20509).
+    pre_busy = (
+        _busy_agents(candidates, timeout, " (read before the lane check)")
+        if wait_budget > 0
+        else {}
+    )
     lane, tried = choose_lane(
         lanes, require, lambda url: http_health(url, timeout), match
     )
+    waited: float | None = None
+    wait_detail = ""
+    if lane is None and wait_budget > 0:
+        started = time.monotonic()
+        last_busy = dict(pre_busy)
+        saw_busy = bool(pre_busy)
+        not_busy_since: float | None = None
+        end_reason = "no readable busy deploy agent"
+        while lane is None:
+            busy = _busy_agents(candidates, timeout)
+            last_busy.update(busy)
+            now = time.monotonic()
+            if busy:
+                saw_busy = True
+                not_busy_since = None
+            elif not saw_busy:
+                break
+            else:
+                if not_busy_since is None:
+                    not_busy_since = now
+                if now - not_busy_since >= SETTLE_GRACE_SECONDS:
+                    end_reason = f"deploy agent not busy for {SETTLE_GRACE_SECONDS:g}s"
+                    break
+            if waited is None:
+                _say(
+                    "lab lane deploy wait started -- "
+                    + " | ".join((busy or pre_busy).values())
+                )
+                waited = 0.0
+            remaining = wait_budget - (now - started)
+            if remaining <= 0:
+                end_reason = "budget exhausted"
+                break
+            time.sleep(min(poll, remaining))
+            lane, tried = choose_lane(
+                lanes, require, lambda url: http_health(url, timeout), match
+            )
+        if waited is not None:
+            waited = time.monotonic() - started
+            if lane is not None:
+                end_reason = f"lane {lane['name']} answers"
+            wait_detail = (
+                "; deploy wait: "
+                + " | ".join(last_busy.values())
+                + f"; waited {waited:g}s of {wait_budget:g}s budget ({end_reason})"
+            )
+            _say(f"lab lane deploy wait ended -- {wait_detail.removeprefix('; ')}")
     for line in tried:
         _say(f"lane skipped -- {line}")
     if lane is None:
@@ -237,6 +409,7 @@ def main(environ: Mapping[str, str] | None = None) -> int:
             f"{', '.join(require) or '(nothing required)'}; tried: "
             + " | ".join(tried)
             + ". That is RED, not a skip."
+            + wait_detail
         )
         return 1
     _say(f"lab lane: {lane['name']} (after {len(tried)} earlier)")
@@ -248,6 +421,8 @@ def main(environ: Mapping[str, str] | None = None) -> int:
             for field, value in lane.items():
                 if field != "name":
                     handle.write(f"LANE_{field.upper()}={_env_value(value)}\n")
+            if waited is not None:
+                handle.write(f"LANE_WAITED_SECONDS={math.ceil(waited)}\n")
     if out_path:
         with open(out_path, "a", encoding="utf-8") as handle:
             handle.write(f"lane={json.dumps(dict(lane), separators=(',', ':'))}\n")

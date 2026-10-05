@@ -42,6 +42,10 @@ let any caller re-introduce the defect. The absence is the enforcement.
 ``INDETERMINATE`` fails closed. This is the same posture CLAUDE.md rule 12 takes
 on prod health -- "could not determine" is never "fine" -- applied to host state.
 
+The proven floor is stamped by ``reconcile-host.sh`` on a verified full
+reconcile, or by an onboarding run after its delegation passed. Onboarding's
+``floor-from-venv`` reads the installed build without advancing any clone.
+
 WHY STDLIB-ONLY, AND WHY IT READS DIRECTORIES RATHER THAN IMPORTING
 Two independent reasons, both load-bearing:
 
@@ -70,16 +74,20 @@ that handler will be -- total, side-effect free, typed -- so the port is a lift.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
 from pathlib import Path
+from typing import Any
 
 FLOOR_SCHEMA = "onex.workspace.floor.v1"
+GOVERNED_DISTS = ("omnibase-infra", "omnibase-core", "omnibase-spi", "omnibase-compat")
 
 EXIT_OK = 0
 EXIT_FAIL = 1
@@ -270,6 +278,331 @@ def observe_clone_health(clone: Path) -> CloneHealth:
 
 
 # --------------------------------------------------------------------------- #
+# Refused clones: who owns the work, and what is in the way (OMN-20403)
+# --------------------------------------------------------------------------- #
+# On 2026-10-03 the workspace reconcile log held 66 FAILED and 62 declined ticks
+# and no ``ok`` one, because two canonical clones carried staged files nobody
+# owned in the ledger. The refusal said the clone did not move; it never said
+# whose staged work was in the way, so nothing and nobody acted on it.
+#
+# This block reads, and in the one place named below writes, but it NEVER
+# discards, resets, stashes, cleans or checks out anything in a clone. Removing
+# a stale lock is a command it prints for a human.
+
+# The paths the clone reconciler's own build writes into a clone and therefore
+# does not read as operator work (``BUILD_SCRATCH_PREFIXES`` in
+# ``runtime_build/deploy_source_ref.py``). Repeated here because this module is
+# stdlib-only and standalone; a dirty tree of nothing else is not a refusal.
+BUILD_SCRATCH_PREFIXES = ("workspace/",)
+
+MSG_SENDER = "reconcile-host"
+MSG_TICKET = "OMN-20403"
+OPERATOR = "operator"
+REFUSAL_STATE_FILE = "clone-refusals.json"
+BACKUP_DIRNAME = "dirty-clone-backups"
+_LEDGER_ROW_RE = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ \| ([A-Z][A-Z-]*) \|")
+_LANE_RE = re.compile(r"(?<![\w-])lane=([^\s|]+)")
+
+
+@dataclass(frozen=True)
+class DirtyState:
+    """Staged or modified tracked paths, and the index they sit in."""
+
+    paths: tuple[str, ...]  # "XY path" porcelain lines, sorted
+    index_mtime_ns: int
+    digest: str
+
+
+def _utc(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def observe_dirty_state(clone: Path) -> DirtyState | None:
+    """Staged or dirty TRACKED paths in ``clone``; ``None`` when there are none.
+
+    Untracked files are not a refusal reason for the clone reconciler, so they
+    are not listed here either.
+    """
+    try:
+        proc = subprocess.run(
+            [
+                "git",
+                "-c",
+                f"safe.directory={clone}",
+                "-C",
+                str(clone),
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--untracked-files=no",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"cannot run git status in {clone}: {exc}") from exc
+    if proc.returncode != 0:
+        raise RuntimeError(f"git status failed in {clone}: {proc.stderr.strip()}")
+    entries = [e for e in proc.stdout.split("\0") if e]
+    lines: list[str] = []
+    skip_next = False
+    for entry in entries:
+        if skip_next:  # the origin half of a rename or copy
+            skip_next = False
+            continue
+        status, path = entry[:2], entry[3:]
+        if status[0] in "RC":
+            skip_next = True
+        if path.startswith(BUILD_SCRATCH_PREFIXES):
+            continue
+        lines.append(f"{status} {path}")
+    if not lines:
+        return None
+    lines.sort()
+    code, index_path = _git(
+        clone, "rev-parse", "--path-format=absolute", "--git-path", "index"
+    )
+    index = Path(index_path) if code == 0 and index_path else clone / ".git" / "index"
+    try:
+        mtime_ns = index.stat().st_mtime_ns
+    except OSError:
+        mtime_ns = 0
+    digest = hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:12]
+    return DirtyState(tuple(lines), mtime_ns, digest)
+
+
+def _ledger_files(ledger: Path) -> list[Path]:
+    """The live ledger first, then its archive newest-first."""
+    files = [ledger]
+    archive = ledger.parent / "archive"
+    if archive.is_dir():
+        files.extend(sorted(archive.glob("*.md"), reverse=True))
+    return files
+
+
+def find_owner(ledger: Path, repo: str, paths: tuple[str, ...]) -> str | None:
+    """The lane of the newest CLAIM row naming this clone and one of ``paths``.
+
+    A reader only: it never opens the ledger for writing. A row owns the work
+    when it names the clone AND a dirty path (the bare path or ``<repo>/<path>``),
+    so a path such as ``README.md`` alone never claims every clone's staged
+    README. Rows are read newest first; the first match wins.
+    """
+    needles = {p[3:] for p in paths}
+    for file in _ledger_files(ledger):
+        try:
+            rows = file.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for row in reversed(rows):
+            match = _LEDGER_ROW_RE.match(row)
+            if not match or match.group(1) != "CLAIM" or repo not in row:
+                continue
+            if not any(needle in row for needle in needles):
+                continue
+            lane = _LANE_RE.search(row)
+            if lane:
+                return lane.group(1)
+    return None
+
+
+def _load_refusal_state(path: Path) -> dict[str, dict[str, Any]]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_refusal_state(path: Path, state: dict[str, dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+
+def save_patch_backup(
+    clone: Path, repo: str, dirty: DirtyState, directory: Path
+) -> Path:
+    """Write the staged and dirty diff against HEAD where an approved converge cannot lose it."""
+    code, patch = _git_raw(clone, "diff", "--binary", "HEAD")
+    if code != 0 or not patch:
+        raise RuntimeError(f"cannot read the diff of {clone}: {patch.strip()}")
+    directory.mkdir(parents=True, exist_ok=True)
+    target = (
+        directory
+        / f"{repo}-{_utc(dirty.index_mtime_ns / 1e9).replace(':', '')}-{dirty.digest}.patch"
+    )
+    tmp = target.with_name(target.name + ".tmp")
+    tmp.write_text(patch, encoding="utf-8")
+    tmp.replace(target)
+    return target
+
+
+def _git_raw(clone: Path, *args: str) -> tuple[int, str]:
+    """Like :func:`_git` but the output is not stripped: a patch ends in a newline."""
+    try:
+        proc = subprocess.run(
+            ["git", "-c", f"safe.directory={clone}", "-C", str(clone), *args],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 1, str(exc)
+    return proc.returncode, proc.stdout or proc.stderr
+
+
+def append_msg(ledger_lock: Path, ledger: Path, sender: str, to: str, text: str) -> str:
+    """Append one MSG row through ``ledger_lock.py``; returns the row's id.
+
+    The id is ``<timestamp>-<sender>``, so a sender per clone keeps two rows
+    written in the same second distinct.
+    """
+    stamp = _utc(time.time())
+    msg_id = f"{stamp}-{sender}"
+    row = (
+        f"{stamp} | MSG | from={sender} | to={to} | id={msg_id} | "
+        f"ticket={MSG_TICKET} | {text}"
+    )
+    proc = subprocess.run(
+        [sys.executable, str(ledger_lock), str(ledger), "--append", row],
+        capture_output=True,
+        text=True,
+        timeout=330,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"ledger append refused (exit {proc.returncode}): "
+            f"{(proc.stderr or proc.stdout).strip()}"
+        )
+    return msg_id
+
+
+def find_stale_ref_locks(clone: Path, max_age_s: int) -> list[tuple[Path, int]]:
+    """Git lock files in the clone's git dir older than ``max_age_s``, with their age.
+
+    Covers ``*.lock`` beside the git dir's own files (``index.lock``,
+    ``HEAD.lock``, ``packed-refs.lock``) and everything under ``refs/``. Age is
+    the file's mtime against now; a younger lock is a live writer's.
+    """
+    code, git_dir = _git(
+        clone, "rev-parse", "--path-format=absolute", "--git-common-dir"
+    )
+    if code != 0 or not git_dir:
+        return []
+    root = Path(git_dir)
+    candidates = list(root.glob("*.lock")) + list((root / "refs").rglob("*.lock"))
+    now = time.time()
+    found = []
+    for lock in candidates:
+        try:
+            age = int(now - lock.stat().st_mtime)
+        except OSError:
+            continue
+        if age > max_age_s:
+            found.append((lock, age))
+    return sorted(found)
+
+
+def _cmd_clone_refusal(args: argparse.Namespace) -> int:
+    """Explain why one clone is refused. One ``tag<TAB>text`` line per fact on stdout.
+
+    Tags: ``dirty``, ``index``, ``owner``, ``backup``, ``msg``, ``lock``. With
+    ``--record`` the call also keeps the consecutive-refusal state under
+    ``--state-dir`` and, on the second consecutive refusal at the same index
+    state and dirty-path digest, saves a patch backup and appends exactly one
+    MSG. Without it nothing is written anywhere.
+    """
+    clone = Path(args.clone)
+    repo = args.repo
+    state_dir = Path(args.state_dir)
+    state_path = state_dir / REFUSAL_STATE_FILE
+    state = _load_refusal_state(state_path) if args.record else {}
+    dirty = observe_dirty_state(clone)
+
+    for lock, age in find_stale_ref_locks(clone, args.lock_age_s):
+        print(
+            f"lock\tstale ref lock: {lock} age {age}s "
+            f"(converge timeout {args.lock_age_s}s) — if no git process is using "
+            f"{repo}, remove it with: rm -f {lock}"
+        )
+
+    if dirty is None:
+        if args.record and repo in state:
+            del state[repo]
+            _save_refusal_state(state_path, state)
+        return EXIT_OK
+
+    index_iso = _utc(dirty.index_mtime_ns / 1e9)
+    print(f"dirty\t{len(dirty.paths)} dirty paths in {repo}:")
+    for line in dirty.paths:
+        print(f"dirty\t  {line}")
+    print(f"index\tindex mtime {index_iso}")
+
+    owner: str | None = None
+    ledger = Path(args.ledger) if args.ledger else None
+    if ledger is None:
+        print(
+            "owner\towner: unknown — ONEX_LEDGER_PATH is not set, so the ledger was not read"
+        )
+    elif not ledger.is_file():
+        print(f"owner\towner: unknown — no ledger at {ledger}")
+    else:
+        owner = find_owner(ledger, repo, tuple(p[3:] for p in dirty.paths)) or "unowned"
+        print(f"owner\towner: {owner}")
+
+    if not args.record:
+        return EXIT_OK
+
+    previous = state.get(repo, {})
+    same = (
+        previous.get("index_mtime_ns") == dirty.index_mtime_ns
+        and previous.get("digest") == dirty.digest
+    )
+    count = int(previous.get("count", 0)) + 1 if same else 1
+    msg_id = str(previous.get("msg_id", "")) if same else ""
+    print(f"owner\tconsecutive refusals at this index state: {count}")
+
+    if count >= 2 and not msg_id and owner is not None and ledger is not None:
+        try:
+            backup = save_patch_backup(clone, repo, dirty, state_dir / BACKUP_DIRNAME)
+            to = OPERATOR if owner == "unowned" else owner
+            listed = ", ".join(p[3:] for p in dirty.paths[:8]).replace("|", "/")
+            more = len(dirty.paths) - 8
+            tail = f" (+{more} more)" if more > 0 else ""
+            msg_id = append_msg(
+                Path(args.ledger_lock),
+                ledger,
+                f"{MSG_SENDER}-{repo}",
+                to,
+                f"canonical clone {repo} was refused twice by reconcile-host at the same "
+                f"index state ({index_iso}), staged or dirty paths: {listed}{tail}. A patch "
+                f"of the diff is saved at {backup}. Land or park this work; then converge "
+                f"with bash converge-canonical-clone.sh {repo} --execute",
+            )
+            print(f"backup\tpatch backup: {backup}")
+            print(f"msg\tledger MSG {msg_id} to={to}")
+        except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+            print(f"msg\tMSG NOT SENT: {exc}")
+    elif msg_id:
+        print(f"msg\tledger MSG {msg_id} already sent for this index state")
+
+    state[repo] = {
+        "index_mtime_ns": dirty.index_mtime_ns,
+        "digest": dirty.digest,
+        "count": count,
+        "msg_id": msg_id,
+    }
+    _save_refusal_state(state_path, state)
+    return EXIT_OK
+
+
+# --------------------------------------------------------------------------- #
 # Lock targets
 # --------------------------------------------------------------------------- #
 _LOCK_PACKAGE_RE = re.compile(
@@ -308,11 +641,11 @@ def write_floor(
 ) -> Path:
     """Stamp the proven floor.
 
-    Only ever called on a reconcile where every surface the dispatch build is
-    made from verdicted ok (``is_dispatch_premise`` in reconcile-host.sh,
-    OMN-20111), so the floor always describes a state that was once *proven*
-    rather than one that was merely attempted. A failure on any of those
-    surfaces leaves the previous floor in place.
+    Called by reconcile-host.sh on a verified full reconcile (every dispatch
+    premise verdicted ok, ``is_dispatch_premise``, OMN-20111), or by an
+    onboarding run after its delegation passed. The floor describes a build
+    that was proven rather than merely attempted. Failed reconciliation or
+    delegation leaves the previous floor in place.
 
     The emitted shape is a consumed contract, not an implementation detail:
     ``scripts/onex`` parses this in awk with no JSON parser, so the indentation
@@ -413,6 +746,42 @@ def _cmd_floor(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _cmd_floor_from_venv(args: argparse.Namespace) -> int:
+    """Stamp installed metadata after an onboarding delegation has passed."""
+    site_packages = Path(args.site_packages)
+    commit = observe_installed_commit(site_packages, "omnimarket")
+    if not commit:
+        print(
+            "cannot stamp floor: installed omnimarket commit is missing",
+            file=sys.stderr,
+        )
+        return EXIT_FAIL
+    try:
+        targets = lock_targets(Path(args.lock), list(GOVERNED_DISTS))
+    except OSError as exc:
+        print(f"cannot stamp floor: cannot read lock: {exc}", file=sys.stderr)
+        return EXIT_FAIL
+    distributions: dict[str, str] = {}
+    for dist in targets:
+        name = dist.replace("-", "_")
+        version = observe_installed_version(site_packages, name)
+        if not version:
+            print(
+                f"cannot stamp floor: lock-governed {dist} is not installed",
+                file=sys.stderr,
+            )
+            return EXIT_FAIL
+        distributions[name] = version
+    path = write_floor(
+        output=Path(args.output),
+        omni_home=Path(args.omni_home),
+        distributions=distributions,
+        omnimarket_commit=commit,
+    )
+    print(f"floor stamped: {path}")
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="reconcile_verify_movement.py",
@@ -437,6 +806,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--clone", required=True)
     p.set_defaults(func=_cmd_clone_health)
 
+    p = sub.add_parser(
+        "clone-refusal",
+        help="name the owner, backup and stale locks of a refused clone",
+    )
+    p.add_argument("--clone", required=True)
+    p.add_argument("--repo", required=True)
+    p.add_argument("--state-dir", required=True)
+    p.add_argument("--ledger", default=None)
+    p.add_argument("--ledger-lock", default=None)
+    p.add_argument("--lock-age-s", type=int, required=True)
+    p.add_argument(
+        "--record",
+        action="store_true",
+        help="keep the refusal count and send the MSG (a repair run; never --check)",
+    )
+    p.set_defaults(func=_cmd_clone_refusal)
+
     p = sub.add_parser("lock-targets", help="target versions from a uv.lock")
     p.add_argument("--lock", required=True)
     p.add_argument("--dist", action="append", default=[])
@@ -448,6 +834,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--distribution", action="append", default=[])
     p.add_argument("--omnimarket-commit", default=None)
     p.set_defaults(func=_cmd_floor)
+
+    p = sub.add_parser(
+        "floor-from-venv", help="stamp installed build after onboarding passed"
+    )
+    p.add_argument("--site-packages", required=True)
+    p.add_argument("--lock", required=True)
+    p.add_argument("--omni-home", required=True)
+    p.add_argument("--output", required=True)
+    p.set_defaults(func=_cmd_floor_from_venv)
 
     return parser
 

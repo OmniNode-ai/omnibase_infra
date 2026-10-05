@@ -492,7 +492,8 @@ INFRA_NODES_PATH = "src/omnibase_infra/nodes/"
 #                     (OMN-17896). The drain now surfaces a record it could not
 #                     parse as a typed ModelUnparseableDlqRecord instead of
 #                     skipping it, so the generator's yield type and the
-#                     handler's parameter are genuinely two-shaped. Declared as
+#                     handler's parameter share the drain shapes (including
+#                     already-quarantined gateway records, OMN-20318). Declared as
 #                     a single `type` alias used at both seams rather than the
 #                     union spelled twice, so this ratchet moves by exactly one.
 INFRA_MAX_UNIONS = 155

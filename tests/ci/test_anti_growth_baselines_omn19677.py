@@ -47,13 +47,6 @@ BASELINES = (
         "anti-growth-validator-requirements-baseline",
     ),
     (
-        "runtime-profiles-allowlist-oneway",
-        "Runtime Profiles Allowlist One-way (OMN-19677)",
-        "config/validation/runtime_profiles_allowlist.yaml",
-        "yaml-list:allowlist",
-        "anti-growth-runtime-profiles-allowlist",
-    ),
-    (
         "skip-count-baseline-oneway",
         "Skip Count Baseline One-way (OMN-19677)",
         "config/skip_count_baseline.yaml",

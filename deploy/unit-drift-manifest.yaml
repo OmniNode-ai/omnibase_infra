@@ -108,3 +108,13 @@ units:
       - dev-200
       - '42098'
       - '{home}/onex-lanes/dev-200'
+  - name: onex-rung-eval.service
+    tracked: deploy/rung-eval/onex-rung-eval.service
+    installed: ~/.config/systemd/user/onex-rung-eval.service
+    hosts:
+      - omnipc2
+  - name: onex-rung-eval.timer
+    tracked: deploy/rung-eval/onex-rung-eval.timer
+    installed: ~/.config/systemd/user/onex-rung-eval.timer
+    hosts:
+      - omnipc2

@@ -392,7 +392,9 @@ def test_ci_bus_topics_are_exactly_the_ci_bus_set(ci_bus: dict[str, Any]) -> Non
     THE FIVE CI NAMES. Four are the topics the thin CI publishers write to; the fifth
     is consumed by the rebuild trigger when it waits for a rebuild, so it rides the
     same broker and is provisioned with them. Eleven lab-work bus topics cover
-    lab-work units, host capacity, focused test runs and push validation (OMN-20213).
+    lab-work units, host capacity, focused test runs and push validation (OMN-20213),
+    and two more carry merge events and each host's canonical-clone refresh receipt
+    (OMN-20496).
     """
     expected = {
         "onex.cmd.omnimarket.occ-autobind.v1",  # onex-topic-allow: OMN-18691 CI-bus provisioning set
@@ -411,6 +413,8 @@ def test_ci_bus_topics_are_exactly_the_ci_bus_set(ci_bus: dict[str, Any]) -> Non
         "onex.evt.omnimarket.push-validation-completed.v1",  # onex-topic-allow: OMN-20213
         "onex.evt.omnimarket.push-validation-failed.v1",  # onex-topic-allow: OMN-20213
         "onex.dlq.omnimarket.push-validation.v1",  # onex-topic-allow: OMN-20213
+        "onex.evt.omnimarket.repo-merged.v1",  # onex-topic-allow: OMN-20496
+        "onex.evt.omnimarket.canonical-clone-refreshed.v1",  # onex-topic-allow: OMN-20496
     }
 
     raw = CI_BUS_COMPOSE.read_text(encoding="utf-8")
@@ -425,7 +429,7 @@ def test_ci_bus_topics_are_exactly_the_ci_bus_set(ci_bus: dict[str, Any]) -> Non
     )
 
     # Cross-check the one name this repo owns a canonical constant for. The other
-    # fifteen are declared in omnimarket's topic registry, which this repo does not
+    # seventeen are declared in omnimarket's topic registry, which this repo does not
     # import -- stated rather than left as an apparent omission.
     from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_GITHUB_PR_MERGED
 
@@ -466,7 +470,7 @@ def test_ci_bus_labwork_principal_is_scoped_not_superuser(
     lab_topics = re.search(r'LAB_TOPICS="([^"]+)"', command)
     assert lab_topics is not None, "the lab-work ACL grant set must be explicit"
     granted = lab_topics.group(1).split()
-    assert len(granted) == 11
+    assert len(granted) == 13
     assert '--resource-pattern-type literal --topic "$$t"' in command
     topics_command = "\n".join(services["ci-bus-topics"]["command"])
     declared = set(re.findall(r"onex\.[a-z]+\.[a-z0-9.-]+\.v\d+", topics_command))

@@ -28,7 +28,7 @@ repos:
   # .onex_ratchets/canonical_file_shape_baseline.txt. CI runs the same module
   # at the same commit (job "Canonical File Shape (OMN-20304)").
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 33a8eb68b0f5f0e22fd8a574abd29caecea0d5fc
+    rev: f50d00fc7918d0b12ccd0d3497160325e32e7ac5
     hooks:
       - id: canonical-file-shape
         require_serial: true
@@ -61,12 +61,11 @@ repos:
       - id: check-receipt-honesty
         require_serial: true
       # OMN-13026: bare AsyncMock/MagicMock without spec=/spec_set= on
-      # EventBus/transport/kafka surfaces. Ratchet: existing violations frozen
-      # in config/validation/transport_mock_baseline.yaml (218 violations, 63 files).
-      # New violations blocked. Drain tracked by OMN-13026 per-site tickets.
+      # EventBus/transport/kafka surfaces. OMN-20562 drained the last baselined
+      # sites and inline suppressions and deleted the baseline: a plain check
+      # with no exception list, so every violation blocks.
       - id: transport-mock-lint
         require_serial: true
-        args: [--baseline, config/validation/transport_mock_baseline.yaml]
   # Canonical Inference Gate (OMN-13249, fleet rollout of OMN-13219).
   # Rejects NEW non-canonical model-inference surfaces: shelled model CLIs
   # (codex/claude/gemini/opencode) and *_MODEL/*_PROVIDER env reads. Structural
@@ -170,9 +169,6 @@ repos:
       - id: no-bare-feature-flags
         require_serial: true
         # YAML formatting (standard across ecosystem)
-      - id: no-untracked-todos
-        require_serial: true
-        stages: [pre-commit]
   - repo: https://github.com/google/yamlfmt
     rev: v0.17.2
     hooks:
@@ -1218,17 +1214,14 @@ repos:
       #     omnibase_core REGISTERED_RUNTIME_PROFILES registry)
       #   - runtime_profile_no_consumer_lane (subscribing REDUCER/EFFECT names
       #     no consumer-attached profile, so subscriptions are never drained)
-      # Pre-existing violators are frozen in validation/runtime_profiles_allowlist.yaml
-      # (discovered by repo-root walk; drain tracked by OMN-12982).
+      # OMN-20562 emptied and deleted the allowlist: this is a plain check, and
+      # every contract under src/ must pass with no exception list.
       - id: onex-validate-runtime-profiles
         name: Validate runtime_profiles on node contracts (OMN-12957)
-        # Reads the canonical baseline allowlist at config/validation/ — the same
-        # path the required CI gate (.github/workflows/validator-runtime-profiles.yml)
-        # passes explicitly. The bare module CLI auto-discovers a different
-        # repo-root path (validation/) that does not exist here, so the hook is
-        # pinned to the canonical config/validation path to match CI (OMN-13247).
+        # Same invocation as the required CI job (runtime-profiles-validator in
+        # ci.yml), with no allowlist argument (OMN-20562).
         entry: >-
-          uv run --frozen python -c "import sys; from pathlib import Path; from omnibase_core.validation.validator_runtime_profiles import ValidatorRuntimeProfiles; r = ValidatorRuntimeProfiles(allowlist_path=Path('config/validation/runtime_profiles_allowlist.yaml')).validate(Path('src')); [print(f'[{i.severity.value}] {i.file_path}:{i.line_number}: {i.message}') for i in r.issues]; sys.exit(0 if r.is_valid else 1)"
+          uv run --frozen python -c "import sys; from pathlib import Path; from omnibase_core.validation.validator_runtime_profiles import ValidatorRuntimeProfiles; r = ValidatorRuntimeProfiles().validate(Path('src')); [print(f'[{i.severity.value}] {i.file_path}:{i.line_number}: {i.message}') for i in r.issues]; sys.exit(0 if r.is_valid else 1)"
         language: system
         files: 'contract\.yaml$'
         pass_filenames: false
@@ -1755,6 +1748,17 @@ repos:
         types: [python]
         exclude: ^tests/|^examples/|^scripts/
         stages: [pre-commit]
+      # Require TODO/FIXME/HACK comments to carry a ticket reference (OMN-20068,
+      # OCC retirement S8). Runs omnibase_core's own handler, which owns this
+      # behaviour; the hook of the same id used to be pulled from the
+      # onex_change_control repo block above.
+      - id: no-untracked-todos
+        name: No untracked TODO/FIXME/HACK comments
+        language: system
+        entry: uv run --frozen python -m omnibase_core.handlers.handler_todo_format
+        require_serial: true
+        types: [python]
+        stages: [pre-commit]
       # OMN-9125: Strict-gate ordering — gate PRs must have compliance PRs land first
       - id: check-strict-gate-ordering
         name: Strict-gate ordering check
@@ -2190,12 +2194,6 @@ repos:
         name: Validator requirements baseline can only shrink (OMN-19677)
         args: [--baseline, architecture-handshakes/validator-requirements-baseline.yaml, --parser, 'yaml-list:gaps', --base-ref, origin/dev]
         files: ^architecture-handshakes/validator-requirements-baseline\.yaml$
-      - id: anti-growth-baseline
-        require_serial: true
-        alias: anti-growth-runtime-profiles-allowlist
-        name: Runtime profiles allowlist baseline can only shrink (OMN-19677)
-        args: [--baseline, config/validation/runtime_profiles_allowlist.yaml, --parser, 'yaml-list:allowlist', --base-ref, origin/dev]
-        files: ^config/validation/runtime_profiles_allowlist\.yaml$
       - id: anti-growth-baseline
         require_serial: true
         alias: anti-growth-skip-count-baseline

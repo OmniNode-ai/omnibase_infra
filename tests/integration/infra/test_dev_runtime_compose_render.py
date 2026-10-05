@@ -937,3 +937,42 @@ def test_the_base_broker_probe_is_unchanged_for_every_other_lane() -> None:
         assert "onex-broker-readiness-probe" not in str(target), (
             "the OMN-18789 probe leaked into the base every other lane merges"
         )
+
+
+_RUNTIME_BINDING_TARGET = "/etc/onex/projection-runtime-binding.yaml"
+
+
+def _binding_mount_source(service: dict[str, Any]) -> Path | None:
+    for mount in service.get("volumes", []):
+        if isinstance(mount, dict) and mount.get("target") == _RUNTIME_BINDING_TARGET:
+            return Path(mount["source"])
+    return None
+
+
+@pytest.mark.integration
+def test_dev_lane_runtime_effects_carries_no_projection_binding() -> None:
+    """OMN-17427: the OMN-20159 read binding also selects the delegation claim store.
+    node_delegate_skill_orchestrator then INSERTs as role_omnidash, which lacks
+    USAGE on omninode_internal and cannot write delegate_skill_command_claims.
+    Postgres skips the pinned search_path schema, so every delegation fails with
+    UndefinedTable: relation "delegate_skill_command_claims" does not exist.
+    Chain-canary 37043007992 failed with verdict projection_row_absent.
+    Change this test when the claim store resolves a write principal separately
+    from the /skill read binding (OMN-20159).
+    """
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+    effects = services["runtime-effects"]
+    assert "OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY" not in effects["environment"]
+    assert _binding_mount_source(effects) is None
+
+    # Positive control: the helper finds another service's binding at the target.
+    assert any(
+        _binding_mount_source(service) is not None
+        for name, service in services.items()
+        if name != "runtime-effects"
+    ), "no other dev-lane binding found; the helper check proves nothing"

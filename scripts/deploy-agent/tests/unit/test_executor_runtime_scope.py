@@ -275,6 +275,8 @@ class TestCoreAndFullScopeComposeUp:
         def fake_run(
             cmd: list[str], timeout: int, **kwargs: object
         ) -> subprocess.CompletedProcess:
+            if cmd[:1] == ["git"] and "rev-parse" in cmd:
+                return _ok()
             captured_cmds.append(cmd)
             if "SELECT to_regclass('public.delegation_events') IS NOT NULL" in cmd:
                 return subprocess.CompletedProcess(

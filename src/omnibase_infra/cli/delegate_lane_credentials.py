@@ -57,6 +57,7 @@ __all__ = [
     "ENV_SASL_USERNAME",
     "DelegateLaneCredentialError",
     "resolve_lane_client_transport_for",
+    "sasl_refusal_remediation",
 ]
 
 #: The two environment variables the fleet's containers and CI runners already
@@ -172,3 +173,31 @@ def resolve_lane_client_transport_for(
         "listener."
     )
     raise DelegateLaneCredentialError(message)
+
+
+def sasl_refusal_remediation(*, lane: str | None) -> str:
+    """The operator's next step when a broker refuses this machine's SASL login.
+
+    OMN-19452. The probe that hits the refusal knows the broker and the
+    principal; only the caller knows which lane the run selected, so the lane
+    is taken here. ``None`` means the run stated a broker address directly and
+    no stored lane identity could have applied.
+
+    The text names the two things that fix a refused login: the command that
+    stores a working identity for a lane, and the ``--lane`` flag that selects
+    it. It is carried in its own typed field on the written refusal rather
+    than inside the error message, because the message passes through the
+    receipt sanitizer and a command containing ``auth`` is redacted by it.
+    """
+    if lane is None:
+        return (
+            "No lane was selected, so no stored lane identity was used. Store "
+            "one with 'onex auth lane-login --lane <lane> --sasl-username "
+            "<principal> --sasl-password-stdin' and run again with "
+            "--lane <lane>."
+        )
+    return (
+        f"Store a working identity for lane '{lane}' with 'onex auth "
+        f"lane-login --lane {lane} --sasl-username <principal> "
+        "--sasl-password-stdin', or select a different lane with --lane."
+    )

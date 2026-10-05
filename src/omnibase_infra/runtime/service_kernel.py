@@ -74,6 +74,7 @@ import signal
 import sys
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from datetime import UTC, datetime
 from importlib.metadata import version as get_package_version
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -93,6 +94,9 @@ if TYPE_CHECKING:
     )
     from omnibase_infra.event_bus.model_topic_readiness_config import (
         ModelTopicReadinessConfig,
+    )
+    from omnibase_infra.protocols.protocol_runtime_log_producer import (
+        ProtocolRuntimeLogProducer,
     )
 from pydantic import ValidationError
 
@@ -241,9 +245,9 @@ TIER0_RUNTIME_CONFIG_RESOURCE = "tier0_runtime_config.yaml"
 
 # OMN-19193: where a workspace keeps its own tier-1 (self-hosted) runtime
 # contracts directory, relative to the workspace root; its
-# runtime/runtime_config.yaml is what an embedded runtime on that workspace
-# resolves once no bootstrap pointer is set -- the tier-1 overlay the OMN-17304
-# ruling composes on top of tier-0. The product ships only this convention.
+# runtime/runtime_config.yaml is the working-tree fallback after the copy
+# materialized from origin/main (OMN-19212), once no bootstrap pointer or
+# developer lane binding is set. The product ships only this convention.
 # The VALUES (which transport, which lane) belong to the workspace that
 # declares them and are never shipped in this package: lab configuration is
 # not hardcoded in the product every customer runs (OMN-19184).
@@ -297,6 +301,29 @@ def _runtime_log_bridge_allowlist() -> list[str]:
         ",".join(DEFAULT_RUNTIME_LOG_BRIDGE_ALLOWLIST),
     )
     return [name.strip() for name in allowlist_raw.split(",") if name.strip()]
+
+
+class EventBusRuntimeLogProducer:
+    """Bridge producer that publishes through the kernel's selected event bus.
+
+    A runtime booted natively on the in-memory bus has no broker and no Kafka
+    producer (OMN-19992), so ``RuntimeLogEventBridge`` publishes through the bus
+    the kernel already selected. The bus lifecycle belongs to the kernel:
+    ``stop`` closes only this producer, and a send after it is refused rather
+    than published onto a bus that may be tearing down.
+    """
+
+    def __init__(self, event_bus: EventBusInmemory | EventBusKafka) -> None:
+        self._event_bus = event_bus
+        self._stopped = False
+
+    async def send(self, topic: str, *, value: bytes) -> object:
+        if self._stopped:
+            raise RuntimeError("runtime log producer is stopped")
+        return await self._event_bus.publish(topic, None, value)
+
+    async def stop(self) -> None:
+        self._stopped = True
 
 
 async def _create_runtime_log_bridge_producer(
@@ -1323,15 +1350,18 @@ def resolve_embedded_runtime_config(
        passes the value in, and this function still decides. It outranks the
        workspace config because it is one person's choice for their own
        machine, where the workspace config is shared by every checkout.
-    2. With no pointer and no binding, a bound WORKSPACE root answers with its tier-1
-       (self-hosted) runtime config,
-       ``<workspace_root>/config/onex/runtime/runtime_config.yaml``
-       (OMN-19193) -- the tier-1 overlay the OMN-17304 ruling composes on top
-       of tier-0. The file belongs to the workspace, never to this package. A
-       bound root that declares none is REFUSED rather than answered with
-       tier-0: binding a workspace root is a claim to be a registry workspace,
-       and quietly running one on the in-memory bus is how its delegation
-       evidence stranded in local storage.
+    2. With no pointer and no binding, a bound WORKSPACE root answers with its
+       tier-1 (self-hosted) runtime config materialized from ``origin/main``
+       under ``<workspace_root>/.onex_state/workspace-runtime/runtime/``
+       (OMN-19212). The SHA and check time identify the source; stale copies
+       still answer with a STALE label. Without an attributable copy, the
+       working-tree ``<workspace_root>/config/onex/runtime/runtime_config.yaml``
+       answers (OMN-19193). This is the tier-1 overlay the OMN-17304 ruling
+       composes on top of tier-0. The file belongs to the workspace, never to
+       this package. A bound root with neither copy is REFUSED rather than
+       answered with tier-0: binding a workspace root is a claim to be a
+       registry workspace, and quietly running one on the in-memory bus is
+       how its delegation evidence stranded in local storage.
     3. With neither, the SHIPPED tier-0 default runtime configuration answers
        (:func:`_load_tier0_runtime_config`) — in-memory bus, local profile.
 
@@ -1383,6 +1413,29 @@ def resolve_embedded_runtime_config(
             f"the shipped tier-0 default runtime config"
         )
     if workspace_root is not None:
+        from omnibase_infra.handlers.handler_workspace_runtime_config_materializer import (
+            MATERIALIZED_CONTRACTS_RELATIVE_PATH,
+            SOURCE_REF,
+            HandlerWorkspaceRuntimeConfigMaterializer,
+        )
+
+        copy = HandlerWorkspaceRuntimeConfigMaterializer().read(workspace_root)
+        if copy is not None:
+            config = load_runtime_config(
+                copy.contracts_dir, correlation_id=correlation_id
+            )
+            provenance = (
+                f"workspace tier-1 runtime config materialised from "
+                f"{SOURCE_REF}@{copy.sha} at {copy.materialized_at.isoformat()} "
+                f"({copy.config_path})"
+            )
+            if copy.stale:
+                age = datetime.now(UTC) - copy.materialized_at
+                provenance = (
+                    f"STALE {provenance}; age {age}; origin/main may have moved; "
+                    f"the materialiser refreshes it on every default `onex delegate` run"
+                )
+            return config, provenance
         workspace_contracts = workspace_root / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
         workspace_config = workspace_contracts / DEFAULT_RUNTIME_CONFIG
         if workspace_config.is_file():
@@ -1390,14 +1443,22 @@ def resolve_embedded_runtime_config(
                 workspace_contracts, correlation_id=correlation_id
             )
             return config, f"workspace tier-1 runtime config at {workspace_config}"
+        materialized_config = (
+            workspace_root
+            / MATERIALIZED_CONTRACTS_RELATIVE_PATH
+            / DEFAULT_RUNTIME_CONFIG
+        )
         raise ProtocolConfigurationError(
-            f"workspace root {workspace_root} is bound but declares no runtime "
+            f"workspace root {workspace_root} is bound but has no materialised "
+            f"runtime config at {materialized_config} (the copy comes from "
+            f"{SOURCE_REF} of the workspace) and declares no working-tree runtime "
             f"config at {workspace_config}. A bound workspace root is a "
             f"registry workspace, and its transport comes from its own tier-1 "
             f"config; it is never answered with the shipped in-memory default, "
             f"which would strand the workspace's evidence in local storage "
-            f"(OMN-19193). Declare the workspace's runtime config there, or "
-            f"select a transport explicitly (onex delegate --bus inmemory runs "
+            f"(OMN-19193). Run `onex delegate` again so the materialiser can "
+            f"refresh it / declare the config in the workspace, or select a "
+            f"transport explicitly (onex delegate --bus inmemory runs "
             f"offline on purpose).",
             context=ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
@@ -2128,14 +2189,22 @@ async def bootstrap() -> int:
                     exc_info=True,
                 )
 
-        # 3.6. Initialize RuntimeLogEventBridge if enabled (OMN-5525)
+        # 3.6. Initialize RuntimeLogEventBridge if enabled (OMN-5525, OMN-19992)
         # Captures ERROR/WARNING log records from allowlisted loggers and emits
-        # them as structured Kafka events. Requires a dedicated producer.
-        if use_kafka and RuntimeLogEventBridge.is_enabled() and kafka_bootstrap_servers:
+        # them as structured runtime-error events. The Kafka transport gets a
+        # dedicated producer; a native runtime on the in-memory bus publishes
+        # through the bus it selected, so both modes feed the same topic.
+        if RuntimeLogEventBridge.is_enabled() and (
+            kafka_bootstrap_servers or not use_kafka
+        ):
             try:
-                _bridge_producer = await _create_runtime_log_bridge_producer(
-                    kafka_bootstrap_servers
-                )
+                _bridge_producer: ProtocolRuntimeLogProducer
+                if use_kafka and kafka_bootstrap_servers:
+                    _bridge_producer = await _create_runtime_log_bridge_producer(
+                        kafka_bootstrap_servers
+                    )
+                else:
+                    _bridge_producer = EventBusRuntimeLogProducer(event_bus)
 
                 runtime_log_bridge = RuntimeLogEventBridge(
                     producer=_bridge_producer,
@@ -2149,8 +2218,9 @@ async def bootstrap() -> int:
                 await runtime_log_bridge.start()
 
                 logger.info(
-                    "RuntimeLogEventBridge started (loggers=%s, correlation_id=%s)",
+                    "RuntimeLogEventBridge started (loggers=%s, bus=%s, correlation_id=%s)",
                     allowlist,
+                    event_bus_type,
                     correlation_id,
                 )
             except Exception:  # noqa: BLE001 — best-effort, never blocks startup

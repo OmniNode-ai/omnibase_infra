@@ -1,6 +1,6 @@
 name: 'Resolve the lab lane a probe grades'
 description: >-
-  OMN-19894. Walk the deployment overlay's ordered lane list (the repository variable LAB_LANES_JSON, cheapest first) and pick the first lane whose required surfaces all answer GET <url>/health. Exports LANE_NAME and LANE_<FIELD> for that lane. No lane answering is RED naming every lane tried, never a skip and never a default. See resolve_lab_lane.py beside this file.
+  OMN-19894. Walk the deployment overlay's ordered lane list (the repository variable LAB_LANES_JSON, cheapest first) and pick the first lane whose required surfaces all answer GET <url>/health. Exports LANE_NAME and LANE_<FIELD> for that lane. No lane answering is RED naming every lane tried, never a skip and never a default. See resolve_lab_lane.py beside this file. An optional deploy wait polls readable busy deploy agents and exports LANE_WAITED_SECONDS on success (OMN-19811).
 author: 'OmniNode'
 inputs:
   lanes-json:
@@ -13,6 +13,10 @@ inputs:
     description: 'Optional space-separated field=value pairs a lane must carry to be eligible.'
     required: false
     default: ''
+  deploy-wait-seconds:
+    description: 'Seconds to wait while eligible lanes report a deploy in progress; 0 keeps single-shot resolution.'
+    required: false
+    default: '0'
 outputs:
   name:
     description: 'The chosen lane name.'
@@ -33,4 +37,5 @@ runs:
         LAB_LANES_JSON: ${{ inputs.lanes-json }}
         LANE_REQUIRE: ${{ inputs.require }}
         LANE_MATCH: ${{ inputs.match }}
+        LANE_DEPLOY_WAIT_SECONDS: ${{ inputs.deploy-wait-seconds }}
       run: python3 "${GITHUB_ACTION_PATH}/resolve_lab_lane.py"

@@ -8,6 +8,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from omnibase_infra.runtime.models.model_secret_namespace_rule import (
+    ModelSecretNamespaceRule,
+)
+
 # OMN-18114: `tenant-projection` joins the three shared kernels as a fourth
 # runtime process a lane may declare. It is OPTIONAL per lane (see
 # `ModelRuntimeProfilePolicy`) because it is a lab-lane carrier, not a member of
@@ -45,6 +49,18 @@ class ModelRuntimeProcessPolicy(BaseModel):
     # stability-test/prod overlays -- so a recreate that omits the policy env
     # fails loudly instead of dropping the worker with no signal.
     replicas: int = Field(default=1, ge=1)
+    # OMN-20533: store-backed namespace rules that only THIS process resolves,
+    # on top of the profile's own mappings and namespaces. A BYOK tenant ref
+    # is resolved at the provider-call boundary, which is runtime-effects, and
+    # an Infisical-backed rule makes the process that declares it demand a
+    # store identity at boot (omnibase_infra handler_wiring
+    # build_lane_infisical_handler). Declaring the rule on the profile would
+    # put that demand on main, worker and tenant-projection too, none of which
+    # reads a tenant credential. The renderer emits these as a separate
+    # `{PROFILE}_RUNTIME_{PROCESS}_STORE_SECRET_RESOLVER_CONFIG_JSON` so the
+    # profile-level config stays the house-only one every lane that borrows
+    # this profile keeps.
+    secret_resolver_namespaces: tuple[ModelSecretNamespaceRule, ...] = ()
 
     @field_validator("capabilities")
     @classmethod

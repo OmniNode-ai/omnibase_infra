@@ -45,6 +45,16 @@ class ModelDispatchDeadlineStatus(BaseModel):
             "projection, a worker thread and a projection gate slot."
         ),
     )
+    degrading_orphans: int = Field(
+        ...,
+        ge=0,
+        description=(
+            "Abandoned dispatches still inside the degraded grace window "
+            "(consumer_dispatch_orphan_degraded_grace_seconds). Older ones stay "
+            "counted in orphaned_dispatches and toward the limit, but no "
+            "longer degrade the bus (OMN-20464)."
+        ),
+    )
     deadline_expiries_total: int = Field(
         ...,
         ge=0,
@@ -65,10 +75,14 @@ class ModelDispatchDeadlineStatus(BaseModel):
 
     @property
     def status(self) -> Literal["healthy", "degraded", "unhealthy"]:
-        """``unhealthy`` at the limit, ``degraded`` below it, else ``healthy``."""
+        """``unhealthy`` at the limit, ``degraded`` while one is within grace.
+
+        The limit counts every still-running orphan, however old: they hold
+        gate slots. Only an orphan inside its grace window degrades (OMN-20464).
+        """
         if self.orphaned_dispatches >= self.orphan_limit:
             return "unhealthy"
-        if self.orphaned_dispatches > 0:
+        if self.degrading_orphans > 0:
             return "degraded"
         return "healthy"
 
