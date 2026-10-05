@@ -52,15 +52,19 @@ from deploy_agent.executor import (
     REPO_DIR,
     SCOPE_BUNDLES,
     DeployExecutor,
+    DeployRolledBackError,
     DevLaneMigrationPreflightError,
     EnumInstancePhase,
+    VerificationFailedError,
     active_dev_instance,
     assert_prod_request_has_stability_digest,
+    capture_rollback_point,
     lane_config_for,
     lane_runs_phase,
     read_applied_migration_fingerprint,
     read_checkout_migration_fingerprint,
     resolve_prod_target_service,
+    restore_rollback_point,
     select_dev_instance,
 )
 from deploy_agent.health import create_health_app
@@ -1324,6 +1328,12 @@ class DeployAgent:
 
                 # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer
                 # cache. prod pulls the pinned digest instead of rebuilding from a ref.
+                rollback_point = (
+                    capture_rollback_point(self.executor, cmd.runtime_lane)
+                    if cmd.scope in (Scope.RUNTIME, Scope.FULL)
+                    and cmd.runtime_lane != EnumRuntimeLane.PROD
+                    else None
+                )
                 services_restarted = self.executor.rebuild_scope(
                     cmd.scope,
                     cmd.services,
@@ -1348,9 +1358,19 @@ class DeployAgent:
                         service=resolve_prod_target_service(cmd),
                     )
                 else:
-                    health_checks = self.executor.verify(
-                        on_phase_update=on_phase_update, lane=cmd.runtime_lane
-                    )
+                    try:
+                        health_checks = self.executor.verify(
+                            on_phase_update=on_phase_update, lane=cmd.runtime_lane
+                        )
+                    except VerificationFailedError as exc:
+                        if rollback_point is not None:
+                            outcome = restore_rollback_point(
+                                self.executor, rollback_point, on_phase_update
+                            )
+                            raise DeployRolledBackError(
+                                exc, outcome, rollback_point
+                            ) from exc
+                        raise
 
                 # Complete -- AND SAY WHAT IS STILL RUNNING (OMN-18636 AC5).
                 #
