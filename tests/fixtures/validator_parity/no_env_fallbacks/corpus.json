@@ -1,0 +1,138 @@
+[
+  {
+    "path": "src/a_environ_get.py",
+    "source": "host = os.environ.get(\"HOST\", \"localhost\")\n"
+  },
+  {
+    "path": "src/a_environ_http.py",
+    "source": "url = os.environ.get(\"URL\", \"http://localhost:8080\")\n"
+  },
+  {
+    "path": "src/a_environ_clean.py",
+    "source": "host = os.environ[\"HOST\"]\n"
+  },
+  {
+    "path": "src/a_exempt.py",
+    "source": "host = os.environ.get(\"HOST\", \"localhost\")  # fallback-ok: test harness\n"
+  },
+  {
+    "path": "src/b_getenv.py",
+    "source": "db = os.getenv(\"DB_HOST\", \"localhost\")\n"
+  },
+  {
+    "path": "src/b_getenv_redis.py",
+    "source": "r = os.getenv(\"R\", \"redis://localhost:6379\")\n"
+  },
+  {
+    "path": "src/b_cloud_bus.py",
+    "source": "b = os.getenv(\"B\", \"localhost:9092\")  # cloud-bus-ok: dev bus\n"
+  },
+  {
+    "path": "src/b_omn7227.py",
+    "source": "b = os.getenv(\"B\", \"localhost:9092\")  # OMN-7227-exempt\n"
+  },
+  {
+    "path": "src/c_field_default.py",
+    "source": "host: str = Field(default=\"localhost\")\n"
+  },
+  {
+    "path": "src/c_param_default.py",
+    "source": "def f(host: str = \"localhost\"):\n    pass\n"
+  },
+  {
+    "path": "src/c_clean.py",
+    "source": "host: str = Field(...)\n"
+  },
+  {
+    "path": "src/d_private_ip_getenv.py",
+    "source": "h = os.getenv(\"H\", \"192.168.1.5\")\n"
+  },
+  {
+    "path": "src/d_private_ip_default.py",
+    "source": "x: str = \"192.168.86.201\"\n"
+  },
+  {
+    "path": "src/e_bootstrap.py",
+    "source": "p = Producer(bootstrap_servers=\"localhost:9092\")\n"
+  },
+  {
+    "path": "src/e_bootstrap_ip.py",
+    "source": "p = Producer(bootstrap_servers=\"192.168.1.9:9092\")\n"
+  },
+  {
+    "path": "src/e_bootstrap_env.py",
+    "source": "p = Producer(bootstrap_servers=os.environ[\"B\"])\n"
+  },
+  {
+    "path": "src/f_docstring.py",
+    "source": "\"\"\"\nExample: os.environ.get(\"HOST\", \"localhost\")\n\"\"\"\nx = 1\n"
+  },
+  {
+    "path": "src/f_docstring_oneline.py",
+    "source": "\"\"\"os.environ.get(\"HOST\", \"localhost\")\"\"\"\nx = 1\n"
+  },
+  {
+    "path": "src/f_comment.py",
+    "source": "# host = os.environ.get(\"HOST\", \"localhost\")\n"
+  },
+  {
+    "path": "src/f_after_docstring.py",
+    "source": "\"\"\"doc\"\"\"\nhost = os.environ.get(\"HOST\", \"localhost\")\n"
+  },
+  {
+    "path": "src/f_embedded_triple.py",
+    "source": "x = \"\"\"a\"\"\"; host = os.environ.get(\"HOST\", \"localhost\")\n"
+  },
+  {
+    "path": "src/f_leading_triple_tail.py",
+    "source": "\"\"\"doc\"\"\" + os.environ.get(\"HOST\", \"localhost\")\n"
+  },
+  {
+    "path": "scripts/g_shell.sh",
+    "source": "HOST=${HOST:-localhost}\n"
+  },
+  {
+    "path": "scripts/g_shell_http.sh",
+    "source": "URL=${URL:-http://localhost:8080}\n"
+  },
+  {
+    "path": "scripts/g_shell_ip.sh",
+    "source": "H=${H:-192.168.86.201}\n"
+  },
+  {
+    "path": "scripts/g_shell_clean.sh",
+    "source": "HOST=\"${HOST:?must be set}\"\n"
+  },
+  {
+    "path": "scripts/g_shell_exempt.sh",
+    "source": "HOST=${HOST:-localhost}  # fallback-ok: dev\n"
+  },
+  {
+    "path": "scripts/g_shell_comment.sh",
+    "source": "# HOST=${HOST:-localhost}\n"
+  },
+  {
+    "path": "scripts/g_bash.bash",
+    "source": "HOST=${HOST:-127.0.0.1}\n"
+  },
+  {
+    "path": "tests/skipped_dir.py",
+    "source": "host = os.environ.get(\"HOST\", \"localhost\")\n"
+  },
+  {
+    "path": "src/pkg/tests/nested_skip.py",
+    "source": "host = os.environ.get(\"HOST\", \"localhost\")\n"
+  },
+  {
+    "path": "src/h_not_scanned.txt",
+    "source": "host = os.environ.get(\"HOST\", \"localhost\")\n"
+  },
+  {
+    "path": "src/i_multi.py",
+    "source": "a = os.getenv(\"A\", \"localhost\")\nb = os.getenv(\"B\", \"ok\")\n"
+  },
+  {
+    "path": "src/j_two_hits.py",
+    "source": "a = os.getenv(\"A\", \"localhost\")\nb = os.getenv(\"B\", \"127.0.0.1\")\n"
+  }
+]
