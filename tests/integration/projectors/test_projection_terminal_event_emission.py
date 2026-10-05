@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
@@ -45,6 +46,79 @@ _PATCH_ENVIRON_GET = "omnibase_infra.runtime.auto_wiring.handler_wiring.os.envir
 TERMINAL_TOPIC = "onex.evt.omnimarket.projection-delegation-applied.v1"
 DB_TARGET = projection_database_target("delegation_events")
 SUBSCRIBE_TOPICS = ("onex.evt.omniclaude.task-delegated.v1",)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_live_delegation_terminal_readback() -> None:
+    """Read a recent terminal from a deployed broker without producing or committing.
+
+    Set PROJECTION_TERMINAL_READBACK_BOOTSTRAP_SERVERS and the usual KAFKA auth
+    variables to opt in. A configured broker must contain a terminal emitted
+    within the last day; unavailable infrastructure or stale records fail.
+    """
+    from aiokafka import AIOKafkaConsumer
+    from aiokafka.admin import AIOKafkaAdminClient
+
+    from omnibase_infra.event_bus.kafka_auth import (
+        build_aiokafka_auth_kwargs_from_env,
+    )
+
+    bootstrap = os.environ.get("PROJECTION_TERMINAL_READBACK_BOOTSTRAP_SERVERS")
+    if not bootstrap:
+        pytest.skip("PROJECTION_TERMINAL_READBACK_BOOTSTRAP_SERVERS is not configured")
+
+    auth = build_aiokafka_auth_kwargs_from_env()
+    admin = AIOKafkaAdminClient(bootstrap_servers=bootstrap, **auth)
+    try:
+        await asyncio.wait_for(admin.start(), timeout=30)
+        assert TERMINAL_TOPIC in await admin.list_topics(), (
+            "The deployed terminal topic must already exist"
+        )
+    finally:
+        await admin.close()
+
+    consumer = AIOKafkaConsumer(
+        TERMINAL_TOPIC,
+        bootstrap_servers=bootstrap,
+        group_id=None,
+        enable_auto_commit=False,
+        request_timeout_ms=10000,
+        **auth,
+    )
+    try:
+        await asyncio.wait_for(consumer.start(), timeout=30)
+        partitions = consumer.assignment()
+        assert partitions, "The deployed terminal topic must have partitions"
+        ends = await consumer.end_offsets(partitions)
+        assert any(ends.values()), "The deployed terminal topic must contain records"
+        for partition, end in ends.items():
+            consumer.seek(partition, max(0, end - 1))
+
+        batches = await consumer.getmany(timeout_ms=10000, max_records=100)
+        records = [record for batch in batches.values() for record in batch]
+        assert records, "The deployed terminal topic must yield a terminal record"
+        latest = max(records, key=lambda record: record.timestamp)
+        age_seconds = datetime.now(UTC).timestamp() - latest.timestamp / 1000
+        assert 0 <= age_seconds <= 86400, (
+            "The terminal must have been emitted within the last day"
+        )
+
+        terminal = json.loads(latest.value)
+        assert terminal["event_type"] == TERMINAL_TOPIC
+        correlation_id = terminal["correlation_id"]
+        assert uuid.UUID(correlation_id)
+        payload = terminal["payload"]
+        if terminal["source_tool"] == "node_projection_delegation":
+            assert payload["correlation_id"] == correlation_id
+            assert payload["source_topic"]
+            assert datetime.fromisoformat(payload["projected_at"])
+        else:
+            assert terminal["source_tool"] == "projection-reducer"
+            assert payload["projected"] is True
+            assert payload["rows_upserted"] >= 1
+    finally:
+        await consumer.stop()
 
 
 @pytest.mark.integration
