@@ -61,12 +61,11 @@ repos:
       - id: check-receipt-honesty
         require_serial: true
       # OMN-13026: bare AsyncMock/MagicMock without spec=/spec_set= on
-      # EventBus/transport/kafka surfaces. Ratchet: existing violations frozen
-      # in config/validation/transport_mock_baseline.yaml (218 violations, 63 files).
-      # New violations blocked. Drain tracked by OMN-13026 per-site tickets.
+      # EventBus/transport/kafka surfaces. OMN-20562 drained the last baselined
+      # sites and inline suppressions and deleted the baseline: a plain check
+      # with no exception list, so every violation blocks.
       - id: transport-mock-lint
         require_serial: true
-        args: [--baseline, config/validation/transport_mock_baseline.yaml]
   # Canonical Inference Gate (OMN-13249, fleet rollout of OMN-13219).
   # Rejects NEW non-canonical model-inference surfaces: shelled model CLIs
   # (codex/claude/gemini/opencode) and *_MODEL/*_PROVIDER env reads. Structural
