@@ -15,6 +15,7 @@ Test Coverage:
     - HTTP GET operations (success, with headers)
     - HTTP POST operations (JSON body, with headers)
     - Error responses (404, 500)
+    - 402 reported as payment_required without body or PAYMENT-REQUIRED header
     - Timeout handling
     - Response size limit enforcement
 """
@@ -797,3 +798,51 @@ __all__: list[str] = [
     "TestHttpPostEmptyBody",
     "TestHttpMultipleRequests",
 ]
+
+
+class TestHttpPaymentRequired:
+    """A 402 over a real socket is payment_required and carries no payment text."""
+
+    _PAYMENT_BODY = '{"accepts": [{"payTo": "0xSECRETPAYEE"}]}'
+    _PAYMENT_HEADER = "eyJwYXlUbyI6IjB4U0VDUkVUUEFZRUUifQ=="
+
+    async def test_http_get_402_is_payment_required_without_payment_text(
+        self,
+        httpserver: HTTPServer,
+        http_handler_config: dict[str, object],
+        mock_container: MagicMock,
+    ) -> None:
+        httpserver.expect_request("/paid").respond_with_data(
+            self._PAYMENT_BODY,
+            status=402,
+            headers={
+                "PAYMENT-REQUIRED": self._PAYMENT_HEADER,
+                "X-Request-ID": "abc",
+            },
+            content_type="application/json",
+        )
+
+        handler = HandlerHttpRest(container=mock_container)
+        await handler.initialize(http_handler_config)
+
+        try:
+            output = await handler.execute(
+                {
+                    "operation": "http.get",
+                    "payload": {"url": httpserver.url_for("/paid")},
+                    "correlation_id": uuid4(),
+                }
+            )
+            result = output.result
+
+            assert result["status"] == "payment_required"
+            payload = result["payload"]
+            assert payload["status_code"] == 402
+            assert "body" not in payload
+            assert "payment-required" not in {k.lower() for k in payload["headers"]}
+            assert payload["headers"]["x-request-id"] == "abc"
+            serialized = repr(result)
+            assert "0xSECRETPAYEE" not in serialized
+            assert self._PAYMENT_HEADER not in serialized
+        finally:
+            await handler.shutdown()
