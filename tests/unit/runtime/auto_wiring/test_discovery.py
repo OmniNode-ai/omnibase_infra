@@ -9,6 +9,7 @@ from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 from omnibase_infra.runtime.auto_wiring.discovery import (
     _parse_contract,
@@ -193,6 +194,72 @@ class TestParseContract:
         path = tmp_path / "contract.yaml"
         path.write_text("- just a list")
         with pytest.raises(ValueError, match="Expected YAML dict"):
+            _parse_contract(
+                contract_path=path,
+                entry_point_name="bad",
+                package_name="pkg",
+                package_version="1.0.0",
+            )
+
+    @pytest.mark.unit
+    def test_cold_discovery_avoids_python_yaml_scanning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A cold rebuild must benefit before the discovery memo is populated."""
+        path = _make_contract_yaml(tmp_path, with_event_bus=True)
+
+        def python_scan_refused(*args: object, **kwargs: object) -> object:
+            raise AssertionError("cold discovery used the Python YAML scanner")
+
+        if hasattr(yaml, "CSafeLoader"):
+            monkeypatch.setattr(yaml.SafeLoader, "get_single_data", python_scan_refused)
+
+        manifest = discover_contracts_from_paths([path])
+        assert manifest.total_errors == 0
+        assert manifest.total_discovered == 1
+        assert manifest.get_all_subscribe_topics() == frozenset(
+            {"onex.evt.platform.test-input.v1"}
+        )
+
+    @pytest.mark.unit
+    def test_shipped_contracts_match_without_libyaml(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The accelerator and portable fallback produce identical wiring data."""
+        root = Path(__file__).resolve().parents[4]
+        paths = sorted((root / "src/omnibase_infra/nodes").rglob("contract.yaml"))
+        assert paths
+        accelerated = discover_contracts_from_paths(paths)
+        assert accelerated.total_discovered > 0
+        assert accelerated.total_errors == 0
+
+        monkeypatch.delattr(yaml, "CSafeLoader", raising=False)
+        portable = discover_contracts_from_paths(paths)
+        assert portable == accelerated
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("portable", [False, True])
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "name: !!python/object/apply:builtins.str [unsafe]",
+            "name: !!python/object:builtins.object {}",
+            "name: [unterminated",
+        ],
+    )
+    def test_rejects_unsafe_and_malformed_yaml(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        portable: bool,
+        content: str,
+    ) -> None:
+        """Neither loader may construct Python objects or accept broken YAML."""
+        if portable:
+            monkeypatch.delattr(yaml, "CSafeLoader", raising=False)
+        path = tmp_path / "contract.yaml"
+        path.write_text(content)
+        with pytest.raises(yaml.YAMLError):
             _parse_contract(
                 contract_path=path,
                 entry_point_name="bad",
