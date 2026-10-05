@@ -14,6 +14,7 @@ untouched.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -143,24 +144,35 @@ async def test_declared_row_passes_the_gate_and_reaches_the_broker(
     accepted = [
         record
         for record in caplog.records
-        if record.getMessage() == "bounded delegation route accepted before dispatch"
+        if record.getMessage().startswith(
+            "bounded delegation route accepted before dispatch"
+        )
     ]
     assert len(accepted) == 1
     record = accepted[0]
     assert record.correlation_id == str(correlation_id)
-    assert record.lane == "dogfood"
-    assert record.broker == _EXTERNAL
-    assert record.runtime_environment == "dogfood"
-    assert record.runtime_bootstrap_servers == _INTERNAL
-    assert record.consumer == "omnimarket.nodes.node_delegation_orchestrator"
-    assert record.repository_owner == "omnimarket"
-    assert record.command_topic == _route().command_topic
-    assert record.terminal_route == "terminal_events"
-    assert record.terminal_events == list(_route().terminal_events)
-    assert record.declaration_source == f"fixture {overlay}"
+    # The deployed runtime renders standard logging messages without `extra`.
+    # The durable log must still bind the correlation and every route identity.
+    rendered = logging.Formatter("%(message)s").format(record)
+    prefix = (
+        "bounded delegation route accepted before dispatch: "
+        f"correlation_id={correlation_id} route="
+    )
+    assert rendered.startswith(prefix)
+    identity = json.loads(rendered.removeprefix(prefix))
+    assert identity["lane"] == "dogfood"
+    assert identity["broker"] == _EXTERNAL
+    assert identity["runtime_environment"] == "dogfood"
+    assert identity["runtime_bootstrap_servers"] == _INTERNAL
+    assert identity["consumer"] == "omnimarket.nodes.node_delegation_orchestrator"
+    assert identity["repository_owner"] == "omnimarket"
+    assert identity["command_topic"] == _route().command_topic
+    assert identity["terminal_route"] == "terminal_events"
+    assert identity["terminal_events"] == list(_route().terminal_events)
+    assert identity["declaration_source"] == f"fixture {overlay}"
     digest = hashlib.sha256(overlay.read_bytes()).hexdigest()
-    assert record.declaration_sha256 == digest
-    assert record.manifest_sha256 == digest
+    assert identity["declaration_sha256"] == digest
+    assert identity["manifest_sha256"] == digest
 
 
 @pytest.mark.asyncio
