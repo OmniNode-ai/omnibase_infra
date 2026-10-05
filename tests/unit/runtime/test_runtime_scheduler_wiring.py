@@ -144,24 +144,44 @@ def _service_env(document: dict[str, Any], service: str) -> dict[str, str]:
     return {str(k): str(v) for k, v in env.items()}
 
 
+# The lane overlays that publish the runtime tick. dev-202 (OMN-20590) and the
+# h201 stability-test lane (OMN-20593, the backup delegation lane beside the
+# h201 dev lane, which stays off so its demo runtime is never restarted).
+_OPTED_IN_OVERLAYS = (
+    "docker-compose.dev-202.yml",
+    "docker-compose.stability-test.yml",
+)
+
+
 class TestLaneOverlays:
-    def test_overlay_dev_202_turns_on_the_main_runtime_producer(self) -> None:
-        document = _load_compose("docker-compose.dev-202.yml")
+    @pytest.mark.parametrize("overlay", _OPTED_IN_OVERLAYS)
+    def test_overlay_turns_on_the_main_runtime_producer(self, overlay: str) -> None:
+        document = _load_compose(overlay)
         assert _service_env(document, "omninode-runtime").get(_FLAG) == "true"
 
-    def test_overlay_dev_202_gives_the_tick_driven_prunes_their_archive(
-        self,
+    @pytest.mark.parametrize("overlay", _OPTED_IN_OVERLAYS)
+    def test_overlay_sets_the_flag_on_no_secondary_role(self, overlay: str) -> None:
+        # One producer per lane: only the main role may carry the switch.
+        services = _load_compose(overlay).get("services") or {}
+        carriers = sorted(
+            name
+            for name in services
+            if _FLAG in _service_env({"services": services}, name)
+        )
+        assert carriers == ["omninode-runtime"]
+
+    @pytest.mark.parametrize("overlay", _OPTED_IN_OVERLAYS)
+    def test_overlay_gives_the_tick_driven_prunes_their_archive(
+        self, overlay: str
     ) -> None:
         # The two prune effects on runtime-effects resolve these on every tick;
         # an opted-in lane without them dead-letters every tick (read live on
         # dev-202, 2026-10-05: KeyError 'ONEX_CONSUMER_FLOW_ARCHIVE_DIR').
-        env = _service_env(
-            _load_compose("docker-compose.dev-202.yml"), "runtime-effects"
-        )
+        env = _service_env(_load_compose(overlay), "runtime-effects")
         for name in ("ONEX_DEAD_LETTER_ARCHIVE_DIR", "ONEX_CONSUMER_FLOW_ARCHIVE_DIR"):
             assert env.get(name, "").startswith("/app/data/"), name
 
-    def test_overlay_flag_is_set_by_dev_202_alone(self) -> None:
+    def test_overlay_flag_is_set_by_the_opted_in_lanes_alone(self) -> None:
         # Every other lane changes only by an explicit overlay edit; this test
         # names the lanes that opted in so the next one is a reviewed diff.
         opted_in = sorted(
@@ -169,7 +189,7 @@ class TestLaneOverlays:
             for path in _DOCKER_DIR.glob("docker-compose*.yml")
             if _FLAG in path.read_text(encoding="utf-8")
         )
-        assert opted_in == ["docker-compose.dev-202.yml"]
+        assert opted_in == sorted(_OPTED_IN_OVERLAYS)
 
 
 def test_envelope_survives_the_consumer_deserializer_shape() -> None:
