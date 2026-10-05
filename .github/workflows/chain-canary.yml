@@ -566,6 +566,7 @@ jobs:
         run: |
           set -uo pipefail
           python3 - <<'PY'
+          import http.client
           import json
           import os
           import pathlib
@@ -735,6 +736,7 @@ jobs:
         run: |
           set -uo pipefail
           python3 - <<'PY'
+          import http.client
           import json
           import os
           import sys
@@ -811,7 +813,7 @@ jobs:
                   with opener(listing, timeout=30) as response:
                       runs = json.loads(response.read()).get("workflow_runs") or []
                   previous = previous_conclusion(runs, env["RUN_ID"], env["BRANCH"])
-              except Exception as exc:  # an unread history alerts rather than hides
+              except (OSError, ValueError, http.client.HTTPException) as exc:  # an unread history alerts rather than hides
                   print(f"::warning::previous chain-canary run unreadable ({exc}); treating it as unknown")
                   previous = None
               kind = decide(env["JOB_STATUS"], previous)
@@ -833,7 +835,7 @@ jobs:
               try:
                   with opener(post, timeout=30) as response:
                       answer = json.loads(response.read())
-              except Exception as exc:
+              except (OSError, ValueError, http.client.HTTPException) as exc:
                   print(f"::warning::{kind}: the Slack post failed ({exc}), the operator was NOT told")
                   return 0
               if not answer.get("ok"):
