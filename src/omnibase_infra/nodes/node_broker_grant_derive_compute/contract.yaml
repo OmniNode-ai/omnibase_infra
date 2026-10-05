@@ -39,6 +39,7 @@ error_handling:
     exponential_base: 1
     retry_on: []
 metadata:
+  description: Derive exact broker topic and group grants from a principal's resolved wire bindings, without I/O.
   author: OmniNode Team
   license: MIT
   tags: [compute, broker, grants]
