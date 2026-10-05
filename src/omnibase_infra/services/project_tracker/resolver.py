@@ -4,82 +4,70 @@
 """Central project tracker DI authority.
 
 Single authoritative surface for selecting a `ProtocolProjectTracker`
-implementation. Token present (LINEAR_API_KEY or LINEAR_TOKEN) →
-`AdapterLinearGraphQLProjectTracker` (calls Linear GraphQL via httpx).
-Absent → `LocalStubProjectTracker`. Fail-soft: NEVER raises; on any
-construction error (missing adapter module, constructor failure, bad
-token) falls back to `LocalStubProjectTracker` with a warning log.
+implementation. The caller selects the backend:
 
-Returns a fully-functional Linear adapter when LINEAR_API_KEY is set;
-otherwise returns LocalStubProjectTracker. Safe to call from any Python
-context (no MCP-runtime dependency).
+* ``EnumProjectTrackerBackend.LINEAR`` (the default) returns
+  `AdapterLinearGraphQLProjectTracker`, authenticated by ``LINEAR_API_KEY`` or
+  ``LINEAR_TOKEN``. A missing or blank credential, or any construction
+  failure, RAISES. It never falls back to the stub: a caller that asked for
+  Linear and silently got a local JSON file would read and write tickets that
+  do not exist (OMN-20595, Operating Rule 8).
+* ``EnumProjectTrackerBackend.LOCAL_STUB`` returns `LocalStubProjectTracker`,
+  and only when the caller names it.
+
+Safe to call from any Python context (no MCP-runtime dependency).
 """
 
 from __future__ import annotations
 
-import logging
-import os
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+
+from omnibase_infra.enums.enum_project_tracker_backend import (
+    EnumProjectTrackerBackend,
+)
 
 if TYPE_CHECKING:
     from omnibase_spi.protocols.services.protocol_project_tracker import (
         ProtocolProjectTracker,
     )
 
-log = logging.getLogger(__name__)
-
 
 def resolve_project_tracker(
     state_root: Path | None = None,
-    _force_construction_error: bool = False,
+    *,
+    backend: EnumProjectTrackerBackend = EnumProjectTrackerBackend.LINEAR,
 ) -> ProtocolProjectTracker:
-    """Resolve a `ProtocolProjectTracker` implementation.
+    """Resolve the `ProtocolProjectTracker` implementation the caller selected.
 
     Args:
-        state_root: Optional state directory for the local fallback's JSON backing file.
-        _force_construction_error: Test-only hook; forces the Linear adapter path
-            to fail so the fail-soft fallback is exercised.
+        state_root: State directory for the local JSON tracker's backing file.
+            Ignored for Linear.
+        backend: Linear (the default) or the local JSON tracker.
 
     Returns:
-        A `ProtocolProjectTracker`-shaped instance. Never raises.
+        A `ProtocolProjectTracker`-shaped instance.
+
+    Raises:
+        InfraAuthenticationError: Linear is selected and no credential resolves.
     """
-    token = os.environ.get("LINEAR_API_KEY") or os.environ.get("LINEAR_TOKEN")
-    if token and not _force_construction_error:
-        try:
-            from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
-                AdapterLinearGraphQLProjectTracker,
-            )
-
-            # cast: AdapterLinearGraphQLProjectTracker returns ModelStub*
-            # typed variants that are structural-compatible subclasses of
-            # the canonical ModelIssue/ModelComment/ModelProject declared
-            # by ProtocolProjectTracker. Runtime @runtime_checkable
-            # suffices. Stub type consolidation is tracked separately
-            # (OMN-9210).
-            return cast(
-                "ProtocolProjectTracker",
-                AdapterLinearGraphQLProjectTracker(api_key=token),
-            )
-        except Exception as exc:  # noqa: BLE001 — fail-soft is the contract
-            # Log only the exception class name; never interpolate `exc` body to
-            # avoid leaking upstream secrets (tokens, connection strings, PII).
-            log.warning(
-                "resolve_project_tracker: Linear adapter construction failed (%s); "
-                "falling back to LocalStubProjectTracker",
-                type(exc).__name__,
-            )
-
-    if _force_construction_error:
-        log.warning(
-            "resolve_project_tracker: forced construction error; "
-            "falling back to LocalStubProjectTracker",
+    if backend is EnumProjectTrackerBackend.LOCAL_STUB:
+        from omnibase_infra.adapters.project_tracker.local_stub_project_tracker import (
+            LocalStubProjectTracker,
         )
 
-    from omnibase_infra.adapters.project_tracker.local_stub_project_tracker import (
-        LocalStubProjectTracker,
+        return cast(
+            "ProtocolProjectTracker", LocalStubProjectTracker(state_root=state_root)
+        )
+
+    from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
+        AdapterLinearGraphQLProjectTracker,
     )
 
-    return cast(
-        "ProtocolProjectTracker", LocalStubProjectTracker(state_root=state_root)
-    )
+    # The adapter resolves LINEAR_API_KEY, then LINEAR_TOKEN, and raises
+    # InfraAuthenticationError when neither carries a value.
+    # cast: AdapterLinearGraphQLProjectTracker returns ModelStub* typed
+    # variants that are structural-compatible subclasses of the canonical
+    # ModelIssue/ModelComment/ModelProject declared by ProtocolProjectTracker.
+    # Stub type consolidation is tracked separately (OMN-9210).
+    return cast("ProtocolProjectTracker", AdapterLinearGraphQLProjectTracker())

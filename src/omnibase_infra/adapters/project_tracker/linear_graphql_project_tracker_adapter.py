@@ -5,8 +5,9 @@
 
 Calls the Linear GraphQL API directly via ``httpx.AsyncClient`` using the
 ``LINEAR_API_KEY`` (or ``LINEAR_TOKEN``) credential from the environment.
-Selected by ``resolve_project_tracker()`` whenever a Linear credential is
-available — works from any Python context (no MCP-runtime dependency).
+Returned by ``resolve_project_tracker()`` for the Linear backend (its default),
+which raises rather than fall back when no credential resolves — works from any
+Python context (no MCP-runtime dependency).
 
 Replaces the previous MCP-callable ``AdapterLinearProjectTracker`` (deleted
 in OMN-10048) which required external callable injection that no production
@@ -333,8 +334,8 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
     Calls Linear's public GraphQL endpoint via ``httpx.AsyncClient``. Auth
     via ``LINEAR_API_KEY`` (or ``LINEAR_TOKEN``).
 
-    Designed for any Python caller — no MCP runtime dependency. Selected by
-    ``resolve_project_tracker()`` when a Linear credential is present.
+    Designed for any Python caller — no MCP runtime dependency. Returned by
+    ``resolve_project_tracker()`` for the Linear backend.
 
     Resilience: wraps ``MixinAsyncCircuitBreaker`` with HTTP transport,
     threshold=5, reset_timeout=60s. Connection / timeout / auth errors are
