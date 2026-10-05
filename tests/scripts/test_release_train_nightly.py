@@ -254,6 +254,18 @@ class TestLiveState:
             "what still holds this repo at report_only"
         )
 
+    def test_infra_counts_docker_migrations_as_release_relevant(self) -> None:
+        """Migration-only merges are unreleased work for omnibase_infra.
+
+        The vendored SQL under docker/migrations/ is applied from the repo at
+        deploy time, so a migration-only merge changes what downstream repos
+        pin against. v0.38.66 -> dev carried three such merges and the train
+        decided SKIP no_unreleased_release_relevant_work.
+        """
+        paths = rt.load_policy(_POLICY)["omnibase_infra"].release_relevant_paths
+        assert "docker/migrations" in paths
+        assert {"src", "pyproject.toml"} <= set(paths)
+
     def test_the_shipped_policy_file_parses_and_covers_the_seven_repos(self) -> None:
         policies = rt.load_policy(_POLICY)
         assert set(policies) == {
