@@ -218,6 +218,11 @@ from aiokafka.errors import (
 )
 from aiokafka.structs import TopicPartition
 
+from omnibase_core.enums.enum_bus_binding_direction import EnumBusBindingDirection
+from omnibase_core.models.event_bus.model_bus_binding import ModelBusBinding
+from omnibase_core.models.event_bus.model_resolved_bus_bindings import (
+    ModelResolvedBusBindings,
+)
 from omnibase_infra.enums import (
     EnumConsumerGroupPurpose,
     EnumDlqFailureClass,
@@ -1612,7 +1617,7 @@ class EventBusKafka(
                     # logged above, and the namespace is applied here so a
                     # namespaced runtime cannot publish onto the shared
                     # unprefixed topic (OMN-18891).
-                    apply_topic_namespace(topic),
+                    self.resolve_bus_binding(topic).physical_topic,
                     value=value,
                     key=key,
                     headers=kafka_headers,
@@ -2326,6 +2331,59 @@ class EventBusKafka(
         prefix_budget = KAFKA_CONSUMER_GROUP_MAX_LENGTH - len(host_hash) - 1
         return f"{effective_group_id[:prefix_budget]}-{host_hash}"
 
+    def resolve_bus_binding(
+        self, topic: str, *, consumer_group: str | None = None
+    ) -> ModelBusBinding:
+        """Resolve an exact wire operation at the Kafka client boundary.
+
+        Consumer groups passed here are already resolved, including the
+        per-topic suffix, instance discriminator and length truncation.
+        """
+        return ModelBusBinding(
+            broker=self._config.environment,
+            physical_topic=apply_topic_namespace(topic),
+            direction=(
+                EnumBusBindingDirection.CONSUME
+                if consumer_group is not None
+                else EnumBusBindingDirection.PRODUCE
+            ),
+            consumer_group=consumer_group,
+        )
+
+    def resolve_bus_bindings(
+        self,
+        *,
+        principal: str,
+        subscribe_topics: Sequence[str],
+        publish_topics: Sequence[str],
+        group_id: str,
+    ) -> ModelResolvedBusBindings:
+        """Resolve contract topics with the runtime's actual group algorithm."""
+        bindings = {
+            self.resolve_bus_binding(
+                topic,
+                consumer_group=self._resolve_effective_group_id(
+                    group_id, topic, UUID(int=0), (topic, group_id)
+                ),
+            )
+            for topic in subscribe_topics
+        }
+        bindings.update(self.resolve_bus_binding(topic) for topic in publish_topics)
+        return ModelResolvedBusBindings(
+            principal=principal,
+            bindings=tuple(
+                sorted(
+                    bindings,
+                    key=lambda b: (
+                        b.broker,
+                        b.physical_topic,
+                        b.direction,
+                        b.consumer_group or "",
+                    ),
+                )
+            ),
+        )
+
     def _build_consumer(
         self,
         topic: str,
@@ -2359,15 +2417,16 @@ class EventBusKafka(
         # in flight, so a restart would resume past them and they would never
         # be redelivered.
         concurrent = self._consume_concurrency.get((topic, group_id), 1) > 1
+        binding = self.resolve_bus_binding(topic, consumer_group=effective_group_id)
         return AIOKafkaConsumer(
             # PHYSICAL name. Every other use of ``topic`` in this class -- the
             # ``_group_consumers`` key, the ``_consume_loop`` argument, the
             # subscriber registry -- stays CANONICAL, so handler dispatch and
             # topic comparison are unaffected by the deployment namespace and
             # only the wire subscription moves (OMN-18891).
-            apply_topic_namespace(topic),
+            binding.physical_topic,
             bootstrap_servers=self._bootstrap_servers,
-            group_id=effective_group_id,
+            group_id=binding.consumer_group,
             group_instance_id=group_instance_id,
             auto_offset_reset=auto_offset_reset,
             enable_auto_commit=self._config.enable_auto_commit and not concurrent,
