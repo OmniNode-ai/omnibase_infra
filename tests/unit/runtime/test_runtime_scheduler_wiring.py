@@ -149,6 +149,18 @@ class TestLaneOverlays:
         document = _load_compose("docker-compose.dev-202.yml")
         assert _service_env(document, "omninode-runtime").get(_FLAG) == "true"
 
+    def test_overlay_dev_202_gives_the_tick_driven_prunes_their_archive(
+        self,
+    ) -> None:
+        # The two prune effects on runtime-effects resolve these on every tick;
+        # an opted-in lane without them dead-letters every tick (read live on
+        # dev-202, 2026-10-05: KeyError 'ONEX_CONSUMER_FLOW_ARCHIVE_DIR').
+        env = _service_env(
+            _load_compose("docker-compose.dev-202.yml"), "runtime-effects"
+        )
+        for name in ("ONEX_DEAD_LETTER_ARCHIVE_DIR", "ONEX_CONSUMER_FLOW_ARCHIVE_DIR"):
+            assert env.get(name, "").startswith("/app/data/"), name
+
     def test_overlay_flag_is_set_by_dev_202_alone(self) -> None:
         # Every other lane changes only by an explicit overlay edit; this test
         # names the lanes that opted in so the next one is a reviewed diff.
