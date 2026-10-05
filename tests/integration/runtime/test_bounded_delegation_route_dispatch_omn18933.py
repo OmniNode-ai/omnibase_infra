@@ -13,8 +13,10 @@ untouched.
 
 from __future__ import annotations
 
+import hashlib
+import logging
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import yaml
@@ -81,7 +83,12 @@ def _overlay(tmp_path: Path, **row_changes: str) -> Path:
 
 
 async def _dispatch(
-    monkeypatch: pytest.MonkeyPatch, overlay: Path, *, environment: str
+    monkeypatch: pytest.MonkeyPatch,
+    overlay: Path,
+    *,
+    environment: str,
+    bootstrap_servers: str = _INTERNAL,
+    correlation_id: UUID | None = None,
 ) -> None:
     def _stand_in_broker(*args: object, **kwargs: object) -> None:
         raise _BrokerReachedError
@@ -96,7 +103,7 @@ async def _dispatch(
     monkeypatch.setattr(port_module, "resolve_bounded_delegation_route", _resolve)
     bus = EventBusKafka(
         config=ModelKafkaEventBusConfig(
-            bootstrap_servers=_INTERNAL, environment=environment
+            bootstrap_servers=bootstrap_servers, environment=environment
         )
     )
     port = port_module.RuntimeDelegationDispatchPort(
@@ -108,7 +115,7 @@ async def _dispatch(
     await port.dispatch(
         prompt="k6 integration probe",
         task_type="document",
-        correlation_id=uuid4(),
+        correlation_id=correlation_id if correlation_id is not None else uuid4(),
         max_tokens=16,
         source_file_path=None,
         source_session_id=None,
@@ -118,10 +125,68 @@ async def _dispatch(
 
 @pytest.mark.asyncio
 async def test_declared_row_passes_the_gate_and_reaches_the_broker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    overlay = _overlay(tmp_path)
+    correlation_id = uuid4()
+    with (
+        caplog.at_level(logging.INFO, logger=port_module.__name__),
+        pytest.raises(_BrokerReachedError),
+    ):
+        await _dispatch(
+            monkeypatch,
+            overlay,
+            environment="dogfood",
+            correlation_id=correlation_id,
+        )
+
+    accepted = [
+        record
+        for record in caplog.records
+        if record.getMessage() == "bounded delegation route accepted before dispatch"
+    ]
+    assert len(accepted) == 1
+    record = accepted[0]
+    assert record.correlation_id == str(correlation_id)
+    assert record.lane == "dogfood"
+    assert record.broker == _EXTERNAL
+    assert record.runtime_environment == "dogfood"
+    assert record.runtime_bootstrap_servers == _INTERNAL
+    assert record.consumer == "omnimarket.nodes.node_delegation_orchestrator"
+    assert record.repository_owner == "omnimarket"
+    assert record.command_topic == _route().command_topic
+    assert record.terminal_route == "terminal_events"
+    assert record.terminal_events == list(_route().terminal_events)
+    assert record.declaration_source == f"fixture {overlay}"
+    digest = hashlib.sha256(overlay.read_bytes()).hexdigest()
+    assert record.declaration_sha256 == digest
+    assert record.manifest_sha256 == digest
+
+
+@pytest.mark.asyncio
+async def test_a_missing_row_refuses_before_the_broker_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with pytest.raises(_BrokerReachedError):
-        await _dispatch(monkeypatch, _overlay(tmp_path), environment="dogfood")
+    overlay = _overlay(tmp_path)
+    declaration = yaml.safe_load(overlay.read_text(encoding="utf-8"))
+    del declaration["lanes"]["dogfood"]["delegation_routes"]
+    overlay.write_text(yaml.safe_dump(declaration), encoding="utf-8")
+
+    with pytest.raises(InfraUnavailableError, match="exactly one delegation route"):
+        await _dispatch(monkeypatch, overlay, environment="dogfood")
+
+
+@pytest.mark.asyncio
+async def test_a_broker_mismatch_refuses_before_the_broker_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(InfraUnavailableError, match="broker mismatch"):
+        await _dispatch(
+            monkeypatch,
+            _overlay(tmp_path),
+            environment="dogfood",
+            bootstrap_servers="192.0.2.11:47092",
+        )
 
 
 @pytest.mark.asyncio
