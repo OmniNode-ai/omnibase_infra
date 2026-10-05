@@ -252,7 +252,7 @@ def test_runner_fleet_config_git_mirror_is_recorded() -> None:
     assert config.git_mirror.kill_switch_env == "OMNI_GIT_MIRROR_DISABLE"
 
 
-def test_runner_fleet_config_git_mirror_covers_all_nine_repos() -> None:
+def test_runner_fleet_config_git_mirror_covers_every_ci_repo() -> None:
     """OMN-16056: the C2 git mirror's original 5-repo set (OMN-16053) left
     omniweb, omnimemory, omnibase_compat, and knowledge-base doing full remote
     fetches -- exposed to the same GnuTLS/early-EOF checkout-failure class the
@@ -260,6 +260,11 @@ def test_runner_fleet_config_git_mirror_covers_all_nine_repos() -> None:
     exactly a sibling fetch of one of these: omnimarket's `Clone
     omnibase_compat` step). This asserts the fix's full coverage, not just
     membership of one repo.
+
+    OMN-20597: knowledge-base-internal was the largest gap of all. Over
+    2026-10-04T18:09Z..10-05T11:05Z its unmirrored depth-1 checkout spent
+    2,048 of ~2,075 self-hosted checkout minutes (p50 158 s, max 1831 s),
+    while the mirrored repos checked out in 0-4 s.
     """
     config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
 
@@ -267,6 +272,7 @@ def test_runner_fleet_config_git_mirror_covers_all_nine_repos() -> None:
     assert set(config.git_mirror.repos) == {
         "onex_change_control",
         "omnibase_infra",
+        "omninode_infra",
         "omnibase_core",
         "omnimarket",
         "omniclaude",
@@ -274,7 +280,52 @@ def test_runner_fleet_config_git_mirror_covers_all_nine_repos() -> None:
         "omnimemory",
         "omnibase_compat",
         "knowledge-base",
+        "knowledge-base-internal",
     }
+
+
+def _refresh_script_mirror_repos(script_text: str) -> list[str]:
+    """The MIRROR_REPOS bash array as the refresh script executes it."""
+    match = re.search(r"^MIRROR_REPOS=\(\n(.*?)^\)$", script_text, re.M | re.S)
+    assert match is not None, "MIRROR_REPOS=( ... ) array not found"
+    repos: list[str] = []
+    for line in match.group(1).splitlines():
+        entry = line.split("#", 1)[0].strip()
+        if entry:
+            repos.append(entry)
+    return repos
+
+
+def test_runner_fleet_config_git_mirror_repos_match_refresh_script() -> None:
+    """OMN-20597: the yaml list is the fleet record and the script's
+    MIRROR_REPOS is what the host actually mirrors. Nothing compared them, so
+    omninode_infra was added to the script (OMN-19895) and never to the record.
+    A repo in one and not the other is either mirrored without a record or
+    recorded without a mirror; both read as coverage that is not there.
+    """
+    config = load_runner_fleet_config(REPO_ROOT / "config" / "runner_fleet.yaml")
+    script = REPO_ROOT / "docker" / "runners" / "git-mirror-refresh.sh"
+
+    assert config.git_mirror is not None
+    assert list(config.git_mirror.repos) == _refresh_script_mirror_repos(
+        script.read_text(encoding="utf-8")
+    )
+
+
+def test_refresh_script_mirror_repos_parser_sees_a_divergence() -> None:
+    """Positive control for the parity test: the parser must return the array
+    entries and skip comments, or the parity assertion proves nothing."""
+    text = (
+        "set -euo pipefail\n"
+        "MIRROR_REPOS=(\n"
+        "    alpha\n"
+        "    # a comment line\n"
+        "    beta  # trailing comment\n"
+        ")\n"
+        'for repo in "${MIRROR_REPOS[@]}"; do :; done\n'
+    )
+    assert _refresh_script_mirror_repos(text) == ["alpha", "beta"]
+    assert _refresh_script_mirror_repos(text) != ["alpha", "beta", "gamma"]
 
 
 def test_runner_fleet_config_tool_cache_durability_is_recorded() -> None:

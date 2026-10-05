@@ -331,7 +331,7 @@ seed_workspace_from_mirror() {
 _C2B_REWRITE_REPOS="${OMNI_GIT_MIRROR_REWRITE_REPOS:-onex_change_control}"
 
 # ---------------------------------------------------------------------------
-# Shared rewrite accumulator (OMN-16063 C2b + OMN-16114 C2c)
+# Shared job git-config accumulator (C2b + C2c + OMN-20598 stall bound)
 # ---------------------------------------------------------------------------
 #
 # GIT_CONFIG_COUNT is a single flat index namespace in the job's environment.
@@ -342,10 +342,19 @@ _C2B_REWRITE_REPOS="${OMNI_GIT_MIRROR_REWRITE_REPOS:-onex_change_control}"
 # would win -- GITHUB_ENV lines just set env vars, a later same-named write
 # replaces rather than merges, silently dropping the first mechanism's
 # GIT_CONFIG_KEY_0/VALUE_0 entries even though both lines are present in the
-# file. Both mechanisms append to this shared accumulator instead; exactly
-# one flush, after both have run, writes the combined set.
+# file. Both rewrite mechanisms and the HTTP transfer stall bound append to
+# this shared accumulator instead; exactly one flush, after all have run,
+# writes the combined set of job-scoped git settings.
 declare -a _C2_REWRITE_ENV_LINES=()
 _C2_REWRITE_COUNT=0
+
+# Adds one git setting to the shared job-environment index namespace.
+_c2_env_add_config() {
+    local key="$1" value="$2"
+    _C2_REWRITE_ENV_LINES+=("GIT_CONFIG_KEY_${_C2_REWRITE_COUNT}=${key}")
+    _C2_REWRITE_ENV_LINES+=("GIT_CONFIG_VALUE_${_C2_REWRITE_COUNT}=${value}")
+    _C2_REWRITE_COUNT=$((_C2_REWRITE_COUNT + 1))
+}
 
 # Adds one fetch-only redirect: fetches of $2 (upstream) resolve to $1
 # (mirror); pushes to $2 stay pinned at $2 via an identity pushInsteadOf
@@ -355,20 +364,17 @@ _C2_REWRITE_COUNT=0
 # for the field verification this relies on).
 _c2_rewrite_add_pair() {
     local mirror_url="$1" upstream_url="$2"
-    _C2_REWRITE_ENV_LINES+=("GIT_CONFIG_KEY_${_C2_REWRITE_COUNT}=url.${mirror_url}.insteadOf")
-    _C2_REWRITE_ENV_LINES+=("GIT_CONFIG_VALUE_${_C2_REWRITE_COUNT}=${upstream_url}")
-    _C2_REWRITE_COUNT=$((_C2_REWRITE_COUNT + 1))
-    _C2_REWRITE_ENV_LINES+=("GIT_CONFIG_KEY_${_C2_REWRITE_COUNT}=url.${upstream_url}.pushInsteadOf")
-    _C2_REWRITE_ENV_LINES+=("GIT_CONFIG_VALUE_${_C2_REWRITE_COUNT}=${upstream_url}")
-    _C2_REWRITE_COUNT=$((_C2_REWRITE_COUNT + 1))
+    _c2_env_add_config "url.${mirror_url}.insteadOf" "${upstream_url}"
+    _c2_env_add_config "url.${upstream_url}.pushInsteadOf" "${upstream_url}"
 }
 
+# Flushes rewrites and the HTTP stall bound together, with one config count.
 _c2_rewrite_flush() {
     if [[ "${_C2_REWRITE_COUNT}" -eq 0 ]]; then
         return 0
     fi
     if [[ -z "${GITHUB_ENV:-}" || ! -w "${GITHUB_ENV}" ]]; then
-        echo "[c2-mirror-rewrite] GITHUB_ENV unwritable; ${_C2_REWRITE_COUNT} discovered rewrite pair(s) not applied (fail-open)."
+        echo "[c2-mirror-rewrite] GITHUB_ENV unwritable; ${_C2_REWRITE_COUNT} job git setting(s) not applied (fail-open)."
         return 0
     fi
     {
@@ -378,6 +384,40 @@ _c2_rewrite_flush() {
         echo "[c2-mirror-rewrite] GITHUB_ENV write failed; job unaffected (fail-open)."
         return 0
     }
+    return 0
+}
+
+# OMN-20598 -- bound silent git HTTP transfers before checkout retries.
+#
+# WHY THIS EXISTS. On 2026-10-05 09:18-10:25Z knowledge-base-internal's
+# depth-1 checkout ran 963-1831s on omninode-runner and omnipc2-ci-runner.
+# Each attempt hung for 10-20 minutes before `RPC failed; curl 56 GnuTLS
+# recv error (-54)` / `fatal: early EOF`; actions/checkout@v4 made three
+# attempts with roughly 20s waits. Git has no low-speed bound by default.
+# Its `git -c protocol.version=2 fetch --no-tags --prune
+# --no-recurse-submodules --depth=1 origin <sha>` needs a silence limit.
+#
+# WHY 1 BYTE/S. upload-pack keepalives arrive about every 5s during
+# server-side pack generation, keeping a legitimately slow server above
+# this tiny threshold. Only total silence trips the default bound.
+# WHY 60S. A minute allows transient pauses and many keepalive intervals,
+# while returning control to checkout's retries far sooner than 10-20 minutes.
+#
+# JOB SCOPE. Like C2b/C2c, this lives in GITHUB_ENV via the shared accumulator;
+# nothing persists in containers or global git config. Git >= 2.31 honours
+# GIT_CONFIG_COUNT/KEY/VALUE (the runner image ships 2.34.1), so it covers
+# checkout, sibling clones and uv git fetches throughout the job.
+# http.* applies only to HTTP(S); it does NOT touch git:// mirror traffic.
+# Invalid overrides fail open as a unit: install neither setting, exit 0.
+wire_git_transfer_stall_bound() {
+    local limit="${OMNI_GIT_LOW_SPEED_LIMIT:-1}" time="${OMNI_GIT_LOW_SPEED_TIME:-60}"
+    if [[ ! "${limit}" =~ ^0*[1-9][0-9]*$ || ! "${time}" =~ ^0*[1-9][0-9]*$ ]]; then
+        echo "[git-stall-bound] invalid low-speed override; http.lowSpeedLimit=${limit} http.lowSpeedTime=${time} must be positive integers; no stall bound applied (fail-open)."
+        return 0
+    fi
+    _c2_env_add_config "http.lowSpeedLimit" "${limit}"
+    _c2_env_add_config "http.lowSpeedTime" "${time}"
+    echo "[git-stall-bound] http.lowSpeedLimit=${limit} http.lowSpeedTime=${time}s -- a git HTTP transfer silent for ${time}s now aborts so actions/checkout retries, instead of hanging until curl 56 (OMN-20598)."
     return 0
 }
 
@@ -1126,6 +1166,7 @@ if rm -rf -- "${canonical_workspace}" 2>"${err_file}"; then
     seed_workspace_from_mirror "${canonical_workspace}"
     wire_uv_git_mirror_rewrite "${canonical_workspace}" || true
     wire_sibling_checkout_mirror_rewrite "${canonical_workspace}" || true
+    wire_git_transfer_stall_bound || true
     _c2_rewrite_flush || true
     exit 0
 fi
@@ -1153,6 +1194,7 @@ elif sudo -n /bin/rm -rf -- "${canonical_workspace}" 2>"${err_file}"; then
     seed_workspace_from_mirror "${canonical_workspace}"
     wire_uv_git_mirror_rewrite "${canonical_workspace}" || true
     wire_sibling_checkout_mirror_rewrite "${canonical_workspace}" || true
+    wire_git_transfer_stall_bound || true
     _c2_rewrite_flush || true
     exit 0
 else
