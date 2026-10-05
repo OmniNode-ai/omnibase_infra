@@ -186,6 +186,12 @@ services:
     environment:
       ONEX_RUNTIME_LANE: "compose-dev-202"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml
+      # OMN-20590: this lane's main runtime publishes the runtime tick
+      # (onex.intent.platform.runtime-tick.v1). Opt-in per lane: the first
+      # ticks activate every subscribing contract, including the dead-letter
+      # and consumer-flow prunes (dry_run false). Only the main role acts on
+      # it, so it is set here and nowhere else in this file.
+      ONEX_RUNTIME_SCHEDULER_ENABLED: "true"
     ports: !override
       - "127.0.0.1:61085:8085"
       - "172.17.0.1:61085:8085"
