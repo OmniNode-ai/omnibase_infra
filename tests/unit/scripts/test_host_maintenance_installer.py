@@ -58,7 +58,7 @@ def test_deploy_runners_no_longer_installs_legacy_docker_prune_cron() -> None:
 def test_disk_gc_service_runs_repo_owned_volume_gc() -> None:
     service = REPO_ROOT / "deploy" / "disk-gc" / "onex-disk-gc.service"
     body = service.read_text(encoding="utf-8")
-    assert "scripts/docker-volume-gc.sh --execute" in body
+    assert 'omnibase_infra/scripts/docker-volume-gc.sh" --execute' in body
     assert "unused ephemeral" in body
 
 
