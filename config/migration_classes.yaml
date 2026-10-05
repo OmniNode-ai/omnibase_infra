@@ -253,6 +253,8 @@ migrations:
   forward/nodes/node_projection_delegation/0053_delegation_events_finish_reason_truncated.sql: expand-only
   forward/nodes/node_projection_delegation/0054_delegation_events_backend_id_and_host.sql: expand-only
   forward/nodes/node_projection_delegation/0055_model_routing_local_call_share.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
+  forward/nodes/node_projection_delegation/0056_delegation_budget_applied_events.sql: expand-only
+  forward/nodes/node_projection_delegation/0057_delegation_budget_applied_events_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP POLICY
   forward/nodes/node_projection_delegation_disposition/0000_create_delegation_dispositions.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT; ROW LEVEL SECURITY; DROP
   forward/nodes/node_projection_delegation_disposition/0001_grant_tenant_projection_writer_delegation_dispositions.sql: expand-only
   forward/nodes/node_projection_delegation_disposition/0002_force_rls_delegation_dispositions.sql: forward-only # ENABLE/FORCE ROW LEVEL SECURITY; DROP
