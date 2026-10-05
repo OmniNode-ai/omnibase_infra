@@ -102,7 +102,12 @@ from deploy_agent.lineage_fence import (
 )
 from deploy_agent.load_gate import EnumLoadGateVerdict, LoadGate
 from deploy_agent.queue_depth import LagSampler, ModelControlTopicLag
-from deploy_agent.routing import ROUTED_LANES, DeployRouter
+from deploy_agent.routing import (
+    ROUTED_LANES,
+    DeployRouter,
+    ModelLaneFlags,
+    is_promotion,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -263,6 +268,9 @@ class DeployConsumer:
     #: partition a deferral paused, until a re-check opens the gate.
     load_gate: LoadGate | None = None
     load_gate_paused: TopicPartition | None = None
+    #: Lane flags (``deploy_agent.routing`` lane flags): ``flags.freeze`` refuses every
+    #: command of this instance's but a promotion, as ``frozen``.
+    lane_flags: ModelLaneFlags | None = None
 
     def __init__(
         self,
@@ -282,6 +290,7 @@ class DeployConsumer:
         host_slot: HostSlot | None = None,
         host_slot_owner: str = "deploy-agent",
         load_gate: LoadGate | None = None,
+        lane_flags: ModelLaneFlags | None = None,
     ) -> None:
         # OMN-19506 AC3. Each deploy-agent instance reads EVERY record, so each
         # subscribes with its own declared group: in one shared group Kafka
@@ -293,6 +302,7 @@ class DeployConsumer:
         self.host_slot_owner = host_slot_owner
         self.load_gate = load_gate
         self.load_gate_paused = None
+        self.lane_flags = lane_flags
         self.consumer = KafkaConsumer(
             TOPIC_REBUILD_REQUESTED,
             **kafka_config.consumer_kwargs(),
@@ -609,6 +619,25 @@ class DeployConsumer:
                 )
                 self._commit_through(msg)
                 return None, None
+
+        # Step 4b: Freeze (lane flags). After routing, so a command for another
+        # instance is still skipped silently; before busy, so a frozen lane
+        # names FROZEN rather than whatever else it might also be. Only a
+        # deliberate promotion (requested_by promotion/...) passes.
+        frozen = (
+            self.lane_flags.frozen_reason(datetime.now(UTC))
+            if self.lane_flags is not None
+            else None
+        )
+        if frozen is not None and not is_promotion(cmd.requested_by):
+            logger.warning(
+                "Rejecting command %s from %s: %s",
+                cmd.correlation_id,
+                cmd.requested_by,
+                frozen,
+            )
+            self._commit_through(msg)
+            return None, self._reject(EnumRejectionReason.FROZEN, cmd=cmd)
 
         # Step 5: Check busy
         if self.job_store.has_active_job():
