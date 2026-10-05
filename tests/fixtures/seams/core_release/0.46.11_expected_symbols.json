@@ -15,9 +15,10 @@
     "OMN-18595: bumped 0.47.25 -> 0.47.27 by the dependency cascade (omnibase_infra#4355). The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged.",
     "OMN-18595: bumped 0.47.27 -> 0.47.28 by the dependency cascade (omnibase_infra#4414). The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged.",
     "OMN-18595: bumped 0.47.28 -> 0.47.31 by the dependency cascade (omnibase_infra#4489). The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged.",
-    "OMN-18595: bumped 0.47.31 -> 0.47.32 by the dependency cascade (omnibase_infra#4505). The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged."
+    "OMN-18595: bumped 0.47.31 -> 0.47.32 by the dependency cascade (omnibase_infra#4505). The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged.",
+    "OMN-18595: bumped 0.47.32 -> 0.47.35 by the dependency cascade (omnibase_infra#4585). The seam test reported the version line and no symbol or field-type drift, so the consumed surface is unchanged."
   ],
-  "core_version": "0.47.32",
+  "core_version": "0.47.35",
   "source": "pypi",
   "modules": {
     "omnibase_core.models.delegation.wire": [
