@@ -1113,10 +1113,12 @@ async def start_lane_runtime_scheduler(
         or ``None`` when this process does not publish ticks.
 
     Raises:
-        ProtocolConfigurationError: If the lane's switch holds a value that
-            is not a boolean.
+        ProtocolConfigurationError: If this is the owning role and the lane's
+            switch holds a value that is not a boolean. A role that does not
+            own the producer never reads the switch, so a typo on a shared
+            compose environment refuses the ``main`` boot, which is the role
+            it is for, and leaves the others running.
     """
-    enabled = resolve_runtime_scheduler_enabled()
     if runtime_profile != TICK_PRODUCER_PROFILE:
         logger.debug(
             "Runtime tick producer not started: profile %r does not own it (owner: %r)",
@@ -1124,6 +1126,7 @@ async def start_lane_runtime_scheduler(
             TICK_PRODUCER_PROFILE,
         )
         return None
+    enabled = resolve_runtime_scheduler_enabled()
     config = ModelRuntimeSchedulerConfig.default()
     if not enabled:
         logger.warning(
