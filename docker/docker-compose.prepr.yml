@@ -253,6 +253,13 @@ services:
       - "${PREPR_RUNTIME_MAIN_PORT:?PREPR_RUNTIME_MAIN_PORT must be set - the slot's reserved runtime port from prepr_slot_policy.py}:8085"
     environment:
       !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
+      # OMN-19494 (LO4): the slot's own lane id, `prepr-1` or `prepr-2`. This
+      # file layers over docker-compose.dev-lane.yml, which declares
+      # `compose-dev` on this very service, and an environment key survives a
+      # layer that does not repeat it: without this line a slot would name
+      # itself as the dev lane and key its health verdict onto the dev lane's
+      # lab lane-health row. ONEX_PREPR_SLOT is `:?` in the marker anchor above.
+      ONEX_RUNTIME_LANE: "prepr-${ONEX_PREPR_SLOT}"
       # Distinct from the dev lane's `onex-runtime-main`, so the two never
       # share a group even on a topic the namespace somehow failed to move.
       # Belt and braces with KAFKA_ENVIRONMENT, deliberately.

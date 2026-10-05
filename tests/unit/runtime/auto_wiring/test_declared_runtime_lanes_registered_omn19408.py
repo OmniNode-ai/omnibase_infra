@@ -93,8 +93,14 @@ def _load_declared_runtime_lanes() -> tuple[LaneDeclaration, ...]:
         compose_yaml = compose_path.read_text(encoding="utf-8").replace("!override", "")
         document: object = yaml.safe_load(compose_yaml)
         relative_path = compose_path.relative_to(repo_root).as_posix()
+        # A declaration that interpolates (the pre-PR slot overlay's
+        # `prepr-${ONEX_PREPR_SLOT}`) has no literal to check here. test_omn19494_compose_runtime_lane
+        # renders each lane's stack with its interpolation resolved and holds
+        # those values against the same registry.
         declarations.update(
-            (relative_path, lane) for lane in _walk_runtime_lane_declarations(document)
+            (relative_path, lane)
+            for lane in _walk_runtime_lane_declarations(document)
+            if "${" not in lane
         )
 
     return tuple(sorted(declarations))
