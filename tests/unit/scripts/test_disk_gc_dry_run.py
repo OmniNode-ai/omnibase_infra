@@ -12,6 +12,7 @@ no destructive verb (rmi, rm, prune, produce, 'worktree remove') was issued.
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import subprocess
 from pathlib import Path
@@ -20,6 +21,76 @@ import pytest
 
 _REPO = Path(__file__).resolve().parents[3]
 _SCRIPTS = _REPO / "scripts"
+
+
+def _install_disk_gc(
+    tmp_path: Path, registry_root: Path, *, export_root: bool = True
+) -> tuple[subprocess.CompletedProcess[str], str, Path]:
+    """Install into an isolated user home with systemctl recorded, not executed."""
+    source = tmp_path / "source" / "deploy" / "disk-gc"
+    source.mkdir(parents=True)
+    for name in ("install-disk-gc.sh", "onex-disk-gc.service", "onex-disk-gc.timer"):
+        shutil.copyfile(_REPO / "deploy" / "disk-gc" / name, source / name)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    calllog = tmp_path / "calls.log"
+    calllog.write_text("")
+    _make_shim(bin_dir, "systemctl", calllog)
+    _make_shim(bin_dir, "chmod", calllog)
+    user_home = tmp_path / "user"
+    env = dict(os.environ, HOME=str(user_home), PATH=f"{bin_dir}:{os.environ['PATH']}")
+    env.pop("OMNI_HOME", None)
+    if export_root:
+        env["OMNI_HOME"] = str(registry_root)
+    proc = subprocess.run(
+        ["bash", str(source / "install-disk-gc.sh")],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+        check=False,
+    )
+    installed = user_home / ".config" / "systemd" / "user" / "onex-disk-gc.service"
+    return proc, calllog.read_text(), installed
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("export_root", [True, False])
+def test_disk_gc_installer_uses_selected_registry_root(
+    tmp_path: Path, export_root: bool
+) -> None:
+    """h202's /data registry and the default registry both reach the GC scripts."""
+    registry_root = (
+        tmp_path / 'registry with spaces%and"quotes'
+        if export_root
+        else tmp_path / "user" / "Code" / "omni_home"
+    )
+    scripts = registry_root / "omnibase_infra" / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("disk-gc.sh", "docker-volume-gc.sh", "disk-watermark-check.sh"):
+        (scripts / name).touch()
+    proc, calls, installed = _install_disk_gc(
+        tmp_path, registry_root, export_root=export_root
+    )
+    assert proc.returncode == 0, proc.stderr
+    unit = installed.read_text()
+    escaped_root = str(registry_root).replace('"', '\\"').replace("%", "%%")
+    assert f'Environment="OMNI_HOME={escaped_root}"' in unit
+    for name in ("disk-gc.sh", "docker-volume-gc.sh", "disk-watermark-check.sh"):
+        assert f'"${{OMNI_HOME}}/omnibase_infra/scripts/{name}"' in unit
+    assert "systemctl --user enable --now onex-disk-gc.timer" in calls
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("root", ["relative-root", "missing-root"])
+def test_disk_gc_installer_refuses_unusable_registry_before_enabling(
+    tmp_path: Path, root: str
+) -> None:
+    registry_root = Path(root) if root == "relative-root" else tmp_path / root
+    proc, calls, _ = _install_disk_gc(tmp_path, registry_root)
+    assert proc.returncode != 0
+    assert "systemctl" not in calls
+
 
 DESTRUCTIVE_TOKENS = ("rmi", "prune", "produce", "remove", "rm ")
 
