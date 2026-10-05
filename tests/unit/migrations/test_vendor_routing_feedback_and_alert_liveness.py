@@ -89,9 +89,15 @@ def test_migration_classes_match_the_classifier(
 ) -> None:
     classes = yaml.safe_load(_CLASSES.read_text(encoding="utf-8"))["migrations"]
     declared = classes[f"forward/nodes/{node}/{filename}"]
-    # The liveness create adds a unique index on the cursor column, which the
-    # classifier reads as forward-only. Every other file is additive or a grant.
-    expected = "forward-only" if filename == _LIVENESS_CREATE else "expand-only"
+    # The liveness create adds a unique index on the cursor column, and the
+    # routing-feedback create reconciles a drifted shape with ALTER COLUMN and a
+    # guarded primary key: the classifier reads both as forward-only. Every other
+    # file is a grant.
+    expected = (
+        "forward-only"
+        if filename in {_LIVENESS_CREATE, _FEEDBACK_CREATE}
+        else "expand-only"
+    )
     assert declared.split(" #")[0] == expected
 
 
