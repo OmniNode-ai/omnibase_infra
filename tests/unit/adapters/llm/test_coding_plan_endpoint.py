@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from omnibase_infra.adapters.llm.plugin_llm import _LLM_URL_ENV_VARS, PluginLlm
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.runtime.models import ModelDomainPluginConfig
 
 pytestmark = pytest.mark.unit
@@ -17,7 +18,7 @@ pytestmark = pytest.mark.unit
 def _config() -> ModelDomainPluginConfig:
     return ModelDomainPluginConfig(
         container=MagicMock(),
-        event_bus=MagicMock(),  # transport-mock-ok: should_activate never touches the bus
+        event_bus=MagicMock(spec=EventBusInmemory),
         correlation_id=uuid4(),
         input_topic="requests",
         output_topic="responses",

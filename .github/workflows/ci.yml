@@ -559,9 +559,8 @@ jobs:
           VALIDATORS
 
       # OMN-13026: Transport-mock lint. Bare AsyncMock/MagicMock without
-      # spec=/spec_set= on EventBus/transport/kafka surfaces. Ratchet: existing
-      # violations frozen in config/validation/transport_mock_baseline.yaml. New
-      # violations in any PR are blocked. Drain tracked by per-site tickets.
+      # spec=/spec_set= on EventBus/transport/kafka surfaces. OMN-20562 deleted
+      # the empty baseline: a plain check over tests/, every violation blocks.
       # SYNC with pre-commit hook 'transport-mock-lint'.
       # Clone omnibase_core HEAD so the validator is available before the
       # OMN-13026 omnibase_core pin bump lands in the lockfile.
@@ -577,7 +576,6 @@ jobs:
         run: |
           PYTHONPATH=.ci/omnibase_core/src uv run python \
             -m omnibase_core.validators.transport_mock_lint \
-            --baseline config/validation/transport_mock_baseline.yaml \
             tests/
 
       - name: Run mypy type checking
@@ -3773,21 +3771,11 @@ jobs:
             --spec ../architecture-handshakes/validator-requirements.yaml \
             --baseline ../architecture-handshakes/validator-requirements-baseline.yaml
 
-  # OMN-19677: the baseline can only shrink relative to the merge base;
-  # registered as a strict CI Summary gate.
-  runtime-profiles-allowlist-oneway:
-    name: Runtime Profiles Allowlist One-way (OMN-19677)
-    # The reusable reads the checkout and nothing else (CodeQL actions/missing-workflow-permissions).
-    permissions:
-      contents: read
-    uses: OmniNode-ai/omniclaude/.github/workflows/anti-growth-baseline-reusable.yml@3faefdcd5750b05f69d2efcb8cf200bc359483c3
-    with:
-      baseline-path: config/validation/runtime_profiles_allowlist.yaml
-      parser: yaml-list:allowlist
-
   # Migrated from validator-runtime-profiles.yml (OMN-15108, OMN-14877
   # pattern). Enforces runtime_profiles on command-consuming contracts
-  # (OMN-9886 / OMN-12957) against the frozen allowlist.
+  # (OMN-9886 / OMN-12957). OMN-20562 emptied and deleted the allowlist, so
+  # this is a plain check with no exception list: every contract under src/
+  # must pass. Registered STRICT in scripts/ci/ci_summary_gate.py.
   runtime-profiles-validator:
     name: Runtime Profiles / validate
     # OMNI_RUNNER_SELECTOR_V1 - trusted events default to self-hosted omnibase-ci; pull_request defaults to ubuntu-latest
@@ -3833,9 +3821,7 @@ jobs:
               ValidatorRuntimeProfiles,
           )
 
-          result = ValidatorRuntimeProfiles(
-              allowlist_path=Path("config/validation/runtime_profiles_allowlist.yaml")
-          ).validate(Path("src"))
+          result = ValidatorRuntimeProfiles().validate(Path("src"))
           for issue in result.issues:
               print(f"[{issue.severity.value}] {issue.file_path}:{issue.line_number}: {issue.message}")
           raise SystemExit(0 if result.is_valid else 1)

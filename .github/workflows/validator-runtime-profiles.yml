@@ -11,9 +11,8 @@
 #   - runtime_profile_no_consumer_lane (OMN-12957) — subscribing REDUCER/EFFECT
 #     names no consumer-attached profile, so its subscriptions are never drained
 #
-# Pre-existing violators are frozen in
-# config/validation/runtime_profiles_allowlist.yaml (drain tracked by OMN-12982); the
-# workflow passes that repo-local path explicitly. The gate blocks NEW orphans.
+# OMN-20562 declared runtime_profiles on the last ten violators and deleted the
+# allowlist, so the gate is a plain check: any violation under src/ fails.
 #
 # MIGRATED INTO ci.yml (OMN-15108, OMN-14877/OMN-14430 fast-follow pattern):
 # the "Required status check context" comment above was aspirational, not
@@ -84,9 +83,7 @@ jobs:
               ValidatorRuntimeProfiles,
           )
 
-          result = ValidatorRuntimeProfiles(
-              allowlist_path=Path("config/validation/runtime_profiles_allowlist.yaml")
-          ).validate(Path("src"))
+          result = ValidatorRuntimeProfiles().validate(Path("src"))
           for issue in result.issues:
               print(f"[{issue.severity.value}] {issue.file_path}:{issue.line_number}: {issue.message}")
           raise SystemExit(0 if result.is_valid else 1)
