@@ -195,6 +195,26 @@ jobs:
           --contract c28-contract.yaml --input c28-request.json
           --timeout 1700 --output receipt
 
+      - name: Compare the script and node on the measured dev-lane observation
+        run: |
+          uv run --frozen python - <<'PYCODE'
+          import json
+          from pathlib import Path
+          from scripts.ci.c28_consumer_flow_probe import grade
+
+          record = json.loads(Path("c28-consumer-flow.json").read_text())
+          observation = record["observation"]
+          if not observation["read_ok"]:
+              raise SystemExit("C28 parity requires a readable live observation")
+          script = grade(observation)
+          node = record["result"]
+          measured_at = observation["observed_at"]
+          print(json.dumps({"source": "script", "subject": node["subject"], "observed_at": measured_at, "verdict": script.verdict, "detail": script.detail}))
+          print(json.dumps({"source": "node", **node}))
+          if script.verdict.upper() != node["outcome"] or measured_at != node["observed_at"]:
+              raise SystemExit("C28 script and node disagree on the live observation")
+          PYCODE
+
       - name: Assert the C28 record is present and non-empty
         if: always()
         run: |
