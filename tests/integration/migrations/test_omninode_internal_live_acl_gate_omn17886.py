@@ -447,6 +447,23 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
     assert board_probe_results_live == board_probe_results_declared
     assert "DELETE" not in board_probe_results_live
 
+    # OMN-20578: the platform routing feedback is written by the tenant writer and
+    # read by the dashboard; the alert-channel verdicts are written by the runtime
+    # principal with SELECT, INSERT and UPDATE and no DELETE.
+    assert _live_privileges(
+        fresh_build,
+        "delegation_routing_feedback",
+        "tenant_projection_writer",
+        schema="public",
+    ) == {"SELECT", "INSERT", "UPDATE"}
+    assert _live_privileges(
+        fresh_build, "delegation_routing_feedback", "app_dashboard", schema="public"
+    ) == {"SELECT"}
+    alert_liveness_live = _live_privileges(
+        fresh_build, "alert_channel_liveness_verdicts", _RUNTIME
+    )
+    assert alert_liveness_live == {"SELECT", "INSERT", "UPDATE"}
+
     live = set(report["findings"])
     allowed = {entry["finding"] for entry in _load_allowlist()}
     new = sorted(live - allowed)

@@ -49,6 +49,7 @@ from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     should_replay,
 )
 from omnibase_infra.nodes.node_dlq_replay_effect.handlers.handler_dlq_replay import (
+    DlqConsumerDrainState,
     HandlerDlqReplay,
 )
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_message import (
@@ -285,7 +286,9 @@ async def test_5_an_empty_bodied_dlq_record_is_quarantined_not_republished() -> 
         quarantine_producer=quarantine,  # type: ignore[arg-type]
         tracking=None,
     )
-    result = await handler._process_message(_message(""), handler._config)
+    result = await handler._process_message(
+        _message(""), handler._config, DlqConsumerDrainState()
+    )
 
     assert producer.replayed == [], (
         "the producer published a zero-byte record back onto the original topic"

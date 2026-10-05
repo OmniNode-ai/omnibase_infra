@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol
@@ -99,9 +100,15 @@ class DlqConsumerDrainState:
     instances over the same consumers; a count kept per handler would let each
     of them spend the whole bound. Both are read and written only while the
     mutex is held.
+
+    ``replayed_sources`` is OMN-20589: the source coordinates this consumer has
+    already replayed, so the other dead letters of the same source record are
+    completed rather than replayed again. It lives here for the same reason:
+    the three dispatchers share the consumer, and siblings of one source record
+    can arrive in different runs.
     """
 
-    __slots__ = ("failed_attempts", "halted", "lock")
+    __slots__ = ("failed_attempts", "halted", "lock", "replayed_sources")
 
     def __init__(self) -> None:
         self.lock = asyncio.Lock()
@@ -109,6 +116,41 @@ class DlqConsumerDrainState:
         self.failed_attempts: dict[tuple[int, int], int] = {}
         # partition -> the offset whose record halted it.
         self.halted: dict[int, int] = {}
+        # (original topic, partition, offset) of every source record replayed,
+        # oldest first, bounded by _MAX_REPLAYED_SOURCES.
+        self.replayed_sources: OrderedDict[tuple[str, int, str], None] = OrderedDict()
+
+    def already_replayed(self, source: tuple[str, int, str]) -> bool:
+        return source in self.replayed_sources
+
+    def mark_replayed(self, source: tuple[str, int, str]) -> None:
+        self.replayed_sources[source] = None
+        self.replayed_sources.move_to_end(source)
+        while len(self.replayed_sources) > _MAX_REPLAYED_SOURCES:
+            self.replayed_sources.popitem(last=False)
+
+
+_MAX_REPLAYED_SOURCES = 10_000
+"""How many replayed source coordinates one consumer remembers (OMN-20589).
+
+The dead letters of one source record are written within milliseconds of each
+other, so the window only has to span one burst. Evicting the oldest entry can
+at worst let one more replay of a long-finished record through; it can never
+suppress a replay of a record that has not been replayed.
+"""
+
+
+def _source_coordinate(message: ModelDlqMessage) -> tuple[str, int, str] | None:
+    """The delivered source record a dead letter names, or None if it names none.
+
+    Every subscriber that rejects one delivered record writes its own dead
+    letter for it, and all of them carry the same original topic, partition and
+    offset. A dead letter without both partition and offset cannot be matched
+    to its siblings and is replayed on its own, exactly as before OMN-20589.
+    """
+    if message.original_partition is None or message.original_offset is None:
+        return None
+    return (message.original_topic, message.original_partition, message.original_offset)
 
 
 _DRAIN_STATES: WeakKeyDictionary[object, DlqConsumerDrainState] = WeakKeyDictionary()
@@ -594,7 +636,7 @@ class HandlerDlqReplay:
                     elif isinstance(message, ModelUnparseableDlqRecord):
                         result = await self._quarantine_unparseable(message)
                     else:
-                        result = await self._process_message(message, config)
+                        result = await self._process_message(message, config, state)
                     results.append(result)
                     self._mark_offset(message, result, ledger, config.dlq_topic)
                     self._count_failure(message, result, state, config)
@@ -979,7 +1021,10 @@ class HandlerDlqReplay:
         )
 
     async def _process_message(
-        self, message: ModelDlqMessage, config: ModelDlqReplayEngineConfig
+        self,
+        message: ModelDlqMessage,
+        config: ModelDlqReplayEngineConfig,
+        state: DlqConsumerDrainState,
     ) -> ModelDlqReplayResult:
         # OMN-18084: resolve a nested dead letter to the record it actually
         # wraps BEFORE deciding anything about it. A record whose original_topic
@@ -1018,6 +1063,42 @@ class HandlerDlqReplay:
 
         replay_correlation_id = generate_replay_correlation_id()
 
+        # OMN-20589: a replay re-delivers the source record to EVERY subscriber
+        # of its topic, so the dead letters other subscribers wrote for the same
+        # delivered record are already answered by the first one's replay.
+        # Replaying each of them multiplied the record by the number of
+        # rejecting subscribers on every round: two subscribers turned one
+        # runtime tick into 63 copies on the dev-202 lane (1/2/4/8/16/32 by
+        # x-replay-count). Refusal is still decided per dead letter above, so a
+        # sibling at the cap is quarantined, never skipped.
+        source = _source_coordinate(message)
+        if source is not None and state.already_replayed(source):
+            detail = (
+                f"source record {source[0]}/{source[1]}@{source[2]} was already "
+                "replayed for another subscriber's dead letter; that replay "
+                "re-delivered it here too (OMN-20589)"
+            )
+            await self._record(
+                message,
+                EnumReplayStatus.SKIPPED,
+                replay_correlation_id,
+                error_message=detail,
+            )
+            logger.info(
+                "SKIPPED duplicate dead letter %s/%s for %s: %s",
+                config.dlq_topic,
+                message.dlq_offset,
+                message.correlation_id,
+                detail,
+            )
+            return ModelDlqReplayResult(
+                correlation_id=message.correlation_id,
+                original_topic=message.original_topic,
+                status=EnumReplayStatus.SKIPPED,
+                message=f"Duplicate dead letter: {detail}",
+                replay_correlation_id=replay_correlation_id,
+            )
+
         if self._config.dry_run:
             return ModelDlqReplayResult(
                 correlation_id=message.correlation_id,
@@ -1049,6 +1130,8 @@ class HandlerDlqReplay:
                 replay_correlation_id=replay_correlation_id,
             )
 
+        if source is not None:
+            state.mark_replayed(source)
         await self._record(message, EnumReplayStatus.COMPLETED, replay_correlation_id)
         return ModelDlqReplayResult(
             correlation_id=message.correlation_id,
