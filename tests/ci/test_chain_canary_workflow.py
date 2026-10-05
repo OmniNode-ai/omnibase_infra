@@ -499,15 +499,36 @@ def test_alert_previous_verdict_skips_this_run_and_cancelled_runs(
 ) -> None:
     previous_conclusion = _alert_module(canary_job)["previous_conclusion"]
     assert callable(previous_conclusion)
+
+    def run(
+        run_id: int,
+        conclusion: str | None,
+        created: str,
+        *,
+        event: str = "schedule",
+        branch: str = "dev",
+        status: str = "completed",
+    ) -> dict[str, object]:
+        return {
+            "id": run_id,
+            "conclusion": conclusion,
+            "created_at": created,
+            "event": event,
+            "head_branch": branch,
+            "status": status,
+        }
+
     runs = [
-        {"id": 9, "conclusion": None},
-        {"id": 8, "conclusion": "cancelled"},
-        {"id": 7, "conclusion": "skipped"},
-        {"id": 6, "conclusion": "failure"},
-        {"id": 5, "conclusion": "success"},
+        # Listed out of order on purpose: the listing's order is not trusted.
+        run(5, "success", "2026-10-05T06:00:00Z"),
+        run(9, None, "2026-10-05T10:00:00Z", status="in_progress"),
+        run(8, "cancelled", "2026-10-05T09:45:00Z"),
+        run(7, "success", "2026-10-05T09:30:00Z", event="workflow_dispatch"),
+        run(10, "success", "2026-10-05T09:40:00Z", branch="feature"),
+        run(6, "failure", "2026-10-05T08:00:00Z"),
     ]
-    assert previous_conclusion(runs, 9) == "failure"
-    assert previous_conclusion(runs[:3], 9) is None
+    assert previous_conclusion(runs, 9, "dev") == "failure"
+    assert previous_conclusion(runs[1:5], 9, "dev") is None
 
 
 class _FakeResponse:
@@ -545,7 +566,18 @@ def test_alert_red_posts_one_message_naming_the_verdict_and_run(
     def opener(request: object, timeout: float = 0) -> _FakeResponse:
         url = getattr(request, "full_url", "")
         if "api.github.com" in url:
-            runs = {"workflow_runs": [{"id": 1, "conclusion": "success"}]}
+            runs = {
+                "workflow_runs": [
+                    {
+                        "id": 1,
+                        "conclusion": "success",
+                        "created_at": "2026-10-05T09:00:00Z",
+                        "event": "schedule",
+                        "head_branch": "dev",
+                        "status": "completed",
+                    }
+                ]
+            }
             return _FakeResponse(_json.dumps(runs).encode())
         sent.append(request)
         return _FakeResponse(b'{"ok": true, "ts": "1.2"}')

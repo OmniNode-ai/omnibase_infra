@@ -746,18 +746,26 @@ jobs:
           MEASURED = FAILED | {"success"}
 
 
-          def previous_conclusion(runs, run_id):
-              """The newest measured conclusion among completed runs, not this one.
+          def previous_conclusion(runs, run_id, branch):
+              """The newest measured conclusion among completed scheduled runs, not this one.
 
-              A run cancelled while pending (the concurrency group supersedes it)
-              never measured anything, so it is skipped rather than read as red.
+              The listing is read UNFILTERED and filtered here: the filtered
+              listing intermittently omits the newest runs (OMN-20277), which
+              would read a stale red as the previous verdict. A run cancelled
+              while pending (the concurrency group supersedes it) never measured
+              anything, so it is skipped rather than read as red.
               """
-              for run in runs:
-                  if str(run.get("id")) == str(run_id):
-                      continue
-                  if run.get("conclusion") in MEASURED:
-                      return run["conclusion"]
-              return None
+              admitted = [
+                  run
+                  for run in runs
+                  if str(run.get("id")) != str(run_id)
+                  and run.get("event") == "schedule"
+                  and run.get("head_branch") == branch
+                  and run.get("status") == "completed"
+                  and run.get("conclusion") in MEASURED
+              ]
+              admitted.sort(key=lambda run: str(run.get("created_at", "")), reverse=True)
+              return admitted[0]["conclusion"] if admitted else None
 
 
           def decide(job_status, previous):
@@ -791,9 +799,7 @@ jobs:
 
           def main(env, opener=urllib.request.urlopen):
               api = env.get("GITHUB_API_URL") or "https://api.github.com"
-              query = urllib.parse.urlencode(
-                  {"branch": env["BRANCH"], "event": "schedule", "status": "completed", "per_page": "20"}
-              )
+              query = urllib.parse.urlencode({"per_page": "50"})
               listing = urllib.request.Request(
                   f"{api}/repos/{env['GITHUB_REPOSITORY']}/actions/workflows/chain-canary.yml/runs?{query}",
                   headers={
@@ -804,7 +810,7 @@ jobs:
               try:
                   with opener(listing, timeout=30) as response:
                       runs = json.loads(response.read()).get("workflow_runs") or []
-                  previous = previous_conclusion(runs, env["RUN_ID"])
+                  previous = previous_conclusion(runs, env["RUN_ID"], env["BRANCH"])
               except Exception as exc:  # an unread history alerts rather than hides
                   print(f"::warning::previous chain-canary run unreadable ({exc}); treating it as unknown")
                   previous = None
