@@ -76,6 +76,7 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.exceptions import RedisError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -85,18 +86,22 @@ from omnibase_infra.errors import (
     ModelTimeoutErrorContext,
     ProtocolConfigurationError,
 )
-from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
-from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.enums import EnumSchedulerStatus
 from omnibase_infra.runtime.models import (
     ModelRuntimeSchedulerConfig,
     ModelRuntimeSchedulerMetrics,
     ModelRuntimeTick,
 )
+from omnibase_infra.runtime.runtime_profile import resolve_runtime_scheduler_enabled
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 logger = logging.getLogger(__name__)
+
+# The event_type every runtime-tick subscriber routes on (handler_routing
+# ``event_type: platform.runtime-tick`` in each subscribing contract).
+RUNTIME_TICK_EVENT_TYPE = "platform.runtime-tick"
 
 
 class RuntimeScheduler(MixinAsyncCircuitBreaker):
@@ -145,13 +150,14 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
     def __init__(
         self,
         config: ModelRuntimeSchedulerConfig,
-        event_bus: EventBusKafka,
+        event_bus: ProtocolEventBusLike,
     ) -> None:
         """Initialize the RuntimeScheduler.
 
         Args:
             config: Configuration model containing all scheduler settings.
-            event_bus: EventBusKafka instance for publishing tick events.
+            event_bus: Any event bus with ``publish_envelope`` (Kafka in a lane,
+                in-memory in tests and local runs).
 
         Raises:
             ProtocolConfigurationError: If config or event_bus is None.
@@ -418,17 +424,19 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                 await self._record_tick_failure(correlation_id)
                 raise
 
-        # Create headers for the event
-        headers = ModelEventHeaders(
+        # OMN-20590: the tick travels as a ModelEventEnvelope carrying the
+        # event_type every subscribing contract routes on. A bare tick is
+        # refused outright by EventBusSubcontractWiring._deserialize_to_envelope
+        # (no ``payload`` key), and at the auto-wiring consume boundary it is
+        # wrapped in a synthesized envelope whose minted id has no lineage
+        # (OMN-18958), so the envelope is the one shape both paths take whole.
+        envelope: ModelEventEnvelope[ModelRuntimeTick] = ModelEventEnvelope(
+            payload=tick,
             correlation_id=correlation_id,
-            message_id=tick_id,
-            timestamp=tick_time,
-            source=f"runtime-scheduler.{self.scheduler_id}",
-            event_type="runtime.tick.v1",
+            event_type=RUNTIME_TICK_EVENT_TYPE,
+            source_tool=f"runtime-scheduler.{self.scheduler_id}",
+            tenant_id=None,
         )
-
-        # Serialize tick to JSON bytes
-        tick_bytes = tick.model_dump_json().encode("utf-8")
 
         # Prepare error context for ONEX error types
         ctx = ModelInfraErrorContext(
@@ -440,11 +448,10 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
 
         try:
             # Publish tick event
-            await self._event_bus.publish(
+            await self._event_bus.publish_envelope(
+                envelope=envelope,
                 topic=self._config.tick_topic,
                 key=self.scheduler_id.encode("utf-8"),
-                value=tick_bytes,
-                headers=headers,
             )
 
             # Record success
@@ -1067,4 +1074,81 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
             await self._close_valkey_client()
 
 
-__all__: list[str] = ["RuntimeScheduler"]
+# =============================================================================
+# Lane wiring (OMN-20590)
+# =============================================================================
+#
+# RuntimeScheduler was built (OMN-953) and never started by any runtime, so
+# nothing published the runtime tick on any lane while seven contracts
+# subscribed to it (read live 2026-10-05: the .201 dev and stability brokers
+# and the k3s onex-lab broker held HIGH-WATERMARK 0 on the topic).
+#
+# Ownership: a lane runs one ``main`` runtime and several secondary roles that
+# often share one compose environment anchor. Two producers on one bus would
+# double every tick, so only the ``main`` role publishes.
+#
+# Opt-in per lane: the first ticks a lane receives activate every subscribing
+# contract, two of which prune rows with ``dry_run: false``. A lane turns its
+# producer on in the overlay that owns it, so a redeploy keeps the setting and
+# a lane nobody edited does not change. A ``main`` runtime that was not asked
+# says so at WARNING on every boot, naming the topic.
+
+# The one role that owns the lane's tick producer.
+TICK_PRODUCER_PROFILE = "main"
+
+
+async def start_lane_runtime_scheduler(
+    event_bus: ProtocolEventBusLike,
+    runtime_profile: str,
+) -> RuntimeScheduler | None:
+    """Start the runtime tick producer when this process owns it.
+
+    Args:
+        event_bus: The kernel's started event bus.
+        runtime_profile: The validated ROLE identity of this process
+            (``resolve_runtime_profile_name()``).
+
+    Returns:
+        The running scheduler, which the caller must ``stop()`` at shutdown,
+        or ``None`` when this process does not publish ticks.
+
+    Raises:
+        ProtocolConfigurationError: If the lane's switch holds a value that
+            is not a boolean.
+    """
+    enabled = resolve_runtime_scheduler_enabled()
+    if runtime_profile != TICK_PRODUCER_PROFILE:
+        logger.debug(
+            "Runtime tick producer not started: profile %r does not own it (owner: %r)",
+            runtime_profile,
+            TICK_PRODUCER_PROFILE,
+        )
+        return None
+    config = ModelRuntimeSchedulerConfig.default()
+    if not enabled:
+        logger.warning(
+            "Runtime tick producer NOT started on this lane: "
+            "ONEX_RUNTIME_SCHEDULER_ENABLED is not true, so nothing publishes "
+            "%s and every contract subscribed to it (prunes, reapers, timeout "
+            "evaluation, pollers) never fires. Set it in the lane overlay to "
+            "turn the producer on.",
+            config.tick_topic,
+        )
+        return None
+    scheduler = RuntimeScheduler(config=config, event_bus=event_bus)
+    await scheduler.start()
+    logger.info(
+        "Runtime tick producer started: scheduler_id=%s topic=%s interval_ms=%d",
+        scheduler.scheduler_id,
+        config.tick_topic,
+        config.tick_interval_ms,
+    )
+    return scheduler
+
+
+__all__: list[str] = [
+    "RUNTIME_TICK_EVENT_TYPE",
+    "TICK_PRODUCER_PROFILE",
+    "RuntimeScheduler",
+    "start_lane_runtime_scheduler",
+]
