@@ -718,12 +718,13 @@ class TestRuntimeSchedulerTickEmission:
     async def test_tick_published_as_envelope_the_consumers_accept(
         self, scheduler: RuntimeScheduler, mock_event_bus: AsyncMock
     ) -> None:
-        """OMN-20590: a bare tick is refused by every auto-wired consumer.
+        """OMN-20590: the tick is published as an envelope, not a bare model.
 
-        The consumer path (``EventBusSubcontractWiring._deserialize_to_envelope``)
-        validates the record as a ``ModelEventEnvelope``, and every subscribing
-        contract routes on ``platform.runtime-tick``. RED on the parent:
-        ``emit_tick`` called ``publish`` with the bare tick's JSON bytes.
+        ``EventBusSubcontractWiring._deserialize_to_envelope`` refuses a bare
+        tick (no ``payload`` key), the auto-wiring boundary wraps one in an
+        envelope with a minted, lineage-less id, and every subscribing contract
+        routes on ``platform.runtime-tick``. RED on the parent: ``emit_tick``
+        called ``publish`` with the bare tick's JSON bytes.
         """
         import json
 

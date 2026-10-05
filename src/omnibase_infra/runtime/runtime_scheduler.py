@@ -424,11 +424,12 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                 await self._record_tick_failure(correlation_id)
                 raise
 
-        # OMN-20590: the tick travels as a ModelEventEnvelope. Every auto-wired
-        # consumer deserializes with ModelEventEnvelope.model_validate
-        # (EventBusSubcontractWiring._deserialize_to_envelope), which refuses a
-        # bare payload, and every subscribing contract routes on the event_type
-        # RUNTIME_TICK_EVENT_TYPE.
+        # OMN-20590: the tick travels as a ModelEventEnvelope carrying the
+        # event_type every subscribing contract routes on. A bare tick is
+        # refused outright by EventBusSubcontractWiring._deserialize_to_envelope
+        # (no ``payload`` key), and at the auto-wiring consume boundary it is
+        # wrapped in a synthesized envelope whose minted id has no lineage
+        # (OMN-18958), so the envelope is the one shape both paths take whole.
         envelope: ModelEventEnvelope[ModelRuntimeTick] = ModelEventEnvelope(
             payload=tick,
             correlation_id=correlation_id,
