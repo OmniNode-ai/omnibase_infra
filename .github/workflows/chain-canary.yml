@@ -177,6 +177,11 @@ jobs:
     # See "WHERE IT RUNS" above before changing this. OMN-18408 moved the job
     # off the single deploy runner; OMN-19894 moved it off the one host.
     runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
+    # OMN-20594: `actions: read` lets the last step read this workflow's
+    # previous scheduled run, so the operator alert is edge-triggered.
+    permissions:
+      contents: read
+      actions: read
     # OMN-19811: 25 -> 65. The probe itself still fits the old 25 (setup, a
     # 120 s budget and its readbacks, at most twice). The added 40 minutes is
     # the deploy_wait_seconds default of 2400 s, spent only when the deploy
@@ -561,6 +566,7 @@ jobs:
         run: |
           set -uo pipefail
           python3 - <<'PY'
+          import http.client
           import json
           import os
           import pathlib
@@ -703,4 +709,142 @@ jobs:
               f"chain canary PROBE-GREEN — {scope}, chain proof "
               f"{'complete' if chain_proved else 'INCOMPLETE'}: {detail}"
           )
+          PY
+
+      # OMN-20594. The h201 dev lane is the protected delegation lane (see the
+      # dev entry of deploy/lane-census/lane-manifest.yaml): the Tech Week demo
+      # runs on it. OMN-16773 deferred alerting, so until this step a red here
+      # was a failed run nobody watched. A scheduled run now tells the operator
+      # when the verdict CHANGES: a red after a non-red posts once, a green
+      # after a red posts the recovery, and a lane that stays red posts nothing
+      # more (the lab alarm's delegation_chain_canary condition and the board
+      # carry it from there). The channel and token are the ones the fleet
+      # canary and dev-lane-liveness already alert through; absent secrets are
+      # a warning on the run, never a silent pass. A manual dispatch may carry
+      # overrides aimed at another lane, so only scheduled runs alert.
+      - name: Tell the operator when the delegation verdict changes (OMN-20594)
+        if: always() && github.event_name == 'schedule'
+        env:
+          JOB_STATUS: ${{ job.status }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BRANCH: ${{ github.ref_name }}
+          GITHUB_TOKEN: ${{ github.token }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          RECEIPT_PATH: chain-canary-receipt.json
+        run: |
+          set -uo pipefail
+          python3 - <<'PY'
+          import http.client
+          import json
+          import os
+          import sys
+          import urllib.parse
+          import urllib.request
+
+          SLACK_POST_URL = "https://slack.com/api/chat.postMessage"
+          FAILED = frozenset({"failure", "timed_out", "startup_failure"})
+          MEASURED = FAILED | {"success"}
+
+
+          def previous_conclusion(runs, run_id, branch):
+              """The newest measured conclusion among completed scheduled runs, not this one.
+
+              The listing is read UNFILTERED and filtered here: the filtered
+              listing intermittently omits the newest runs (OMN-20277), which
+              would read a stale red as the previous verdict. A run cancelled
+              while pending (the concurrency group supersedes it) never measured
+              anything, so it is skipped rather than read as red.
+              """
+              admitted = [
+                  run
+                  for run in runs
+                  if str(run.get("id")) != str(run_id)
+                  and run.get("event") == "schedule"
+                  and run.get("head_branch") == branch
+                  and run.get("status") == "completed"
+                  and run.get("conclusion") in MEASURED
+              ]
+              admitted.sort(key=lambda run: str(run.get("created_at", "")), reverse=True)
+              return admitted[0]["conclusion"] if admitted else None
+
+
+          def decide(job_status, previous):
+              if job_status == "success":
+                  return "RECOVERED" if previous in FAILED else None
+              if job_status == "cancelled":
+                  return None
+              return None if previous in FAILED else "RED"
+
+
+          def read_receipt(path):
+              try:
+                  result = json.loads(open(path, encoding="utf-8").read()).get("result") or {}
+              except (OSError, ValueError, AttributeError):
+                  return "no receipt", "the canary produced no readable receipt"
+              return str(result.get("verdict", "unknown")), str(result.get("detail", ""))[:400]
+
+
+          def compose(kind, verdict, detail, run_url):
+              if kind == "RED":
+                  return (
+                      "*[DELEGATION CANARY RED]* h201 dev lane (protected delegation lane): "
+                      f"a live delegation through the deployed lane did not prove out, verdict `{verdict}`. "
+                      f"{detail} Run: {run_url}"
+                  )
+              return (
+                  "*[DELEGATION CANARY RECOVERED]* h201 dev lane (protected delegation lane): "
+                  f"the chain canary is green again, verdict `{verdict}`. Run: {run_url}"
+              )
+
+
+          def main(env, opener=urllib.request.urlopen):
+              api = env.get("GITHUB_API_URL") or "https://api.github.com"
+              query = urllib.parse.urlencode({"per_page": "50"})
+              listing = urllib.request.Request(
+                  f"{api}/repos/{env['GITHUB_REPOSITORY']}/actions/workflows/chain-canary.yml/runs?{query}",
+                  headers={
+                      "Authorization": f"Bearer {env.get('GITHUB_TOKEN', '')}",
+                      "Accept": "application/vnd.github+json",
+                  },
+              )
+              try:
+                  with opener(listing, timeout=30) as response:
+                      runs = json.loads(response.read()).get("workflow_runs") or []
+                  previous = previous_conclusion(runs, env["RUN_ID"], env["BRANCH"])
+              except (OSError, ValueError, http.client.HTTPException) as exc:  # an unread history alerts rather than hides
+                  print(f"::warning::previous chain-canary run unreadable ({exc}); treating it as unknown")
+                  previous = None
+              kind = decide(env["JOB_STATUS"], previous)
+              print(f"job status {env['JOB_STATUS']}, previous measured run {previous}, alert {kind}")
+              if kind is None:
+                  return 0
+              verdict, detail = read_receipt(env.get("RECEIPT_PATH", "chain-canary-receipt.json"))
+              text = compose(kind, verdict, detail, env["RUN_URL"])
+              token = env.get("SLACK_BOT_TOKEN", "")
+              channel = env.get("SLACK_CHANNEL_ID", "")
+              if not token or not channel:
+                  print(f"::warning::{kind}: SLACK_BOT_TOKEN or SLACK_CHANNEL_ID is unset, the operator was NOT told: {text}")
+                  return 0
+              post = urllib.request.Request(
+                  SLACK_POST_URL,
+                  data=json.dumps({"channel": channel, "text": text}).encode(),
+                  headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+              )
+              try:
+                  with opener(post, timeout=30) as response:
+                      answer = json.loads(response.read())
+              except (OSError, ValueError, http.client.HTTPException) as exc:
+                  print(f"::warning::{kind}: the Slack post failed ({exc}), the operator was NOT told")
+                  return 0
+              if not answer.get("ok"):
+                  print(f"::warning::{kind}: Slack refused the post ({answer.get('error')}), the operator was NOT told")
+                  return 0
+              print(f"{kind}: posted to the operator channel, ts {answer.get('ts')}")
+              return 0
+
+
+          if __name__ == "__main__":
+              sys.exit(main(dict(os.environ)))
           PY

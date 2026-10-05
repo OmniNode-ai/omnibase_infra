@@ -47,6 +47,12 @@ MIRROR_REPOS=(
     omnimemory
     omnibase_compat
     knowledge-base
+    # OMN-20597: about 99% of self-hosted checkout minutes on 2026-10-04/05
+    # (2,048 of ~2,075 over 17 h, 551 checkouts, p50 158 s, max 1831 s) were
+    # this repo's depth-1 fetch of a 270 MB tree straight from github.com,
+    # because the pre-seed found no mirror for it. Mirrored repos check out in
+    # 0-4 s.
+    knowledge-base-internal
 )
 
 # OMN-16063 C2b -- serving settings every mirror must carry.

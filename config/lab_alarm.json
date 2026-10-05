@@ -12,6 +12,11 @@
   "_comment_work_ledger_db_container": "OMN-20248: work_ledger_db_container is the dev lane's postgres container the work_ledger_projection_stale condition reads max(row_ts) of omninode_internal.work_ledger_rows from, through docker_command (docker exec ... psql, read-only).",
   "_comment_work_ledger_database": "OMN-20248: work_ledger_database is the database holding omninode_internal.work_ledger_rows. Measured 2026-10-01: that table sat frozen at 424 rows for about 36 hours while the projection's consumer groups read Stable at lag 0, so only a file-vs-table comparison sees the freeze.",
   "_comment_work_ledger_max_lag_minutes": "OMN-20248: work_ledger_max_lag_minutes is how far the projection's max(row_ts) may trail the newest canonical row in the --ledger file before the condition alarms. Thirty minutes is well past normal emit-to-projection latency and well inside the hourly tick, so one tick sees a freeze.",
+  "_comment_chain_canary": "OMN-20594: the delegation_chain_canary condition reads the verdict of chain_canary_workflow (chain-canary.yml, C15) on chain_canary_branch through the workflow-verdict reader staging delivery binds C15 with, scheduled runs only. It alarms when the newest completed scheduled run is not success or started more than chain_canary_max_age_minutes ago. 180 minutes is one 2-hour C15 period plus slack, the same 3-hour bound deliver-dev-candidate-to-staging.yml reads C15 with. The h201 dev lane this canary grades is the protected delegation lane (deploy/lane-census/lane-manifest.yaml).",
+  "chain_canary_workflow": "chain-canary.yml",
+  "chain_canary_branch": "dev",
+  "chain_canary_max_age_minutes": 180,
+
   "work_ledger_db_container": "omnibase-infra-postgres",
   "work_ledger_database": "omnidash_analytics",
   "work_ledger_max_lag_minutes": 30,

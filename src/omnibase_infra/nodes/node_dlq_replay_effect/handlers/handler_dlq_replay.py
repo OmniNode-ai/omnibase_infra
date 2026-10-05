@@ -1078,6 +1078,16 @@ class HandlerDlqReplay:
                 "replayed for another subscriber's dead letter; that replay "
                 "re-delivered it here too (OMN-20589)"
             )
+            if self._config.dry_run:
+                # A dry run writes no audit row on any other path either, so a
+                # duplicate it finds is reported, not recorded.
+                return ModelDlqReplayResult(
+                    correlation_id=message.correlation_id,
+                    original_topic=message.original_topic,
+                    status=EnumReplayStatus.SKIPPED,
+                    message=f"DRY RUN - would skip duplicate dead letter: {detail}",
+                    replay_correlation_id=replay_correlation_id,
+                )
             await self._record(
                 message,
                 EnumReplayStatus.SKIPPED,

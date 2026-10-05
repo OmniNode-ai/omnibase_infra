@@ -247,3 +247,29 @@ def test_real_manifest_generates_valid_block() -> None:
     # Every declared lane must appear
     for lane in manifest.get("lanes", {}):
         assert f"| {lane}" in block
+
+
+# ---------------------------------------------------------------------------
+# OMN-20594 -- the protected delegation lane is declared where lanes read
+# ---------------------------------------------------------------------------
+
+
+def test_dev_lane_boundary_names_the_protected_delegation_lane() -> None:
+    """The lane table a lane reads before touching the dev lane says what guards it."""
+    boundary = MOD._LANE_BOUNDARY["dev"]
+    assert "protected delegation lane" in boundary
+    assert "chain canary" in boundary
+    assert "OMN-20594" in boundary
+    # The boundary text is rendered into the table row, so a pipe would split it.
+    assert "|" not in boundary
+
+
+def test_manifest_dev_entry_declares_the_protected_delegation_lane() -> None:
+    """The desired-state census names the guards beside the lane they guard."""
+    text = _MANIFEST_PATH.read_text(encoding="utf-8")
+    head, _, rest = text.partition("\n  dev:\n")
+    assert rest, "the manifest has no dev lane entry"
+    preceding = head[-3000:]
+    assert "PROTECTED DELEGATION LANE (OMN-20594)" in preceding
+    for guard in ("chain-canary.yml", "delegation_chain_canary", "staging delivery"):
+        assert guard in preceding, f"the dev entry's comment does not name {guard}"

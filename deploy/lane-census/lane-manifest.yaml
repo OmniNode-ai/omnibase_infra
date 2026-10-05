@@ -407,6 +407,30 @@ lanes:
   # down most of the time, so its absence is not a steady-state regression. When dev
   # IS up, the listed services must be running. This avoids a noisy false-positive
   # ticket every time a developer stops their local stack.
+  #
+  # PROTECTED DELEGATION LANE (OMN-20594). Operator in session 2026-10-05:
+  # delegation must work in the lab and stay working on at least one lane. This
+  # is that lane: the operator demos delegation against it from the Mac Studio.
+  # A change that breaks delegation here is a defect, not lab churn. What guards
+  # it today, each an existing surface:
+  #   * chain-canary.yml (C15) fires a real delegation through this lane's
+  #     deployed ingress on its schedule (every 2 hours at :41) and reads the
+  #     terminal back off the bus. A scheduled red posts to the operator's Slack
+  #     channel when the verdict changes, and a recovery posts too.
+  #   * scripts/lab_alarm.py, condition delegation_chain_canary (hourly
+  #     launchd timer), raises once when the newest scheduled C15 run is red or
+  #     none completed inside config/lab_alarm.json's window.
+  #   * staging delivery (deliver-dev-candidate-to-staging.yml) refuses to
+  #     promote while C15 is red or older than 3 hours.
+  #   * the omni plugin's delegation-health check reads this lane's
+  #     delegation_events projection per provider.
+  # Not a guard yet: nothing rolls this lane back when a deploy breaks
+  # delegation; the next C15 run catches it and the operator is told. A
+  # deploy-agent post-deploy delegation check with rollback to the prior loaded
+  # sha is proposed under OMN-20594, for after Tech Week. A 15-minute C15
+  # cadence waits on an operator decision, because it would close every
+  # idle-converge window of this lane (OMN-19509). The backup delegation lane
+  # is the h201 stability-test lane (OMN-20593).
   dev:
     hosts: [lab-201]
     compose_file: docker/docker-compose.generated.yml

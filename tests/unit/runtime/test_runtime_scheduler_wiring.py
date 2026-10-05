@@ -22,9 +22,13 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.models import ModelRuntimeTick
-from omnibase_infra.runtime.runtime_profile import resolve_runtime_scheduler_enabled
+from omnibase_infra.runtime.runtime_profile import (
+    load_runtime_profile,
+    resolve_runtime_scheduler_enabled,
+)
 from omnibase_infra.runtime.runtime_scheduler import (
     RUNTIME_TICK_EVENT_TYPE,
+    TICK_PRODUCER_PROFILE,
     start_lane_runtime_scheduler,
 )
 from omnibase_infra.topics import SUFFIX_RUNTIME_TICK
@@ -128,6 +132,24 @@ class TestStartLaneRuntimeScheduler:
         with pytest.raises(ProtocolConfigurationError):
             await start_lane_runtime_scheduler(bus, "main")
 
+    @pytest.mark.parametrize("profile", ["effects", "workers", "projection-api"])
+    async def test_unparseable_flag_leaves_a_secondary_role_running(
+        self, monkeypatch: pytest.MonkeyPatch, bus: AsyncMock, profile: str
+    ) -> None:
+        """A role that does not own the producer never reads the switch.
+
+        Roles often share one compose environment anchor, so a typo there
+        reaches every role. Only ``main`` acts on the switch, so only ``main``
+        refuses to boot over it (the test above); the others start as before.
+        """
+        monkeypatch.setenv(_FLAG, "ture")
+        assert await start_lane_runtime_scheduler(bus, profile) is None
+        bus.publish_envelope.assert_not_called()
+
+    def test_tick_producer_profile_is_a_registered_role(self) -> None:
+        """The owner name is the registry's ``main``, not a free-standing string."""
+        assert load_runtime_profile(TICK_PRODUCER_PROFILE).name == TICK_PRODUCER_PROFILE
+
 
 def _load_compose(name: str) -> dict[str, Any]:
     # `!override` is a compose-only tag SafeLoader refuses.
@@ -207,7 +229,7 @@ def test_envelope_survives_the_consumer_deserializer_shape() -> None:
         scheduler_id="runtime-scheduler-default",
         tick_interval_ms=1000,
     )
-    envelope = ModelEventEnvelope(
+    envelope: ModelEventEnvelope[ModelRuntimeTick] = ModelEventEnvelope(
         payload=tick,
         correlation_id=tick.correlation_id,
         event_type=RUNTIME_TICK_EVENT_TYPE,

@@ -105,6 +105,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import io
 import json
 import os
 import re
@@ -132,6 +133,7 @@ from scripts.ci.lab_pass_receipt import (
     ReceiptLookupError,
     artifact_name,
     download_receipt,
+    evaluate_workflow_verdict,
     list_artifacts,
 )
 
@@ -190,6 +192,12 @@ class EnumAlarmCondition(StrEnum):
     minutes behind a slow runtime health gate while its docker CONTAINER
     status alone gives no signal that delegation itself cannot proceed.
 
+    DELEGATION_CHAIN_CANARY (OMN-20594) reads the verdict of the chain
+    canary (``chain-canary.yml``, C15), the one probe that fires a real
+    delegation through the protected h201 dev lane's deployed ingress. A red,
+    or no completed scheduled run inside the declared window, is an alarm:
+    until this condition a red canary was a failed run nobody watched.
+
     WORK_LEDGER_PROJECTION_STALE (OMN-20248) compares the rolling ledger
     file's newest canonical row against ``max(row_ts)`` in the work-ledger
     projection table. The projection sat frozen for about 36 hours while its
@@ -202,6 +210,7 @@ class EnumAlarmCondition(StrEnum):
     CONSUMER_GROUP_LAG = "consumer_group_lag"
     EFFECTS_HELD_BEHIND_RUNTIME = "effects_held_behind_runtime"
     WORK_LEDGER_PROJECTION_STALE = "work_ledger_projection_stale"
+    DELEGATION_CHAIN_CANARY = "delegation_chain_canary"
     STALE_INDETERMINATE = "stale_indeterminate"
 
 
@@ -326,7 +335,7 @@ class ModelConditionReport:
 
 @dataclass(frozen=True)
 class ModelAlarmRun:
-    """One tick. Carries all six conditions whether or not anything fired."""
+    """One tick. Carries all seven conditions whether or not anything fired."""
 
     started_at: str
     finished_at: str
@@ -1866,6 +1875,99 @@ def select_new_alarms(
 
 
 # ---------------------------------------------------------------------------
+# Condition 6 — the protected lane's delegation canary is red or silent (OMN-20594)
+# ---------------------------------------------------------------------------
+#
+# The h201 dev lane is the protected delegation lane (the dev entry of
+# deploy/lane-census/lane-manifest.yaml). The chain canary is the one probe
+# that submits a real delegation through its deployed ingress and reads the
+# terminal back off the bus; its exit code is the verdict, the same fact the
+# board scores C15 from and staging delivery binds. This condition reads that
+# verdict through the ONE workflow-verdict reader (OMN-18866), with the same
+# admission staging delivery uses (scheduled runs only, so a manual dispatch
+# aimed at another lane cannot stand in), and does not grade the run itself.
+#
+# The reader prints its reasoning and returns 0 or 1. Its "the run surface is
+# unreadable" refusal is the one red that is about this alarm's own read rather
+# than the lane, so it reads INDETERMINATE (rule 16: an unread surface is not a
+# clean one, and it is not an outage either); every other refusal -- a newest
+# run that failed, was cancelled, is older than the window, or does not exist
+# -- is the ALARM. The chain canary posts its own change of verdict to the
+# operator the moment a scheduled run ends; this condition is the hourly
+# backstop that also catches a canary that stopped running at all.
+
+
+class CanaryVerdictReader(Protocol):
+    def __call__(
+        self, repo: str, workflow: str, branch: str, max_age_hours: float
+    ) -> tuple[int, str]:
+        """Return the reader's exit code and everything it printed."""
+
+
+def read_chain_canary_verdict(
+    repo: str, workflow: str, branch: str, max_age_hours: float
+) -> tuple[int, str]:
+    """The workflow-verdict reader, scheduled runs only, its output captured."""
+    out = io.StringIO()
+    rc = evaluate_workflow_verdict(
+        repo, workflow, branch, max_age_hours, ("schedule",), out
+    )
+    return rc, out.getvalue()
+
+
+_UNREADABLE_SURFACE = "run surface is unreadable"
+
+
+def _verdict_summary(text: str) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return " / ".join(lines[-3:]) if lines else "(the reader printed nothing)"
+
+
+def evaluate_delegation_chain_canary(
+    reader: CanaryVerdictReader,
+    *,
+    repo: str,
+    workflow: str,
+    branch: str,
+    max_age: timedelta,
+) -> ModelConditionReport:
+    condition = EnumAlarmCondition.DELEGATION_CHAIN_CANARY
+    subject = f"{repo} {workflow}@{branch}"
+    hours = max_age.total_seconds() / 3600.0
+    try:
+        rc, text = reader(repo, workflow, branch, hours)
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+        return ModelConditionReport(
+            condition=condition,
+            outcome=EnumConditionOutcome.INDETERMINATE,
+            evidence=f"{subject}: the workflow-verdict read failed: {exc}",
+        )
+    summary = _verdict_summary(text)
+    if rc == 0:
+        return ModelConditionReport(
+            condition=condition,
+            outcome=EnumConditionOutcome.OK,
+            evidence=f"{subject}: newest scheduled run green and inside {max_age}; {summary}",
+        )
+    if _UNREADABLE_SURFACE in text:
+        return ModelConditionReport(
+            condition=condition,
+            outcome=EnumConditionOutcome.INDETERMINATE,
+            evidence=f"{subject}: the run surface is unreadable, so no verdict; {summary}",
+        )
+    detail = (
+        f"the delegation chain canary on the protected delegation lane (h201 dev) "
+        f"is red or has not completed a scheduled run inside {max_age}: {summary}"
+    )
+    return ModelConditionReport(
+        condition=condition,
+        outcome=EnumConditionOutcome.ALARM,
+        evidence=f"{subject}: {detail}",
+        alarms=(ModelAlarm(condition=condition, subject=subject, detail=detail),),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Condition 4 — a condition stuck INDETERMINATE for too long (OMN-19091)
 # ---------------------------------------------------------------------------
 
@@ -2017,6 +2119,11 @@ class ModelAlarmConfig:
     #: classifier's path rule. Empty disables the nearest-runtime-affecting
     #: ancestor rule and asks the delivered sha itself.
     runtime_path_validator: str = ""
+    #: OMN-20594: the protected lane's delegation probe and the window inside
+    #: which a completed scheduled run must exist.
+    chain_canary_workflow: str = "chain-canary.yml"
+    chain_canary_branch: str = "dev"
+    chain_canary_max_age: timedelta = timedelta(hours=3)
 
     @classmethod
     def load(cls, path: Path) -> ModelAlarmConfig:
@@ -2053,6 +2160,11 @@ class ModelAlarmConfig:
             runtime_path_validator=expand_env(
                 str(payload.get("runtime_path_validator", "")), source=path
             ),
+            chain_canary_workflow=str(payload["chain_canary_workflow"]),
+            chain_canary_branch=str(payload["chain_canary_branch"]),
+            chain_canary_max_age=timedelta(
+                minutes=int(payload["chain_canary_max_age_minutes"])
+            ),
         )
 
 
@@ -2076,11 +2188,12 @@ def run_once(
     runner: CommandRunner,
     lag_reader: GroupLagReader,
     effects_reader: EffectsHeldReader,
+    canary_reader: CanaryVerdictReader,
     posting_channel: str,
     env_file: Path,
     subject_resolver: SubjectResolver | None = None,
 ) -> ModelAlarmRun:
-    """Evaluate all six conditions, record the run, return it."""
+    """Evaluate all seven conditions, record the run, return it."""
     started = _now()
     state = ModelAlarmState.load(state_dir / "state.json")
 
@@ -2107,12 +2220,20 @@ def run_once(
         max_lag=config.work_ledger_max_lag,
         runner=runner,
     )
+    canary_report = evaluate_delegation_chain_canary(
+        canary_reader,
+        repo=config.repo,
+        workflow=config.chain_canary_workflow,
+        branch=config.chain_canary_branch,
+        max_age=config.chain_canary_max_age,
+    )
     watched_reports = (
         receipt_report,
         restart_report,
         lag_report,
         effects_report,
         work_ledger_report,
+        canary_report,
     )
     stale_report = evaluate_stale_indeterminate(watched_reports, state, now=started)
 
@@ -2364,6 +2485,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             group_prefix=config.effects_group_prefix,
             group_suffix=config.effects_group_suffix,
         ),
+        canary_reader=read_chain_canary_verdict,
         posting_channel=args.posting_channel,
         env_file=args.env_file,
         subject_resolver=make_clone_subject_resolver(
