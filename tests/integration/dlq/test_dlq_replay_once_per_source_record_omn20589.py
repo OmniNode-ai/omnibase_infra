@@ -200,3 +200,89 @@ async def test_a_tick_two_subscribers_reject_settles_at_one_copy_per_round() -> 
     assert statuses.count(EnumReplayStatus.QUARANTINED) == 2
     assert EnumReplayStatus.FAILED not in statuses
     assert len(quarantine_sink.sends) == 2
+
+
+class _RecordingTracking:
+    """Stands in for ``ServiceDlqTracking``: keeps every audit row's status."""
+
+    def __init__(self) -> None:
+        self.statuses: list[EnumReplayStatus] = []
+
+    @property
+    def is_tracking_enabled(self) -> bool:
+        return True
+
+    async def record_replay_attempt(self, record: Any) -> None:
+        self.statuses.append(record.replay_status)
+
+
+async def test_a_dry_run_after_a_live_replay_reports_the_sibling_and_records_nothing() -> (
+    None
+):
+    """A dry run over the live shape writes no audit row, even for a duplicate.
+
+    The live run replays the first dead letter of the tick, so its sibling is a
+    duplicate. A dry run over the same consumer reports that sibling as a
+    skipped duplicate and the next round's two dead letters as would-replay,
+    and records, publishes and commits nothing (OMN-20589 review follow-up).
+    """
+    lane = _Lane()
+    live_config = ModelDlqReplayEngineConfig(
+        bootstrap_servers="localhost:9092",
+        dlq_topic=_INTENTS_DLQ,
+        max_replay_count=5,
+        rate_limit_per_second=10_000.0,
+        max_run_duration_seconds=5.0,
+        idle_probe_seconds=0.05,
+        max_records_per_run=1,
+    )
+    aio_consumer = _AioConsumer(lane)
+    consumer = DLQConsumer(live_config)
+    cast("Any", consumer)._consumer = aio_consumer
+    consumer._started = True
+    tick_producer = _AioTickProducer(lane)
+    producer = DLQProducer(live_config)
+    cast("Any", producer)._producer = tick_producer
+    producer._started = True
+    quarantine_sink = _AioQuarantineProducer()
+    quarantine = DLQQuarantineProducer(live_config)
+    cast("Any", quarantine)._producer = quarantine_sink
+    quarantine._started = True
+    tracking = _RecordingTracking()
+
+    lane.deliver_tick(0)
+    live = HandlerDlqReplay(
+        consumers={_INTENTS_DLQ: consumer},
+        producer=producer,
+        quarantine_producer=quarantine,
+        tracking=cast("Any", tracking),
+    )
+    first = await asyncio.wait_for(live.run(), _RUN_TIMEOUT_SECONDS)
+    assert [r.status for r in first.results] == [EnumReplayStatus.COMPLETED]
+    assert tracking.statuses == [EnumReplayStatus.COMPLETED]
+    assert aio_consumer.committed == 1
+    assert len(lane.dlq) == 4
+
+    consumer.config = live_config.model_copy(
+        update={"dry_run": True, "max_records_per_run": 10}
+    )
+    dry = HandlerDlqReplay(
+        consumers={_INTENTS_DLQ: consumer},
+        producer=producer,
+        quarantine_producer=quarantine,
+        tracking=cast("Any", tracking),
+    )
+    second = await asyncio.wait_for(dry.run(), _RUN_TIMEOUT_SECONDS)
+
+    assert [r.status for r in second.results] == [
+        EnumReplayStatus.SKIPPED,
+        EnumReplayStatus.PENDING,
+        EnumReplayStatus.PENDING,
+    ]
+    assert second.results[0].message.startswith("DRY RUN")
+    assert tracking.statuses == [EnumReplayStatus.COMPLETED], (
+        "the dry run wrote an audit row"
+    )
+    assert len(tick_producer.sends) == 1
+    assert quarantine_sink.sends == []
+    assert aio_consumer.committed == 1
