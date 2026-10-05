@@ -216,6 +216,7 @@ class TestPrePublishValidationFailureThroughTheCommand:
         capture_log = _sole_capture_log(state_root)
 
         assert "requested_timeout_seconds" in result.stderr
+        assert "supplied by `--timeout`" in result.stderr
         assert "extra_forbidden" in result.stderr
         assert _MODEL_IMPORT_PATH in result.stderr
         assert str(capture_log) in result.stderr
@@ -235,6 +236,7 @@ class TestPrePublishValidationFailureThroughTheCommand:
         assert receipt.exit_code != 0
         error = receipt.result.error
         assert "requested_timeout_seconds" in error
+        assert "supplied by `--timeout`" in error
         assert _MODEL_IMPORT_PATH in error
         assert str(capture_log) in error
         assert receipt.result.wire_correlation_id is None
