@@ -16,6 +16,9 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.models.validation.model_validation_report import (
+    ModelValidationReport,
+)
 from omnibase_infra.nodes.node_migration_freeze_check_compute import (
     NodeMigrationFreezeCheckCompute,
 )
@@ -36,7 +39,9 @@ def _freeze_ago(days: int) -> str:
     return f"freeze_date={(TODAY - timedelta(days=days)).isoformat()}\n"
 
 
-def _check(freeze_text: str, added: tuple[str, ...] = (), active: bool = True):
+def _check(
+    freeze_text: str, added: tuple[str, ...] = (), active: bool = True
+) -> ModelValidationReport:
     return NodeMigrationFreezeCheckCompute().handle(
         ModelMigrationFreezeCheckInput(
             freeze_active=active,
