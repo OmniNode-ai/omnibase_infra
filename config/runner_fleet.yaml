@@ -236,9 +236,14 @@ git_mirror:
   # twice: systemd Type=oneshot will not overlap runs, and the refresh script
   # takes an flock. That serialization is the entire point of the component.
   serialized: true
+  # The list docker/runners/git-mirror-refresh.sh executes (MIRROR_REPOS).
+  # Kept equal to it, in the same order, by
+  # test_runner_fleet_config_git_mirror_repos_match_refresh_script (OMN-20597):
+  # omninode_infra sat in the script and not here from 2026-09-19 until then.
   repos:
     - onex_change_control
     - omnibase_infra
+    - omninode_infra
     - omnibase_core
     - omnimarket
     - omniclaude
@@ -246,6 +251,7 @@ git_mirror:
     - omnimemory
     - omnibase_compat
     - knowledge-base
+    - knowledge-base-internal
   # Space-separated RUNNER_NAME allowlist consumed by the pre-seed, or ALL.
   # Narrowed on the deployed copy of the hook during canary; the committed
   # default is the post-canary fleet-wide value.
