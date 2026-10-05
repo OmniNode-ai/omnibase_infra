@@ -47,8 +47,9 @@ def _seed(conn: psycopg2.extensions.connection) -> None:
             cur.execute(
                 "INSERT INTO public.delegation_events "
                 "(correlation_id, session_id, tenant_id, cost_tier_name, "
-                "tokens_input, tokens_output, cost_usd, cost_savings_usd) "
-                "VALUES (%s, %s, %s, %s, %s, %s, 0, 0)",
+                "tokens_input, tokens_output, cost_usd, cost_savings_usd, "
+                "cost_measurement_source) "
+                "VALUES (%s, %s, %s, %s, %s, %s, 0, 0, 'metered')",
                 (run, run, TENANT, tier, tokens_in, tokens_out),
             )
 
@@ -122,8 +123,9 @@ def test_094_reports_unmeasured_when_no_run_carries_a_tier(
             cur.execute(
                 "INSERT INTO public.delegation_events "
                 "(correlation_id, session_id, tenant_id, cost_tier_name, "
-                "tokens_input, tokens_output, cost_usd, cost_savings_usd) "
-                "VALUES (%s, %s, %s, '', 10, 10, 0, 0)",
+                "tokens_input, tokens_output, cost_usd, cost_savings_usd, "
+                "cost_measurement_source) "
+                "VALUES (%s, %s, %s, '', 10, 10, 0, 0, 'metered')",
                 (run, run, TENANT),
             )
         pct, warnings = _overview(conn)
@@ -135,4 +137,11 @@ def test_094_reports_unmeasured_when_no_run_carries_a_tier(
 
 def test_094_is_the_last_savings_migration() -> None:
     names = sorted(p.name for p in SAVINGS.glob("09*.sql"))
-    assert names[-1].startswith("094_savings_overview_local_token_pct")
+    # Namespaced migrations are keyed by the full filename. OMN-20008 adds a
+    # forward 094 successor without editing the applied local-share migration.
+    # Pin both names in apply order: a prefix match would also pass for a
+    # misnamed or reordered successor, or a stray third 094 file.
+    assert names[-2:] == [
+        "094_savings_overview_local_token_pct.sql",
+        "094_savings_overview_measured_provenance.sql",
+    ]

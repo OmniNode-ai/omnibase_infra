@@ -370,6 +370,7 @@ migrations:
   forward/nodes/node_projection_savings/093_savings_series_persisted_baseline.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_savings/093_savings_series_recorded_model.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_savings/094_savings_overview_local_token_pct.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
+  forward/nodes/node_projection_savings/094_savings_overview_measured_provenance.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab
   forward/nodes/node_projection_session_outcome/0022_grant_omninode_runtime_session_outcomes.sql: expand-only
