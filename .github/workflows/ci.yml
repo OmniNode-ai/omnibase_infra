@@ -5404,7 +5404,7 @@ jobs:
       - name: Check node migration append-only immutability
         env:
           APPEND_ONLY_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/dev' }}
-        run: uv run python scripts/validation/check_migration_append_only.py --base "${APPEND_ONLY_BASE}"
+        run: uv run python -m omnibase_infra.nodes.node_migration_append_only_check_compute.runtime_migration_append_only_check --base "${APPEND_ONLY_BASE}"
 
       # OMN-17298: RLS enabled with no admitting policy is an outage, not a
       # stricter boundary -- PostgreSQL denies every row to every non-owner,

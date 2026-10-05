@@ -486,7 +486,6 @@ scripts/validation/check_claudemd_references.py
 scripts/validation/check_cli_registry_vocabulary.py
 scripts/validation/check_exposed_identifiers.py
 scripts/validation/check_kafka_no_hardcoded_fallback.sh
-scripts/validation/check_migration_append_only.py
 scripts/validation/check_migration_class.py
 scripts/validation/check_migration_conflicts.py
 scripts/validation/check_migration_rls_policy_atomicity.py
@@ -508,7 +507,6 @@ scripts/validation/validate_application_migration_manifest.py
 scripts/validation/validate_clean_root.py
 scripts/validation/validate_db_quality_gate.py
 scripts/validation/validate_markdown_links.py
-scripts/validation/validate_migration_sequence.py
 scripts/validation/validate_model_dump_json_mode.py
 scripts/validation/validate_naming.py
 scripts/validation/validate_precommit_fail_loud.py

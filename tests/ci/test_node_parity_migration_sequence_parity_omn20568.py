@@ -1,7 +1,13 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Real-git migration-sequence parity against the original validator (OMN-20568)."""
+"""Real-git migration-sequence parity against the removed validator script (OMN-20568).
+
+The script ``scripts/validation/validate_migration_sequence.py`` and the node were run
+over this matrix of real git repositories while both existed (commit 1a4e78742); the
+script's exit code, stdout, stderr and conflict pairs were recorded in
+``tests/fixtures/validator_parity/migration_sequence/golden.json`` and are replayed here.
+"""
 
 from __future__ import annotations
 
@@ -29,7 +35,58 @@ from omnibase_infra.nodes.node_migration_sequence_check_compute import (
 from omnibase_infra.nodes.node_migration_sequence_check_compute.models import (
     ModelMigrationSequenceCheckInput,
 )
-from scripts.validation import validate_migration_sequence as old_script
+from tests.ci.recorded_verdicts import RecordedVerdicts, normalise_git_error
+
+RECORDED = RecordedVerdicts(
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "validator_parity"
+    / "migration_sequence"
+    / "golden.json"
+)
+
+
+@dataclass(frozen=True)
+class _DuplicateConflict:
+    sequence: int
+    file_a: str
+    file_b: str
+
+    def __str__(self) -> str:
+        return f"  seq {self.sequence:03d}: {self.file_a!r}  <-->  {self.file_b!r}"
+
+
+@dataclass(frozen=True)
+class _RecordedResult:
+    conflicts: tuple[_DuplicateConflict, ...]
+
+
+class _RemovedScript:
+    """The removed script's verdicts, replayed from the recording."""
+
+    DuplicateConflict = _DuplicateConflict
+
+    def main(self) -> int:
+        record = RECORDED.take("seq.main", skip=("seq.validate",))
+        sys.stdout.write(record["out"])
+        sys.stderr.write(record["err"])
+        exit_code: int = record["exit"]
+        return exit_code
+
+    def validate_migration_sequence(self, repo: Path) -> _RecordedResult:
+        record = RECORDED.take("seq.validate")
+        return _RecordedResult(
+            tuple(_DuplicateConflict(*c) for c in record["conflicts"])
+        )
+
+
+old_script = _RemovedScript()
+
+
+@pytest.fixture(autouse=True)
+def _bind_recording(request: pytest.FixtureRequest) -> None:
+    RECORDED.bind(request.node.nodeid)
+
 
 DOCKER = "docker/migrations/forward"
 SRC = "src/omnibase_infra/migrations/forward"
@@ -295,7 +352,8 @@ def test_node_parity_migration_sequence_parity_git_failure(
     node_exit = node_runtime.main([str(tmp_path)])
     node_output = capsys.readouterr()
     assert node_exit == old_exit == 2
-    assert node_output == old_output
+    assert node_output.out == old_output.out
+    assert normalise_git_error(node_output.err) == normalise_git_error(old_output.err)
 
 
 @pytest.mark.unit

@@ -12,7 +12,6 @@ Usage:
     python scripts/validate.py [--verbose] [--quick]
     python scripts/validate.py architecture
     python scripts/validate.py architecture_layers
-    python scripts/validate.py migration_sequence
     python scripts/validate.py clean_root
     python scripts/validate.py contracts
     python scripts/validate.py patterns
@@ -964,55 +963,6 @@ def run_io_audit(verbose: bool = False) -> bool:
         return True
 
 
-def run_migration_sequence(verbose: bool = False) -> bool:
-    """Run migration sequence duplicate detection validation.
-
-    Scans docker/ and src/ migration sets as a shared namespace and
-    blocks commits with duplicate sequence numbers (OMN-3570).
-    """
-    import importlib.util
-
-    try:
-        validator_path = (
-            Path(__file__).parent / "validation" / "validate_migration_sequence.py"
-        )
-
-        if not validator_path.exists():
-            print(f"Migration Sequence: SKIP (validator not found: {validator_path})")
-            return True
-
-        spec = importlib.util.spec_from_file_location(
-            "validate_migration_sequence", validator_path
-        )
-        if spec is None or spec.loader is None:
-            print("Migration Sequence: SKIP (could not load validator module)")
-            return True
-
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["validate_migration_sequence"] = module
-        spec.loader.exec_module(module)
-
-        repo_path = Path(__file__).parent.parent
-        result = module.validate_migration_sequence(repo_path)
-
-        report = module.generate_report(result)
-        if verbose or not result.is_valid or result.has_staged_migrations:
-            print(report)
-
-        return result.is_valid
-
-    except RuntimeError as e:
-        print(f"Migration Sequence: ERROR ({e})", file=sys.stderr)
-        return False
-    except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
-        print(f"Migration Sequence: ERROR ({type(e).__name__}: {e})")
-        if verbose:
-            import traceback
-
-            traceback.print_exc()
-        return False
-
-
 def run_clean_root(verbose: bool = False) -> bool:
     """Run root directory cleanliness validation.
 
@@ -1362,7 +1312,6 @@ def run_all(verbose: bool = False, quick: bool = False) -> bool:
     validators = [
         ("Architecture", run_architecture),
         ("Architecture Layers", run_architecture_layers),
-        ("Migration Sequence", run_migration_sequence),
         ("Clean Root", run_clean_root),
         ("Contracts", run_contracts),
         ("Patterns", run_patterns),
@@ -1414,7 +1363,6 @@ def main() -> int:
             "all",
             "architecture",
             "architecture_layers",
-            "migration_sequence",
             "clean_root",
             "contracts",
             "patterns",
@@ -1452,7 +1400,6 @@ def main() -> int:
         "unused_exemptions": run_unused_exemptions,
         "architecture": run_architecture,
         "architecture_layers": run_architecture_layers,
-        "migration_sequence": run_migration_sequence,
         "clean_root": run_clean_root,
         "contracts": run_contracts,
         "patterns": run_patterns,

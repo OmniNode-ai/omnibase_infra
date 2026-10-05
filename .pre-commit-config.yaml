@@ -863,7 +863,7 @@ repos:
         stages: [pre-commit]
       - id: onex-validate-migration-sequence
         name: ONEX Migration Sequence Duplicate Check
-        entry: uv run --frozen python scripts/validation/validate_migration_sequence.py
+        entry: uv run --frozen python -m omnibase_infra.nodes.node_migration_sequence_check_compute.runtime_migration_sequence_check
         language: system
         pass_filenames: false
         always_run: false
@@ -958,7 +958,7 @@ repos:
       # the predicate is a git diff, not a per-file lint.
       - id: onex-check-migration-append-only
         name: ONEX Migration Append-Only Check
-        entry: uv run --frozen python scripts/validation/check_migration_append_only.py --staged --base origin/dev
+        entry: uv run --frozen python -m omnibase_infra.nodes.node_migration_append_only_check_compute.runtime_migration_append_only_check --staged --base origin/dev
         language: system
         pass_filenames: false
         always_run: true

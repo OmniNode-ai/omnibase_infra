@@ -1,12 +1,19 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Real-repository parity for the append-only script and COMPUTE node."""
+"""Real-repository parity of the append-only COMPUTE node with the script it replaced.
+
+``scripts/validation/check_migration_append_only.py`` and the node were run over this
+matrix of real git repositories while both existed (commit 1a4e78742); the script's exit
+code, stdout and stderr were recorded in
+``tests/fixtures/validator_parity/migration_append_only/golden.json`` and are replayed here.
+"""
 
 from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,8 +35,8 @@ from omnibase_infra.nodes.node_migration_append_only_check_compute import (
 from omnibase_infra.nodes.node_migration_append_only_check_compute.models import (
     ModelMigrationAppendOnlyCheckInput,
 )
-from scripts.validation import check_migration_append_only as old
-from tests.ci.test_migration_append_only_guard_omn16705 import (
+from tests.ci.recorded_verdicts import RecordedVerdicts, normalise_git_error
+from tests.ci.test_migration_append_only_check_node import (
     _APPLIED,
     _APPLIED_BODY,
     _SUCCESSOR,
@@ -40,6 +47,34 @@ from tests.ci.test_migration_append_only_guard_omn16705 import (
 )
 
 pytestmark = pytest.mark.unit
+
+RECORDED = RecordedVerdicts(
+    Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "validator_parity"
+    / "migration_append_only"
+    / "golden.json"
+)
+
+
+class _RemovedScript:
+    """The removed script's verdicts, replayed from the recording."""
+
+    def main(self, argv: list[str] | None = None) -> int:
+        record = RECORDED.take("append.main")
+        sys.stdout.write(record["out"])
+        sys.stderr.write(record["err"])
+        exit_code: int = record["exit"]
+        return exit_code
+
+
+old = _RemovedScript()
+
+
+@pytest.fixture(autouse=True)
+def _bind_recording(request: pytest.FixtureRequest) -> None:
+    RECORDED.bind(request.node.nodeid)
+
 
 FORWARD = "docker/migrations/forward"
 MANIFEST = f"{FORWARD}/_ledger/application-migrations.tsv"
@@ -256,7 +291,7 @@ def _run_main(
             if line.startswith("  - ")
         ),
         captured.out,
-        captured.err,
+        normalise_git_error(captured.err),
     )
 
 
