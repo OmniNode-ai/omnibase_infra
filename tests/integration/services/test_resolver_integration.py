@@ -23,16 +23,22 @@ from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adap
 from omnibase_infra.adapters.project_tracker.local_stub_project_tracker import (
     LocalStubProjectTracker,
 )
+from omnibase_infra.enums.enum_project_tracker_backend import (
+    EnumProjectTrackerBackend,
+)
+from omnibase_infra.errors import InfraAuthenticationError
 from omnibase_infra.services.project_tracker.resolver import resolve_project_tracker
 
 pytestmark = pytest.mark.integration
 
 
 class TestResolveProjectTrackerIntegration:
-    def test_no_token_resolves_to_working_local_stub(self, tmp_path: Path) -> None:
-        """End-to-end: resolver → LocalStub → create/get issue round-trip."""
+    def test_selected_local_stub_is_a_working_tracker(self, tmp_path: Path) -> None:
+        """End-to-end: resolver → explicitly selected LocalStub → create/get round-trip."""
         with patch.dict("os.environ", {}, clear=True):
-            tracker = resolve_project_tracker(state_root=tmp_path)
+            tracker = resolve_project_tracker(
+                state_root=tmp_path, backend=EnumProjectTrackerBackend.LOCAL_STUB
+            )
 
         assert isinstance(tracker, LocalStubProjectTracker)
 
@@ -55,20 +61,12 @@ class TestResolveProjectTrackerIntegration:
         assert state_file.exists()
         assert "resolver integration test" in state_file.read_text()
 
-    def test_fail_soft_returns_working_local_stub(self, tmp_path: Path) -> None:
-        """Construction-error path still returns a tracker that can connect/close."""
-        with patch.dict("os.environ", {"LINEAR_TOKEN": "bad"}, clear=True):
-            tracker = resolve_project_tracker(
-                state_root=tmp_path,
-                _force_construction_error=True,
-            )
-        assert isinstance(tracker, LocalStubProjectTracker)
-
-        async def _lifecycle() -> None:
-            await tracker.connect()
-            await tracker.close()
-
-        asyncio.run(_lifecycle())
+    def test_no_key_fails_loud_and_writes_no_stub_state(self, tmp_path: Path) -> None:
+        """Linear selected with no key raises, and no stub backing file appears."""
+        with patch.dict("os.environ", {}, clear=True):
+            with pytest.raises(InfraAuthenticationError):
+                resolve_project_tracker(state_root=tmp_path)
+        assert not (tmp_path / "project_tracker_stub.json").exists()
 
     def test_linear_adapter_branch_integration(self, tmp_path: Path) -> None:
         """End-to-end token branch — resolver returns the GraphQL adapter."""

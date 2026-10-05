@@ -153,7 +153,14 @@ _LANE_PORT_MAP: dict[str, dict[str, str]] = {
 }
 
 _LANE_BOUNDARY: dict[str, str] = {
-    "dev": "fully mutable test platform",
+    # OMN-20594: the dev lane is also the protected delegation lane; the lane
+    # manifest's dev entry names every guard. The row says so where a lane
+    # reads before it touches the lane.
+    "dev": (
+        "fully mutable test platform; protected delegation lane (OMN-20594): "
+        "the chain canary grades it and a red alerts the operator, so a change "
+        "that breaks delegation here is a defect"
+    ),
     "stability-test": "preferred proof lane for synthetic integration evidence",
     "judge": "NOT authorized for mutation — read-only",
     "lakshman": (

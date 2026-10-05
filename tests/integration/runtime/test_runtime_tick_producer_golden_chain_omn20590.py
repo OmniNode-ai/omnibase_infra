@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.nodes.node_github_pr_poller_effect.handlers import (
@@ -35,7 +36,9 @@ from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_polle
 from omnibase_infra.runtime.auto_wiring import discover_contracts_from_paths
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
 from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.runtime_profile import resolve_runtime_profile_name
 from omnibase_infra.runtime.runtime_scheduler import start_lane_runtime_scheduler
+from omnibase_infra.topics import SUFFIX_RUNTIME_TICK
 
 _OUTPUT_TOPIC = "onex.evt.github.pr-status.v1"
 _REPO = "OmniNode-ai/omnibase_infra"
@@ -136,5 +139,52 @@ async def test_lane_producer_tick_drives_a_tick_subscriber(
         assert result.payload.errors == []
         assert result.payload.repos_polled == [_REPO]
         assert result.payload.prs_polled == 1
+    finally:
+        await bus.close()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_bad_switch_on_a_shared_environment_stops_only_the_main_boot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every role of a lane reads one compose environment; only main owns the switch.
+
+    The roles resolve their identity the way the kernel does
+    (``resolve_runtime_profile_name()`` over ``RUNTIME_PROFILE``) against one
+    started bus and one environment carrying an unparseable switch value. The
+    secondary roles start no producer and publish nothing; main refuses its
+    boot, which is the role the switch is for (OMN-20590 review follow-up).
+    """
+    monkeypatch.setenv("ONEX_RUNTIME_SCHEDULER_ENABLED", "ture")
+    monkeypatch.setenv("ONEX_RUNTIME_SCHEDULER_PERSIST_SEQUENCE", "false")
+    monkeypatch.setenv("ONEX_RUNTIME_SCHEDULER_TICK_INTERVAL_MS", "60000")
+    bus = EventBusInmemory(environment="test", group="runtime-tick-bad-switch")
+    await bus.start()
+    try:
+        for role in ("effects", "workers", "projection-api"):
+            monkeypatch.setenv("RUNTIME_PROFILE", role)
+            scheduler = await start_lane_runtime_scheduler(
+                bus, resolve_runtime_profile_name()
+            )
+            assert scheduler is None, role
+
+        monkeypatch.setenv("RUNTIME_PROFILE", "main")
+        with pytest.raises(ProtocolConfigurationError, match="ture"):
+            await start_lane_runtime_scheduler(bus, resolve_runtime_profile_name())
+
+        assert await bus.get_event_history(topic=SUFFIX_RUNTIME_TICK) == []
+
+        # Positive control: the same read sees a tick once main is asked for one.
+        monkeypatch.setenv("ONEX_RUNTIME_SCHEDULER_ENABLED", "true")
+        producer = await start_lane_runtime_scheduler(
+            bus, resolve_runtime_profile_name()
+        )
+        assert producer is not None
+        try:
+            await producer.emit_tick()
+        finally:
+            await producer.stop()
+        assert len(await bus.get_event_history(topic=SUFFIX_RUNTIME_TICK)) == 1
     finally:
         await bus.close()

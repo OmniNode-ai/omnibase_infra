@@ -22,9 +22,13 @@ from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.errors import ProtocolConfigurationError
 from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime.models import ModelRuntimeTick
-from omnibase_infra.runtime.runtime_profile import resolve_runtime_scheduler_enabled
+from omnibase_infra.runtime.runtime_profile import (
+    load_runtime_profile,
+    resolve_runtime_scheduler_enabled,
+)
 from omnibase_infra.runtime.runtime_scheduler import (
     RUNTIME_TICK_EVENT_TYPE,
+    TICK_PRODUCER_PROFILE,
     start_lane_runtime_scheduler,
 )
 from omnibase_infra.topics import SUFFIX_RUNTIME_TICK
@@ -128,6 +132,24 @@ class TestStartLaneRuntimeScheduler:
         with pytest.raises(ProtocolConfigurationError):
             await start_lane_runtime_scheduler(bus, "main")
 
+    @pytest.mark.parametrize("profile", ["effects", "workers", "projection-api"])
+    async def test_unparseable_flag_leaves_a_secondary_role_running(
+        self, monkeypatch: pytest.MonkeyPatch, bus: AsyncMock, profile: str
+    ) -> None:
+        """A role that does not own the producer never reads the switch.
+
+        Roles often share one compose environment anchor, so a typo there
+        reaches every role. Only ``main`` acts on the switch, so only ``main``
+        refuses to boot over it (the test above); the others start as before.
+        """
+        monkeypatch.setenv(_FLAG, "ture")
+        assert await start_lane_runtime_scheduler(bus, profile) is None
+        bus.publish_envelope.assert_not_called()
+
+    def test_tick_producer_profile_is_a_registered_role(self) -> None:
+        """The owner name is the registry's ``main``, not a free-standing string."""
+        assert load_runtime_profile(TICK_PRODUCER_PROFILE).name == TICK_PRODUCER_PROFILE
+
 
 def _load_compose(name: str) -> dict[str, Any]:
     # `!override` is a compose-only tag SafeLoader refuses.
@@ -144,24 +166,44 @@ def _service_env(document: dict[str, Any], service: str) -> dict[str, str]:
     return {str(k): str(v) for k, v in env.items()}
 
 
+# The lane overlays that publish the runtime tick. dev-202 (OMN-20590) and the
+# h201 stability-test lane (OMN-20593, the backup delegation lane beside the
+# h201 dev lane, which stays off so its demo runtime is never restarted).
+_OPTED_IN_OVERLAYS = (
+    "docker-compose.dev-202.yml",
+    "docker-compose.stability-test.yml",
+)
+
+
 class TestLaneOverlays:
-    def test_overlay_dev_202_turns_on_the_main_runtime_producer(self) -> None:
-        document = _load_compose("docker-compose.dev-202.yml")
+    @pytest.mark.parametrize("overlay", _OPTED_IN_OVERLAYS)
+    def test_overlay_turns_on_the_main_runtime_producer(self, overlay: str) -> None:
+        document = _load_compose(overlay)
         assert _service_env(document, "omninode-runtime").get(_FLAG) == "true"
 
-    def test_overlay_dev_202_gives_the_tick_driven_prunes_their_archive(
-        self,
+    @pytest.mark.parametrize("overlay", _OPTED_IN_OVERLAYS)
+    def test_overlay_sets_the_flag_on_no_secondary_role(self, overlay: str) -> None:
+        # One producer per lane: only the main role may carry the switch.
+        services = _load_compose(overlay).get("services") or {}
+        carriers = sorted(
+            name
+            for name in services
+            if _FLAG in _service_env({"services": services}, name)
+        )
+        assert carriers == ["omninode-runtime"]
+
+    @pytest.mark.parametrize("overlay", _OPTED_IN_OVERLAYS)
+    def test_overlay_gives_the_tick_driven_prunes_their_archive(
+        self, overlay: str
     ) -> None:
         # The two prune effects on runtime-effects resolve these on every tick;
         # an opted-in lane without them dead-letters every tick (read live on
         # dev-202, 2026-10-05: KeyError 'ONEX_CONSUMER_FLOW_ARCHIVE_DIR').
-        env = _service_env(
-            _load_compose("docker-compose.dev-202.yml"), "runtime-effects"
-        )
+        env = _service_env(_load_compose(overlay), "runtime-effects")
         for name in ("ONEX_DEAD_LETTER_ARCHIVE_DIR", "ONEX_CONSUMER_FLOW_ARCHIVE_DIR"):
             assert env.get(name, "").startswith("/app/data/"), name
 
-    def test_overlay_flag_is_set_by_dev_202_alone(self) -> None:
+    def test_overlay_flag_is_set_by_the_opted_in_lanes_alone(self) -> None:
         # Every other lane changes only by an explicit overlay edit; this test
         # names the lanes that opted in so the next one is a reviewed diff.
         opted_in = sorted(
@@ -169,7 +211,7 @@ class TestLaneOverlays:
             for path in _DOCKER_DIR.glob("docker-compose*.yml")
             if _FLAG in path.read_text(encoding="utf-8")
         )
-        assert opted_in == ["docker-compose.dev-202.yml"]
+        assert opted_in == sorted(_OPTED_IN_OVERLAYS)
 
 
 def test_envelope_survives_the_consumer_deserializer_shape() -> None:
@@ -187,7 +229,7 @@ def test_envelope_survives_the_consumer_deserializer_shape() -> None:
         scheduler_id="runtime-scheduler-default",
         tick_interval_ms=1000,
     )
-    envelope = ModelEventEnvelope(
+    envelope: ModelEventEnvelope[ModelRuntimeTick] = ModelEventEnvelope(
         payload=tick,
         correlation_id=tick.correlation_id,
         event_type=RUNTIME_TICK_EVENT_TYPE,

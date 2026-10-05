@@ -10,7 +10,7 @@ resolution-markers = [
 [manifest]
 overrides = [
     { name = "omnibase-compat", specifier = "==0.5.7" },
-    { name = "omnibase-core", specifier = "==0.47.32" },
+    { name = "omnibase-core", specifier = "==0.47.35" },
     { name = "omnibase-spi", specifier = "==0.23.5" },
 ]
 
@@ -2233,7 +2233,7 @@ wheels = [
 
 [[package]]
 name = "omnibase-core"
-version = "0.47.32"
+version = "0.47.35"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "blake3" },
@@ -2250,14 +2250,14 @@ dependencies = [
     { name = "tree-sitter" },
     { name = "tree-sitter-python" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/de/34/00108308d7462e6b1bf5f536eb7735ddbf54dbb9e0c35d8ea19972f6391c/omnibase_core-0.47.32.tar.gz", hash = "sha256:5d1db15debad2e8c6c6a6923940583b3232b2d4c7314cec5826f629b72a5ae1b", size = 10326941, upload-time = "2026-10-03T07:55:18.687Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/42/84/0d56e4b4be8536c66f91966c7c4501b0c5d311768da945a5054c4506fe59/omnibase_core-0.47.35.tar.gz", hash = "sha256:9b1e596ee88ce2e9f5a062c1e50b1c6a36bf0f477219bc34804dcc47cc4ba12b", size = 10537265, upload-time = "2026-10-05T12:52:08.508Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b4/33/3a07762b2d35f623389d2d5cb507c4483458b59112439d952d83b034cf47/omnibase_core-0.47.32-py3-none-any.whl", hash = "sha256:380dcbddc0fc79240f1eca1c981463cb3db6fc32d551dbfb347ed84a19044489", size = 7368004, upload-time = "2026-10-03T07:55:16.158Z" },
+    { url = "https://files.pythonhosted.org/packages/de/bc/c16333467f25ffbaeca3e2e5af5281598fa531a4960b151938a2de61167f/omnibase_core-0.47.35-py3-none-any.whl", hash = "sha256:6a69b4cac83757f695b818fb65800a9e5b0822bd62cb80b4f94cd98ec22820af", size = 7464704, upload-time = "2026-10-05T12:52:06.286Z" },
 ]
 
 [[package]]
 name = "omnibase-infra"
-version = "0.38.66"
+version = "0.38.67"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },

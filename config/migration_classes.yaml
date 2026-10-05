@@ -162,6 +162,8 @@ migrations:
   forward/nodes/node_pr_merged_projection/0001_create_pr_merged_events.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PR_MERGED_EVENTS_PKEY; ALTER TABLE ADD CONSTRAINT PR_MERGED_EVENTS_EVENT_I
   forward/nodes/node_pr_merged_projection/0002_grant_omninode_runtime_pr_merged_events.sql: forward-only # EXECUTE
   forward/nodes/node_pr_review_bot/001_create_review_bot_bypass_log.sql: expand-only
+  forward/nodes/node_projection_alert_channel_liveness/0000_create_alert_channel_liveness_verdicts.sql: forward-only # CREATE UNIQUE INDEX idx_alert_channel_liveness_cursor on omninode_internal.alert_channel_liveness_verdicts (UNIQUE INDEX class)
+  forward/nodes/node_projection_alert_channel_liveness/0001_grant_omninode_runtime_alert_channel_liveness_verdicts.sql: expand-only # additive
   forward/nodes/node_projection_baselines/0001_create_baselines_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT BASELINES_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT BASELINES_COMPARISONS
   forward/nodes/node_projection_baselines/0002_realign_child_tables_to_producer_schema.sql: forward-only # DROP; EXECUTE; ALTER TABLE ADD CONSTRAINT BASELINES_COMPARISONS_PKEY; ALTER TABLE ADD CONSTRAINT BASELINES_TRE
   forward/nodes/node_projection_baselines/0003_grant_omninode_runtime_baselines_tables.sql: expand-only
@@ -250,6 +252,7 @@ migrations:
   forward/nodes/node_projection_delegation/0052_delegation_events_trace_and_routing.sql: expand-only
   forward/nodes/node_projection_delegation/0053_delegation_events_finish_reason_truncated.sql: expand-only
   forward/nodes/node_projection_delegation/0054_delegation_events_backend_id_and_host.sql: expand-only
+  forward/nodes/node_projection_delegation/0055_model_routing_local_call_share.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
   forward/nodes/node_projection_delegation_disposition/0000_create_delegation_dispositions.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT; ROW LEVEL SECURITY; DROP
   forward/nodes/node_projection_delegation_disposition/0001_grant_tenant_projection_writer_delegation_dispositions.sql: expand-only
   forward/nodes/node_projection_delegation_disposition/0002_force_rls_delegation_dispositions.sql: forward-only # ENABLE/FORCE ROW LEVEL SECURITY; DROP
@@ -327,12 +330,15 @@ migrations:
   forward/nodes/node_projection_routing_decision/0021_create_agent_routing_decisions.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT AGENT_ROUTING_DECISIONS_PKEY
   forward/nodes/node_projection_routing_decision/0022_agent_routing_decisions_tenant_id_and_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_projection_routing_decision/0023_grant_tenant_projection_writer_agent_routing_decisions.sql: expand-only
+  forward/nodes/node_projection_routing_feedback/0000_create_delegation_routing_feedback.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT
+  forward/nodes/node_projection_routing_feedback/0001_grant_tenant_projection_writer_delegation_routing_feedback.sql: expand-only # additive
   forward/nodes/node_projection_runner_fleet/0000_create_runner_fleet_liveness.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_runner_fleet/0001_grant_omninode_runtime_runner_fleet_liveness.sql: expand-only
   forward/nodes/node_projection_demo_readiness/0000_create_demo_readiness_latest.sql: forward-only # UNIQUE INDEX on created table
   forward/nodes/node_projection_demo_readiness/0001_grant_omninode_runtime_demo_readiness_latest.sql: expand-only
   forward/nodes/node_projection_metering_summary/0000_create_metering_summary.sql: forward-only # UNIQUE INDEX on created table
   forward/nodes/node_projection_metering_summary/0001_grant_tenant_projection_writer_metering_summary.sql: expand-only
+  forward/nodes/node_projection_metering_summary/0002_metering_summary_savings_per_measured_run.sql: expand-only
   forward/nodes/node_projection_lab_container_memory/0000_create_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_lab_container_memory/0001_grant_omninode_runtime_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_topic_activity/0000_create_topic_activity.sql: forward-only # ALTER TABLE on the created table
@@ -366,6 +372,7 @@ migrations:
   forward/nodes/node_projection_savings/093_savings_series_persisted_baseline.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_savings/093_savings_series_recorded_model.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_savings/094_savings_overview_local_token_pct.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
+  forward/nodes/node_projection_savings/094_savings_overview_measured_provenance.sql: forward-only # CREATE OR REPLACE VIEW; ALTER VIEW SET (security_invoker)
   forward/nodes/node_projection_session_content/0001_create_session_content.sql: expand-only
   forward/nodes/node_projection_session_outcome/0021_session_outcomes.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT SESSION_OUTCOMES_PKEY; CREATE OR REPLACE; DROP; TRIGGER on an existing tab
   forward/nodes/node_projection_session_outcome/0022_grant_omninode_runtime_session_outcomes.sql: expand-only
@@ -386,6 +393,7 @@ migrations:
   forward/nodes/node_projection_traces/0002_grant_omninode_runtime_traces.sql: expand-only
   forward/nodes/node_projection_usage_by_model_day/0000_create_usage_by_model_day.sql: forward-only # UNIQUE INDEX on an existing table (public.usage_by_model_day)
   forward/nodes/node_projection_usage_by_model_day/0001_grant_usage_by_model_day.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
+  forward/nodes/node_projection_usage_by_model_day/0002_usage_by_model_day_measured_cost.sql: forward-only # ALTER TABLE ADD COLUMN on tables 0000 created (additive; declared forward-only per the checker's rule)
   forward/nodes/node_projection_voice_sessions/0001_create_voice_sessions.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT VOICE_SESSIONS_PKEY; ALTER TABLE ADD CONSTRAINT VOICE_SESSIONS_TOTAL_TURNS
   forward/nodes/node_projection_voice_sessions/0002_grant_omninode_runtime_voice_sessions.sql: expand-only
   forward/nodes/node_projection_work_events/0001_create_work_events.sql: expand-only

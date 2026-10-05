@@ -570,3 +570,15 @@ def _inline_settle_pool(
     if request.node.get_closest_marker("real_settle_pool") is not None:
         return
     monkeypatch.setattr(agent_mod, "_new_settle_pool", _InlineSettlePool)
+
+
+@pytest.fixture(autouse=True)
+def _no_rollback_capture(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OMN-20602: runtime deploys capture a rollback point before the rebuild.
+
+    Capture probes the live lane's health and docker state, which the fake
+    executors in unrelated agent tests do not model. They get no rollback point
+    by default; ``test_auto_rollback.py`` sets its own ``capture_rollback_point``
+    and exercises the real one against the executor directly.
+    """
+    monkeypatch.setattr(agent_mod, "capture_rollback_point", lambda *args, **kw: None)

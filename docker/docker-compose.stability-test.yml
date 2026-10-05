@@ -252,6 +252,14 @@ services:
       ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON}
       OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${STABILITY_TEST_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-main
+      # OMN-20593: this lane's main runtime publishes the runtime tick
+      # (onex.intent.platform.runtime-tick.v1, producer from OMN-20590). It is
+      # the backup delegation lane beside the h201 dev lane, which stays off.
+      # The first ticks activate every subscribing contract, including the
+      # dead-letter and consumer-flow prunes (dry_run false) whose archive
+      # directories runtime-effects sets below. Main role only: one producer
+      # per lane.
+      ONEX_RUNTIME_SCHEDULER_ENABLED: "true"
       # OMN-14551 G6: flip the auto-wired consume boundary's DLQ routing ON
       # for this lane's live-proof, sourced from the ledgered contract value
       # (docker/runtime-policy.env), fail-fast if the policy env is missing.
@@ -336,6 +344,14 @@ services:
       ONEX_SECRET_RESOLVER_CONFIG_PATH: ${STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH}
       ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-effects
+      # OMN-20593: the two prune effects on this role resolve their local
+      # archive directory from these names on every runtime tick, and this lane
+      # publishes the tick (see omninode-runtime above). Unset, both raise
+      # KeyError per tick and dead-letter it (read live on dev-202 2026-10-05,
+      # OMN-20590). The directories live on this role's own effects_data
+      # volume; the sink creates them owner-only on first write.
+      ONEX_DEAD_LETTER_ARCHIVE_DIR: /app/data/dead-letter-archive
+      ONEX_CONSUMER_FLOW_ARCHIVE_DIR: /app/data/consumer-flow-archive
       # OMN-14551 G6: see omninode-runtime's ONEX_BOUNDARY_DLQ_ENABLED comment.
       ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     ports: !override

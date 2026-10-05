@@ -52,15 +52,19 @@ from deploy_agent.executor import (
     REPO_DIR,
     SCOPE_BUNDLES,
     DeployExecutor,
+    DeployRolledBackError,
     DevLaneMigrationPreflightError,
     EnumInstancePhase,
+    VerificationFailedError,
     active_dev_instance,
     assert_prod_request_has_stability_digest,
+    capture_rollback_point,
     lane_config_for,
     lane_runs_phase,
     read_applied_migration_fingerprint,
     read_checkout_migration_fingerprint,
     resolve_prod_target_service,
+    restore_rollback_point,
     select_dev_instance,
 )
 from deploy_agent.health import create_health_app
@@ -117,7 +121,9 @@ from deploy_agent.queue_depth import LagSampler
 from deploy_agent.routing import (
     AGENT_CLONE_ROOT,
     ROUTED_LANES,
+    ModelLaneFlags,
     build_router_from_env,
+    lane_flags_for_instance,
 )
 from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
 from deploy_agent.unit_drift import check_units, load_manifest, report
@@ -425,6 +431,14 @@ class DeployAgent:
         )
         self._load_gate = LoadGate(thresholds) if thresholds is not None else None
         self._load_gate_last_verdict: EnumLoadGateVerdict | None = None
+        # Lane flags (deploy_agent.routing lane flags). Read from the table shipped with
+        # this code, like the load gate, so a flag lands by a dev PR and takes
+        # effect at the next self-update. A malformed block refuses start.
+        self._lane_flags = (
+            lane_flags_for_instance(AGENT_CLONE_ROOT, self._router.instance.name)
+            if self._router is not None
+            else ModelLaneFlags()
+        )
         if self._host_slot is not None:
             logger.info(
                 "Deploy agent host slot: %s as %s, verify window %ds",
@@ -601,6 +615,11 @@ class DeployAgent:
             "Deploy agent load gate: %s",
             gate.thresholds.model_dump() if gate is not None else "none declared",
         )
+        flags = getattr(self, "_lane_flags", ModelLaneFlags())
+        logger.info(
+            "Deploy agent lane flags: %s",
+            flags.frozen_reason(datetime.now(UTC)) or "not frozen",
+        )
 
         # Step 0: record which code this process actually loaded, before
         # anything can move the clone underneath it, and NAME IT IN THE JOURNAL
@@ -709,6 +728,8 @@ class DeployAgent:
             host_slot_owner=self._host_slot_owner,
             # OMN-19507: defer, without refusing, while the host is loaded.
             load_gate=self._load_gate,
+            # Lane flags: refuse, as frozen, all but a promotion.
+            lane_flags=self._lane_flags,
         )
 
         # Step 6b: keep the lag sample current DURING a rebuild (OMN-18990).
@@ -1046,6 +1067,9 @@ class DeployAgent:
                 probe_blocker=probe_blocker,
                 windows_error=windows_error,
                 attempted_heads=frozenset(self._idle_converge_attempted),
+                frozen_reason=getattr(
+                    self, "_lane_flags", ModelLaneFlags()
+                ).frozen_reason(now),
             )
         )
         if decision.verdict is not EnumIdleConvergeVerdict.CONVERGE:
@@ -1304,6 +1328,12 @@ class DeployAgent:
 
                 # Rebuild — pass git_sha so _compose_build can bust the COPY src/ layer
                 # cache. prod pulls the pinned digest instead of rebuilding from a ref.
+                rollback_point = (
+                    capture_rollback_point(self.executor, cmd.runtime_lane)
+                    if cmd.scope in (Scope.RUNTIME, Scope.FULL)
+                    and cmd.runtime_lane != EnumRuntimeLane.PROD
+                    else None
+                )
                 services_restarted = self.executor.rebuild_scope(
                     cmd.scope,
                     cmd.services,
@@ -1328,9 +1358,19 @@ class DeployAgent:
                         service=resolve_prod_target_service(cmd),
                     )
                 else:
-                    health_checks = self.executor.verify(
-                        on_phase_update=on_phase_update, lane=cmd.runtime_lane
-                    )
+                    try:
+                        health_checks = self.executor.verify(
+                            on_phase_update=on_phase_update, lane=cmd.runtime_lane
+                        )
+                    except VerificationFailedError as exc:
+                        if rollback_point is not None:
+                            outcome = restore_rollback_point(
+                                self.executor, rollback_point, on_phase_update
+                            )
+                            raise DeployRolledBackError(
+                                exc, outcome, rollback_point
+                            ) from exc
+                        raise
 
                 # Complete -- AND SAY WHAT IS STILL RUNNING (OMN-18636 AC5).
                 #
