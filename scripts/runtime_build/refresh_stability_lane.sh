@@ -55,7 +55,9 @@
 #                           omninode_infra@main pin the lane's proof —
 #                           refreshing invalidates the stability-proven premise
 #                           those grants rest on. Proceeding requires naming EVERY
-#                           live grant id (the acknowledgement is recorded).
+#                           live grant id (the acknowledgement is recorded). An
+#                           empty registry also refuses; proceeding past it takes
+#                           the token 'empty-grant-registry' (OMN-20068).
 #
 # Optional environment:
 #   RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS (OMN-15718)  Bounded wall-clock
@@ -508,7 +510,8 @@ log "mode            : ${MODE}"
 # Refuses when ONEX_DEPLOY_REASON is absent/placeholder, or when unconsumed,
 # unexpired prod-promotion grants at omninode_infra@main pin this lane's
 # proof (acknowledge each grant id via ONEX_DEPLOY_GRANT_ACK to proceed on the
-# record). Fails closed when grant state cannot be resolved.
+# record). Fails closed when grant state cannot be resolved or the registry
+# lists no entries.
 # =============================================================================
 ATTRIBUTION_PREFLIGHT="${REPO_ROOT}/scripts/preflight_lane_deploy_attribution.py"
 ATTRIBUTION_RECORD_JSON="null"

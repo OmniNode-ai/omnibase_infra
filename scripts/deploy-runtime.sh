@@ -697,7 +697,8 @@ ATTRIBUTION + GRANT INTERLOCK (OMN-15218)
                             grants exist at omninode_infra@main; proceeding
                             requires naming EVERY live grant id here (or the token
                             'unreadable-grant-state' when grant state cannot be
-                            resolved — which also fails closed). The
+                            resolved, or 'empty-grant-registry' when the registry
+                            lists no entries — both also fail closed). The
                             acknowledgement is written into the record.
 
 DEPLOYMENT ROOT

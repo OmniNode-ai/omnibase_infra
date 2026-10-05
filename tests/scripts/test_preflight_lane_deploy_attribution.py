@@ -80,6 +80,14 @@ SECOND_LIVE_GRANT = {
     "grant_id": "grant-b94b0386-3333-4333-8333-333333333333",
     "image_digest": "sha256:" + "b94b0386" * 8,
 }
+# A registry that lists a spent grant reads CLEAR; a registry that lists nothing
+# reads EMPTY and refuses (OMN-20068), so every "allowed" fixture carries one.
+SPENT_GRANT = {
+    **LIVE_GRANT,
+    "grant_id": "grant-spent000-6666-4666-8666-666666666666",
+    "consumed": True,
+}
+CLEAR_ENTRIES: list[dict[str, Any]] = [SPENT_GRANT]
 
 
 def _write_grants(path: Path, entries: list[dict[str, Any]]) -> Path:
@@ -230,7 +238,7 @@ def test_placeholder_reason_refused(tmp_path: Path, placeholder: str) -> None:
 @pytest.mark.unit
 @pytest.mark.skipif(shutil.which("git") is None, reason="git binary not available")
 def test_stability_deploy_allowed_with_real_reason(tmp_path: Path) -> None:
-    grants = _grants_repo(tmp_path, [])
+    grants = _grants_repo(tmp_path, CLEAR_ENTRIES)
     result = _run(
         _stability_args(grants),
         env_overrides={
@@ -253,7 +261,7 @@ def test_stability_deploy_allowed_with_real_reason(tmp_path: Path) -> None:
 @pytest.mark.unit
 @pytest.mark.skipif(shutil.which("git") is None, reason="git binary not available")
 def test_explicit_ticket_env_wins_over_reason_text(tmp_path: Path) -> None:
-    grants = _grants_repo(tmp_path, [])
+    grants = _grants_repo(tmp_path, CLEAR_ENTRIES)
     result = _run(
         _stability_args(grants),
         env_overrides={
@@ -497,7 +505,7 @@ def test_unreadable_state_override_requires_the_sentinel_token(tmp_path: Path) -
 @pytest.mark.unit
 @pytest.mark.skipif(shutil.which("git") is None, reason="git binary not available")
 def test_allowed_deploy_writes_durable_record(tmp_path: Path) -> None:
-    grants = _grants_repo(tmp_path, [])
+    grants = _grants_repo(tmp_path, CLEAR_ENTRIES)
     record_dir = tmp_path / "state"
     result = _run(
         _stability_args(grants, record_dir=record_dir),
@@ -546,7 +554,7 @@ def test_refused_attempt_is_also_recorded(tmp_path: Path) -> None:
 @pytest.mark.unit
 @pytest.mark.skipif(shutil.which("git") is None, reason="git binary not available")
 def test_check_only_writes_nothing(tmp_path: Path) -> None:
-    grants = _grants_repo(tmp_path, [])
+    grants = _grants_repo(tmp_path, CLEAR_ENTRIES)
     result = _run(
         _stability_args(grants),
         env_overrides={
@@ -587,15 +595,110 @@ def test_wrong_anchor_empty_registry_refuses(tmp_path: Path) -> None:
         _run(_stability_args(wrong), env_overrides=env), "not the canonical anchor"
     )
 
+    # The same empty bytes at the canonical anchor still do not read CLEAR.
     canonical = _grants_repo(tmp_path, [], name="omninode_infra")
     result = _run(_stability_args(canonical), env_overrides=env)
-    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.returncode == 1, result.stdout + result.stderr
     record = _record(result)
-    assert record["result"] == "ALLOW"
-    assert record["grant_guard"]["verdict"] == "CLEAR"
+    assert record["result"] == "REFUSE"
+    assert record["grant_guard"]["verdict"] == "EMPTY"
     assert (wrong / "grants" / "prod_promotion_grants.yaml").read_bytes() == (
         canonical / "grants" / "prod_promotion_grants.yaml"
     ).read_bytes()
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(shutil.which("git") is None, reason="git binary not available")
+def test_empty_registry_at_canonical_anchor_refuses(tmp_path: Path) -> None:
+    """Jake's G4 finding (2026-10-03): for this interlock empty must mean stop.
+
+    The live grant sits at the other anchor (onex_change_control) while the
+    canonical omninode_infra registry is still ``entries: []``. Before OMN-20068
+    the canonical read returned CLEAR and the refresh went ahead.
+    """
+    other_anchor = _grants_repo(
+        tmp_path,
+        [LIVE_GRANT],
+        origin_url="https://github.com/OmniNode-ai/onex_change_control.git",
+        name="onex_change_control",
+    )
+    assert LIVE_GRANT["grant_id"] in (
+        other_anchor / "grants" / "prod_promotion_grants.yaml"
+    ).read_text(encoding="utf-8")
+    canonical = _grants_repo(tmp_path, [], name="omninode_infra")
+
+    result = _run(
+        _stability_args(canonical),
+        env_overrides={"ONEX_DEPLOY_REASON": "OMN-20068 stability refresh mid-move"},
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    record = _record(result)
+    assert record["result"] == "REFUSE"
+    assert record["grant_guard"]["verdict"] == "EMPTY"
+    assert record["grant_guard"]["grants_commit"]
+    assert record["grant_guard"]["acknowledged"] is False
+    assert len(record["refusal_reasons"]) == 1
+    refusal = record["refusal_reasons"][0]
+    assert "lists no entries" in refusal
+    assert _mod.EMPTY_ACK_TOKEN in refusal
+    assert record["grant_guard"]["grants_commit"] in refusal
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(shutil.which("git") is None, reason="git binary not available")
+def test_empty_registry_override_takes_only_its_own_token(tmp_path: Path) -> None:
+    canonical = _grants_repo(tmp_path, [])
+    base_env = {"ONEX_DEPLOY_REASON": "OMN-20068 stability refresh, registry empty"}
+
+    for wrong_token in (
+        _mod.UNREADABLE_ACK_TOKEN,
+        str(LIVE_GRANT["grant_id"]),
+        "true",
+        "all",
+    ):
+        wrong = _run(
+            _stability_args(canonical),
+            env_overrides={**base_env, "ONEX_DEPLOY_GRANT_ACK": wrong_token},
+        )
+        assert wrong.returncode == 1, wrong_token
+        assert _record(wrong)["grant_guard"]["acknowledged"] is False
+
+    record_dir = tmp_path / "state"
+    right = _run(
+        _stability_args(canonical, record_dir=record_dir),
+        env_overrides={**base_env, "ONEX_DEPLOY_GRANT_ACK": _mod.EMPTY_ACK_TOKEN},
+    )
+    assert right.returncode == 0, right.stdout + right.stderr
+    logged = json.loads(
+        (record_dir / "deploy-log.jsonl").read_text(encoding="utf-8").strip()
+    )
+    assert logged["result"] == "ALLOW"
+    assert logged["grant_guard"]["verdict"] == "EMPTY"
+    assert logged["grant_guard"]["acknowledged"] is True
+    assert logged["grant_guard"]["acknowledgement_tokens"] == [_mod.EMPTY_ACK_TOKEN]
+
+
+@pytest.mark.unit
+@pytest.mark.skipif(shutil.which("git") is None, reason="git binary not available")
+def test_unreadable_token_does_not_clear_wrong_anchor_as_empty(
+    tmp_path: Path,
+) -> None:
+    """The wrong-anchor refusal stays UNREADABLE; the empty token cannot clear it."""
+    wrong = _grants_repo(
+        tmp_path,
+        [],
+        origin_url="https://github.com/OmniNode-ai/onex_change_control.git",
+        name="onex_change_control",
+    )
+    result = _run(
+        _stability_args(wrong),
+        env_overrides={
+            "ONEX_DEPLOY_REASON": "OMN-20068 verify canonical grant anchor",
+            "ONEX_DEPLOY_GRANT_ACK": _mod.EMPTY_ACK_TOKEN,
+        },
+    )
+    record = _assert_unreadable(result, "not the canonical anchor")
+    assert record["grant_guard"]["acknowledged"] is False
 
 
 @pytest.mark.unit
@@ -858,6 +961,27 @@ def test_apply_acknowledgement_is_case_insensitive_and_id_scoped() -> None:
         is True
     )
     assert _mod.apply_acknowledgement(block, ["grant-other"])["acknowledged"] is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("entries", "verdict"),
+    [
+        ([], "EMPTY"),
+        ([SPENT_GRANT], "CLEAR"),
+        ([{**LIVE_GRANT, "expires_at": "2026-07-26T00:00:00Z"}], "CLEAR"),
+        ([SPENT_GRANT, LIVE_GRANT], "LIVE_GRANTS"),
+    ],
+)
+def test_evaluate_grant_state_empty_is_not_clear(
+    entries: list[dict[str, Any]], verdict: str
+) -> None:
+    block = _mod.evaluate_grant_state(
+        json.dumps({"entries": entries}).encode(),
+        now=datetime(2026, 7, 27, 12, 0, tzinfo=UTC),
+    )
+    assert block["verdict"] == verdict
+    assert block["errors"] == []
 
 
 @pytest.mark.unit

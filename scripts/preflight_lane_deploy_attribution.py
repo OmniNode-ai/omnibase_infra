@@ -50,6 +50,15 @@ recreated, or restarted. It enforces two rules:
    ``--grants-file`` read are ``UNREADABLE``. Indeterminate grant state REFUSES
    unless the ``unreadable-grant-state`` acknowledgement token is given.
 
+   An empty registry (``entries: []``) at the canonical anchor is ``EMPTY``, not
+   ``CLEAR``, and REFUSES unless the ``empty-grant-registry`` acknowledgement
+   token is given (OMN-20068). For this interlock an empty list cannot mean
+   "go": it is exactly what a reader sees when live grants sit at another anchor
+   (the registry moved from onex_change_control to omninode_infra), so it shows
+   only that this file lists nothing. A registry that lists entries, none of
+   them live (all consumed or expired), is evidently the one grants are written
+   to and reads ``CLEAR``.
+
 Layering note: ``omnibase_infra`` must not import ``omnimarket`` (where the
 OMN-13439 grant resolver EFFECT lives). The grant FILE is the contract surface
 — this module parses that YAML directly and imports nothing from the governance
@@ -187,6 +196,11 @@ ENV_ACTOR = "ONEX_DEPLOY_ACTOR"
 #: Acknowledgement token required to proceed past an UNREADABLE grant state.
 UNREADABLE_ACK_TOKEN = "unreadable-grant-state"
 
+#: Acknowledgement token required to proceed past an EMPTY grant registry. It is
+#: distinct from :data:`UNREADABLE_ACK_TOKEN` so each override attests to the
+#: state it was given for.
+EMPTY_ACK_TOKEN = "empty-grant-registry"
+
 #: A reason must clear this length AND not be one of the placeholders below.
 MIN_REASON_LENGTH = 12
 
@@ -246,8 +260,11 @@ class EnumGrantVerdict(enum.Enum):
 
     #: Lane is outside :data:`GRANT_INTERLOCK_LANES`; interlock did not run.
     NOT_APPLICABLE = "NOT_APPLICABLE"
-    #: Grant state read successfully; no unconsumed, unexpired grants.
+    #: Grant state read successfully; entries exist, none unconsumed and unexpired.
     CLEAR = "CLEAR"
+    #: Registry read at the canonical anchor lists no entries at all. Fails
+    #: closed: an empty list cannot show that no live grant exists elsewhere.
+    EMPTY = "EMPTY"
     #: Grant state read successfully; live grants exist and pin this lane's proof.
     LIVE_GRANTS = "LIVE_GRANTS"
     #: Grant state could NOT be established. Fails closed.
@@ -421,9 +438,12 @@ def evaluate_grant_state(raw: bytes, *, now: datetime) -> dict[str, Any]:
         )
 
     block["live_grants"] = live
-    block["verdict"] = (
-        EnumGrantVerdict.LIVE_GRANTS if live else EnumGrantVerdict.CLEAR
-    ).value
+    if live:
+        block["verdict"] = EnumGrantVerdict.LIVE_GRANTS.value
+    elif not entries:
+        block["verdict"] = EnumGrantVerdict.EMPTY.value
+    else:
+        block["verdict"] = EnumGrantVerdict.CLEAR.value
     return block
 
 
@@ -438,7 +458,8 @@ def apply_acknowledgement(
     silently authorize the next rebuild.
 
     ``UNREADABLE`` clears only with the explicit
-    :data:`UNREADABLE_ACK_TOKEN` sentinel.
+    :data:`UNREADABLE_ACK_TOKEN` sentinel, and ``EMPTY`` only with
+    :data:`EMPTY_ACK_TOKEN`.
     """
     verdict = str(grant_block.get("verdict"))
     lowered = {token.lower() for token in ack_tokens}
@@ -457,6 +478,8 @@ def apply_acknowledgement(
         result["acknowledged"] = not missing
     elif verdict == EnumGrantVerdict.UNREADABLE.value:
         result["acknowledged"] = UNREADABLE_ACK_TOKEN in lowered
+    elif verdict == EnumGrantVerdict.EMPTY.value:
+        result["acknowledged"] = EMPTY_ACK_TOKEN in lowered
 
     return result
 
@@ -624,6 +647,7 @@ def resolve_grant_block(
         block = evaluate_grant_state(raw, now=now)
         if block["verdict"] in {
             EnumGrantVerdict.CLEAR.value,
+            EnumGrantVerdict.EMPTY.value,
             EnumGrantVerdict.LIVE_GRANTS.value,
         }:
             error = (
@@ -735,6 +759,15 @@ def build_record(
             + "; ".join(str(err) for err in grant_block.get("errors", []))
             + f". Fail-closed (OMN-15218). Fix the grant source, or set {ENV_GRANT_ACK}="
             f"{UNREADABLE_ACK_TOKEN} to proceed on the record."
+        )
+    elif verdict == EnumGrantVerdict.EMPTY.value and not ack["acknowledged"]:
+        refusals.append(
+            f"the grant registry at {GRANTS_ANCHOR} lists no entries "
+            f"(commit {grant_block.get('grants_commit', '') or 'unknown'}). An empty "
+            f"registry is not proof that no live prod-promotion grant pins the {lane} "
+            "proof: it is what a reader sees when the live grants sit at another anchor "
+            "(OMN-20068). Fail-closed. Confirm no live grant exists at any grant anchor, "
+            f"then set {ENV_GRANT_ACK}={EMPTY_ACK_TOKEN} to proceed on the record."
         )
 
     ticket = extract_ticket(env.get(ENV_TICKET), reason)
