@@ -27,12 +27,18 @@ from aiokafka.errors import (
 )
 
 from omnibase_core.container import ModelONEXContainer
+from omnibase_core.enums.enum_bus_binding_direction import EnumBusBindingDirection
+from omnibase_core.models.event_bus.model_bus_binding import ModelBusBinding
+from omnibase_core.models.event_bus.model_resolved_bus_bindings import (
+    ModelResolvedBusBindings,
+)
 from omnibase_core.protocols.runtime.protocol_transport_producer import (
     ProtocolTransportProducer,
 )
 from omnibase_infra.errors import InfraUnavailableError
 from omnibase_infra.event_bus.kafka_transport import KafkaTransport
 from omnibase_infra.event_bus.models import ModelEventHeaders
+from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.handlers.handler_infisical import HandlerInfisical
 from omnibase_infra.handlers.models.infisical import ModelInfisicalHandlerConfig
 from omnibase_infra.idempotency import StoreIdempotencySqlite
@@ -70,6 +76,11 @@ from omnibase_infra.runtime.models.model_secret_resolver_config import (
 from omnibase_infra.runtime.secret_resolver import SecretResolver
 from omnibase_infra.secret_stores.adapter_env_secret_store import (
     AdapterEnvSecretStore,
+)
+from omnibase_infra.topics.topic_namespace import (
+    apply_topic_namespace,
+    resolve_topic_namespace,
+    strip_topic_namespace,
 )
 
 logger = logging.getLogger(__name__)
@@ -944,6 +955,132 @@ async def select_outbound_publish_transport(
     )
 
 
+def build_gateway_transports(
+    config: ModelGatewayForwarderRuntimeConfig,
+) -> tuple[ModelResolvedBusBindings, dict[str, KafkaTransport]]:
+    """Resolve wire bindings once, then build every gateway transport from them.
+
+    Logical broker refs are independent of endpoints and credentials. The cloud
+    ref comes from the contract; local and lane refs name the resolved legs.
+    HTTPS outbound does not require Kafka WRITE on the cloud broker.
+    """
+    forwarder = config.forwarder
+    slug = forwarder.tenant_identity.tenant_slug
+    namespace = resolve_topic_namespace()
+    bindings: set[ModelBusBinding] = set()
+    legs: dict[str, tuple[str, ModelKafkaEventBusConfig, str]] = {}
+
+    def add(
+        broker: str,
+        topics: Sequence[str],
+        direction: EnumBusBindingDirection,
+        group: str | None = None,
+        *,
+        tenant: bool = False,
+    ) -> None:
+        for topic in topics:
+            wire = prefix_topic(slug, topic) if tenant else topic
+            bindings.add(
+                ModelBusBinding(
+                    broker=broker,
+                    physical_topic=apply_topic_namespace(wire, namespace=namespace),
+                    direction=direction,
+                    consumer_group=group,
+                )
+            )
+
+    if forwarder.cloud_bus is not None:
+        assert config.local_bus is not None and config.cloud_bus is not None
+        cloud = forwarder.cloud_bus.cloud_broker_ref
+        local_group = f"tenant-{slug}-gateway-forwarder-outbound"
+        cloud_group = f"tenant-{slug}-gateway-forwarder-inbound"
+        legs["local"] = ("local", config.local_bus, local_group)
+        legs["cloud"] = (cloud, config.cloud_bus, cloud_group)
+        add(
+            "local",
+            forwarder.declared_outbound_topics,
+            EnumBusBindingDirection.CONSUME,
+            local_group,
+        )
+        # Inbound delivery and the heartbeat service publish on the local bus.
+        heartbeat_topics = tuple(
+            t
+            for t in forwarder.declared_outbound_topics
+            if t.endswith(".gateway-heartbeat.v1")
+        )
+        add(
+            "local",
+            (*forwarder.declared_inbound_topics, *heartbeat_topics),
+            EnumBusBindingDirection.PRODUCE,
+        )
+        add(
+            cloud,
+            forwarder.declared_inbound_topics,
+            EnumBusBindingDirection.CONSUME,
+            cloud_group,
+            tenant=True,
+        )
+        if forwarder.https_ingest is None:
+            add(
+                cloud,
+                forwarder.declared_outbound_topics,
+                EnumBusBindingDirection.PRODUCE,
+                tenant=True,
+            )
+
+    mirror = forwarder.lane_mirror
+    if mirror is not None:
+        assert config.lane_mirror_source_bus is not None
+        source = f"lane.{mirror.source_lane}.kafka.broker"
+        source_group = f"tenant-{slug}-gateway-lane-mirror-source"
+        legs["lane_source"] = (source, config.lane_mirror_source_bus, source_group)
+        add(source, mirror.topics, EnumBusBindingDirection.CONSUME, source_group)
+        for lane in mirror.mirror_lanes:
+            broker = f"lane.{lane}.kafka.broker"
+            legs[f"lane:{lane}"] = (
+                broker,
+                config.lane_mirror_buses[lane],
+                f"tenant-{slug}-gateway-lane-mirror-{lane}",
+            )
+            add(broker, mirror.topics, EnumBusBindingDirection.PRODUCE)
+
+    resolved = ModelResolvedBusBindings(
+        principal=forwarder.tenant_identity.principal_id,
+        bindings=tuple(
+            sorted(
+                bindings,
+                key=lambda b: (
+                    b.broker,
+                    b.physical_topic,
+                    b.direction,
+                    b.consumer_group or "",
+                ),
+            )
+        ),
+    )
+    transports = {
+        name: KafkaTransport(
+            config=bus,
+            group=group,
+            topics=tuple(
+                strip_topic_namespace(binding.physical_topic)
+                for binding in resolved.bindings
+                if binding.broker == broker
+                and binding.direction == EnumBusBindingDirection.CONSUME
+                and binding.consumer_group == group
+            ),
+            auto_offset_reset=bus.auto_offset_reset,
+            refused_topic_retry_seconds=(
+                float(forwarder.inbound_topic_retry_seconds)
+                if name == "cloud"
+                else None
+            ),
+        )
+        for name, (broker, bus, group) in legs.items()
+    }
+    return resolved, transports
+
+
 async def run_gateway_forwarder(
     config: ModelGatewayForwarderRuntimeConfig,
     *,
@@ -984,51 +1121,16 @@ async def run_gateway_forwarder(
     mirror_topics = config.forwarder.mirror_topics
     assert mirror_topics is not None
 
-    tenant_slug = config.forwarder.tenant_identity.tenant_slug
-    local_transport = KafkaTransport(
-        config=config.local_bus,
-        group=f"tenant-{tenant_slug}-gateway-forwarder-outbound",
-        topics=mirror_topics.outbound,
-        auto_offset_reset=config.local_bus.auto_offset_reset,
-    )
-    cloud_transport = KafkaTransport(
-        config=config.cloud_bus,
-        group=f"tenant-{tenant_slug}-gateway-forwarder-inbound",
-        topics=tuple(
-            prefix_topic(tenant_slug, topic) for topic in mirror_topics.inbound
-        ),
-        auto_offset_reset=config.cloud_bus.auto_offset_reset,
-        # OMN-15629 / OMN-19592: webhook delivery cannot exist on the cloud bus
-        # until its owner places the secret; one refused inbound topic must not
-        # kill the heartbeat copy or every other admitted inbound topic.
-        refused_topic_retry_seconds=float(config.forwarder.inbound_topic_retry_seconds),
-    )
-    # OMN-17034: the lane-mirror leg's own transports. Deliberately separate
-    # KafkaTransport instances with their own consumer group: a single
-    # transport backs one direction's consumer AND another direction's
-    # producer (see NodeGatewayDelivery's note on restart_consumer), so
-    # sharing one with the trust-boundary legs would couple a stability-lane
-    # fault to the dev/cloud delegation path.
+    _bindings, transports = build_gateway_transports(config)
+    local_transport = transports["local"]
+    cloud_transport = transports["cloud"]
     lane_mirror_config = config.forwarder.lane_mirror
-    lane_mirror_source: KafkaTransport | None = None
-    lane_mirror_producers: dict[str, KafkaTransport] = {}
-    if lane_mirror_config is not None:
-        source_bus_config = config.lane_mirror_source_bus
-        if source_bus_config is None:  # pragma: no cover - runtime config validates
-            raise ValueError("lane_mirror declared without a resolved source bus")
-        lane_mirror_source = KafkaTransport(
-            config=source_bus_config,
-            group=f"tenant-{tenant_slug}-gateway-lane-mirror-source",
-            topics=lane_mirror_config.topics,
-            auto_offset_reset=source_bus_config.auto_offset_reset,
-        )
-        for lane in lane_mirror_config.mirror_lanes:
-            lane_mirror_producers[lane] = KafkaTransport(
-                config=config.lane_mirror_buses[lane],
-                group=f"tenant-{tenant_slug}-gateway-lane-mirror-{lane}",
-                topics=(),
-                auto_offset_reset=config.lane_mirror_buses[lane].auto_offset_reset,
-            )
+    lane_mirror_source = transports.get("lane_source")
+    lane_mirror_producers = {
+        name.removeprefix("lane:"): transport
+        for name, transport in transports.items()
+        if name.startswith("lane:")
+    }
 
     identity = config.forwarder.tenant_identity
     local_bus = TransportGatewayBus(local_transport, identity=identity)

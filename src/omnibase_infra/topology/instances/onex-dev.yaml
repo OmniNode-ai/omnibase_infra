@@ -85,6 +85,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - alert_channel_liveness_verdicts
               - board_probe_results
               - ci_attempt_outcome
               - claude_agent_spans
@@ -201,6 +202,7 @@ databases:
               - delegation_eval_results
               - delegation_events
               - delegation_judge_verdict_events
+              - delegation_routing_feedback
               - delegation_routing_tenant_overlay
               - delegation_shadow_comparisons
               - dep_health_findings
