@@ -880,3 +880,15 @@ skills:
       - {name: query-filter, payload_field: query_filter, arg_type: json}
       - {name: conflict-scope, payload_field: conflict_scope, arg_type: string}
       - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+  # The authorize skill invokes node_authorize but had no entry here, so
+  # `onex skill authorize` returned "Unknown skill" and the node's
+  # authorize-start command had no producer. Defaults mirror the skill's own
+  # documented defaults (the node requires scope and tools, and a null TTL
+  # would write a non-expiring grant).
+  - skill_name: authorize
+    node_name: node_authorize
+    result_model: omnimarket.nodes.node_authorize.handlers.handler_authorize.AuthorizeResult
+    args:
+      - {name: scope, payload_field: scope, arg_type: string_list, default: ["src/**", "tests/**", "docs/**"]}
+      - {name: tools, payload_field: tools, arg_type: string_list, default: ["Edit", "Write"]}
+      - {name: ttl-seconds, payload_field: ttl_seconds, arg_type: integer, default: 14400}

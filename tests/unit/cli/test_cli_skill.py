@@ -1764,3 +1764,56 @@ def test_omn_17018_drainer_node_resolves_in_catalog() -> None:
             "(set OMNIMARKET_SRC or OMNI_HOME); CI wires the sibling checkout"
         )
     assert _OMN_17018_DRAINER_NODE in _omnimarket_declared_nodes(omnimarket_root)
+
+
+def test_authorize_registered_and_wired() -> None:
+    """`authorize` resolves to node_authorize and its typed result model.
+
+    Before this mapping entry existed, ``onex skill authorize`` returned
+    "Unknown skill" even though the authorize skill says it invokes
+    node_authorize, so the node's authorize-start command had no producer.
+    """
+    registry = load_skill_registry()
+    mapping = registry.get("authorize")
+    assert mapping is not None, "authorize absent from skill_mapping.yaml"
+    assert mapping.node_name == "node_authorize"
+    assert mapping.result_model == (
+        "omnimarket.nodes.node_authorize.handlers.handler_authorize.AuthorizeResult"
+    )
+
+
+def test_authorize_payload_validates_against_request_model() -> None:
+    """The mapping builds payloads AuthorizeRequest (extra="forbid") accepts.
+
+    Omitted args take the authorize skill's documented defaults: scope
+    'src/**,tests/**,docs/**', tools 'Edit,Write', a 4 hour TTL.
+    """
+    handler_module = pytest.importorskip(
+        "omnimarket.nodes.node_authorize.handlers.handler_authorize"
+    )
+    AuthorizeRequest = handler_module.AuthorizeRequest
+
+    mapping = load_skill_registry().get("authorize")
+    assert mapping is not None
+
+    explicit = AuthorizeRequest.model_validate(
+        _parse_skill_args(
+            mapping,
+            (
+                "--scope",
+                "src/**,tests/**",
+                "--tools",
+                "Edit",
+                "--ttl-seconds",
+                "600",
+            ),
+        )
+    )
+    assert explicit.scope == ["src/**", "tests/**"]
+    assert explicit.tools == ["Edit"]
+    assert explicit.ttl_seconds == 600
+
+    defaulted = AuthorizeRequest.model_validate(_parse_skill_args(mapping, ()))
+    assert defaulted.scope == ["src/**", "tests/**", "docs/**"]
+    assert defaulted.tools == ["Edit", "Write"]
+    assert defaulted.ttl_seconds == 14400
