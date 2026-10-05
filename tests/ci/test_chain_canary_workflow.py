@@ -565,7 +565,7 @@ def test_alert_red_posts_one_message_naming_the_verdict_and_run(
 
     def opener(request: object, timeout: float = 0) -> _FakeResponse:
         url = getattr(request, "full_url", "")
-        if "api.github.com" in url:
+        if url.startswith("https://api.github.com/"):
             runs = {
                 "workflow_runs": [
                     {
