@@ -193,7 +193,6 @@ runtime-observability-projections:
   description: "Runtime projection/observability consumers — postgres projections, cost aggregation, health projection, decision store (OMN-9332)"
   services:
     - injection-effectiveness-consumer
-    - savings-estimation-consumer
     - llm-cost-aggregation-consumer
     - consumer-health-projection
     - decision-store-consumer
