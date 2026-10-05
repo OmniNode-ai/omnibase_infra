@@ -1,3 +1,35 @@
+## v0.38.65 (2026-10-04)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.65 by the scheduled release train.
+- 5 release-relevant commit(s) merged since v0.38.64.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.64
+- fix: size local-omnipc2-chat max_tokens to its slot share of the .202 pool (#4542)
+- fix(cli): sanitise delegate pre-publish failure diagnostics (#4525)
+- fix: C28 pins rpk to the broker's internal listener (#4527)
+- fix: an abandoned dispatch stops degrading the bus after a bounded grace (#4540)
+- fix: keyless-tenant refusals stop flapping the dev runtime; C28 waits out one unhealthy window (#4536)
+
+## v0.38.64 (2026-10-03)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.64 by the scheduled release train.
+- 9 release-relevant commit(s) merged since v0.38.63.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.63
+- chore(deps): bump omnibase-core to 0.47.32 (#4505)
+- fix: onex delegate stamps the request with its install's tenant (#4503)
+- feat: onex delegate accepts the prompt from a file or stdin (#4501)
+- fix: a deployed-lane reply timeout is a typed failure, not a usage error (#4509)
+- fix: onex delegate says where the local record went (#4497)
+- fix: onex delegate state root: flag, then ONEX_STATE_DIR, then ~/.onex_state (#4510)
+- fix: subcontract wiring callback binds the consumed envelope so retry-path outputs carry the tenant (#4508)
+- fix: replace literal api_key with api_key_ref in LLM command (#4499)
+- fix: onex delegate leaves a receipt for every exit before dispatch (#4511)
+
 ## v0.38.63 (2026-10-03)
 
 ### Release

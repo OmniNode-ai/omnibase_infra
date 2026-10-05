@@ -1669,7 +1669,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 3ec171a755f82dad774fda43f46c45198440a81a # .github/sibling-pins.yaml
+          ref: ba246b55068d46a5e998e61b9c833859a613f54f # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -1904,7 +1904,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 3ec171a755f82dad774fda43f46c45198440a81a # .github/sibling-pins.yaml
+          ref: ba246b55068d46a5e998e61b9c833859a613f54f # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1920,7 +1920,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 3ec171a755f82dad774fda43f46c45198440a81a # .github/sibling-pins.yaml
+          ref: ba246b55068d46a5e998e61b9c833859a613f54f # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -3957,6 +3957,15 @@ jobs:
       contents: read
     uses: ./.github/workflows/deploy-agent-tests.yml
 
+  # OMN-14975: run vendor sync inside this run so the required CI Summary
+  # observes it. The exact caller/inner name is registered as a STRICT gate.
+  node-migration-sync:
+    name: node-migration-sync
+    permissions:
+      contents: read
+    uses: ./.github/workflows/node-migration-sync.yml
+    secrets: inherit
+
   # OMN-18926. The sanitized legacy-RDS fixture proof is the ONLY leg anywhere that
   # builds `omnidash_analytics` from EMPTY and runs the real
   # scripts/run-forward-migrations.sh over the real corpus, twice, asserting
@@ -4493,7 +4502,7 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     timeout-minutes: 15
     env:
-      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@33a8eb68b0f5f0e22fd8a574abd29caecea0d5fc"
+      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@f50d00fc7918d0b12ccd0d3497160325e32e7ac5"
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4893,7 +4902,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 3ec171a755f82dad774fda43f46c45198440a81a # .github/sibling-pins.yaml
+          ref: ba246b55068d46a5e998e61b9c833859a613f54f # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4909,7 +4918,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 3ec171a755f82dad774fda43f46c45198440a81a # .github/sibling-pins.yaml
+          ref: ba246b55068d46a5e998e61b9c833859a613f54f # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 

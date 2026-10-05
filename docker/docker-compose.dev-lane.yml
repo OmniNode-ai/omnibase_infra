@@ -973,6 +973,41 @@ services:
       # binding, and role_omnidash cannot write
       # omninode_internal.delegate_skill_command_claims (OMN-17427). The /skill read
       # edge needs the claim store to resolve a write principal separately first (OMN-20159).
+      #
+      # -- BYOK credential READ (OMN-20533) ------------------------------------
+      # onex-api (below) writes a tenant's provider key to Infisical env dev,
+      # folder /tenant-inference-credentials, under a minted ref; the provider
+      # call that needs it runs HERE. With the house-only config every tenant
+      # ref failed closed ("could not be resolved from the secret store"), 4 of
+      # 4 lab-tenant runs on 2026-10-04 09:33-09:50Z.
+      #
+      # The config is the contract's process-level variant for effects (house
+      # mappings plus the tenant_inference_credentials namespace rule,
+      # contracts/services/runtime_policy.contract.yaml). The identity is
+      # effects' OWN: on .201 it is dev-lane-runtime-effects-tenant-credentials,
+      # whose project role grants secrets READ on environment dev, path
+      # /tenant-inference-credentials, and nothing else -- not onex-api's
+      # create/edit identity and not the base anchor's ONEX_RUNTIME_INFISICAL_*
+      # names. Values come from the operator env file on the host
+      # (RUNTIME_EFFECTS_INFISICAL_*), never from this file.
+      #
+      # `:-` and not `:?` on the identity, because the dev-105, dev-200, dev-202
+      # and pre-PR overlays layer this file and hold no such identity; compose
+      # interpolates each file before merging, so a `:?` here would fail their
+      # render even though each of them rebinds runtime-effects to the house
+      # config. On THIS lane a blank identity is still loud: the namespace rule
+      # makes effects build its Infisical handler at wiring time and refuse,
+      # naming every blank INFISICAL_* variable (handler_wiring
+      # build_lane_infisical_handler).
+      #
+      # The slug is pinned for the same reason as onex-api's: its wrong answer
+      # is the dangerous one, and this lane reads environment dev only.
+      ONEX_SECRET_RESOLVER_CONFIG_JSON: ${DEV_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set DEV_RUNTIME_EFFECTS_STORE_SECRET_RESOLVER_CONFIG_JSON}
+      INFISICAL_ADDR: ${RUNTIME_EFFECTS_INFISICAL_ADDR:-}
+      INFISICAL_PROJECT_ID: ${RUNTIME_EFFECTS_INFISICAL_PROJECT_ID:-}
+      INFISICAL_CLIENT_ID: ${RUNTIME_EFFECTS_INFISICAL_CLIENT_ID:-}
+      INFISICAL_CLIENT_SECRET: ${RUNTIME_EFFECTS_INFISICAL_CLIENT_SECRET:-}
+      INFISICAL_ENVIRONMENT_SLUG: "dev"
     healthcheck:
       test:
         - CMD
@@ -1986,6 +2021,40 @@ services:
       # three redirect URLs above name a reserved never-resolvable host.
       STRIPE_API_KEY: ${STRIPE_API_KEY:?STRIPE_API_KEY must be set - main.py reads it at import; the dev lane uses a generated sentinel from render_dev_lane_tenant_path_env.sh and reaches no Stripe endpoint, NEVER a real key}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?STRIPE_WEBHOOK_SECRET must be set - generated sentinel, see render_dev_lane_tenant_path_env.sh}
+      # -- BYOK credential intake store (OMN-18829) ---------------------------
+      # POST /v1/tenants/me/inference-credentials runs
+      # omnimarket.projection.credential_publisher.register_inference_credential,
+      # whose _build_secret_store() needs all five INFISICAL_* bootstrap names
+      # and raises CredentialStoreConfigurationError (a 503 naming the missing
+      # names) when any is blank. Without this block every BYOK registration on
+      # the lane was that 503, measured on .201 2026-10-03T22:11:26Z.
+      #
+      # The identity is onex-api's OWN, not the runtime's: on .201 it is
+      # dev-lane-onex-api-tenant-credentials, whose project role grants create
+      # and edit on environment dev, path /tenant-inference-credentials, and
+      # nothing else (no read, no delete, no other path) -- the same split as
+      # onex-dev's onex-store-resolver identity, narrowed to the write the
+      # intake performs. It is deliberately NOT bound from the runtime anchor's
+      # ONEX_RUNTIME_INFISICAL_* names, which carry a project-admin identity.
+      #
+      # `:-` and not `:?`, deliberately: this file is layered by the .105,
+      # .200 and .202 dev lanes and the pre-PR slots, none of which hold this
+      # identity. A blank value does not degrade silently -- the publisher
+      # refuses the write with a legible 503 naming every blank variable
+      # (OMN-17349 AC1) -- so the failure stays on the one route that needs
+      # the store instead of failing every service's compose render on hosts
+      # that never register a customer key. Values come from the operator env
+      # file on the host (ONEX_API_INFISICAL_*), never from this file.
+      #
+      # The environment slug and folder are pinned, not inherited: the slug is
+      # the one value whose wrong answer is dangerous (it used to default to
+      # "prod"), and the dev lane writes to environment dev and nowhere else.
+      INFISICAL_ADDR: ${ONEX_API_INFISICAL_ADDR:-}
+      INFISICAL_PROJECT_ID: ${ONEX_API_INFISICAL_PROJECT_ID:-}
+      INFISICAL_CLIENT_ID: ${ONEX_API_INFISICAL_CLIENT_ID:-}
+      INFISICAL_CLIENT_SECRET: ${ONEX_API_INFISICAL_CLIENT_SECRET:-}
+      INFISICAL_ENVIRONMENT_SLUG: "dev"
+      INFISICAL_TENANT_CREDENTIAL_SECRET_PATH: "/tenant-inference-credentials"
       ONEX_LOG_LEVEL: ${ONEX_LOG_LEVEL:-INFO}
       ONEX_ENVIRONMENT: ${ONEX_ENVIRONMENT:-local}
       PYTHONUNBUFFERED: "1"

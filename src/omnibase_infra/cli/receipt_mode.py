@@ -1053,6 +1053,22 @@ def _runtime_factory(
     return functools.partial(DelegatePhaseTimedRuntime, phase_stopwatch=phase_stopwatch)
 
 
+def create_receipt_artifact_store(state_root: Path) -> ArtifactStore:
+    """Bind a store to this receipt's root without leaking process configuration.
+
+    Terminal capture runs after receipt mode has restored its environment.
+    Use the same root resolution and lock as receipt mode; the constructed
+    store retains its resolved root after the environment is restored.
+    """
+    with _RECEIPT_MODE_LOCK_STATE.lock:
+        previous_root = os.environ.get(ARTIFACT_STORE_ROOT_ENV)
+        try:
+            _resolve_artifact_store_root(state_root)
+            return ArtifactStore()
+        finally:
+            _restore_environment_value(ARTIFACT_STORE_ROOT_ENV, previous_root)
+
+
 def run_receipt_mode(
     *,
     node_name: str,

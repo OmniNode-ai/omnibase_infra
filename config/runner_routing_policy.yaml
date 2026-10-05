@@ -1112,6 +1112,7 @@ route:
         - No Plugin Daemon Classes Gate (OMN-20298)
         - no-noncanonical-lifecycle-classes
         - Node Migration Declaration Check
+        - node-migration-sync / node-migration-sync
         # OMN-19677: the five shared shrink-only callers are strict CI Summary
         # gates and therefore belong in this umbrella-enforced snapshot.
         - Noncanonical Class Allowlist One-way (OMN-19677) / anti-growth-baseline

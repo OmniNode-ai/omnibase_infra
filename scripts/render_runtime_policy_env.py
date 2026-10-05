@@ -10,6 +10,7 @@ import json
 import re
 import shlex
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 import yaml
@@ -23,6 +24,10 @@ from omnibase_infra.runtime.models.model_runtime_policy_contract import (
 )
 from omnibase_infra.runtime.models.model_runtime_process_policy import (
     RuntimeProcessName,
+)
+from omnibase_infra.runtime.models.model_secret_mapping import ModelSecretMapping
+from omnibase_infra.runtime.models.model_secret_namespace_rule import (
+    ModelSecretNamespaceRule,
 )
 from omnibase_infra.runtime.models.model_secret_resolver_config import (
     ModelSecretResolverConfig,
@@ -63,6 +68,22 @@ def _bool_text(value: bool) -> str:
 
 def _bifrost_text(value: bool) -> str:
     return "1" if value else "0"
+
+
+def _secret_resolver_config_json(
+    mappings: Iterable[ModelSecretMapping],
+    namespaces: Iterable[ModelSecretNamespaceRule],
+) -> str:
+    """Render one lane secret-resolver config as compact, key-sorted JSON."""
+    return json.dumps(
+        ModelSecretResolverConfig(
+            mappings=list(mappings),
+            namespaces=list(namespaces),
+            enable_convention_fallback=False,
+        ).model_dump(mode="json", exclude_defaults=True),
+        separators=(",", ":"),
+        sort_keys=True,
+    )
 
 
 def load_contract(path: Path = _DEFAULT_CONTRACT) -> ModelRuntimePolicyContract:
@@ -112,17 +133,12 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
         )
         secret_resolver_config_json = ""
         if profile.secret_resolver_mappings or profile.secret_resolver_namespaces:
-            secret_resolver_config_json = json.dumps(
-                ModelSecretResolverConfig(
-                    mappings=list(profile.secret_resolver_mappings),
-                    # OMN-16944: rule-based sources for runtime-minted refs
-                    # ride the SAME rendered lane surface as the exact-match
-                    # mappings, so a lane declares both in one contract block.
-                    namespaces=list(profile.secret_resolver_namespaces),
-                    enable_convention_fallback=False,
-                ).model_dump(mode="json", exclude_defaults=True),
-                separators=(",", ":"),
-                sort_keys=True,
+            # OMN-16944: rule-based sources for runtime-minted refs ride the
+            # SAME rendered lane surface as the exact-match mappings, so a
+            # lane declares both in one contract block.
+            secret_resolver_config_json = _secret_resolver_config_json(
+                profile.secret_resolver_mappings,
+                profile.secret_resolver_namespaces,
             )
 
         for process_name, process in profile.processes.items():
@@ -148,6 +164,21 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
                 profile.secret_resolver_config_path
             )
             env[f"{prefix}_SECRET_RESOLVER_CONFIG_JSON"] = secret_resolver_config_json
+            if process.secret_resolver_namespaces:
+                # OMN-20533: the process's own store-backed rules on top of the
+                # profile's config, under a SEPARATE name. The profile-level
+                # value above stays house-only, so a lane that borrows this
+                # profile without holding a store identity keeps binding it
+                # and never starts demanding one.
+                env[f"{prefix}_STORE_SECRET_RESOLVER_CONFIG_JSON"] = (
+                    _secret_resolver_config_json(
+                        profile.secret_resolver_mappings,
+                        (
+                            *profile.secret_resolver_namespaces,
+                            *process.secret_resolver_namespaces,
+                        ),
+                    )
+                )
 
     return dict(sorted(env.items()))
 

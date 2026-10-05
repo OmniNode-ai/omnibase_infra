@@ -58,6 +58,8 @@ from deploy_agent.executor import (
     assert_prod_request_has_stability_digest,
     lane_config_for,
     lane_runs_phase,
+    read_applied_migration_fingerprint,
+    read_checkout_migration_fingerprint,
     resolve_prod_target_service,
     select_dev_instance,
 )
@@ -335,12 +337,13 @@ REJECTION_PUBLISH_MAX_BLOCK_MS = 10_000
 #: does not override it). A pre-accept settle wait at least this long has let
 #: the coordinator drop the member, which is reported rather than discovered.
 SETTLE_WAIT_EVICTION_WARN_SECONDS = 300.0
+MIGRATION_CONVERGE_CHECK_INTERVAL_SECONDS = 60
 
 
 class DeployAgent:
     def __init__(self, *, skip_self_update: bool = False):
         self.job_store = JobStore(state_dir=STATE_DIR)
-        self.executor = DeployExecutor()
+        self.executor = DeployExecutor(migration_record_dir=STATE_DIR)
         self._state = "idle"
         self._shutdown = False
         self._current_git_sha = ""
@@ -385,6 +388,9 @@ class DeployAgent:
         self._idle_converge_last_check: float | None = None
         self._idle_converge_attempted: set[str] = set()
         self._idle_converge_last_verdict: EnumIdleConvergeVerdict | None = None
+        self._migration_converge_last_check: float | None = None
+        self._migration_converge_attempted: set[str] = set()
+        self._migration_converge_last_verdict: str | None = None
         self._idle_converge_now: Callable[[], datetime] = lambda: datetime.now(UTC)
         self._idle_read_running_ref: Callable[[], str | None] = lambda: (
             read_running_omnimarket_ref(
@@ -754,6 +760,7 @@ class DeployAgent:
                     # deferral holds its partition paused.
                     if getattr(consumer, "load_gate_paused", None) is None:
                         await self._offload(self._maybe_idle_converge)
+                        await self._offload(self._maybe_converge_forward_migration)
                     await asyncio.sleep(1)
         finally:
             publish_retry_task.cancel()
@@ -1065,6 +1072,59 @@ class DeployAgent:
         )
         self.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
         self._execute_command(cmd)
+
+    def _maybe_converge_forward_migration(self) -> None:
+        """Apply changed checkout migrations once per fingerprint on an idle dev lane."""
+        if self._allowed_lanes != {EnumRuntimeLane.DEV}:
+            return
+        tick = time.monotonic()
+        if (
+            self._migration_converge_last_check is not None
+            and tick - self._migration_converge_last_check
+            < MIGRATION_CONVERGE_CHECK_INTERVAL_SECONDS
+        ):
+            return
+        self._migration_converge_last_check = tick
+        if self.job_store.has_active_job():
+            return
+        fingerprint = read_checkout_migration_fingerprint()
+        if fingerprint is None:
+            if self._migration_converge_last_verdict != "unreadable":
+                logger.warning("migration tree fingerprint unreadable")
+            self._migration_converge_last_verdict = "unreadable"
+            return
+        recorded = read_applied_migration_fingerprint(STATE_DIR, EnumRuntimeLane.DEV)
+        if fingerprint == recorded:
+            if self._migration_converge_last_verdict != "applied":
+                logger.info(
+                    "forward migration converge: checkout migration tree already applied"
+                )
+            self._migration_converge_last_verdict = "applied"
+            return
+        self._migration_converge_last_verdict = "changed"
+        if fingerprint in self._migration_converge_attempted:
+            return
+        if not self._idle_converge_gate_open():
+            return
+        self._migration_converge_attempted.add(fingerprint)
+        logger.info(
+            "forward migration converge: checkout migration tree %s differs from "
+            "the last applied %s; applying the forward migration "
+            "(no runtime service is restarted)",
+            fingerprint[:12],
+            recorded[:12] if recorded else "none",
+        )
+        try:
+            applied = self.executor.converge_forward_migration(lane=EnumRuntimeLane.DEV)
+            logger.info("forward migration converge succeeded for %s", applied[:12])
+        except Exception as exc:
+            logger.exception(
+                "forward migration converge FAILED for %s: %s. Writers built "
+                "against these migrations will fail readiness until the forward "
+                "migration applies",
+                fingerprint[:12],
+                exc,
+            )
 
     def _idle_converge_gate_open(self) -> bool:
         """Whether the load gate lets an idle converge start now (OMN-19507)."""

@@ -38,20 +38,31 @@ import json
 import socket
 import time
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from click.testing import CliRunner, Result
 from pydantic import JsonValue
 
+from omnibase_core.artifacts.artifact_store import ArtifactStore
 from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
 from omnibase_infra.cli import cli_skill
 from omnibase_infra.cli.cli_skill import run_skill_by_name
 from omnibase_infra.cli.delegate_lane import LANE_DECLARATION_RELATIVE_PATH
 from omnibase_infra.cli.enum_skill_arg_type import EnumSkillArgType
+from omnibase_infra.cli.enum_skill_terminal_publish_outcome import (
+    EnumSkillTerminalPublishOutcome,
+)
 from omnibase_infra.cli.model_skill_arg_spec import ModelSkillArgSpec
 from omnibase_infra.cli.model_skill_mapping import ModelSkillMapping
 from omnibase_infra.cli.model_skill_mapping_registry import ModelSkillMappingRegistry
+from omnibase_infra.cli.receipt_mode import create_receipt_artifact_store
+from omnibase_infra.cli.skill_terminal_publish import (
+    publish_skill_terminal_event,
+    resolve_skill_terminal_target,
+)
+from omnibase_infra.runtime_identity import collect_runtime_identity
 from tests.fixtures.handler_correlated_noop import (
     HandlerCorrelatedNoop,
     ModelCorrelatedNoopRequest,
@@ -267,3 +278,52 @@ class TestARealDispatchIsPublishedFailSoft:
 
         assert result.exit_code == 0, result.stderr
         assert "onex skill: terminal publish failed for lane dev" in result.stderr
+
+
+class TestTerminalEnvelopeIsRetainedBeforeTheBroker:
+    """OMN-20071: real store, real lane resolution, real unreachable broker."""
+
+    def test_the_envelope_is_readable_after_a_real_broker_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("OMNI_HOME", raising=False)
+        monkeypatch.delenv("ONEX_ARTIFACT_STORE_ROOT", raising=False)
+        workspace = tmp_path / "workspace"
+        _workspace_with_declared_lane(workspace, broker=f"127.0.0.1:{_closed_port()}")
+        contract = tmp_path / "contract.yaml"
+        contract.write_text(
+            f"name: node_dod_verify\nterminal_event: {_TERMINAL_TOPIC}\n",
+            encoding="utf-8",
+        )
+        verdict = {"ticket_id": "OMN-20071", "correlation_id": str(uuid4())}
+        receipt = ModelSkillResult[JsonValue](
+            skill_name="node_dod_verify",
+            node_name="node_dod_verify",
+            status=EnumSkillResultStatus.SUCCESS,
+            correlation_id=uuid4(),
+            run_id=uuid4(),
+            exit_code=0,
+            duration_ms=10,
+            result=verdict,
+            result_model=_RESULT_MODEL,
+            runtime_identity=collect_runtime_identity(config_source="contract.yaml"),
+        )
+        state_root = tmp_path / "state"
+
+        report = publish_skill_terminal_event(
+            receipt=receipt,
+            result_model=_RESULT_MODEL,
+            contract_path=contract,
+            lane="dev",
+            artifact_store_factory=lambda: create_receipt_artifact_store(state_root),
+            resolve_target=lambda lane: resolve_skill_terminal_target(
+                lane, omni_home=workspace
+            ),
+        )
+
+        assert report.outcome is EnumSkillTerminalPublishOutcome.FAILED
+        assert report.artifact_ref is not None
+        assert report.artifact_ref.ref in report.render()
+        monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(state_root / "artifacts"))
+        retained = json.loads(ArtifactStore().read(report.artifact_ref))
+        assert retained["payload"] == verdict

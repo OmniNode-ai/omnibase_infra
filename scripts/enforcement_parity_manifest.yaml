@@ -78,10 +78,13 @@ repos:
         - context: "CI Summary"
           coverage: direct
           rule: "Merge Queue Policy / OMN-4497 (umbrella correctness gate)"
-        - context: "node-migration-sync"
-          coverage: direct
-          rule: >-
-            OMN-14556: node-migration-sync.yml is its OWN workflow file (separate run_id from ci.yml), so ci_summary_gate.py's poll of actions/runs/${RUN_ID}/jobs structurally cannot observe it -- a needs_child declaration would be a false COVERED. Confirmed live on PR #2288 (2026-07-13): node-migration-sync=FAIL, CI Summary=PASS, different run_ids. Absent from required_status_checks today (MISSING) -- this entry makes the report-only ratchet flag it until the branch-protection PUT lands.
+          # OMN-14975: node-migration-sync now runs inside ci.yml through an
+          # unconditional reusable caller. "node-migration-sync /
+          # node-migration-sync" is in STRICT_GATE_JOBS; failed/skipped/missing
+          # results cannot pass CI Summary. Its former direct-gate MISSING entry
+          # is resolved through the same poller enforcement as deploy-agent-tests
+          # below, pinned by tests/ci/test_ci_summary_gate.py. The coverage-mode
+          # limitation documented below applies to this gate too.
           # OMN-15378 AC3 -- RESOLVED, so the former `deploy-agent-tests` direct-gate
           # entry is deliberately GONE rather than left as a permanent MISSING finding.
           # The gap it recorded was real: deploy-agent-tests.yml was its own

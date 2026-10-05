@@ -95,6 +95,9 @@ if TYPE_CHECKING:
     from omnibase_infra.event_bus.model_topic_readiness_config import (
         ModelTopicReadinessConfig,
     )
+    from omnibase_infra.protocols.protocol_runtime_log_producer import (
+        ProtocolRuntimeLogProducer,
+    )
 from pydantic import ValidationError
 
 from omnibase_core.container import ModelONEXContainer
@@ -298,6 +301,29 @@ def _runtime_log_bridge_allowlist() -> list[str]:
         ",".join(DEFAULT_RUNTIME_LOG_BRIDGE_ALLOWLIST),
     )
     return [name.strip() for name in allowlist_raw.split(",") if name.strip()]
+
+
+class EventBusRuntimeLogProducer:
+    """Bridge producer that publishes through the kernel's selected event bus.
+
+    A runtime booted natively on the in-memory bus has no broker and no Kafka
+    producer (OMN-19992), so ``RuntimeLogEventBridge`` publishes through the bus
+    the kernel already selected. The bus lifecycle belongs to the kernel:
+    ``stop`` closes only this producer, and a send after it is refused rather
+    than published onto a bus that may be tearing down.
+    """
+
+    def __init__(self, event_bus: EventBusInmemory | EventBusKafka) -> None:
+        self._event_bus = event_bus
+        self._stopped = False
+
+    async def send(self, topic: str, *, value: bytes) -> object:
+        if self._stopped:
+            raise RuntimeError("runtime log producer is stopped")
+        return await self._event_bus.publish(topic, None, value)
+
+    async def stop(self) -> None:
+        self._stopped = True
 
 
 async def _create_runtime_log_bridge_producer(
@@ -2163,14 +2189,22 @@ async def bootstrap() -> int:
                     exc_info=True,
                 )
 
-        # 3.6. Initialize RuntimeLogEventBridge if enabled (OMN-5525)
+        # 3.6. Initialize RuntimeLogEventBridge if enabled (OMN-5525, OMN-19992)
         # Captures ERROR/WARNING log records from allowlisted loggers and emits
-        # them as structured Kafka events. Requires a dedicated producer.
-        if use_kafka and RuntimeLogEventBridge.is_enabled() and kafka_bootstrap_servers:
+        # them as structured runtime-error events. The Kafka transport gets a
+        # dedicated producer; a native runtime on the in-memory bus publishes
+        # through the bus it selected, so both modes feed the same topic.
+        if RuntimeLogEventBridge.is_enabled() and (
+            kafka_bootstrap_servers or not use_kafka
+        ):
             try:
-                _bridge_producer = await _create_runtime_log_bridge_producer(
-                    kafka_bootstrap_servers
-                )
+                _bridge_producer: ProtocolRuntimeLogProducer
+                if use_kafka and kafka_bootstrap_servers:
+                    _bridge_producer = await _create_runtime_log_bridge_producer(
+                        kafka_bootstrap_servers
+                    )
+                else:
+                    _bridge_producer = EventBusRuntimeLogProducer(event_bus)
 
                 runtime_log_bridge = RuntimeLogEventBridge(
                     producer=_bridge_producer,
@@ -2184,8 +2218,9 @@ async def bootstrap() -> int:
                 await runtime_log_bridge.start()
 
                 logger.info(
-                    "RuntimeLogEventBridge started (loggers=%s, correlation_id=%s)",
+                    "RuntimeLogEventBridge started (loggers=%s, bus=%s, correlation_id=%s)",
                     allowlist,
+                    event_bus_type,
                     correlation_id,
                 )
             except Exception:  # noqa: BLE001 — best-effort, never blocks startup

@@ -27,6 +27,7 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._error_consumer_flow_
 )
 from omnibase_infra.nodes.node_board_probe_effect.handlers._error_consumer_flow_input import (
     ConsumerFlowInputError,
+    ConsumerFlowLaneUnsettledError,
 )
 from omnibase_infra.nodes.node_board_probe_effect.models.model_consumer_flow_observation import (
     ModelConsumerFlowObservation,
@@ -110,6 +111,16 @@ class HandlerDockerConsumerFlowTarget(ProtocolConsumerFlowTarget):
                 except ConsumerFlowBootChangedError:
                     if attempt + 1 == request.attempts:
                         raise
+                except ConsumerFlowLaneUnsettledError as exc:
+                    # OMN-20410: the .201 dev runtime flaps unhealthy for minutes
+                    # at a time (a redeploy, or its own degraded health monitor),
+                    # so one settle window that ran out is not yet a verdict. The
+                    # next attempt waits a whole fresh window; a lane that never
+                    # converges still ends unreadable, which grades INDETERMINATE.
+                    if attempt + 1 == request.attempts:
+                        raise ConsumerFlowLaneUnsettledError(
+                            f"{exc} (after {request.attempts} settle window(s))"
+                        ) from exc
             request.scratch.mkdir(parents=True, exist_ok=True)
             obs["negative"] = run_negative(
                 self._repo_root,

@@ -139,6 +139,9 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "Kafka Schema Handshake (OMN-3411)",  # schema-handshake
     "Writer-Migration Coupling Check",  # migration-required-check
     "Node Migration Declaration Check",  # node-migration-declaration-check (OMN-15717)
+    # OMN-14975: vendor drift used to report in a separate workflow run. Calling
+    # it from ci.yml makes it observable here; absent/red/skipped cannot pass.
+    "node-migration-sync / node-migration-sync",
     "no-noncanonical-lifecycle-classes",  # OMN-14350 non-canonical lifecycle-class ratchet
     "Canonical Handler-Shape Gate (OMN-20298)",  # canonical-handler-shape-gate — detector with no preflight dependency
     "No Plugin Daemon Classes Gate (OMN-20298)",  # no-plugin-daemon-classes-gate — detector with no preflight dependency

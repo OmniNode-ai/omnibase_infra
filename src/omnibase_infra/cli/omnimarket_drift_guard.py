@@ -126,6 +126,7 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -187,6 +188,36 @@ DRIFT_OVERRIDE_ENV = "ONEX_ALLOW_OMNIMARKET_DRIFT"
 # Local `git rev-parse HEAD` only -- this never touches the network, so a
 # generous timeout still keeps the hot path fast.
 _GIT_TIMEOUT_SECONDS = 2
+
+# Repository-selecting variables git itself lists as "local" (the output of
+# ``git rev-parse --local-env-vars``). ``git -C <clone>`` does NOT override
+# them: a lane process exports GIT_DIR / GIT_WORK_TREE for its own worktree, so
+# an inherited value makes every ``git -C $OMNIBASE_PATH/omnimarket ...`` below
+# answer about the lane's repository instead (a DETACHED HEAD that the named
+# clone does not have). Every git subprocess in this module runs without them.
+_GIT_REPO_SELECTING_ENV = frozenset(
+    {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_DIR",
+        "GIT_GRAFT_FILE",
+        "GIT_IMPLICIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_INTERNAL_SUPER_PREFIX",
+        "GIT_NAMESPACE",
+        "GIT_NO_REPLACE_OBJECTS",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_PREFIX",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_SHALLOW_FILE",
+        "GIT_WORK_TREE",
+    }
+)
+
+
+def _clean_git_env() -> dict[str, str]:
+    """Return the process environment minus every repository-selecting git variable."""
+    return {k: v for k, v in os.environ.items() if k not in _GIT_REPO_SELECTING_ENV}
 
 
 @dataclass(frozen=True)
@@ -288,6 +319,7 @@ def canonical_local_omnimarket_commit(omni_home: str | None = None) -> str | Non
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT_SECONDS,
+            env=_clean_git_env(),
             check=True,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
@@ -374,6 +406,7 @@ def canonical_clone_attachment(
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT_SECONDS,
+            env=_clean_git_env(),
             check=False,
         )
     except (subprocess.TimeoutExpired, OSError):
@@ -408,6 +441,7 @@ def resolve_detached_registry_stamp(
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT_SECONDS,
+            env=_clean_git_env(),
             check=True,
         )
         reference_ref = default.stdout.strip()
@@ -425,6 +459,7 @@ def resolve_detached_registry_stamp(
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT_SECONDS,
+            env=_clean_git_env(),
             check=True,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
@@ -751,6 +786,7 @@ def resolve_ancestor_lag(
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT_SECONDS,
+            env=_clean_git_env(),
             check=False,
         )
     except (subprocess.TimeoutExpired, OSError):
@@ -771,6 +807,7 @@ def resolve_ancestor_lag(
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT_SECONDS,
+            env=_clean_git_env(),
             check=True,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):

@@ -78,12 +78,14 @@
 #               reads the same variable with the same default, so the wrapper
 #               and the reconciler cannot disagree about which venv is the
 #               composed one.
-#   ONEX_FLOOR_LOCK_WAIT_S (default 300), ONEX_FLOOR_LOCK_POLL_S (default 5)
+#   ONEX_FLOOR_LOCK_WAIT_S (default 3660), ONEX_FLOOR_LOCK_POLL_S (default 5)
 #               how long an evidence command below the floor waits for a PEER
 #               reconcile that holds the host lock, and how often it re-reads
 #               the floor meanwhile (OMN-20111). Waiting never lowers the bar:
 #               when the wait ends the floor is read again and the refusal
 #               below still fires unless it now reads OK.
+#               The default covers both host reconcile steps plus 60s, and
+#               follows ONEX_RECONCILE_STEP_TIMEOUT_S when configured.
 #   ONEX_RECONCILE_RECEIPT
 #               the last reconcile's receipt, read only to name the blocking
 #               surface in a refusal; same variable and default as
@@ -385,9 +387,15 @@ _floor_verdict() {
 # bounded time, re-reading the floor as it goes, instead of refusing while a
 # stamp is seconds away. Returns 0 only when the floor reads OK.
 _await_peer_reconcile() {
-  local budget="${ONEX_FLOOR_LOCK_WAIT_S:-300}" poll="${ONEX_FLOOR_LOCK_POLL_S:-5}"
+  # A cold host pass runs clone and venv delegates, each allowed 1800s
+  # (OMN-19709). The former 300s wait could refuse a healthy peer mid-pass
+  # and send a text delegation to its fallback (OMN-17427).
+  local step_budget="${ONEX_RECONCILE_STEP_TIMEOUT_S:-1800}" default_budget
+  [[ "$step_budget" =~ ^[1-9][0-9]*$ ]] || step_budget=1800
+  default_budget=$(( 2 * step_budget + 60 ))
+  local budget="${ONEX_FLOOR_LOCK_WAIT_S:-$default_budget}" poll="${ONEX_FLOOR_LOCK_POLL_S:-5}"
   local waited=0
-  [[ "$budget" =~ ^[0-9]+$ ]] || budget=300
+  [[ "$budget" =~ ^[0-9]+$ ]] || budget="$default_budget"
   [[ "$poll" =~ ^[1-9][0-9]*$ ]] || poll=5
   _say "a peer reconcile holds $RECONCILE_LOCK_DIR; waiting up to ${budget}s for it before refusing."
   while :; do
@@ -410,8 +418,9 @@ _await_peer_reconcile() {
 
 # Name what blocks the floor and the command that clears it (OMN-20111), from
 # the last reconcile's receipt. `reconcile-host.sh` writes one surface per line
-# with its verdict, whether it is part of the dispatch premise, and its remedy;
-# one awk reads them back. This runs only on the refusal path, so it costs the
+# with its verdict, whether it is part of the dispatch premise, its remedy and,
+# for a refused clone, its owner (OMN-20403: the ledger lane whose CLAIM last
+# named the staged paths, or `unowned`); one awk reads them back. This runs only on the refusal path, so it costs the
 # hot path nothing.
 _explain_blocking_surfaces() {
   if [[ ! -f "$RECONCILE_RECEIPT" ]]; then
@@ -431,9 +440,9 @@ _explain_blocking_surfaces() {
     /"surface": "/ {
       v = field($0, "verdict")
       if (v == "MOVED" || v == "ALREADY_AT_TARGET") next
-      s = field($0, "surface"); r = field($0, "remedy")
-      if ($0 ~ /"dispatch_premise": true/) { nb++; bs[nb] = s " " v; br[nb] = r }
-      else { no++; os[no] = s " " v }
+      s = field($0, "surface"); r = field($0, "remedy"); w = field($0, "owner")
+      if ($0 ~ /"dispatch_premise": true/) { nb++; bs[nb] = s " " v; br[nb] = r; bw[nb] = w }
+      else { no++; os[no] = s " " v; ow[no] = w }
     }
     END {
       if (nb == 0) {
@@ -441,10 +450,12 @@ _explain_blocking_surfaces() {
       }
       for (i = 1; i <= nb; i++) {
         printf "[onex]   blocking : %s (last reconcile %s)\n", bs[i], at
+        if (bw[i] != "") printf "[onex]   owner    : %s\n", bw[i]
         if (br[i] != "") printf "[onex]   clears by: %s\n", br[i]
       }
       for (i = 1; i <= no; i++) {
         printf "[onex]   not blocking delegation: %s\n", os[i]
+        if (ow[i] != "") printf "[onex]   owner    : %s\n", ow[i]
       }
     }
   ' "$RECONCILE_RECEIPT" >&2
