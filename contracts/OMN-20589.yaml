@@ -1,0 +1,59 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20589
+title: DLQ replay replays the dead letters of one source record once between them
+summary: Every subscriber that rejects a delivered record writes its own dead letter, and a replay re-delivers the record to every subscriber, so the replay node now replays the dead letters that name one source topic, partition and offset once in total and completes the rest as SKIPPED.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20589
+    statement: A record that N subscribers reject must reach its source topic at most max_replay_count+1 times in total, not N to the power of the replay round.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: A closed-loop test with two always-failing subscribers on one source topic fails today (63 source copies) and passes after the change with max_replay_count+1 copies -- falsifier: uv run pytest tests/unit/nodes/node_dlq_replay_effect/test_replay_once_per_source_record.py -q'
+      - id: AC2
+        statement: 'AC2: Dead letters that name the same source topic, partition and offset are replayed once in total, including when they arrive in different runs, and the duplicates are completed and committed rather than withheld -- falsifier: uv run pytest tests/unit/nodes/node_dlq_replay_effect -q -k one_replay_per_source'
+      - id: AC3
+        statement: 'AC3: Positive control: two dead letters with the same correlation id but different source offsets are both replayed, and a dead letter with no source coordinate keeps today''s behaviour -- falsifier: uv run pytest tests/unit/nodes/node_dlq_replay_effect -q -k positive_control'
+evidence_requirements:
+  - kind: tests
+    description: The closed-loop test drives the real HandlerDlqReplay over a source log whose every record two subscribers dead-letter, and asserts six source copies, one per replay round.
+    command: uv run pytest tests/unit/nodes/node_dlq_replay_effect/test_replay_once_per_source_record.py -q
+  - kind: tests
+    description: Siblings split across runs (three subscribers, one record per run) still give one replay per round, and the duplicates complete as SKIPPED with every offset committed.
+    command: uv run pytest tests/unit/nodes/node_dlq_replay_effect -q -k one_replay_per_source
+  - kind: tests
+    description: Positive controls show that distinct source offsets under one correlation id, and dead letters with no source coordinate, are each replayed.
+    command: uv run pytest tests/unit/nodes/node_dlq_replay_effect -q -k positive_control
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20589-ac1
+    description: The closed-loop test drives the real HandlerDlqReplay over a source log whose every record two subscribers dead-letter, and asserts six source copies, one per replay round.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_dlq_replay_effect/test_replay_once_per_source_record.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20589-ac2
+    description: Siblings split across runs still give one replay per round, and the duplicates complete as SKIPPED with every offset committed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_dlq_replay_effect -q -k one_replay_per_source
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-20589-ac3
+    description: Positive controls show that distinct source offsets under one correlation id, and dead letters with no source coordinate, are each replayed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_dlq_replay_effect -q -k positive_control
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
