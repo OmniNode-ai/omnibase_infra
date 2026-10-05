@@ -108,6 +108,7 @@ Runner = Callable[..., "subprocess.CompletedProcess[str]"]
 
 class EnumIdleConvergeVerdict(StrEnum):
     CONVERGE = "converge"
+    FROZEN = "frozen"
     NOT_ROUTED_ELSEWHERE = "not_routed_elsewhere"
     JOB_ACTIVE = "job_active"
     RECENTLY_ACTIVE = "recently_active"
@@ -136,6 +137,8 @@ class ModelIdleConvergeInputs(BaseModel):
     #: Why the probe schedule could not be read, or ``None``.
     windows_error: str | None
     attempted_heads: frozenset[str]
+    #: The instance's FROZEN reason in force (``deploy_agent.routing`` lane flags), or ``None``.
+    frozen_reason: str | None = None
 
 
 class ModelIdleConvergeDecision(BaseModel):
@@ -154,6 +157,8 @@ def decide(inputs: ModelIdleConvergeInputs) -> ModelIdleConvergeDecision:
     ) -> ModelIdleConvergeDecision:
         return ModelIdleConvergeDecision(verdict=verdict, detail=detail)
 
+    if inputs.frozen_reason is not None:
+        return refuse(EnumIdleConvergeVerdict.FROZEN, inputs.frozen_reason)
     if not inputs.omnimarket_routed_elsewhere:
         return refuse(
             EnumIdleConvergeVerdict.NOT_ROUTED_ELSEWHERE,

@@ -76,6 +76,15 @@
 # 2026-09-25T12:40:36Z (ledger:3893), item (b): "a deploy lane on .200 with a
 # load gate".
 #
+# LANE FLAGS (OMN-17427). An instance may declare `flags:`, the one typed
+# switch block its agent reads from its own clone at start (the lane-flags
+# section of deploy_agent/routing.py), so a lane's config changes by a dev PR
+# picked up at the agent's idle self-update, never by an env edit or a restart by hand. An
+# unknown key refuses the table. `freeze: {until, reason}` refuses every command
+# routed to the instance as `frozen`, and stops idle converge, until `until`
+# (it expires by itself); a command with requested_by `promotion/<who>` is the
+# one way through (python -m deploy_agent.trigger --requested-by promotion/...).
+#
 # EXCLUDED HOSTS (OMN-19507). No instance may name one and no agent may run as
 # one, even with DEPLOY_AGENT_INSTANCE set (routing.resolve_instance). The key
 # is the lowercased first hostname label, the same one the router compares.
@@ -92,6 +101,14 @@ instances:
   dev-201:
     hostnames: [omninode-pc]
     consumer_group: onex-deploy-agent
+    # The operator's stable demo lane for Tech Week (operator, session
+    # 2026-10-05 ~12:45Z: "Freeze it"). Five of 2026-10-05's six recreates were
+    # idle converge and one a runtime merge (dev-recreate-9143, omni_home ledger
+    # MSG 2026-10-05T11:27:38Z).
+    flags:
+      freeze:
+        until: 2026-10-19T07:00:00Z
+        reason: "stable demo lane, operator 2026-10-05 ~12:45Z; changes only on a promotion/ command"
     verify:
       receipt_lane: compose-dev
       runner_labels: [self-hosted, omnibase-verify, host-201]

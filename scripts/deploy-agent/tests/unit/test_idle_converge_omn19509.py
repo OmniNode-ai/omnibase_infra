@@ -54,6 +54,7 @@ from deploy_agent.idle_converge import (
 from deploy_agent.job_state import JobStore
 from deploy_agent.routing import (
     DeployRouter,
+    ModelLaneFlags,
     ModelRoute,
     load_routing_table,
     resolve_instance,
@@ -316,6 +317,10 @@ def _agent(
     agent._idle_read_running_ref = lambda: RUNNING
     agent._idle_read_head_ref = lambda: HEAD
     agent._idle_probe_blocker = lambda now: None
+    # The committed table freezes dev-201 until 2026-10-19 (lane flags), which
+    # covers QUIET; these tests are about the converge rule, so the lane is
+    # unfrozen here. test_lane_flags_freeze_omn17427.py covers the freeze.
+    agent._lane_flags = ModelLaneFlags()
     return agent
 
 
