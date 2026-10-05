@@ -1215,17 +1215,14 @@ repos:
       #     omnibase_core REGISTERED_RUNTIME_PROFILES registry)
       #   - runtime_profile_no_consumer_lane (subscribing REDUCER/EFFECT names
       #     no consumer-attached profile, so subscriptions are never drained)
-      # Pre-existing violators are frozen in validation/runtime_profiles_allowlist.yaml
-      # (discovered by repo-root walk; drain tracked by OMN-12982).
+      # OMN-20562 emptied and deleted the allowlist: this is a plain check, and
+      # every contract under src/ must pass with no exception list.
       - id: onex-validate-runtime-profiles
         name: Validate runtime_profiles on node contracts (OMN-12957)
-        # Reads the canonical baseline allowlist at config/validation/ — the same
-        # path the required CI gate (.github/workflows/validator-runtime-profiles.yml)
-        # passes explicitly. The bare module CLI auto-discovers a different
-        # repo-root path (validation/) that does not exist here, so the hook is
-        # pinned to the canonical config/validation path to match CI (OMN-13247).
+        # Same invocation as the required CI job (runtime-profiles-validator in
+        # ci.yml), with no allowlist argument (OMN-20562).
         entry: >-
-          uv run --frozen python -c "import sys; from pathlib import Path; from omnibase_core.validation.validator_runtime_profiles import ValidatorRuntimeProfiles; r = ValidatorRuntimeProfiles(allowlist_path=Path('config/validation/runtime_profiles_allowlist.yaml')).validate(Path('src')); [print(f'[{i.severity.value}] {i.file_path}:{i.line_number}: {i.message}') for i in r.issues]; sys.exit(0 if r.is_valid else 1)"
+          uv run --frozen python -c "import sys; from pathlib import Path; from omnibase_core.validation.validator_runtime_profiles import ValidatorRuntimeProfiles; r = ValidatorRuntimeProfiles().validate(Path('src')); [print(f'[{i.severity.value}] {i.file_path}:{i.line_number}: {i.message}') for i in r.issues]; sys.exit(0 if r.is_valid else 1)"
         language: system
         files: 'contract\.yaml$'
         pass_filenames: false
@@ -2198,12 +2195,6 @@ repos:
         name: Validator requirements baseline can only shrink (OMN-19677)
         args: [--baseline, architecture-handshakes/validator-requirements-baseline.yaml, --parser, 'yaml-list:gaps', --base-ref, origin/dev]
         files: ^architecture-handshakes/validator-requirements-baseline\.yaml$
-      - id: anti-growth-baseline
-        require_serial: true
-        alias: anti-growth-runtime-profiles-allowlist
-        name: Runtime profiles allowlist baseline can only shrink (OMN-19677)
-        args: [--baseline, config/validation/runtime_profiles_allowlist.yaml, --parser, 'yaml-list:allowlist', --base-ref, origin/dev]
-        files: ^config/validation/runtime_profiles_allowlist\.yaml$
       - id: anti-growth-baseline
         require_serial: true
         alias: anti-growth-skip-count-baseline
