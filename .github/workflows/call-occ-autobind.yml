@@ -176,7 +176,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: OmniNode-ai/omnimarket
-          ref: ba246b55068d46a5e998e61b9c833859a613f54f # .github/sibling-pins.yaml
+          ref: fced10cd2906e10a9ea5ef28ab88cdf5aa5e7eb5 # .github/sibling-pins.yaml
           path: .occ-autobind-src
           persist-credentials: false
           sparse-checkout: |
