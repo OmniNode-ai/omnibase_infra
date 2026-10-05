@@ -34,12 +34,13 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
 import pytest
 
 from omnibase_infra.dlq.models.enum_replay_status import EnumReplayStatus
+from omnibase_infra.dlq.models.model_dlq_replay_record import ModelDlqReplayRecord
 from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     DLQConsumer,
     DLQProducer,
@@ -47,7 +48,10 @@ from omnibase_infra.nodes.node_dlq_replay_effect.engine_dlq_replay import (
     ModelDlqReplayEngineConfig,
 )
 from omnibase_infra.nodes.node_dlq_replay_effect.handlers.handler_dlq_replay import (
+    _MAX_REPLAYED_SOURCES,
+    DlqConsumerDrainState,
     HandlerDlqReplay,
+    _drain_state_for,
 )
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_message import (
     ModelDlqMessage,
@@ -58,6 +62,9 @@ from omnibase_infra.nodes.node_dlq_replay_effect.models.model_dlq_replay_run_res
 from omnibase_infra.nodes.node_dlq_replay_effect.models.model_unparseable_dlq_record import (
     DlqDrainRecord,
 )
+
+if TYPE_CHECKING:
+    from omnibase_infra.dlq.service_dlq_tracking import ServiceDlqTracking
 
 pytestmark = pytest.mark.unit
 
@@ -203,13 +210,31 @@ class _ConfirmingQuarantine:
         return object()
 
 
+class _RecordingTracking:
+    """Stands in for ``ServiceDlqTracking``: keeps every audit row it is given."""
+
+    def __init__(self) -> None:
+        self.records: list[ModelDlqReplayRecord] = []
+
+    @property
+    def is_tracking_enabled(self) -> bool:
+        return True
+
+    async def record_replay_attempt(self, record: ModelDlqReplayRecord) -> None:
+        self.records.append(record)
+
+
 def _handler(
-    consumer: _LoopConsumer, producer: object, quarantine: _ConfirmingQuarantine
+    consumer: _LoopConsumer,
+    producer: object,
+    quarantine: _ConfirmingQuarantine,
+    tracking: _RecordingTracking | None = None,
 ) -> HandlerDlqReplay:
     return HandlerDlqReplay(
         consumers={_INTENTS_DLQ: cast("DLQConsumer", consumer)},
         producer=cast("DLQProducer", producer),
         quarantine_producer=cast("DLQQuarantineProducer", quarantine),
+        tracking=cast("ServiceDlqTracking | None", tracking),
     )
 
 
@@ -349,3 +374,109 @@ class TestPositiveControl:
         await asyncio.wait_for(handler.run(), _OUTER_TIMEOUT_SECONDS)
 
         assert [m.dlq_offset for m in producer.replayed] == [0, 1]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("source_partition", "source_offset"),
+        [(0, None), (None, 10)],
+        ids=["offset-missing", "partition-missing"],
+    )
+    async def test_positive_control_half_a_source_coordinate_each_replay(
+        self, source_partition: int | None, source_offset: int | None
+    ) -> None:
+        """Half a coordinate cannot match siblings, so each dead letter replays."""
+        correlation_id = uuid4()
+        dlq = [
+            _dead_letter(
+                dlq_offset=index,
+                retry_count=0,
+                correlation_id=correlation_id,
+                source_offset=source_offset,
+                source_partition=source_partition,
+            )
+            for index in range(2)
+        ]
+        producer = _RecordingReplayProducer()
+        handler = _handler(
+            _LoopConsumer(_config(), dlq), producer, _ConfirmingQuarantine()
+        )
+
+        await asyncio.wait_for(handler.run(), _OUTER_TIMEOUT_SECONDS)
+
+        assert [m.dlq_offset for m in producer.replayed] == [0, 1]
+
+
+@pytest.mark.unit
+class TestReplayedSourcesBound:
+    """The remembered coordinates are bounded, and eviction only forgets."""
+
+    def test_eviction_boundary_forgets_only_the_oldest(self) -> None:
+        state = DlqConsumerDrainState()
+        for offset in range(_MAX_REPLAYED_SOURCES + 1):
+            state.mark_replayed((_TICK_TOPIC, 0, str(offset)))
+
+        assert len(state.replayed_sources) == _MAX_REPLAYED_SOURCES
+        assert not state.already_replayed((_TICK_TOPIC, 0, "0"))
+        assert state.already_replayed((_TICK_TOPIC, 0, "1"))
+        assert state.already_replayed((_TICK_TOPIC, 0, str(_MAX_REPLAYED_SOURCES)))
+
+    def test_eviction_boundary_a_re_marked_source_is_kept(self) -> None:
+        state = DlqConsumerDrainState()
+        for offset in range(_MAX_REPLAYED_SOURCES):
+            state.mark_replayed((_TICK_TOPIC, 0, str(offset)))
+        state.mark_replayed((_TICK_TOPIC, 0, "0"))
+        state.mark_replayed((_TICK_TOPIC, 0, "new"))
+
+        assert state.already_replayed((_TICK_TOPIC, 0, "0"))
+        assert not state.already_replayed((_TICK_TOPIC, 0, "1"))
+
+    def test_eviction_boundary_never_marks_an_unreplayed_source(self) -> None:
+        """An evicted or unseen source reads as unseen: it is replayed, not skipped."""
+        state = DlqConsumerDrainState()
+        for offset in range(_MAX_REPLAYED_SOURCES * 2):
+            state.mark_replayed((_TICK_TOPIC, 0, str(offset)))
+
+        assert not state.already_replayed((_TICK_TOPIC, 1, "0"))
+        assert not state.already_replayed(("another.topic", 0, "1"))
+
+
+@pytest.mark.unit
+class TestDuplicateAuditRows:
+    @pytest.mark.asyncio
+    async def test_live_duplicate_writes_a_skipped_audit_row(self) -> None:
+        bus = _Bus(subscribers=2)
+        bus.publish_source(0)
+        consumer = _LoopConsumer(_config(), bus.dlq[:2])
+        tracking = _RecordingTracking()
+        handler = _handler(
+            consumer, _RecordingReplayProducer(), _ConfirmingQuarantine(), tracking
+        )
+
+        await asyncio.wait_for(handler.run(), _OUTER_TIMEOUT_SECONDS)
+
+        assert [r.replay_status for r in tracking.records] == [
+            EnumReplayStatus.COMPLETED,
+            EnumReplayStatus.SKIPPED,
+        ]
+        assert consumer.committed == 2
+
+    @pytest.mark.asyncio
+    async def test_dry_run_duplicate_writes_no_audit_row_and_commits_nothing(
+        self,
+    ) -> None:
+        """A dry run records nothing on any path, a found duplicate included."""
+        bus = _Bus(subscribers=2)
+        bus.publish_source(0)
+        consumer = _LoopConsumer(_config(dry_run=True), bus.dlq[1:2])
+        _drain_state_for(consumer).mark_replayed((_TICK_TOPIC, 0, "0"))
+        tracking = _RecordingTracking()
+        producer = _RecordingReplayProducer()
+        handler = _handler(consumer, producer, _ConfirmingQuarantine(), tracking)
+
+        run = await asyncio.wait_for(handler.run(), _OUTER_TIMEOUT_SECONDS)
+
+        assert [r.status for r in run.results] == [EnumReplayStatus.SKIPPED]
+        assert run.results[0].message.startswith("DRY RUN")
+        assert tracking.records == []
+        assert producer.replayed == []
+        assert consumer.committed == 0
