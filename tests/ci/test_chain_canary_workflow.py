@@ -31,6 +31,9 @@ Ticket: OMN-16773
 
 from __future__ import annotations
 
+import importlib.util
+import tempfile
+import textwrap
 import tomllib
 from pathlib import Path
 
@@ -392,3 +395,202 @@ def test_the_deploy_agent_is_the_resolved_lanes_own(
     # any runner reads the agent of the lane it grades.
     assert "DEPLOY_AGENT_URL=${LANE_DEPLOY_AGENT_URL}" in workflow_text
     assert ":8098" not in workflow_text
+
+
+# ---------------------------------------------------------------------------
+# OMN-20594 -- a red canary reaches the operator, once per change of verdict
+# ---------------------------------------------------------------------------
+#
+# OMN-16773 deferred alerting: until this, a red chain canary was a failed
+# workflow run that nobody watched. The h201 dev lane is the protected
+# delegation lane (the lane manifest says so), so a scheduled red posts to the
+# Slack channel the fleet canary and dev-lane-liveness already alert to,
+# through the same two secrets, and a green after a red posts the recovery.
+# The decision is edge-triggered against the previous completed scheduled run,
+# so a lane that stays red posts once, not once a run.
+
+_ALERT_STEP = "Tell the operator when the delegation verdict changes (OMN-20594)"
+
+
+def _alert_step(canary_job: dict[str, object]) -> dict[str, object]:
+    steps = canary_job["steps"]
+    assert isinstance(steps, list)
+    matches = [s for s in steps if isinstance(s, dict) and s.get("name") == _ALERT_STEP]
+    assert len(matches) == 1, f"exactly one {_ALERT_STEP!r} step"
+    return matches[0]
+
+
+def _alert_module(canary_job: dict[str, object]) -> dict[str, object]:
+    """Execute the step's own inline program as a module, without running main."""
+    run = str(_alert_step(canary_job)["run"])
+    start = run.index("<<'PY'\n") + len("<<'PY'\n")
+    end = run.index("\nPY", start)
+    source = Path(tempfile.mkdtemp()) / "chain_canary_alert.py"
+    source.write_text(textwrap.dedent(run[start:end]), encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("chain_canary_alert", source)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return vars(module)
+
+
+@pytest.mark.unit
+def test_alert_step_runs_last_on_every_scheduled_outcome(
+    canary_job: dict[str, object],
+) -> None:
+    step = _alert_step(canary_job)
+    steps = canary_job["steps"]
+    assert isinstance(steps, list)
+    assert steps[-1] is step, "the alert reads job.status, so it runs after the verdict"
+    assert step["if"] == "always() && github.event_name == 'schedule'"
+
+
+@pytest.mark.unit
+def test_alert_token_reaches_the_step_as_env_never_argv(
+    canary_job: dict[str, object],
+) -> None:
+    step = _alert_step(canary_job)
+    env = step["env"]
+    assert isinstance(env, dict)
+    assert env["SLACK_BOT_TOKEN"] == "${{ secrets.SLACK_BOT_TOKEN }}"
+    assert env["SLACK_CHANNEL_ID"] == "${{ secrets.SLACK_CHANNEL_ID }}"
+    assert env["JOB_STATUS"] == "${{ job.status }}"
+    assert "secrets." not in str(step["run"]), (
+        "a secret is never interpolated into the script"
+    )
+
+
+@pytest.mark.unit
+def test_alert_job_may_read_its_own_run_history(canary_job: dict[str, object]) -> None:
+    permissions = canary_job.get("permissions")
+    assert isinstance(permissions, dict)
+    assert permissions.get("actions") == "read"
+    assert permissions.get("contents") == "read"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("job_status", "previous", "expected"),
+    [
+        ("failure", "success", "RED"),
+        ("failure", None, "RED"),
+        ("failure", "failure", None),
+        ("failure", "timed_out", None),
+        ("success", "failure", "RECOVERED"),
+        ("success", "success", None),
+        ("success", None, None),
+        ("cancelled", "success", None),
+    ],
+)
+def test_alert_posts_only_on_a_change_of_verdict(
+    canary_job: dict[str, object],
+    job_status: str,
+    previous: str | None,
+    expected: str | None,
+) -> None:
+    decide = _alert_module(canary_job)["decide"]
+    assert callable(decide)
+    assert decide(job_status, previous) == expected
+
+
+@pytest.mark.unit
+def test_alert_previous_verdict_skips_this_run_and_cancelled_runs(
+    canary_job: dict[str, object],
+) -> None:
+    previous_conclusion = _alert_module(canary_job)["previous_conclusion"]
+    assert callable(previous_conclusion)
+    runs = [
+        {"id": 9, "conclusion": None},
+        {"id": 8, "conclusion": "cancelled"},
+        {"id": 7, "conclusion": "skipped"},
+        {"id": 6, "conclusion": "failure"},
+        {"id": 5, "conclusion": "success"},
+    ]
+    assert previous_conclusion(runs, 9) == "failure"
+    assert previous_conclusion(runs[:3], 9) is None
+
+
+class _FakeResponse:
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def __enter__(self) -> _FakeResponse:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._body
+
+
+@pytest.mark.unit
+def test_alert_red_posts_one_message_naming_the_verdict_and_run(
+    canary_job: dict[str, object], tmp_path: Path
+) -> None:
+    import json as _json
+
+    module = _alert_module(canary_job)
+    main = module["main"]
+    assert callable(main)
+    receipt = tmp_path / "chain-canary-receipt.json"
+    receipt.write_text(
+        _json.dumps(
+            {"result": {"verdict": "terminal_missing", "detail": "no terminal"}}
+        ),
+        encoding="utf-8",
+    )
+    sent: list[object] = []
+
+    def opener(request: object, timeout: float = 0) -> _FakeResponse:
+        url = getattr(request, "full_url", "")
+        if "api.github.com" in url:
+            runs = {"workflow_runs": [{"id": 1, "conclusion": "success"}]}
+            return _FakeResponse(_json.dumps(runs).encode())
+        sent.append(request)
+        return _FakeResponse(b'{"ok": true, "ts": "1.2"}')
+
+    env = {
+        "JOB_STATUS": "failure",
+        "RUN_ID": "2",
+        "RUN_URL": "https://github.com/o/r/actions/runs/2",
+        "GITHUB_REPOSITORY": "o/r",
+        "GITHUB_API_URL": "https://api.github.com",
+        "GITHUB_TOKEN": "gh-token",
+        "BRANCH": "dev",
+        "SLACK_BOT_TOKEN": "xoxb-test",
+        "SLACK_CHANNEL_ID": "C123",
+        "RECEIPT_PATH": str(receipt),
+    }
+    assert main(env, opener) == 0
+    assert len(sent) == 1
+    request = sent[0]
+    body = _json.loads(request.data)
+    assert body["channel"] == "C123"
+    assert "terminal_missing" in body["text"]
+    assert "https://github.com/o/r/actions/runs/2" in body["text"]
+    assert request.get_header("Authorization") == "Bearer xoxb-test"
+
+
+@pytest.mark.unit
+def test_alert_without_slack_secrets_warns_and_never_passes_silently(
+    canary_job: dict[str, object], capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json as _json
+
+    main = _alert_module(canary_job)["main"]
+    assert callable(main)
+
+    def opener(request: object, timeout: float = 0) -> _FakeResponse:
+        return _FakeResponse(_json.dumps({"workflow_runs": []}).encode())
+
+    env = {
+        "JOB_STATUS": "failure",
+        "RUN_ID": "2",
+        "RUN_URL": "u",
+        "GITHUB_REPOSITORY": "o/r",
+        "GITHUB_TOKEN": "t",
+        "BRANCH": "dev",
+    }
+    assert main(env, opener) == 0
+    assert "::warning::" in capsys.readouterr().out
