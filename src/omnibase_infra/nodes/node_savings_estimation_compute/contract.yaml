@@ -74,6 +74,7 @@ node_version:
   minor: 4
   patch: 3
 node_type: "EFFECT_GENERIC"
+runtime_profiles: [main]
 description: >
   EFFECT node for token savings estimation. HandlerSavingsCorrelation ingests raw injection-effectiveness / validator-catch signals into Postgres (no in-memory buffering), periodically correlates them per session by joining against llm_call_metrics and session_outcomes (owned by omnimarket's projection nodes), and calls the pure HandlerSavingsEstimation (tiered model pricing: Opus $15/M input, Sonnet $3/M input) to produce a ModelSavingsEstimate for Kafka emission to onex.evt.omnibase-infra.savings-estimated.v1.
 

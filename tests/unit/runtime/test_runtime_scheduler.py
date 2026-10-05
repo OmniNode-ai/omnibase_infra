@@ -35,12 +35,13 @@ import asyncio
 import os
 from collections.abc import Awaitable, Coroutine
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, _Call, patch
 from uuid import UUID, uuid4
 
 import pytest
 from pydantic import ValidationError
 
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.errors import InfraUnavailableError, ProtocolConfigurationError
 from omnibase_infra.protocols import ProtocolEventBusLike
 from omnibase_infra.runtime import runtime_scheduler as runtime_scheduler_module
@@ -50,7 +51,10 @@ from omnibase_infra.runtime.models import (
     ModelRuntimeSchedulerMetrics,
     ModelRuntimeTick,
 )
-from omnibase_infra.runtime.runtime_scheduler import RuntimeScheduler
+from omnibase_infra.runtime.runtime_scheduler import (
+    RUNTIME_TICK_EVENT_TYPE,
+    RuntimeScheduler,
+)
 from omnibase_infra.topics import SUFFIX_RUNTIME_TICK
 
 # Upper bound for waiting on the running tick loop. Ticks are expected every
@@ -87,6 +91,14 @@ async def _wait_for_ticks(
             f"tick loop emitted {emitted} tick(s); expected at least {minimum} "
             f"within {timeout}s"
         )
+
+
+def _published_tick(call: _Call) -> ModelRuntimeTick:
+    """The tick carried by one recorded ``publish_envelope`` call (OMN-20590)."""
+    envelope = call.kwargs["envelope"]
+    assert isinstance(envelope, ModelEventEnvelope)
+    assert envelope.event_type == RUNTIME_TICK_EVENT_TYPE
+    return ModelRuntimeTick.model_validate(envelope.payload)
 
 
 class _RecordingAsyncio:
@@ -128,7 +140,7 @@ def mock_event_bus() -> AsyncMock:
         AsyncMock configured to simulate EventBusKafka behavior.
     """
     bus = AsyncMock(spec=ProtocolEventBusLike)
-    bus.publish = AsyncMock(return_value=None)
+    bus.publish_envelope = AsyncMock(return_value=None)
     bus.start = AsyncMock(return_value=None)
     bus.stop = AsyncMock(return_value=None)
     return bus
@@ -691,17 +703,41 @@ class TestRuntimeSchedulerTickEmission:
         await scheduler.emit_tick()
 
         # Verify publish was called
-        mock_event_bus.publish.assert_called_once()
+        mock_event_bus.publish_envelope.assert_called_once()
 
         # Get the call arguments
-        call_args = mock_event_bus.publish.call_args
+        call_args = mock_event_bus.publish_envelope.call_args
         assert call_args.kwargs["topic"] == "test.runtime.tick.v1"
         assert call_args.kwargs["key"] == b"test-scheduler"
 
-        # Verify tick content (value is JSON bytes)
-        tick_bytes = call_args.kwargs["value"]
-        assert b"test-scheduler" in tick_bytes
-        assert b"sequence_number" in tick_bytes
+        # Verify tick content (OMN-20590: the tick travels as an envelope)
+        tick = _published_tick(call_args)
+        assert tick.scheduler_id == "test-scheduler"
+        assert tick.sequence_number == 1
+
+    async def test_tick_published_as_envelope_the_consumers_accept(
+        self, scheduler: RuntimeScheduler, mock_event_bus: AsyncMock
+    ) -> None:
+        """OMN-20590: the tick is published as an envelope, not a bare model.
+
+        ``EventBusSubcontractWiring._deserialize_to_envelope`` refuses a bare
+        tick (no ``payload`` key), the auto-wiring boundary wraps one in an
+        envelope with a minted, lineage-less id, and every subscribing contract
+        routes on ``platform.runtime-tick``. RED on the parent: ``emit_tick``
+        called ``publish`` with the bare tick's JSON bytes.
+        """
+        import json
+
+        await scheduler.emit_tick()
+
+        mock_event_bus.publish.assert_not_called()
+        call_args = mock_event_bus.publish_envelope.call_args
+        envelope = call_args.kwargs["envelope"]
+        wire = json.loads(json.dumps(envelope.model_dump(mode="json")))
+        decoded = ModelEventEnvelope[object].model_validate(wire)
+        assert decoded.event_type == RUNTIME_TICK_EVENT_TYPE
+        tick = ModelRuntimeTick.model_validate(decoded.payload)
+        assert tick.scheduler_id == "test-scheduler"
 
     async def test_emit_tick_increments_sequence(
         self, scheduler: RuntimeScheduler, mock_event_bus: AsyncMock
@@ -727,11 +763,9 @@ class TestRuntimeSchedulerTickEmission:
         await scheduler.emit_tick(now=fixed_time)
 
         # Verify the tick contains the injected time
-        call_args = mock_event_bus.publish.call_args
-        tick_bytes = call_args.kwargs["value"]
-
-        # The JSON should contain the fixed time
-        assert b"2025-06-15" in tick_bytes
+        call_args = mock_event_bus.publish_envelope.call_args
+        # The tick should carry the injected time
+        assert _published_tick(call_args).now == fixed_time
 
     async def test_tick_published_to_kafka(
         self, scheduler: RuntimeScheduler, mock_event_bus: AsyncMock
@@ -742,7 +776,7 @@ class TestRuntimeSchedulerTickEmission:
         await scheduler.emit_tick()
 
         # Verify 3 publishes occurred
-        assert mock_event_bus.publish.call_count == 3
+        assert mock_event_bus.publish_envelope.call_count == 3
 
     async def test_tick_has_unique_ids(
         self, scheduler: RuntimeScheduler, mock_event_bus: AsyncMock
@@ -752,18 +786,15 @@ class TestRuntimeSchedulerTickEmission:
         await scheduler.emit_tick()
 
         # Get both tick payloads
-        call1 = mock_event_bus.publish.call_args_list[0]
-        call2 = mock_event_bus.publish.call_args_list[1]
+        call1 = mock_event_bus.publish_envelope.call_args_list[0]
+        call2 = mock_event_bus.publish_envelope.call_args_list[1]
 
-        # Parse the JSON to extract IDs
-        import json
-
-        tick1 = json.loads(call1.kwargs["value"])
-        tick2 = json.loads(call2.kwargs["value"])
+        tick1 = _published_tick(call1)
+        tick2 = _published_tick(call2)
 
         # IDs should be unique
-        assert tick1["tick_id"] != tick2["tick_id"]
-        assert tick1["correlation_id"] != tick2["correlation_id"]
+        assert tick1.tick_id != tick2.tick_id
+        assert tick1.correlation_id != tick2.correlation_id
 
     async def test_tick_loop_emits_at_interval(
         self,
@@ -783,7 +814,7 @@ class TestRuntimeSchedulerTickEmission:
             await _wait_for_ticks(scheduler, minimum=2)
             await scheduler.stop()
 
-        published = mock_event_bus.publish.call_count
+        published = mock_event_bus.publish_envelope.call_count
         assert published >= 2
 
         # Every published tick was preceded by one interval wait, and every
@@ -902,12 +933,9 @@ class TestRuntimeSchedulerRestartSafety:
         assert scheduler.current_sequence_number == 20
 
         # Verify each tick has correct sequence in published data
-        import json
-
         sequences = []
-        for call in mock_event_bus.publish.call_args_list:
-            tick_data = json.loads(call.kwargs["value"])
-            sequences.append(tick_data["sequence_number"])
+        for call in mock_event_bus.publish_envelope.call_args_list:
+            sequences.append(_published_tick(call).sequence_number)
 
         # All sequences should be unique
         assert len(set(sequences)) == 20
@@ -948,7 +976,9 @@ class TestRuntimeSchedulerMetrics:
         from omnibase_infra.errors import InfraConnectionError
 
         # Configure event bus to fail
-        mock_event_bus.publish = AsyncMock(side_effect=Exception("Publish failed"))
+        mock_event_bus.publish_envelope = AsyncMock(
+            side_effect=Exception("Publish failed")
+        )
 
         scheduler = RuntimeScheduler(config=scheduler_config, event_bus=mock_event_bus)
 
@@ -1028,7 +1058,9 @@ class TestRuntimeSchedulerCircuitBreaker:
     ) -> None:
         """Test that circuit breaker opens after threshold failures."""
         # Configure to fail
-        mock_event_bus.publish = AsyncMock(side_effect=Exception("Network error"))
+        mock_event_bus.publish_envelope = AsyncMock(
+            side_effect=Exception("Network error")
+        )
 
         scheduler = RuntimeScheduler(config=scheduler_config, event_bus=mock_event_bus)
 
@@ -1050,7 +1082,9 @@ class TestRuntimeSchedulerCircuitBreaker:
     ) -> None:
         """Test that InfraUnavailableError is raised when circuit is open."""
         # Configure to fail
-        mock_event_bus.publish = AsyncMock(side_effect=Exception("Network error"))
+        mock_event_bus.publish_envelope = AsyncMock(
+            side_effect=Exception("Network error")
+        )
 
         scheduler = RuntimeScheduler(config=scheduler_config, event_bus=mock_event_bus)
 
@@ -1100,7 +1134,9 @@ class TestRuntimeSchedulerCircuitBreaker:
         )
 
         # Start with failures to open circuit
-        mock_event_bus.publish = AsyncMock(side_effect=Exception("Network error"))
+        mock_event_bus.publish_envelope = AsyncMock(
+            side_effect=Exception("Network error")
+        )
         scheduler = RuntimeScheduler(config=config, event_bus=mock_event_bus)
 
         # Open the circuit
@@ -1116,7 +1152,7 @@ class TestRuntimeSchedulerCircuitBreaker:
         await asyncio.sleep(1.1)
 
         # Now make publish succeed
-        mock_event_bus.publish = AsyncMock(return_value=None)
+        mock_event_bus.publish_envelope = AsyncMock(return_value=None)
 
         # Should be able to emit (circuit in half-open state)
         await scheduler.emit_tick()
@@ -1131,7 +1167,9 @@ class TestRuntimeSchedulerCircuitBreaker:
     ) -> None:
         """Test that start() raises when circuit breaker is already open."""
         # Configure to fail
-        mock_event_bus.publish = AsyncMock(side_effect=Exception("Network error"))
+        mock_event_bus.publish_envelope = AsyncMock(
+            side_effect=Exception("Network error")
+        )
 
         scheduler = RuntimeScheduler(config=scheduler_config, event_bus=mock_event_bus)
 
@@ -1237,7 +1275,7 @@ class TestRuntimeSchedulerEdgeCases:
             if fail_count <= 2:
                 raise RuntimeError("Intermittent failure")
 
-        mock_event_bus.publish = AsyncMock(side_effect=intermittent_failure)
+        mock_event_bus.publish_envelope = AsyncMock(side_effect=intermittent_failure)
 
         scheduler = RuntimeScheduler(config=scheduler_config, event_bus=mock_event_bus)
 
@@ -1249,7 +1287,7 @@ class TestRuntimeSchedulerEdgeCases:
         await scheduler.stop()
 
         # Should have attempted multiple publishes despite failures
-        assert mock_event_bus.publish.call_count >= 3
+        assert mock_event_bus.publish_envelope.call_count >= 3
 
     async def test_scheduler_handles_rapid_start_stop(
         self, scheduler: RuntimeScheduler
@@ -1351,9 +1389,9 @@ class TestRuntimeSchedulerIntegration:
         """Test that tick events include correlation ID in headers."""
         await scheduler.emit_tick()
 
-        call_args = mock_event_bus.publish.call_args
-        headers = call_args.kwargs["headers"]
+        call_args = mock_event_bus.publish_envelope.call_args
+        envelope = call_args.kwargs["envelope"]
 
-        # Headers should have correlation_id
-        assert headers.correlation_id is not None
-        assert isinstance(headers.correlation_id, UUID)
+        # The envelope carries the tick's correlation_id
+        assert isinstance(envelope.correlation_id, UUID)
+        assert envelope.correlation_id == envelope.payload.correlation_id

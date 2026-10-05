@@ -15,6 +15,7 @@
 #   - OMN-10867: Update build_loop contract schemas to current format
 name: "node_build_loop_write_effect"
 node_type: "EFFECT_GENERIC"
+runtime_profiles: [main]
 contract_version:
   major: 0
   minor: 2

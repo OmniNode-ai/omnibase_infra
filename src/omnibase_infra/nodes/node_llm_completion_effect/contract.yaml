@@ -7,6 +7,7 @@
 #
 name: "node_llm_completion_effect"
 node_type: "EFFECT_GENERIC"
+runtime_profiles: [main]
 contract_version:
   major: 1
   minor: 0

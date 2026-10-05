@@ -186,6 +186,12 @@ services:
     environment:
       ONEX_RUNTIME_LANE: "compose-dev-202"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml
+      # OMN-20590: this lane's main runtime publishes the runtime tick
+      # (onex.intent.platform.runtime-tick.v1). Opt-in per lane: the first
+      # ticks activate every subscribing contract, including the dead-letter
+      # and consumer-flow prunes (dry_run false). Only the main role acts on
+      # it, so it is set here and nowhere else in this file.
+      ONEX_RUNTIME_SCHEDULER_ENABLED: "true"
     ports: !override
       - "127.0.0.1:61085:8085"
       - "172.17.0.1:61085:8085"
@@ -211,6 +217,14 @@ services:
       INFISICAL_CLIENT_ID: ${ONEX_RUNTIME_INFISICAL_CLIENT_ID:-}
       INFISICAL_CLIENT_SECRET: ${ONEX_RUNTIME_INFISICAL_CLIENT_SECRET:-}
       INFISICAL_ENVIRONMENT_SLUG: ""
+      # OMN-20590: this lane publishes the runtime tick (see omninode-runtime
+      # above), and the two prune effects on this role resolve their local
+      # archive directory from these names on every tick. Unset, both raise
+      # KeyError per tick and dead-letter it (read live on this lane
+      # 2026-10-05). The directories live on this role's own data volume;
+      # the sink creates them owner-only on first write.
+      ONEX_DEAD_LETTER_ARCHIVE_DIR: /app/data/dead-letter-archive
+      ONEX_CONSUMER_FLOW_ARCHIVE_DIR: /app/data/consumer-flow-archive
       # OMN-20159: docker-compose.dev-lane.yml gives runtime-effects the
       # projection read binding variable, and this lane's `volumes: !override`
       # drops the file it names. Blank is unset to omnimarket, so reads here keep

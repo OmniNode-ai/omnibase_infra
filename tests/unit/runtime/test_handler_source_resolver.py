@@ -42,6 +42,7 @@ from omnibase_infra.models.handlers import (
     ModelHandlerDescriptor,
     ModelHandlerIdentifier,
 )
+from omnibase_infra.runtime.protocol_contract_source import ProtocolContractSource
 
 # Forward Reference Resolution:
 # ModelContractDiscoveryResult uses a forward reference to ModelHandlerValidationError.
@@ -392,7 +393,7 @@ class TestKafkaEventsModeValidationErrors:
             output_model="test.models.Output",
         )
 
-        mock_kafka_with_errors = MagicMock()  # transport-mock-ok: complex Kafka consumer mock setup; spec= would break mock configuration
+        mock_kafka_with_errors = MagicMock(spec=ProtocolContractSource)
         mock_kafka_with_errors.source_type = "KAFKA_EVENTS"
         mock_kafka_with_errors.discover_handlers = AsyncMock(
             return_value=ModelContractDiscoveryResult(
@@ -457,7 +458,7 @@ class TestKafkaEventsModeValidationErrors:
             remediation_hint="Add required fields",
         )
 
-        mock_kafka_multi_errors = MagicMock()  # transport-mock-ok: complex Kafka consumer mock setup; spec= would break mock configuration
+        mock_kafka_multi_errors = MagicMock(spec=ProtocolContractSource)
         mock_kafka_multi_errors.source_type = "KAFKA_EVENTS"
         mock_kafka_multi_errors.discover_handlers = AsyncMock(
             return_value=ModelContractDiscoveryResult(
