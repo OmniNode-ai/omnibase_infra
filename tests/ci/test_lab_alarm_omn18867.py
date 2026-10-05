@@ -23,6 +23,7 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -53,12 +54,14 @@ from scripts.lab_alarm import (
     ModelRecoveryNotice,
     evaluate_consumer_group_lag,
     evaluate_container_restarts,
+    evaluate_delegation_chain_canary,
     evaluate_effects_held_behind_runtime,
     evaluate_lab_pass_receipt,
     evaluate_stale_indeterminate,
     evaluate_work_ledger_projection_stale,
     expand_env,
     make_runner,
+    read_chain_canary_verdict,
     read_ledger_newest_canonical_row,
     read_onex_lane_credential,
     resolve_posting_consent,
@@ -74,6 +77,21 @@ CONFIG = REPO_ROOT / "config" / "lab_alarm.json"
 
 SHA = "a" * 40
 CHANNEL = "#omninode-notifications"
+
+#: What the workflow-verdict reader prints for a fresh green and a red C15.
+CANARY_GREEN = (
+    "workflow verdict (OMN-18866) for o/r chain-canary.yml on dev\n"
+    "  newest      : run 37293363538 concluded success, 0.8h old\n"
+)
+CANARY_RED = (
+    "workflow verdict (OMN-18866) for o/r chain-canary.yml on dev\n"
+    "::error::workflow verdict FAILED for o/r chain-canary.yml on dev: the newest "
+    "completed run 37281295440 concluded failure.\n"
+)
+CANARY_UNREADABLE = (
+    "::error::workflow verdict FAILED for o/r chain-canary.yml on dev: the run "
+    "surface is unreadable: gh: HTTP 502.\n"
+)
 
 
 def _lag_reader(lags: dict[str, int]) -> GroupLagReader:
@@ -654,6 +672,7 @@ def _run(
     restarts: str,
     lag: int,
     ledger: Path,
+    canary: tuple[int, str] = (0, CANARY_GREEN),
 ) -> ModelAlarmRun:
     config = ModelAlarmConfig(
         repo="o/r",
@@ -696,6 +715,7 @@ def _run(
         runner=runner,
         lag_reader=_lag_reader({"savings": lag}),
         effects_reader=_effects_reader(),
+        canary_reader=lambda repo, workflow, branch, max_age_hours: canary,
         posting_channel=CHANNEL,
         env_file=tmp_path / "absent.env",
     )
@@ -2081,3 +2101,169 @@ def test_an_exited_container_inside_its_restart_bound_is_recorded_not_graded() -
     )
     assert report.outcome is EnumConditionOutcome.OK
     assert "exited" in report.evidence
+
+
+# ---------------------------------------------------------------------------
+# Condition 6 -- DELEGATION_CHAIN_CANARY, the protected lane's delegation (OMN-20594)
+# ---------------------------------------------------------------------------
+
+
+def _canary(rc: int, text: str):
+    def read(
+        repo: str, workflow: str, branch: str, max_age_hours: float
+    ) -> tuple[int, str]:
+        return rc, text
+
+    return read
+
+
+def _evaluate_canary(rc: int, text: str) -> ModelConditionReport:
+    return evaluate_delegation_chain_canary(
+        _canary(rc, text),
+        repo="o/r",
+        workflow="chain-canary.yml",
+        branch="dev",
+        max_age=timedelta(hours=3),
+    )
+
+
+@pytest.mark.unit
+def test_a_red_chain_canary_raises_one_alarm_naming_the_workflow_and_run() -> None:
+    report = _evaluate_canary(1, CANARY_RED)
+    assert report.condition is EnumAlarmCondition.DELEGATION_CHAIN_CANARY
+    assert report.outcome is EnumConditionOutcome.ALARM
+    assert len(report.alarms) == 1
+    alarm = report.alarms[0]
+    assert alarm.subject == "o/r chain-canary.yml@dev"
+    assert "37281295440" in alarm.detail
+    assert "protected delegation lane" in alarm.detail
+
+
+@pytest.mark.unit
+def test_a_green_chain_canary_reads_ok_and_quotes_the_reader() -> None:
+    report = _evaluate_canary(0, CANARY_GREEN)
+    assert report.outcome is EnumConditionOutcome.OK
+    assert "37293363538" in report.evidence
+    assert report.alarms == ()
+
+
+@pytest.mark.unit
+def test_an_unreadable_chain_canary_surface_is_indeterminate_not_ok() -> None:
+    report = _evaluate_canary(1, CANARY_UNREADABLE)
+    assert report.outcome is EnumConditionOutcome.INDETERMINATE
+    assert "unreadable" in report.evidence
+
+
+@pytest.mark.unit
+def test_a_chain_canary_reader_that_raises_is_indeterminate() -> None:
+    def broken(
+        repo: str, workflow: str, branch: str, max_age_hours: float
+    ) -> tuple[int, str]:
+        raise OSError("gh is not on PATH")
+
+    report = evaluate_delegation_chain_canary(
+        broken,
+        repo="o/r",
+        workflow="chain-canary.yml",
+        branch="dev",
+        max_age=timedelta(hours=3),
+    )
+    assert report.outcome is EnumConditionOutcome.INDETERMINATE
+    assert "gh is not on PATH" in report.evidence
+
+
+@pytest.mark.unit
+def test_the_chain_canary_reader_asks_for_fresh_scheduled_runs_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same reader and the same admission staging delivery binds C15 with."""
+    from scripts import lab_alarm
+
+    seen: dict[str, object] = {}
+
+    def fake(
+        repo: str,
+        workflow: str,
+        branch: str,
+        max_age_hours: float,
+        events: Sequence[str],
+        out: Any,
+        **kwargs: object,
+    ) -> int:
+        seen.update(
+            repo=repo,
+            workflow=workflow,
+            branch=branch,
+            max_age=max_age_hours,
+            events=tuple(events),
+        )
+        print("workflow verdict (OMN-18866) fake", file=out)
+        return 0
+
+    monkeypatch.setattr(lab_alarm, "evaluate_workflow_verdict", fake)
+    rc, text = read_chain_canary_verdict("o/r", "chain-canary.yml", "dev", 3.0)
+    assert rc == 0
+    assert "fake" in text
+    assert seen == {
+        "repo": "o/r",
+        "workflow": "chain-canary.yml",
+        "branch": "dev",
+        "max_age": 3.0,
+        "events": ("schedule",),
+    }
+
+
+@pytest.mark.unit
+def test_a_red_chain_canary_alarms_once_across_two_runs_and_clears(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("| none |\n", encoding="utf-8")
+
+    def canary_alarms(run: ModelAlarmRun) -> list[ModelAlarm]:
+        return [
+            a
+            for a in run.raised
+            if a.condition is EnumAlarmCondition.DELEGATION_CHAIN_CANARY
+        ]
+
+    def run(canary: tuple[int, str]) -> ModelAlarmRun:
+        return _run(
+            tmp_path,
+            result=EnumLabPassResult.PASS,
+            restarts="0 running",
+            lag=7,
+            ledger=ledger,
+            canary=canary,
+        )
+
+    first = run((1, CANARY_RED))
+    second = run((1, CANARY_RED))
+    green = run((0, CANARY_GREEN))
+    again = run((1, CANARY_RED))
+    assert len(canary_alarms(first)) == 1
+    assert canary_alarms(second) == []
+    assert canary_alarms(green) == []
+    assert len(canary_alarms(again)) == 1
+
+
+@pytest.mark.unit
+def test_the_shipped_config_declares_the_protected_lanes_chain_canary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ONEX_INFRA_HOST", "lab.invalid")
+    monkeypatch.setenv("ONEX_RUNTIME_SSH_HOST", "user@lab.invalid")
+    monkeypatch.setenv("OMNI_HOME", "/nonexistent")
+    config = ModelAlarmConfig.load(CONFIG)
+    assert config.chain_canary_workflow == "chain-canary.yml"
+    assert config.chain_canary_branch == "dev"
+    # One scheduled period of C15 (2 hours) plus slack, matching the staging
+    # delivery binding's 3-hour freshness bound for the same workflow.
+    assert config.chain_canary_max_age == timedelta(hours=3)
+    payload = json.loads(CONFIG.read_text(encoding="utf-8"))
+    for key in (
+        "chain_canary_workflow",
+        "chain_canary_branch",
+        "chain_canary_max_age_minutes",
+    ):
+        assert any(k.startswith("_comment_") and key in v for k, v in payload.items())
