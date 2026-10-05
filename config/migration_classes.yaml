@@ -162,6 +162,8 @@ migrations:
   forward/nodes/node_pr_merged_projection/0001_create_pr_merged_events.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PR_MERGED_EVENTS_PKEY; ALTER TABLE ADD CONSTRAINT PR_MERGED_EVENTS_EVENT_I
   forward/nodes/node_pr_merged_projection/0002_grant_omninode_runtime_pr_merged_events.sql: forward-only # EXECUTE
   forward/nodes/node_pr_review_bot/001_create_review_bot_bypass_log.sql: expand-only
+  forward/nodes/node_projection_alert_channel_liveness/0000_create_alert_channel_liveness_verdicts.sql: forward-only # CREATE UNIQUE INDEX idx_alert_channel_liveness_cursor on omninode_internal.alert_channel_liveness_verdicts (UNIQUE INDEX class)
+  forward/nodes/node_projection_alert_channel_liveness/0001_grant_omninode_runtime_alert_channel_liveness_verdicts.sql: expand-only # additive
   forward/nodes/node_projection_baselines/0001_create_baselines_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT BASELINES_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT BASELINES_COMPARISONS
   forward/nodes/node_projection_baselines/0002_realign_child_tables_to_producer_schema.sql: forward-only # DROP; EXECUTE; ALTER TABLE ADD CONSTRAINT BASELINES_COMPARISONS_PKEY; ALTER TABLE ADD CONSTRAINT BASELINES_TRE
   forward/nodes/node_projection_baselines/0003_grant_omninode_runtime_baselines_tables.sql: expand-only
@@ -327,6 +329,8 @@ migrations:
   forward/nodes/node_projection_routing_decision/0021_create_agent_routing_decisions.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT AGENT_ROUTING_DECISIONS_PKEY
   forward/nodes/node_projection_routing_decision/0022_agent_routing_decisions_tenant_id_and_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_projection_routing_decision/0023_grant_tenant_projection_writer_agent_routing_decisions.sql: expand-only
+  forward/nodes/node_projection_routing_feedback/0000_create_delegation_routing_feedback.sql: expand-only # additive
+  forward/nodes/node_projection_routing_feedback/0001_grant_tenant_projection_writer_delegation_routing_feedback.sql: expand-only # additive
   forward/nodes/node_projection_runner_fleet/0000_create_runner_fleet_liveness.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_runner_fleet/0001_grant_omninode_runtime_runner_fleet_liveness.sql: expand-only
   forward/nodes/node_projection_demo_readiness/0000_create_demo_readiness_latest.sql: forward-only # UNIQUE INDEX on created table
