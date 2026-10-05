@@ -31,6 +31,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
@@ -225,6 +226,7 @@ def _run_compose_config(
     policy_env_file: str = _DEFAULT_POLICY_ENV_FILE,
     profile: str = "",
     with_dev_lane_overlay: bool = False,
+    borrower_overlay: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     # NOTE: the default arm keeps the literal "--env-file",
     # "docker/runtime-policy.env" pair on the command line, because
@@ -245,6 +247,10 @@ def _run_compose_config(
     ]
     if with_dev_lane_overlay:
         command += ["-f", str(DEV_LANE_OVERLAY)]
+    if borrower_overlay is not None:
+        # A lane that layers its own overlay THIRD, over this base and the
+        # dev-lane overlay, as the deploy agent renders it.
+        command += ["-f", str(borrower_overlay)]
     if profile:
         command += ["--profile", profile]
     command.append("config")
@@ -939,40 +945,227 @@ def test_the_base_broker_probe_is_unchanged_for_every_other_lane() -> None:
         )
 
 
+# OMN-20159 (Amendment 4 step 3). node_projection_read_effect runs in
+# runtime-effects and reads through its OWN binding variable (omnimarket#3364).
+# The runtime binding variable stays off runtime-effects: it also selects
+# node_delegate_skill_orchestrator's claim store and evidence store, and with
+# role_omnidash as their login every bus delegation failed with UndefinedTable
+# on delegate_skill_command_claims (OMN-17427, chain-canary 37043007992).
+_RUNTIME_BINDING_ENV = "OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY"
 _RUNTIME_BINDING_TARGET = "/etc/onex/projection-runtime-binding.yaml"
+_READ_BINDING_ENV = "OMNIMARKET_PROJECTION_READ_BINDING_OVERLAY"
+_READ_BINDING_TARGET = "/etc/onex/projection-read-binding.yaml"
+_READ_BINDING_FILE = (
+    REPO_ROOT / "docker" / "projection-runtime-binding" / "runtime-read.yaml"
+)
+_READ_BINDING_GROUP = "local.omnimarket-projections.runtime-read.consume.v1"
+
+# Every lane that layers docker-compose.dev-lane.yml under its own overlay, with
+# the profile its runtime-effects renders under. Named, not discovered:
+# test_every_lane_layering_the_dev_overlay_is_listed fails when a new overlay
+# claims the dev-lane layering and is missing here.
+_BORROWER_OVERLAYS: dict[str, str] = {
+    "docker-compose.dev-105.yml": "runtime",
+    "docker-compose.dev-200.yml": "runtime",
+    "docker-compose.dev-202.yml": "runtime",
+    "docker-compose.prepr.yml": "prepr",
+}
+# The pre-PR slot overlay's own `:?` inputs. Render-only stand-ins: the real
+# values come from the slot allocator on the lane host.
+_PREPR_SLOT_RENDER_ENV: dict[str, str] = {
+    "KAFKA_ENVIRONMENT": "prepr-render-only",
+    "KAFKA_TOPIC_NAMESPACE": "prepr-render-only",
+    "ONEX_DB_SLOT": "render-only",
+    "ONEX_PREPR_SLOT": "render-only",
+    "ONEX_PREPR_TENANT_STATE_DIR": str(REPO_ROOT / ".render-only-prepr-state"),
+    "PREPR_GATEWAY_PORT": "18001",
+    "PREPR_PROJECTION_API_PORT": "18002",
+    "PREPR_RUNTIME_EFFECTS_PORT": "18003",
+    "PREPR_RUNTIME_MAIN_PORT": "18004",
+    "PREPR_VALKEY_DB_INDEX": "9",
+    "ROLE_OMNIBASE_PASSWORD": _RENDER_ONLY,
+    "ROLE_OMNIINTELLIGENCE_PASSWORD": _RENDER_ONLY,
+    "ROLE_OMNIMEMORY_PASSWORD": _RENDER_ONLY,
+}
+
+
+def _mounts_at(service: dict[str, Any], target: str) -> list[dict[str, Any]]:
+    return [
+        mount
+        for mount in service.get("volumes", [])
+        if isinstance(mount, dict) and mount.get("target") == target
+    ]
 
 
 def _binding_mount_source(service: dict[str, Any]) -> Path | None:
-    for mount in service.get("volumes", []):
-        if isinstance(mount, dict) and mount.get("target") == _RUNTIME_BINDING_TARGET:
-            return Path(mount["source"])
+    for mount in _mounts_at(service, _RUNTIME_BINDING_TARGET):
+        return Path(mount["source"])
     return None
 
 
-@pytest.mark.integration
-def test_dev_lane_runtime_effects_carries_no_projection_binding() -> None:
-    """OMN-17427: the OMN-20159 read binding also selects the delegation claim store.
-    node_delegate_skill_orchestrator then INSERTs as role_omnidash, which lacks
-    USAGE on omninode_internal and cannot write delegate_skill_command_claims.
-    Postgres skips the pinned search_path schema, so every delegation fails with
-    UndefinedTable: relation "delegate_skill_command_claims" does not exist.
-    Chain-canary 37043007992 failed with verdict projection_row_absent.
-    Change this test when the claim store resolves a write principal separately
-    from the /skill read binding (OMN-20159).
-    """
+def _render_dev_lane_services() -> dict[str, Any]:
     env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
-
     result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
-
     assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
     services = yaml.safe_load(result.stdout)["services"]
-    effects = services["runtime-effects"]
-    assert "OMNIMARKET_PROJECTION_RUNTIME_BINDING_OVERLAY" not in effects["environment"]
-    assert _binding_mount_source(effects) is None
+    assert isinstance(services, dict)
+    return services
 
-    # Positive control: the helper finds another service's binding at the target.
+
+@pytest.mark.integration
+def test_dev_lane_runtime_effects_carries_the_projection_read_binding() -> None:
+    """With no read binding the /skill edge refuses every read
+    ``projection_binding_unconfigured``. The variable must name exactly the
+    mount target, or omnimarket raises ProjectionReadBindingOverlayError and
+    every read answers ``projection_binding_invalid``. The mount is read-only,
+    so the container cannot rewrite its own database identity.
+    """
+    effects = _render_dev_lane_services()["runtime-effects"]
+    assert effects["environment"].get(_READ_BINDING_ENV) == _READ_BINDING_TARGET
+    mounts = _mounts_at(effects, _READ_BINDING_TARGET)
+    assert len(mounts) == 1, f"expected one read-binding mount, got {mounts!r}"
+    (mount,) = mounts
+    assert mount.get("type") == "bind"
+    assert mount.get("read_only") is True
+    assert Path(mount["source"]).resolve() == _READ_BINDING_FILE.resolve()
+
+
+@pytest.mark.integration
+def test_dev_lane_runtime_effects_carries_no_runtime_binding() -> None:
+    """OMN-17427, kept from omnibase_infra#4481: the runtime binding selects the
+    delegation claim store, and role_omnidash lacks USAGE on omninode_internal
+    and cannot write delegate_skill_command_claims, so Postgres skips the pinned
+    search_path schema and every delegation fails with UndefinedTable.
+    #4481 said to change this test once the claim store resolves a write
+    principal apart from the /skill read binding; omnimarket#3364 did that with
+    the read variable above. The runtime variable stays off runtime-effects, so
+    the claim store and evidence store keep their container-local SQLite files.
+    """
+    services = _render_dev_lane_services()
+    effects = services["runtime-effects"]
+    assert _RUNTIME_BINDING_ENV not in effects["environment"]
+    assert _mounts_at(effects, _RUNTIME_BINDING_TARGET) == []
+
+    # Positive control: the helper finds a writer's runtime binding at the target.
     assert any(
         _binding_mount_source(service) is not None
         for name, service in services.items()
         if name != "runtime-effects"
     ), "no other dev-lane binding found; the helper check proves nothing"
+
+
+@pytest.mark.integration
+def test_dev_lane_read_binding_reads_as_the_projection_api_does() -> None:
+    """The edge and :3002 must answer the same rows, so the read binding names
+    OMNIDASH_ANALYTICS_DB_URL by reference, and runtime-effects renders that
+    variable exactly as projection-api does (role_omnidash, non-BYPASSRLS,
+    OMN-15363). A URL in the file would be a committed credential.
+    """
+    services = _render_dev_lane_services()
+    binding = yaml.safe_load(_READ_BINDING_FILE.read_text(encoding="utf-8"))
+    assert binding["database_url_secret_ref"] == "env:OMNIDASH_ANALYTICS_DB_URL"
+    assert "://" not in _READ_BINDING_FILE.read_text(encoding="utf-8")
+
+    effects_dsn = services["runtime-effects"]["environment"][
+        "OMNIDASH_ANALYTICS_DB_URL"
+    ]
+    api_dsn = services["projection-api"]["environment"]["OMNIDASH_ANALYTICS_DB_URL"]
+    assert effects_dsn == api_dsn
+    assert urlsplit(effects_dsn).username == "role_omnidash"
+
+
+@pytest.mark.integration
+def test_dev_lane_read_binding_consumer_group_is_its_own() -> None:
+    """A group shared with a writer would split that writer's partitions."""
+    services = _render_dev_lane_services()
+    binding = yaml.safe_load(_READ_BINDING_FILE.read_text(encoding="utf-8"))
+    assert binding["kafka_consumer_group"] == _READ_BINDING_GROUP
+
+    # Every group another dev-lane service consumes under: the ones its own
+    # binding file declares and the ones its environment declares (each
+    # standalone writer sets KAFKA_CONSUMER_GROUP; runtimes set ONEX_GROUP_ID).
+    binding_groups = {
+        yaml.safe_load(other.read_text(encoding="utf-8"))["kafka_consumer_group"]
+        for name, service in services.items()
+        if name != "runtime-effects"
+        and (other := _binding_mount_source(service)) is not None
+    }
+    env_groups = {
+        str(value)
+        for name, service in services.items()
+        if name != "runtime-effects"
+        for key, value in (service.get("environment") or {}).items()
+        if key in {"KAFKA_CONSUMER_GROUP", "ONEX_GROUP_ID"} and value
+    }
+    assert binding_groups, (
+        "no other dev-lane binding found; the comparison proves nothing"
+    )
+    assert "local.omnimarket-projections.delegation-writer.consume.v1" in env_groups, (
+        "the delegation writer's own group is missing; the env comparison proves nothing"
+    )
+    assert _READ_BINDING_GROUP not in binding_groups | env_groups
+
+
+@pytest.mark.integration
+def test_only_runtime_effects_carries_the_read_binding() -> None:
+    """The read node runs in runtime-effects. Runtime main and every writer keep
+    their shape, and main carries no binding of either kind."""
+    services = _render_dev_lane_services()
+    carriers = {
+        name
+        for name, service in services.items()
+        if _READ_BINDING_ENV in (service.get("environment") or {})
+        or _mounts_at(service, _READ_BINDING_TARGET)
+    }
+    assert carriers == {"runtime-effects"}
+    runtime = services["omninode-runtime"]
+    assert _RUNTIME_BINDING_ENV not in runtime["environment"]
+    assert _mounts_at(runtime, _RUNTIME_BINDING_TARGET) == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("overlay", sorted(_BORROWER_OVERLAYS))
+def test_lanes_layering_the_dev_overlay_carry_no_read_binding(overlay: str) -> None:
+    """These lanes merge runtime-effects' environment from the dev-lane overlay
+    but replace its volumes (`volumes: !override`), so they would inherit the
+    read variable without the file and every read there would turn from
+    ``projection_binding_unconfigured`` into ``projection_binding_invalid``.
+    Each blanks the variable, which omnimarket reads as unset, and mounts
+    nothing at the target: no behaviour change on those lanes.
+    """
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST, **_PREPR_SLOT_RENDER_ENV
+    )
+    result = _run_compose_config(
+        env,
+        profile=_BORROWER_OVERLAYS[overlay],
+        with_dev_lane_overlay=True,
+        borrower_overlay=REPO_ROOT / "docker" / overlay,
+    )
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    effects = yaml.safe_load(result.stdout)["services"]["runtime-effects"]
+
+    # Positive controls: the render layered the dev-lane overlay (its broker
+    # auth is declared nowhere in the base file) and then this lane's overlay.
+    assert effects["environment"].get("KAFKA_SASL_MECHANISM") == "SCRAM-SHA-256"
+    assert effects["container_name"] != "omninode-runtime-effects"
+
+    assert str(effects["environment"].get(_READ_BINDING_ENV, "")).strip() == ""
+    assert _mounts_at(effects, _READ_BINDING_TARGET) == []
+    assert _RUNTIME_BINDING_ENV not in effects["environment"]
+
+
+@pytest.mark.integration
+def test_every_lane_layering_the_dev_overlay_is_listed() -> None:
+    docker_dir = REPO_ROOT / "docker"
+    layering = sorted(
+        path.name
+        for path in docker_dir.glob("docker-compose*.yml")
+        if path != DEV_LANE_OVERLAY
+        and "\n  runtime-effects:\n" in (text := path.read_text(encoding="utf-8"))
+        and (
+            "-f docker/docker-compose.dev-lane.yml" in text
+            or "over docker-compose.infra.yml and docker-compose.dev-lane.yml" in text
+        )
+    )
+    assert layering == sorted(_BORROWER_OVERLAYS)
