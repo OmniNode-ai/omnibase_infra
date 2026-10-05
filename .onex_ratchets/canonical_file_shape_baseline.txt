@@ -480,7 +480,6 @@ scripts/validate_delegation_cohort_keys.py
 scripts/validate_env.py
 scripts/validate_handler_contracts.py
 scripts/validate_no_direct_env.py
-scripts/validate_no_env_fallbacks.py
 scripts/validate_pr_contracts.py
 scripts/validation/__init__.py
 scripts/validation/check_ai_slop.py

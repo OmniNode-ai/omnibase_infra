@@ -1583,13 +1583,18 @@ repos:
         pass_filenames: false
         files: contract\.yaml$
         stages: [pre-commit]
-      # OMN-10741: Unified localhost/hardcoded-endpoint fallback validator
-      # Covers all 6 pattern types from OMN-10658 enforcement sweep.
-      # Annotation: add  # fallback-ok: <reason>  to exempt a justified line.
+      # OMN-10741 / OMN-20568: localhost/hardcoded-endpoint fallback validator.
+      # Covers all 6 pattern types from OMN-10658 enforcement sweep. The check is
+      # the omnibase_core node_no_env_fallbacks_check_compute node, run from this
+      # repo's locked omnibase-core install (same rule as no-plugin-daemon-classes
+      # above: a remote hook builds a separate pip env), so the hook, CI and the
+      # runtime resolve one version. The runtime's --report-json and zero-scan
+      # ERROR arrive with core's OMN-20565 retrofit. Annotation: add
+      # # fallback-ok: <reason>  to exempt a justified line.
       - id: no-env-fallbacks
         require_serial: true
         name: No localhost/hardcoded-endpoint fallbacks (OMN-10741)
-        entry: uv run --frozen python scripts/validate_no_env_fallbacks.py
+        entry: uv run --frozen python -m omnibase_core.nodes.node_no_env_fallbacks_check_compute.runtime_no_env_fallbacks_check
         language: system
         pass_filenames: true
         types_or: [python, shell]

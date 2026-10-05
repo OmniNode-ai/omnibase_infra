@@ -355,8 +355,11 @@ jobs:
       - name: Check Kafka hardcoded broker fallbacks (whole-tree backstop)
         run: bash scripts/validation/check_kafka_no_hardcoded_fallback.sh
 
-      - name: Check no localhost env fallbacks in src/ (OMN-10732)
-        run: uv run python scripts/validate_no_env_fallbacks.py
+      # OMN-20568: the same hook entry as pre-commit, the omnibase_core
+      # node_no_env_fallbacks_check_compute node over every tracked Python and
+      # shell file (the old backstop scanned src/ and scripts/ only).
+      - name: Check no localhost env fallbacks (OMN-10732)
+        run: uv run pre-commit run no-env-fallbacks --all-files
 
       - name: Check topic suffix exports (F56)
         run: python scripts/validation/check_topic_suffix_exports.py

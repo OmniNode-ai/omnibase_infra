@@ -224,7 +224,6 @@ scope:
     - scripts/validate-kafka-schema-handshake.py
     - scripts/validate-pr-contract-sync.sh
     - scripts/validate.py
-    - scripts/validate_no_env_fallbacks.py
     - scripts/validation/check_ai_slop.py
     - scripts/validation/check_kafka_no_hardcoded_fallback.sh
     - scripts/validation/check_no_infra_inmemory_import.sh
