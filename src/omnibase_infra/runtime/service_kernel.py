@@ -196,6 +196,10 @@ from omnibase_infra.runtime.runtime_profile import (
     resolve_runtime_profile_name,
     resolve_secret_resolver_config_path,
 )
+from omnibase_infra.runtime.runtime_scheduler import (
+    RuntimeScheduler,
+    start_lane_runtime_scheduler,
+)
 from omnibase_infra.runtime.util_container_wiring import (
     wire_infrastructure_services,
 )
@@ -1656,6 +1660,8 @@ async def bootstrap() -> int:
     plugin_unsubscribe_callbacks: list[Callable[[], Awaitable[None]]] = []
     # Contract registry unsubscribe functions and router (separate domain)
     contract_router: ContractRegistrationEventRouter | None = None
+    # OMN-20590: the lane's runtime tick producer (main profile, opt-in).
+    runtime_tick_scheduler: RuntimeScheduler | None = None
     contract_unsub_registered: Callable[[], Awaitable[None]] | None = None
     contract_unsub_deregistered: Callable[[], Awaitable[None]] | None = None
     contract_unsub_heartbeat: Callable[[], Awaitable[None]] | None = None
@@ -4872,6 +4878,16 @@ async def bootstrap() -> int:
                     },
                 )
 
+        # 9.6b. Start the lane's runtime tick producer (OMN-20590).
+        # RuntimeScheduler (OMN-953) was never started by any runtime, so
+        # nothing published onex.intent.platform.runtime-tick.v1 and every
+        # contract subscribed to it never fired. Only the main role publishes,
+        # and only on a lane whose overlay sets ONEX_RUNTIME_SCHEDULER_ENABLED.
+        runtime_tick_scheduler = await start_lane_runtime_scheduler(
+            event_bus,
+            resolve_runtime_profile_name(),
+        )
+
         # 9.7. Start runtime error triage consumer (OMN-5655)
         # Subscribes to runtime-error events and routes them to the
         # HandlerRuntimeErrorTriage for first-match-wins triage processing.
@@ -5151,6 +5167,13 @@ async def bootstrap() -> int:
                     correlation_id,
                 )
         plugin_unsubscribe_callbacks.clear()
+
+        # Stop the runtime tick producer (OMN-20590). stop() is graceful and
+        # idempotent: it bounds the tick task's wait and degrades a failed
+        # sequence persist to a warning itself.
+        if runtime_tick_scheduler is not None:
+            await runtime_tick_scheduler.stop()
+            runtime_tick_scheduler = None
 
         # Stop contract registry router and consumers
         if contract_router is not None:
@@ -5455,6 +5478,10 @@ async def bootstrap() -> int:
                     sanitize_error_message(cleanup_error),
                     correlation_id,
                 )
+
+        # Cleanup the runtime tick producer (OMN-20590); stop() is idempotent.
+        if runtime_tick_scheduler is not None:
+            await runtime_tick_scheduler.stop()
 
         # Cleanup contract registry router and consumers
         if contract_router is not None:

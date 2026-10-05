@@ -60,6 +60,10 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOOK_SCRIPT = REPO_ROOT / "docker" / "runners" / "runner-job-started.sh"
 _MAIN_BODY_MARKER = "\nwire_pypi_cache || true\n"
@@ -113,7 +117,7 @@ def _run_git(*args: str, cwd: Path, env: dict[str, str] | None = None) -> str:
         text=True,
         timeout=15,
         check=True,
-        env=env,
+        env=scrub_git_location_env(os.environ if env is None else env),
     )
     return result.stdout.strip()
 
@@ -201,6 +205,7 @@ def mirror_daemon(tmp_path: Path) -> Iterator[tuple[str, int, Path]]:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        env=scrub_git_location_env(os.environ),
     )
     try:
         # Readiness: the daemon logs "Ready to rock" once listening, but
@@ -341,6 +346,7 @@ def test_branch_ref_present_on_mirror_installs_rewrite(tmp_path: Path) -> None:
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        env=scrub_git_location_env(os.environ),
     )
     try:
         deadline = time.monotonic() + 10
@@ -820,6 +826,10 @@ def test_full_script_success_path_installs_sibling_checkout_rewrite(
     )
     assert result.returncode == 0, result.stderr
     count, pairs = _github_env_pairs(github_env)
-    assert count == 2, result.stderr
+    assert count == 4, result.stderr
+    assert ("http.lowSpeedLimit", "1") in pairs
+    assert ("http.lowSpeedTime", "60") in pairs
+    rewrite_pairs = [(key, value) for key, value in pairs if key.startswith("url.")]
+    assert len(rewrite_pairs) == 2, result.stderr
     fetch_key = f"url.git://{host}:{port}/omnimarket.git.insteadOf"
-    assert (fetch_key, "https://github.com/OmniNode-ai/omnimarket") in pairs
+    assert (fetch_key, "https://github.com/OmniNode-ai/omnimarket") in rewrite_pairs

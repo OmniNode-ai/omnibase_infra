@@ -79,6 +79,12 @@ _OWNERSHIP_DEFAULT_PROFILE = "main"
 _SECRET_POLICY_ENV_VAR = "ONEX_SECRET_POLICY"
 _VALID_PREFETCH_POLICIES = frozenset({"disabled", "best_effort", "required"})
 
+# OMN-20590: lane-scoped switch for the runtime tick producer. See
+# resolve_runtime_scheduler_enabled().
+_RUNTIME_SCHEDULER_ENABLED_ENV_VAR = "ONEX_RUNTIME_SCHEDULER_ENABLED"
+_TRUE_SPELLINGS = frozenset({"true", "1", "yes", "on"})
+_FALSE_SPELLINGS = frozenset({"false", "0", "no", "off"})
+
 
 class ModelRuntimeProfile(BaseModel):
     """Schema for a named runtime deployment profile.
@@ -316,6 +322,39 @@ def load_runtime_profile(profile_name: str | None = None) -> ModelRuntimeProfile
     return profile
 
 
+def resolve_runtime_scheduler_enabled() -> bool:
+    """Resolve ``ONEX_RUNTIME_SCHEDULER_ENABLED``, the lane's tick-producer switch (OMN-20590).
+
+    Lane-scoped, like ``ONEX_SECRET_POLICY``: a lane overlay sets it once, and
+    only the ``main`` role acts on it (see
+    ``runtime_scheduler.start_lane_runtime_scheduler``). It is opt-in
+    per lane because the first ticks a lane receives activate every contract
+    subscribed to the runtime tick, including prunes configured to delete.
+
+    Unset or blank is ``False``. A value outside the accepted spellings is
+    REFUSED rather than read as false: a lane that wrote ``ture`` asked for
+    ticks, and silently publishing none is the defect this switch exists to
+    end.
+
+    Returns:
+        Whether this lane asked for a runtime tick producer.
+
+    Raises:
+        ProtocolConfigurationError: If the value is not a recognised boolean.
+    """
+    raw = os.environ.get(_RUNTIME_SCHEDULER_ENABLED_ENV_VAR, "").strip().lower()
+    if not raw:
+        return False
+    if raw in _TRUE_SPELLINGS:
+        return True
+    if raw in _FALSE_SPELLINGS:
+        return False
+    raise ProtocolConfigurationError(
+        f"{_RUNTIME_SCHEDULER_ENABLED_ENV_VAR}={raw!r} is not a boolean. "
+        f"Use one of {sorted([*_TRUE_SPELLINGS, *_FALSE_SPELLINGS])}."
+    )
+
+
 def resolve_secret_resolver_config_path() -> str:
     """Resolve ``ONEX_SECRET_RESOLVER_CONFIG_PATH`` (OMN-14951).
 
@@ -338,5 +377,6 @@ __all__ = [
     "ModelRuntimeProfile",
     "load_runtime_profile",
     "resolve_runtime_profile_name",
+    "resolve_runtime_scheduler_enabled",
     "resolve_secret_resolver_config_path",
 ]

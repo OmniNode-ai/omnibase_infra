@@ -1,134 +1,69 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Cross-repo provisioning-sync pin for the forwarder mirror set (OMN-17201).
+"""Provisioning follows resolved wire bindings, never a second topic list.
 
-WHY THIS FILE EXISTS. ``config.gateway_forwarder.mirror_topics`` in this node's
-contract declares which canonical topics cross the tenant gateway boundary. It
-does NOT create anything: the physical, TENANT-PREFIXED wire topic is minted by
-``omninode_infra/docker/onex-api/kafka_topic_provisioner.py::ensure_tenant_topics``
-over ``topic_constants.py::DEFAULT_TENANT_CANONICAL_TOPICS``. That file states
-in its own header that it "MUST stay in sync with the P0A forwarder contract
-mirror_topics union" -- and until OMN-17201 nothing enforced it.
-
-THE MEASURED COST OF THE UNENFORCED COMMENT. OMN-16204 and the earlier
-four-class OMN-16979 declaration widened ``mirror_topics.outbound`` while the
-provisioning tuple stayed at eight. ``omninode-dev-msk`` runs
-``auto.create.topics.enable=false``, so those four wire topics could not appear
-lazily either: on 2026-09-05 the cloud hook-ledger writer crash-looped on
-``UnknownTopicOrPartitionError`` against topics that had never been created,
-and had to be parked at ``replicas: 0`` (omninode_infra#1164). A broker
-readback the same day found all four BARE canonical forms present and all four
-tenant-prefixed forms absent.
-
-WHY A PINNED LITERAL LIST AND NOT A CROSS-REPO IMPORT. omninode_infra is not on
-this repo's import path in CI, and vendoring its module would make one repo's
-tests depend on the other's checkout. Instead BOTH repos pin the same
-wire-format literals independently -- this file from the contract's side,
-``topic_constants.FORWARDER_MIRROR_TOPIC_UNION`` from the provisioner's side --
-so a one-sided edit fails a test in whichever repo made it, which is the
-property the comment always claimed and never had.
-
-The pin is deliberately on the UNION (inbound + outbound), not on outbound
-alone: a tenant's wire topic has to exist for both directions of the bridge,
-and ``ensure_tenant_topics`` provisions one flat set.
+The contract determines mirror membership; the transport builder resolves the
+physical topics and groups. This pin compares that configuration with the
+pure grant derivation, so editing a test-side literal list cannot mask a
+missing grant. Topic additions are exercised by the two-version derivation
+fixture in node_broker_grant_derive_compute.
 """
-
-from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-import yaml
 
-CONTRACT_PATH = (
-    Path(__file__).parents[4]
-    / "src"
-    / "omnibase_infra"
-    / "nodes"
-    / "node_bus_forwarder_effect"
-    / "contract.yaml"
+from omnibase_infra.handlers.handler_broker_grant_derive import (
+    HandlerBrokerGrantDerive,
+)
+from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_topic_transform import (
+    prefix_topic,
+)
+from omnibase_infra.runtime.gateway_forwarder import (
+    build_gateway_transports,
+    load_gateway_forwarder_runtime_config,
 )
 
-# The eighteen canonical topics that every tenant's wire set must contain.
-# Counterpart: omninode_infra docker/onex-api/topic_constants.py
-# ``FORWARDER_MIRROR_TOPIC_UNION`` / ``DEFAULT_TENANT_CANONICAL_TOPICS``.
-PROVISIONED_TENANT_CANONICAL_TOPICS: frozenset[str] = frozenset(
-    {
-        "onex.cmd.omnibase-infra.delegation-inference-request.v1",
-        "onex.cmd.omnibase-infra.delegation-request.v1",
-        "onex.evt.omnibase-infra.gateway-heartbeat.v1",
-        "onex.evt.omnibase-infra.inference-response.v1",
-        "onex.evt.omnibase-infra.delegation-completed.v1",
-        "onex.evt.omnibase-infra.delegation-failed.v1",
-        "onex.evt.omniintelligence.llm-call-completed.v1",
-        "onex.evt.omnibase-infra.llm-call-completed.v1",
-        "onex.evt.omniclaude.session-started.v1",
-        "onex.evt.omniclaude.session-ended.v1",
-        "onex.evt.omniclaude.tool-executed.v1",
-        "onex.evt.omniclaude.prompt-submitted.v1",
-        "onex.evt.omniclaude.skill-started.v1",
-        "onex.evt.omniclaude.skill-completed.v1",
-        "onex.evt.omnimarket.tool-output-captured.v1",
-        # OMN-19439: the delegate-skill terminals, metadata-scrubbed.
-        "onex.evt.omnimarket.delegate-skill-completed.v1",
-        "onex.evt.omnimarket.delegate-skill-failed.v1",
-        # OMN-19593: signed GitHub webhook deliveries, inbound to the lab.
-        "onex.cmd.github.webhook-delivery.v1",
+
+@pytest.mark.unit
+def test_cloud_provisioning_is_exactly_the_resolved_contract(
+    tmp_path, monkeypatch
+) -> None:
+    """Every mirrored physical topic has exactly the configured operations."""
+    monkeypatch.delenv("KAFKA_TOPIC_NAMESPACE", raising=False)
+    root = Path(__file__).parents[4]
+    credentials = tmp_path / "credentials.yaml"
+    credentials.write_text(
+        "lane.dev.kafka.scram:\n  username: fixture\n  password: fixture-not-a-secret\n"
+    )
+    config = load_gateway_forwarder_runtime_config(
+        root / "docker/gateway/beta-gateway-canary.yaml",
+        broker_ref_map_path=root
+        / "tests/fixtures/gateway/beta-gateway-canary-broker-ref-map.yaml",
+        lane_credential_map_path=credentials,
+    )
+    resolved, transports = build_gateway_transports(config)
+    derived = HandlerBrokerGrantDerive().handle(resolved)
+    cloud = config.forwarder.cloud_bus.cloud_broker_ref
+    slug = config.forwarder.tenant_identity.tenant_slug
+    inbound = {prefix_topic(slug, t) for t in config.forwarder.declared_inbound_topics}
+    outbound = {
+        prefix_topic(slug, t) for t in config.forwarder.declared_outbound_topics
     }
-)
-
-# The subset OMN-17201 is about: the seven governed hook capture classes the
-# cloud hook-ledger writer (omnimarket node_projection_hook_ledger) subscribes
-# to in their tenant-prefixed form.
-HOOK_CLASSES: tuple[str, ...] = (
-    "onex.evt.omniclaude.session-started.v1",
-    "onex.evt.omniclaude.session-ended.v1",
-    "onex.evt.omniclaude.tool-executed.v1",
-    "onex.evt.omniclaude.prompt-submitted.v1",
-    "onex.evt.omniclaude.skill-started.v1",
-    "onex.evt.omniclaude.skill-completed.v1",
-    "onex.evt.omnimarket.tool-output-captured.v1",
-)
-
-
-def _mirror_topics() -> dict[str, list[str]]:
-    contract = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))
-    return contract["config"]["gateway_forwarder"]["mirror_topics"]
-
-
-@pytest.mark.unit
-def test_mirror_union_equals_the_provisioned_tenant_topic_set() -> None:
-    """The whole point: contract union == provisioner set, exactly.
-
-    Set equality in BOTH directions, not containment. A contract topic missing
-    from the provisioner is an unprovisionable wire topic (the OMN-17201
-    crash-loop). A provisioner topic missing from the contract is a wire topic
-    nothing ever writes to or reads from -- broker clutter that reads like
-    coverage.
-    """
-    mirror = _mirror_topics()
-    union = set(mirror["inbound"]) | set(mirror["outbound"])
-    assert union == set(PROVISIONED_TENANT_CANONICAL_TOPICS)
-
-
-@pytest.mark.unit
-@pytest.mark.parametrize("topic", HOOK_CLASSES)
-def test_each_hook_class_is_in_the_provisioned_set(topic: str) -> None:
-    """Per-topic proof, so a failure names the class that regressed rather
-    than reporting a set difference."""
-    mirror = _mirror_topics()
-    assert topic in set(mirror["inbound"]) | set(mirror["outbound"])
-    assert topic in PROVISIONED_TENANT_CANONICAL_TOPICS
-
-
-@pytest.mark.unit
-def test_pin_is_a_falsifiable_count() -> None:
-    """8 pre-existing topics plus all seven governed capture topics = 15, plus
-    OMN-19439's two metadata-scrubbed delegate-skill terminals = 17, plus
-    OMN-19593's inbound GitHub webhook delivery command = 18.
-
-    A count assertion catches the case a set-equality edit would launder: an
-    author who "fixes" a failure by editing BOTH sides of the pin at once still
-    has to move this number, which is the line a reviewer reads.
-    """
-    assert len(PROVISIONED_TENANT_CANONICAL_TOPICS) == 18
+    grants = {
+        (g.resource, g.operation)
+        for g in derived.grants
+        if g.broker == cloud and g.resource_type == "TOPIC"
+    }
+    assert grants == (
+        {(topic, "READ") for topic in inbound}
+        | {(topic, "WRITE") for topic in outbound}
+        | {(topic, "DESCRIBE") for topic in inbound | outbound}
+    )
+    assert set(transports["cloud"]._physical_topics) == inbound
+    group_grants = {
+        (g.resource, g.operation)
+        for g in derived.grants
+        if g.broker == cloud and g.resource_type == "GROUP"
+    }
+    assert group_grants == {(transports["cloud"]._group, "READ")}
