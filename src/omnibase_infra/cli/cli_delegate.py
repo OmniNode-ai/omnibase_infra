@@ -247,6 +247,10 @@ from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy imp
 from omnibase_infra.handlers.handler_workspace_runtime_config_materializer import (
     HandlerWorkspaceRuntimeConfigMaterializer,
 )
+from omnibase_infra.models.delegation.model_delegate_lineage import (
+    LINEAGE_KINDS,
+    ModelDelegateLineage,
+)
 from omnibase_infra.models.delegation.model_delegate_phase_durations import (
     ModelDelegatePhaseDurations,
 )
@@ -2237,6 +2241,7 @@ def _request_payload(
     ticket_id: str | None = None,
     caller: ModelDelegateCaller | None = None,
     tenant_id: str | None = None,
+    lineage: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Build the delegate request, setting only the fields the caller supplied."""
     payload: dict[str, object] = {
@@ -2275,6 +2280,10 @@ def _request_payload(
     # UUID. Each is omitted entirely when unresolved.
     if caller is not None and caller.lane is not None:
         metadata[DELEGATE_CALLER_LANE_METADATA_KEY] = caller.lane
+    # OMN-20606: the delegation this run falls back or escalates from, already
+    # validated by resolve_delegate_lineage. Omitted entirely when unnamed.
+    if lineage:
+        metadata.update(lineage)
     if metadata:
         payload["metadata"] = metadata
     if caller is not None and caller.session_id is not None:
@@ -2306,6 +2315,7 @@ def _write_payload(
     ticket_id: str | None = None,
     caller: ModelDelegateCaller | None = None,
     tenant_id: str | None = None,
+    lineage: Mapping[str, str] | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -2361,6 +2371,7 @@ def _write_payload(
         ticket_id=ticket_id,
         caller=caller,
         tenant_id=tenant_id,
+        lineage=lineage,
     )
     payload_path.write_text(
         json.dumps(payload),
@@ -3179,6 +3190,39 @@ class DelegateCommand(click.Command):
     ),
 )
 @click.option(
+    "--parent-correlation-id",
+    "parent_correlation_id",
+    default=None,
+    help=(
+        "The correlation id of the delegation this run falls back or escalates "
+        "from (OMN-20606). With --lineage-kind it rides in the request metadata "
+        "onto the delegation's terminal and its delegation_events row, so a "
+        "retry is joined to the failure it answers. A malformed value is a "
+        "usage error, never dropped."
+    ),
+)
+@click.option(
+    "--lineage-kind",
+    "lineage_kind",
+    type=click.Choice(LINEAGE_KINDS),
+    default=None,
+    help=(
+        "How this run relates to --parent-correlation-id: 'fallback' asks "
+        "another route (lane, in-process run, engine) for the same work; "
+        "'escalation' asks a stronger model on the same route (OMN-20606)."
+    ),
+)
+@click.option(
+    "--parent-failure-cause",
+    "parent_failure_cause",
+    default=None,
+    help=(
+        "Why the parent delegation did not answer, as a short token such as "
+        "provider_quota_exhausted or exit_124 (OMN-20606). Needs "
+        "--parent-correlation-id and --lineage-kind."
+    ),
+)
+@click.option(
     "--omnibase-path",
     "omnibase_path",
     type=click.Path(path_type=Path),
@@ -3256,6 +3300,9 @@ def delegate_command(
     allow_omnimarket_drift: bool,
     ticket: str | None,
     caller_lane: str | None,
+    parent_correlation_id: str | None = None,
+    lineage_kind: str | None = None,
+    parent_failure_cause: str | None = None,
 ) -> None:
     """Delegate PROMPT to a local LLM and print the result.
 
@@ -3326,6 +3373,13 @@ def delegate_command(
         caller = resolve_delegate_caller(
             caller_lane, cwd=Path.cwd(), environ=os.environ
         )
+        resolved_lineage = ModelDelegateLineage.from_flags(
+            parent_correlation_id,
+            lineage_kind,
+            parent_failure_cause,
+            own_correlation_id=correlation_id,
+        )
+        lineage = resolved_lineage.as_metadata() if resolved_lineage else None
         acceptance_criteria = tuple(criteria)
         declared_contract = _load_response_contract(response_contract)
         _validate_replace_mode_authority(
@@ -3357,6 +3411,7 @@ def delegate_command(
             json_output=json_output,
             run_id=run_id,
             correlation_id=correlation_id,
+            lineage=lineage,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -3390,6 +3445,7 @@ def run_delegate(
     json_output: bool = True,
     run_id: uuid.UUID | None = None,
     correlation_id: uuid.UUID | None = None,
+    lineage: Mapping[str, str] | None = None,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -3711,12 +3767,20 @@ def run_delegate(
             ticket_id=ticket_id,
             caller=caller,
             tenant_id=tenant_id,
+            lineage=lineage,
         )
         # OMN-19514: say which ticket the run carries and how it was chosen,
         # beside the task-class line, so a derived ticket is never silent.
         click.echo(f"ticket: {ticket_id or 'none'} ({ticket_resolution})", err=True)
         # OMN-19860: and who issued it, the same way.
         click.echo((caller or ModelDelegateCaller.unattributed()).describe(), err=True)
+        # OMN-20606: and what it follows, when it follows anything.
+        if lineage:
+            click.echo(
+                "lineage: "
+                + " ".join(f"{key}={value}" for key, value in sorted(lineage.items())),
+                err=True,
+            )
         contract_path = _resolve_packaged_contract(DELEGATE_NODE_NAME)
         # OMN-17295 / OMN-17304: decide WHERE the orchestrator runs, and — for a
         # dispatched run — prove a deployed one is actually consuming the command

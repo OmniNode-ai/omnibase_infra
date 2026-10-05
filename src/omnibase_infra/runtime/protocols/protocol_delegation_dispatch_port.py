@@ -8,6 +8,7 @@ enabling handler_wiring to inject the dispatch port without a concrete dependenc
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Protocol
 from uuid import UUID
 
@@ -78,6 +79,12 @@ class ProtocolDelegationDispatchPort(Protocol):
         system_prompt: str | None = None,
         temperature: float | None = None,
         response_format: dict[str, object] | None = None,
+        # OMN-20606: who issued the delegation and what it follows (caller
+        # lane, ticket, and the parent correlation, lineage kind and parent
+        # failure cause), validated by the delegate-skill handler. Declared
+        # here before omnimarket passes it, through a TypedDict-typed helper
+        # splat and only when named, so a released consumer keeps working.
+        attribution: Mapping[str, str] | None = None,
     ) -> dict[str, object]: ...
 
 
