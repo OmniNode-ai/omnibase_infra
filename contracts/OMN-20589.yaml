@@ -37,8 +37,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/nodes/node_dlq_replay_effect/test_replay_once_per_source_record.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC1
   - id: dod-omn-20589-ac2
     description: Siblings split across runs still give one replay per round, and the duplicates complete as SKIPPED with every offset committed.
     source: manual
@@ -46,8 +44,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/nodes/node_dlq_replay_effect -q -k one_replay_per_source
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC2
   - id: dod-omn-20589-ac3
     description: Positive controls show that distinct source offsets under one correlation id, and dead letters with no source coordinate, are each replayed.
     source: manual
@@ -55,5 +51,3 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/nodes/node_dlq_replay_effect -q -k positive_control
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC3
