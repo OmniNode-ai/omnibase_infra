@@ -42,6 +42,7 @@ Error Mapping:
     HTTP status codes are mapped to typed infrastructure exceptions:
     - 401/403 -> InfraAuthenticationError (no retry, no CB failure)
     - 404     -> ProtocolConfigurationError (assumed misconfiguration)
+    - 402     -> InfraPaymentRequiredError (one attempt, no retry, no CB failure)
     - 429     -> InfraRateLimitedError (retry with Retry-After)
     - 400/422 -> InfraRequestRejectedError (provider rejection)
     - 500-504 -> InfraUnavailableError (retry, CB failure)
@@ -83,6 +84,7 @@ from omnibase_infra.enums import EnumInfraTransportType, EnumRetryErrorCategory
 from omnibase_infra.errors import (
     InfraAuthenticationError,
     InfraConnectionError,
+    InfraPaymentRequiredError,
     InfraProtocolError,
     InfraRateLimitedError,
     InfraRequestRejectedError,
@@ -384,6 +386,14 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                 should_retry=False,
                 record_circuit_failure=False,
                 error_message=f"Authentication failed during {operation}",
+            )
+
+        if isinstance(error, InfraPaymentRequiredError):
+            return ModelRetryErrorClassification(
+                category=EnumRetryErrorCategory.UNKNOWN,
+                should_retry=False,
+                record_circuit_failure=False,
+                error_message=f"Payment required (402) during {operation}",
             )
 
         if isinstance(error, InfraRateLimitedError):
@@ -962,6 +972,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                     ) from exc
 
                 except (
+                    InfraPaymentRequiredError,
                     InfraRateLimitedError,
                     InfraRequestRejectedError,
                     InfraAuthenticationError,
@@ -1043,6 +1054,16 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
                 context=ctx,
                 status_code=status,
                 response_body=body_snippet,
+            )
+
+        if status == 402:
+            return InfraPaymentRequiredError(
+                f"Payment required (402) by {self._llm_target_name}",
+                context=ctx,
+                status_code=status,
+                response_body=body_snippet,
+                raw_header=response.headers.get("payment-required", ""),
+                raw_body=response.content,
             )
 
         if status == 429:
