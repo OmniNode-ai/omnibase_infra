@@ -4757,6 +4757,7 @@ class DeployExecutor:
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
         extra_env: Mapping[str, str] | None = None,
         force_recreate: bool = True,
+        build: bool = True,
     ) -> None:
         on_phase_update(phase, PhaseStatus.IN_PROGRESS)
 
@@ -4790,9 +4791,14 @@ class DeployExecutor:
             )
             # The migration one-shots are not gated on any healthcheck, so they
             # keep the flat phase bound.
-            self._ensure_runtime_migrations_ready(
-                lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME]
-            )
+            if build:
+                self._ensure_runtime_migrations_ready(
+                    lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME]
+                )
+            else:
+                self._ensure_runtime_migrations_ready(
+                    lane=lane, timeout=PHASE_TIMEOUTS[Phase.RUNTIME], build=False
+                )
         elif not deps_phase:
             timeout = PHASE_TIMEOUTS.get(phase, 300)
         cmd = [
@@ -4837,9 +4843,11 @@ class DeployExecutor:
         # already running alone"). The two now agree.
         if force_recreate:
             cmd.append("--force-recreate")
+        if not build:
+            cmd.append("--no-build")
         cmd += [
             "--pull",
-            "never" if scope == Scope.RUNTIME else "always",
+            "never" if scope == Scope.RUNTIME or not build else "always",
         ]
         # OMN-9455: runtime scope must pass --no-deps so compose cannot recreate
         # the core infra services (postgres/redpanda/valkey/infisical) declared
@@ -4906,18 +4914,21 @@ class DeployExecutor:
                 stuck,
             )
             for name in stuck:
+                recovery_cmd = [
+                    "docker",
+                    "compose",
+                    *_compose_file_args(lane),
+                    "-p",
+                    config.compose_project,
+                    "up",
+                    "-d",
+                    "--no-deps",
+                ]
+                if not build:
+                    recovery_cmd.extend(["--no-build", "--pull", "never"])
+                recovery_cmd.append(name)
                 start_result = subprocess.run(
-                    [
-                        "docker",
-                        "compose",
-                        *_compose_file_args(lane),
-                        "-p",
-                        config.compose_project,
-                        "up",
-                        "-d",
-                        "--no-deps",
-                        name,
-                    ],
+                    recovery_cmd,
                     capture_output=True,
                     text=True,
                     check=False,
@@ -4972,6 +4983,7 @@ class DeployExecutor:
         *,
         lane: EnumRuntimeLane = EnumRuntimeLane.DEV,
         timeout: int = 300,
+        build: bool = True,
     ) -> str:
         """Run bounded migration services before a runtime-only restart.
 
@@ -4995,6 +5007,8 @@ class DeployExecutor:
             "--no-deps",
             "--force-recreate",
         ]
+        if not build:
+            base_cmd.extend(["--no-build", "--pull", "never"])
         for service in RUNTIME_MIGRATION_SERVICES:
             cmd = [*base_cmd, service]
             self._record_compose_invocation(Phase.RUNTIME, cmd)
@@ -5605,3 +5619,201 @@ class DeployExecutor:
         )
         self.verify_recreate.append(record)
         logger.info("verify recreate: %s", record.describe())
+
+
+# ---------------------------------------------------------------------------
+# OMN-20602: automatic rollback of a non-prod lane whose post-deploy
+# verification failed, to the images it ran while healthy before the deploy.
+# ---------------------------------------------------------------------------
+class ModelRetainedImage(BaseModel):
+    """One running container's image and compose service."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    container: str
+    service: str
+    image_ref: str
+    image_id: str
+
+
+class ModelRollbackPoint(BaseModel):
+    """Image identities captured from a healthy lane before rebuilding."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    lane: EnumRuntimeLane
+    captured_at: datetime
+    images: tuple[ModelRetainedImage, ...]
+
+
+class ModelRollbackOutcome(BaseModel):
+    """Whether image restoration and its subsequent verification succeeded."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    restored: bool
+    verified: bool
+    detail: str
+
+
+class DeployRolledBackError(VerificationFailedError):
+    """The deploy failed verification and attempted automatic rollback."""
+
+    def __init__(
+        self,
+        original: VerificationFailedError,
+        outcome: ModelRollbackOutcome,
+        point: ModelRollbackPoint,
+    ) -> None:
+        super().__init__(original.failures)
+        self.outcome = outcome
+        image_ids = ", ".join(
+            dict.fromkeys(
+                image.image_id.removeprefix("sha256:")[:12] for image in point.images
+            )
+        )
+        self.args = (
+            (
+                f"{original}; auto-rollback: restored={outcome.restored} "
+                f"verified={outcome.verified} to {image_ids}"
+            ),
+        )
+
+
+def _retention_ref(image_ref: str, lane: EnumRuntimeLane) -> str:
+    repo = image_ref.split("@", 1)[0]
+    if repo.rfind(":") > repo.rfind("/"):
+        repo = repo.rsplit(":", 1)[0]
+    return f"{repo}:rollback-{lane.value}"
+
+
+def _tag_image(image_id: str, image_ref: str) -> None:
+    result = _run(
+        ["docker", "tag", image_id, image_ref],
+        timeout=PHASE_TIMEOUTS[Phase.RUNTIME],
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"docker tag {image_id} {image_ref} failed (exit {result.returncode}): "
+            f"{result.stderr.strip() or result.stdout.strip()}"
+        )
+
+
+def capture_rollback_point(
+    executor: DeployExecutor, lane: EnumRuntimeLane
+) -> ModelRollbackPoint | None:
+    """Capture only a healthy lane whose images can all be read and retained."""
+    try:
+        targets = lane_config_for(lane).runtime_health_targets
+        for container, port in targets:
+            check, timed_out = executor._probe_runtime_health(
+                service=container, port=port
+            )
+            if check.status != "pass" or timed_out is not None:
+                logger.warning(
+                    "Cannot capture rollback for %s: %s is unhealthy: %s",
+                    lane.value,
+                    container,
+                    check.detail or str(timed_out),
+                )
+                return None
+
+        service_by_index = {
+            index: service for service, index in SERVICE_HEALTH_TARGET_INDEX.items()
+        }
+        images: list[ModelRetainedImage] = []
+        retention: dict[str, str] = {}
+        for index, (container, _) in enumerate(targets):
+            result = _run(
+                ["docker", "inspect", "--format", "{{.Config.Image}}", container],
+                timeout=PHASE_TIMEOUTS[Phase.VERIFICATION],
+            )
+            image_ref = result.stdout.strip()
+            if result.returncode != 0 or not image_ref:
+                logger.warning(
+                    "Cannot capture rollback for %s: unreadable image reference for %s: %s",
+                    lane.value,
+                    container,
+                    result.stderr.strip() or "empty reference",
+                )
+                return None
+            image_id = _container_image_id(container)
+            if not image_id:
+                logger.warning(
+                    "Cannot capture rollback for %s: unreadable image id for %s",
+                    lane.value,
+                    container,
+                )
+                return None
+            retain_ref = _retention_ref(image_ref, lane)
+            if retain_ref in retention and retention[retain_ref] != image_id:
+                logger.warning(
+                    "Cannot capture rollback for %s: conflicting image ids for %s",
+                    lane.value,
+                    retain_ref,
+                )
+                return None
+            retention[retain_ref] = image_id
+            images.append(
+                ModelRetainedImage(
+                    container=container,
+                    service=service_by_index[index],
+                    image_ref=image_ref,
+                    image_id=image_id,
+                )
+            )
+        if not images:
+            logger.warning(
+                "Cannot capture rollback for %s: no runtime targets", lane.value
+            )
+            return None
+        for retain_ref, image_id in retention.items():
+            _tag_image(image_id, retain_ref)
+        return ModelRollbackPoint(
+            lane=lane, captured_at=datetime.now(UTC), images=tuple(images)
+        )
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        logger.warning("Cannot capture rollback for %s: %s", lane.value, exc)
+        return None
+
+
+def restore_rollback_point(
+    executor: DeployExecutor,
+    point: ModelRollbackPoint,
+    on_phase_update: PhaseCallback,
+) -> ModelRollbackOutcome:
+    """Restore retained references without building, then verify the lane again."""
+    try:
+        refs: dict[str, str] = {}
+        for image in point.images:
+            if image.image_ref in refs and refs[image.image_ref] != image.image_id:
+                raise RuntimeError(
+                    f"Conflicting rollback image ids for {image.image_ref}"
+                )
+            refs[image.image_ref] = image.image_id
+        for image_ref, image_id in refs.items():
+            _tag_image(image_id, image_ref)
+        executor._compose_up(
+            Phase.RUNTIME,
+            Scope.RUNTIME,
+            _requested_services_for_up(Scope.RUNTIME, [], lane=point.lane),
+            on_phase_update,
+            lane=point.lane,
+            force_recreate=True,
+            build=False,
+        )
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        logger.warning("Auto-rollback restore failed for %s: %s", point.lane.value, exc)
+        return ModelRollbackOutcome(restored=False, verified=False, detail=str(exc))
+    try:
+        executor.verify(on_phase_update=on_phase_update, lane=point.lane)
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        logger.warning(
+            "Auto-rollback verification failed for %s: %s", point.lane.value, exc
+        )
+        return ModelRollbackOutcome(restored=True, verified=False, detail=str(exc))
+    return ModelRollbackOutcome(
+        restored=True,
+        verified=True,
+        detail="Retained runtime images restored and verified",
+    )
