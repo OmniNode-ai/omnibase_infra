@@ -91,7 +91,6 @@ scripts/check_lane_census_drift.py
 scripts/check_lane_env_drift.py
 scripts/check_llm_endpoint_env_contract.py
 scripts/check_llm_endpoints.sh
-scripts/check_migration_freeze.sh
 scripts/check_migration_required.py
 scripts/check_migrations_complete.sh
 scripts/check_no_cloud_bus_wrapper.sh
@@ -509,7 +508,6 @@ scripts/validation/validate_application_migration_manifest.py
 scripts/validation/validate_clean_root.py
 scripts/validation/validate_db_quality_gate.py
 scripts/validation/validate_markdown_links.py
-scripts/validation/validate_migration_freeze.py
 scripts/validation/validate_migration_sequence.py
 scripts/validation/validate_model_dump_json_mode.py
 scripts/validation/validate_naming.py

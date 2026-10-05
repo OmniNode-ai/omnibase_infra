@@ -12,7 +12,6 @@ Usage:
     python scripts/validate.py [--verbose] [--quick]
     python scripts/validate.py architecture
     python scripts/validate.py architecture_layers
-    python scripts/validate.py migration_freeze
     python scripts/validate.py migration_sequence
     python scripts/validate.py clean_root
     python scripts/validate.py contracts
@@ -965,53 +964,6 @@ def run_io_audit(verbose: bool = False) -> bool:
         return True
 
 
-def run_migration_freeze(verbose: bool = False) -> bool:
-    """Run migration freeze enforcement validation.
-
-    When .migration_freeze exists in the repo root, prevents new migration
-    files from being committed. Enforces schema freeze during DB-per-repo
-    refactor (OMN-2055).
-    """
-    import importlib.util
-
-    try:
-        validator_path = (
-            Path(__file__).parent / "validation" / "validate_migration_freeze.py"
-        )
-
-        if not validator_path.exists():
-            print(f"Migration Freeze: SKIP (validator not found: {validator_path})")
-            return True
-
-        spec = importlib.util.spec_from_file_location(
-            "validate_migration_freeze", validator_path
-        )
-        if spec is None or spec.loader is None:
-            print("Migration Freeze: SKIP (could not load validator module)")
-            return True
-
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["validate_migration_freeze"] = module
-        spec.loader.exec_module(module)
-
-        repo_path = Path(__file__).parent.parent
-        result = module.validate_migration_freeze(repo_path, verbose=verbose)
-
-        if verbose or not result.is_valid:
-            report = module.generate_report(result, repo_path)
-            print(report)
-
-        return result.is_valid
-
-    except Exception as e:  # noqa: BLE001 — boundary: prints error and degrades
-        print(f"Migration Freeze: ERROR ({type(e).__name__}: {e})")
-        if verbose:
-            import traceback
-
-            traceback.print_exc()
-        return False
-
-
 def run_migration_sequence(verbose: bool = False) -> bool:
     """Run migration sequence duplicate detection validation.
 
@@ -1410,7 +1362,6 @@ def run_all(verbose: bool = False, quick: bool = False) -> bool:
     validators = [
         ("Architecture", run_architecture),
         ("Architecture Layers", run_architecture_layers),
-        ("Migration Freeze", run_migration_freeze),
         ("Migration Sequence", run_migration_sequence),
         ("Clean Root", run_clean_root),
         ("Contracts", run_contracts),
@@ -1463,7 +1414,6 @@ def main() -> int:
             "all",
             "architecture",
             "architecture_layers",
-            "migration_freeze",
             "migration_sequence",
             "clean_root",
             "contracts",
@@ -1502,7 +1452,6 @@ def main() -> int:
         "unused_exemptions": run_unused_exemptions,
         "architecture": run_architecture,
         "architecture_layers": run_architecture_layers,
-        "migration_freeze": run_migration_freeze,
         "migration_sequence": run_migration_sequence,
         "clean_root": run_clean_root,
         "contracts": run_contracts,

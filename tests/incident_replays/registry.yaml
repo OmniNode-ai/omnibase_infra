@@ -68,7 +68,6 @@ scope:
     - scripts/check_lane_attestation.py
     - scripts/check_lane_census_age.py
     - scripts/check_lane_env_drift.py
-    - scripts/check_migration_freeze.sh
     - scripts/check_migration_required.py
     - scripts/check_no_cloud_bus_wrapper.sh
     - scripts/check_prod_promotion_lineage.py
@@ -232,7 +231,6 @@ scope:
     - scripts/validation/check_topic_suffix_exports.py
     - scripts/validation/lint_topic_names.py
     - scripts/validation/run_topic_lint.sh
-    - scripts/validation/validate_migration_freeze.py
     - scripts/validation/validate_migration_sequence.py
     - scripts/validation/validate_model_dump_json_mode.py
     - scripts/validation/validate_naming.py

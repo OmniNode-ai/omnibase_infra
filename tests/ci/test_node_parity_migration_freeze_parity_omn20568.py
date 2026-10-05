@@ -1,20 +1,23 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Verdict parity of the three migration-freeze implementations vs the node (OMN-20568).
+"""Verdict parity of the migration-freeze node vs the three implementations it replaced (OMN-20568).
 
 ``scripts/validation/validate_migration_freeze.py`` (pre-commit, through
 ``validate.py migration_freeze``), ``scripts/check_migration_freeze.sh`` (CI) and the
-python ``--check-committed`` mode all enforced the freeze. The node
-``node_migration_freeze_check_compute`` replaces them. Over a matrix of freeze files
-and diffs, built in real git repositories, every implementation must give the same exit
-code, and the node must name exactly the files the scripts named.
+python ``--check-committed`` mode enforced the freeze before this node. While they
+existed, the same matrix of freeze files and diffs below was run through all three and
+through the node in real git repositories; the three agreed on every exit code and the
+node agreed with them (commit badcc132e). The recorded verdicts are
+``tests/fixtures/validator_parity/migration_freeze/golden.json``. This file keeps that
+matrix as the node's regression test.
 
 AC3: every refusal any of the three produced on the matrix is still produced by the node.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from dataclasses import dataclass
@@ -35,10 +38,18 @@ from omnibase_infra.nodes.node_migration_freeze_check_compute import (
 from omnibase_infra.nodes.node_migration_freeze_check_compute.models import (
     ModelMigrationFreezeCheckInput,
 )
-from scripts.validation import validate_migration_freeze as py_impl
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SH_SCRIPT = REPO_ROOT / "scripts" / "check_migration_freeze.sh"
+GOLDEN = json.loads(
+    (
+        REPO_ROOT
+        / "tests"
+        / "fixtures"
+        / "validator_parity"
+        / "migration_freeze"
+        / "golden.json"
+    ).read_text(encoding="utf-8")
+)
 
 MIG = "docker/migrations/forward"
 
@@ -146,41 +157,6 @@ class Verdict:
     refused: tuple[str, ...]
 
 
-def _py_staged(root: Path) -> Verdict:
-    result = py_impl.validate_migration_freeze(root, check_staged=True)
-    return Verdict(
-        0 if result.is_valid else 1,
-        tuple(sorted(v.file_path for v in result.violations)),
-    )
-
-
-def _py_committed(root: Path) -> Verdict:
-    result = py_impl.validate_migration_freeze(root, check_staged=False)
-    return Verdict(
-        0 if result.is_valid else 1,
-        tuple(sorted(v.file_path for v in result.violations)),
-    )
-
-
-def _sh(root: Path, *args: str) -> Verdict:
-    completed = subprocess.run(
-        ["bash", str(SH_SCRIPT), *args],
-        cwd=root,
-        env=scrub_git_location_env(),
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    refused = tuple(
-        sorted(
-            line.strip()
-            for line in completed.stdout.splitlines()
-            if line.startswith("  docker/migrations/")
-        )
-    )
-    return Verdict(completed.returncode, refused)
-
-
 def _node(root: Path, monkeypatch: pytest.MonkeyPatch, *args: str) -> Verdict:
     monkeypatch.chdir(root)
     report_exit = node_runtime.main(list(args))
@@ -211,6 +187,11 @@ SCENARIOS = [(f, d) for f in FREEZES for d in DIFFS]
 IDS = [f"{f}-{d}" for f, d in SCENARIOS]
 
 
+def _expected(freeze_id: str, diff_id: str, mode: str) -> Verdict:
+    recorded = GOLDEN["scenarios"][f"{freeze_id}-{diff_id}"][mode]
+    return Verdict(recorded["exit"], tuple(sorted(recorded["refused"])))
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(("freeze_id", "diff_id"), SCENARIOS, ids=IDS)
 def test_node_parity_migration_freeze_parity_precommit_mode(
@@ -220,22 +201,18 @@ def test_node_parity_migration_freeze_parity_precommit_mode(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Staged-file mode: python validator, bash script and node agree."""
+    """Staged-file mode matches what the python validator and bash script recorded."""
     repo = tmp_path / "repo"
     _build_repo(repo, FREEZES[freeze_id], DIFFS[diff_id])
-    py = _py_staged(repo)
-    sh = _sh(repo)
-    assert py.exit_code == sh.exit_code, f"python {py} vs bash {sh}"
+    expected = _expected(freeze_id, diff_id, "staged")
     if FREEZES[freeze_id] is None:
-        assert (py.exit_code, sh.exit_code) == (0, 0)
         monkeypatch.chdir(repo)
-        assert node_runtime.main([]) == 0
+        assert node_runtime.main([]) == expected.exit_code == 0
         capsys.readouterr()
         return
     node = _node(repo, monkeypatch)
     capsys.readouterr()
-    assert node.exit_code == py.exit_code, f"node {node} vs python {py}"
-    assert node.refused == py.refused
+    assert node == expected
 
 
 @pytest.mark.unit
@@ -247,75 +224,51 @@ def test_node_parity_migration_freeze_parity_ci_mode(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Committed-diff mode: python --check-committed, bash --ci and node --base agree."""
+    """Committed-diff mode matches what --check-committed and --ci recorded."""
     repo = tmp_path / "repo"
     _build_repo(repo, FREEZES[freeze_id], DIFFS[diff_id])
     _commit(repo)
-    py = _py_committed(repo)
-    sh = _sh(repo, "--ci")
-    assert py.exit_code == sh.exit_code, f"python {py} vs bash {sh}"
+    expected = _expected(freeze_id, diff_id, "ci")
     if FREEZES[freeze_id] is None:
         monkeypatch.chdir(repo)
-        assert node_runtime.main(["--base", "origin/main"]) == 0
+        assert node_runtime.main(["--base", "origin/main"]) == expected.exit_code == 0
         capsys.readouterr()
         return
     node = _node(repo, monkeypatch, "--base", "origin/main")
     capsys.readouterr()
-    assert node.exit_code == py.exit_code, f"node {node} vs python {py}"
-    assert node.refused == py.refused
+    assert node == expected
 
 
 class _FixedClock(datetime):
-    fixed: datetime = datetime(2026, 10, 5, 12, 0, tzinfo=UTC)
-
     @classmethod
     def now(cls, tz: object = None) -> _FixedClock:
-        return cls(cls.fixed.year, cls.fixed.month, cls.fixed.day, 12, 0, tzinfo=UTC)
+        return cls(2026, 10, 5, 12, 0, tzinfo=UTC)
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("age_days", [0, 29, 30, 31, 59, 60, 61, 400])
-def test_node_parity_migration_freeze_parity_age_thresholds_match_python(
+def test_node_parity_migration_freeze_parity_age_thresholds_match_recorded(
     age_days: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The exact 30 and 60 day thresholds, with a fixed clock for both sides."""
-    today = _FixedClock.fixed.date()
-    freeze_date = today - timedelta(days=age_days)
+    """The exact 30 and 60 day thresholds under a fixed clock."""
+    freeze_date = _FixedClock.now().date() - timedelta(days=age_days)
     repo = tmp_path / "repo"
     _build_repo(repo, f"freeze_date={freeze_date.isoformat()}\n", ())
-    monkeypatch.setattr(py_impl, "datetime", _FixedClock)
     monkeypatch.setattr(node_runtime, "datetime", _FixedClock)
-    py = _py_staged(repo)
     monkeypatch.chdir(repo)
-    assert node_runtime.main([]) == py.exit_code
-    status = py_impl._compute_freeze_age(repo / ".migration_freeze")
-    report = NodeMigrationFreezeCheckCompute().handle(
-        ModelMigrationFreezeCheckInput(
-            freeze_active=True,
-            freeze_text=f"freeze_date={freeze_date.isoformat()}\n",
-            today=today,
-        )
-    )
-    assert (report.overall_status == "FAIL") == status.is_expired
-    assert (report.overall_status == "WARN") == (
-        status.is_warning and not status.is_expired
-    )
+    assert node_runtime.main([]) == GOLDEN["age_thresholds"][str(age_days)]
 
 
 @pytest.mark.unit
 def test_node_parity_migration_freeze_parity_indented_date_follows_python_not_bash(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Documented drift: bash ignores an indented freeze_date line, python enforces it.
-
-    The node takes the stricter python behaviour, so an expired indented date fails.
-    """
+    """Documented drift: the bash script ignored an indented freeze_date line (exit 0)
+    and the python validator enforced it (exit 1). The node takes the stricter python
+    behaviour, so an expired indented date fails."""
     repo = tmp_path / "repo"
     _build_repo(repo, f"  freeze_date={_ago(65)}\n", ())
-    py = _py_staged(repo)
-    sh = _sh(repo)
-    assert (py.exit_code, sh.exit_code) == (1, 0)
-    assert _node(repo, monkeypatch).exit_code == py.exit_code
+    assert _node(repo, monkeypatch).exit_code == 1
 
 
 @pytest.mark.unit
@@ -330,8 +283,4 @@ def test_node_parity_migration_freeze_parity_comparison_detects_a_broken_node(
         "_violation_findings",
         staticmethod(lambda request: []),
     )
-    py = _py_staged(repo)
-    node = _node(repo, monkeypatch)
-    assert py.exit_code == 1
-    assert node.exit_code != py.exit_code
-    assert node.refused != py.refused
+    assert _node(repo, monkeypatch) != _expected("fresh", "add_migration", "staged")

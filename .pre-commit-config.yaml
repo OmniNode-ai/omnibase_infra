@@ -850,10 +850,13 @@ repos:
         files: ^(src/omnibase_infra/runtime/auto_wiring/handler_wiring\.py|src/omnibase_infra/runtime/observability/consumer_flow_counters\.py|src/omnibase_infra/runtime/service_dispatch_result_applier\.py|tests/ci/test_omn17214_publish_flow_attribution_gate\.py)$
         pass_filenames: false
         stages: [pre-commit]
-      # Migration freeze enforcement - block new migrations during DB-per-repo refactor
+      # Migration freeze enforcement - block new migrations during DB-per-repo refactor.
+      # OMN-20568: the node_migration_freeze_check_compute node, which replaced the
+      # three freeze implementations. Staged-file mode; CI runs the same module
+      # with --base (the `migration-freeze` job).
       - id: onex-validate-migration-freeze
         name: ONEX Migration Freeze Enforcement
-        entry: uv run --frozen python scripts/validate.py migration_freeze
+        entry: uv run --frozen python -m omnibase_infra.nodes.node_migration_freeze_check_compute.runtime_migration_freeze_check
         language: system
         pass_filenames: false
         always_run: true
@@ -2241,5 +2244,5 @@ ci:
   # Skip ONEX validation hooks in CI that require omnibase_core imports
   # Note: onex-validate-clean-root is NOT skipped (standalone script, no omnibase_core dependency)
   # Also skip migration freeze (checks staged files via git diff --cached, which is empty in CI;
-  # CI should run: uv run python scripts/validation/validate_migration_freeze.py --check-committed)
+  # CI runs the same node with --base: the `migration-freeze` job)
   skip: [no-env-file, onex-validate-architecture, onex-imperative-orchestrator-ratchet, onex-orchestration-monolith-ratchet, onex-orchestrator-reducer-state-invariant, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze, normalization-symmetry]
