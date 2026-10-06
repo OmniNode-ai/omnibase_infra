@@ -51,6 +51,8 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HOOK = REPO_ROOT / "scripts" / "hooks" / "prepush_smart_tests.sh"
 LIB = REPO_ROOT / "scripts" / "hooks" / "prepush_dispatch.sh"
@@ -98,7 +100,7 @@ def test_no_capacity_row_hardcodes_an_ssh_login() -> None:
             "credentials and reports the whole lab unreachable for everybody "
             "else (OMN-17280); a hardcoded host publishes the lab address book "
             "from a public repository (OMN-17996). Put the value in "
-            "$OMNI_HOME/config/lab/prepush_hosts.omnibase_infra.overlay.tsv."
+            "${ONEX_WORKSPACE_CONFIG_ROOT}/config/lab/prepush_hosts.omnibase_infra.overlay.tsv."
         )
 
 
@@ -134,12 +136,23 @@ def _repo_with_table(tmp_path: Path, table_text: str, name: str = "synth") -> Pa
     (repo / "scripts" / "hooks" / "prepush_hosts.tsv").write_text(
         table_text, encoding="utf-8"
     )
-    subprocess.run(["git", "init", "-q", "."], cwd=repo, check=True)
-    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "init", "-q", "."],
+        cwd=repo,
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
+    subprocess.run(
+        ["git", "add", "-A"],
+        cwd=repo,
+        check=True,
+        env=scrub_git_location_env(os.environ),
+    )
     subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "table"],
         cwd=repo,
         check=True,
+        env=scrub_git_location_env(os.environ),
     )
     return repo
 
