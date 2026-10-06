@@ -50,11 +50,12 @@ import re
 import socket
 import subprocess
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Final
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
 from deploy_agent.events import EnumRuntimeLane, ModelRebuildRequested
 
@@ -432,3 +433,114 @@ def build_router_from_env(deploy_source_dir: str) -> DeployRouter:
     table = load_routing_table()
     instance = resolve_instance(table)
     return DeployRouter(table, instance, GitTableAtRef(deploy_source_dir))
+
+
+# --- lane flags ---------------------------------------------------------------
+#
+# Declared, typed per-instance lane flags (OMN-17427, lane stable-lane-freeze-9143).
+#
+# WHY THIS EXISTS
+# ---------------
+# Operator, 2026-10-05 ~12:45Z: "We need a stable lane ... Freeze it. We should
+# have a feature flag setup for our overlays so we can switch configs as needed".
+# A lane's switches were ad hoc env edits on the host. They are now one typed
+# block per instance in ``config/deploy_lane_routing.yaml`` (``flags:``), read by
+# the agent from the table shipped with its own code, like ``load_gate:``. A flag
+# lands through a normal dev PR and takes effect at the agent's own idle
+# self-update, so nobody restarts a lane by hand to change one.
+#
+# THE FIRST FLAG: ``freeze``
+# --------------------------
+# A frozen instance changes only on a deliberate promotion. Until ``until``:
+#
+# * the consumer refuses every routed command of its own whose ``requested_by``
+#   does not start with :data:`PROMOTION_REQUESTER_PREFIX`, with the rejection
+#   reason ``frozen`` (merge-driven recreates: runtime-rebuild-trigger.yml and
+#   onex-api-lab-delivery.yml publish ``gha/<repo>/...``);
+# * idle converge (OMN-19509) does not start (verdict ``frozen``).
+#
+# A promotion is a command published with ``--requested-by promotion/<who>``
+# through the existing trigger CLI (``python -m deploy_agent.trigger``); it runs
+# as any other job. The freeze expires by itself at ``until``: no flag outlives
+# its declared window, so a forgotten freeze cannot silently pin a lane forever.
+#
+# An unknown key or a naive ``until`` refuses the table, and the agent reading
+# its own table then refuses to start, as it does for a malformed load gate.
+
+#: The key an instance's flags sit under in the routing table.
+LANE_FLAGS_KEY: Final = "flags"
+
+#: ``requested_by`` prefix of a deliberate promotion, the one way onto a frozen lane.
+PROMOTION_REQUESTER_PREFIX: Final = "promotion/"
+
+
+class ModelLaneFreeze(BaseModel):
+    """The lane changes only on a deliberate promotion, until ``until``."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    until: AwareDatetime
+    #: Why, with the ruling or ledger row that asked for it.
+    reason: str = Field(min_length=1)
+
+    def active(self, now: datetime) -> bool:
+        return now < self.until
+
+    def describe(self) -> str:
+        return f"FROZEN until {self.until:%Y-%m-%dT%H:%MZ}: {self.reason}"
+
+
+class ModelLaneFlags(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    freeze: ModelLaneFreeze | None = None
+
+    def frozen_reason(self, now: datetime) -> str | None:
+        """The FROZEN reason in force at ``now``, or ``None``."""
+        if self.freeze is not None and self.freeze.active(now):
+            return self.freeze.describe()
+        return None
+
+
+def is_promotion(requested_by: str) -> bool:
+    return requested_by.startswith(PROMOTION_REQUESTER_PREFIX)
+
+
+def parse_lane_flags(text: str) -> dict[str, ModelLaneFlags]:
+    """Every instance's ``flags:`` block, keyed by instance name.
+
+    An instance without a block has every flag off. A block that does not
+    validate refuses.
+    """
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise RoutingTableError(f"routing table is not YAML: {exc}") from exc
+    if not isinstance(raw, dict) or not isinstance(raw.get("instances"), dict):
+        raise RoutingTableError("routing table declares no instances")
+    flags: dict[str, ModelLaneFlags] = {}
+    for name, spec in raw["instances"].items():
+        if not isinstance(spec, dict) or LANE_FLAGS_KEY not in spec:
+            continue
+        block = spec[LANE_FLAGS_KEY]
+        if not isinstance(block, dict):
+            raise RoutingTableError(
+                f"instance {name!r} {LANE_FLAGS_KEY}: must be a mapping"
+            )
+        try:
+            flags[str(name)] = ModelLaneFlags.model_validate(block)
+        except ValidationError as exc:
+            raise RoutingTableError(
+                f"instance {name!r} {LANE_FLAGS_KEY}: block is invalid: {exc}"
+            ) from exc
+    return flags
+
+
+def lane_flags_for_instance(repo_root: str | Path, instance: str) -> ModelLaneFlags:
+    """The flags ``instance`` declares in ``repo_root``'s committed table."""
+    path = Path(repo_root) / ROUTING_TABLE_RELPATH
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RoutingTableError(f"routing table unreadable at {path}: {exc}") from exc
+    return parse_lane_flags(text).get(instance, ModelLaneFlags())

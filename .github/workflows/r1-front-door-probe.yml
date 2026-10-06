@@ -89,20 +89,24 @@ jobs:
 
     steps:
       - name: Checkout omnibase_infra
+        id: checkout_infra
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 1
           persist-credentials: false
 
       - name: Install uv
+        id: install_uv
         uses: astral-sh/setup-uv@v7
         with:
           version: "latest"
 
       - name: Set up Python
+        id: setup_python
         run: uv python install 3.12
 
       - name: Install dependencies
+        id: install_dependencies
         run: uv sync --locked --all-extras
 
       # The pinned omnimarket: the task-class contract provider AND the owner of
@@ -110,10 +114,11 @@ jobs:
       # workspace root (`<root>/omnimarket/config/ci_bus_lanes.yaml`) because
       # that is the path the CLI reads (OMNIBASE_PATH, below).
       - name: Checkout omnimarket (pinned provider and lane declaration)
+        id: checkout_provider
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: fced10cd2906e10a9ea5ef28ab88cdf5aa5e7eb5 # .github/sibling-pins.yaml
+          ref: bd0002cc5ed2d10435e3294dce7d5adeb0e54b86 # .github/sibling-pins.yaml
           path: .probe-workspace/omnimarket
           persist-credentials: false
           fetch-depth: 1
@@ -126,6 +131,7 @@ jobs:
       # `vcs_info.commit_id` and the omnimarket drift guard reads
       # installed == canonical.
       - name: Co-install omnimarket into the job venv
+        id: coinstall_provider
         run: |
           set -euo pipefail
           PYTHON_BIN="${GITHUB_WORKSPACE}/.venv/bin/python"
@@ -179,6 +185,7 @@ jobs:
       # the credential injected below is offered to the protocol the broker
       # speaks. The credentials themselves never pass through this step.
       - name: Resolve the declared lane transport
+        id: lane_transport
         run: |
           set -euo pipefail
           .venv/bin/python -c "
@@ -200,7 +207,16 @@ jobs:
 
       - name: Run the R1 front-door probe and grade it
         id: probe
+        if: ${{ always() && !cancelled() }}
         env:
+          SETUP_OUTCOMES: >-
+            {"checkout_infra": "${{ steps.checkout_infra.outcome }}",
+             "install_uv": "${{ steps.install_uv.outcome }}",
+             "setup_python": "${{ steps.setup_python.outcome }}",
+             "install_dependencies": "${{ steps.install_dependencies.outcome }}",
+             "checkout_provider": "${{ steps.checkout_provider.outcome }}",
+             "coinstall_provider": "${{ steps.coinstall_provider.outcome }}",
+             "lane_transport": "${{ steps.lane_transport.outcome }}"}
           # The workspace root the CLI reads `omnimarket/config/ci_bus_lanes.yaml`
           # under (the sanctioned wrapper binds the same variable on a lab host).
           OMNIBASE_PATH: ${{ github.workspace }}/.probe-workspace
@@ -212,6 +228,42 @@ jobs:
           set -uo pipefail
           # NOT `set -e`: a non-zero probe is the verdict and must still write
           # its record before the job ends.
+          # A setup failure skips the CLI, but must still publish AC2's named
+          # terminal. Use the host's standard-library Python: the job venv or
+          # even the source checkout may not exist yet.
+          python3 - <<'PYEOF'
+          import json
+          import os
+          from pathlib import Path
+
+          outcomes = json.loads(os.environ["SETUP_OUTCOMES"])
+          incomplete = [(step, outcome) for step, outcome in outcomes.items() if outcome != "success"]
+          if not incomplete:
+              raise SystemExit(0)
+          step, outcome = next(
+              ((step, outcome) for step, outcome in incomplete if outcome == "failure"),
+              incomplete[0],
+          )
+          leg = "lane-declaration" if step == "lane_transport" else "runner-env"
+          cause = f"setup step {step} ended with {outcome}; probe not run"
+          record = {
+              "argv": [], "lane": "dev", "exit_code": 2, "ok": False,
+              "duration_s": 0.0, "stdout_tail": "", "stderr_tail": cause,
+              "timeout_reason": None, "leg": leg, "named_cause": cause,
+          }
+          Path("r1-front-door-probe.json").write_text(json.dumps(record, indent=2) + "\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write(
+                  f"\n## R1 front-door probe: FAIL\n\n- exit code: 2\n"
+                  f"- leg: {leg}\n- named cause: {cause}\n"
+              )
+          print(f"::error title=R1 front-door probe ({leg})::{cause}")
+          raise SystemExit(2)
+          PYEOF
+          setup_status=$?
+          if [ "${setup_status}" -ne 0 ]; then
+            exit "${setup_status}"
+          fi
           .venv/bin/python scripts/ci/r1_front_door_probe.py \
             --onex-bin .venv/bin/onex \
             --record r1-front-door-probe.json \

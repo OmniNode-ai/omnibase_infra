@@ -4,6 +4,7 @@
 # Ticket: OMN-3045
 name: "node_baselines_batch_compute"
 node_type: "EFFECT_GENERIC"
+runtime_profiles: [main]
 contract_version:
   major: 1
   minor: 0

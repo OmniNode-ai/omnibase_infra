@@ -1,3 +1,17 @@
+## v0.38.66 (2026-10-05)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.66 by the scheduled release train.
+- 5 release-relevant commit(s) merged since v0.38.65.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.65
+- refactor: empty the runtime_profiles and transport-mock ratchets and make both plain blocking checks (#4570)
+- feat: container in-memory kernel publishes runtime errors through RuntimeLogEventBridge (#4495)
+- fix: dev-lane runtime-effects reads tenant BYOK keys with its own read-only Infisical identity (#4561)
+- fix: omnimarket drift guard ignores inherited GIT_DIR and GIT_WORK_TREE (#4557)
+- fix: retain verdict envelopes before lane publication (#4552)
+
 ## v0.38.65 (2026-10-04)
 
 ### Release

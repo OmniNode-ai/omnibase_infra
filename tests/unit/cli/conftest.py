@@ -55,6 +55,8 @@ def _restore_process_environment_after_cli_test() -> Generator[None, None, None]
 @pytest.fixture(autouse=True)
 def _no_omnimarket_drift_guard_cli_node(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("OMNI_HOME", raising=False)
+    for key in ("ONEX_LANE_HOST", "ONEX_REMOTE_LANE_HOST", "ONEX_LAB_RUN_HOSTS"):
+        monkeypatch.delenv(key, raising=False)
     monkeypatch.setattr(cli_node, "check_omnimarket_drift", lambda **_: None)
 
 

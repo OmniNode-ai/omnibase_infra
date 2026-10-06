@@ -7,9 +7,8 @@ DeployAgent._run_deploy():
 
 1. No phantom auto-rollback and no half-recreated container goes unreported —
    a digest mismatch must not trigger any further container mutation (no
-   second rebuild_scope/_compose_up/_pull_pinned_image call; grep of
-   deploy_agent/ confirms no rollback code path exists anywhere in this
-   package today, so this is enforced by construction, not disabled here).
+   second rebuild_scope/_compose_up/_pull_pinned_image call). Automatic image
+   rollback is restricted to non-prod lanes.
 2. The completed job carries a TRUTHFUL status: JobState.status == "failed",
    job.errors names the real cause, and phase_results marks
    Phase.VERIFICATION FAILED rather than leaving it unset/absent — an absent
@@ -149,8 +148,15 @@ async def test_digest_mismatch_produces_truthful_failed_completion(
             return _ok(stdout=f"sha256:imageid {_OTHER_DIGEST}\n")
         return _ok()
 
-    with patch("deploy_agent.executor._run", side_effect=fake_run):
+    with (
+        patch("deploy_agent.executor._run", side_effect=fake_run),
+        patch("deploy_agent.agent.capture_rollback_point") as capture,
+        patch("deploy_agent.agent.restore_rollback_point") as restore,
+    ):
         agent._run_deploy(cmd)
+
+    capture.assert_not_called()
+    restore.assert_not_called()
 
     # 1. No phantom rollback / re-recreate: exactly one rebuild_scope call,
     #    exactly one deploy_and_verify call, nothing after the failure.
@@ -277,8 +283,17 @@ def test_no_rollback_code_path_exists_in_deploy_agent_package() -> None:
     # the agent runs it as an ordinary deploy. It is not a recovery path the
     # agent takes by itself after a failure, which is what claim (1) guards, so
     # its two names are allowed and nothing else is.
+    #
+    # The automatic rollback in ``rollback.py`` is the second deliberate
+    # update: it restores the images of a lane that was healthy before a
+    # non-prod deploy whose verification then failed, and the job still ends
+    # ``failed`` with the rollback named in its errors. Prod never reaches it
+    # (``test_digest_mismatch_produces_truthful_failed_completion``), so its
+    # names are allowed and nothing else is.
     operator_declared_rollback = re.compile(
-        r"\b(?:ModelRollbackDeclaration|_resolve_rollback)\b"
+        r"\b(?:ModelRollbackDeclaration|_resolve_rollback"
+        r"|capture_rollback_point|restore_rollback_point|ModelRollbackPoint"
+        r"|ModelRollbackOutcome|DeployRolledBackError)\b"
     )
 
     pkg_dir = Path(deploy_agent.__file__).parent

@@ -336,3 +336,30 @@ def test_docker_compose_config_resolves_without_error_for_the_fleet(
     assert result.returncode == 0, (
         f"docker compose config failed:\nstdout={result.stdout}\nstderr={result.stderr}"
     )
+
+
+@pytest.mark.parametrize(
+    ("file", "host"), [(COMPOSE_FILE, "h201"), (POOL_COMPOSE_FILE, "h202")]
+)
+def test_lab_fleet_delegations_read_host_declaration(file: Path, host: str) -> None:
+    compose = yaml.safe_load(file.read_text())
+    for name, service in compose["services"].items():
+        if not name.startswith(FLEET_PREFIXES):
+            assert "ONEX_LAB_RUN_HOSTS" not in service.get("environment", {})
+            assert "ONEX_LANE_HOST" not in service.get("environment", {})
+            continue
+        env = service["environment"]
+        assert env["ONEX_LANE_HOST"] == host
+        assert "ONEX_TENANT_ID" not in env
+        mounts = [
+            v
+            for v in service["volumes"]
+            if isinstance(v, dict) and v.get("target") == env["ONEX_LAB_RUN_HOSTS"]
+        ]
+        assert len(mounts) == 1, name
+        mount = mounts[0]
+        assert mount["source"].endswith(
+            "/omnibase_internal/src/omnibase_internal/lab_run_hosts.yaml"
+        )
+        assert mount["read_only"] is True
+        assert mount["bind"]["create_host_path"] is False

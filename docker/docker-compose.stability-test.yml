@@ -20,9 +20,16 @@ x-omninode-contract-overlay:
     # OMN-12832: Kafka clients reconnect to the broker address returned in
     # metadata. This is lane contract data, not host environment. Do not move
     # it back to deploy-time interpolation.
-    advertised_kafka_addr: &stability_test_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://100.109.203.94:39092"
+    #
+    # OMN-20637: the `lan` listener is the LAN-address twin of `external` (the
+    # tailnet name). It sits on its own port because a Kafka client bootstraps
+    # on one address and then connects to whatever the metadata advertises per
+    # listener: a LAN client must be handed a LAN address, and two listeners
+    # cannot share a port. `external` is unchanged.
+    advertised_kafka_addr: &stability_test_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://100.109.203.94:39092,lan://192.168.86.201:39093"
     advertised_pandaproxy_addr: &stability_test_redpanda_advertised_pandaproxy_addr "internal://redpanda:8082,external://100.109.203.94:28082"
     kafka_port_publish: &stability_test_redpanda_kafka_port_publish "39092:19092"
+    kafka_lan_port_publish: &stability_test_redpanda_kafka_lan_port_publish "39093:19093"
     # Loopback only (OMN-20260): admin_api_require_auth is false on this broker,
     # and every in-network consumer uses redpanda:9644.
     admin_port_publish: &stability_test_redpanda_admin_port_publish "127.0.0.1:29644:9644"
@@ -144,7 +151,7 @@ services:
       - "0"
       - --check=false
       - --kafka-addr
-      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092,lan://0.0.0.0:19093
       - --advertise-kafka-addr
       - *stability_test_redpanda_advertised_kafka_addr
       - --pandaproxy-addr
@@ -169,6 +176,7 @@ services:
       - topic_partitions_per_shard=15000
     ports: !override
       - *stability_test_redpanda_kafka_port_publish
+      - *stability_test_redpanda_kafka_lan_port_publish
       - *stability_test_redpanda_admin_port_publish
   redpanda-partition-cap:
     image: redpandadata/redpanda:v24.2.7
@@ -252,6 +260,14 @@ services:
       ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_SECRET_RESOLVER_CONFIG_JSON}
       OMNIINTELLIGENCE_PUBLISH_INTROSPECTION: ${STABILITY_TEST_RUNTIME_MAIN_PUBLISH_INTROSPECTION:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PUBLISH_INTROSPECTION}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-main
+      # OMN-20593: this lane's main runtime publishes the runtime tick
+      # (onex.intent.platform.runtime-tick.v1, producer from OMN-20590). It is
+      # the backup delegation lane beside the h201 dev lane, which stays off.
+      # The first ticks activate every subscribing contract, including the
+      # dead-letter and consumer-flow prunes (dry_run false) whose archive
+      # directories runtime-effects sets below. Main role only: one producer
+      # per lane.
+      ONEX_RUNTIME_SCHEDULER_ENABLED: "true"
       # OMN-14551 G6: flip the auto-wired consume boundary's DLQ routing ON
       # for this lane's live-proof, sourced from the ledgered contract value
       # (docker/runtime-policy.env), fail-fast if the policy env is missing.
@@ -336,6 +352,14 @@ services:
       ONEX_SECRET_RESOLVER_CONFIG_PATH: ${STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_PATH}
       ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-effects
+      # OMN-20593: the two prune effects on this role resolve their local
+      # archive directory from these names on every runtime tick, and this lane
+      # publishes the tick (see omninode-runtime above). Unset, both raise
+      # KeyError per tick and dead-letter it (read live on dev-202 2026-10-05,
+      # OMN-20590). The directories live on this role's own effects_data
+      # volume; the sink creates them owner-only on first write.
+      ONEX_DEAD_LETTER_ARCHIVE_DIR: /app/data/dead-letter-archive
+      ONEX_CONSUMER_FLOW_ARCHIVE_DIR: /app/data/consumer-flow-archive
       # OMN-14551 G6: see omninode-runtime's ONEX_BOUNDARY_DLQ_ENABLED comment.
       ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     ports: !override

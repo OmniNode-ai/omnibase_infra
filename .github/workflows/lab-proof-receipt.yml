@@ -5,7 +5,7 @@
 # PR head (OMN-19566, T2 slice 3 of the lab-proof plan, epic OMN-19564).
 #
 # WHAT IT DOES. The lab pool driver (prepr_runtime_pool.py run
-# --dispatch-check-run) mints one pr-head receipt per PR it proves, PASS or
+# (dispatching this workflow by default; --no-dispatch-check-run opts out) mints one pr-head receipt per PR it proves, PASS or
 # FAIL, and dispatches this workflow with that receipt. The job reads the PR's
 # LIVE head from the API, recomputes the PR's diff digest from a fresh clone
 # with the verifier's own command, pins the profile and its mandatory checks

@@ -855,6 +855,9 @@ class EnumRejectionReason(StrEnum):
     SUPERSEDED = "superseded"
     SUPERSEDED_BY_RUNNING_BUILD = "superseded_by_running_build"
     DIVERGENT_REF = "divergent_ref"
+    #: The instance's ``flags.freeze`` is in force and the command is not a
+    #: promotion (``deploy_agent.lane_flags``).
+    FROZEN = "frozen"
 
 
 class ModelRejectionNotice(BaseModel):

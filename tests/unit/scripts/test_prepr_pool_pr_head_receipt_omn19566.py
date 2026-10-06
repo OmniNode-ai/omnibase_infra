@@ -421,3 +421,58 @@ def test_the_check_run_workflow_exists_and_is_dispatch_only() -> None:
     assert '--pin "${REPO}" "${KIND}"' in text
     assert "--profile-pin" in text
     assert "--mandatory-check" not in text
+
+
+def test_a_run_dispatches_the_check_run_unless_told_not_to(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # OMN-19566 slice 3 was built opt-in and nothing passed the flag, so no
+    # pr-head receipt ever reached lab-proof-receipt.yml. The default is to post.
+    dispatched: list[int] = []
+    monkeypatch.setattr(
+        pool, "dispatch_check_runs", lambda minted: dispatched.append(len(minted)) or []
+    )
+    default = pool.build_publisher(None, None, dispatch_check_run=True)
+    assert default is not None
+    default([object(), object()])
+    assert dispatched == [2]
+    assert pool.build_publisher(None, None, dispatch_check_run=False) is None
+
+
+def test_the_run_parser_posts_by_default_and_has_one_opt_out() -> None:
+    args = pool.build_parser().parse_args(["run", "--params", "p.env", "--holder", "h"])
+    assert args.no_dispatch_check_run is False
+    off = pool.build_parser().parse_args(
+        ["run", "--params", "p.env", "--holder", "h", "--no-dispatch-check-run"]
+    )
+    assert off.no_dispatch_check_run is True
+    with pytest.raises(SystemExit):
+        pool.build_parser().parse_args(
+            ["run", "--params", "p.env", "--holder", "h", "--dispatch-check-run"]
+        )
+
+
+@pytest.mark.parametrize(
+    "error", [FileNotFoundError("gh"), subprocess.TimeoutExpired("gh", 60)]
+)
+def test_a_dispatch_that_cannot_run_is_reported_not_raised(
+    tmp_path: Path, error: Exception
+) -> None:
+    receipt = tmp_path / "r.json"
+    receipt.write_text("{}", encoding="utf-8")
+    minted = [
+        pool.MintedReceipt(
+            key="k",
+            result="PASS",
+            token="ACCEPTED",
+            reason="r",
+            receipt_path=receipt,
+            event_path=tmp_path / "e.json",
+        )
+    ]
+
+    def runner(*_a: Any, **_k: Any) -> Any:
+        raise error
+
+    (line,) = pool.dispatch_check_runs(minted, runner=runner)
+    assert line.startswith("  check-run dispatch k: not dispatched")

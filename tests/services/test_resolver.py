@@ -3,10 +3,11 @@
 
 """Tests for `resolve_project_tracker()` — central tracker DI authority.
 
-Three required branches:
-    1. No token → LocalStubProjectTracker
-    2. LINEAR_API_KEY / LINEAR_TOKEN present → AdapterLinearGraphQLProjectTracker
-    3. Construction failure → fail-soft to LocalStubProjectTracker (never raises)
+Required branches (OMN-20595, Operating Rule 8: fail fast, no silent fallback):
+    1. Linear selected (the default), LINEAR_API_KEY / LINEAR_TOKEN present
+       → AdapterLinearGraphQLProjectTracker
+    2. Linear selected and no key → raises InfraAuthenticationError; never the stub
+    3. LocalStubProjectTracker only when the caller selects it explicitly
 
 Plus an OMN-10048 regression: when a token is set, the resolved adapter
 MUST be functional — calls to ``tracker.get_issue()`` must NOT raise
@@ -30,6 +31,10 @@ from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adap
 from omnibase_infra.adapters.project_tracker.local_stub_project_tracker import (
     LocalStubProjectTracker,
 )
+from omnibase_infra.enums.enum_project_tracker_backend import (
+    EnumProjectTrackerBackend,
+)
+from omnibase_infra.errors import InfraAuthenticationError
 from omnibase_infra.services.project_tracker.resolver import resolve_project_tracker
 
 pytestmark = pytest.mark.unit
@@ -53,29 +58,43 @@ _ISSUE_FIXTURE: dict[str, object] = {
 
 
 class TestResolveProjectTracker:
-    def test_returns_local_stub_when_no_token(self, tmp_path: Path) -> None:
+    def test_fails_loud_when_linear_selected_and_no_key(self, tmp_path: Path) -> None:
+        """No key on a caller that asked for Linear raises; it never returns the stub."""
         with patch.dict("os.environ", {}, clear=True):
-            tracker = resolve_project_tracker(state_root=tmp_path)
+            with pytest.raises(InfraAuthenticationError):
+                resolve_project_tracker(state_root=tmp_path)
+
+    def test_fails_loud_when_linear_selected_explicitly_and_no_key(
+        self, tmp_path: Path
+    ) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            with pytest.raises(InfraAuthenticationError):
+                resolve_project_tracker(
+                    state_root=tmp_path, backend=EnumProjectTrackerBackend.LINEAR
+                )
+
+    def test_fails_loud_on_blank_key(self, tmp_path: Path) -> None:
+        with patch.dict("os.environ", {"LINEAR_API_KEY": "   "}, clear=True):
+            with pytest.raises(InfraAuthenticationError):
+                resolve_project_tracker(state_root=tmp_path)
+
+    def test_returns_local_stub_only_when_selected(self, tmp_path: Path) -> None:
+        with patch.dict("os.environ", {"LINEAR_API_KEY": "fake"}, clear=True):
+            tracker = resolve_project_tracker(
+                state_root=tmp_path, backend=EnumProjectTrackerBackend.LOCAL_STUB
+            )
             assert isinstance(tracker, LocalStubProjectTracker)
 
     def test_returns_linear_graphql_adapter_when_token_present(
         self, tmp_path: Path
     ) -> None:
-        with patch.dict("os.environ", {"LINEAR_TOKEN": "fake-token"}, clear=True):
+        with patch.dict("os.environ", {"LINEAR_TOKEN": "fake"}, clear=True):
             tracker = resolve_project_tracker(state_root=tmp_path)
             assert isinstance(tracker, AdapterLinearGraphQLProjectTracker)
 
-    def test_never_raises_on_construction_failure(self, tmp_path: Path) -> None:
-        with patch.dict("os.environ", {"LINEAR_TOKEN": "bad-token"}, clear=True):
-            tracker = resolve_project_tracker(
-                state_root=tmp_path,
-                _force_construction_error=True,
-            )
-            assert isinstance(tracker, LocalStubProjectTracker)
-
     def test_api_key_env_var_also_selects_linear(self, tmp_path: Path) -> None:
         """LINEAR_API_KEY must be honored in addition to LINEAR_TOKEN."""
-        with patch.dict("os.environ", {"LINEAR_API_KEY": "fake-token"}, clear=True):
+        with patch.dict("os.environ", {"LINEAR_API_KEY": "fake"}, clear=True):
             tracker = resolve_project_tracker(state_root=tmp_path)
             assert isinstance(tracker, AdapterLinearGraphQLProjectTracker)
 

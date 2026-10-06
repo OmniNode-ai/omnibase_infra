@@ -77,6 +77,7 @@ NOT_FOUND Classification Patterns:
 
 from __future__ import annotations
 
+import hashlib
 import traceback
 from typing import Any, cast
 from uuid import uuid4
@@ -697,6 +698,60 @@ class InfraRequestRejectedError(RuntimeHostError):
         )
         self.status_code = status_code
         self.response_body = _sanitized_body
+
+
+class InfraPaymentRequiredError(InfraRequestRejectedError):
+    """Backend answered HTTP 402: the attempt on that backend is over.
+
+    A 402 is a typed answer, not an outage. It is never retried on the same
+    backend and never counts as a circuit breaker failure. The sha256 and byte
+    length of the full raw ``payment-required`` header and body are computed
+    before any truncation or sanitising, so the payment text itself never has
+    to travel; only a bounded header and a sanitized body snippet are kept.
+
+    Part of OMN-20608 (T0.1 of the agent payments 402 plan).
+    """
+
+    #: Upper bound, in characters, of ``payment_required_header``.
+    MAX_HEADER_CHARS = 8 * 1024
+
+    def __init__(
+        self,
+        message: str,
+        context: ModelInfraErrorContext | None = None,
+        status_code: int | None = 402,
+        response_body: str = "",
+        *,
+        raw_header: str = "",
+        raw_body: bytes = b"",
+        **extra_context: object,
+    ) -> None:
+        """Initialize InfraPaymentRequiredError.
+
+        Args:
+            message: Human-readable error message
+            context: Bundled infrastructure context
+            status_code: HTTP status code (402)
+            response_body: Response body snippet, sanitized and truncated
+            raw_header: Full raw ``payment-required`` header value
+            raw_body: Full raw response body bytes
+            **extra_context: Additional context information
+        """
+        super().__init__(
+            message,
+            context=context,
+            status_code=status_code,
+            response_body=response_body,
+            **extra_context,
+        )
+        raw_header_bytes = raw_header.encode()
+        self.header_sha256 = (
+            hashlib.sha256(raw_header_bytes).hexdigest() if raw_header else ""
+        )
+        self.header_byte_length = len(raw_header_bytes)
+        self.body_sha256 = hashlib.sha256(raw_body).hexdigest() if raw_body else ""
+        self.body_byte_length = len(raw_body)
+        self.payment_required_header = raw_header[: self.MAX_HEADER_CHARS]
 
 
 class InfraProtocolError(RuntimeHostError):

@@ -196,6 +196,10 @@ from omnibase_infra.runtime.runtime_profile import (
     resolve_runtime_profile_name,
     resolve_secret_resolver_config_path,
 )
+from omnibase_infra.runtime.runtime_scheduler import (
+    RuntimeScheduler,
+    start_lane_runtime_scheduler,
+)
 from omnibase_infra.runtime.util_container_wiring import (
     wire_infrastructure_services,
 )
@@ -244,7 +248,7 @@ DEFAULT_RUNTIME_CONFIG = "runtime/runtime_config.yaml"
 TIER0_RUNTIME_CONFIG_RESOURCE = "tier0_runtime_config.yaml"
 
 # OMN-19193: where a workspace keeps its own tier-1 (self-hosted) runtime
-# contracts directory, relative to the workspace root; its
+# contracts directory, relative to the owning config root; its
 # runtime/runtime_config.yaml is the working-tree fallback after the copy
 # materialized from origin/main (OMN-19212), once no bootstrap pointer or
 # developer lane binding is set. The product ships only this convention.
@@ -1326,6 +1330,19 @@ def _load_tier0_runtime_config(
         ) from e
 
 
+def workspace_runtime_config_root(workspace_root: Path) -> Path:
+    """Resolve the config owner, independently of the registry's state root.
+
+    ONEX_WORKSPACE_CONFIG_ROOT is a bootstrap location, never a transport
+    selector. Registry installs use the sibling operator repository. Developer
+    installs can name their own config directory. There is no retiring-root read.
+    """
+    configured = os.environ.get("ONEX_WORKSPACE_CONFIG_ROOT", "").strip()
+    return (
+        Path(configured) if configured else workspace_root / ".." / "omnibase_internal"
+    ).resolve()
+
+
 def resolve_embedded_runtime_config(
     correlation_id: UUID | None = None,
     *,
@@ -1355,10 +1372,12 @@ def resolve_embedded_runtime_config(
        under ``<workspace_root>/.onex_state/workspace-runtime/runtime/``
        (OMN-19212). The SHA and check time identify the source; stale copies
        still answer with a STALE label. Without an attributable copy, the
-       working-tree ``<workspace_root>/config/onex/runtime/runtime_config.yaml``
+       working-tree config under the owning config root
        answers (OMN-19193). This is the tier-1 overlay the OMN-17304 ruling
-       composes on top of tier-0. The file belongs to the workspace, never to
-       this package. A bound root with neither copy is REFUSED rather than
+       composes on top of tier-0. The file belongs to the config owner, selected by
+       ``ONEX_WORKSPACE_CONFIG_ROOT`` or the sibling operator repository,
+       never to this package. The retiring registry root is never read. A bound
+       root with neither copy is REFUSED rather than
        answered with tier-0: binding a workspace root is a claim to be a
        registry workspace, and quietly running one on the in-memory bus is
        how its delegation evidence stranded in local storage.
@@ -1426,7 +1445,8 @@ def resolve_embedded_runtime_config(
             )
             provenance = (
                 f"workspace tier-1 runtime config materialised from "
-                f"{SOURCE_REF}@{copy.sha} at {copy.materialized_at.isoformat()} "
+                f"{SOURCE_REF}@{copy.sha} in {workspace_runtime_config_root(workspace_root)} "
+                f"at {copy.materialized_at.isoformat()} "
                 f"({copy.config_path})"
             )
             if copy.stale:
@@ -1436,7 +1456,10 @@ def resolve_embedded_runtime_config(
                     f"the materialiser refreshes it on every default `onex delegate` run"
                 )
             return config, provenance
-        workspace_contracts = workspace_root / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+        workspace_contracts = (
+            workspace_runtime_config_root(workspace_root)
+            / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+        )
         workspace_config = workspace_contracts / DEFAULT_RUNTIME_CONFIG
         if workspace_config.is_file():
             config = load_runtime_config(
@@ -1451,13 +1474,13 @@ def resolve_embedded_runtime_config(
         raise ProtocolConfigurationError(
             f"workspace root {workspace_root} is bound but has no materialised "
             f"runtime config at {materialized_config} (the copy comes from "
-            f"{SOURCE_REF} of the workspace) and declares no working-tree runtime "
+            f"{SOURCE_REF} of the config owner) and declares no working-tree runtime "
             f"config at {workspace_config}. A bound workspace root is a "
             f"registry workspace, and its transport comes from its own tier-1 "
             f"config; it is never answered with the shipped in-memory default, "
             f"which would strand the workspace's evidence in local storage "
             f"(OMN-19193). Run `onex delegate` again so the materialiser can "
-            f"refresh it / declare the config in the workspace, or select a "
+            f"refresh it / declare the config in the config owner, or select a "
             f"transport explicitly (onex delegate --bus inmemory runs "
             f"offline on purpose).",
             context=ModelInfraErrorContext(
@@ -1656,6 +1679,8 @@ async def bootstrap() -> int:
     plugin_unsubscribe_callbacks: list[Callable[[], Awaitable[None]]] = []
     # Contract registry unsubscribe functions and router (separate domain)
     contract_router: ContractRegistrationEventRouter | None = None
+    # OMN-20590: the lane's runtime tick producer (main profile, opt-in).
+    runtime_tick_scheduler: RuntimeScheduler | None = None
     contract_unsub_registered: Callable[[], Awaitable[None]] | None = None
     contract_unsub_deregistered: Callable[[], Awaitable[None]] | None = None
     contract_unsub_heartbeat: Callable[[], Awaitable[None]] | None = None
@@ -4872,6 +4897,16 @@ async def bootstrap() -> int:
                     },
                 )
 
+        # 9.6b. Start the lane's runtime tick producer (OMN-20590).
+        # RuntimeScheduler (OMN-953) was never started by any runtime, so
+        # nothing published onex.intent.platform.runtime-tick.v1 and every
+        # contract subscribed to it never fired. Only the main role publishes,
+        # and only on a lane whose overlay sets ONEX_RUNTIME_SCHEDULER_ENABLED.
+        runtime_tick_scheduler = await start_lane_runtime_scheduler(
+            event_bus,
+            resolve_runtime_profile_name(),
+        )
+
         # 9.7. Start runtime error triage consumer (OMN-5655)
         # Subscribes to runtime-error events and routes them to the
         # HandlerRuntimeErrorTriage for first-match-wins triage processing.
@@ -5151,6 +5186,13 @@ async def bootstrap() -> int:
                     correlation_id,
                 )
         plugin_unsubscribe_callbacks.clear()
+
+        # Stop the runtime tick producer (OMN-20590). stop() is graceful and
+        # idempotent: it bounds the tick task's wait and degrades a failed
+        # sequence persist to a warning itself.
+        if runtime_tick_scheduler is not None:
+            await runtime_tick_scheduler.stop()
+            runtime_tick_scheduler = None
 
         # Stop contract registry router and consumers
         if contract_router is not None:
@@ -5455,6 +5497,10 @@ async def bootstrap() -> int:
                     sanitize_error_message(cleanup_error),
                     correlation_id,
                 )
+
+        # Cleanup the runtime tick producer (OMN-20590); stop() is idempotent.
+        if runtime_tick_scheduler is not None:
+            await runtime_tick_scheduler.stop()
 
         # Cleanup contract registry router and consumers
         if contract_router is not None:

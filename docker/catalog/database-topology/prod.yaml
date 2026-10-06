@@ -75,6 +75,7 @@ databases:
             schema: public
           - object_type: TABLE
             objects:
+              - alert_channel_liveness_verdicts
               - board_probe_results
               - ci_attempt_outcome
               - claude_agent_spans
@@ -203,6 +204,7 @@ databases:
               - agent_routing_decisions
               - capability_scores
               - context_roi_scores
+              - delegation_budget_applied_events
               - delegation_budget_state
               - delegation_dispositions
               - delegation_eval_item_verdicts
@@ -210,6 +212,7 @@ databases:
               - delegation_eval_results
               - delegation_events
               - delegation_judge_verdict_events
+              - delegation_routing_feedback
               - delegation_routing_tenant_overlay
               - delegation_shadow_comparisons
               - dep_health_findings
@@ -382,5 +385,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: a58dbdde827c5a2a5514d490a7ac42c4aee36bb11cf885e045f98d57fd6f38ee
+  sha256: 7cfb07606c676f28e6e984e8046b55a1d2a91690ea77f94e18c8c26c5ecfd12b
 topology_instance: local

@@ -82,6 +82,9 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
 
     OMN-18595 refresh: the dependency cascade advances the proven runtime to
     core 0.47.32 (omnibase_infra#4505); spi stays 0.23.5.
+
+    OMN-18595 refresh: the dependency cascade advances the proven runtime to
+    core 0.47.35 (omnibase_infra#4585); spi stays 0.23.5.
     """
 
     uv_lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
@@ -89,7 +92,7 @@ def test_release_backmerge_preserves_proven_runtime_core_pin() -> None:
     pins = _declared_pins()
 
     # The proven runtime pins the published PyPI releases (exact versions).
-    assert pins["omnibase-core"] == "0.47.32"
+    assert pins["omnibase-core"] == "0.47.35"
     assert pins["omnibase-spi"] == "0.23.5"
 
     # The retired git-rev overrides must be gone from both manifest and lock:
