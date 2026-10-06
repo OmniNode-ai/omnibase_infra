@@ -79,6 +79,11 @@ def _git_show_index(repo_root: Path, repo_path: str) -> str | None:
     return result.stdout if result.returncode == 0 else None
 
 
+def _read_worktree_file(repo_root: Path, repo_path: str) -> str | None:
+    target = repo_root / repo_path
+    return target.read_text(encoding="utf-8") if target.is_file() else None
+
+
 def _repo_path_exists(repo_root: Path, repo_path: str, *, staged: bool) -> bool:
     if not staged:
         return (repo_root / repo_path).is_file()
@@ -150,12 +155,7 @@ def collect_request(
     )
     supersessions_text = _git_show_index(repo_root, SUPERSESSIONS_REPO_PATH)
     if not staged:
-        supersessions_path = repo_root / SUPERSESSIONS_REPO_PATH
-        supersessions_text = (
-            supersessions_path.read_text(encoding="utf-8")
-            if supersessions_path.is_file()
-            else None
-        )
+        supersessions_text = _read_worktree_file(repo_root, SUPERSESSIONS_REPO_PATH)
     existing_paths = frozenset(
         path
         for path, status in changed.items()
