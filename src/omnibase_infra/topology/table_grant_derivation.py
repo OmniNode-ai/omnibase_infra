@@ -396,6 +396,27 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # OMN-20578: the same bridge for alert_channel_liveness_verdicts, ahead of
     # omnimarket#3417 landing the node_projection_alert_channel_liveness contract.
     # Retired by: omnimarket#3417 merging and the pin advancing past it.
+    # OMN-20613: delegation_budget_applied_events is vendored here first; no
+    # pinned omnimarket contract declares it yet, so the derivation cannot
+    # reproduce the shipped writer grant until the retiring pull request lands.
+    ContractTableDeclaration(
+        node="legacy_migration:delegation_budget_applied_events",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_delegation/"
+            "0056_delegation_budget_applied_events.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="delegation_budget_applied_events",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_delegation/"
+                "0056_delegation_budget_applied_events.sql"
+            ),
+            access="read_write",
+            role="budget_applied_events",
+        ),
+    ),
     ContractTableDeclaration(
         node="legacy_migration:alert_channel_liveness_verdicts",
         contract_path=Path(

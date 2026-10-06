@@ -386,8 +386,8 @@ def test_pyproject_registers_importable_doctor_checks() -> None:
 
 def test_refreshed_metadata_is_discoverable_by_core_registry() -> None:
     installed = {point.name for point in entry_points(group="onex.doctor")}
-    if not _EXPECTED_ENTRY_POINTS.keys() <= installed:
-        pytest.skip("editable package metadata has not been refreshed")
+    missing = _EXPECTED_ENTRY_POINTS.keys() - installed
+    assert not missing, f"Missing onex.doctor delegation checks: {sorted(missing)}"
 
     registry = DoctorRegistry()
     registry.discover()
