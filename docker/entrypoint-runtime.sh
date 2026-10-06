@@ -23,6 +23,14 @@
 
 set -e
 
+# OMN-17427 ROLLBACK PROOF ONLY - NEVER MERGE. A deliberate post-deploy
+# verification failure for the dev-202 lane: the runtime kernel (CMD
+# onex-runtime: runtime, runtime-effects, runtime-worker) exits at start.
+if [ "${1:-}" = "onex-runtime" ]; then
+  echo "[entrypoint] OMN-17427 rollback proof: deliberate startup failure" >&2
+  exit 1
+fi
+
 # =============================================================================
 # Fresh Volume Bootstrap
 # =============================================================================
