@@ -63,6 +63,15 @@
 # which mints one short-lived org registration token, installs and reads back
 # the slice, and brings up omnipc2-ci-runner-1..N additively (a runner already
 # online is not touched at all). --limit=1 is the canary step.
+# OMN-18829: the same host-owned declaration is read by native jobs and CI.
+# Refuse container creation when it is absent; never create an empty directory.
+x-lab-host-table: &lab-host-table
+  type: bind
+  source: /data/omninode/omnibase_internal/src/omnibase_internal/lab_run_hosts.yaml
+  target: /etc/onex/lab_run_hosts.yaml
+  read_only: true
+  bind:
+    create_host_path: false
 x-runner-base: &runner-base
   image: omninode-runner:latest
   restart: unless-stopped
@@ -72,6 +81,9 @@ x-runner-base: &runner-base
   pids_limit: 4096
   cgroup_parent: omnirunners.slice
   environment: &runner-env
+    # OMN-18829: the host row, not the container install identity, owns lab delegations.
+    ONEX_LANE_HOST: h202
+    ONEX_LAB_RUN_HOSTS: /etc/onex/lab_run_hosts.yaml
     RUNNER_LABELS: self-hosted,omnibase-ci,linux,x64,arch-amd64
     GITHUB_ORG_URL: https://github.com/OmniNode-ai
     KUBECONFIG: /home/runner/.lab-credentials/lab-ci-reader.kubeconfig
@@ -93,6 +105,7 @@ x-runner-base: &runner-base
     - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
     - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
     - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+    - *lab-host-table
   group_add:
     - "984" # .202 docker group GID (getent group docker, read 2026-09-28), the same value as the primary host
   healthcheck:
@@ -120,6 +133,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/1/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/1/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/1/pre-commit:/home/runner/.cache/pre-commit
@@ -143,6 +157,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/2/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/2/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/2/pre-commit:/home/runner/.cache/pre-commit
@@ -166,6 +181,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/3/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/3/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/3/pre-commit:/home/runner/.cache/pre-commit
@@ -189,6 +205,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/4/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/4/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/4/pre-commit:/home/runner/.cache/pre-commit
@@ -212,6 +229,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/5/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/5/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/5/pre-commit:/home/runner/.cache/pre-commit
@@ -235,6 +253,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/6/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/6/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/6/pre-commit:/home/runner/.cache/pre-commit
@@ -258,6 +277,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/7/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/7/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/7/pre-commit:/home/runner/.cache/pre-commit
@@ -281,6 +301,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/8/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/8/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/8/pre-commit:/home/runner/.cache/pre-commit
@@ -304,6 +325,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/9/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/9/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/9/pre-commit:/home/runner/.cache/pre-commit
@@ -327,6 +349,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/10/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/10/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/10/pre-commit:/home/runner/.cache/pre-commit
@@ -350,6 +373,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/11/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/11/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/11/pre-commit:/home/runner/.cache/pre-commit
@@ -373,6 +397,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/12/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/12/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/12/pre-commit:/home/runner/.cache/pre-commit
@@ -396,6 +421,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/13/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/13/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/13/pre-commit:/home/runner/.cache/pre-commit
@@ -419,6 +445,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/14/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/14/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/14/pre-commit:/home/runner/.cache/pre-commit
@@ -442,6 +469,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/15/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/15/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/15/pre-commit:/home/runner/.cache/pre-commit
@@ -465,6 +493,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - /scratch/cache/runners/16/uv:/home/runner/.cache/uv
       - /scratch/cache/runners/16/pip:/home/runner/.cache/pip
       - /scratch/cache/runners/16/pre-commit:/home/runner/.cache/pre-commit
