@@ -114,6 +114,7 @@ import logging
 import os
 import re
 import signal
+import socket
 import sys
 import time
 import uuid
@@ -123,6 +124,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import click
+import yaml
 from pydantic import BaseModel, ValidationError
 
 from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
@@ -2141,8 +2143,8 @@ def _wire_criteria_mode(criteria_mode: str | None) -> str | None:
 # Where a tenant overlay is declared it arrives as ``ONEX_TENANT_ID``, the same
 # variable the delegate handler already reads, and it wins, so the stamp is the
 # tenant the handler would have resolved had the lane held it. Lab usage goes
-# through this path as one tenant; there is no second internal system and no
-# fallback tenant.
+# through the host tenant declared in lab_run_hosts.yaml even without the
+# overlay (OMN-18829); there is no fallback tenant.
 #
 # NOTHING HERE IS A DEFAULT. Every branch returns a stamp that was declared or
 # minted, or refuses naming ``onex local init``. The one request that carries no
@@ -2195,12 +2197,106 @@ def read_install_identity() -> str | None:
     return None if identity is None else str(identity.tenant_uuid)
 
 
+def _lab_target_is_local(target: str) -> bool:
+    """Compare a declared SSH target with this host's route address; send no data."""
+    if target == "local":
+        # `local` is relative to the launching host, not every reader of the table.
+        return False
+    hostname = target.rsplit("@", 1)[-1]
+    try:
+        addresses = socket.getaddrinfo(hostname, 9, socket.AF_INET, socket.SOCK_DGRAM)
+        for _, _, _, _, address in addresses:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route:
+                route.connect(address)
+                if route.getsockname()[0] == address[0]:
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def read_lab_host_tenant(
+    environ: Mapping[str, str], *, omni_home: Path | None = None
+) -> str | None:
+    """Read the declared host tenant, or None outside a lab registry.
+
+    Native host jobs locate their row by hostname or the table's SSH target.
+    Containers and remote lanes declare ONEX_LANE_HOST because their own
+    network namespace need not carry the host's address. The table is the
+    authority in both cases; an unresolved declaration never reads the install
+    identity. The CLI workspace binding wins over OMNI_HOME; the wrapper
+    supplies it through OMNIBASE_PATH even when OMNI_HOME is not exported.
+    Resolve the registry before taking its parent (it may be a symlink).
+    """
+    host = (
+        environ.get("ONEX_LANE_HOST") or environ.get("ONEX_REMOTE_LANE_HOST") or ""
+    ).strip()
+    configured = environ.get("ONEX_LAB_RUN_HOSTS", "").strip()
+    registry = (
+        str(omni_home)
+        if omni_home is not None
+        else environ.get("OMNI_HOME", "").strip()
+    )
+    if configured:
+        table = Path(configured)
+    elif registry:
+        table = (
+            Path(registry).resolve().parent
+            / "omnibase_internal/src/omnibase_internal/lab_run_hosts.yaml"
+        )
+        if not table.exists() and not host:
+            return None
+    elif host:
+        raise DelegateTenantRefusedError(
+            "lab host declared without OMNI_HOME or ONEX_LAB_RUN_HOSTS"
+        )
+    else:
+        return None
+    try:
+        document = yaml.safe_load(table.read_text(encoding="utf-8"))
+        rows = document.get("hosts") if isinstance(document, dict) else None
+        if (
+            not isinstance(rows, list)
+            or not rows
+            or any(
+                not isinstance(row, dict)
+                or not row.get("name")
+                or not row.get("target")
+                for row in rows
+            )
+        ):
+            raise ValueError("expected hosts with name and target")
+        if host:
+            matches = [row for row in rows if row["name"] == host]
+        else:
+            hostname = socket.gethostname().split(".")[0]
+            matches = [
+                row
+                for row in rows
+                if row["name"] == hostname
+                or row["target"] == hostname
+                or _lab_target_is_local(str(row["target"]))
+            ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"expected one host row for {host or socket.gethostname()}, found {len(matches)}"
+            )
+        tenant = matches[0].get("tenant_id")
+        if not isinstance(tenant, str) or not tenant.strip():
+            raise ValueError(f"host {matches[0]['name']} has no tenant_id")
+        return str(uuid.UUID(tenant.strip()))
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise DelegateTenantRefusedError(
+            f"lab tenant declaration {table} refused: {exc}"
+        ) from exc
+
+
 def resolve_delegate_tenant(
-    *, in_process: bool, environ: Mapping[str, str]
+    *, in_process: bool, environ: Mapping[str, str], omni_home: Path | None = None
 ) -> str | None:
     """The tenant to stamp on the request, or ``None`` only for the OMN-19966 path.
 
-    Precedence: a declared tenant overlay, then this install's minted identity.
+    Precedence: a declared tenant overlay, the lab host row, then the install identity.
     With neither, a request bound for a deployed lane is refused, because that
     lane would dead-letter its verdict. An in-process request on an install that
     never initialised carries no stamp and the local port mints the identity on
@@ -2209,6 +2305,9 @@ def resolve_delegate_tenant(
     declared = environ.get(TENANT_OVERLAY_ENV, "").strip()
     if declared:
         return declared
+    lab_tenant = read_lab_host_tenant(environ, omni_home=omni_home)
+    if lab_tenant is not None:
+        return lab_tenant
     minted = read_install_identity()
     if minted is not None:
         return minted
@@ -3737,6 +3836,7 @@ def run_delegate(
                 in_process=locus is EnumDelegateLocus.IN_PROCESS
                 or (locus is EnumDelegateLocus.AUTO and bus != BUS_KAFKA),
                 environ=os.environ,
+                omni_home=omni_home,
             )
         except DelegateTenantRefusedError as exc:
             raise click.ClickException(str(exc)) from exc

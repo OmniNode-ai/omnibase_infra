@@ -14,6 +14,9 @@ class ModelWorkspaceRuntimeConfigSidecar(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
 
+    source_repository: str = Field(
+        description="Absolute path of the owning config repository."
+    )
     source_ref: str = Field(description="Git reference carrying the runtime config.")
     source_path: str = Field(description="Runtime config path inside the repository.")
     sha: str = Field(
