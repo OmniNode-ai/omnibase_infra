@@ -206,7 +206,7 @@ jobs:
   # lint, validators, contract gates, and receipt-gate callers still run.
   zone-filter:
     needs: occ-preflight
-    uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@e12c36249d550204354f1d99428841ee99a89868
+    uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@13ceae69c246a33c9fc8fc4b33f83fb66b89edc6
     with:
       python-version: "3.12"
 
