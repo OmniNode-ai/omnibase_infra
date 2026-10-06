@@ -1482,40 +1482,23 @@ def read_append_payload(args: argparse.Namespace) -> str | None:
     return Path(args.append_file).read_text(encoding="utf-8")
 
 
-# --- OMN-18554: resolving the omni_home registry from inside this repo -----
-#
-# Three of the guards ported here (OMN-18258 ruling, OMN-18274 friction,
-# OMN-18433 stranded-clone) load a COMMITTED helper module out of
-# ``omni_home/docs/workflows/_shared/``. In omni_home's own copy of this script
-# that directory was reachable as ``Path(__file__).parents[1]``; here it is not,
-# because ``parents[1]`` is this repository's root.
-#
-# The helpers are deliberately NOT vendored into this repo. They are 995 lines
-# of already-committed omni_home code, and copying them would create the exact
-# two-divergent-copies condition this port exists to end. They are resolved
-# instead, and every one of the three loaders already fails SOFT on absence --
-# it announces on stderr and falls back to its inline constants, so a machine
-# without the registry degrades loudly rather than silently.
-#
-# Resolution order, fail-soft by design (this is not a rule-8 required-env site:
-# a missing registry must not break a ledger append on a CI runner):
-#   1. $OMNI_HOME, the variable every lane already exports;
-#   2. a walk up from this file for a directory that actually carries
-#      docs/workflows/_shared -- proof by structure, not by name;
-#   3. this repository's parent, which is where the registry sits by layout.
+# --- OMN-19741: guards are selected from the private operator package -----
+# ONEX_LEDGER_GUARDS_PATH names the moved package's ledger module directory.
+# An absent setting cannot fall back to a frozen registry copy. Each loader
+# retains its existing absence contract (governed ledgers and replay refuse).
 def _omni_home_root() -> Path:
     override = os.environ.get("OMNI_HOME")
-    if override:
-        return Path(override)
-    here = Path(__file__).resolve()
-    for candidate in here.parents:
-        if (candidate / "docs" / "workflows" / "_shared").is_dir():
-            return candidate
-    return here.parents[2]
+    return Path(override) if override else Path(__file__).resolve().parents[2]
 
 
-def _omni_home_shared() -> Path:
-    return _omni_home_root() / "docs" / "workflows" / "_shared"
+def _omni_home_shared() -> Path | None:
+    override = os.environ.get("ONEX_LEDGER_GUARDS_PATH", "").strip()
+    return Path(override) if override else None
+
+
+def _guard_path(filename: str) -> Path | None:
+    shared = _omni_home_shared()
+    return shared / filename if shared is not None else None
 
 
 # --- OMN-15649: rule-4 cost-sentence enforcement at claim-append time -----
@@ -3630,7 +3613,7 @@ def validate_clock_skew_payload(payload: str, now: datetime) -> str | None:
 # --- OMN-18258: refuse a second ruling on an unacknowledged subject -------
 #
 # The deciding logic is NOT here. It lives in the committed module
-# docs/workflows/_shared/ruling_guard.py, where tests/test_ledger_lock_ruling_guard.py
+# the private operator package ruling_guard.py, where tests/test_ledger_lock_ruling_guard.py
 # runs its real bytes in CI. This file is gitignored local tooling, so logic
 # that lived here would be tested nowhere; this is the thin caller, and that
 # test asserts the caller still calls.
@@ -3640,14 +3623,14 @@ def validate_clock_skew_payload(payload: str, now: datetime) -> str | None:
 # immediately before the append, where a concurrent writer cannot slip a
 # competing ruling in between the check and the write.
 
-_RULING_GUARD_PATH = _omni_home_shared() / "ruling_guard.py"
+_RULING_GUARD_PATH = _guard_path("ruling_guard.py")
 
 
 def load_ruling_guard() -> Any | None:
     """Import the committed guard. Returns None when it is absent -- a checkout
     without docs/ is not a reason to refuse every append, and the absence is
     announced on stderr rather than swallowed."""
-    if not _RULING_GUARD_PATH.is_file():
+    if _RULING_GUARD_PATH is None or not _RULING_GUARD_PATH.is_file():
         print(
             f"ledger_lock: OMN-18258 ruling guard not found at {_RULING_GUARD_PATH}; "
             "ruling sequencing is NOT being enforced for this append",
@@ -3695,7 +3678,7 @@ def validate_ruling_payload(payload: str, ledger: Path) -> str | None:
 #
 # Same arrangement as the OMN-18258 ruling guard immediately above, for the
 # same reason: this file is gitignored local tooling, so the DECIDING LOGIC
-# lives in the committed module docs/workflows/_shared/friction_guard.py
+# lives in the committed module the private operator package friction_guard.py
 # where tests/test_ledger_lock_friction_guard.py runs its real bytes in CI.
 # This is the thin caller, and that test asserts the caller still calls.
 #
@@ -3707,14 +3690,14 @@ def validate_ruling_payload(payload: str, ledger: Path) -> str | None:
 # Like the ruling guard, obligation 3 (a cited friction row must exist) is
 # STATE-DEPENDENT, so this runs INSIDE the held lock where a concurrent
 # writer cannot slip the row in between the check and the write.
-_FRICTION_GUARD_PATH = _omni_home_shared() / "friction_guard.py"
+_FRICTION_GUARD_PATH = _guard_path("friction_guard.py")
 
 
 def load_friction_guard() -> Any | None:
     """Import the committed guard. Returns None when it is absent -- a checkout
     without docs/ is not a reason to refuse every append, and the absence is
     announced on stderr rather than swallowed."""
-    if not _FRICTION_GUARD_PATH.is_file():
+    if _FRICTION_GUARD_PATH is None or not _FRICTION_GUARD_PATH.is_file():
         print(
             f"ledger_lock: OMN-18274 friction guard not found at {_FRICTION_GUARD_PATH}; "
             "friction recording is NOT being enforced for this append",
@@ -3758,7 +3741,7 @@ def validate_friction_payload(payload: str, ledger: Path) -> str | None:
 # either scope list is refused.
 #
 # Same arrangement as the two guards above: the DECIDING LOGIC is the committed
-# module docs/workflows/_shared/ledger_grammar.py in omni_home, whose real
+# module ledger_grammar.py in the private operator package, whose real
 # bytes tests/test_ledger_lock_row_grammar.py runs in CI, and this is the thin
 # caller. Unlike those two it FAILS CLOSED when the module is absent: the
 # ruling allows no warn-only mode, and a clone checked out at a revision
@@ -3768,14 +3751,14 @@ def validate_friction_payload(payload: str, ledger: Path) -> str | None:
 # The governed file names are repeated here, and only here, because the caller
 # must know them precisely when the module cannot be loaded. The omni_home test
 # asserts the two sets are equal.
-_LEDGER_GRAMMAR_PATH = _omni_home_shared() / "ledger_grammar.py"
+_LEDGER_GRAMMAR_PATH = _guard_path("ledger_grammar.py")
 GRAMMAR_GOVERNED_LEDGER_NAMES = frozenset({"ROLLING_WORK_LEDGER.md"})
 
 
 def load_ledger_grammar() -> Any | None:
     """Import the committed grammar, or None when it is absent. The caller
     decides what absence means -- for a governed ledger, a refusal."""
-    if not _LEDGER_GRAMMAR_PATH.is_file():
+    if _LEDGER_GRAMMAR_PATH is None or not _LEDGER_GRAMMAR_PATH.is_file():
         return None
     import importlib.util
 
@@ -3795,8 +3778,8 @@ def grammar_missing_reason() -> str:
         f"OMN-19256 row grammar not found at {_LEDGER_GRAMMAR_PATH}. Appends to "
         f"{', '.join(sorted(GRAMMAR_GOVERNED_LEDGER_NAMES))} are refused until it is "
         "present: the grammar fails closed and has no warn-only mode. Bring the "
-        "omni_home clone to a revision that carries docs/workflows/_shared/"
-        "ledger_grammar.py, or set OMNI_HOME to one. Nothing was written."
+        "private operator tooling clone to a revision that carries the grammar, "
+        "and set ONEX_LEDGER_GUARDS_PATH to its ledger module directory. Nothing was written."
     )
 
 
@@ -3854,12 +3837,12 @@ def validate_consent_payload(payload: str) -> str | None:
 # that branch with exit 5 on every attempt to persist the rows. Fifty
 # row-blocks reached no committed copy and nothing said so.
 #
-# The deciding logic is committed at docs/workflows/_shared/stranded_clone_guard.py
+# The deciding logic is committed at the private operator package stranded_clone_guard.py
 # so it is testable in CI. The FALLBACK below is not belt-and-braces: this
 # script is gitignored and the module is tracked, so a clone checked out at a
 # revision without the module -- which is precisely the condition being
 # detected -- would otherwise disarm the guard that exists to detect it.
-_STRANDED_GUARD_PATH = _omni_home_shared() / "stranded_clone_guard.py"
+_STRANDED_GUARD_PATH = _guard_path("stranded_clone_guard.py")
 _FALLBACK_EXIT_STRANDED_CLONE = 78
 _FALLBACK_EXPECTED_BRANCH = "main"
 _FALLBACK_REMEDY = (
@@ -3876,7 +3859,7 @@ def load_stranded_clone_guard() -> Any | None:
     Absence is announced, never swallowed, and never silences the signal --
     the caller falls back to its inline constants.
     """
-    if not _STRANDED_GUARD_PATH.is_file():
+    if _STRANDED_GUARD_PATH is None or not _STRANDED_GUARD_PATH.is_file():
         print(
             f"ledger_lock: OMN-18433 stranded-clone guard not found at {_STRANDED_GUARD_PATH}; "
             "falling back to the inline constants (the signal still fires)",
@@ -4094,7 +4077,7 @@ def resolve_replay(
         )
     before = parse_replay_window(parser, args.replay_before)
 
-    if not _STRANDED_GUARD_PATH.is_file():
+    if _STRANDED_GUARD_PATH is None or not _STRANDED_GUARD_PATH.is_file():
         return None, (
             "OMN-18433 replay REFUSED -- the committed deciding logic is not reachable "
             f"at {_STRANDED_GUARD_PATH}, and this tool holds no inline copy of it on "

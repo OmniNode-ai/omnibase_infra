@@ -20,7 +20,7 @@ which is the loop that was missing.
 
 TWO SUBJECTS, AND WHERE EACH LIVES. The deciding logic --
 ``replay_refusal()`` and ``replay_marker_row()`` -- is in
-``docs/workflows/_shared/stranded_clone_guard.py``, which is tracked in
+``stranded_clone_guard.py`` in the private operator package, which is tracked in
 ``omni_home`` and unit-tested there. This file's subject is the CLI WIRING in
 ``scripts/ledger_lock.py``, which is tracked HERE. The split is deliberate and
 it is also why there is no inline fallback for the waiver: see
@@ -51,7 +51,7 @@ assert SCRIPT.is_file(), (
     "repository (OMN-18554), so absence is a failure, never a skip."
 )
 
-GUARD_RELPATH = Path("docs") / "workflows" / "_shared" / "stranded_clone_guard.py"
+GUARD_RELPATH = Path("guards") / "stranded_clone_guard.py"
 
 #: A row recovered from the 2026-09-16 stranded tree. Two days old relative to
 #: the window below, and carrying no ``friction=`` field, which is what the
@@ -75,23 +75,17 @@ def _omni_home_guard() -> Path | None:
     real module and the wiring disagreed, which is the failure mode the whole
     two-subject arrangement exists to prevent.
     """
-    candidates: list[Path] = []
-    env = os.environ.get("OMNI_HOME")
-    if env:
-        candidates.append(Path(env))
-    # The canonical registry holds this clone as a sibling of omni_home's root.
-    candidates.append(Path(__file__).resolve().parents[4])
-    for root in candidates:
-        guard = root / GUARD_RELPATH
-        if guard.is_file():
-            return guard
-    return None
+    selected = os.environ.get("ONEX_LEDGER_GUARDS_PATH", "").strip()
+    if not selected:
+        return None
+    guard = Path(selected) / GUARD_RELPATH.name
+    return guard if guard.is_file() else None
 
 
 _GUARD = _omni_home_guard()
 _NO_GUARD = (
     "the committed deciding logic is not on this machine: looked for "
-    f"{GUARD_RELPATH} under $OMNI_HOME and under {Path(__file__).resolve().parents[4]}. "
+    f"{GUARD_RELPATH.name} under ONEX_LEDGER_GUARDS_PATH. "
     "The wiring legs that need no module run regardless; this leg needs the real "
     "module and will not substitute a stub for it."
 )
@@ -101,9 +95,8 @@ _NO_GUARD = (
 def omni_home(tmp_path: Path) -> Path:
     """A throwaway ``OMNI_HOME`` carrying the REAL guard module.
 
-    ``ledger_lock.py`` resolves the module at ``$OMNI_HOME/docs/workflows/
-    _shared/``, so pointing ``OMNI_HOME`` at a tmp tree is how a test decides
-    whether the module is reachable for a given invocation.
+    Each child gets ONEX_LEDGER_GUARDS_PATH pointing to this copied fixture,
+    so module-present and module-absent tests never read the host's registry.
     """
     if _GUARD is None:  # pragma: no cover - guarded by the skipif
         pytest.skip(_NO_GUARD)
@@ -131,6 +124,10 @@ def _run(
     """
     env = dict(os.environ)
     env["OMNI_HOME"] = str(omni_home_root if omni_home_root else ledger_path.parent)
+    env["ONEX_LEDGER_GUARDS_PATH"] = str(
+        (omni_home_root if omni_home_root else ledger_path.parent)
+        / GUARD_RELPATH.parent
+    )
     return subprocess.run(
         [sys.executable, str(SCRIPT), str(ledger_path), *args],
         capture_output=True,
@@ -554,3 +551,24 @@ class TestTheOrdinaryPathIsUnchanged:
         having been removed."""
         proc = _append(ledger, RECOVERED, omni_home_root=omni_home)
         assert proc.returncode == 65, (proc.returncode, proc.stderr)
+
+
+def test_shared_guards_resolve_only_the_explicit_package_directory(
+    tmp_path: Path,
+) -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("shared_path_probe", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    previous = os.environ.get("ONEX_LEDGER_GUARDS_PATH")
+    try:
+        os.environ["ONEX_LEDGER_GUARDS_PATH"] = str(tmp_path / "moved-guards")
+        assert module._omni_home_shared() == tmp_path / "moved-guards"
+        os.environ.pop("ONEX_LEDGER_GUARDS_PATH")
+        assert module._omni_home_shared() is None
+    finally:
+        if previous is not None:
+            os.environ["ONEX_LEDGER_GUARDS_PATH"] = previous
