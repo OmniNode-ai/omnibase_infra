@@ -2215,20 +2215,28 @@ def _lab_target_is_local(target: str) -> bool:
     return False
 
 
-def read_lab_host_tenant(environ: Mapping[str, str]) -> str | None:
+def read_lab_host_tenant(
+    environ: Mapping[str, str], *, omni_home: Path | None = None
+) -> str | None:
     """Read the declared host tenant, or None outside a lab registry.
 
     Native host jobs locate their row by hostname or the table's SSH target.
     Containers and remote lanes declare ONEX_LANE_HOST because their own
     network namespace need not carry the host's address. The table is the
     authority in both cases; an unresolved declaration never reads the install
-    identity. Resolve OMNI_HOME before taking its parent (it may be a symlink).
+    identity. The CLI workspace binding wins over OMNI_HOME; the wrapper
+    supplies it through OMNIBASE_PATH even when OMNI_HOME is not exported.
+    Resolve the registry before taking its parent (it may be a symlink).
     """
     host = (
         environ.get("ONEX_LANE_HOST") or environ.get("ONEX_REMOTE_LANE_HOST") or ""
     ).strip()
     configured = environ.get("ONEX_LAB_RUN_HOSTS", "").strip()
-    registry = environ.get("OMNI_HOME", "").strip()
+    registry = (
+        str(omni_home)
+        if omni_home is not None
+        else environ.get("OMNI_HOME", "").strip()
+    )
     if configured:
         table = Path(configured)
     elif registry:
@@ -2284,7 +2292,7 @@ def read_lab_host_tenant(environ: Mapping[str, str]) -> str | None:
 
 
 def resolve_delegate_tenant(
-    *, in_process: bool, environ: Mapping[str, str]
+    *, in_process: bool, environ: Mapping[str, str], omni_home: Path | None = None
 ) -> str | None:
     """The tenant to stamp on the request, or ``None`` only for the OMN-19966 path.
 
@@ -2297,7 +2305,7 @@ def resolve_delegate_tenant(
     declared = environ.get(TENANT_OVERLAY_ENV, "").strip()
     if declared:
         return declared
-    lab_tenant = read_lab_host_tenant(environ)
+    lab_tenant = read_lab_host_tenant(environ, omni_home=omni_home)
     if lab_tenant is not None:
         return lab_tenant
     minted = read_install_identity()
@@ -3828,6 +3836,7 @@ def run_delegate(
                 in_process=locus is EnumDelegateLocus.IN_PROCESS
                 or (locus is EnumDelegateLocus.AUTO and bus != BUS_KAFKA),
                 environ=os.environ,
+                omni_home=omni_home,
             )
         except DelegateTenantRefusedError as exc:
             raise click.ClickException(str(exc)) from exc
