@@ -290,3 +290,20 @@ def test_consent_cannot_be_combined_with_another_action(
     with pytest.raises(SystemExit) as error:
         ll.main([str(tmp_path / "CONSENTS.md"), "--consent", "row", *other])
     assert error.value.code == 2
+
+
+def test_packaged_grammar_can_import_its_sibling_dependencies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    package = tmp_path / "src" / "operator_fixture"
+    ledger_modules = package / "ledger"
+    ledger_modules.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (package / "dependencies.py").write_text(
+        "MARKER = 'loaded-from-selected-package'\n"
+    )
+    module_path = ledger_modules / "ledger_grammar.py"
+    module_path.write_text("from operator_fixture.dependencies import MARKER\n")
+    monkeypatch.setenv("ONEX_LEDGER_GUARDS_PATH", str(ledger_modules))
+    caller = _load()
+    assert caller.load_ledger_grammar().MARKER == "loaded-from-selected-package"

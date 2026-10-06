@@ -1498,7 +1498,14 @@ def _omni_home_shared() -> Path | None:
 
 def _guard_path(filename: str) -> Path | None:
     shared = _omni_home_shared()
-    return shared / filename if shared is not None else None
+    if shared is None:
+        return None
+    # Packaged guards import sibling modules through their package. Loading
+    # their file directly therefore also needs the selected package's src root.
+    package_src = str(shared.resolve().parent.parent)
+    if package_src not in sys.path:
+        sys.path.insert(0, package_src)
+    return shared / filename
 
 
 # --- OMN-15649: rule-4 cost-sentence enforcement at claim-append time -----
