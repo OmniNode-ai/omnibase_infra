@@ -3087,8 +3087,22 @@ jobs:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          MERGE_GROUP_REF: ${{ github.event.merge_group.head_ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          # A merge_group event carries no PR author, title or head ref: read
+          # them from the queued PR named by the gh-readonly-queue ref, so a
+          # ticketless dependency-bot bump is exempt in the queue as it is on
+          # the pull_request event. Unresolvable stays unexempt (fail closed).
+          if [[ "${EVENT_NAME}" == "merge_group" ]]; then
+            QUEUED_PR="$(sed -nE 's#.*/pr-([0-9]+)-.*#\1#p' <<<"${MERGE_GROUP_REF:-}")"
+            if [[ -n "${QUEUED_PR}" ]]; then
+              PR_AUTHOR="$(gh pr view "${QUEUED_PR}" --repo "${{ github.repository }}" --json author --jq .author.login || true)"
+              PR_TITLE="$(gh pr view "${QUEUED_PR}" --repo "${{ github.repository }}" --json title --jq .title || true)"
+              PR_HEAD_REF="$(gh pr view "${QUEUED_PR}" --repo "${{ github.repository }}" --json headRefName --jq .headRefName || true)"
+            fi
+          fi
           python3 -m scripts.ci.classify_contract_compliance_scope \
             --event-name "${EVENT_NAME}" \
             --pr-author "${PR_AUTHOR:-}" \

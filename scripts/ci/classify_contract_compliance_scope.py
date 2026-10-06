@@ -13,8 +13,9 @@ predicate ``ci_summary_gate`` already applies to the change-control caller jobs
 (``_declared_ticketless_dependency_bot_skip``, OMN-19167), composed from the
 same public helpers so the two cannot drift:
 
-1. the event is ``pull_request`` (push and merge_group carry no author or title,
-   and admit nothing);
+1. the event is ``pull_request`` or ``merge_group`` (a merge_group event carries
+   no author or title of its own, so the workflow resolves them from the queued
+   PR; a push admits nothing);
 2. the author is one of the dependency bots (``DEPENDENCY_BOT_AUTHORS``);
 3. the mirrored PR-title rule exempts the PR from carrying a ticket (its
    bot-author arm already does for both bots);
@@ -41,9 +42,9 @@ from scripts.ci.ci_summary_gate import (
 
 
 def is_declared_exemption(*, event_name: str, ctx: PullRequestContext) -> bool:
-    """True only for a ticketless dependency-bot bump on a pull_request event."""
+    """True only for a ticketless dependency-bot bump on a PR or merge_group event."""
 
-    if event_name != "pull_request" or not ctx.is_resolved:
+    if event_name not in ("pull_request", "merge_group") or not ctx.is_resolved:
         return False
     if ctx.author not in DEPENDENCY_BOT_AUTHORS:
         return False

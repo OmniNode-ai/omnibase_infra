@@ -347,6 +347,14 @@ def test_a_ticketless_dependency_bot_bump_is_the_declared_exemption(
     assert "dependency-bot" in stdout
 
 
+def test_a_queued_dependency_bot_bump_is_exempt_in_the_merge_group(
+    tmp_path: Path,
+) -> None:
+    code, output, _ = _classify(tmp_path, event_name="merge_group")
+    assert code == 0
+    assert output == "exempt=true\n"
+
+
 @pytest.mark.parametrize(
     "override",
     [
@@ -358,9 +366,10 @@ def test_a_ticketless_dependency_bot_bump_is_the_declared_exemption(
         {"pr_head_ref": "deps/OMN-17427"},
         # a bot that is not one of the two dependency bots is not exempt
         {"pr_author": "github-actions[bot]"},
-        # push and merge_group carry no author or title: never exempt
+        # a push carries no author or title: never exempt
         {"event_name": "push"},
-        {"event_name": "merge_group"},
+        # a merge_group whose queued PR could not be resolved admits nothing
+        {"event_name": "merge_group", "pr_author": "", "pr_title": ""},
         # an unresolved context admits nothing
         {"pr_title": ""},
         {"pr_author": ""},
