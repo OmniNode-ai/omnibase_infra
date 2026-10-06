@@ -34,7 +34,6 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TOOL = REPO_ROOT / "scripts" / "delete_orphan_branch.py"
-HOOKS_DIR = REPO_ROOT / "scripts" / "git-hooks" / "canonical-clone"
 
 CONSENT_ROW = (
     "2026-09-16T14:34:06Z | OPERATOR-CONSENT | lane=fixture | approved_by=operator "
@@ -163,10 +162,6 @@ def world(tmp_path: Path) -> dict[str, object]:
         _git("clone", "-q", str(upstream), str(clone), cwd=registry, env=env).returncode
         == 0
     )
-    assert (
-        _git("config", "core.hooksPath", str(HOOKS_DIR), cwd=clone, env=env).returncode
-        == 0
-    )
     # `merged` sits one commit behind the upstream default, so it is a genuine
     # ancestor; `orphan` is on the divergent lineage and is not.
     assert _git("branch", "merged", "HEAD~1", cwd=clone, env=env).returncode == 0
@@ -184,6 +179,19 @@ def world(tmp_path: Path) -> dict[str, object]:
     bin_dir = tmp_path / "bin"
     _gh_shim(bin_dir)
     env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
+
+    hook = clone / ".git/hooks/reference-transaction"
+    hook.write_text(
+        "#!/bin/sh\n"
+        '[ "$1" = prepared ] || exit 0\n'
+        "while read -r old new ref; do\n"
+        '  case "$ref" in refs/heads/*) ;; *) continue ;; esac\n'
+        '  if [ "$new" = 0000000000000000000000000000000000000000 ]; then\n'
+        '    printf "%s|%s\\n" "$ONEX_BRANCH_DELETE_CONSENT" "$ONEX_BRANCH_DELETE_REFS" >> "$PWD/.git/delete-contract"\n'
+        "  fi\n"
+        "done\n"
+    )
+    hook.chmod(0o755)
 
     dev_tip = _git("rev-parse", "origin/dev", cwd=clone, env=env).stdout.strip()
 
@@ -283,23 +291,6 @@ def _branch_exists(world: dict[str, object], name: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def test_control_a_bare_delete_is_still_refused_by_the_guard(
-    world: dict[str, object],
-) -> None:
-    """The guard's blanket refusal is unchanged. Every permitted deletion below
-    is the declared door opening, not the refusal having quietly died."""
-    result = _git(
-        "branch",
-        "-D",
-        "merged",
-        cwd=world["clone"],  # type: ignore[arg-type]
-        env=world["env"],  # type: ignore[arg-type]
-    )
-    assert result.returncode == 128, result.stderr
-    assert "refused deleting a branch" in result.stderr
-    assert _branch_exists(world, "merged")
-
-
 def test_control_a_merged_branch_is_deleted_through_the_tool(
     world: dict[str, object],
 ) -> None:
@@ -313,6 +304,13 @@ def test_control_a_merged_branch_is_deleted_through_the_tool(
     assert row["deleted"] is True
     assert row["reason"] == "merged_into_upstream_default"
     assert not _branch_exists(world, "merged")
+    clone = world["clone"]
+    assert isinstance(clone, Path)
+    ledger = world["ledger"]
+    assert isinstance(ledger, Path)
+    assert set((clone / ".git/delete-contract").read_text().splitlines()) == {
+        "docs/tracking/LEDGER.md:2|refs/heads/merged"
+    }
 
 
 # ---------------------------------------------------------------------------

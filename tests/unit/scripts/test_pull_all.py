@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+
 SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
 PULL_ALL = SCRIPTS_DIR / "pull-all.sh"
 PLIST = SCRIPTS_DIR / "ai.omninode.bare-clone-sync.plist"
@@ -72,7 +74,7 @@ def _git(args: list[str], *, cwd: Path) -> None:
     subprocess.run(
         ["git", "-C", str(target), *args],
         check=True,
-        env=_hermetic_git_env(),
+        env=scrub_git_location_env(_hermetic_git_env()),
     )
 
 
@@ -400,42 +402,45 @@ class TestPullAllScript:
         assert result.returncode == 0, result.stderr
         assert "left on dev" in result.stdout
         current_branch = subprocess.check_output(
-            ["git", "branch", "--show-current"], cwd=omniclaude, text=True
+            ["git", "branch", "--show-current"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
         main_sha = subprocess.check_output(
-            ["git", "rev-parse", "main"], cwd=omniclaude, text=True
+            ["git", "rev-parse", "main"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
         origin_main_sha = subprocess.check_output(
-            ["git", "rev-parse", "origin/main"], cwd=omniclaude, text=True
+            ["git", "rev-parse", "origin/main"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
         dev_sha = subprocess.check_output(
-            ["git", "rev-parse", "dev"], cwd=omniclaude, text=True
+            ["git", "rev-parse", "dev"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
         origin_dev_sha = subprocess.check_output(
-            ["git", "rev-parse", "origin/dev"], cwd=omniclaude, text=True
+            ["git", "rev-parse", "origin/dev"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
 
         assert current_branch == "dev"
         assert main_sha == origin_main_sha
         assert dev_sha == origin_dev_sha
 
-    def test_script_syncs_a_clone_with_the_canonical_clone_guard_installed(
-        self, tmp_path: Path
-    ) -> None:
-        """The sanctioned sync must pass the guard that landed over it.
+    def test_script_opens_the_convergence_hook_contract(self, tmp_path: Path) -> None:
+        """The consumer supplies the guard's convergence door around HEAD switches.
 
-        `pull-all.sh` switches `main` <-> `dev` INSIDE the canonical clone as
-        its ordinary job. The OMN-16497 reference-transaction guard refuses a
-        HEAD symref move, and `pull-all.sh` never opened the sanctioned
-        `ONEX_CANONICAL_CONVERGE` door, so from the guard's merge onward every
-        run of the registry sync on a guarded host FAILED -- measured
-        2026-09-14T07:0xZ as `FAILED omniclaude (fast-forward main; could not
-        return to dev to converge)`.
-
-        The test above is blind to this: its fixture clone has no
-        `core.hooksPath`, so it exercises a repository no host actually has.
-        This one installs the guard exactly as `install-canonical-clone-git-
-        hooks.sh` does.
+        Actual guard policy and refusal tests moved to omnibase_internal. This
+        protocol fixture verifies the caller without owning a second guard copy.
         """
         omni_home = tmp_path / "omni_home"
         omni_home.mkdir()
@@ -443,12 +448,22 @@ class TestPullAllScript:
         fake_home.mkdir()
 
         omniclaude = _make_omniclaude_source(omni_home)
-        hooks_dir = (
-            Path(__file__).resolve().parents[3]
-            / "scripts"
-            / "git-hooks"
-            / "canonical-clone"
+        # The actual guard and its behavioural tests live in omnibase_internal.
+        # This consumer verifies the convergence protocol at its git-hook boundary.
+        hooks_dir = tmp_path / "convergence-contract-hooks"
+        hooks_dir.mkdir()
+        ref_hook = hooks_dir / "reference-transaction"
+        ref_hook.write_text(
+            "#!/bin/sh\n"
+            '[ "$1" = prepared ] || exit 0\n'
+            "while read -r old new ref; do\n"
+            '  [ "$ref" = HEAD ] || continue\n'
+            '  case "$new" in ref:*) ;; *) continue ;; esac\n'
+            '  printf "%s\\n" "$ONEX_CANONICAL_CONVERGE" >> "$PWD/.git/convergence-contract"\n'
+            '  [ "$ONEX_CANONICAL_CONVERGE" = 1 ] || exit 1\n'
+            "done\n"
         )
+        ref_hook.chmod(0o755)
         _git(["config", "core.hooksPath", str(hooks_dir)], cwd=omniclaude)
 
         upstream = omni_home / "omniclaude.git"
@@ -465,7 +480,10 @@ class TestPullAllScript:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "left on dev" in result.stdout
         current_branch = subprocess.check_output(
-            ["git", "branch", "--show-current"], cwd=omniclaude, text=True
+            ["git", "branch", "--show-current"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
         assert current_branch == "dev"
         # And the sanctioned path refused nothing, so it recorded nothing: a
@@ -475,7 +493,10 @@ class TestPullAllScript:
         # (OMN-18358) would show here as staged paths.
         assert (
             subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=omniclaude, text=True
+                ["git", "status", "--porcelain"],
+                cwd=omniclaude,
+                text=True,
+                env=scrub_git_location_env(os.environ),
             )
             == ""
         )
@@ -506,7 +527,10 @@ test_untracked_files_do_not_refuse_the_sync`, which is the other half of the
         assert "dirty worktree" in result.stdout
         assert dirty_file.read_text() == "do not lose this\n"
         current_branch = subprocess.check_output(
-            ["git", "branch", "--show-current"], cwd=omniclaude, text=True
+            ["git", "branch", "--show-current"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
         assert current_branch == "main"
 
@@ -580,7 +604,7 @@ test_untracked_files_do_not_refuse_the_sync`, which is the other half of the
                 ["git", "init", "--bare", str(repo_path)],
                 capture_output=True,
                 check=True,
-                env=_hermetic_git_env(),
+                env=scrub_git_location_env(_hermetic_git_env()),
             )
 
             result = subprocess.run(
@@ -637,15 +661,24 @@ class TestMainOnlyRepo:
         assert "FAILED" not in result.stdout
 
         current_branch = subprocess.check_output(
-            ["git", "branch", "--show-current"], cwd=repo, text=True
+            ["git", "branch", "--show-current"],
+            cwd=repo,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
         assert current_branch == "main"
 
         main_sha = subprocess.check_output(
-            ["git", "rev-parse", "main"], cwd=repo, text=True
+            ["git", "rev-parse", "main"],
+            cwd=repo,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
         origin_main_sha = subprocess.check_output(
-            ["git", "rev-parse", "origin/main"], cwd=repo, text=True
+            ["git", "rev-parse", "origin/main"],
+            cwd=repo,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
         assert main_sha == origin_main_sha
 
@@ -654,6 +687,7 @@ class TestMainOnlyRepo:
             ["git", "show-ref", "--verify", "--quiet", "refs/heads/dev"],
             cwd=repo,
             check=False,
+            env=scrub_git_location_env(os.environ),
         )
         assert dev_ref.returncode != 0, (
             "no local dev branch should exist for a main-only repo"
@@ -768,7 +802,10 @@ class TestPluginCacheRefresh:
         cache = _make_versioned_cache(fake_home)
 
         expected_commit = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=omniclaude, text=True
+            ["git", "rev-parse", "HEAD"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
 
         result = _run_pull_all(omni_home, fake_home)
@@ -1632,15 +1669,24 @@ class TestMainConvergeWiring:
 
         # main converged, dev pulled, repo left on dev, OK line says what happened
         main_sha = subprocess.check_output(
-            ["git", "rev-parse", "main"], cwd=repo, text=True
+            ["git", "rev-parse", "main"],
+            cwd=repo,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
         origin_main_sha = subprocess.check_output(
-            ["git", "rev-parse", "origin/main"], cwd=repo, text=True
+            ["git", "rev-parse", "origin/main"],
+            cwd=repo,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
         assert main_sha == origin_main_sha
         assert (
             subprocess.check_output(
-                ["git", "branch", "--show-current"], cwd=repo, text=True
+                ["git", "branch", "--show-current"],
+                cwd=repo,
+                text=True,
+                env=scrub_git_location_env(os.environ),
             ).strip()
             == "dev"
         )
@@ -1714,7 +1760,10 @@ class TestMainConvergeWiring:
         _git(["push", "-q", "origin", "dev"], cwd=writer)
 
         local_dev_before = subprocess.check_output(
-            ["git", "rev-parse", "dev"], cwd=repo, text=True
+            ["git", "rev-parse", "dev"],
+            cwd=repo,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
 
         result = _run_pull_all(
@@ -1731,7 +1780,10 @@ class TestMainConvergeWiring:
             assert "--branch dev" not in calls_log.read_text()
         # and local dev must be exactly where the user left it
         local_dev_after = subprocess.check_output(
-            ["git", "rev-parse", "dev"], cwd=repo, text=True
+            ["git", "rev-parse", "dev"],
+            cwd=repo,
+            text=True,
+            env=scrub_git_location_env(os.environ),
         ).strip()
         assert local_dev_after == local_dev_before
 
@@ -1761,7 +1813,9 @@ class TestGuardManagedHooksPath:
         return repo
 
     def _install_guard_hooks_path(self, omni_home: Path, repo: Path) -> None:
-        guard_dir = omni_home / "scripts" / "git-hooks" / "canonical-clone"
+        guard_dir = (
+            omni_home.parent / "omnibase_internal" / "scripts/git-hooks/canonical-clone"
+        )
         guard_dir.mkdir(parents=True, exist_ok=True)
         hook = guard_dir / "pre-commit"
         hook.write_text(
@@ -2031,7 +2085,7 @@ class TestWrongBranchConvergeWiring:
         branch = subprocess.check_output(
             ["git", "-C", str(repo), "branch", "--show-current"],
             text=True,
-            env=_hermetic_git_env(),
+            env=scrub_git_location_env(_hermetic_git_env()),
         ).strip()
         assert branch in {"main", "dev"}, f"left on {branch!r}"
 
@@ -2039,7 +2093,7 @@ class TestWrongBranchConvergeWiring:
             return subprocess.check_output(
                 ["git", "-C", str(repo), "rev-parse", ref],
                 text=True,
-                env=_hermetic_git_env(),
+                env=scrub_git_location_env(_hermetic_git_env()),
             ).strip()
 
         # Returning to a tracking branch is only half the repair: the clone

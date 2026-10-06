@@ -321,7 +321,7 @@ def _is_ancestor(repo_path: Path, ancestor: str, descendant: str) -> bool:
 def _registry_roots() -> list[Path]:
     """Every directory whose direct children are canonical clones: ``OMNI_HOME``
     plus each ``ONEX_REGISTRY_ROOTS`` entry (the canonical-clone hook family's
-    union, ``scripts/git-hooks/canonical_clone_paths.sh``)."""
+    union, ``omnibase_internal/src/omnibase_internal/handlers/canonical_clone/git-hooks/canonical_clone_paths.sh``)."""
     values = [os.environ.get("OMNI_HOME", "")]
     values.extend(os.environ.get("ONEX_REGISTRY_ROOTS", "").split(":"))
     return [Path(value).resolve() for value in values if value.strip()]
