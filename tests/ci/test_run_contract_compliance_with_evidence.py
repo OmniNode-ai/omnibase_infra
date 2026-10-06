@@ -15,6 +15,7 @@ tests/unit/scripts/ci/test_contract_compliance_evidence_binding.py.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -358,9 +359,10 @@ def test_a_ticketless_dependency_bot_bump_is_the_declared_exemption(
         {"pr_head_ref": "deps/OMN-17427"},
         # a bot that is not one of the two dependency bots is not exempt
         {"pr_author": "github-actions[bot]"},
-        # push and merge_group carry no author or title: never exempt
+        # push carries no PR: never exempt
         {"event_name": "push"},
-        {"event_name": "merge_group"},
+        # merge_group with no queue ref to resolve a PR from: never exempt
+        {"event_name": "merge_group", "pr_author": "", "pr_title": ""},
         # an unresolved context admits nothing
         {"pr_title": ""},
         {"pr_author": ""},
@@ -372,3 +374,39 @@ def test_every_other_pull_request_is_evaluated(
     code, output, _ = _classify(tmp_path, **override)
     assert code == 0
     assert output == "exempt=false\n"
+
+
+def test_merge_group_reads_the_source_pr_facts_and_exempts_a_dependency_bot_bump() -> (
+    None
+):
+    from scripts.ci import classify_contract_compliance_scope as classifier
+
+    def fake_run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        assert argv[2] == "repos/OmniNode-ai/omnibase_infra/pulls/4612"
+        payload = {
+            "user": {"login": "dependabot[bot]"},
+            "title": "build(deps): bump the uv group",
+            "head": {"ref": "dependabot/uv/uv-97be706d13"},
+        }
+        return subprocess.CompletedProcess(argv, 0, json.dumps(payload), "")
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(classifier.subprocess, "run", fake_run)
+        ctx = classifier.fetch_pull_request_context(
+            "OmniNode-ai/omnibase_infra", "4612"
+        )
+    assert classifier.is_declared_exemption(event_name="merge_group", ctx=ctx)
+
+
+def test_merge_group_fails_closed_when_the_source_pr_cannot_be_read() -> None:
+    from scripts.ci import classify_contract_compliance_scope as classifier
+
+    def failing_run(argv: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.CalledProcessError(1, argv)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(classifier.subprocess, "run", failing_run)
+        ctx = classifier.fetch_pull_request_context(
+            "OmniNode-ai/omnibase_infra", "4612"
+        )
+    assert not classifier.is_declared_exemption(event_name="merge_group", ctx=ctx)

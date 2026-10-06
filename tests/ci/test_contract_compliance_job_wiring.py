@@ -143,6 +143,8 @@ def test_the_exemption_is_classified_by_the_declared_rule() -> None:
     assert env["PR_AUTHOR"] == "${{ github.event.pull_request.user.login }}"
     assert env["PR_TITLE"] == "${{ github.event.pull_request.title }}"
     assert env["PR_HEAD_REF"] == "${{ github.event.pull_request.head.ref }}"
+    assert env["MERGE_GROUP_REF"] == "${{ github.event.merge_group.head_ref }}"
+    assert "--merge-group-ref" in step["run"]
 
 
 @pytest.mark.parametrize(
