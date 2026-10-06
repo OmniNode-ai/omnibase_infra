@@ -93,7 +93,7 @@
 # it refuses with exit 3. In repair mode the second consecutive refusal of the
 # same clone at the same index state and dirty-path digest saves a patch of the
 # staged and dirty diff under $OMNI_HOME/.onex_state/dirty-clone-backups and
-# appends exactly one MSG through scripts/ledger_lock.py (to the owner; `unowned`
+# appends exactly one MSG through onex-ledger (to the owner; `unowned`
 # goes to=operator). A changed index resets the count; --check reports and
 # writes nothing. A git lock file older than the clone step budget is named with
 # its age and the `rm -f` that clears it: printed, never run. Nothing here
@@ -733,13 +733,13 @@ explain_refused_clone() { # repo clone
     "clone:$repo|MOVED|"*|"clone:$repo|ALREADY_AT_TARGET|"*) return 0 ;;
   esac
   args=(--clone "$clone" --repo "$repo" --state-dir "$OMNI_HOME/.onex_state"
-        --ledger "${ONEX_LEDGER_PATH:-}" --ledger-lock "$SCRIPT_DIR/ledger_lock.py"
+        --ledger "${ONEX_LEDGER_PATH:-}"
         --lock-age-s "$STEP_TIMEOUT_SECONDS")
   [[ "$MODE" == "repair" ]] && args+=(--record)
   while IFS=$'\t' read -r tag text; do
     say "    $text"
     [[ "$tag" == "owner" && -z "$owner_line" ]] && owner_line="$text"
-  done < <(as_owner "$PYTHON_BIN" "$VERIFIER" clone-refusal "${args[@]}" || \
+  done < <(as_owner env OMNI_HOME="$OMNI_HOME" "$PYTHON_BIN" "$VERIFIER" clone-refusal "${args[@]}" || \
              say "clone-refusal report failed for $repo (exit $?)")
   SURFACE_OWNERS[last]="${owner_line#owner: }"
 }
