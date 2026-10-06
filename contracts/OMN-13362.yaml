@@ -17,7 +17,7 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "uv run python scripts/validation/validate_migration_sequence.py"
+        check_value: "uv run python -m omnibase_infra.nodes.node_migration_sequence_check_compute.runtime_migration_sequence_check"
   - id: "dod-002"
     description: "Node-migration vendor tree is in sync with omnimarket dev (sync-node-migrations --check passes)."
     source: "manual"
