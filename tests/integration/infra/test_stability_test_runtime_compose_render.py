@@ -114,7 +114,7 @@ OUT_OF_LANE_SERVICES = {
 }
 EXPECTED_PUBLISHED_PORTS = {
     "postgres": {"15436"},
-    "redpanda": {"39092", "29644"},
+    "redpanda": {"39092", "39093", "29644"},
     "valkey": {"26379"},
     "omninode-runtime": {"18085"},
     "runtime-effects": {"18086"},
