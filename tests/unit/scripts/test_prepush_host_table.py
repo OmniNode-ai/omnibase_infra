@@ -277,7 +277,7 @@ def test_placement_columns_are_private_in_the_public_table() -> None:
             assert row[idx] in ("@private", "-"), (
                 f"{row[0]}: column {idx + 1} must be `@private` (or `-` on an "
                 f"identity row); got {row[idx]!r}. The real value belongs in "
-                f"$OMNI_HOME/config/lab/prepush_hosts.omnibase_infra.overlay.tsv"
+                f"$ONEX_WORKSPACE_CONFIG_ROOT/config/lab/prepush_hosts.omnibase_infra.overlay.tsv"
             )
 
 
@@ -312,7 +312,7 @@ def test_the_public_table_publishes_no_lab_or_cloud_identifier() -> None:
     offenders = {what: hits for what, hits in found.items() if hits}
     assert not offenders, (
         f"{TABLE} publishes {sorted(offenders)}; move the value to "
-        "$OMNI_HOME/config/lab/prepush_hosts.omnibase_infra.overlay.tsv"
+        "${ONEX_WORKSPACE_CONFIG_ROOT}/config/lab/prepush_hosts.omnibase_infra.overlay.tsv"
     )
 
 
@@ -391,7 +391,7 @@ host_load_ratio() {{ return 1; }}
             "PREPUSH_SLOT_OVERRIDE_MAP": "",
             "PREPUSH_MEM_OVERRIDE_MAP": "",
             # OMN-17996. The placement columns hydrate from
-            # $OMNI_HOME/config/lab/... on a real workstation. Left inherited,
+            # ${ONEX_WORKSPACE_CONFIG_ROOT}/config/lab/... on a real workstation. Left inherited,
             # every one of these tests would read a DIFFERENT table on a
             # developer machine than in CI, where no such file exists -- the
             # test would pass in both places while asserting two different
@@ -400,6 +400,7 @@ host_load_ratio() {{ return 1; }}
             # addresses are reserved-documentation values, so these tests are
             # identical everywhere and none of them can print a real one.
             "OMNI_HOME": str(_synthetic_overlay_home()),
+            "ONEX_WORKSPACE_CONFIG_ROOT": str(_synthetic_overlay_home()),
         },
     )
 
@@ -445,7 +446,11 @@ def test_hydration_fills_the_placement_columns_from_the_private_overlay(
         timeout=60,
         check=False,
         stdin=subprocess.DEVNULL,
-        env={**os.environ, "OMNI_HOME": str(home)},
+        env={
+            **os.environ,
+            "OMNI_HOME": str(home),
+            "ONEX_WORKSPACE_CONFIG_ROOT": str(home),
+        },
     )
     assert completed.returncode == 0, completed.stderr
     rows = [line.split("\t") for line in completed.stdout.splitlines() if line]
@@ -555,7 +560,11 @@ def test_partial_overlay_row_skips_the_whole_placement_row(
         timeout=60,
         check=False,
         stdin=subprocess.DEVNULL,
-        env={**os.environ, "OMNI_HOME": str(home)},
+        env={
+            **os.environ,
+            "OMNI_HOME": str(home),
+            "ONEX_WORKSPACE_CONFIG_ROOT": str(home),
+        },
     )
     assert completed.returncode == 0, completed.stderr
     rows = [line.split("\t") for line in completed.stdout.splitlines() if line]
@@ -4049,3 +4058,28 @@ def test_the_mac_capacity_rows_no_longer_carry_a_widened_slot_reservation() -> N
             f"{label} must not reserve a second concurrent heavy-suite slot for "
             f"a leg that no longer runs (got slots={rows[label][9]!r})"
         )
+
+
+def test_config_migration_reads_overlay_from_owner(tmp_path: Path) -> None:
+    """OMN-19743: the retired root's overlay cannot hydrate a host row."""
+    root = tmp_path / "omni_home"
+    owner = tmp_path / "omnibase_internal"
+    rel = "config/lab/prepush_hosts.omnibase_infra.overlay.tsv"
+    old = root / rel
+    new = owner / rel
+    for p in (old, new):
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("# fixture\n")
+    env = {**os.environ, "OMNI_HOME": str(root), "TEST_OVERLAY_REL": rel}
+    env.pop("ONEX_WORKSPACE_CONFIG_ROOT", None)
+    lib = Path(__file__).resolve().parents[3] / "scripts/hooks/prepush_dispatch.sh"
+    command = 'source "$1"; '
+    command += 'prepush_table_text() { printf "#!placement-overlay %s\\n" "$TEST_OVERLAY_REL"; }; prepush_overlay_path'
+    result = subprocess.run(
+        ["bash", "-c", command, "test", str(lib), rel],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=True,
+    )
+    assert Path(result.stdout).resolve() == new.resolve()

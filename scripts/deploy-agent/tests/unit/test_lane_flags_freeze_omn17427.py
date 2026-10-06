@@ -252,16 +252,10 @@ def test_instance_without_flags_has_no_freeze(tmp_path: Path) -> None:
     assert flags.frozen_reason(NOW) is None
 
 
-def test_committed_dev_201_freeze_expires_at_the_declared_boundary() -> None:
-    flags = lane_flags_for_instance(REPO_ROOT, "dev-201")
-
-    assert flags.freeze is not None
-    assert flags.freeze.until == UNTIL
-    assert flags.frozen_reason(NOW) == (
-        f"FROZEN until 2026-10-19T07:00Z: {flags.freeze.reason}"
-    )
-    assert flags.frozen_reason(UNTIL) is None
-    for instance in ("dev-202", "dev-200"):
+def test_committed_dev_lanes_carry_no_freeze() -> None:
+    # The operator lifted the dev-201 Tech Week freeze on 2026-10-06 (RULINGs
+    # 07:55:26Z and 14:16:08Z), so no committed dev instance is frozen.
+    for instance in ("dev-201", "dev-202", "dev-200"):
         other_flags = lane_flags_for_instance(REPO_ROOT, instance)
         assert other_flags.frozen_reason(NOW) is None
         assert other_flags.frozen_reason(UNTIL) is None

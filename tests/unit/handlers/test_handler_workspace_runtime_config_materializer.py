@@ -16,6 +16,7 @@ working tree of the repository it reads (AC2).
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -34,6 +35,12 @@ from omnibase_infra.handlers.handler_workspace_runtime_config_materializer impor
 )
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def config_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path))
+
 
 _TIER1 = 'event_bus:\n  type: "kafka"\n  profile: "local"\n  lane: "dev"\n'
 
@@ -233,12 +240,13 @@ class TestWhatItReportsInsteadOfRaising:
             encoding="utf-8"
         ) == _TIER1
 
-    def test_a_subdirectory_of_a_repository_is_not_the_workspace(
-        self, tmp_path: Path
+    def test_a_subdirectory_of_a_repository_is_not_the_source(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _lagging_workspace(tmp_path)
         inner = tmp_path / "not-the-root"
         inner.mkdir()
+        monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(inner))
         outcome = HandlerWorkspaceRuntimeConfigMaterializer().materialize(inner)
         assert outcome.ok is False
         assert not (inner / MATERIALIZED_CONTRACTS_RELATIVE_PATH).exists()
@@ -276,3 +284,57 @@ class TestRead:
             / "runtime_config.yaml"
         ).unlink()
         assert handler.read(tmp_path) is None
+
+
+def test_config_is_read_from_owning_sibling_not_retiring_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-19743: a poison config in the retiring root cannot answer."""
+    monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
+    workspace = tmp_path / "omni_home"
+    owner = tmp_path / "omnibase_internal"
+    workspace.mkdir()
+    sha = _lagging_workspace(owner)
+    legacy = workspace / SOURCE_PATH_IN_REPO
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(_TIER1.replace('"dev"', '"stability-test"'), encoding="utf-8")
+    handler = HandlerWorkspaceRuntimeConfigMaterializer()
+    outcome = handler.materialize(workspace)
+    assert outcome.ok, outcome.detail
+    assert outcome.sha == sha
+    copy = handler.read(workspace)
+    assert copy is not None
+    assert copy.config_path.read_text(encoding="utf-8") == _TIER1
+
+
+def test_missing_owner_does_not_materialize_retiring_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
+    workspace = tmp_path / "omni_home"
+    _lagging_workspace(workspace)
+    outcome = HandlerWorkspaceRuntimeConfigMaterializer().materialize(workspace)
+    assert not outcome.ok
+    assert "omnibase_internal" in outcome.detail
+
+
+@pytest.mark.parametrize("owner", [None, "retired"])
+def test_copy_from_retiring_owner_is_not_attributable(
+    tmp_path: Path, owner: str | None
+) -> None:
+    _lagging_workspace(tmp_path)
+    handler = HandlerWorkspaceRuntimeConfigMaterializer()
+    assert handler.materialize(tmp_path).ok
+    sidecar = (
+        tmp_path
+        / MATERIALIZED_CONTRACTS_RELATIVE_PATH
+        / "runtime"
+        / MATERIALIZED_SIDECAR_NAME
+    )
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    if owner is None:
+        data.pop("source_repository")
+    else:
+        data["source_repository"] = str(tmp_path / owner)
+    sidecar.write_text(json.dumps(data), encoding="utf-8")
+    assert handler.read(tmp_path) is None
