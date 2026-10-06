@@ -192,6 +192,7 @@ def _invoke(tmp_path: Path) -> Result:
             delegate_command,
             [
                 _PROMPT,
+                "--json",
                 "--task-type",
                 "summarization",
                 "--bus",

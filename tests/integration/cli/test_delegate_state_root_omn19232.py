@@ -71,6 +71,7 @@ def _invoke(tmp_path: Path, *extra: str) -> tuple[Result, Path]:
             delegate_command,
             [
                 "Reply with exactly the word READY",
+                "--json",
                 "--task-type",
                 "summarization",
                 "--bus",
