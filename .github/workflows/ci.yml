@@ -206,7 +206,7 @@ jobs:
   # lint, validators, contract gates, and receipt-gate callers still run.
   zone-filter:
     needs: occ-preflight
-    uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@e12c36249d550204354f1d99428841ee99a89868
+    uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@13ceae69c246a33c9fc8fc4b33f83fb66b89edc6
     with:
       python-version: "3.12"
 
@@ -355,8 +355,11 @@ jobs:
       - name: Check Kafka hardcoded broker fallbacks (whole-tree backstop)
         run: bash scripts/validation/check_kafka_no_hardcoded_fallback.sh
 
-      - name: Check no localhost env fallbacks in src/ (OMN-10732)
-        run: uv run python scripts/validate_no_env_fallbacks.py
+      # OMN-20568: the same hook entry as pre-commit, the omnibase_core
+      # node_no_env_fallbacks_check_compute node over every tracked Python and
+      # shell file (the old backstop scanned src/ and scripts/ only).
+      - name: Check no localhost env fallbacks (OMN-10732)
+        run: uv run pre-commit run no-env-fallbacks --all-files
 
       - name: Check topic suffix exports (F56)
         run: python scripts/validation/check_topic_suffix_exports.py
@@ -1150,8 +1153,23 @@ jobs:
           fetch-depth: 2
           fetch-tags: false
 
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      # OMN-20568: the node_migration_freeze_check_compute node replaced
+      # scripts/check_migration_freeze.sh. Same base-ref rule: GITHUB_BASE_REF,
+      # or main on a push, where the diff is empty and the check is a no-op.
       - name: Check migration freeze
-        run: ./scripts/check_migration_freeze.sh --ci
+        env:
+          FREEZE_BASE_REF: ${{ github.base_ref || 'main' }}
+        run: |
+          git fetch origin "${FREEZE_BASE_REF}" --quiet || echo "Warning: could not fetch origin/${FREEZE_BASE_REF} (may already be available from checkout)" >&2
+          uv run python -m omnibase_infra.nodes.node_migration_freeze_check_compute.runtime_migration_freeze_check --base "origin/${FREEZE_BASE_REF}"
 
   # Topic enum drift check -- CI gate for contract-driven topic enum pipeline (OMN-3187)
   # Ensures generated enum files stay in sync with contract.yaml definitions
@@ -1813,7 +1831,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniclaude
-          ref: c86c9fe6330c789614126f5f106bfb1be364b20d # .github/sibling-pins.yaml
+          ref: 3b8addff365b1a53e04106284b9275b6d5fad3c6 # .github/sibling-pins.yaml
           path: omniclaude
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -3087,10 +3105,14 @@ jobs:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 -m scripts.ci.classify_contract_compliance_scope \
             --event-name "${EVENT_NAME}" \
+            --repo "${{ github.repository }}" \
+            --merge-group-head-ref "${MERGE_GROUP_HEAD_REF:-}" \
             --pr-author "${PR_AUTHOR:-}" \
             --pr-title "${PR_TITLE:-}" \
             --pr-head-ref "${PR_HEAD_REF:-}" \
@@ -5372,7 +5394,7 @@ jobs:
       - name: Check node migration append-only immutability
         env:
           APPEND_ONLY_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/dev' }}
-        run: uv run python scripts/validation/check_migration_append_only.py --base "${APPEND_ONLY_BASE}"
+        run: uv run python -m omnibase_infra.nodes.node_migration_append_only_check_compute.runtime_migration_append_only_check --base "${APPEND_ONLY_BASE}"
 
       # OMN-17298: RLS enabled with no admitting policy is an outage, not a
       # stricter boundary -- PostgreSQL denies every row to every non-owner,

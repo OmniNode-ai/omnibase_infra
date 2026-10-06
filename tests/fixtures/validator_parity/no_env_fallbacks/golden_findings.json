@@ -1,0 +1,102 @@
+[
+  [
+    "scripts/g_bash.bash",
+    1,
+    "HOST=${HOST:-127.0.0.1}"
+  ],
+  [
+    "scripts/g_shell.sh",
+    1,
+    "HOST=${HOST:-localhost}"
+  ],
+  [
+    "scripts/g_shell_http.sh",
+    1,
+    "URL=${URL:-http://localhost:8080}"
+  ],
+  [
+    "scripts/g_shell_ip.sh",
+    1,
+    "H=${H:-192.168.86.201}"
+  ],
+  [
+    "src/a_environ_get.py",
+    1,
+    "host = os.environ.get(\"HOST\", \"localhost\")"
+  ],
+  [
+    "src/a_environ_http.py",
+    1,
+    "url = os.environ.get(\"URL\", \"http://localhost:8080\")"
+  ],
+  [
+    "src/b_getenv.py",
+    1,
+    "db = os.getenv(\"DB_HOST\", \"localhost\")"
+  ],
+  [
+    "src/b_getenv_redis.py",
+    1,
+    "r = os.getenv(\"R\", \"redis://localhost:6379\")"
+  ],
+  [
+    "src/c_field_default.py",
+    1,
+    "host: str = Field(default=\"localhost\")"
+  ],
+  [
+    "src/c_param_default.py",
+    1,
+    "def f(host: str = \"localhost\"):"
+  ],
+  [
+    "src/d_private_ip_default.py",
+    1,
+    "x: str = \"192.168.86.201\""
+  ],
+  [
+    "src/d_private_ip_getenv.py",
+    1,
+    "h = os.getenv(\"H\", \"192.168.1.5\")"
+  ],
+  [
+    "src/e_bootstrap.py",
+    1,
+    "p = Producer(bootstrap_servers=\"localhost:9092\")"
+  ],
+  [
+    "src/e_bootstrap_ip.py",
+    1,
+    "p = Producer(bootstrap_servers=\"192.168.1.9:9092\")"
+  ],
+  [
+    "src/f_after_docstring.py",
+    2,
+    "host = os.environ.get(\"HOST\", \"localhost\")"
+  ],
+  [
+    "src/f_embedded_triple.py",
+    1,
+    "x = \"\"\"a\"\"\"; host = os.environ.get(\"HOST\", \"localhost\")"
+  ],
+  [
+    "src/f_leading_triple_tail.py",
+    1,
+    "\"\"\"doc\"\"\" + os.environ.get(\"HOST\", \"localhost\")"
+  ],
+  [
+    "src/i_multi.py",
+    1,
+    "a = os.getenv(\"A\", \"localhost\")"
+  ],
+  [
+    "src/j_two_hits.py",
+    1,
+    "a = os.getenv(\"A\", \"localhost\")"
+  ],
+  [
+    "src/j_two_hits.py",
+    2,
+    "b = os.getenv(\"B\", \"127.0.0.1\")"
+  ]
+]

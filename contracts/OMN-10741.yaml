@@ -15,7 +15,7 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "uv run --frozen python scripts/validate_no_env_fallbacks.py"
+        check_value: "uv run pre-commit run no-env-fallbacks --all-files"
   - id: "dod-integration-coverage"
     description: "Integration coverage proves the validator remains clean for runtime roots."
     source: "manual"

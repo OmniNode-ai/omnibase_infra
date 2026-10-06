@@ -32,6 +32,7 @@ from omnibase_core.container import ModelONEXContainer
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
+    InfraPaymentRequiredError,
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
@@ -45,6 +46,8 @@ if TYPE_CHECKING:
     )
 
 logger = logging.getLogger(__name__)
+
+PAYMENT_REFUSED_MESSAGE = "Payment required: the tool endpoint refused the call with HTTP 402. No payment was made."
 
 
 class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
@@ -122,6 +125,8 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
     ) -> dict[str, object]:
         """Execute an MCP tool call by dispatching to the ONEX orchestrator.
 
+        Payment refusals return a fixed message without changing breaker state.
+
         Args:
             tool: Tool definition containing endpoint, timeout, and metadata.
             arguments: Input arguments from the MCP tool call.
@@ -132,6 +137,7 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
                 - success: True if execution succeeded
                 - result: Orchestrator response (if successful)
                 - error: Error message (if failed)
+                - payment_refused: True if the endpoint refused payment
 
         Raises:
             InfraUnavailableError: If tool endpoint is not configured.
@@ -232,6 +238,20 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
                 "error": f"Tool execution timed out after {timeout} seconds",
             }
 
+        except InfraPaymentRequiredError:
+            logger.warning(
+                "MCP tool execution refused - payment required",
+                extra={
+                    "tool_name": tool.name,
+                    "correlation_id": str(correlation_id),
+                },
+            )
+            return {
+                "success": False,
+                "error": PAYMENT_REFUSED_MESSAGE,
+                "payment_refused": True,
+            }
+
         except InfraConnectionError as e:
             # Record failure to potentially open circuit breaker
             async with self._circuit_breaker_lock:
@@ -318,6 +338,7 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
             Response from orchestrator.
 
         Raises:
+            InfraPaymentRequiredError: If the endpoint returns HTTP 402.
             InfraTimeoutError: If request times out.
             InfraConnectionError: If connection fails.
         """
@@ -362,6 +383,7 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
             Response from orchestrator.
 
         Raises:
+            InfraPaymentRequiredError: If the endpoint returns HTTP 402.
             InfraTimeoutError: If request times out.
             InfraConnectionError: If connection fails.
         """
@@ -383,9 +405,27 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
                 timeout=timeout,
             )
 
+            if response.status_code == 402:
+                ctx = ModelInfraErrorContext.with_correlation(
+                    correlation_id=correlation_id,
+                    transport_type=EnumInfraTransportType.HTTP,
+                    operation="http_dispatch",
+                    target_name=endpoint,
+                )
+                raise InfraPaymentRequiredError(
+                    f"Payment required (402) by {endpoint}",
+                    context=ctx,
+                    status_code=402,
+                    raw_header=response.headers.get("payment-required", ""),
+                    raw_body=response.content,
+                )
+
             response.raise_for_status()
             result: dict[str, object] = response.json()
             return result
+
+        except InfraPaymentRequiredError:
+            raise
 
         except TimeoutError as e:
             timeout_ctx = ModelTimeoutErrorContext(
@@ -452,4 +492,4 @@ class AdapterONEXToolExecution(MixinAsyncCircuitBreaker):
         }
 
 
-__all__ = ["AdapterONEXToolExecution"]
+__all__ = ["PAYMENT_REFUSED_MESSAGE", "AdapterONEXToolExecution"]

@@ -216,7 +216,8 @@ services:
       # the process command; the pinning test asserts each argv separately.
       test: ["CMD", "onex-gateway-canary-probe", "--config", "/app/config/gateway-forwarder.yaml", "--state-file", "/tmp/gateway-canary-probe-state.json", "--broker-ref-map", "/run/gateway/broker-ref-map.yaml", "--lane-credential-map", "/run/gateway/lane-credentials.yaml", "--egress-health-file", "/tmp/gateway-egress-health.json", "--lane-mirror-health-file", "/tmp/gateway-lane-mirror-health.json"]
       interval: 15s
-      timeout: 45s
+      # OMN-20006: enclose the loaded canary's 132s worst-case budget.
+      timeout: 135s
       retries: 4
       start_period: 90s
     labels:

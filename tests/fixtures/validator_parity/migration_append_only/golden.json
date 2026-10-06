@@ -1,0 +1,506 @@
+{
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_base_errors[False-False]": [
+  {
+   "err": "FAIL: a base ref is required outside --staged mode\n",
+   "exit": 2,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_base_errors[False-True]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): no supersession row in docker/migrations/forward/_ledger/migration-supersessions.tsv. An already-declared migration is applied history and its bytes are frozen: add a NEW file with the next ordinal in the same node directory instead of editing this one. Before writing a supersession row, ASK THE LANE whether this migration is already applied -- scripts/migrations/check_migration_applied_on_lane.py reads platform_catalog.schema_migrations, the table the runner gates on; onex_application_migration_manifest is a per-session TEMP table and reads clean on every lane (OMN-17139).\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_base_errors[True-False]": [
+  {
+   "err": "FAIL: git merge-base missing-ref HEAD failed (128): fatal: Not a valid object name missing-ref\n",
+   "exit": 2,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_base_errors[True-True]": [
+  {
+   "err": "FAIL: could not resolve integration base 'missing-ref'; fetch the integration reference or pass --base explicitly before running the append-only guard\n",
+   "exit": 2,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_comparison_detects_broken_node": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): no supersession row in docker/migrations/forward/_ledger/migration-supersessions.tsv. An already-declared migration is applied history and its bytes are frozen: add a NEW file with the next ordinal in the same node directory instead of editing this one. Before writing a supersession row, ASK THE LANE whether this migration is already applied -- scripts/migrations/check_migration_applied_on_lane.py reads platform_catalog.schema_migrations, the table the runner gates on; onex_application_migration_manifest is a per-session TEMP table and reads clean on every lane (OMN-17139).\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[absent_base_manifest-committed]": [
+  {
+   "err": "FAIL: anti-vacuity: docker/migrations/forward/_ledger/application-migrations.tsv at 66c7a74186c080a47097166ab5bb6b9c5ebdfc18 declared no migrations; the guard would pass everything\n",
+   "exit": 2,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[absent_base_manifest-staged]": [
+  {
+   "err": "FAIL: anti-vacuity: docker/migrations/forward/_ledger/application-migrations.tsv at 66c7a74186c080a47097166ab5bb6b9c5ebdfc18 declared no migrations; the guard would pass everything\n",
+   "exit": 2,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[add-committed]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[add-staged]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[amend_new_migration-committed]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[amend_new_migration-staged]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[bad_ticket-committed]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): invalid ticket 'bad-ticket'\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[bad_ticket-staged]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): invalid ticket 'bad-ticket'\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[blank_tsv_lines-committed]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[blank_tsv_lines-staged]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[delete-committed]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (D): no supersession row in docker/migrations/forward/_ledger/migration-supersessions.tsv. An already-declared migration is applied history and its bytes are frozen: add a NEW file with the next ordinal in the same node directory instead of editing this one. Before writing a supersession row, ASK THE LANE whether this migration is already applied -- scripts/migrations/check_migration_applied_on_lane.py reads platform_catalog.schema_migrations, the table the runner gates on; onex_application_migration_manifest is a per-session TEMP table and reads clean on every lane (OMN-17139).\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[delete-staged]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (D): no supersession row in docker/migrations/forward/_ledger/migration-supersessions.tsv. An already-declared migration is applied history and its bytes are frozen: add a NEW file with the next ordinal in the same node directory instead of editing this one. Before writing a supersession row, ASK THE LANE whether this migration is already applied -- scripts/migrations/check_migration_applied_on_lane.py reads platform_catalog.schema_migrations, the table the runner gates on; onex_application_migration_manifest is a per-session TEMP table and reads clean on every lane (OMN-17139).\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[delete_with_supersession-committed]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[delete_with_supersession-staged]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[descending_ordinal-committed]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): nodes/node_example/0000_previous.sql does not carry a higher ordinal than nodes/node_example/0001_create_example.sql\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[descending_ordinal-staged]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): nodes/node_example/0000_previous.sql does not carry a higher ordinal than nodes/node_example/0001_create_example.sql\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[different_node-committed]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): nodes/node_other/0002_other.sql is not in the same node directory\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[different_node-staged]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): nodes/node_other/0002_other.sql is not in the same node directory\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[empty-committed]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[empty-staged]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[empty_base_manifest-committed]": [
+  {
+   "err": "FAIL: anti-vacuity: docker/migrations/forward/_ledger/application-migrations.tsv at f62668570dca1dc9dd34b82a5868edaf15e315cd declared no migrations; the guard would pass everything\n",
+   "exit": 2,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[empty_base_manifest-staged]": [
+  {
+   "err": "FAIL: anti-vacuity: docker/migrations/forward/_ledger/application-migrations.tsv at f62668570dca1dc9dd34b82a5868edaf15e315cd declared no migrations; the guard would pass everything\n",
+   "exit": 2,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[empty_tsv_field-committed]": [
+  {
+   "err": "FAIL: docker/migrations/forward/_ledger/migration-supersessions.tsv:1: expected 4 non-empty TSV fields\n",
+   "exit": 2,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[empty_tsv_field-staged]": [
+  {
+   "err": "FAIL: docker/migrations/forward/_ledger/migration-supersessions.tsv:1: expected 4 non-empty TSV fields\n",
+   "exit": 2,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[equal_ordinal-committed]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): nodes/node_example/0001_other.sql does not carry a higher ordinal than nodes/node_example/0001_create_example.sql\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[equal_ordinal-staged]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): nodes/node_example/0001_other.sql does not carry a higher ordinal than nodes/node_example/0001_create_example.sql\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[flat-committed]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[flat-staged]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[invalid_path-committed]": [
+  {
+   "err": "FAIL: supersession path must be nodes/<node>/<ordinal>_<name>.sql: 'nodes/node_example/not_numbered.sql'\n",
+   "exit": 2,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[invalid_path-staged]": [
+  {
+   "err": "FAIL: supersession path must be nodes/<node>/<ordinal>_<name>.sql: 'nodes/node_example/not_numbered.sql'\n",
+   "exit": 2,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[malformed_tsv-committed]": [
+  {
+   "err": "FAIL: docker/migrations/forward/_ledger/migration-supersessions.tsv:1: expected 4 non-empty TSV fields\n",
+   "exit": 2,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[malformed_tsv-staged]": [
+  {
+   "err": "FAIL: docker/migrations/forward/_ledger/migration-supersessions.tsv:1: expected 4 non-empty TSV fields\n",
+   "exit": 2,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[missing_successor-committed]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): nodes/node_example/0002_example_not_null.sql is not ADDED by this change; a supersession only authorises the change that lands the successor, it is not a standing waiver\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[missing_successor-staged]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): nodes/node_example/0002_example_not_null.sql is not ADDED by this change; a supersession only authorises the change that lands the successor, it is not a standing waiver\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[modify-committed]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): no supersession row in docker/migrations/forward/_ledger/migration-supersessions.tsv. An already-declared migration is applied history and its bytes are frozen: add a NEW file with the next ordinal in the same node directory instead of editing this one. Before writing a supersession row, ASK THE LANE whether this migration is already applied -- scripts/migrations/check_migration_applied_on_lane.py reads platform_catalog.schema_migrations, the table the runner gates on; onex_application_migration_manifest is a per-session TEMP table and reads clean on every lane (OMN-17139).\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[modify-staged]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): no supersession row in docker/migrations/forward/_ledger/migration-supersessions.tsv. An already-declared migration is applied history and its bytes are frozen: add a NEW file with the next ordinal in the same node directory instead of editing this one. Before writing a supersession row, ASK THE LANE whether this migration is already applied -- scripts/migrations/check_migration_applied_on_lane.py reads platform_catalog.schema_migrations, the table the runner gates on; onex_application_migration_manifest is a per-session TEMP table and reads clean on every lane (OMN-17139).\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[multiple_rows_invalid-committed]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): invalid ticket 'bad-ticket'; invalid ticket 'another-bad-ticket'\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[multiple_rows_invalid-staged]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): invalid ticket 'bad-ticket'; invalid ticket 'another-bad-ticket'\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[multiple_rows_one_valid-committed]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[multiple_rows_one_valid-staged]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[rename-committed]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (R): no supersession row in docker/migrations/forward/_ledger/migration-supersessions.tsv. An already-declared migration is applied history and its bytes are frozen: add a NEW file with the next ordinal in the same node directory instead of editing this one. Before writing a supersession row, ASK THE LANE whether this migration is already applied -- scripts/migrations/check_migration_applied_on_lane.py reads platform_catalog.schema_migrations, the table the runner gates on; onex_application_migration_manifest is a per-session TEMP table and reads clean on every lane (OMN-17139).\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[rename-staged]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (R): no supersession row in docker/migrations/forward/_ledger/migration-supersessions.tsv. An already-declared migration is applied history and its bytes are frozen: add a NEW file with the next ordinal in the same node directory instead of editing this one. Before writing a supersession row, ASK THE LANE whether this migration is already applied -- scripts/migrations/check_migration_applied_on_lane.py reads platform_catalog.schema_migrations, the table the runner gates on; onex_application_migration_manifest is a per-session TEMP table and reads clean on every lane (OMN-17139).\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[rename_with_supersession-committed]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[rename_with_supersession-staged]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[stale_supersession-committed]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): nodes/node_example/0002_example_not_null.sql is not ADDED by this change; a supersession only authorises the change that lands the successor, it is not a standing waiver\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[stale_supersession-staged]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): nodes/node_example/0002_example_not_null.sql is not ADDED by this change; a supersession only authorises the change that lands the successor, it is not a standing waiver\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[two_violations-committed]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): no supersession row in docker/migrations/forward/_ledger/migration-supersessions.tsv. An already-declared migration is applied history and its bytes are frozen: add a NEW file with the next ordinal in the same node directory instead of editing this one. Before writing a supersession row, ASK THE LANE whether this migration is already applied -- scripts/migrations/check_migration_applied_on_lane.py reads platform_catalog.schema_migrations, the table the runner gates on; onex_application_migration_manifest is a per-session TEMP table and reads clean on every lane (OMN-17139).\n  - docker/migrations/forward/nodes/node_example/0003_second.sql (M): no supersession row in docker/migrations/forward/_ledger/migration-supersessions.tsv. An already-declared migration is applied history and its bytes are frozen: add a NEW file with the next ordinal in the same node directory instead of editing this one. Before writing a supersession row, ASK THE LANE whether this migration is already applied -- scripts/migrations/check_migration_applied_on_lane.py reads platform_catalog.schema_migrations, the table the runner gates on; onex_application_migration_manifest is a per-session TEMP table and reads clean on every lane (OMN-17139).\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[two_violations-staged]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): no supersession row in docker/migrations/forward/_ledger/migration-supersessions.tsv. An already-declared migration is applied history and its bytes are frozen: add a NEW file with the next ordinal in the same node directory instead of editing this one. Before writing a supersession row, ASK THE LANE whether this migration is already applied -- scripts/migrations/check_migration_applied_on_lane.py reads platform_catalog.schema_migrations, the table the runner gates on; onex_application_migration_manifest is a per-session TEMP table and reads clean on every lane (OMN-17139).\n  - docker/migrations/forward/nodes/node_example/0003_second.sql (M): no supersession row in docker/migrations/forward/_ledger/migration-supersessions.tsv. An already-declared migration is applied history and its bytes are frozen: add a NEW file with the next ordinal in the same node directory instead of editing this one. Before writing a supersession row, ASK THE LANE whether this migration is already applied -- scripts/migrations/check_migration_applied_on_lane.py reads platform_catalog.schema_migrations, the table the runner gates on; onex_application_migration_manifest is a per-session TEMP table and reads clean on every lane (OMN-17139).\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[undeclared_successor-committed]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): nodes/node_example/0002_example_not_null.sql is not declared in docker/migrations/forward/_ledger/application-migrations.tsv\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[undeclared_successor-staged]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): nodes/node_example/0002_example_not_null.sql is not declared in docker/migrations/forward/_ledger/application-migrations.tsv\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[valid_supersession-committed]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_matrix[valid_supersession-staged]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_unstaged_data[manifest-False]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_unstaged_data[manifest-True]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): nodes/node_example/0002_example_not_null.sql is not declared in docker/migrations/forward/_ledger/application-migrations.tsv\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_unstaged_data[successor-False]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): nodes/node_example/0002_example_not_null.sql does not exist on disk\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_unstaged_data[successor-True]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_unstaged_data[supersessions-False]": [
+  {
+   "err": "FAIL: applied migration history was rewritten (OMN-16705). The forward-migration runner records a content_sha256 per applied migration in platform_catalog.schema_migrations and refuses every later run when the file no longer matches:\n  - docker/migrations/forward/nodes/node_example/0001_create_example.sql (M): no supersession row in docker/migrations/forward/_ledger/migration-supersessions.tsv. An already-declared migration is applied history and its bytes are frozen: add a NEW file with the next ordinal in the same node directory instead of editing this one. Before writing a supersession row, ASK THE LANE whether this migration is already applied -- scripts/migrations/check_migration_applied_on_lane.py reads platform_catalog.schema_migrations, the table the runner gates on; onex_application_migration_manifest is a per-session TEMP table and reads clean on every lane (OMN-17139).\n",
+   "exit": 1,
+   "kind": "append.main",
+   "out": ""
+  }
+ ],
+ "tests/ci/test_node_parity_migration_append_only_parity_omn20568.py::test_node_parity_migration_append_only_parity_unstaged_data[supersessions-True]": [
+  {
+   "err": "",
+   "exit": 0,
+   "kind": "append.main",
+   "out": "PASS: no declared node migration was modified, deleted, or renamed.\n"
+  }
+ ]
+}

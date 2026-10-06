@@ -600,6 +600,10 @@ surface_remedy() { # surface verdict
         "$OMNI_HOME" "$rerun"
       ;;
     onex-path-shadow) printf 'uv tool uninstall omnibase-core, then %s' "$rerun" ;;
+    canonical-guard)
+      printf 'bash %s/install-canonical-clone-git-hooks.sh (readback), then bash %s/install-canonical-clone-git-hooks.sh --apply <the clones the readback lists as ok>, then %s' \
+        "$SCRIPT_DIR" "$SCRIPT_DIR" "$rerun"
+      ;;
     *) printf '%s' "$rerun" ;;
   esac
 }
@@ -987,6 +991,53 @@ path_onex_shadow_check() {
     "$shadow exists ($found) and outranks $wrapper for every non-interactive onex invocation (the interactive-shell alias never covers those) — fix: uv tool uninstall omnibase-core"
 }
 path_onex_shadow_check
+
+# --------------------------------------------------------------------------- #
+# Installed canonical-clone guard surface (OMN-17291)
+# --------------------------------------------------------------------------- #
+# The reference-transaction guard that decides what this reconciler may do to a
+# canonical clone is a COPY, installed under $OMNI_HOME/scripts/git-hooks from
+# the tracked source beside this script. Nothing proved the copy current. On
+# 2026-09-26 the tracked guard learned that `checkout -B dev` on the branch HEAD
+# is already on is not a branch switch (OMN-18608), and the installed copy stayed
+# at the 2026-09-24 text for nine days: every tick's own `checkout --force -B dev`
+# was refused by a guard that had already been fixed, and only the readback below
+# the delegate kept a clone that happened to sit at its target reading in sync.
+# A clone that fell behind origin/dev could not advance at all, and the tick
+# failed (measured 2026-10-03T22:33Z onward).
+#
+# Read it back by content, never by installer exit status: the installer's own
+# readback also reports clones whose core.hooksPath is deliberately not the
+# shared directory, which would hold this surface red forever. This surface
+# answers one question -- is the live guard byte-identical to the tracked guard
+# -- and its repair is the sanctioned installer, which keeps a dated copy of what
+# it replaces. It is never applied here: rewriting an enforcement surface
+# unattended is not a reconciliation step.
+#
+# A host with no live hooks directory has no installed guard to be stale, so it
+# records nothing, the same way the gate-venv check treats a host with no gate
+# venv. Never a failure by absence.
+canonical_guard_drift_check() {
+  local src_dir="$SCRIPT_DIR/git-hooks" live_dir="$OMNI_HOME/scripts/git-hooks"
+  local script drifted=() checked=0
+  [[ -d "$live_dir" && -d "$src_dir" ]] || return 0
+  for script in canonical_clone_guard.sh canonical_clone_paths.sh canonical_clone_ref_guard.sh; do
+    [[ -f "$src_dir/$script" ]] || continue
+    checked=$((checked + 1))
+    if [[ ! -f "$live_dir/$script" ]] || ! cmp -s "$src_dir/$script" "$live_dir/$script"; then
+      drifted+=("$script")
+    fi
+  done
+  (( checked > 0 )) || return 0
+  if (( ${#drifted[@]} > 0 )); then
+    record "canonical-guard" "DRIFT" \
+      "the installed canonical-clone guard at $live_dir differs from the tracked source at $src_dir: ${drifted[*]} -- a guard fix merged to dev is not in force on this host until it is installed (OMN-17291)"
+    return 0
+  fi
+  record "canonical-guard" "ALREADY_AT_TARGET" \
+    "$checked installed guard script(s) in $live_dir are byte-identical to $src_dir"
+}
+canonical_guard_drift_check
 
 # --------------------------------------------------------------------------- #
 # Receipt, floor, alert

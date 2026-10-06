@@ -11,7 +11,7 @@ interfaces_touched: []
 evidence_requirements:
   - kind: tests
     description: "Discovery applies node-owned migrations and creates the views without manual copy; namespaced ids do not collide with the flat sequence."
-    command: "uv run pytest tests/unit/migrations/ tests/integration/migrations/ tests/ci/test_validate_migration_sequence.py -q"
+    command: "uv run pytest tests/unit/migrations/ tests/integration/migrations/ tests/ci/test_migration_sequence_check_node.py -q"
   - kind: ci
     description: "Vendored node migrations stay in sync with omnimarket source (drift guard)."
     command: "OMNIMARKET_SRC=$OMNI_HOME/omnimarket bash scripts/sync-node-migrations.sh --check"
@@ -28,7 +28,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: "uv run pytest tests/unit/migrations/ tests/integration/migrations/ tests/ci/test_validate_migration_sequence.py -q"
+        check_value: "uv run pytest tests/unit/migrations/ tests/integration/migrations/ tests/ci/test_migration_sequence_check_node.py -q"
   - id: dod-vendor-sync
     description: "Vendored node migrations are in sync with omnimarket origin/dev."
     source: manual

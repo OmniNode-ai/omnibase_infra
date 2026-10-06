@@ -186,6 +186,7 @@ class TestRunDelegate:
         *,
         bus: str,
         locus: EnumDelegateLocus,
+        omni_home: Path | None = None,
     ) -> dict[str, object]:
         """Run the command with the receipt layer faked; return what it was handed."""
         captured: dict[str, object] = {}
@@ -211,6 +212,7 @@ class TestRunDelegate:
             timeout=60,
             verbose=False,
             emit_socket=tmp_path / "no-daemon.sock",
+            omni_home=omni_home,
         )
         return captured
 
@@ -270,3 +272,157 @@ class TestRunDelegate:
             tmp_path, monkeypatch, bus="inmemory", locus=EnumDelegateLocus.IN_PROCESS
         )
         assert "tenant_id" not in self._sent_payload(captured)
+
+
+class TestLabHostTenant:
+    @pytest.mark.parametrize(
+        ("host", "install"),
+        [
+            ("h201", "a630ba90-7baa-4aec-b990-c34ec71ea2fb"),
+            ("h202", "89941c22-11fc-4ff5-bd21-8eb7e9ba4567"),
+        ],
+    )
+    def test_lab_host_without_overlay_stamps_declared_house_tenant(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host: str, install: str
+    ) -> None:
+        house = "820272f9-4aaf-5add-a2df-0af942852ab2"
+        table = tmp_path / "lab_run_hosts.yaml"
+        table.write_text(
+            f"hosts:\n  - name: {host}\n    target: lab.invalid\n    tenant_id: {house}\n"
+        )
+        monkeypatch.setattr(cli_delegate, "read_install_identity", lambda: install)
+        stamp = resolve_delegate_tenant(
+            in_process=False,
+            environ={
+                "ONEX_LAB_RUN_HOSTS": str(table),
+                "ONEX_LANE_HOST": host,
+            },
+        )
+        assert stamp == house
+
+    @pytest.mark.parametrize(
+        "rows",
+        [
+            "[]",
+            "[{name: h201, target: lab.invalid}]",
+            "[{name: h201, target: lab.invalid, tenant_id: bad-uuid}]",
+            "[{name: h202, target: lab.invalid, tenant_id: 820272f9-4aaf-5add-a2df-0af942852ab2}]",
+            "[{name: h201, target: lab.invalid}, {name: h201, target: lab.invalid}]",
+        ],
+    )
+    def test_unresolved_lab_declaration_refuses_instead_of_reading_install(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, rows: str
+    ) -> None:
+        table = tmp_path / "hosts.yaml"
+        table.write_text(f"hosts: {rows}")
+
+        def never_read_install() -> str:
+            pytest.fail(
+                "an invalid lab declaration must never read the install identity"
+            )
+
+        monkeypatch.setattr(cli_delegate, "read_install_identity", never_read_install)
+        with pytest.raises(DelegateTenantRefusedError, match="lab tenant declaration"):
+            resolve_delegate_tenant(
+                in_process=True,
+                environ={
+                    "ONEX_LAB_RUN_HOSTS": str(table),
+                    "ONEX_LANE_HOST": "h201",
+                },
+            )
+
+    def test_missing_table_refuses(self, tmp_path: Path) -> None:
+        with pytest.raises(DelegateTenantRefusedError, match="lab tenant declaration"):
+            resolve_delegate_tenant(
+                in_process=False,
+                environ={
+                    "ONEX_LAB_RUN_HOSTS": str(tmp_path / "absent"),
+                    "ONEX_LANE_HOST": "h201",
+                },
+            )
+
+    def test_native_job_reads_row_through_symlinked_registry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        registry = tmp_path / "registry" / "omni_home"
+        registry.mkdir(parents=True)
+        alias = tmp_path / "Code" / "omni_home"
+        alias.parent.mkdir()
+        alias.symlink_to(registry, target_is_directory=True)
+        table = (
+            registry.parent
+            / "omnibase_internal/src/omnibase_internal/lab_run_hosts.yaml"
+        )
+        table.parent.mkdir(parents=True)
+        house = "820272f9-4aaf-5add-a2df-0af942852ab2"
+        table.write_text(
+            f"hosts:\n  - name: h201\n    target: lab.invalid\n    tenant_id: {house}\n"
+        )
+        monkeypatch.setattr(cli_delegate.socket, "gethostname", lambda: "omninode-pc")
+        monkeypatch.setattr(
+            cli_delegate, "_lab_target_is_local", lambda target: target == "lab.invalid"
+        )
+        assert (
+            resolve_delegate_tenant(in_process=False, environ={"OMNI_HOME": str(alias)})
+            == house
+        )
+
+    def test_customer_registry_without_lab_table_keeps_install_identity(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(cli_delegate, "read_install_identity", lambda: _MINTED)
+        assert (
+            resolve_delegate_tenant(
+                in_process=False, environ={"OMNI_HOME": str(tmp_path)}
+            )
+            == _MINTED
+        )
+
+    def test_explicit_customer_overlay_keeps_precedence(self, tmp_path: Path) -> None:
+        assert (
+            resolve_delegate_tenant(
+                in_process=False,
+                environ={
+                    TENANT_OVERLAY_ENV: _MINTED,
+                    "ONEX_LANE_HOST": "h201",
+                    "ONEX_LAB_RUN_HOSTS": str(tmp_path / "absent"),
+                },
+            )
+            == _MINTED
+        )
+
+    def test_lab_stamp_reaches_request_payload(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        house = "820272f9-4aaf-5add-a2df-0af942852ab2"
+        table = tmp_path / "hosts.yaml"
+        table.write_text(
+            f"hosts:\n  - name: h202\n    target: lab.invalid\n    tenant_id: {house}\n"
+        )
+        monkeypatch.setenv("ONEX_LAB_RUN_HOSTS", str(table))
+        monkeypatch.setenv("ONEX_LANE_HOST", "h202")
+        captured = TestRunDelegate._run(
+            tmp_path, monkeypatch, bus="kafka", locus=EnumDelegateLocus.IN_PROCESS
+        )
+        assert TestRunDelegate._sent_payload(captured)["tenant_id"] == house
+
+    def test_wrapper_workspace_binding_stamps_lab_tenant_without_omni_home_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        registry = tmp_path / "omni_home"
+        registry.mkdir()
+        table = tmp_path / "omnibase_internal/src/omnibase_internal/lab_run_hosts.yaml"
+        table.parent.mkdir(parents=True)
+        house = "820272f9-4aaf-5add-a2df-0af942852ab2"
+        table.write_text(
+            f"hosts:\n  - name: h202\n    target: lab.invalid\n    tenant_id: {house}\n"
+        )
+        monkeypatch.setattr(cli_delegate.socket, "gethostname", lambda: "h202")
+        captured = TestRunDelegate._run(
+            tmp_path,
+            monkeypatch,
+            bus="kafka",
+            locus=EnumDelegateLocus.IN_PROCESS,
+            omni_home=registry,
+        )
+        assert TestRunDelegate._sent_payload(captured)["tenant_id"] == house

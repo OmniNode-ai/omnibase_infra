@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""RED/GREEN proof for the append-only migration guard (OMN-16705).
+"""RED/GREEN proof for the append-only migration node (OMN-20568, OMN-16705).
 
-``scripts/validation/check_migration_append_only.py`` exists so the defect class
+``NodeMigrationAppendOnlyCheckCompute`` exists so the defect class
 behind OMN-16705 becomes impossible rather than merely fixed once: an in-place
 edit to a migration a database has already applied permanently bricks
 ``forward-migration`` on that database, and nothing detected it.
@@ -17,26 +17,40 @@ The RED case reproduces the shape of ``7de798a4a`` exactly: edit an
 already-declared migration and update its manifest checksum to match, which is
 precisely the combination every pre-existing gate accepts.
 
-Ticket: OMN-16705
+Ports every case of the former test_migration_append_only_guard_omn16705.py
+through the node's canonical reports and runtime collection boundary.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from scripts.validation.check_migration_append_only import (
+from omnibase_core.models.validation.model_validation_report import (
+    ModelValidationReport,
+)
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+from omnibase_infra.nodes.node_migration_append_only_check_compute import (
+    runtime_migration_append_only_check as runtime,
+)
+from omnibase_infra.nodes.node_migration_append_only_check_compute.handler import (
     AppendOnlyViolationError,
-    check,
+    NodeMigrationAppendOnlyCheckCompute,
+    declared_artifacts,
+    parse_supersessions,
 )
 
 pytestmark = [pytest.mark.unit]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-GUARD = REPO_ROOT / "scripts" / "validation" / "check_migration_append_only.py"
+RUNTIME_MODULE = (
+    "omnibase_infra.nodes.node_migration_append_only_check_compute."
+    "runtime_migration_append_only_check"
+)
 FORWARD = "docker/migrations/forward"
 
 _APPLIED = "nodes/node_example/0001_create_example.sql"
@@ -45,8 +59,25 @@ _SUCCESSOR = "nodes/node_example/0002_example_not_null.sql"
 _SUCCESSOR_BODY = "ALTER TABLE example ALTER COLUMN id SET NOT NULL;\n"
 
 
+@pytest.fixture(autouse=True)
+def _no_git_location_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in [key for key in os.environ if key.startswith("GIT_")]:
+        monkeypatch.delenv(key)
+
+
 def _run(repo: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), *args],
+        env=scrub_git_location_env(),
+        check=True,
+        capture_output=True,
+    )
+
+
+def _check(repo: Path, *, base: str, staged: bool) -> ModelValidationReport:
+    return NodeMigrationAppendOnlyCheckCompute().handle(
+        runtime.collect_request(repo, base=base, staged=staged)
+    )
 
 
 def _sha256(text: str) -> str:
@@ -100,6 +131,55 @@ def _edit_applied_migration(repo: Path, new_body: str) -> None:
     )
 
 
+@pytest.mark.parametrize("text", [None, "", "\n \t\n"])
+def test_declared_artifacts_ignores_empty_manifests(text: str | None) -> None:
+    assert declared_artifacts(text) == frozenset()
+
+
+def test_declared_artifacts_preserves_paths_and_deduplicates_rows() -> None:
+    row = _manifest_row(_APPLIED, _APPLIED_BODY)
+    text = f"\n{row}\n{row}\n {_SUCCESSOR}\tmetadata\n"
+    assert declared_artifacts(text) == frozenset({_APPLIED, f" {_SUCCESSOR}"})
+
+
+@pytest.mark.parametrize("text", [None, "", "\n \t\n"])
+def test_parse_supersessions_ignores_empty_ledgers(text: str | None) -> None:
+    assert parse_supersessions(text) == ()
+
+
+def test_parse_supersessions_preserves_order_and_field_whitespace() -> None:
+    row = f"{_APPLIED}\t{_SUCCESSOR}\tOMN-16705\t restore applied bytes "
+    second = f"{_SUCCESSOR}\tnodes/node_example/0003_next.sql\tOMN-20568\tsecond"
+    rows = parse_supersessions(f"\n{row}\n\n{second}\n{row}\n")
+    assert len(rows) == 3
+    assert rows[0] == rows[2]
+    assert rows[1].artifact_path == _SUCCESSOR
+    assert rows[1].ticket == "OMN-20568"
+    assert rows[0].artifact_path == _APPLIED
+    assert rows[0].superseded_by == _SUCCESSOR
+    assert rows[0].ticket == "OMN-16705"
+    assert rows[0].reason == " restore applied bytes "
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        "a\tb\tc",
+        "a\tb\tc\td\te",
+        "\tb\tc\td",
+        "a\t\tc\td",
+        "a\tb\t\td",
+        "a\tb\tc\t",
+    ],
+)
+def test_parse_supersessions_rejects_malformed_rows_with_line_number(row: str) -> None:
+    with pytest.raises(
+        AppendOnlyViolationError,
+        match=r"migration-supersessions\.tsv:2: expected 4 non-empty TSV fields",
+    ):
+        parse_supersessions(f"\n{row}\n")
+
+
 def test_rewriting_an_applied_migration_is_rejected(repo: Path) -> None:
     """RED: the defect that produced OMN-16705 is caught."""
     _edit_applied_migration(
@@ -107,11 +187,17 @@ def test_rewriting_an_applied_migration_is_rejected(repo: Path) -> None:
     )
     _run(repo, "commit", "-qam", "rewrite in place")
 
-    violations = check(repo, base="base-marker", staged=False)
+    report = _check(repo, base="base-marker", staged=False)
 
-    assert len(violations) == 1, violations
-    assert _APPLIED in violations[0]
-    assert "supersession" in violations[0]
+    assert report.overall_status == "FAIL"
+    assert len(report.findings) == 1, report.findings
+    assert report.provenance.validators_run == ("migration-append-only",)
+    assert report.findings[0].validator_id == "migration-append-only"
+    assert report.findings[0].rule_id == "applied-migration-mutated"
+    assert report.findings[0].severity == "FAIL"
+    assert report.findings[0].location == f"{FORWARD}/{_APPLIED}"
+    assert _APPLIED in report.findings[0].message
+    assert "supersession" in report.findings[0].message
 
 
 def test_deleting_an_applied_migration_is_rejected(repo: Path) -> None:
@@ -121,10 +207,11 @@ def test_deleting_an_applied_migration_is_rejected(repo: Path) -> None:
     _run(repo, "add", "-A")
     _run(repo, "commit", "-qm", "delete applied migration")
 
-    violations = check(repo, base="base-marker", staged=False)
+    report = _check(repo, base="base-marker", staged=False)
 
-    assert len(violations) == 1, violations
-    assert _APPLIED in violations[0]
+    assert report.overall_status == "FAIL"
+    assert len(report.findings) == 1, report.findings
+    assert _APPLIED in report.findings[0].message
 
 
 def test_adding_a_new_ordinal_is_allowed(repo: Path) -> None:
@@ -141,7 +228,9 @@ def test_adding_a_new_ordinal_is_allowed(repo: Path) -> None:
     _run(repo, "add", "-A")
     _run(repo, "commit", "-qm", "add successor")
 
-    assert check(repo, base="base-marker", staged=False) == []
+    report = _check(repo, base="base-marker", staged=False)
+    assert report.overall_status == "PASS"
+    assert report.findings == ()
 
 
 def _land_supersession(repo: Path, *, with_successor: bool) -> None:
@@ -168,17 +257,20 @@ def test_supersession_with_its_successor_is_allowed(repo: Path) -> None:
     """GREEN: this repair's own shape -- restore the bytes, land the successor."""
     _land_supersession(repo, with_successor=True)
 
-    assert check(repo, base="base-marker", staged=False) == []
+    report = _check(repo, base="base-marker", staged=False)
+    assert report.overall_status == "PASS"
+    assert report.findings == ()
 
 
 def test_supersession_without_its_successor_is_rejected(repo: Path) -> None:
     """A supersession row is not a standing waiver."""
     _land_supersession(repo, with_successor=False)
 
-    violations = check(repo, base="base-marker", staged=False)
+    report = _check(repo, base="base-marker", staged=False)
 
-    assert len(violations) == 1, violations
-    assert "not ADDED by this change" in violations[0]
+    assert report.overall_status == "FAIL"
+    assert len(report.findings) == 1, report.findings
+    assert "not ADDED by this change" in report.findings[0].message
 
 
 def test_a_stale_supersession_cannot_authorise_a_second_edit(repo: Path) -> None:
@@ -188,10 +280,11 @@ def test_a_stale_supersession_cannot_authorise_a_second_edit(repo: Path) -> None
     _edit_applied_migration(repo, "-- second, unauthorised rewrite\n")
     _run(repo, "commit", "-qam", "second rewrite")
 
-    violations = check(repo, base="landed", staged=False)
+    report = _check(repo, base="landed", staged=False)
 
-    assert len(violations) == 1, violations
-    assert "not ADDED by this change" in violations[0]
+    assert report.overall_status == "FAIL"
+    assert len(report.findings) == 1, report.findings
+    assert "not ADDED by this change" in report.findings[0].message
 
 
 def test_a_migration_added_in_this_change_can_still_be_amended(repo: Path) -> None:
@@ -219,7 +312,9 @@ def test_a_migration_added_in_this_change_can_still_be_amended(repo: Path) -> No
     )
     _run(repo, "commit", "-qam", "amend the new migration")
 
-    assert check(repo, base="base-marker", staged=False) == []
+    report = _check(repo, base="base-marker", staged=False)
+    assert report.overall_status == "PASS"
+    assert report.findings == ()
 
 
 def test_staged_mode_sees_the_change_before_it_is_committed(repo: Path) -> None:
@@ -227,10 +322,11 @@ def test_staged_mode_sees_the_change_before_it_is_committed(repo: Path) -> None:
     _edit_applied_migration(repo, "-- staged rewrite\n")
     _run(repo, "add", "-A")
 
-    violations = check(repo, base="base-marker", staged=True)
+    report = _check(repo, base="base-marker", staged=True)
 
-    assert len(violations) == 1, violations
-    assert _APPLIED in violations[0]
+    assert report.overall_status == "FAIL"
+    assert len(report.findings) == 1, report.findings
+    assert _APPLIED in report.findings[0].message
 
 
 def test_staged_mode_still_allows_amending_a_migration_added_on_this_branch(
@@ -267,7 +363,9 @@ def test_staged_mode_still_allows_amending_a_migration_added_on_this_branch(
     )
     _run(repo, "add", "-A")
 
-    assert check(repo, base="base-marker", staged=True) == []
+    report = _check(repo, base="base-marker", staged=True)
+    assert report.overall_status == "PASS"
+    assert report.findings == ()
 
 
 def test_staged_mode_reads_manifest_and_supersessions_from_the_index(
@@ -297,10 +395,11 @@ def test_staged_mode_reads_manifest_and_supersessions_from_the_index(
         f"{FORWARD}/_ledger/migration-supersessions.tsv",
     )
 
-    violations = check(repo, base="base-marker", staged=True)
+    report = _check(repo, base="base-marker", staged=True)
 
-    assert len(violations) == 1, violations
-    assert f"{_SUCCESSOR} is not declared" in violations[0]
+    assert report.overall_status == "FAIL"
+    assert len(report.findings) == 1, report.findings
+    assert f"{_SUCCESSOR} is not declared" in report.findings[0].message
 
 
 def test_staged_mode_fails_when_the_integration_ref_is_unavailable(
@@ -310,7 +409,7 @@ def test_staged_mode_fails_when_the_integration_ref_is_unavailable(
     _run(repo, "add", "-A")
 
     with pytest.raises(AppendOnlyViolationError, match="fetch the integration"):
-        check(repo, base="missing-integration-ref", staged=True)
+        _check(repo, base="missing-integration-ref", staged=True)
 
 
 def test_an_empty_base_manifest_fails_closed(tmp_path: Path) -> None:
@@ -325,18 +424,27 @@ def test_an_empty_base_manifest_fails_closed(tmp_path: Path) -> None:
     _run(repo, "commit", "-qm", "base")
 
     with pytest.raises(AppendOnlyViolationError, match="anti-vacuity"):
-        check(repo, base="HEAD", staged=False)
+        _check(repo, base="HEAD", staged=False)
 
 
-def test_the_guard_runs_as_a_script_and_reports_a_failing_exit_code(
+def test_the_node_runs_as_a_module_and_reports_a_failing_exit_code(
     repo: Path,
 ) -> None:
-    """The CI step and the pre-commit hook both invoke it as a process."""
+    """The node runtime can enforce the guard from a module entry point."""
     _edit_applied_migration(repo, "-- rewrite\n")
     _run(repo, "commit", "-qam", "rewrite")
 
     result = subprocess.run(
-        [sys.executable, str(GUARD), "--repo-root", str(repo), "--base", "base-marker"],
+        [
+            sys.executable,
+            "-m",
+            RUNTIME_MODULE,
+            "--repo-root",
+            str(repo),
+            "--base",
+            "base-marker",
+        ],
+        cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=False,
@@ -344,6 +452,26 @@ def test_the_guard_runs_as_a_script_and_reports_a_failing_exit_code(
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "OMN-16705" in result.stderr
+
+
+def test_runtime_reports_a_passing_exit_code(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert runtime.main(["--repo-root", str(repo), "--base", "base-marker"]) == 0
+    output = capsys.readouterr()
+    assert output.out == (
+        "PASS: no declared node migration was modified, deleted, or renamed.\n"
+    )
+    assert output.err == ""
+
+
+def test_runtime_reports_an_unavailable_check(
+    repo: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert runtime.main(["--repo-root", str(repo)]) == 2
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "FAIL: a base ref is required outside --staged mode\n"
 
 
 _FIXTURES = REPO_ROOT / "tests" / "fixtures" / "omn16705"
@@ -372,13 +500,14 @@ def _captured(entry: tuple[Path, str]) -> str:
     return body
 
 
-def test_the_omn16450_rewrite_is_rejected_by_the_real_guard(tmp_path: Path) -> None:
+def test_the_omn16450_rewrite_is_rejected_by_the_node(tmp_path: Path) -> None:
     """Incident replay: the merge that bricked the .201 dev lane (OMN-16705).
 
     Reconstructs #2866 exactly -- a base revision declaring the bytes the lane
     had applied, and a head revision carrying the rewritten bytes with the
     manifest checksum restamped to match, which is the combination every
-    pre-existing gate accepted. Drives the real ``check()`` and requires reject.
+    pre-existing gate accepted. Collects the real Git diff and requires a FAIL
+    report from the node.
     """
     applied = _captured(_APPLIED_CAPTURE)
     rewritten = _captured(_REWRITTEN_CAPTURE)
@@ -407,17 +536,18 @@ def test_the_omn16450_rewrite_is_rejected_by_the_real_guard(tmp_path: Path) -> N
     )
     _run(repo, "commit", "-qam", "fix(OMN-16450): restore node migration shape proof")
 
-    violations = check(repo, base="dev-before-2866", staged=False)
+    report = _check(repo, base="dev-before-2866", staged=False)
 
-    assert len(violations) == 1, violations
-    assert _CREDENTIALS_ARTIFACT in violations[0]
-    assert "supersession" in violations[0]
+    assert report.overall_status == "FAIL"
+    assert len(report.findings) == 1, report.findings
+    assert _CREDENTIALS_ARTIFACT in report.findings[0].message
+    assert "supersession" in report.findings[0].message
 
 
 def test_the_guard_is_wired_as_a_precommit_hook() -> None:
     """Rule 5: detection that is not enforcement gets ignored."""
     config = (REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
-    assert "check_migration_append_only.py" in config
+    assert "runtime_migration_append_only_check --staged --base origin/dev" in config
 
 
 def test_the_guard_is_wired_as_a_ci_gate() -> None:
@@ -425,13 +555,14 @@ def test_the_guard_is_wired_as_a_ci_gate() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
         encoding="utf-8"
     )
-    assert "check_migration_append_only.py" in workflow
+    assert "runtime_migration_append_only_check --base" in workflow
 
 
 def test_this_repository_satisfies_its_own_guard() -> None:
     """The repair itself must pass the rule it introduces."""
     try:
-        violations = check(REPO_ROOT, base="origin/dev", staged=False)
+        report = _check(REPO_ROOT, base="origin/dev", staged=False)
     except AppendOnlyViolationError as exc:
         pytest.skip(f"base ref unavailable in this checkout: {exc}")
-    assert violations == [], violations
+    assert report.overall_status == "PASS"
+    assert report.findings == ()

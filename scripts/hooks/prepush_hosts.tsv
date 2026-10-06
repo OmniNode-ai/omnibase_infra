@@ -18,7 +18,7 @@
 # addresses, a Tailscale MagicDNS name embedding the tailnet identifier, and
 # per-host absolute home paths -- and this repository is public. They now live
 # in the private workspace repository at
-# `$OMNI_HOME/config/lab/prepush_hosts.omnibase_infra.overlay.tsv`, joined to
+# `${ONEX_WORKSPACE_CONFIG_ROOT}/config/lab/prepush_hosts.omnibase_infra.overlay.tsv`, joined to
 # these rows on `label`, and prepush_dispatch.sh hydrates them at read time.
 #
 # THE SPLIT IS BY AUTHORITY, NOT BY CONVENIENCE. Those three columns are
