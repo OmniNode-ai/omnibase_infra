@@ -1402,25 +1402,19 @@ def _resolve_transport_bound() -> tuple[int, float]:
     return policy.total_attempts, policy.total_bound_seconds
 
 
-def _stdout_is_tty() -> bool:
-    """Whether stdout is a terminal, which picks the default output form (OMN-20124).
-
-    A pipe, a subprocess or CI keeps the one-JSON-line receipt every parsing
-    caller reads; only a person at a terminal gets the human form.
-    """
-    try:
-        return sys.stdout.isatty()
-    except (AttributeError, ValueError):
-        return False
-
-
-def _render_receipt_for_person(receipt: object, *, state_root: Path) -> bool:
+def _render_receipt_for_person(
+    receipt: object, *, state_root: Path, json_output: bool = False
+) -> bool:
     """Print the default, human form of one receipt and say whether it succeeded (OMN-20124).
 
     The answer goes to stdout, the one-line summary or failure line to stderr.
+    JSON mode still prints a plain failure before the full receipt.
     A receipt that is not a delegation is printed as JSON rather than dropped.
     """
     dump = getattr(receipt, "model_dump", None)
+    dump_json = getattr(receipt, "model_dump_json", None)
+    if not callable(dump_json):
+        raise ValueError("delegate receipt is not a serializable typed result")
     envelope = dump(mode="json") if callable(dump) else None
     outcome = (
         render_delegate_outcome(envelope, state_root=state_root)
@@ -1428,12 +1422,15 @@ def _render_receipt_for_person(receipt: object, *, state_root: Path) -> bool:
         else None
     )
     if outcome is None:
-        click.echo(receipt.model_dump_json())  # type: ignore[attr-defined]
+        click.echo(dump_json())
         return True
-    if outcome.stdout:
+    if not json_output or not outcome.succeeded:
+        for line in outcome.stderr:
+            click.echo(line, err=True)
+    if json_output:
+        click.echo(dump_json())
+    elif outcome.stdout:
         click.echo(outcome.stdout)
-    for line in outcome.stderr:
-        click.echo(line, err=True)
     return outcome.succeeded
 
 
@@ -1449,6 +1446,7 @@ def _write_local_run_files(
     config_overrides: tuple[ModelDelegateEnvConfigOverride, ...] = (),
     require_budget_evidence: bool = False,
     require_contract_evidence: bool = False,
+    artifacts_to_stdout: bool = False,
     requested_backend_id: str | None = None,
     broker: str = "",
     command_topic: str = "",
@@ -1465,7 +1463,7 @@ def _write_local_run_files(
     Three outcomes, and each is distinguishable from the other two (OMN-18569):
 
     * the receipt is a delegation with an accepted rung -> three attributed
-      files, and a stderr line naming them;
+      files, and an artifacts line on stdout in human mode (stderr in JSON mode);
     * the receipt is a delegation with no accepted rung -> three UNattributed
       files naming no route, and a stderr line saying so (OMN-18306);
     * the receipt is not a delegation at all -> nothing written, silently,
@@ -1696,7 +1694,7 @@ def _write_local_run_files(
             str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
         )
         + f" state_root={run_dir.parent.parent}",
-        err=True,
+        err=not artifacts_to_stdout,
     )
 
 
@@ -3243,9 +3241,8 @@ class DelegateCommand(click.Command):
     is_flag=True,
     default=False,
     help=(
-        "Force the full typed receipt as ONE JSON line on stdout, even on a "
-        "terminal. This is already the default whenever stdout is not a "
-        "terminal (pipes, subprocesses, CI) (OMN-20124)."
+        "Print the full typed receipt as ONE JSON line on stdout. Use this "
+        "flag for programs that parse the receipt (OMN-20124)."
     ),
 )
 @click.option(
@@ -3254,10 +3251,8 @@ class DelegateCommand(click.Command):
     is_flag=True,
     default=False,
     help=(
-        "Force the human form (the answer on stdout, a one-line summary on "
-        "stderr) even when stdout is not a terminal. Without --json or "
-        "--human the form follows stdout: human on a terminal, the JSON "
-        "receipt otherwise (OMN-20124)."
+        "Print the human form (the default): answer and artifacts line on "
+        "stdout, summary or failure on stderr (OMN-20124)."
     ),
 )
 @click.option(
@@ -3306,17 +3301,14 @@ def delegate_command(
 ) -> None:
     """Delegate PROMPT to a local LLM and print the result.
 
-    Output form follows stdout (OMN-20124). When stdout is NOT a terminal
-    (a pipe, a subprocess, CI) stdout carries exactly ONE
-    ``ModelSkillResult[ModelDelegateSkillResponse]`` JSON, the full LLM
-    response and metrics, never truncated: the contract every program that
-    parses this command reads, unchanged. On a terminal stdout is the answer
-    text and stderr carries a one-line summary (model, cost, run id, where the
-    full receipt is); on failure stdout is empty and stderr names the cause,
-    the reason and the run id. ``--json`` forces the JSON form and ``--human``
-    the human form. Exits non-zero on failure in every form. RuntimeLocal logs
-    go to a capture file + the content-addressed artifact store, never to
-    stdout.
+    Default stdout is the plain answer followed by the artifacts line, including
+    when redirected to a file or pipe (OMN-20124). Diagnostics and the one-line
+    summary (model, cost, run id, full receipt path) go to stderr. On failure,
+    stderr names the typed cause, reason and error_message on a plain line.
+    ``--json`` prints the full typed receipt as one stdout line for programs;
+    failures still have a plain stderr line before the JSON. ``--human`` selects
+    the default form explicitly. Exits non-zero on failure in every form.
+    RuntimeLocal logs go to a capture file and the artifact store.
 
     State root (OMN-19232): runs/<run_id>/{result.txt,receipt.json,run.json}
     are written under one root resolved in this order: the --state-root flag,
@@ -3358,7 +3350,7 @@ def delegate_command(
     """
     if force_json and force_human:
         raise click.UsageError("--json and --human are mutually exclusive.")
-    json_output = force_json or not (force_human or _stdout_is_tty())
+    json_output = force_json
     # OMN-19006: the command class minted this run's identity when argument
     # parsing began, and files the receipt for any refusal under it, so the
     # body runs under the same ids rather than minting a second pair.
@@ -3973,12 +3965,10 @@ def run_delegate(
                     phase_stopwatch=phase_stopwatch,
                     # OMN-20124: the default output is for a person. --json keeps
                     # the one-receipt-JSON-line contract for programs.
-                    receipt_renderer=(
-                        None
-                        if json_output
-                        else functools.partial(
-                            _render_receipt_for_person, state_root=state_root
-                        )
+                    receipt_renderer=functools.partial(
+                        _render_receipt_for_person,
+                        state_root=state_root,
+                        json_output=json_output,
                     ),
                     # OMN-17295 / OMN-14872: the receipt layer cannot select by an
                     # identity it was never told. Handing it the id this CLI just
@@ -4006,6 +3996,7 @@ def run_delegate(
                     receipt_callback=lambda receipt: _write_local_run_files(
                         receipt=receipt,
                         state_root=state_root,
+                        artifacts_to_stdout=not json_output,
                         prompt=prompt,
                         task_type=resolved_task_type,
                         task_type_resolution=resolution,

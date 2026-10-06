@@ -115,6 +115,7 @@ def _invoke(*, tmp_path: Path, broker: str) -> tuple[object, float, Path]:
         delegate_command,
         [
             "Reply with exactly the word READY",
+            "--json",
             "--bus",
             "kafka",
             "--kafka-bootstrap",
