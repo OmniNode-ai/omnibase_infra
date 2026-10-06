@@ -1470,10 +1470,11 @@ DEPENDENCY_BOT_AUTHORS: frozenset[str] = frozenset({"dependabot[bot]", "renovate
 TICKET_TOKEN_RE = re.compile(r"OMN-\d+")
 
 # A MIRROR, not a second policy. Source of truth, read live on 2026-09-22; the
-# reusable was re-read byte-identical at ebe30bc on 2026-09-29:
+# reusable was re-read byte-identical at ebe30bc on 2026-09-29 and at 326ebee
+# on 2026-10-06:
 #   OmniNode-ai/onex_change_control
 #   .github/workflows/pr-title-check-reusable.yml
-#   @ebe30bc3589c9f803e8920b941ddaef07b17ed90
+#   @326ebee0561ab42b3d970e533ae9f447abed2292
 # which is the exact ref .github/workflows/pr-title-check.yml in THIS repo
 # pins, so the mirror and the enforcer cannot be reading different revisions
 # without that pin moving. Its shell tests, in order, are:
