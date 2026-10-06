@@ -1,3 +1,27 @@
+## v0.38.67 (2026-10-06)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.67 by the scheduled release train.
+- 15 release-relevant commit(s) merged since v0.38.66.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.66
+- feat: infra validator conversion batch 1, env-fallback and migration gates become check nodes (#4638)
+- fix: name --timeout in pre-publish field refusals (#4599)
+- fix: budget gateway canary for authenticated cloud startup (#4640)
+- fix: read workspace configuration from its owning repository (#4630)
+- fix: MCP tool execution reports a 402 as a typed payment refusal, no breaker failure, no server body (#4632)
+- : Stamp lab caller delegations from the declared host tenant (#4624)
+- feat: vendor the budget applied-events migrations, fence the RLS step, grant the writer (#4595)
+- fix: print the answer by default when stdout is redirected (#4609)
+- feat: onex delegate names the delegation it falls back or escalates from, and vendors migration 0055 (#4592)
+- feat: map the authorize skill to node_authorize (#4587)
+- fix: a 402 in the LLM transport is one attempt, no retry, no breaker failure (#4593)
+- fix: resolve_project_tracker fails loud instead of returning the local stub (#4580)
+- feat: vendor the run-locally share and saving-per-run migrations (#4568)
+- feat: vendor usage_by_model_day 0002, measured cost apart from estimates (#4559)
+- feat: vendor measured savings provenance (#4547)
+
 ## v0.38.66 (2026-10-05)
 
 ### Release
