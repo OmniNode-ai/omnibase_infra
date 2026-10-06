@@ -134,14 +134,16 @@ def test_release_train_lab_evidence_compose_dev_202_is_not_read_under_compose_de
 def test_release_train_lab_evidence_compose_dev_202_committed_policy() -> None:
     policy = rt.load_policy(_POLICY_PATH)
     assert policy["omnimarket"].lab_evidence is EITHER
-    assert policy["omnibase_infra"].lab_evidence is rt.EnumLabEvidence.COMPOSE_DEV
+    # OMN-20006: omnibase_infra reads dev-202 too while dev-201 is frozen.
+    assert policy["omnibase_infra"].lab_evidence is EITHER
+    assert policy["omnibase_core"].lab_evidence is rt.EnumLabEvidence.NONE
 
 
-def test_release_train_lab_evidence_compose_dev_202_refused_for_omnibase_infra(
+def test_release_train_lab_evidence_compose_dev_202_refused_for_a_repo_no_instance_proves(
     tmp_path: Path,
 ) -> None:
     raw = yaml.safe_load(_POLICY_PATH.read_text(encoding="utf-8"))
-    raw["repos"]["omnibase_infra"]["lab_evidence"] = EITHER.value
+    raw["repos"]["omnibase_core"]["lab_evidence"] = EITHER.value
     path = tmp_path / "policy.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     with pytest.raises(rt.ReleaseTrainConfigError, match=r"no instance in"):

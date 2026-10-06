@@ -335,3 +335,25 @@ def test_frozen_agent_never_starts_an_idle_converge(
     assert list((tmp_path / "jobs").glob("*.json")) == []
     assert cast("Any", agent.executor).calls == []
     assert agent._idle_converge_last_verdict is EnumIdleConvergeVerdict.FROZEN
+
+
+def test_freeze_substitute_instance_is_declared_data_omn20006() -> None:
+    """OMN-20006: the freeze names the instance that proves in its place."""
+    from deploy_agent.routing import parse_lane_flags
+
+    text = (
+        "instances:\n"
+        "  dev-201:\n"
+        "    flags:\n"
+        "      freeze:\n"
+        "        until: 2026-10-19T07:00:00Z\n"
+        "        reason: demo\n"
+        "        substitute_instance: dev-202\n"
+    )
+    freeze = parse_lane_flags(text)["dev-201"].freeze
+    assert freeze is not None
+    assert freeze.substitute_instance == "dev-202"
+    bare = text.replace("        substitute_instance: dev-202\n", "")
+    bare_freeze = parse_lane_flags(bare)["dev-201"].freeze
+    assert bare_freeze is not None
+    assert bare_freeze.substitute_instance == ""

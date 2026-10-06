@@ -95,7 +95,7 @@ class TestOwnShaStepRequiresComposeDev:
     def test_the_step_requires_compose_dev_of_the_proof_subject(self) -> None:
         run = _own_sha_step()["run"]
         assert "lab_pass_receipt.py gate" in run
-        assert "--require-lane compose-dev" in run
+        assert '--require-routed-lane "${GITHUB_REPOSITORY##*/}"' in run
         assert "--resolve-runtime-ancestor" in run
         assert "--detect-pending" in run
         assert f"--overall-bound-seconds {DELIVERY_OVERALL_BOUND_SECONDS}" in run

@@ -39,7 +39,9 @@
 # (dev-201) declares no block: it keeps the dev lane's historical composition.
 # `proves` follows the operator's rulings: omnimarket only on every instance
 # but .201 (ruling 2026-09-25T00:56:45Z for dev-202, ruling
-# 2026-09-25T10:22:22Z for one slot per lab host); omnibase_infra stays .201.
+# 2026-09-25T10:22:22Z for one slot per lab host); omnibase_infra stays .201,
+# except that dev-202 also proves it while dev-201 is frozen (OMN-20006, the
+# `substitute_instance` of dev-201's freeze and the `while_frozen` route).
 #
 # THE ROUTE (task B8, OMN-19510). omnimarket's dev rebuilds run on the dev-202
 # instance on .202 and are proven there under the compose-dev-202 receipt; every
@@ -109,6 +111,14 @@ instances:
       freeze:
         until: 2026-10-19T07:00:00Z
         reason: "stable demo lane, operator 2026-10-05 ~12:45Z; changes only on a promotion/ command"
+        # OMN-20006. While dev-201 is frozen it deploys no dev head, so no
+        # compose-dev receipt can exist for one and the release train and the
+        # staging delivery gate would stall until `until`. dev-202 deploys
+        # omnibase_infra's dev heads in its place (the route below carries
+        # `while_frozen: dev-201`) and emits a real receipt for each merged sha
+        # under compose-dev-202: PASS or FAIL, never a skip (CLAUDE.md rule 24).
+        # scripts/ci/instance_receipt_lanes.py checks the two halves agree.
+        substitute_instance: dev-202
     verify:
       receipt_lane: compose-dev
       runner_labels: [self-hosted, omnibase-verify, host-201]
@@ -133,7 +143,7 @@ instances:
       disabled_phases: [gateway-deploy, lab-overlay, onex-api-pin, infisical-seed]
       disabled_services: [onex-api, cloud-migration-files, cloud-migration, keycloak, infisical]
       receipt_lane: compose-dev-202
-      proves: [omnimarket]
+      proves: [omnimarket, omnibase_infra]
     verify:
       receipt_lane: compose-dev-202
       runner_labels: [self-hosted, omnibase-verify, host-202]
@@ -212,3 +222,10 @@ routes:
   - runtime_lane: dev
     requester_repository: omnimarket
     instance: dev-202
+  # OMN-20006: omnibase_infra's dev heads deploy on dev-202 while dev-201 is
+  # frozen. Delete this row with the freeze (the consistency check refuses one
+  # without the other); the default route then returns omnibase_infra to dev-201.
+  - runtime_lane: dev
+    requester_repository: omnibase_infra
+    instance: dev-202
+    while_frozen: dev-201

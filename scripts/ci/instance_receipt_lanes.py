@@ -30,6 +30,8 @@ malformed table raises, and the gate refuses rather than reading fewer lanes.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
@@ -85,3 +87,184 @@ def receipt_lanes_for(repo: str, table: Path | None = None) -> tuple[str, ...]:
             f"routing table unreadable at {table}: {exc}"
         ) from exc
     return receipt_lanes_from_text(text, repo)
+
+
+def _spec(table: dict[str, object], name: str) -> dict[str, object]:
+    instances = table.get("instances")
+    spec = instances.get(name) if isinstance(instances, dict) else None
+    if not isinstance(spec, dict):
+        raise InstanceReceiptLanesError(f"instance {name!r} is not declared")
+    return spec
+
+
+def _instance_receipt_lane(table: dict[str, object], name: str) -> str:
+    """The receipt lane ``name`` emits: its ``verify:`` lane, else its ``lane:`` one."""
+    spec = _spec(table, name)
+    for key in ("verify", "lane"):
+        block = spec.get(key)
+        lane = block.get("receipt_lane") if isinstance(block, dict) else None
+        if lane:
+            return str(lane)
+    raise InstanceReceiptLanesError(f"instance {name!r} declares no receipt_lane")
+
+
+def _load(text: str) -> dict[str, object]:
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise InstanceReceiptLanesError(f"routing table is not YAML: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise InstanceReceiptLanesError("routing table is not a mapping")
+    return raw
+
+
+def _read(table: Path | None) -> str:
+    table = table if table is not None else ROUTING_TABLE
+    try:
+        return table.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise InstanceReceiptLanesError(
+            f"routing table unreadable at {table}: {exc}"
+        ) from exc
+
+
+@dataclass(frozen=True)
+class FrozenLane:
+    """A receipt lane whose instance is frozen, and the lane that stands in."""
+
+    instance: str
+    until: datetime
+    substitute_instance: str
+    substitute_receipt_lane: str
+
+
+def _freeze(spec: dict[str, object]) -> dict[str, object] | None:
+    flags = spec.get("flags")
+    freeze = flags.get("freeze") if isinstance(flags, dict) else None
+    return freeze if isinstance(freeze, dict) else None
+
+
+def _until(freeze: dict[str, object]) -> datetime:
+    until = freeze.get("until")
+    if isinstance(until, str):
+        until = datetime.fromisoformat(until.replace("Z", "+00:00"))
+    if not isinstance(until, datetime):
+        raise InstanceReceiptLanesError("a freeze declares no `until` timestamp")
+    return until if until.tzinfo is not None else until.replace(tzinfo=UTC)
+
+
+def frozen_receipt_lanes_from_text(text: str, now: datetime) -> dict[str, FrozenLane]:
+    """Receipt lane -> its frozen instance's declared substitute, while ``now < until``.
+
+    Only a freeze that names a ``substitute_instance`` appears: a freeze with no
+    substitute declares no lane that stands in, so it is not an explained absence.
+    """
+    table = _load(text)
+    instances = table.get("instances")
+    if not isinstance(instances, dict):
+        raise InstanceReceiptLanesError("routing table declares no instances")
+    frozen: dict[str, FrozenLane] = {}
+    for name, spec in instances.items():
+        freeze = _freeze(spec) if isinstance(spec, dict) else None
+        substitute = str(freeze.get("substitute_instance") or "") if freeze else ""
+        if freeze is None or not substitute:
+            continue
+        until = _until(freeze)
+        if now >= until:
+            continue
+        frozen[_instance_receipt_lane(table, str(name))] = FrozenLane(
+            instance=str(name),
+            until=until,
+            substitute_instance=substitute,
+            substitute_receipt_lane=_instance_receipt_lane(table, substitute),
+        )
+    return frozen
+
+
+def frozen_receipt_lanes(
+    now: datetime, table: Path | None = None
+) -> dict[str, FrozenLane]:
+    """``frozen_receipt_lanes_from_text`` over the committed table (or ``table``)."""
+    return frozen_receipt_lanes_from_text(_read(table), now)
+
+
+def check_substitute_routes_from_text(text: str) -> None:
+    """Refuse a table whose freeze substitute and ``while_frozen`` routes disagree.
+
+    Both halves of the declaration must exist together: a freeze naming a
+    substitute needs at least one route standing in for it, and a route
+    marked ``while_frozen`` needs that instance's freeze to name the route's
+    instance and the instance to prove the repository. Dropping the freeze
+    without the route would leave a lane routing to a substitute for nothing;
+    dropping the route alone would leave the frozen lane unproven.
+    """
+    table = _load(text)
+    instances = table.get("instances")
+    if not isinstance(instances, dict):
+        raise InstanceReceiptLanesError("routing table declares no instances")
+    routes = [r for r in table.get("routes") or () if isinstance(r, dict)]
+    for name, spec in instances.items():
+        freeze = _freeze(spec) if isinstance(spec, dict) else None
+        substitute = str(freeze.get("substitute_instance") or "") if freeze else ""
+        if not substitute:
+            continue
+        _spec(table, substitute)
+        if not any(
+            r.get("while_frozen") == name and r.get("instance") == substitute
+            for r in routes
+        ):
+            raise InstanceReceiptLanesError(
+                f"{name} freezes with substitute_instance {substitute}, but no "
+                f"route is while_frozen: {name} to {substitute}, so nothing "
+                "deploys there in its place"
+            )
+    for route in routes:
+        frozen = str(route.get("while_frozen") or "")
+        if not frozen:
+            continue
+        repo = str(route.get("requester_repository"))
+        target = str(route.get("instance"))
+        freeze = _freeze(_spec(table, frozen))
+        if freeze is None or str(freeze.get("substitute_instance") or "") != target:
+            raise InstanceReceiptLanesError(
+                f"the route for {repo} to {target} is while_frozen: {frozen}, but "
+                f"{frozen} declares no freeze naming {target} as its "
+                "substitute_instance; remove the route with the freeze"
+            )
+        if repo not in (_proves(_spec(table, target)) or ()):
+            raise InstanceReceiptLanesError(
+                f"the route for {repo} to {target} is while_frozen: {frozen}, but "
+                f"{target} lane.proves does not name {repo}"
+            )
+
+
+def _proves(spec: dict[str, object]) -> list[object] | None:
+    block = spec.get("lane")
+    proves = block.get("proves") if isinstance(block, dict) else None
+    return proves if isinstance(proves, list) else None
+
+
+def routed_receipt_lane(
+    repo: str, table: Path | None = None, runtime_lane: str = "dev"
+) -> str:
+    """The receipt lane of the instance a ``runtime_lane`` rebuild from ``repo`` runs on.
+
+    The same rule as ``deploy_agent.routing.ModelRoutingTable.route`` (and
+    ``deploy_lane_verify_route.route``): the first matching row, else
+    ``default_instance``. The delivery gate requires this lane for the delivered
+    sha, since it is the one lane that actually ran it.
+    """
+    parsed = _load(_read(table))
+    default = str(parsed.get("default_instance") or "").strip()
+    if not default:
+        raise InstanceReceiptLanesError("routing table declares no default_instance")
+    instance = default
+    for route in parsed.get("routes") or ():
+        if (
+            isinstance(route, dict)
+            and str(route.get("runtime_lane")) == runtime_lane
+            and str(route.get("requester_repository")) == repo
+        ):
+            instance = str(route.get("instance"))
+            break
+    return _instance_receipt_lane(parsed, instance)

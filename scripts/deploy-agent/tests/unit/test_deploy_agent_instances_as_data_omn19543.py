@@ -243,7 +243,7 @@ class TestDev200Instance:
         every matching rebuild)."""
         table = load_routing_table(_REPO_ROOT)
         assert all(r.instance != "dev-200" for r in table.routes)
-        for requester in ("gha/omnibase_infra/9", "operator"):
+        for requester in ("gha/omnibase_core/9", "operator"):
             assert table.route(EnumRuntimeLane.DEV, requester) == "dev-201"
 
     def test_dev_200_proves_omnimarket_only(self) -> None:

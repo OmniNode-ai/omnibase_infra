@@ -75,8 +75,12 @@ def test_the_committed_table_gives_omnimarket_both_instance_lanes() -> None:
     assert irl.receipt_lanes_for("omnimarket") == ("compose-dev-202", "compose-dev-200")
 
 
-def test_the_committed_table_gives_omnibase_infra_none() -> None:
-    assert irl.receipt_lanes_for("omnibase_infra") == ()
+def test_the_committed_table_gives_omnibase_infra_only_the_frozen_lanes_substitute() -> (
+    None
+):
+    """OMN-20006: dev-202 proves omnibase_infra while dev-201 is frozen."""
+    assert irl.receipt_lanes_for("omnibase_infra") == ("compose-dev-202",)
+    assert irl.receipt_lanes_for("omnibase_core") == ()
 
 
 def test_every_table_lane_is_a_declared_receipt_lane_outside_the_any_of() -> None:
@@ -169,7 +173,8 @@ def test_the_gate_reads_the_instance_lanes_that_prove_the_repo() -> None:
         EnumLabLane.COMPOSE_DEV_202,
         EnumLabLane.COMPOSE_DEV_200,
     ]
-    assert instance_lanes_for("omnibase_infra") == []
+    assert instance_lanes_for("omnibase_infra") == [EnumLabLane.COMPOSE_DEV_202]
+    assert instance_lanes_for("omnibase_core") == []
 
 
 def _gate_main(
@@ -214,7 +219,7 @@ def test_a_compose_dev_200_pass_is_refused_without_the_instance_lanes(
 def test_a_repo_no_instance_proves_reads_compose_dev_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    args = ("--lane", "compose-dev", "--instance-lanes-for", "omnibase_infra")
+    args = ("--lane", "compose-dev", "--instance-lanes-for", "omnibase_core")
     assert _gate_main(monkeypatch, EnumLabLane.COMPOSE_DEV_200, *args) != 0
 
 

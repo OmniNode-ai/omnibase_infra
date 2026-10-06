@@ -136,7 +136,7 @@ import re
 import subprocess
 import sys
 import tomllib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -535,8 +535,9 @@ def _parse_entry(repo: str, entry: Any, path: Path) -> ModelRepoReleasePolicy:
             f"{path}: repo {repo} declares lab_evidence "
             f"'{EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE.value}', but no instance in "
             "config/deploy_lane_routing.yaml proves it. The instance lanes prove "
-            "omnimarket changes only (operator rulings 2026-09-25T00:56:45Z and "
-            "2026-09-25T10:22:22Z); omnibase_infra stays proven on .201."
+            "omnimarket changes (operator rulings 2026-09-25T00:56:45Z and "
+            "2026-09-25T10:22:22Z), and omnibase_infra only while dev-201 is "
+            "frozen and names its substitute (OMN-20006)."
         )
         raise ReleaseTrainConfigError(msg)
 
@@ -1211,6 +1212,7 @@ def classify_lab_receipt(
     download_receipt: Callable[[str, int], Any],
     rebuild_pending: Callable[[str, str], bool] | None = None,
     lanes: Sequence[Any] | None = None,
+    frozen: Mapping[str, Any] | None = None,
 ) -> tuple[EnumTrainReason | None, str]:
     """Resolve the compose-dev receipt for one sha into a reason, or None on PASS.
 
@@ -1252,6 +1254,15 @@ def classify_lab_receipt(
     each instance lane that proves it (``compose-dev-202``, ``compose-dev-200``,
     in routing-table order), and a PASS on any satisfies the premise. When none
     passes, the refusal is the FIRST lane's, with the others' outcomes appended.
+
+    FROZEN LANES (OMN-20006)
+    ------------------------
+    ``frozen`` maps a receipt lane to its declared freeze
+    (``instance_receipt_lanes.frozen_receipt_lanes``). A frozen lane deploys no
+    new head, so no receipt exists for one by design; a refusal on that lane says
+    so and names the lane read in its place, rather than reading as a lane that
+    failed. It changes no verdict: the substitute lane still needs a real PASS
+    on the exact sha, and a receipt that exists is classified as it always was.
     """
     read = tuple(lanes) if lanes else (lab_pass_receipt.EnumLabLane.COMPOSE_DEV,)
     outcomes: list[tuple[EnumTrainReason | None, str]] = []
@@ -1266,6 +1277,14 @@ def classify_lab_receipt(
         )
         if reason is None:
             return reason, detail
+        freeze = (frozen or {}).get(lane.value)
+        if freeze is not None and reason is EnumTrainReason.LAB_RECEIPT_ABSENT:
+            detail = (
+                f"the {lane.value} lane ({freeze.instance}) is frozen until "
+                f"{freeze.until:%Y-%m-%dT%H:%MZ} and deploys no new head, so it "
+                f"carries no receipt for {sha[:12]} by declaration; "
+                f"{freeze.substitute_receipt_lane} is read in its place. {detail}"
+            )
         outcomes.append((reason, detail))
     first_reason, first_detail = outcomes[0]
     if len(outcomes) > 1:
@@ -1532,6 +1551,7 @@ def decide(
         download_receipt=download_receipt,
         rebuild_pending=rebuild_pending,
         lanes=lab_evidence_lanes(policy.lab_evidence, policy.repo),
+        frozen=instance_receipt_lanes.frozen_receipt_lanes(datetime.now(UTC)),
     )
     if reason is not None:
         if not candidate.sha and candidate.unresolved_reason:

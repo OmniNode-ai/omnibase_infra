@@ -1266,6 +1266,11 @@ jobs:
       #
       # The any-of rule 24(b) premise on the exact sha is unchanged. No `if:`,
       # no force, skip or override (tests/scripts/ci/test_lab_pass_gate_no_force_skip.py).
+      #
+      # OMN-20006: the required lane is the one config/deploy_lane_routing.yaml
+      # routes this repository's dev rebuilds to: compose-dev, or the declared
+      # substitute (compose-dev-202) while dev-201 is frozen. Still ONE lane, the
+      # one that ran the sha; another lane's PASS never substitutes (PS-2).
       - name: Read the lab-pass receipt for the delivered sha
         id: own-sha-gate
         env:
@@ -1276,7 +1281,7 @@ jobs:
             python3 scripts/ci/lab_pass_receipt.py gate \
             --sha "${GITHUB_SHA}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --require-lane compose-dev \
+            --require-routed-lane "${GITHUB_REPOSITORY##*/}" \
             --resolve-runtime-ancestor \
             --clone . \
             --runtime-path-validator .deploy-gate-source/.github/actions/deploy-gate/validate_pr_deploy_required.py \

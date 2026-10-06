@@ -100,6 +100,11 @@ class ModelRoute(BaseModel):
     runtime_lane: EnumRuntimeLane
     requester_repository: str
     instance: str
+    #: OMN-20006. Names the instance whose freeze this route stands in for. The
+    #: route exists only while that instance's freeze names ``instance`` as its
+    #: ``substitute_instance``; ``scripts/ci/instance_receipt_lanes.py`` checks
+    #: both halves, so dropping the freeze forces the route out in the same change.
+    while_frozen: str = ""
 
 
 class ModelRoutingTable(BaseModel):
@@ -205,7 +210,10 @@ def parse_routing_table(text: str) -> ModelRoutingTable:
         seen.add(key)
         routes.append(
             ModelRoute(
-                runtime_lane=lane, requester_repository=repository, instance=instance
+                runtime_lane=lane,
+                requester_repository=repository,
+                instance=instance,
+                while_frozen=str(entry.get("while_frozen") or "").strip(),
             )
         )
 
@@ -482,6 +490,10 @@ class ModelLaneFreeze(BaseModel):
     until: AwareDatetime
     #: Why, with the ruling or ledger row that asked for it.
     reason: str = Field(min_length=1)
+    #: OMN-20006. The instance that deploys and proves in this lane's place while
+    #: the freeze holds, so a lab-pass receipt for each merged sha still exists on
+    #: a lane that moves. Empty: nothing substitutes.
+    substitute_instance: str = ""
 
     def active(self, now: datetime) -> bool:
         return now < self.until

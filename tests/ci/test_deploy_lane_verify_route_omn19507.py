@@ -85,8 +85,12 @@ REQUESTERS = (
 #: omnimarket -> dev-202 route. omnimarket is asserted separately below,
 #: against the real committed table, since it now legitimately resolves
 #: to dev-202 rather than dev-201.
+#: OMN-20006: omnibase_infra moved to dev-202 for as long as dev-201 is frozen
+#: (asserted separately below, against the committed table).
 REQUESTERS_STILL_ON_201 = tuple(
-    r for r in REQUESTERS if not r.startswith("gha/omnimarket/")
+    r
+    for r in REQUESTERS
+    if not r.startswith(("gha/omnimarket/", "gha/omnibase_infra/"))
 )
 
 
@@ -135,7 +139,7 @@ class TestTheCommittedTableKeepsEveryMergeOn201:
             resolve(
                 load_table(),
                 runtime_lane="dev",
-                requested_by="gha/omnibase_infra/pr-1",
+                requested_by="gha/omnibase_core/pr-1",
             )
         )
         assert outputs == {
@@ -163,13 +167,23 @@ class TestTheCommittedTableKeepsEveryMergeOn201:
             == check_lane_sibling_revision.DEFAULT_COMPOSE_PROJECT
         )
 
-    def test_omnibase_infra_is_never_routed_off_201(self) -> None:
-        """Operator ruling 2026-09-25T00:56:45Z: omnibase_infra changes stay
-        proven on .201 only."""
+    def test_omnibase_infra_is_routed_off_201_only_while_it_is_frozen(self) -> None:
+        """Operator ruling 2026-09-25T00:56:45Z kept omnibase_infra proven on
+        .201 only. OMN-20006: while dev-201 is frozen (omnibase_infra#4588), a
+        route to its declared substitute stands in, marked ``while_frozen``."""
         table = load_table()
-        for row in table.get("routes") or ():
-            if row.get("requester_repository") == "omnibase_infra":
-                assert row.get("instance") == "dev-201", row
+        rows = [
+            row
+            for row in table.get("routes") or ()
+            if row.get("requester_repository") == "omnibase_infra"
+        ]
+        assert [(r["instance"], r["while_frozen"]) for r in rows] == [
+            ("dev-202", "dev-201")
+        ]
+        resolved = resolve(
+            table, runtime_lane="dev", requested_by="gha/omnibase_infra/pr-1"
+        )
+        assert resolved.targets.receipt_lane == "compose-dev-202"
 
 
 # --------------------------------------------------------------------------- #
@@ -302,7 +316,7 @@ class TestTheResolverRefusesRatherThanGuesses:
         table = load_table()
         del table["instances"]["dev-201"]["verify"]["runner_labels"]
         with pytest.raises(VerifyRouteError, match="invalid"):
-            resolve(table, runtime_lane="dev", requested_by="gha/omnibase_infra/x")
+            resolve(table, runtime_lane="dev", requested_by="gha/omnibase_core/x")
 
     def test_a_receipt_lane_no_instance_emits_refuses(self) -> None:
         with pytest.raises(VerifyRouteError, match="0 instances"):
@@ -320,7 +334,7 @@ class TestTheResolverRefusesRatherThanGuesses:
                     "--runtime-lane",
                     "dev",
                     "--requested-by",
-                    "gha/omnibase_infra/pr-7",
+                    "gha/omnibase_core/pr-7",
                 ]
             )
             == 0

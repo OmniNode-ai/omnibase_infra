@@ -5652,6 +5652,18 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     gate.add_argument(
+        "--require-routed-lane",
+        default="",
+        metavar="REPO",
+        help=(
+            "OMN-20006: also ALL-OF require the receipt lane of the instance "
+            "config/deploy_lane_routing.yaml routes REPO's dev rebuilds to "
+            "(compose-dev by default, the declared substitute while its lane is "
+            "frozen). It is the one lane that ran the sha. An unreadable table "
+            "refuses"
+        ),
+    )
+    gate.add_argument(
         "--wait-seconds",
         type=float,
         default=0.0,
@@ -6360,6 +6372,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return 1
             lanes.extend(lane for lane in extra if lane not in lanes)
         required = list(dict.fromkeys(EnumLabLane(v) for v in args.require_lane))
+        if args.require_routed_lane:
+            table_reader = _instance_receipt_lanes()
+            try:
+                routed = EnumLabLane(
+                    table_reader.routed_receipt_lane(args.require_routed_lane)
+                )
+            except (table_reader.InstanceReceiptLanesError, ValueError) as exc:
+                print(
+                    f"::error::lab-pass gate FAILED for {args.sha}: the routed "
+                    f"receipt lane for {args.require_routed_lane} could not be "
+                    f"read ({exc}); refusing rather than guessing a lane.",
+                    file=sys.stdout,
+                )
+                return 1
+            if routed not in required:
+                required.append(routed)
         required_sha: str | None = None
         required_note = ""
         if args.resolve_runtime_ancestor:

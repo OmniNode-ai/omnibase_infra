@@ -132,9 +132,13 @@ def test_sibling_compose_dev_202_other_siblings_refuse_a_202_pass(
 # --- AC2 ----------------------------------------------------------------------
 
 
-def test_own_sha_requires_compose_dev_and_never_names_202() -> None:
+def test_own_sha_requires_the_routed_lane_and_never_names_202() -> None:
+    """OMN-20006: the required lane comes from the routing table (compose-dev by
+    default, the freeze's declared substitute while dev-201 is frozen), never a
+    literal; tests/scripts/ci/test_frozen_lane_substitute_omn20006.py pins it."""
     code = _code_lines(_step_run(OWN_SHA_STEP))
-    assert "--require-lane compose-dev" in code
+    assert '--require-routed-lane "${GITHUB_REPOSITORY##*/}"' in code
+    assert "--require-lane" not in code
     assert "compose-dev-202" not in code
 
 

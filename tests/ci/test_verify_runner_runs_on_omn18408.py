@@ -177,13 +177,13 @@ ROUTED_JOBS = frozenset(
 )
 
 
-def _routed_labels(requester: str = "gha/omnibase_infra/pr-1") -> Any:
+def _routed_labels(requester: str = "gha/omnibase_core/pr-1") -> Any:
     """What a routed job's ``runs-on`` resolves to for `requester` under the
     COMMITTED table.
 
-    Every requester but omnimarket still resolves to dev-201/host-201 -- the
-    literal the two jobs carried before OMN-19507 -- so that stays the default
-    here. Task B8 (OMN-19510) landed the real omnimarket -> dev-202 route,
+    Every requester but omnimarket and, while dev-201 is frozen (OMN-20006),
+    omnibase_infra still resolves to dev-201/host-201 -- the literal the two jobs
+    carried before OMN-19507 -- so an unrouted requester stays the default here. Task B8 (OMN-19510) landed the real omnimarket -> dev-202 route,
     moving that one caller's own resolution to its host-scoped runner; see
     ``test_the_reusable_verify_job_moves_with_omnimarkets_own_route`` below and
     the full pin in tests/ci/test_deploy_lane_verify_route_omn19507.py.
