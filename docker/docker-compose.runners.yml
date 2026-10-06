@@ -65,6 +65,15 @@
 #
 # NOTE: mem_limit/cpus/pids_limit are Compose v2 top-level resource keys.
 # Do NOT use deploy.resources - those are Swarm-only and silently ignored here.
+# OMN-18829: the same host-owned declaration is read by native jobs and CI.
+# Refuse container creation when it is absent; never create an empty directory.
+x-lab-host-table: &lab-host-table
+  type: bind
+  source: /data/omninode/omnibase_internal/src/omnibase_internal/lab_run_hosts.yaml
+  target: /etc/onex/lab_run_hosts.yaml
+  read_only: true
+  bind:
+    create_host_path: false
 x-runner-base: &runner-base
   image: omninode-runner:latest
   restart: unless-stopped
@@ -74,6 +83,9 @@ x-runner-base: &runner-base
   pids_limit: 4096
   cgroup_parent: omnirunners.slice
   environment: &runner-env
+    # OMN-18829: the host row, not the container install identity, owns lab delegations.
+    ONEX_LANE_HOST: h201
+    ONEX_LAB_RUN_HOSTS: /etc/onex/lab_run_hosts.yaml
     # OMN-17477 -- `arch-amd64` names this host's CPU in the fleet's own
     # vocabulary, the one that matches Docker's TARGETARCH and
     # config/runner_fleet.yaml's `hosts:` inventory, so a workflow pins an
@@ -248,6 +260,7 @@ x-runner-base: &runner-base
     # duplicated the same way). This line documents the shared shape; the
     # per-service `volumes:` blocks below carry the actual effective copy.
     - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+    - *lab-host-table
   group_add:
     - "984" # Match host Docker socket GID for DinD access
   # OMN-12433 / OMN-13915: healthcheck proves BOTH the listener is alive AND
@@ -281,6 +294,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-1-creds:/home/runner/.runner-creds
   omninode-runner-2:
     !!merge <<: *runner-base
@@ -295,6 +309,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-2-creds:/home/runner/.runner-creds
   omninode-runner-3:
     !!merge <<: *runner-base
@@ -309,6 +324,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-3-creds:/home/runner/.runner-creds
   omninode-runner-4:
     !!merge <<: *runner-base
@@ -323,6 +339,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-4-creds:/home/runner/.runner-creds
   omninode-runner-5:
     !!merge <<: *runner-base
@@ -337,6 +354,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-5-creds:/home/runner/.runner-creds
   omninode-runner-6:
     !!merge <<: *runner-base
@@ -351,6 +369,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-6-creds:/home/runner/.runner-creds
   omninode-runner-7:
     !!merge <<: *runner-base
@@ -365,6 +384,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-7-creds:/home/runner/.runner-creds
   omninode-runner-8:
     !!merge <<: *runner-base
@@ -379,6 +399,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-8-creds:/home/runner/.runner-creds
   omninode-runner-9:
     !!merge <<: *runner-base
@@ -393,6 +414,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-9-creds:/home/runner/.runner-creds
   omninode-runner-10:
     !!merge <<: *runner-base
@@ -407,6 +429,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-10-creds:/home/runner/.runner-creds
   omninode-runner-11:
     !!merge <<: *runner-base
@@ -421,6 +444,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-11-creds:/home/runner/.runner-creds
   omninode-runner-12:
     !!merge <<: *runner-base
@@ -435,6 +459,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-12-creds:/home/runner/.runner-creds
   omninode-runner-13:
     !!merge <<: *runner-base
@@ -449,6 +474,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-13-creds:/home/runner/.runner-creds
   omninode-runner-14:
     !!merge <<: *runner-base
@@ -463,6 +489,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-14-creds:/home/runner/.runner-creds
   omninode-runner-15:
     !!merge <<: *runner-base
@@ -477,6 +504,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-15-creds:/home/runner/.runner-creds
   omninode-runner-16:
     !!merge <<: *runner-base
@@ -491,6 +519,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-16-creds:/home/runner/.runner-creds
   omninode-runner-17:
     !!merge <<: *runner-base
@@ -505,6 +534,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-17-creds:/home/runner/.runner-creds
   omninode-runner-18:
     !!merge <<: *runner-base
@@ -519,6 +549,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-18-creds:/home/runner/.runner-creds
   omninode-runner-19:
     !!merge <<: *runner-base
@@ -533,6 +564,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-19-creds:/home/runner/.runner-creds
   omninode-runner-20:
     !!merge <<: *runner-base
@@ -547,6 +579,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-20-creds:/home/runner/.runner-creds
   omninode-runner-21:
     !!merge <<: *runner-base
@@ -561,6 +594,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-21-creds:/home/runner/.runner-creds
   omninode-runner-22:
     !!merge <<: *runner-base
@@ -575,6 +609,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-22-creds:/home/runner/.runner-creds
   omninode-runner-23:
     !!merge <<: *runner-base
@@ -589,6 +624,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-23-creds:/home/runner/.runner-creds
   omninode-runner-24:
     !!merge <<: *runner-base
@@ -603,6 +639,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-24-creds:/home/runner/.runner-creds
   omninode-runner-25:
     !!merge <<: *runner-base
@@ -617,6 +654,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-25-creds:/home/runner/.runner-creds
   omninode-runner-26:
     !!merge <<: *runner-base
@@ -631,6 +669,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-26-creds:/home/runner/.runner-creds
   omninode-runner-27:
     !!merge <<: *runner-base
@@ -645,6 +684,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-27-creds:/home/runner/.runner-creds
   omninode-runner-28:
     !!merge <<: *runner-base
@@ -659,6 +699,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-28-creds:/home/runner/.runner-creds
   omninode-runner-29:
     !!merge <<: *runner-base
@@ -673,6 +714,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-29-creds:/home/runner/.runner-creds
   omninode-runner-30:
     !!merge <<: *runner-base
@@ -687,6 +729,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-30-creds:/home/runner/.runner-creds
   omninode-runner-31:
     !!merge <<: *runner-base
@@ -701,6 +744,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-31-creds:/home/runner/.runner-creds
   omninode-runner-32:
     !!merge <<: *runner-base
@@ -715,6 +759,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-32-creds:/home/runner/.runner-creds
   omninode-runner-33:
     !!merge <<: *runner-base
@@ -729,6 +774,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-33-creds:/home/runner/.runner-creds
   omninode-runner-34:
     !!merge <<: *runner-base
@@ -743,6 +789,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-34-creds:/home/runner/.runner-creds
   omninode-runner-35:
     !!merge <<: *runner-base
@@ -757,6 +804,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-35-creds:/home/runner/.runner-creds
   omninode-runner-36:
     !!merge <<: *runner-base
@@ -771,6 +819,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-36-creds:/home/runner/.runner-creds
   omninode-runner-37:
     !!merge <<: *runner-base
@@ -785,6 +834,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-37-creds:/home/runner/.runner-creds
   omninode-runner-38:
     !!merge <<: *runner-base
@@ -799,6 +849,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-38-creds:/home/runner/.runner-creds
   omninode-runner-39:
     !!merge <<: *runner-base
@@ -813,6 +864,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-39-creds:/home/runner/.runner-creds
   omninode-runner-40:
     !!merge <<: *runner-base
@@ -827,6 +879,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-40-creds:/home/runner/.runner-creds
   omninode-runner-41:
     !!merge <<: *runner-base
@@ -841,6 +894,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-41-creds:/home/runner/.runner-creds
   omninode-runner-42:
     !!merge <<: *runner-base
@@ -855,6 +909,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-42-creds:/home/runner/.runner-creds
   omninode-runner-43:
     !!merge <<: *runner-base
@@ -869,6 +924,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-43-creds:/home/runner/.runner-creds
   omninode-runner-44:
     !!merge <<: *runner-base
@@ -883,6 +939,7 @@ services:
       - ./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro
       - ${RUNNER_DISK_ADMISSION_PAUSE_HOST_DIR:-./state/disk-admission-pause}:/home/runner/.onex-disk-admission-pause
       - ${RUNNER_LAB_CREDENTIALS_HOST_DIR:-/home/jonah/.omnibase/runners/lab-credentials}:/home/runner/.lab-credentials:ro
+      - *lab-host-table
       - runner-44-creds:/home/runner/.runner-creds
   # omninode-deploy-runner -- OMN-14889: dedicated runner for the
   # release-train-lab.yml tag-cut/deploy jobs (cut_release_train_tag.sh,

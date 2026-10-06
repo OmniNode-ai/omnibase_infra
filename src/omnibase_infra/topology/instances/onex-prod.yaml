@@ -185,6 +185,7 @@ databases:
               - agent_routing_decisions
               - capability_scores
               - context_roi_scores
+              - delegation_budget_applied_events
               - delegation_budget_state
               - delegation_dispositions
               - delegation_eval_item_verdicts

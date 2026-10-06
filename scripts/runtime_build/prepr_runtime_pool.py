@@ -1349,24 +1349,30 @@ def dispatch_check_runs(
     """
     results: list[str] = []
     for m in minted:
-        done = runner(
-            [
-                "gh",
-                "workflow",
-                "run",
-                CHECK_RUN_WORKFLOW,
-                "--repo",
-                CHECK_RUN_WORKFLOW_REPO,
-                "--ref",
-                ref,
-                "-f",
-                f"receipt_gzip_b64={encode_receipt_input(m.receipt_path)}",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=60,
-        )
+        try:
+            done = runner(
+                [
+                    "gh",
+                    "workflow",
+                    "run",
+                    CHECK_RUN_WORKFLOW,
+                    "--repo",
+                    CHECK_RUN_WORKFLOW_REPO,
+                    "--ref",
+                    ref,
+                    "-f",
+                    f"receipt_gzip_b64={encode_receipt_input(m.receipt_path)}",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            results.append(
+                f"  check-run dispatch {m.key}: not dispatched ({type(exc).__name__})"
+            )
+            continue
         said = (done.stdout.strip() or done.stderr.strip() or "no output").splitlines()
         results.append(
             f"  check-run dispatch {m.key}: rc={done.returncode} {said[-1][:240]}"
@@ -1719,7 +1725,31 @@ def _status_table(states: Sequence[HostState]) -> str:
     return "\n".join(rows)
 
 
-def main(argv: Sequence[str] | None = None, transport: Transport | None = None) -> int:
+def build_publisher(
+    lane: str | None,
+    overlay: Path | None,
+    *,
+    dispatch_check_run: bool,
+) -> Callable[[Sequence[MintedReceipt]], list[str]] | None:
+    """The post-mint step of a run: bus events and the check-run dispatch."""
+    if not (lane or dispatch_check_run):
+        return None
+    if lane and overlay is None:
+        raise ValueError("a bus lane needs its overlay")
+    bus = (lane, overlay) if lane and overlay is not None else None
+
+    def publisher(minted: Sequence[MintedReceipt]) -> list[str]:
+        said: list[str] = []
+        if bus:
+            said += publish_events(minted, *bus)
+        if dispatch_check_run:
+            said += dispatch_check_runs(minted)
+        return said
+
+    return publisher
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__.splitlines()[0] if __doc__ else ""
     )
@@ -1774,17 +1804,22 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
         help="omnimarket config/ci_bus_lanes.yaml, the declared transport for --publish-bus-lane",
     )
     rn.add_argument(
-        "--dispatch-check-run",
+        "--no-dispatch-check-run",
         action="store_true",
         help=(
-            "also dispatch lab-proof-receipt.yml per receipt, which posts the "
-            "informational lab-proof-receipt check run on the proven head"
+            "do not dispatch lab-proof-receipt.yml per receipt (by default each "
+            "receipt posts the informational lab-proof-receipt check run on the "
+            "proven head)"
         ),
     )
     rl = sub.add_parser("release", help="release a lease this holder left behind")
     rl.add_argument("--host", required=True)
     rl.add_argument("--holder", required=True)
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: Sequence[str] | None = None, transport: Transport | None = None) -> int:
+    args = build_parser().parse_args(argv)
 
     try:
         cfg = load_pool_config(args.config)
@@ -1828,21 +1863,14 @@ def main(argv: Sequence[str] | None = None, transport: Transport | None = None) 
         ok, why = release_lease(cfg, tp, cfg.host(args.host), args.holder)
         print(why)
         return EXIT_PASS if ok else EXIT_LEASE_REFUSED
-    publisher: Callable[[Sequence[MintedReceipt]], list[str]] | None = None
     if args.publish_bus_lane and args.bus_overlay is None:
         print("--publish-bus-lane needs --bus-overlay", file=sys.stderr)
         return EXIT_USAGE
-    if args.publish_bus_lane or args.dispatch_check_run:
-        lane, overlay = args.publish_bus_lane, args.bus_overlay
-        dispatch = bool(args.dispatch_check_run)
-
-        def publisher(minted: Sequence[MintedReceipt]) -> list[str]:
-            said: list[str] = []
-            if lane:
-                said += publish_events(minted, lane, overlay)
-            if dispatch:
-                said += dispatch_check_runs(minted)
-            return said
+    publisher = build_publisher(
+        args.publish_bus_lane,
+        args.bus_overlay,
+        dispatch_check_run=not args.no_dispatch_check_run,
+    )
 
     code, text = run_proof(
         cfg,

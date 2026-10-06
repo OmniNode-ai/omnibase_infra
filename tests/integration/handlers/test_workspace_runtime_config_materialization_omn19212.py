@@ -53,6 +53,7 @@ def _git(cwd: Path, *args: str) -> str:
 
 def test_lagging_clone_resolves_transport_from_real_origin_main(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     origin = tmp_path / "origin.git"
     origin.mkdir()
@@ -83,6 +84,7 @@ def test_lagging_clone_resolves_transport_from_real_origin_main(
     sha = _git(seed, "rev-parse", "HEAD").strip()
     _git(workspace, "fetch", "-q", "origin")
 
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(workspace))
     assert not (workspace / SOURCE_PATH_IN_REPO).exists()
 
     outcome = HandlerWorkspaceRuntimeConfigMaterializer().materialize(workspace)
