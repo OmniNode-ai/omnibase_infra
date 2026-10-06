@@ -493,19 +493,26 @@ def _completed_reply(
 
 
 @pytest.mark.asyncio
-async def test_declared_contract_hash_is_identical_at_dispatch_and_consumer_decode() -> (
-    None
-):
+@pytest.mark.parametrize(
+    "response_contract",
+    [_K2_RESPONSE_CONTRACT, {}],
+    ids=["nested-schema", "empty-schema"],
+)
+async def test_declared_contract_hash_is_identical_at_dispatch_and_consumer_decode(
+    response_contract: dict[str, object],
+) -> None:
     """AC1: the contract the caller declared is the contract the consumer decodes.
 
     The comparison is made three ways, all against the caller's value: the raw
     published bytes, the Core wire model decoded from those bytes, and that
     model's re-serialization.
+
+    An empty schema is still a declared contract: only None may be omitted.
     """
-    dispatch_hash = _canonical_contract_sha256(_K2_RESPONSE_CONTRACT)
+    dispatch_hash = _canonical_contract_sha256(response_contract)
 
     result, published_bytes, decoded = await _dispatch_through_real_broker(
-        response_contract=_K2_RESPONSE_CONTRACT, reply=_completed_reply
+        response_contract=response_contract, reply=_completed_reply
     )
 
     assert result["status"] == "completed"

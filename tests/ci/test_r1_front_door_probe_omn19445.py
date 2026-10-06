@@ -18,6 +18,7 @@ grader that cannot be made to fail has not passed, it has not run.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 from pathlib import Path
@@ -502,3 +503,111 @@ def test_workflow_probe_step_uses_the_composed_cli_and_publishes_the_terminal() 
 def test_workflow_record_and_upload_still_run_after_a_failing_probe() -> None:
     assert _step("Assert the probe record")["if"] == "always()"
     assert _step("Upload the probe record")["if"] == "always()"
+
+
+@pytest.mark.parametrize(
+    ("failed_step", "leg"),
+    [
+        ("checkout_infra", "runner-env"),
+        ("install_uv", "runner-env"),
+        ("setup_python", "runner-env"),
+        ("install_dependencies", "runner-env"),
+        ("checkout_provider", "runner-env"),
+        ("coinstall_provider", "runner-env"),
+        ("lane_transport", "lane-declaration"),
+    ],
+)
+def test_workflow_setup_failure_publishes_a_named_terminal_without_a_venv(
+    tmp_path: Path, failed_step: str, leg: str
+) -> None:
+    steps = _steps()
+    setup_ids = [step["id"] for step in steps[: _index("Run the R1 front-door probe")]]
+    outcomes = dict.fromkeys(setup_ids, "success")
+    failed_index = setup_ids.index(failed_step)
+    outcomes[failed_step] = "failure"
+    for step_id in setup_ids[failed_index + 1 :]:
+        outcomes[step_id] = "skipped"
+    probe = _step("Run the R1 front-door probe")
+    assert "always()" in probe["if"]
+    assert "!cancelled()" in probe["if"]
+    for step_id in setup_ids:
+        assert f"steps.{step_id}.outcome" in probe["env"]["SETUP_OUTCOMES"]
+    summary = tmp_path / "summary.md"
+    summary.write_text("Existing setup evidence\n")
+
+    completed = subprocess.run(
+        ["bash", "-c", probe["run"]],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "SETUP_OUTCOMES": json.dumps(outcomes),
+            "GITHUB_STEP_SUMMARY": str(summary),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+
+    assert completed.returncode == 2
+    result = ModelR1ProbeResult.model_validate_json(
+        (tmp_path / "r1-front-door-probe.json").read_text()
+    )
+    assert result.ok is False
+    assert result.exit_code == 2
+    assert result.leg == leg
+    assert result.argv == []  # the CLI was never invoked
+    assert (
+        result.named_cause
+        == f"setup step {failed_step} ended with failure; probe not run"
+    )
+    assert result.named_cause in completed.stdout
+    text = summary.read_text()
+    assert text.startswith("Existing setup evidence\n")
+    assert "## R1 front-door probe: FAIL" in text
+    assert "exit code: 2" in text
+    assert result.named_cause in text
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_workflow_successful_setup_runs_cli_and_preserves_its_verdict(
+    tmp_path: Path, exit_code: int
+) -> None:
+    setup_ids = [
+        step["id"] for step in _steps()[: _index("Run the R1 front-door probe")]
+    ]
+    python_bin = tmp_path / ".venv" / "bin" / "python"
+    python_bin.parent.mkdir(parents=True)
+    python_bin.write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > cli-argv.txt\n"
+        "printf 'cli record' > r1-front-door-probe.json\n"
+        f"exit {exit_code}\n"
+    )
+    python_bin.chmod(0o755)
+    summary = tmp_path / "summary.md"
+    summary.write_text("Existing setup evidence\n")
+    completed = subprocess.run(
+        ["bash", "-c", _step("Run the R1 front-door probe")["run"]],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "SETUP_OUTCOMES": json.dumps(dict.fromkeys(setup_ids, "success")),
+            "GITHUB_STEP_SUMMARY": str(summary),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    assert completed.returncode == exit_code
+    assert (tmp_path / "cli-argv.txt").read_text().splitlines() == [
+        "scripts/ci/r1_front_door_probe.py",
+        "--onex-bin",
+        ".venv/bin/onex",
+        "--record",
+        "r1-front-door-probe.json",
+        "--summary-file",
+        str(summary),
+    ]
+    assert (tmp_path / "r1-front-door-probe.json").read_text() == "cli record"
+    assert summary.read_text() == "Existing setup evidence\n"

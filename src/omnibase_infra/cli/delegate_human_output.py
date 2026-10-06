@@ -5,7 +5,7 @@
 
 ``onex delegate`` used to print one 10 KB receipt JSON line on stdout and
 nothing a person could read: the answer sat in a hidden run folder, and a
-failure's reason sat inside the JSON. On a terminal (or with ``--human``) the
+failure's reason sat inside the JSON. By default (or with ``--human``) the
 output is now:
 
 * success: the answer text on stdout, then one receipt-summary line on stderr
@@ -13,8 +13,8 @@ output is now:
 * failure: stdout empty, one plain line on stderr naming the cause, the reason
   and the run id, and a non-zero exit.
 
-When stdout is not a terminal, or with ``--json``, the receipt JSON line is
-unchanged: programs in other repos parse it. Pure functions only: they read the
+With ``--json``, the receipt JSON line is unchanged for parsing programs,
+and failures still have a plain stderr line. Pure functions only: they read the
 serialized receipt and return text, so the same envelope the run-file writer
 reads is the one rendered here.
 
@@ -94,11 +94,14 @@ def _failure_text(
     summary = result if isinstance(result, dict) else {}
     if terminal is not None:
         cause = (terminal.terminal_failure_cause or "").strip()
-        reason = one_line(
-            terminal.terminal_failure_reason
-            or terminal.error_message
-            or " ".join(a.error_message for a in terminal.attempts if a.error_message)
-        )
+        reason = one_line(terminal.terminal_failure_reason or "")
+        error = one_line(terminal.error_message or "")
+        if error and error != reason:
+            reason = f"{reason}; {error}" if reason else error
+        if not reason:
+            reason = one_line(
+                " ".join(a.error_message for a in terminal.attempts if a.error_message)
+            )
         if cause and reason:
             return f"{cause}: {reason}"
         if cause or reason:
