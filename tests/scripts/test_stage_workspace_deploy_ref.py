@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -140,6 +141,9 @@ def _run_stage(
         **os.environ,
         "OMNI_HOME": str(omni_home),
         "CONSUMER_LOCK": str(omni_home / "omnimarket" / "uv.lock"),
+        # Fixture contexts have no project venv; use the test interpreter's
+        # pydantic instead of uv resolving a dependency-free fixture project.
+        "PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin",
     }
     env.pop("DEPLOY_SOURCE_REFS_OUT", None)
     env["DEPLOY_SOURCE_WORKTREE_ROOT"] = str(_trees(build_ctx))
@@ -512,3 +516,42 @@ def test_per_repo_dirty_clone_is_staged_from_a_worktree_without_touching_work(
     trees = _trees(tmp_path / "ctx")
     assert _git(trees / "omnibase_core", "rev-parse", "HEAD") == target_core
     assert not (trees / "omnimarket" / "operator-work.txt").exists()
+
+
+@pytest.mark.unit
+def test_two_clone_sets_share_declared_deploy_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both callers reuse worktrees from one clone despite different OMNI_HOME."""
+    canonical = _make_omni_home(tmp_path / "canonical")
+    other = _make_omni_home(tmp_path / "other")
+    monkeypatch.setenv("DEPLOY_SOURCE_CLONE_ROOT", str(canonical))
+    build_ctx = tmp_path / "shared-context"
+    first = _run_stage(canonical, build_ctx, deploy_ref="dev")
+    assert first.returncode == 0, first.stderr
+    second = _run_stage(other, build_ctx, deploy_ref="dev")
+    assert second.returncode == 0, second.stderr
+    for repo in ("omnibase_core", "omnibase_compat", "omnimarket"):
+        common = _git(
+            _trees(build_ctx) / repo,
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-common-dir",
+        )
+        assert Path(common).resolve() == (canonical / repo / ".git").resolve()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "declared_root", ["", "relative/path", "/nonexistent-deploy-source-root"]
+)
+def test_invalid_declared_source_refuses_before_staging(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, declared_root: str
+) -> None:
+    monkeypatch.setenv("DEPLOY_SOURCE_CLONE_ROOT", declared_root)
+    build_ctx = tmp_path / "ctx"
+    result = _run_stage(tmp_path / "other", build_ctx, deploy_ref="dev")
+    assert result.returncode == 64, result.stderr
+    assert "DEPLOY_SOURCE_CLONE_ROOT" in result.stderr
+    assert not _trees(build_ctx).exists()
+    assert not _refs_out(build_ctx).exists()

@@ -134,3 +134,19 @@ for _sibling_manifest_repo in "${SIBLING_LAB_TAG_REPOS[@]}"; do
     fi
 done
 unset _sibling_manifest_repo _sibling_manifest_skip _sibling_manifest_excluded
+
+# OMN-20637: deploy callers can have different registry roots, but RT-1's
+# shared worktrees must all belong to one declared clone set. Apply this AFTER
+# loading the operator env and restoring caller-owned values. An explicit bad
+# declaration refuses; it never silently stages the caller's other clone set.
+resolve_deploy_source_clone_root() {
+    if [[ "${DEPLOY_SOURCE_CLONE_ROOT+x}" != "x" ]]; then
+        return 0
+    fi
+    if [[ "${DEPLOY_SOURCE_CLONE_ROOT}" != /* || ! -d "${DEPLOY_SOURCE_CLONE_ROOT}" ]]; then
+        echo "ERROR: DEPLOY_SOURCE_CLONE_ROOT must name an existing absolute clone-root directory" >&2
+        return 64
+    fi
+    OMNI_HOME="$(cd "${DEPLOY_SOURCE_CLONE_ROOT}" && pwd -P)" || return 64
+    export OMNI_HOME
+}

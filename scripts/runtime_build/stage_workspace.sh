@@ -2,7 +2,8 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 #
-# Stage sibling repos from OMNI_HOME into the Docker build context before
+# Stage sibling repos from the declared DEPLOY_SOURCE_CLONE_ROOT (or the
+# caller's OMNI_HOME when no deploy-source root is declared) into the context before
 # a workspace-mode build.  Must be called from the repo root (build context).
 #
 # Usage:
@@ -76,11 +77,6 @@
 #   5  DEPLOY_REF unset and no explicit opt-in -- refusing an unasserted build
 set -euo pipefail
 
-if [[ -z "${OMNI_HOME:-}" ]]; then
-    echo "ERROR: OMNI_HOME must be set for workspace-mode build" >&2
-    exit 1
-fi
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # The sibling sets come from sibling_clone_manifest.sh, the single place they
@@ -88,6 +84,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # SIBLING_CLONE_MANIFEST for the pin preflight further down.
 # shellcheck source=./sibling_clone_manifest.sh
 source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
+resolve_deploy_source_clone_root
+
+if [[ -z "${OMNI_HOME:-}" ]]; then
+    echo "ERROR: OMNI_HOME must be set for workspace-mode build" >&2
+    exit 1
+fi
 
 # OMN-13405: omnibase_core is staged FIRST so the Dockerfile workspace branch can
 # install the dev-HEAD core (which carries enum modules not yet in the released

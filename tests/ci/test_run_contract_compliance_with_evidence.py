@@ -67,6 +67,16 @@ case "${GH_CASE:-}" in
   unresolved-push)
     echo 'gh unavailable' >&2; exit 1
     ;;
+  queued-bot)
+    [[ "$args" == "api repos/OmniNode-ai/omnibase_infra/pulls/4616" ]] || { echo "unexpected gh invocation: $args" >&2; exit 8; }
+    printf '%s\\n' '{"user":{"login":"dependabot[bot]"},"title":"chore(deps): bump x","head":{"ref":"dependabot/github_actions/x"}}'
+    ;;
+  queued-human)
+    printf '%s\\n' '{"user":{"login":"jonahgabriel"},"title":"chore(deps): bump x","head":{"ref":"deps/x"}}'
+    ;;
+  queued-ticketed-bot)
+    printf '%s\\n' '{"user":{"login":"dependabot[bot]"},"title":"chore(deps): OMN-17427 bump x","head":{"ref":"dependabot/x"}}'
+    ;;
   *)
     echo "unknown GH_CASE=${GH_CASE:-}" >&2; exit 9
     ;;
@@ -358,8 +368,9 @@ def test_a_ticketless_dependency_bot_bump_is_the_declared_exemption(
         {"pr_head_ref": "deps/OMN-17427"},
         # a bot that is not one of the two dependency bots is not exempt
         {"pr_author": "github-actions[bot]"},
-        # push and merge_group carry no author or title: never exempt
+        # push carries no PR: never exempt
         {"event_name": "push"},
+        # merge_group with no queue ref names no PR: never exempt
         {"event_name": "merge_group"},
         # an unresolved context admits nothing
         {"pr_title": ""},
@@ -372,3 +383,51 @@ def test_every_other_pull_request_is_evaluated(
     code, output, _ = _classify(tmp_path, **override)
     assert code == 0
     assert output == "exempt=false\n"
+
+
+_QUEUE_REF = "gh-readonly-queue/dev/pr-4616-" + "a" * 40
+
+
+def _classify_queued(
+    tmp_path: Path, fake_bin: Path, *, case: str
+) -> tuple[int, str, str]:
+    output = tmp_path / "classify-queue-output"
+    output.write_text("", encoding="utf-8")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            CLASSIFIER_MODULE,
+            "--event-name",
+            "merge_group",
+            "--repo",
+            "OmniNode-ai/omnibase_infra",
+            "--merge-group-head-ref",
+            _QUEUE_REF,
+            "--github-output",
+            str(output),
+        ],
+        cwd=REPO_ROOT,
+        env=_env(fake_bin, GH_CASE=case),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode, output.read_text(encoding="utf-8"), result.stdout
+
+
+@pytest.mark.parametrize(
+    ("case", "expected"),
+    [
+        ("queued-bot", "exempt=true\n"),
+        ("queued-human", "exempt=false\n"),
+        ("queued-ticketed-bot", "exempt=false\n"),
+        ("unresolved-push", "exempt=false\n"),
+    ],
+)
+def test_a_queued_pull_request_is_classified_from_the_api(
+    tmp_path: Path, fake_bin: Path, case: str, expected: str
+) -> None:
+    code, output, _ = _classify_queued(tmp_path, fake_bin, case=case)
+    assert code == 0
+    assert output == expected

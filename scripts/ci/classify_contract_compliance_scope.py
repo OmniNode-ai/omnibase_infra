@@ -13,8 +13,11 @@ predicate ``ci_summary_gate`` already applies to the change-control caller jobs
 (``_declared_ticketless_dependency_bot_skip``, OMN-19167), composed from the
 same public helpers so the two cannot drift:
 
-1. the event is ``pull_request`` (push and merge_group carry no author or title,
-   and admit nothing);
+1. the event is ``pull_request``, or ``merge_group`` whose queued PR's author,
+   title and head ref are read from the GitHub API by the number the queue ref
+   carries (a push carries no PR and admits nothing; a merge_group payload
+   carries no author or title, so the supplied ``--pr-*`` values are ignored
+   there and an unresolvable PR admits nothing);
 2. the author is one of the dependency bots (``DEPENDENCY_BOT_AUTHORS``);
 3. the mirrored PR-title rule exempts the PR from carrying a ticket (its
    bot-author arm already does for both bots);
@@ -30,6 +33,8 @@ Writes ``exempt=true`` or ``exempt=false`` to ``--github-output``.
 from __future__ import annotations
 
 import argparse
+import json
+import subprocess  # fixed argv, no shell, trusted gh binary
 import sys
 from pathlib import Path
 
@@ -38,12 +43,37 @@ from scripts.ci.ci_summary_gate import (
     PullRequestContext,
     title_rule_exempts_ticket,
 )
+from scripts.ci.resolve_contract_compliance_pr import parse_merge_queue_ref
+
+
+def fetch_queued_pr_context(repo: str, merge_group_head_ref: str) -> PullRequestContext:
+    """Read the queued PR's author, title and head ref; empty when unresolvable."""
+
+    number = parse_merge_queue_ref(merge_group_head_ref)
+    if number is None or not repo:
+        return PullRequestContext()
+    try:
+        completed = subprocess.run(
+            ["gh", "api", f"repos/{repo}/pulls/{number}"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        )
+        payload = json.loads(completed.stdout)
+        return PullRequestContext(
+            author=str(payload["user"]["login"]),
+            title=str(payload["title"]),
+            head_ref=str(payload["head"]["ref"]),
+        )
+    except (subprocess.SubprocessError, OSError, ValueError, KeyError, TypeError):
+        return PullRequestContext()
 
 
 def is_declared_exemption(*, event_name: str, ctx: PullRequestContext) -> bool:
-    """True only for a ticketless dependency-bot bump on a pull_request event."""
+    """True only for a ticketless dependency-bot bump on a pull_request or merge_group event."""
 
-    if event_name != "pull_request" or not ctx.is_resolved:
+    if event_name not in ("pull_request", "merge_group") or not ctx.is_resolved:
         return False
     if ctx.author not in DEPENDENCY_BOT_AUTHORS:
         return False
@@ -58,12 +88,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--pr-author", default="")
     parser.add_argument("--pr-title", default="")
     parser.add_argument("--pr-head-ref", default="")
+    parser.add_argument("--repo", default="")
+    parser.add_argument("--merge-group-head-ref", default="")
     parser.add_argument("--github-output", required=True, type=Path)
     args = parser.parse_args(argv)
 
-    ctx = PullRequestContext(
-        author=args.pr_author, title=args.pr_title, head_ref=args.pr_head_ref
-    )
+    if args.event_name == "merge_group":
+        ctx = fetch_queued_pr_context(args.repo, args.merge_group_head_ref)
+    else:
+        ctx = PullRequestContext(
+            author=args.pr_author, title=args.pr_title, head_ref=args.pr_head_ref
+        )
     exempt = is_declared_exemption(event_name=args.event_name, ctx=ctx)
     with args.github_output.open("a", encoding="utf-8") as out:
         out.write(f"exempt={'true' if exempt else 'false'}\n")

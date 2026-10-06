@@ -101,14 +101,6 @@ instances:
   dev-201:
     hostnames: [omninode-pc]
     consumer_group: onex-deploy-agent
-    # The operator's stable demo lane for Tech Week (operator, session
-    # 2026-10-05 ~12:45Z: "Freeze it"). Five of 2026-10-05's six recreates were
-    # idle converge and one a runtime merge (dev-recreate-9143, omni_home ledger
-    # MSG 2026-10-05T11:27:38Z).
-    flags:
-      freeze:
-        until: 2026-10-19T07:00:00Z
-        reason: "stable demo lane, operator 2026-10-05 ~12:45Z; changes only on a promotion/ command"
     verify:
       receipt_lane: compose-dev
       runner_labels: [self-hosted, omnibase-verify, host-201]
