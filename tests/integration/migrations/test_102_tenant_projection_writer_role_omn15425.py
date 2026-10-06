@@ -172,7 +172,7 @@ def _executable_lines(path: Path) -> list[str]:
 
 _WRITER_GRANT_STATEMENT = re.compile(
     r"GRANT SELECT, INSERT, UPDATE ON "
-    r"(public\.[a-z0-9_]+(?:, public\.[a-z0-9_]+)*) "
+    r"((?:public\.)?[a-z0-9_]+(?:, (?:public\.)?[a-z0-9_]+)*) "
     rf"TO {PRINCIPAL}\b"
 )
 
