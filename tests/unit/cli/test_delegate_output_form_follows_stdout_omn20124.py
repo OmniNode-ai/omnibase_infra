@@ -1,19 +1,11 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""The output form of ``onex delegate`` follows stdout (OMN-20124).
-
-Programs in other repos parse the one-JSON-line receipt from a subprocess
-(the omniclaude delegate skill, the omnimarket probes, the merge-drain
-delegation step, the omni_home workflows). An older installed CLI also rejects
-``--json``. So the default off a terminal must stay that JSON line, byte for
-byte in shape, and only a terminal gets the human form.
-"""
+"""Default output is plain text even when redirected; --json preserves the receipt."""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -40,14 +32,11 @@ class _Receipt:
         return json.dumps(self.envelope, separators=(",", ":"))
 
 
-def _install(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fixture: Path, *, tty: bool
-) -> None:
+def _install(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fixture: Path) -> None:
     envelope = json.loads(fixture.read_text(encoding="utf-8"))
     contract = tmp_path / "contract.yaml"
     contract.write_text("name: x\n", encoding="utf-8")
     monkeypatch.setattr(cli_delegate, "_resolve_packaged_contract", lambda _n: contract)
-    monkeypatch.setattr(cli_delegate, "_stdout_is_tty", lambda: tty)
 
     def _fake(**kwargs: object) -> int:
         receipt = _Receipt(envelope)
@@ -91,12 +80,11 @@ def _terminal_fields(parsed: dict[str, object]) -> tuple[object, object]:
     return payload["response"], payload["model_name"]
 
 
-@pytest.mark.parametrize("flags", [(), ("--json",)])
-def test_non_tty_and_forced_json_keep_the_golden_json_contract(
+@pytest.mark.parametrize("flags", [("--json",)])
+def test_forced_json_keeps_the_golden_json_contract(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flags: tuple[str, ...]
 ) -> None:
-    fixture_tty = not flags  # the (), non-tty case; --json is forced on a tty
-    _install(monkeypatch, tmp_path, _DISPATCHED, tty=not fixture_tty)
+    _install(monkeypatch, tmp_path, _DISPATCHED)
     result = _invoke(tmp_path, *flags)
     assert result.exit_code == 0, result.output
     stripped = result.stdout.strip()
@@ -110,13 +98,14 @@ def test_non_tty_and_forced_json_keep_the_golden_json_contract(
     assert isinstance(model_name, str) and model_name
 
 
-def test_tty_prints_the_human_form(
+def test_default_prints_the_answer(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _install(monkeypatch, tmp_path, _DISPATCHED, tty=True)
+    _install(monkeypatch, tmp_path, _DISPATCHED)
     result = _invoke(tmp_path)
     assert result.exit_code == 0, result.output
-    assert not result.stdout.lstrip().startswith("{")
+    expected = _terminal_fields(json.loads(_DISPATCHED.read_text()))[0]
+    assert result.stdout == f"{expected}\n"
     with pytest.raises(json.JSONDecodeError):
         json.loads(result.stdout)
 
@@ -124,7 +113,7 @@ def test_tty_prints_the_human_form(
 def test_human_flag_forces_the_human_form_off_a_terminal(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _install(monkeypatch, tmp_path, _DISPATCHED, tty=False)
+    _install(monkeypatch, tmp_path, _DISPATCHED)
     result = _invoke(tmp_path, "--human")
     assert result.exit_code == 0, result.output
     with pytest.raises(json.JSONDecodeError):
@@ -134,27 +123,27 @@ def test_human_flag_forces_the_human_form_off_a_terminal(
 def test_json_and_human_together_are_refused(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _install(monkeypatch, tmp_path, _DISPATCHED, tty=False)
+    _install(monkeypatch, tmp_path, _DISPATCHED)
     result = _invoke(tmp_path, "--json", "--human")
     assert result.exit_code != 0
     assert "mutually exclusive" in result.output
 
 
-def test_failure_off_a_terminal_is_the_json_receipt_and_nonzero(
+def test_explicit_json_failure_is_the_json_receipt_and_nonzero(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _install(monkeypatch, tmp_path, _FAILED, tty=False)
-    result = _invoke(tmp_path)
+    _install(monkeypatch, tmp_path, _FAILED)
+    result = _invoke(tmp_path, "--json")
     assert result.exit_code != 0
     parsed = json.loads(result.stdout.strip())
     assert parsed["exit_code"] != 0
     assert "error_message" in result.stdout
 
 
-def test_failure_on_a_terminal_is_one_plain_line_and_nonzero(
+def test_default_failure_is_one_plain_line_and_nonzero(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _install(monkeypatch, tmp_path, _FAILED, tty=True)
+    _install(monkeypatch, tmp_path, _FAILED)
     result = _invoke(tmp_path)
     assert result.exit_code != 0
     assert result.stdout == ""
@@ -174,5 +163,114 @@ def test_the_run_delegate_default_is_the_json_contract() -> None:
     assert default.default is True
 
 
-def test_stdout_is_tty_is_false_under_the_test_runner() -> None:
-    assert cli_delegate._stdout_is_tty() is False
+@pytest.mark.parametrize("flags", [(), ("--human",), ("--json",)])
+def test_command_success_uses_real_receipt_mode_and_writes_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flags: tuple[str, ...]
+) -> None:
+    """Exercise diagnostics, renderer and writer through the command, off a TTY."""
+    _install_recorded_runtime(monkeypatch, tmp_path, failed=False)
+    result = _invoke(tmp_path, *flags)
+    assert result.exit_code == 0, result.output
+    run_dir = next((tmp_path / "state" / "runs").iterdir())
+    receipt = json.loads((run_dir / "receipt.json").read_text())
+    response, _ = _terminal_fields(receipt["receipt"])
+    assert (run_dir / "result.txt").read_text().strip() == response
+    artifacts = (
+        "delegate artifacts: "
+        + " ".join(
+            str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
+        )
+        + f" state_root={run_dir.parent.parent}"
+    )
+    if flags == ("--json",):
+        assert json.loads(result.stdout) == receipt["receipt"]
+        assert artifacts in result.stderr
+    else:
+        assert result.stdout == f"{response}\n{artifacts}\n"
+        assert artifacts not in result.stderr
+    for diagnostic in ("task class:", "ticket:", "transport:", "onex-runtime:"):
+        assert diagnostic not in result.stdout
+    assert "task class:" in result.stderr
+    assert "ticket:" in result.stderr
+    assert "transport:" in result.stderr
+
+
+@pytest.mark.parametrize("flags", [(), ("--json",)])
+def test_command_failure_prints_cause_reason_and_distinct_error_before_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flags: tuple[str, ...]
+) -> None:
+    _install_recorded_runtime(monkeypatch, tmp_path, failed=True)
+    result = _invoke(tmp_path, *flags)
+    assert result.exit_code != 0, result.output
+    lines = [
+        line
+        for line in result.stderr.splitlines()
+        if line.startswith("onex delegate failed:")
+    ]
+    assert len(lines) == 1
+    assert "no_provider_key" in lines[0]
+    assert "no model configured" in lines[0]
+    assert "Set PROVIDER_KEY to enable this backend" in lines[0]
+    if flags:
+        parsed = json.loads(result.stdout)
+        assert parsed["exit_code"] != 0
+        assert result.output.index(lines[0]) < result.output.index(
+            result.stdout.strip()
+        )
+    else:
+        assert result.stdout == ""
+    run_dir = next((tmp_path / "state" / "runs").iterdir())
+    receipt = json.loads((run_dir / "receipt.json").read_text())
+    assert receipt["terminal_failure_cause"] == "no_provider_key"
+
+
+def _install_recorded_runtime(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *, failed: bool
+) -> None:
+    """Stand in only for model execution; keep the receipt mode and file writer real."""
+    from omnibase_core.enums.enum_workflow_result import EnumWorkflowResult
+    from omnibase_infra.cli import receipt_mode
+
+    contract = tmp_path / "node_delegate_skill_orchestrator" / "contract.yaml"
+    contract.parent.mkdir()
+    contract.write_text("name: node_delegate_skill_orchestrator\n")
+    monkeypatch.setattr(cli_delegate, "_resolve_packaged_contract", lambda _n: contract)
+    monkeypatch.setenv("ONEX_ARTIFACT_STORE_ROOT", str(tmp_path / "artifacts"))
+
+    class RecordedRuntime:
+        exit_code = 1 if failed else 0
+        handler_result = None
+
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+        def run(self) -> EnumWorkflowResult:
+            request = json.loads(Path(str(self.kwargs["input_path"])).read_text())
+            correlation_id = request["correlation_id"]
+            envelope = json.loads(_DISPATCHED.read_text())
+            terminal = envelope["result"]["terminal_payload"]
+            terminal["correlation_id"] = correlation_id
+            terminal["payload"]["correlation_id"] = correlation_id
+            if failed:
+                terminal["payload"].update(
+                    attempts=[],
+                    response="",
+                    status="failed",
+                    terminal_failure_cause="no_provider_key",
+                    terminal_failure_reason="no model configured",
+                    error_message="Set PROVIDER_KEY to enable this backend",
+                )
+            state = Path(str(self.kwargs["state_root"]))
+            state.mkdir(parents=True, exist_ok=True)
+            (state / "workflow_result.json").write_text(
+                json.dumps(
+                    {
+                        "run_id": str(self.kwargs["run_id"]),
+                        "wire_correlation_id": correlation_id,
+                        "terminal_payload": terminal,
+                    }
+                )
+            )
+            return EnumWorkflowResult.FAILED if failed else EnumWorkflowResult.COMPLETED
+
+    monkeypatch.setattr(receipt_mode, "_runtime_factory", lambda _s: RecordedRuntime)

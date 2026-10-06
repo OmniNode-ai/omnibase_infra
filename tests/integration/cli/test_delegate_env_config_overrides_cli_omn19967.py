@@ -62,6 +62,7 @@ def _run(tmp_path: Path) -> tuple[Result, dict[str, object]]:
         delegate_command,
         [
             "Reply with exactly the word READY",
+            "--json",
             "--task-type",
             "summarization",
             "--bus",

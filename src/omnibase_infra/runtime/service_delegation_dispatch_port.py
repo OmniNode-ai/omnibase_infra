@@ -285,12 +285,19 @@ class RuntimeDelegationDispatchPort:
         system_prompt: str | None = None,
         temperature: float | None = None,
         response_format: dict[str, object] | None = None,
+        attribution: Mapping[str, str] | None = None,
     ) -> dict[str, object]:
         """Dispatch a request; guard OMN-18931 faults, pass OMN-19124 routing pins.
 
         Dev run 8c2b5dfc-3907-475d-aab6-126fade5f707 exposed the blanket
         fault-pin refusal on a routing pin.
+
+        ``attribution`` (OMN-20606) is accepted and unused: this port publishes
+        to a deployed lane whose own handler stamps the caller onto its
+        terminal. Only omnimarket's in-process port writes an evidence terminal
+        of its own and needs it.
         """
+        del attribution
 
         # OmniMarket's consumer-facing handler always supplies these optional
         # arguments. The deployed bus model does not expose the completion-shaping

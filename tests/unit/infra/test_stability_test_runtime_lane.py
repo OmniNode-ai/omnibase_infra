@@ -273,6 +273,7 @@ def test_stability_lane_runtime_ports_override_production_bindings() -> None:
     ]
     assert services["redpanda"]["ports"] == [
         "39092:19092",
+        "39093:19093",
         "127.0.0.1:29644:9644",
     ]
     assert services["valkey"]["ports"] == [
@@ -300,11 +301,24 @@ def test_stability_lane_redpanda_requires_connected_network_advertise_host() -> 
     assert "192.168.86.201:39092" not in redpanda_command
     assert "localhost:19092" not in redpanda_command
 
+    # LAN listener (OMN-20637): a third Kafka listener on its own port, so the
+    # metadata a LAN client gets back names an address it can reach. The
+    # existing tailnet external listener is kept, unchanged.
+    assert (
+        "internal://0.0.0.0:9092,external://0.0.0.0:19092,lan://0.0.0.0:19093"
+        in redpanda_command
+    )
+    assert (
+        "internal://redpanda:9092,external://100.109.203.94:39092,"
+        "lan://192.168.86.201:39093" in redpanda_command
+    )
+
     contract_overlay = overlay["x-omninode-contract-overlay"]
     redpanda_contract = contract_overlay["stability-test-redpanda"]
     assert (
         redpanda_contract["advertised_kafka_addr"]
-        == "internal://redpanda:9092,external://100.109.203.94:39092"
+        == "internal://redpanda:9092,external://100.109.203.94:39092,"
+        "lan://192.168.86.201:39093"
     )
     assert (
         redpanda_contract["advertised_pandaproxy_addr"]
