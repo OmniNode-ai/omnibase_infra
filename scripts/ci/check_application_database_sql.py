@@ -37,6 +37,23 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
             "docker/migrations/forward/nodes/node_projection_delegation/"
             "0029_delegation_terminal_failure_cause.sql"
         ),
+        # OMN-20613: 0056 creates delegation_budget_applied_events beside
+        # delegation_budget_state in the same legacy-default-schema stream, and
+        # 0057 forces its row-level security. Its OMN-15376 NOT NULL
+        # reconciliation uses the EXECUTE format(...) idiom of the
+        # node_log_persistence_effect/0000 entry below. node-migration-sync
+        # (OMN-13332) vendors both files verbatim from omnimarket, so exempting
+        # them here (not editing the SQL) is the canonical fix; their real
+        # Postgres apply is proved by
+        # tests/integration/migrations/test_delegation_budget_applied_events_omn20613.py.
+        Path(
+            "docker/migrations/forward/nodes/node_projection_delegation/"
+            "0056_delegation_budget_applied_events.sql"
+        ),
+        Path(
+            "docker/migrations/forward/nodes/node_projection_delegation/"
+            "0057_delegation_budget_applied_events_rls.sql"
+        ),
         # OMN-15655 adds the house-tenant tenant_id/RLS tranche for relations
         # whose physical tables intentionally remain in public until the
         # governed OMN-15359 schema cutover moves the full classified set.

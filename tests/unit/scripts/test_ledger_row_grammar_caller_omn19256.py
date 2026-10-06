@@ -25,6 +25,8 @@ import importlib.util
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -167,3 +169,124 @@ def test_the_editor_verb_is_judged_by_the_same_module(
     rc = ll.main([str(governed), "--", sys.executable, "-c", script, str(governed)])
     assert rc == 65
     assert governed.read_text(encoding="utf-8") == before
+
+
+CONSENT_CELLS = (
+    "OPERATOR-CONSENT",
+    "lane=consent-test",
+    '"Approve the scoped test action"',
+    "APPROVED SCOPE: test action",
+    "OUT OF SCOPE: production",
+)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("missing", "reason"),
+    [
+        (1, "missing lane="),
+        (2, "missing quoted operator words"),
+        (3, "missing APPROVED SCOPE:"),
+        (4, "missing OUT OF SCOPE:"),
+    ],
+)
+@pytest.mark.parametrize("name", ["ROLLING_WORK_LEDGER.md", "CONSENTS.md"])
+def test_consent_schema_refusal_writes_nothing_before_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    missing: int,
+    reason: str,
+    name: str,
+) -> None:
+    # The external schema owns field validation. Pin the caller's fail-closed
+    # contract for each of its four required fields, even on another filename.
+    row = " | ".join(
+        [_now(), *(c for i, c in enumerate(CONSENT_CELLS) if i != missing)]
+    )
+    grammar = SimpleNamespace(
+        parse_row=Mock(return_value=SimpleNamespace(row_type="OPERATOR-CONSENT")),
+        row_refusals=Mock(return_value=[reason]),
+    )
+    monkeypatch.setattr(ll, "load_ledger_grammar", lambda: grammar)
+    lock = Mock(side_effect=AssertionError("refused consent must not acquire a lock"))
+    monkeypatch.setattr(ll, "LedgerLock", lock)
+    ledger = tmp_path / name
+    ledger.write_text("## log\n", encoding="utf-8")
+    before = ledger.read_bytes()
+    assert ll.main([str(ledger), "--consent", row]) == 65
+    assert ledger.read_bytes() == before
+    assert reason in capsys.readouterr().err
+    grammar.row_refusals.assert_called_once_with(row)
+    lock.assert_not_called()
+
+
+@pytest.mark.unit
+def test_valid_consent_uses_the_append_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    row = " | ".join([_now(), *CONSENT_CELLS])
+    grammar = SimpleNamespace(
+        parse_row=Mock(return_value=SimpleNamespace(row_type="OPERATOR-CONSENT")),
+        row_refusals=Mock(return_value=[]),
+    )
+    monkeypatch.setattr(ll, "load_ledger_grammar", lambda: grammar)
+    ledger = tmp_path / "CONSENTS.md"
+    assert ll.main([str(ledger), "--consent", row]) == 0
+    assert ledger.read_text(encoding="utf-8") == row + "\n"
+    grammar.row_refusals.assert_called_once_with(row)
+
+
+@pytest.mark.unit
+def test_consent_without_schema_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(ll, "load_ledger_grammar", lambda: None)
+    ledger = tmp_path / "CONSENTS.md"
+    assert (
+        ll.main([str(ledger), "--consent", " | ".join([_now(), *CONSENT_CELLS])]) == 65
+    )
+    assert not ledger.exists()
+    assert "fails closed" in capsys.readouterr().err
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("row", ["", "not a row", "STATUS", "OPERATOR-CONSENT\nSTATUS"])
+def test_consent_requires_exactly_one_consent_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, row: str
+) -> None:
+    grammar = SimpleNamespace(
+        parse_row=Mock(
+            return_value=None if row == "not a row" else SimpleNamespace(row_type=row)
+        ),
+        row_refusals=Mock(
+            side_effect=AssertionError("invalid row must not reach schema")
+        ),
+    )
+    monkeypatch.setattr(ll, "load_ledger_grammar", lambda: grammar)
+    ledger = tmp_path / "CONSENTS.md"
+    if row == "":
+        with pytest.raises(SystemExit) as error:
+            ll.main([str(ledger), "--consent", row])
+        assert error.value.code == 2
+    else:
+        assert ll.main([str(ledger), "--consent", row]) == 65
+    assert not ledger.exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "other",
+    [
+        ["--append", "row"],
+        ["--append-file", "rows.md"],
+        ["--roll-section"],
+        ["--", "true"],
+    ],
+)
+def test_consent_cannot_be_combined_with_another_action(
+    tmp_path: Path, other: list[str]
+) -> None:
+    with pytest.raises(SystemExit) as error:
+        ll.main([str(tmp_path / "CONSENTS.md"), "--consent", "row", *other])
+    assert error.value.code == 2
