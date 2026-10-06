@@ -121,7 +121,7 @@ jobs:
     # main SHA (OMN-14812). The tests/ci/test_workflow_uses_refs_resolve.py
     # gate now fails closed on any cross-repo `uses:` pin that does not
     # resolve live.
-    uses: OmniNode-ai/omniclaude/.github/workflows/call-occ-autobind-reusable.yml@c86c9fe6330c789614126f5f106bfb1be364b20d # .github/sibling-pins.yaml
+    uses: OmniNode-ai/omniclaude/.github/workflows/call-occ-autobind-reusable.yml@3b8addff365b1a53e04106284b9275b6d5fad3c6 # .github/sibling-pins.yaml
     secrets: inherit
     with:
       lane: dev
@@ -176,7 +176,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 91b8bb1b8c7f35bc502ae1dc126eb95d4916c0ef # .github/sibling-pins.yaml
+          ref: bd0002cc5ed2d10435e3294dce7d5adeb0e54b86 # .github/sibling-pins.yaml
           path: .occ-autobind-src
           persist-credentials: false
           sparse-checkout: |

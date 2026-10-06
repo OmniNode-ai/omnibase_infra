@@ -114,6 +114,7 @@ import logging
 import os
 import re
 import signal
+import socket
 import sys
 import time
 import uuid
@@ -123,6 +124,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import click
+import yaml
 from pydantic import BaseModel, ValidationError
 
 from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
@@ -246,6 +248,10 @@ from omnibase_infra.event_bus.models.config.model_kafka_connect_retry_policy imp
 )
 from omnibase_infra.handlers.handler_workspace_runtime_config_materializer import (
     HandlerWorkspaceRuntimeConfigMaterializer,
+)
+from omnibase_infra.models.delegation.model_delegate_lineage import (
+    LINEAGE_KINDS,
+    ModelDelegateLineage,
 )
 from omnibase_infra.models.delegation.model_delegate_phase_durations import (
     ModelDelegatePhaseDurations,
@@ -1398,25 +1404,19 @@ def _resolve_transport_bound() -> tuple[int, float]:
     return policy.total_attempts, policy.total_bound_seconds
 
 
-def _stdout_is_tty() -> bool:
-    """Whether stdout is a terminal, which picks the default output form (OMN-20124).
-
-    A pipe, a subprocess or CI keeps the one-JSON-line receipt every parsing
-    caller reads; only a person at a terminal gets the human form.
-    """
-    try:
-        return sys.stdout.isatty()
-    except (AttributeError, ValueError):
-        return False
-
-
-def _render_receipt_for_person(receipt: object, *, state_root: Path) -> bool:
+def _render_receipt_for_person(
+    receipt: object, *, state_root: Path, json_output: bool = False
+) -> bool:
     """Print the default, human form of one receipt and say whether it succeeded (OMN-20124).
 
     The answer goes to stdout, the one-line summary or failure line to stderr.
+    JSON mode still prints a plain failure before the full receipt.
     A receipt that is not a delegation is printed as JSON rather than dropped.
     """
     dump = getattr(receipt, "model_dump", None)
+    dump_json = getattr(receipt, "model_dump_json", None)
+    if not callable(dump_json):
+        raise ValueError("delegate receipt is not a serializable typed result")
     envelope = dump(mode="json") if callable(dump) else None
     outcome = (
         render_delegate_outcome(envelope, state_root=state_root)
@@ -1424,12 +1424,15 @@ def _render_receipt_for_person(receipt: object, *, state_root: Path) -> bool:
         else None
     )
     if outcome is None:
-        click.echo(receipt.model_dump_json())  # type: ignore[attr-defined]
+        click.echo(dump_json())
         return True
-    if outcome.stdout:
+    if not json_output or not outcome.succeeded:
+        for line in outcome.stderr:
+            click.echo(line, err=True)
+    if json_output:
+        click.echo(dump_json())
+    elif outcome.stdout:
         click.echo(outcome.stdout)
-    for line in outcome.stderr:
-        click.echo(line, err=True)
     return outcome.succeeded
 
 
@@ -1445,6 +1448,7 @@ def _write_local_run_files(
     config_overrides: tuple[ModelDelegateEnvConfigOverride, ...] = (),
     require_budget_evidence: bool = False,
     require_contract_evidence: bool = False,
+    artifacts_to_stdout: bool = False,
     requested_backend_id: str | None = None,
     broker: str = "",
     command_topic: str = "",
@@ -1461,7 +1465,7 @@ def _write_local_run_files(
     Three outcomes, and each is distinguishable from the other two (OMN-18569):
 
     * the receipt is a delegation with an accepted rung -> three attributed
-      files, and a stderr line naming them;
+      files, and an artifacts line on stdout in human mode (stderr in JSON mode);
     * the receipt is a delegation with no accepted rung -> three UNattributed
       files naming no route, and a stderr line saying so (OMN-18306);
     * the receipt is not a delegation at all -> nothing written, silently,
@@ -1692,7 +1696,7 @@ def _write_local_run_files(
             str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
         )
         + f" state_root={run_dir.parent.parent}",
-        err=True,
+        err=not artifacts_to_stdout,
     )
 
 
@@ -2139,8 +2143,8 @@ def _wire_criteria_mode(criteria_mode: str | None) -> str | None:
 # Where a tenant overlay is declared it arrives as ``ONEX_TENANT_ID``, the same
 # variable the delegate handler already reads, and it wins, so the stamp is the
 # tenant the handler would have resolved had the lane held it. Lab usage goes
-# through this path as one tenant; there is no second internal system and no
-# fallback tenant.
+# through the host tenant declared in lab_run_hosts.yaml even without the
+# overlay (OMN-18829); there is no fallback tenant.
 #
 # NOTHING HERE IS A DEFAULT. Every branch returns a stamp that was declared or
 # minted, or refuses naming ``onex local init``. The one request that carries no
@@ -2193,12 +2197,106 @@ def read_install_identity() -> str | None:
     return None if identity is None else str(identity.tenant_uuid)
 
 
+def _lab_target_is_local(target: str) -> bool:
+    """Compare a declared SSH target with this host's route address; send no data."""
+    if target == "local":
+        # `local` is relative to the launching host, not every reader of the table.
+        return False
+    hostname = target.rsplit("@", 1)[-1]
+    try:
+        addresses = socket.getaddrinfo(hostname, 9, socket.AF_INET, socket.SOCK_DGRAM)
+        for _, _, _, _, address in addresses:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as route:
+                route.connect(address)
+                if route.getsockname()[0] == address[0]:
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def read_lab_host_tenant(
+    environ: Mapping[str, str], *, omni_home: Path | None = None
+) -> str | None:
+    """Read the declared host tenant, or None outside a lab registry.
+
+    Native host jobs locate their row by hostname or the table's SSH target.
+    Containers and remote lanes declare ONEX_LANE_HOST because their own
+    network namespace need not carry the host's address. The table is the
+    authority in both cases; an unresolved declaration never reads the install
+    identity. The CLI workspace binding wins over OMNI_HOME; the wrapper
+    supplies it through OMNIBASE_PATH even when OMNI_HOME is not exported.
+    Resolve the registry before taking its parent (it may be a symlink).
+    """
+    host = (
+        environ.get("ONEX_LANE_HOST") or environ.get("ONEX_REMOTE_LANE_HOST") or ""
+    ).strip()
+    configured = environ.get("ONEX_LAB_RUN_HOSTS", "").strip()
+    registry = (
+        str(omni_home)
+        if omni_home is not None
+        else environ.get("OMNI_HOME", "").strip()
+    )
+    if configured:
+        table = Path(configured)
+    elif registry:
+        table = (
+            Path(registry).resolve().parent
+            / "omnibase_internal/src/omnibase_internal/lab_run_hosts.yaml"
+        )
+        if not table.exists() and not host:
+            return None
+    elif host:
+        raise DelegateTenantRefusedError(
+            "lab host declared without OMNI_HOME or ONEX_LAB_RUN_HOSTS"
+        )
+    else:
+        return None
+    try:
+        document = yaml.safe_load(table.read_text(encoding="utf-8"))
+        rows = document.get("hosts") if isinstance(document, dict) else None
+        if (
+            not isinstance(rows, list)
+            or not rows
+            or any(
+                not isinstance(row, dict)
+                or not row.get("name")
+                or not row.get("target")
+                for row in rows
+            )
+        ):
+            raise ValueError("expected hosts with name and target")
+        if host:
+            matches = [row for row in rows if row["name"] == host]
+        else:
+            hostname = socket.gethostname().split(".")[0]
+            matches = [
+                row
+                for row in rows
+                if row["name"] == hostname
+                or row["target"] == hostname
+                or _lab_target_is_local(str(row["target"]))
+            ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"expected one host row for {host or socket.gethostname()}, found {len(matches)}"
+            )
+        tenant = matches[0].get("tenant_id")
+        if not isinstance(tenant, str) or not tenant.strip():
+            raise ValueError(f"host {matches[0]['name']} has no tenant_id")
+        return str(uuid.UUID(tenant.strip()))
+    except (OSError, ValueError, yaml.YAMLError) as exc:
+        raise DelegateTenantRefusedError(
+            f"lab tenant declaration {table} refused: {exc}"
+        ) from exc
+
+
 def resolve_delegate_tenant(
-    *, in_process: bool, environ: Mapping[str, str]
+    *, in_process: bool, environ: Mapping[str, str], omni_home: Path | None = None
 ) -> str | None:
     """The tenant to stamp on the request, or ``None`` only for the OMN-19966 path.
 
-    Precedence: a declared tenant overlay, then this install's minted identity.
+    Precedence: a declared tenant overlay, the lab host row, then the install identity.
     With neither, a request bound for a deployed lane is refused, because that
     lane would dead-letter its verdict. An in-process request on an install that
     never initialised carries no stamp and the local port mints the identity on
@@ -2207,6 +2305,9 @@ def resolve_delegate_tenant(
     declared = environ.get(TENANT_OVERLAY_ENV, "").strip()
     if declared:
         return declared
+    lab_tenant = read_lab_host_tenant(environ, omni_home=omni_home)
+    if lab_tenant is not None:
+        return lab_tenant
     minted = read_install_identity()
     if minted is not None:
         return minted
@@ -2237,6 +2338,7 @@ def _request_payload(
     ticket_id: str | None = None,
     caller: ModelDelegateCaller | None = None,
     tenant_id: str | None = None,
+    lineage: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Build the delegate request, setting only the fields the caller supplied."""
     payload: dict[str, object] = {
@@ -2275,6 +2377,10 @@ def _request_payload(
     # UUID. Each is omitted entirely when unresolved.
     if caller is not None and caller.lane is not None:
         metadata[DELEGATE_CALLER_LANE_METADATA_KEY] = caller.lane
+    # OMN-20606: the delegation this run falls back or escalates from, already
+    # validated by resolve_delegate_lineage. Omitted entirely when unnamed.
+    if lineage:
+        metadata.update(lineage)
     if metadata:
         payload["metadata"] = metadata
     if caller is not None and caller.session_id is not None:
@@ -2306,6 +2412,7 @@ def _write_payload(
     ticket_id: str | None = None,
     caller: ModelDelegateCaller | None = None,
     tenant_id: str | None = None,
+    lineage: Mapping[str, str] | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -2361,6 +2468,7 @@ def _write_payload(
         ticket_id=ticket_id,
         caller=caller,
         tenant_id=tenant_id,
+        lineage=lineage,
     )
     payload_path.write_text(
         json.dumps(payload),
@@ -3179,6 +3287,39 @@ class DelegateCommand(click.Command):
     ),
 )
 @click.option(
+    "--parent-correlation-id",
+    "parent_correlation_id",
+    default=None,
+    help=(
+        "The correlation id of the delegation this run falls back or escalates "
+        "from (OMN-20606). With --lineage-kind it rides in the request metadata "
+        "onto the delegation's terminal and its delegation_events row, so a "
+        "retry is joined to the failure it answers. A malformed value is a "
+        "usage error, never dropped."
+    ),
+)
+@click.option(
+    "--lineage-kind",
+    "lineage_kind",
+    type=click.Choice(LINEAGE_KINDS),
+    default=None,
+    help=(
+        "How this run relates to --parent-correlation-id: 'fallback' asks "
+        "another route (lane, in-process run, engine) for the same work; "
+        "'escalation' asks a stronger model on the same route (OMN-20606)."
+    ),
+)
+@click.option(
+    "--parent-failure-cause",
+    "parent_failure_cause",
+    default=None,
+    help=(
+        "Why the parent delegation did not answer, as a short token such as "
+        "provider_quota_exhausted or exit_124 (OMN-20606). Needs "
+        "--parent-correlation-id and --lineage-kind."
+    ),
+)
+@click.option(
     "--omnibase-path",
     "omnibase_path",
     type=click.Path(path_type=Path),
@@ -3199,9 +3340,8 @@ class DelegateCommand(click.Command):
     is_flag=True,
     default=False,
     help=(
-        "Force the full typed receipt as ONE JSON line on stdout, even on a "
-        "terminal. This is already the default whenever stdout is not a "
-        "terminal (pipes, subprocesses, CI) (OMN-20124)."
+        "Print the full typed receipt as ONE JSON line on stdout. Use this "
+        "flag for programs that parse the receipt (OMN-20124)."
     ),
 )
 @click.option(
@@ -3210,10 +3350,8 @@ class DelegateCommand(click.Command):
     is_flag=True,
     default=False,
     help=(
-        "Force the human form (the answer on stdout, a one-line summary on "
-        "stderr) even when stdout is not a terminal. Without --json or "
-        "--human the form follows stdout: human on a terminal, the JSON "
-        "receipt otherwise (OMN-20124)."
+        "Print the human form (the default): answer and artifacts line on "
+        "stdout, summary or failure on stderr (OMN-20124)."
     ),
 )
 @click.option(
@@ -3256,20 +3394,20 @@ def delegate_command(
     allow_omnimarket_drift: bool,
     ticket: str | None,
     caller_lane: str | None,
+    parent_correlation_id: str | None = None,
+    lineage_kind: str | None = None,
+    parent_failure_cause: str | None = None,
 ) -> None:
     """Delegate PROMPT to a local LLM and print the result.
 
-    Output form follows stdout (OMN-20124). When stdout is NOT a terminal
-    (a pipe, a subprocess, CI) stdout carries exactly ONE
-    ``ModelSkillResult[ModelDelegateSkillResponse]`` JSON, the full LLM
-    response and metrics, never truncated: the contract every program that
-    parses this command reads, unchanged. On a terminal stdout is the answer
-    text and stderr carries a one-line summary (model, cost, run id, where the
-    full receipt is); on failure stdout is empty and stderr names the cause,
-    the reason and the run id. ``--json`` forces the JSON form and ``--human``
-    the human form. Exits non-zero on failure in every form. RuntimeLocal logs
-    go to a capture file + the content-addressed artifact store, never to
-    stdout.
+    Default stdout is the plain answer followed by the artifacts line, including
+    when redirected to a file or pipe (OMN-20124). Diagnostics and the one-line
+    summary (model, cost, run id, full receipt path) go to stderr. On failure,
+    stderr names the typed cause, reason and error_message on a plain line.
+    ``--json`` prints the full typed receipt as one stdout line for programs;
+    failures still have a plain stderr line before the JSON. ``--human`` selects
+    the default form explicitly. Exits non-zero on failure in every form.
+    RuntimeLocal logs go to a capture file and the artifact store.
 
     State root (OMN-19232): runs/<run_id>/{result.txt,receipt.json,run.json}
     are written under one root resolved in this order: the --state-root flag,
@@ -3311,7 +3449,7 @@ def delegate_command(
     """
     if force_json and force_human:
         raise click.UsageError("--json and --human are mutually exclusive.")
-    json_output = force_json or not (force_human or _stdout_is_tty())
+    json_output = force_json
     # OMN-19006: the command class minted this run's identity when argument
     # parsing began, and files the receipt for any refusal under it, so the
     # body runs under the same ids rather than minting a second pair.
@@ -3326,6 +3464,13 @@ def delegate_command(
         caller = resolve_delegate_caller(
             caller_lane, cwd=Path.cwd(), environ=os.environ
         )
+        resolved_lineage = ModelDelegateLineage.from_flags(
+            parent_correlation_id,
+            lineage_kind,
+            parent_failure_cause,
+            own_correlation_id=correlation_id,
+        )
+        lineage = resolved_lineage.as_metadata() if resolved_lineage else None
         acceptance_criteria = tuple(criteria)
         declared_contract = _load_response_contract(response_contract)
         _validate_replace_mode_authority(
@@ -3357,6 +3502,7 @@ def delegate_command(
             json_output=json_output,
             run_id=run_id,
             correlation_id=correlation_id,
+            lineage=lineage,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -3390,6 +3536,7 @@ def run_delegate(
     json_output: bool = True,
     run_id: uuid.UUID | None = None,
     correlation_id: uuid.UUID | None = None,
+    lineage: Mapping[str, str] | None = None,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -3689,6 +3836,7 @@ def run_delegate(
                 in_process=locus is EnumDelegateLocus.IN_PROCESS
                 or (locus is EnumDelegateLocus.AUTO and bus != BUS_KAFKA),
                 environ=os.environ,
+                omni_home=omni_home,
             )
         except DelegateTenantRefusedError as exc:
             raise click.ClickException(str(exc)) from exc
@@ -3711,12 +3859,20 @@ def run_delegate(
             ticket_id=ticket_id,
             caller=caller,
             tenant_id=tenant_id,
+            lineage=lineage,
         )
         # OMN-19514: say which ticket the run carries and how it was chosen,
         # beside the task-class line, so a derived ticket is never silent.
         click.echo(f"ticket: {ticket_id or 'none'} ({ticket_resolution})", err=True)
         # OMN-19860: and who issued it, the same way.
         click.echo((caller or ModelDelegateCaller.unattributed()).describe(), err=True)
+        # OMN-20606: and what it follows, when it follows anything.
+        if lineage:
+            click.echo(
+                "lineage: "
+                + " ".join(f"{key}={value}" for key, value in sorted(lineage.items())),
+                err=True,
+            )
         contract_path = _resolve_packaged_contract(DELEGATE_NODE_NAME)
         # OMN-17295 / OMN-17304: decide WHERE the orchestrator runs, and — for a
         # dispatched run — prove a deployed one is actually consuming the command
@@ -3909,12 +4065,10 @@ def run_delegate(
                     phase_stopwatch=phase_stopwatch,
                     # OMN-20124: the default output is for a person. --json keeps
                     # the one-receipt-JSON-line contract for programs.
-                    receipt_renderer=(
-                        None
-                        if json_output
-                        else functools.partial(
-                            _render_receipt_for_person, state_root=state_root
-                        )
+                    receipt_renderer=functools.partial(
+                        _render_receipt_for_person,
+                        state_root=state_root,
+                        json_output=json_output,
                     ),
                     # OMN-17295 / OMN-14872: the receipt layer cannot select by an
                     # identity it was never told. Handing it the id this CLI just
@@ -3942,6 +4096,7 @@ def run_delegate(
                     receipt_callback=lambda receipt: _write_local_run_files(
                         receipt=receipt,
                         state_root=state_root,
+                        artifacts_to_stdout=not json_output,
                         prompt=prompt,
                         task_type=resolved_task_type,
                         task_type_resolution=resolution,

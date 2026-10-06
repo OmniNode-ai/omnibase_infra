@@ -24,6 +24,7 @@ rather than run -- the same stand-in the lane-identity integration test uses.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,12 @@ from omnibase_infra.runtime.service_kernel import (
 )
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def isolated_config_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path / "config-owner"))
+
 
 #: The ambient value on the operator host: the governed stability-test lane.
 AMBIENT_STABILITY_BROKER = "192.168.86.201:39092"  # onex-allow-internal-ip OMN-16871 reason="test fixture quoting the ambient env value the CLI must no longer resolve; not a configurable endpoint"
@@ -72,7 +79,7 @@ def _workspace(root: Path, *, with_config: bool) -> Path:
     declaration.write_text(_DECLARATION, encoding="utf-8")
     if with_config:
         config = (
-            root
+            Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
             / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
             / "runtime"
             / "runtime_config.yaml"

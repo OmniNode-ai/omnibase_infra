@@ -1471,6 +1471,8 @@ def announce_roll(plan: RollPlan, unstaged_reason: str) -> None:
 
 
 def read_append_payload(args: argparse.Namespace) -> str | None:
+    if args.consent is not None:
+        return str(args.consent)
     if args.append is not None:
         return str(args.append)
     if args.append_file is None:
@@ -3826,6 +3828,25 @@ def validate_grammar_state(payload: str, ledger: Path) -> str | None:
     return refusal
 
 
+def validate_consent_payload(payload: str) -> str | None:
+    """Validate one consent row against the canonical schema, for any ledger."""
+    grammar = load_ledger_grammar()
+    if grammar is None:
+        return grammar_missing_reason()
+    lines = payload.splitlines()
+    row = grammar.parse_row(lines[0]) if len(lines) == 1 else None
+    if row is None or row.row_type != "OPERATOR-CONSENT":
+        return "--consent requires exactly one canonical OPERATOR-CONSENT row. Nothing was written."
+    reasons = grammar.row_refusals(lines[0])
+    if reasons:
+        return (
+            "OMN-16728 consent row refused -- "
+            + "; ".join(reasons)
+            + ". Nothing was written."
+        )
+    return None
+
+
 # --- OMN-18433: the stranded-clone signal ---------------------------------
 #
 # On 2026-09-16 this clone sat on a branch whose pull request had already
@@ -4102,6 +4123,7 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=(
             "Examples:\n"
             "  scripts/ledger_lock.py path/to/ledger.md --append '- 2026-...: event'\n"
+            "  scripts/ledger_lock.py path/to/ledger.md --consent '<ts> | OPERATOR-CONSENT | lane=<lane> | \"<operator words>\" | APPROVED SCOPE: <list> | OUT OF SCOPE: <list>'\n"
             "  scripts/ledger_lock.py path/to/ledger.md -- ${EDITOR:-vi} path/to/ledger.md\n"
             "  git diff -- path/to/ledger.md | scripts/ledger_lock.py path/to/ledger.md --append-file -\n"
         ),
@@ -4114,10 +4136,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_TIMEOUT_SECONDS,
         help="how long to wait for the lock, e.g. 30s, 5m, 1h (default: 5m)",
     )
-    parser.add_argument("--append", help="append this text while holding the lock")
-    parser.add_argument(
+    append_actions = parser.add_mutually_exclusive_group()
+    append_actions.add_argument(
+        "--append", help="append this text while holding the lock"
+    )
+    append_actions.add_argument(
         "--append-file",
         help="append file contents while holding the lock; use '-' for stdin",
+    )
+    append_actions.add_argument(
+        "--consent",
+        metavar="ROW",
+        help=(
+            "append one OPERATOR-CONSENT row while holding the lock; requires lane=, "
+            "quoted operator words, APPROVED SCOPE: and OUT OF SCOPE: under the "
+            "canonical row grammar (OMN-16728), regardless of the ledger filename"
+        ),
     )
     parser.add_argument(
         "--dedup-window",
@@ -4587,8 +4621,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     if requested_actions != 1:
         parser.error(
-            "provide exactly one action: --append, --append-file, --roll-section, or -- COMMAND"
+            "provide exactly one action: --append, --append-file, --consent, --roll-section, or -- COMMAND"
         )
+    if args.consent is not None:
+        consent_reason = validate_consent_payload(args.consent)
+        if consent_reason is not None:
+            print(f"ledger_lock: {consent_reason}", file=sys.stderr)
+            return 65
     if args.cost_unknown and not payload:
         parser.error(
             "--cost-unknown only applies to --append/--append-file, not -- COMMAND"

@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20159 -- the dev lane's runtime-effects READ binding for
+# node_projection_read_effect, which the runtime /skill edge reaches. Mounted at
+# the path OMNIMARKET_PROJECTION_READ_BINDING_OVERLAY names, never at the
+# runtime binding's path.
+#
+# WHY THE READ VARIABLE AND NOT THE RUNTIME ONE
+#   The runtime binding variable also selects node_delegate_skill_orchestrator's
+#   claim store and evidence store. With this file there, they logged in as
+#   role_omnidash and every bus delegation failed with UndefinedTable on
+#   delegate_skill_command_claims (OMN-17427). omnimarket#3364 gave the read
+#   node its own variable; the two stores keep following the runtime variable
+#   only, which this lane leaves unset, so they stay on container-local SQLite.
+#
+# WHY OMNIDASH_ANALYTICS_DB_URL
+#   The dev-lane overlay renders it as role_omnidash, the identity the lane's
+#   projection-api (:3002) reads with, so the edge and :3002 answer the same
+#   rows. omninode_internal relations are not read through this binding; they
+#   stay on :3002 until the standalone process is retired (OMN-8899).
+#
+# NO CREDENTIAL MATERIAL. database_url_secret_ref names an ENV VAR; the compose
+# overlay renders it from ${ROLE_OMNIDASH_PASSWORD:?...}. The group is distinct
+# from every dev-lane writer group and from every other lane.
+kafka_bootstrap_servers: "redpanda:9092"
+kafka_consumer_group: "local.omnimarket-projections.runtime-read.consume.v1"
+database_url_secret_ref: "env:OMNIDASH_ANALYTICS_DB_URL"

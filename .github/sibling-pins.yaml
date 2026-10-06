@@ -23,10 +23,10 @@
 pins:
   omnibase_core: f43f97629182f463d233b564b19a2b27d4fc4888
   omnibase_compat: 65aed95fa710748654e37d5c15c5446e779fdf52
-  omnimarket: 91b8bb1b8c7f35bc502ae1dc126eb95d4916c0ef
+  omnimarket: bd0002cc5ed2d10435e3294dce7d5adeb0e54b86
   omniintelligence: 51e1cb356453ad325d76aea57ab371cf975df3a4
   omnimemory: c7175878b331628de9be9358cb178547d8247c34
-  omniclaude: c86c9fe6330c789614126f5f106bfb1be364b20d
+  omniclaude: 3b8addff365b1a53e04106284b9275b6d5fad3c6
   onex_change_control: 802b5f7101f4c49f8b30e8deda3d4c5d024c5710
   omninode_infra: 9819782319a96cae1bfee6a0a5955029e882c601
   omnidash: cc628179717f4830bdd6c5a5e1b8d0c7bc4042ff

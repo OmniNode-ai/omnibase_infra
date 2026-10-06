@@ -225,6 +225,12 @@ services:
       # the sink creates them owner-only on first write.
       ONEX_DEAD_LETTER_ARCHIVE_DIR: /app/data/dead-letter-archive
       ONEX_CONSUMER_FLOW_ARCHIVE_DIR: /app/data/consumer-flow-archive
+      # OMN-20159: docker-compose.dev-lane.yml gives runtime-effects the
+      # projection read binding variable, and this lane's `volumes: !override`
+      # drops the file it names. Blank is unset to omnimarket, so reads here keep
+      # refusing projection_binding_unconfigured instead of failing to load a file
+      # this lane never mounts (projection_binding_invalid).
+      OMNIMARKET_PROJECTION_READ_BINDING_OVERLAY: ""
     ports: !override
       - "127.0.0.1:61086:8085"
       - "172.17.0.1:61086:8085"

@@ -157,7 +157,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 91b8bb1b8c7f35bc502ae1dc126eb95d4916c0ef # .github/sibling-pins.yaml
+          ref: bd0002cc5ed2d10435e3294dce7d5adeb0e54b86 # .github/sibling-pins.yaml
           path: .ci-bus-overlay
           persist-credentials: false
           sparse-checkout: |
@@ -169,7 +169,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniclaude
-          ref: c86c9fe6330c789614126f5f106bfb1be364b20d # .github/sibling-pins.yaml
+          ref: 3b8addff365b1a53e04106284b9275b6d5fad3c6 # .github/sibling-pins.yaml
           path: .deploy-gate-source
           persist-credentials: false
           sparse-checkout: |
@@ -380,7 +380,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniclaude
-          ref: c86c9fe6330c789614126f5f106bfb1be364b20d # .github/sibling-pins.yaml
+          ref: 3b8addff365b1a53e04106284b9275b6d5fad3c6 # .github/sibling-pins.yaml
           path: .deploy-gate-source
           persist-credentials: false
           sparse-checkout: |
@@ -712,7 +712,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 91b8bb1b8c7f35bc502ae1dc126eb95d4916c0ef # .github/sibling-pins.yaml
+          ref: bd0002cc5ed2d10435e3294dce7d5adeb0e54b86 # .github/sibling-pins.yaml
           path: .ci-bus-overlay
           persist-credentials: false
           sparse-checkout: |

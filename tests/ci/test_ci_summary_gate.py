@@ -612,6 +612,31 @@ class TestCiSummaryGate:
             for step in sync["steps"]
         )
 
+    def test_node_migration_discovery_regressions_run_unconditionally(self) -> None:
+        called = _load_workflow(REPO_ROOT / ".github/workflows/node-migration-sync.yml")
+        logic = called["jobs"]["deployed-migration-tree-sync-logic"]
+        assert "if" not in logic
+        assert "needs" not in logic
+        assert logic.get("continue-on-error", False) is False
+        regression = next(
+            step
+            for step in logic["steps"]
+            if "tests/unit/migrations/test_node_migration_discovery.py"
+            in step.get("run", "")
+        )
+        assert "if" not in regression
+        assert regression.get("continue-on-error", False) is False
+        assert regression["run"].strip() == (
+            "uv run --frozen pytest "
+            "tests/unit/migrations/test_node_migration_discovery.py "
+            "-q -p no:cacheprovider"
+        )
+
+        gate = "node-migration-sync / deployed-migration-tree-sync-logic"
+        code, report = evaluate([*_all_gates(), _job(gate, "failure")])
+        assert code == EXIT_FAILURE, report
+        assert gate in report
+
     def test_application_database_gate_is_strict_and_docs_only_gated(self) -> None:
         """OMN-15361 source and rebuilt-Docker controls must gate CI Summary.
 

@@ -20,9 +20,16 @@ x-omninode-contract-overlay:
     # OMN-12832: Kafka clients reconnect to the broker address returned in
     # metadata. This is lane contract data, not host environment. Do not move
     # it back to deploy-time interpolation.
-    advertised_kafka_addr: &stability_test_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://100.109.203.94:39092"
+    #
+    # OMN-20637: the `lan` listener is the LAN-address twin of `external` (the
+    # tailnet name). It sits on its own port because a Kafka client bootstraps
+    # on one address and then connects to whatever the metadata advertises per
+    # listener: a LAN client must be handed a LAN address, and two listeners
+    # cannot share a port. `external` is unchanged.
+    advertised_kafka_addr: &stability_test_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://100.109.203.94:39092,lan://192.168.86.201:39093"
     advertised_pandaproxy_addr: &stability_test_redpanda_advertised_pandaproxy_addr "internal://redpanda:8082,external://100.109.203.94:28082"
     kafka_port_publish: &stability_test_redpanda_kafka_port_publish "39092:19092"
+    kafka_lan_port_publish: &stability_test_redpanda_kafka_lan_port_publish "39093:19093"
     # Loopback only (OMN-20260): admin_api_require_auth is false on this broker,
     # and every in-network consumer uses redpanda:9644.
     admin_port_publish: &stability_test_redpanda_admin_port_publish "127.0.0.1:29644:9644"
@@ -144,7 +151,7 @@ services:
       - "0"
       - --check=false
       - --kafka-addr
-      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092,lan://0.0.0.0:19093
       - --advertise-kafka-addr
       - *stability_test_redpanda_advertised_kafka_addr
       - --pandaproxy-addr
@@ -169,6 +176,7 @@ services:
       - topic_partitions_per_shard=15000
     ports: !override
       - *stability_test_redpanda_kafka_port_publish
+      - *stability_test_redpanda_kafka_lan_port_publish
       - *stability_test_redpanda_admin_port_publish
   redpanda-partition-cap:
     image: redpandadata/redpanda:v24.2.7

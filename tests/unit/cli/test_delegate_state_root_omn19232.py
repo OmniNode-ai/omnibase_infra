@@ -217,7 +217,7 @@ def test_run_json_and_artifacts_line_carry_the_absolute_root(
     assert run_json["state_root"] == str(env_root.resolve())
     assert Path(run_json["state_root"]).is_absolute()
     artifacts_line = next(
-        line for line in result.stderr.splitlines() if "delegate artifacts" in line
+        line for line in result.stdout.splitlines() if "delegate artifacts" in line
     )
     assert str(env_root.resolve()) in artifacts_line
     assert "state_root=" in artifacts_line
