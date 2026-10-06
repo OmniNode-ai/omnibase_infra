@@ -3087,10 +3087,14 @@ jobs:
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           python3 -m scripts.ci.classify_contract_compliance_scope \
             --event-name "${EVENT_NAME}" \
+            --repo "${{ github.repository }}" \
+            --merge-group-head-ref "${MERGE_GROUP_HEAD_REF:-}" \
             --pr-author "${PR_AUTHOR:-}" \
             --pr-title "${PR_TITLE:-}" \
             --pr-head-ref "${PR_HEAD_REF:-}" \
