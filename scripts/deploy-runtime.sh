@@ -109,6 +109,10 @@ fi
 unset OPERATOR_OMNI_HOME
 unset OPERATOR_HEALTH_CHECK_URL
 
+# shellcheck source=./runtime_build/sibling_clone_manifest.sh
+source "${SCRIPT_DIR_FOR_ENV}/runtime_build/sibling_clone_manifest.sh"
+resolve_deploy_source_clone_root
+
 # OMN-16729: the ONE derivation of a lane's `docker compose -f ...` token
 # sequence, shared with refresh_dev_lane.sh / refresh_stability_lane.sh. Those
 # wrappers issue their own compose calls -- service-id resolution and the

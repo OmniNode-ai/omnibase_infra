@@ -14,6 +14,7 @@ neither exists -- naming both paths and the explicit offline override.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -44,6 +45,12 @@ from omnibase_infra.runtime.service_kernel import (
 
 pytestmark = pytest.mark.unit
 
+
+@pytest.fixture(autouse=True)
+def isolated_config_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path / "config-owner"))
+
+
 DECLARED_DEV_BROKER = "declared-dev.example:19092"
 _SHA = "0123456789abcdef0123456789abcdef01234567"
 
@@ -65,7 +72,11 @@ _STABILITY = (
 
 
 def _write_working_tree_config(root: Path, text: str) -> Path:
-    path = root / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH / "runtime"
+    path = (
+        Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
+        / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+        / "runtime"
+    )
     path.mkdir(parents=True, exist_ok=True)
     (path / "runtime_config.yaml").write_text(text, encoding="utf-8")
     return path / "runtime_config.yaml"
@@ -84,6 +95,9 @@ def _write_materialised_copy(
     (runtime / MATERIALIZED_SIDECAR_NAME).write_text(
         json.dumps(
             {
+                "source_repository": str(
+                    (Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])).resolve()
+                ),
                 "source_ref": "origin/main",
                 "source_path": SOURCE_PATH_IN_REPO,
                 "sha": sha,
@@ -191,7 +205,7 @@ class TestTheRefusal:
             / "runtime_config.yaml"
         )
         tree = (
-            tmp_path
+            Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
             / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
             / "runtime"
             / "runtime_config.yaml"
@@ -226,17 +240,19 @@ def _git(root: Path, *args: str) -> str:
 def _lagging_workspace(root: Path) -> str:
     """origin/main carries the tier-1 config; the shared tree's HEAD does not."""
     root.mkdir(parents=True, exist_ok=True)
-    _git(root, "init", "-q", "-b", "main")
-    (root / ".git" / "info" / "exclude").write_text(".onex_state/\n", encoding="utf-8")
+    owner = Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
+    owner.mkdir(parents=True, exist_ok=True)
+    _git(owner, "init", "-q", "-b", "main")
+    (owner / ".git" / "info" / "exclude").write_text(".onex_state/\n", encoding="utf-8")
     _declare_lanes(root)
     _write_working_tree_config(root, _DEV)
-    _git(root, "add", "-A")
-    _git(root, "commit", "-q", "-m", "config lands")
-    sha = _git(root, "rev-parse", "HEAD").strip()
-    _git(root, "update-ref", "refs/remotes/origin/main", sha)
-    _git(root, "rm", "-q", SOURCE_PATH_IN_REPO)
-    _git(root, "commit", "-q", "-m", "tree lags")
-    assert not (root / SOURCE_PATH_IN_REPO).exists()
+    _git(owner, "add", "-A")
+    _git(owner, "commit", "-q", "-m", "config lands")
+    sha = _git(owner, "rev-parse", "HEAD").strip()
+    _git(owner, "update-ref", "refs/remotes/origin/main", sha)
+    _git(owner, "rm", "-q", SOURCE_PATH_IN_REPO)
+    _git(owner, "commit", "-q", "-m", "tree lags")
+    assert not (owner / SOURCE_PATH_IN_REPO).exists()
     return sha
 
 
