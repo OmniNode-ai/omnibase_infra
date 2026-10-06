@@ -192,6 +192,40 @@ class TestAC2FixForwardLabel:
         assert code == 0
         assert record.get("red_runs") == []
 
+    @pytest.mark.parametrize(
+        "label",
+        [
+            "delegation-fix-forward",
+            "delegation-fix-forward:",
+            "delegation-fix-forward:fix-it",
+            "delegation-fix-forward:omn-19432",
+            "delegation-fix-forward:OMN-",
+        ],
+    )
+    def test_an_invalid_label_is_refused_even_when_verdicts_are_green(
+        self, monkeypatch: Any, label: str
+    ) -> None:
+        _replay(monkeypatch, {})
+        code, output, record = _check(labels=(label,))
+        assert code == 1
+        assert label in output
+        assert "requires an OMN-<digits> ticket" in output
+        assert "all sources green" not in output
+        assert record["red_runs"] == []
+        assert record["admitted_by"] == []
+
+    @pytest.mark.parametrize("red", [{}, {"delegation-regression-nightly.yml": 5}])
+    def test_a_valid_ticket_does_not_hide_an_invalid_label(
+        self, monkeypatch: Any, red: dict[str, int]
+    ) -> None:
+        _replay(monkeypatch, red)
+        code, output, record = _check(
+            labels=("delegation-fix-forward:OMN-19432", "delegation-fix-forward")
+        )
+        assert code == 1
+        assert "refused labels: delegation-fix-forward" in output
+        assert record["admitted_by"] == []
+
     def test_label_parsing(self) -> None:
         reading = dh.parse_fix_forward_labels(
             ["runtime_change", "delegation-fix-forward:OMN-5", "delegation-fix-forward"]

@@ -123,7 +123,7 @@ def test_pre_publish_failure_names_cause_without_implicating_deployed_lane(
         ),
         (
             {"terminal_failure_reason": "preferred", "error_message": "secondary"},
-            "preferred",
+            "preferred; secondary",
         ),
         (
             {"terminal_failure_cause": " \n ", "error_message": "fallback error"},
@@ -131,7 +131,7 @@ def test_pre_publish_failure_names_cause_without_implicating_deployed_lane(
         ),
     ],
 )
-def test_terminal_failure_uses_first_available_reason(
+def test_terminal_failure_preserves_reason_and_error(
     tmp_path: Path, terminal_fields: dict[str, object], expected: str
 ) -> None:
     envelope = _summary(
