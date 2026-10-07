@@ -88,6 +88,10 @@ on:
         description: 'The deployed onex-api container on the dev lane.'
         required: false
         default: 'onex-api'
+      deploy_wait_seconds:
+        description: 'Total seconds the lane resolution may wait for a dev-lane deploy to converge before it grades RED (OMN-19811; the chain canary default).'
+        required: false
+        default: '2400'
 
 concurrency:
   # Read-only: a second run racing this one changes nothing about either
@@ -102,7 +106,12 @@ jobs:
   resolve-lane:
     name: Resolve the lab lane (chain of responders)
     runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
-    timeout-minutes: 5
+    # OMN-19811: 5 -> 45. The added 40 minutes is the deploy_wait_seconds
+    # default of 2400 s (the chain canary's budget), spent only while the deploy
+    # agent reports a deploy around the lane. config/lab_probe_windows.yaml
+    # carries the longest needs chain and check_lab_probe_windows.py refuses a
+    # disagreement.
+    timeout-minutes: 45
     outputs:
       lane: ${{ steps.lane.outputs.name }}
       docker_runs_on: ${{ steps.lane.outputs.docker_runs_on }}
@@ -126,6 +135,11 @@ jobs:
           lanes-json: ${{ vars.LAB_LANES_JSON }}
           require: gateway_url docker_runs_on
           match: compose_project=omnibase-infra
+          # OMN-19811: a lane that does not answer while its deploy agent reports
+          # a deploy in progress is waited for, not graded. Idle, unreadable or
+          # undeclared agents and an exhausted budget are still RED. The
+          # resolver's own busy test; nothing is re-derived here.
+          deploy-wait-seconds: ${{ github.event.inputs.deploy_wait_seconds || '2400' }}
 
   c12-provider-catalogue:
     name: C12 provider catalogue (dev lane)
