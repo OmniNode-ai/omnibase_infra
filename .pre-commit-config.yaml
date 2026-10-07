@@ -557,6 +557,13 @@ repos:
         files: ^(\.github/workflows/deliver-dev-candidate-to-staging\.yml|tests/ci/test_boot_gate_rollout_deadline_check_omn18316\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      - id: lab-pass-criterion-bindings
+        name: Lab-pass criterion bindings and closer pin gate (OMN-18488)
+        entry: uv run --frozen pytest tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488.py -q
+        language: system
+        files: ^(scripts/ci/lab_pass_receipt\.py|src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/.*|tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488\.py|\.github/workflows/(runtime-rebuild-trigger|deliver-dev-candidate-to-staging)\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-18272: the dependency-cascade generator may not silently stop
       # emitting its machine-readable provenance block. Clause 1 of the
       # OMN-18233 verified-supersession predicate resolves against that block,

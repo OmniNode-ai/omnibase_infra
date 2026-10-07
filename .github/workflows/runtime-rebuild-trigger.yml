@@ -1008,6 +1008,7 @@ jobs:
           esac
           uv run python scripts/ci/lab_pass_receipt.py emit \
             --sha "$MERGE_SHA" \
+            --bind-from-commit . \
             --lane "$RECEIPT_LANE" \
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \

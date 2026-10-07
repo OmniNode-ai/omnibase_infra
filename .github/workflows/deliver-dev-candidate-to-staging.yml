@@ -1047,9 +1047,10 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          uv run --no-project --with pydantic \
+          uv run --no-project --with pydantic --with pyyaml \
             python3 omnibase_infra/scripts/ci/lab_pass_receipt.py emit \
             --sha "${GITHUB_SHA}" \
+            --bind-from-commit omnibase_infra \
             --lane onex-lab \
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
