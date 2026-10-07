@@ -1,3 +1,18 @@
+## v0.38.68 (2026-10-07)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.68 by the scheduled release train.
+- 6 release-relevant commit(s) merged since v0.38.67.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.67
+- chore: vendor migration 0004 for node_projection_dod_verdict (#4665)
+- fix: classify window-less heartbeats and prove SQL refusals (#4664)
+- chore: advance omnimarket contract pin to 3d39b97615a6 (#4641)
+- feat: declare trajectory evaluation lane policy (#4661)
+- : preserve authoritative projection event time (#4623)
+- refactor: replace host reconciliation script with canonical command (#4653)
+
 ## v0.38.67 (2026-10-07)
 
 ### Release
