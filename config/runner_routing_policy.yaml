@@ -1111,6 +1111,9 @@ route:
         - Migration Integration Test
         - No Plugin Daemon Classes Gate (OMN-20298)
         - no-noncanonical-lifecycle-classes
+        # OMN-20703: the node-boundary import gate, registered STRICT in
+        # STRICT_GATE_JOBS and enforced by the CI Summary poller.
+        - Node Boundary Imports (OMN-20703)
         - Node Migration Declaration Check
         - node-migration-sync / node-migration-sync
         # OMN-19677: the five shared shrink-only callers are strict CI Summary

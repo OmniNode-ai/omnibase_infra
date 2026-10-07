@@ -128,19 +128,18 @@ def evaluate_delegation_health(
         if code:
             red_runs.append({"source": source.name, "run_id": run_id})
 
-    if not red_runs:
-        print("Delegation health: all sources green.", file=out)
-        return 0
-
     reds = ", ".join(f"{run['source']} run {run['run_id']}" for run in red_runs)
     reading = parse_fix_forward_labels(labels)
     if reading.refused:
         print(
             "::error::Fix-forward requires an OMN-<digits> ticket; refused labels: "
-            f"{', '.join(reading.refused)}. Red verdicts: {reds}",
+            f"{', '.join(reading.refused)}. Red verdicts: {reds or 'none'}",
             file=out,
         )
         return 1
+    if not red_runs:
+        print("Delegation health: all sources green.", file=out)
+        return 0
     if reading.tickets:
         record["admitted_by"] = list(reading.tickets)
         print(

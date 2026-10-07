@@ -41,14 +41,14 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
 )
 from omnibase_infra.models.registration.events import ModelNodeRegistrationInitiated
+from omnibase_infra.models.registration.model_payload_postgres_upsert_registration import (
+    ModelPayloadPostgresUpsertRegistration,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.handlers.handler_node_introspected import (
     HandlerNodeIntrospected,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.services import (
     RegistrationReducerService,
-)
-from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_upsert_registration import (
-    ModelPayloadPostgresUpsertRegistration,
 )
 from omnibase_infra.projectors.projection_reader_registration import (
     ProjectionReaderRegistration,

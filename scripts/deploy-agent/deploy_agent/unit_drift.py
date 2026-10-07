@@ -86,11 +86,20 @@ def _hostname(hostname: str) -> str:
     return hostname.lower().removesuffix(".local")
 
 
-def _installed_path(entry: ModelUnitEntry, home: Path) -> Path:
+def _installed_path(
+    entry: ModelUnitEntry, home: Path, *, resolve_registry: bool = True
+) -> Path:
     if entry.installed == "~":
         return home
     if entry.installed.startswith("~/"):
         return home / entry.installed[2:]
+    if entry.installed.startswith("{registry_root}/") and resolve_registry:
+        registry_root = os.environ.get("UNIT_DRIFT_REGISTRY_ROOT", "")
+        if not registry_root or not Path(registry_root).is_absolute():
+            raise ValueError(
+                "registry-bound installed paths require absolute UNIT_DRIFT_REGISTRY_ROOT"
+            )
+        return Path(registry_root) / entry.installed.removeprefix("{registry_root}/")
     return Path(entry.installed)
 
 
@@ -121,8 +130,11 @@ def check_units(
     """Compare raw bytes on this host without modifying either copy."""
     results: list[ModelUnitResult] = []
     for entry in entries:
-        installed = (overrides or {}).get(entry.name, _installed_path(entry, home))
-        if _hostname(hostname) not in {_hostname(host) for host in entry.hosts}:
+        applicable = _hostname(hostname) in {_hostname(host) for host in entry.hosts}
+        installed = (overrides or {}).get(entry.name)
+        if installed is None:
+            installed = _installed_path(entry, home, resolve_registry=applicable)
+        if not applicable:
             results.append(
                 ModelUnitResult(
                     name=entry.name,

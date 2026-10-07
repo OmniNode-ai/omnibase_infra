@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from omnibase_infra.runtime.models.model_runtime_process_policy import (
@@ -31,6 +33,10 @@ class ModelRuntimeProfilePolicy(BaseModel):
     # (no default) so every lane declares an explicit position rather than
     # silently inheriting an implicit off -- no-invisible-env-config doctrine.
     boundary_dlq_enabled: bool
+    # OMN-20089: every lane declares its evaluator backend explicitly.
+    trajectory_evaluation_backend: Literal[
+        "off", "in_memory", "dharma_metadata", "dharma_full"
+    ]
     secret_resolver_config_path: str = ""
     secret_resolver_mappings: tuple[ModelSecretMapping, ...] = ()
     # OMN-16944: rule-based sources for runtime-MINTED refs (BYOK credential

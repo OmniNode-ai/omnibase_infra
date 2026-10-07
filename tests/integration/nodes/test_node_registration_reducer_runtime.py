@@ -38,11 +38,11 @@ import pytest
 from omnibase_core.enums.enum_node_kind import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
-from omnibase_infra.nodes.node_registration_reducer.models import (
+from omnibase_infra.models.registration.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
-    ModelRegistrationState,
 )
+from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+from omnibase_infra.nodes.node_registration_reducer.models import ModelRegistrationState
 
 # Import test doubles and fixtures from workflow conftest
 from tests.integration.registration.effect.test_doubles import (

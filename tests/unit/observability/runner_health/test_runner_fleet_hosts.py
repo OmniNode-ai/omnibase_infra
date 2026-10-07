@@ -47,7 +47,6 @@ def _config() -> ModelRunnerFleetConfig:
 EXPECTED_HOSTS: tuple[tuple[str, str, int], ...] = (
     ("omninode-pc.tail75df5e.ts.net", "amd64", 44),
     ("stickybeatz-2.tail75df5e.ts.net", "arm64", 1),
-    ("omnibook.tail75df5e.ts.net", "arm64", 1),
     ("192.168.86.202", "amd64", 1),
     ("stickybeatz-studio.tail75df5e.ts.net", "arm64", 1),
 )
@@ -56,6 +55,8 @@ EXPECTED_HOSTS: tuple[tuple[str, str, int], ...] = (
 def test_inventory_declares_every_lab_host_with_its_architecture() -> None:
     config = _config()
     by_host = {host.host: host for host in config.hosts}
+    # OMN-17427: the retired .105 host must not inflate declared capacity.
+    assert set(by_host) == {address for address, _, _ in EXPECTED_HOSTS}
 
     for address, arch, expected_count in EXPECTED_HOSTS:
         row = by_host.get(address)
@@ -119,7 +120,7 @@ def test_declared_total_sums_only_the_hosts_carrying_that_class() -> None:
     # moved capacity between hosts; it did not change the declared total.
     assert config.declared_total("action") == 60
     assert config.declared_total("customer-plane") == 3
-    assert config.declared_total("verify") >= 1
+    assert config.declared_total("verify") == 6
     # A class nothing declares is zero, not an error and not the whole fleet.
     assert config.declared_total("no-such-class") == 0
 

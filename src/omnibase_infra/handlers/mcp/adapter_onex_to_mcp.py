@@ -42,9 +42,13 @@ from uuid import UUID, uuid4
 
 import yaml
 
-from omnibase_infra.adapters.adapter_onex_tool_execution import AdapterONEXToolExecution
+from omnibase_infra.adapters.adapter_onex_tool_execution import (
+    PAYMENT_REFUSED_MESSAGE,
+    AdapterONEXToolExecution,
+)
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
+    InfraPaymentRequiredError,
     InfraTimeoutError,
     InfraUnavailableError,
     ModelInfraErrorContext,
@@ -476,6 +480,7 @@ class ONEXToMCPAdapter:
         envelope building, correlation ID threading, per-tool timeout enforcement,
         and circuit breaker protection. The raw response is mapped to the MCP
         CallToolResult format: ``{"content": [...], "isError": bool}``.
+        Payment refusals use a fixed message without exposing server content.
 
         Args:
             tool_name: Name of the tool to invoke.
@@ -547,6 +552,11 @@ class ONEXToMCPAdapter:
                 arguments=arguments,
                 correlation_id=correlation_id,
             )
+        except InfraPaymentRequiredError:
+            return {
+                "content": [{"type": "text", "text": PAYMENT_REFUSED_MESSAGE}],
+                "isError": True,
+            }
         except InfraTimeoutError as exc:
             return {
                 "content": [
@@ -568,6 +578,12 @@ class ONEXToMCPAdapter:
         # MCP spec: {"content": [{"type": "text", "text": ...}], "isError": bool}
         # Use raw.get("result", "") as fallback (not raw itself) to avoid
         # leaking internal protocol fields into MCP content.
+        if raw.get("payment_refused") is True:
+            return {
+                "content": [{"type": "text", "text": PAYMENT_REFUSED_MESSAGE}],
+                "isError": True,
+            }
+
         success: bool = bool(raw.get("success", False))
         if success:
             result_payload: object = raw.get("result", "")

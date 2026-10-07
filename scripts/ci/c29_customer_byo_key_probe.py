@@ -1046,7 +1046,9 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
 
     steps: dict[str, Any] = {}
     steps["init"] = run("init", [str(onex), "local", "init", "--json"])
-    steps["keyless"] = run("keyless", [str(onex), "delegate", args.prompt])
+    # The probe parses typed receipt JSON, printed only with --json since
+    # omnibase_infra 0.38.67 (OMN-20124).
+    steps["keyless"] = run("keyless", [str(onex), "delegate", args.prompt, "--json"])
     runs_root = delegate_runs_root(customer_env)
     if runs_root.exists():
         runs_root.rename(runs_root.with_name("runs.keyless"))
@@ -1055,7 +1057,7 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
         [str(onex), "secret", "set", spec.registration_ref],
         stdin_text=key,
     )
-    steps["keyed"] = run("keyed", [str(onex), "delegate", args.prompt])
+    steps["keyed"] = run("keyed", [str(onex), "delegate", args.prompt, "--json"])
     listing = subprocess.run(
         [str(onex), "secret", "list"],
         env=customer_env,

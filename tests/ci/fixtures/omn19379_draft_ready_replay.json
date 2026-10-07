@@ -1,0 +1,89 @@
+{
+  "_provenance": {
+    "ticket": "OMN-19379",
+    "source": "Reconstructed from the ticket incident description for omnibase_infra#4039 head 11cac752a; timestamps and run ids are synthetic, not captured API evidence."
+  },
+  "head_sha": "11cac752a",
+  "timeline": [
+    {
+      "event": "ready_for_review",
+      "created_at": "2026-09-24T03:30:00Z"
+    }
+  ],
+  "workflow_runs": [
+    {
+      "id": 35900000001,
+      "event": "pull_request",
+      "workflow_id": 7,
+      "head_sha": "11cac752a",
+      "created_at": "2026-09-24T03:00:00Z",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "id": 35900000002,
+      "event": "pull_request",
+      "workflow_id": 7,
+      "head_sha": "11cac752a",
+      "created_at": "2026-09-24T04:00:00Z",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "check_runs": [
+    {
+      "name": "Tests (${{ matrix.python-version }}, ${{ matrix.test-group }})",
+      "head_sha": "11cac752a",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "id": 1,
+      "started_at": "2026-09-24T03:00:00Z",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35900000001/job/1"
+    },
+    {
+      "name": "deploy-gate",
+      "head_sha": "11cac752a",
+      "status": "completed",
+      "conclusion": "skipped",
+      "id": 2,
+      "started_at": "2026-09-24T03:00:00Z",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35900000001/job/2"
+    },
+    {
+      "name": "zone-filter",
+      "head_sha": "11cac752a",
+      "status": "completed",
+      "conclusion": "skipped",
+      "id": 3,
+      "started_at": "2026-09-24T03:00:00Z",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35900000001/job/3"
+    },
+    {
+      "name": "Tests (3.12, unit)",
+      "head_sha": "11cac752a",
+      "status": "completed",
+      "conclusion": "success",
+      "id": 4,
+      "started_at": "2026-09-24T04:00:00Z",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35900000002/job/4"
+    },
+    {
+      "name": "deploy-gate / deploy-gate",
+      "head_sha": "11cac752a",
+      "status": "completed",
+      "conclusion": "success",
+      "id": 5,
+      "started_at": "2026-09-24T04:00:00Z",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35900000002/job/5"
+    },
+    {
+      "name": "zone-filter / filter",
+      "head_sha": "11cac752a",
+      "status": "completed",
+      "conclusion": "success",
+      "id": 6,
+      "started_at": "2026-09-24T04:00:00Z",
+      "details_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35900000002/job/6"
+    }
+  ]
+}

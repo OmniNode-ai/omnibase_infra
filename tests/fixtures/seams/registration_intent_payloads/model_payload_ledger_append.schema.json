@@ -1,0 +1,175 @@
+{
+  "$defs": {
+    "JsonType": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/JsonType"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonType"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "description": "Payload for audit ledger append intents.\n\nThis payload follows the ONEX intent payload pattern for use with ModelIntent.\nAll metadata fields are intentionally OPTIONAL to ensure the audit ledger\nnever drops events due to metadata extraction failures.\n\nAttributes:\n    intent_type: Discriminator literal for intent routing. Always \"ledger.append\".\n    topic: Kafka topic the event originated from.\n    partition: Kafka partition number (idempotency key component).\n    kafka_offset: Kafka offset within partition (idempotency key component).\n    event_key: Base64-encoded event key bytes (None for keyless events).\n    event_value: Base64-encoded event value bytes (required - the raw event).\n    onex_headers: Extracted ONEX headers from Kafka message headers.\n    correlation_id: Correlation ID for distributed tracing (extracted, nullable).\n    envelope_id: Unique envelope identifier (extracted, nullable).\n    event_type: Event type discriminator (extracted, nullable).\n    source: Event source identifier (extracted, nullable).\n    event_timestamp: Event timestamp (extracted, nullable).",
+  "properties": {
+    "correlation_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Correlation ID for distributed tracing (extracted, nullable).",
+      "title": "Correlation Id"
+    },
+    "envelope_id": {
+      "anyOf": [
+        {
+          "format": "uuid",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Unique envelope identifier (extracted, nullable).",
+      "title": "Envelope Id"
+    },
+    "event_key": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Base64-encoded event key bytes (None for keyless events).",
+      "title": "Event Key"
+    },
+    "event_timestamp": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Event timestamp (extracted, nullable).",
+      "title": "Event Timestamp"
+    },
+    "event_type": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Event type discriminator (extracted, nullable).",
+      "title": "Event Type"
+    },
+    "event_value": {
+      "description": "Base64-encoded event value bytes (required - the raw event).",
+      "minLength": 1,
+      "title": "Event Value",
+      "type": "string"
+    },
+    "intent_type": {
+      "const": "ledger.append",
+      "default": "ledger.append",
+      "description": "Discriminator literal for intent routing.",
+      "title": "Intent Type",
+      "type": "string"
+    },
+    "kafka_offset": {
+      "description": "Kafka offset within partition (idempotency key component).",
+      "minimum": 0,
+      "title": "Kafka Offset",
+      "type": "integer"
+    },
+    "onex_headers": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonType"
+      },
+      "description": "Extracted ONEX headers from Kafka message headers.",
+      "title": "Onex Headers",
+      "type": "object"
+    },
+    "partition": {
+      "description": "Kafka partition number (idempotency key component).",
+      "minimum": 0,
+      "title": "Partition",
+      "type": "integer"
+    },
+    "source": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Event source identifier (extracted, nullable).",
+      "title": "Source"
+    },
+    "topic": {
+      "description": "Kafka topic the event originated from.",
+      "minLength": 1,
+      "title": "Topic",
+      "type": "string"
+    }
+  },
+  "required": [
+    "topic",
+    "partition",
+    "kafka_offset",
+    "event_value"
+  ],
+  "title": "ModelPayloadLedgerAppend",
+  "type": "object"
+}

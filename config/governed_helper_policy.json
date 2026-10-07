@@ -66,10 +66,10 @@
         "removed by hand."
       ],
       "bare_pattern": "\\bmkdir\\s+(?:-p\\s+)?[\"']?\\$?\\{?[A-Za-z_]*(?:LOCK|lock)",
-      "governed_helper": "scripts/reconcile-host.sh:236-335 (LOCK_HOLDER, lock_age_seconds, lock_holder_field, lock_reclaim_reason)",
-      "governed_form": "write the holder (pid + host + timestamp) INTO the lock and decide staleness from it, as scripts/reconcile-host.sh does; never a bare mkdir released only by a trap",
+      "governed_helper": "scripts/deploy-agent/deploy_agent/reconcile_host_lock.py (holder protocol)",
+      "governed_form": "write the holder (pid + host + timestamp) INTO the lock and decide staleness from it, as scripts/deploy-agent/deploy_agent/reconcile_host_lock.py does; never a bare mkdir released only by a trap",
       "scope_globs": ["*.sh", "*.bash"],
-      "exclude_globs": ["scripts/reconcile-host.sh"],
+      "exclude_globs": [],
       "governed_prefix_pattern": null,
       "established_by": "OMN-18608"
     },

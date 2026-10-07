@@ -101,7 +101,7 @@ def test_the_checked_in_grant_file_is_valid(declaration: lpi.Declaration) -> Non
     )
 
 
-def test_only_the_two_commands_and_the_delegate_terminals_are_writable(
+def test_only_the_commands_and_the_delegate_terminals_are_writable(
     declaration: lpi.Declaration,
 ) -> None:
     # A machine that runs a harness task publishes the terminal event itself, so it
@@ -115,8 +115,37 @@ def test_only_the_two_commands_and_the_delegate_terminals_are_writable(
         "onex.evt.omnimarket.delegate-skill-completed.v1",
         "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.cmd.omnimarket.work-ledger-append-requested.v1",
+        "onex.cmd.omnimarket.pr-handoff-requested.v1",
     }
     assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
+
+
+def test_handoff_caller_can_read_replies_without_writing_them(
+    declaration: lpi.Declaration,
+) -> None:
+    grants = {g.name: g for g in declaration.grants}
+    command = grants["onex.cmd.omnimarket.pr-handoff-requested.v1"]
+    assert command.resource == "topic"
+    assert command.pattern == "literal"
+    assert set(command.operations) == {"write", "describe"}
+    for event in ("accepted", "handed-off", "failed"):
+        reply = grants[f"onex.evt.omnimarket.pr-handoff-{event}.v1"]
+        assert reply.resource == "topic"
+        assert reply.pattern == "literal"
+        assert set(reply.operations) == {"read", "describe"}
+
+
+def test_handoff_caller_group_cannot_join_runtime_groups(
+    declaration: lpi.Declaration,
+) -> None:
+    prefix = "pr-handoff-request."
+    caller = next(g for g in declaration.grants if g.name == prefix)
+    assert caller.resource == "group"
+    assert caller.pattern == "prefixed"
+    assert set(caller.operations) == {"read", "describe"}
+    assert f"{prefix}0123456789ab".startswith(caller.name)
+    for node in ("node_pr_handoff_orchestrator", "node_pr_handoff_ledger_effect"):
+        assert not f"local.omnimarket.{node}.consume.v1".startswith(caller.name)
 
 
 def test_ledger_append_caller_group_cannot_join_the_serve_group(

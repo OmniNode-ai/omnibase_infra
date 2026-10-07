@@ -37,6 +37,7 @@ not re-tested here.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import click
@@ -60,6 +61,12 @@ from omnibase_infra.runtime.service_kernel import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def isolated_config_owner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path / "config-owner"))
+
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -93,7 +100,7 @@ def _workspace(root: Path, *, tier1: str | None = _TIER1) -> Path:
     declaration.write_text(_LANES, encoding="utf-8")
     if tier1 is not None:
         config = (
-            root
+            Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
             / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
             / "runtime"
             / "runtime_config.yaml"
@@ -123,7 +130,13 @@ class TestTheWorkspaceTier:
         assert config.event_bus.type is EnumEventBusType.KAFKA
         assert config.event_bus.lane == "dev"
         assert "workspace tier-1" in source
-        assert str(root / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH) in source
+        assert (
+            str(
+                Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
+                / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+            )
+            in source
+        )
 
     def test_a_bound_workspace_without_one_is_refused_not_tier0(
         self, tmp_path: Path
@@ -133,7 +146,12 @@ class TestTheWorkspaceTier:
             resolve_embedded_runtime_config(workspace_root=root)
         message = str(exc.value)
         assert (
-            str(root / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH / "runtime") in message
+            str(
+                Path(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"])
+                / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+                / "runtime"
+            )
+            in message
         )
         assert "--bus inmemory" in message
 
@@ -324,3 +342,33 @@ class TestTheRefusalNamesTheBoundVariable:
             resolve_lane_declaration_path(None)
         assert "$OMNIBASE_PATH" in str(exc.value)
         assert "$OMNI_HOME" not in str(exc.value)
+
+
+def test_retiring_root_config_cannot_answer_without_owning_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ONEX_CONTRACTS_DIR", raising=False)
+    monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
+    root = tmp_path / "omni_home"
+    legacy = root / "config/onex/runtime/runtime_config.yaml"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(_TIER1, encoding="utf-8")
+    with pytest.raises(ProtocolConfigurationError, match="omnibase_internal"):
+        resolve_embedded_runtime_config(workspace_root=root)
+
+
+def test_symlinked_registry_uses_its_physical_config_sibling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
+    actual = tmp_path / "registry/omni_home"
+    actual.mkdir(parents=True)
+    owner = actual.parent / "omnibase_internal/config/onex/runtime/runtime_config.yaml"
+    owner.parent.mkdir(parents=True)
+    owner.write_text(_TIER1, encoding="utf-8")
+    link = tmp_path / "alias/omni_home"
+    link.parent.mkdir()
+    link.symlink_to(actual, target_is_directory=True)
+    config, source = resolve_embedded_runtime_config(workspace_root=link)
+    assert config.event_bus.lane == "dev"
+    assert str(owner) in source

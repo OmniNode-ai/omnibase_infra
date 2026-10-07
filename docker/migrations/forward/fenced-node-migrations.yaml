@@ -894,3 +894,9 @@ fenced_node_migrations:
   # No lane release is added here.
   - id: "node:node_projection_delegation_disposition:0002_force_rls_delegation_dispositions.sql"
     ticket: "OMN-20242"
+  # OMN-20613: 0057 enables FORCE ROW LEVEL SECURITY on the new tenant table
+  # delegation_budget_applied_events. 0056 (the create and the writer grant)
+  # applies on every lane. Release is a separate operator-sequenced step; no
+  # lane release is added here.
+  - id: "node:node_projection_delegation:0057_delegation_budget_applied_events_rls.sql"
+    ticket: "OMN-20613"

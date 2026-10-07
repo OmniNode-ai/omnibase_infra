@@ -16,6 +16,7 @@ Exports:
     InfraTimeoutError: Infrastructure timeout errors
     InfraAuthenticationError: Infrastructure authentication errors
     InfraUnavailableError: Infrastructure resource unavailable errors
+    InfraPaymentRequiredError: Backend answered HTTP 402 (terminal, no breaker failure)
     InfraRateLimitedError: Infrastructure rate limit errors
     InfraRequestRejectedError: Request rejected by provider (400/422)
     InfraProtocolError: Invalid response format from provider
@@ -156,6 +157,7 @@ from omnibase_infra.errors.error_infra import (
     EventTopicAuthorizationError,
     InfraAuthenticationError,
     InfraConnectionError,
+    InfraPaymentRequiredError,
     InfraProtocolError,
     InfraRateLimitedError,
     InfraRequestRejectedError,
@@ -249,6 +251,7 @@ __all__: list[str] = [
     "InfraConnectionError",
     # Protocol/format errors
     "InfraProtocolError",
+    "InfraPaymentRequiredError",
     "InfraRateLimitedError",
     # Request rejection errors
     "InfraRequestRejectedError",

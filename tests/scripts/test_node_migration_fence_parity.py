@@ -549,6 +549,11 @@ FENCED_DELEGATION_EVAL_RUN_RLS_IDS = (
 FENCED_DELEGATION_DISPOSITIONS_RLS_IDS = (
     "node:node_projection_delegation_disposition:0002_force_rls_delegation_dispositions.sql",
 )
+# OMN-20613: the RLS step of delegation_budget_applied_events is fenced on
+# arrival; 0056 (the create and the writer grant) applies on every lane.
+FENCED_BUDGET_APPLIED_EVENTS_RLS_IDS = (
+    "node:node_projection_delegation:0057_delegation_budget_applied_events_rls.sql",
+)
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS
     + FENCED_REGISTRATION_IDS
@@ -563,6 +568,7 @@ EXPECTED_FENCE = (
     + FENCED_PROVIDER_QUOTA_STATE_RLS_IDS
     + FENCED_DELEGATION_EVAL_RUN_RLS_IDS
     + FENCED_DELEGATION_DISPOSITIONS_RLS_IDS
+    + FENCED_BUDGET_APPLIED_EVENTS_RLS_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -933,10 +939,11 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
         + FENCED_PROVIDER_QUOTA_STATE_RLS_IDS
         + FENCED_DELEGATION_EVAL_RUN_RLS_IDS
         + FENCED_DELEGATION_DISPOSITIONS_RLS_IDS
+        + FENCED_BUDGET_APPLIED_EVENTS_RLS_IDS
     ), (
         "the OMN-19978 usage_by_model_day, OMN-19790 delegation_eval_items, "
         "OMN-20154 provider_quota_state, OMN-19793 eval-run and OMN-20242 "
-        "delegation_dispositions RLS holds are not "
+        "delegation_dispositions and OMN-20613 budget_applied_events RLS holds are not "
         "the expected ids"
     )
 

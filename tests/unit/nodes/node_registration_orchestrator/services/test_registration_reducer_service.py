@@ -54,6 +54,15 @@ from omnibase_infra.models.registration.events.model_node_registration_ack_timed
 from omnibase_infra.models.registration.events.model_node_registration_initiated import (
     ModelNodeRegistrationInitiated,
 )
+from omnibase_infra.models.registration.model_payload_postgres_update_registration import (
+    ModelPayloadPostgresUpdateRegistration,
+)
+from omnibase_infra.models.registration.model_payload_postgres_upsert_registration import (
+    ModelPayloadPostgresUpsertRegistration,
+)
+from omnibase_infra.models.registration.model_registration_heartbeat_update import (
+    ModelRegistrationHeartbeatUpdate,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_context import (
     ModelReducerContext,
 )
@@ -62,13 +71,6 @@ from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_de
 )
 from omnibase_infra.nodes.node_registration_orchestrator.services import (
     RegistrationReducerService,
-)
-from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_update_registration import (
-    ModelPayloadPostgresUpdateRegistration,
-    ModelRegistrationHeartbeatUpdate,
-)
-from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_upsert_registration import (
-    ModelPayloadPostgresUpsertRegistration,
 )
 
 # ---------------------------------------------------------------------------

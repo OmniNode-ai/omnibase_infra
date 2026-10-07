@@ -171,12 +171,16 @@ Environment=DEPLOY_AGENT_PYTHON=/data/omninode/omnibase_infra/scripts/deploy-age
 # and the root its OMN-20154 lock lives under. A workspace build's RT-1 step
 # (stage_workspace.sh -> deploy_source_ref.py) runs checkout --force, reset --hard
 # and clean -ffdx on every vendored sibling under OMNI_HOME. The env store above
-# sets OMNI_HOME=/data/omninode/omni_home, the lanes' canonical tree, so before
+# selects the lanes' canonical tree, so before
 # this line every dev job detached omnimarket, omnibase_core and omnibase_compat
 # there, and the clone guard refused every in-process delegate while they stayed
 # detached. Declared and protected here so the env store cannot move it back.
 Environment=OMNI_HOME=/data/omninode
-Environment="DEPLOY_AGENT_ENV_PROTECTED=PATH OMNI_HOME DEPLOY_AGENT_ENV_FILE DEPLOY_AGENT_PYTHON DEPLOY_AGENT_ENV_PROTECTED DEPLOY_AGENT_DIR DEPLOY_AGENT_STATE_DIR DEPLOY_AGENT_PORT DEPLOY_AGENT_TRACKING_REF DEPLOY_AGENT_ALLOWED_LANES KAFKA_BOOTSTRAP_SERVERS KAFKA_ENVIRONMENT KAFKA_SECURITY_PROTOCOL KAFKA_SASL_MECHANISM KAFKA_SASL_ENV_PREFIX"
+# OMN-20037: scheduled scripts run from the registry, not the deploy-source root.
+Environment=UNIT_DRIFT_REGISTRY_ROOT=/data/omninode/omni_home
+# OMN-20637: same declaration as the host operator env used by stability refresh.
+Environment=DEPLOY_SOURCE_CLONE_ROOT=/data/omninode
+Environment="DEPLOY_AGENT_ENV_PROTECTED=PATH OMNI_HOME UNIT_DRIFT_REGISTRY_ROOT DEPLOY_SOURCE_CLONE_ROOT DEPLOY_AGENT_ENV_FILE DEPLOY_AGENT_PYTHON DEPLOY_AGENT_ENV_PROTECTED DEPLOY_AGENT_DIR DEPLOY_AGENT_STATE_DIR DEPLOY_AGENT_PORT DEPLOY_AGENT_TRACKING_REF DEPLOY_AGENT_ALLOWED_LANES KAFKA_BOOTSTRAP_SERVERS KAFKA_ENVIRONMENT KAFKA_SECURITY_PROTOCOL KAFKA_SASL_MECHANISM KAFKA_SASL_ENV_PREFIX"
 Environment=DEPLOY_AGENT_DIR=/data/omninode/omnibase_infra/scripts/deploy-agent
 Environment=DEPLOY_AGENT_STATE_DIR=/data/omninode/deploy-agent/state/jobs-dev
 Environment=DEPLOY_AGENT_PORT=8098

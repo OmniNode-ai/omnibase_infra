@@ -60,7 +60,7 @@ probes:
     cron: ['29 3,9,15,21 * * *']
     lane: dev
     lane_source: job_name
-    max_duration_minutes: 15
+    max_duration_minutes: 55
   - id: C11
     name: negative paths
     repo: omnibase_infra
@@ -68,7 +68,7 @@ probes:
     cron: ['10 * * * *']
     lane: dev
     lane_source: job_name
-    max_duration_minutes: 10
+    max_duration_minutes: 50
   - id: C12
     name: provider catalogue
     repo: omnibase_infra
@@ -76,7 +76,7 @@ probes:
     cron: ['27 * * * *']
     lane: dev
     lane_source: job_name
-    max_duration_minutes: 15
+    max_duration_minutes: 55
   - id: C28
     name: consumer flow
     repo: omnibase_infra
@@ -84,7 +84,7 @@ probes:
     cron: ['3 * * * *']
     lane: dev
     lane_source: job_name
-    max_duration_minutes: 35
+    max_duration_minutes: 75
   - id: provider-rung
     name: provider-rung liveness canary
     repo: omnibase_infra

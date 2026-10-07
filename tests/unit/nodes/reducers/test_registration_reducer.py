@@ -49,11 +49,11 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeMetadata,
 )
-from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
-from omnibase_infra.nodes.node_registration_reducer.models import (
+from omnibase_infra.models.registration.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
-    ModelRegistrationState,
 )
+from omnibase_infra.nodes.node_registration_reducer import RegistrationReducer
+from omnibase_infra.nodes.node_registration_reducer.models import ModelRegistrationState
 from omnibase_infra.nodes.node_registration_reducer.models.model_registration_state import (
     FailureReason,
 )

@@ -172,7 +172,7 @@ def sample_ledger_payload() -> ModelPayloadLedgerAppend:
     Returns:
         A valid payload with unique Kafka position and test data.
     """
-    from omnibase_infra.nodes.node_registration_reducer.models.model_payload_ledger_append import (
+    from omnibase_infra.models.ledger.model_payload_ledger_append import (
         ModelPayloadLedgerAppend,
     )
 
@@ -210,7 +210,7 @@ def make_ledger_payload() -> Callable[..., ModelPayloadLedgerAppend]:
                 correlation_id=my_correlation_id,
             )
     """
-    from omnibase_infra.nodes.node_registration_reducer.models.model_payload_ledger_append import (
+    from omnibase_infra.models.ledger.model_payload_ledger_append import (
         ModelPayloadLedgerAppend,
     )
 
@@ -242,12 +242,12 @@ def make_ledger_payload() -> Callable[..., ModelPayloadLedgerAppend]:
 
 # Re-export TYPE_CHECKING imports for type hints
 if TYPE_CHECKING:
+    from omnibase_infra.models.ledger.model_payload_ledger_append import (
+        ModelPayloadLedgerAppend,
+    )
     from omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_append import (
         HandlerLedgerAppend,
     )
     from omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_query import (
         HandlerLedgerQuery,
-    )
-    from omnibase_infra.nodes.node_registration_reducer.models.model_payload_ledger_append import (
-        ModelPayloadLedgerAppend,
     )

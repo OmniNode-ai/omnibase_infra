@@ -178,7 +178,7 @@ def test_the_refusal_names_the_file_the_line_the_pair_and_the_helper(
     assert "lockme.sh" in rendered
     assert ":3" in rendered
     assert "lock-without-holder-record" in rendered
-    assert "scripts/reconcile-host.sh" in rendered
+    assert "scripts/deploy-agent/deploy_agent/reconcile_host_lock.py" in rendered
     assert "OMN-18608" in rendered
 
 

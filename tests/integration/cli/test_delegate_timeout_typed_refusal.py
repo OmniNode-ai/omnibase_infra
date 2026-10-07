@@ -118,6 +118,7 @@ class TestDelegateTimeoutIsTypedOnStdout:
             delegate_command,
             [
                 "List the first five prime numbers",
+                "--json",
                 "--state-root",
                 str(tmp_path / "state"),
                 "--timeout",
@@ -230,7 +231,6 @@ class TestDelegateTimeoutIsTypedOnStdout:
             delegate_command,
             [
                 "List the first five prime numbers",
-                "--human",
                 "--state-root",
                 str(tmp_path / "state"),
                 "--timeout",

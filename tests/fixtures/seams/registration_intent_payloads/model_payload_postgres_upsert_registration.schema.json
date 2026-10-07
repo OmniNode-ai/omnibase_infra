@@ -1,0 +1,36 @@
+{
+  "$defs": {
+    "BaseModel": {
+      "properties": {},
+      "title": "BaseModel",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Payload for PostgreSQL upsert registration intents.\n\nThis payload follows the ONEX intent payload pattern for use with ModelIntent.\n\nUses SerializeAsAny wrapper: the `record` field accepts any BaseModel subclass,\nand serialization preserves all subclass fields via Pydantic's SerializeAsAny\ntype wrapper.\n\nAttributes:\n    intent_type: Discriminator literal for intent routing. Always \"postgres.upsert_registration\".\n    correlation_id: Correlation ID for distributed tracing.\n    record: The registration record to upsert (uses SerializeAsAny for subclass preservation).",
+  "properties": {
+    "correlation_id": {
+      "description": "Correlation ID for distributed tracing.",
+      "format": "uuid",
+      "title": "Correlation Id",
+      "type": "string"
+    },
+    "intent_type": {
+      "const": "postgres.upsert_registration",
+      "default": "postgres.upsert_registration",
+      "description": "Discriminator literal for intent routing.",
+      "title": "Intent Type",
+      "type": "string"
+    },
+    "record": {
+      "$ref": "#/$defs/BaseModel",
+      "description": "Registration record to upsert. Accepts any BaseModel subclass."
+    }
+  },
+  "required": [
+    "correlation_id",
+    "record"
+  ],
+  "title": "ModelPayloadPostgresUpsertRegistration",
+  "type": "object"
+}

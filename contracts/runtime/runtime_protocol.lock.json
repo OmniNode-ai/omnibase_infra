@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "package_version": "0.38.66",
+  "package_version": "0.38.69",
   "protocol_count": 25,
   "protocols": {
     "ProtocolAutoWiringManifestLike": {
