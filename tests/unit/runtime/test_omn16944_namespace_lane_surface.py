@@ -79,6 +79,7 @@ def _profile() -> ModelRuntimeProfilePolicy:
             "effects_port": 8086,
             "topic_provisioner_max_partitions": 4,
             "boundary_dlq_enabled": False,
+            "trajectory_evaluation_backend": "off",
             "secret_resolver_config_path": "/app/data/delegation/secret_resolver.yaml",
             "secret_resolver_namespaces": [
                 _tenant_credential_namespace().model_dump(mode="json")
@@ -148,6 +149,7 @@ def test_a_lane_declaring_namespaces_must_name_a_config_path() -> None:
                 "effects_port": 8086,
                 "topic_provisioner_max_partitions": 4,
                 "boundary_dlq_enabled": False,
+                "trajectory_evaluation_backend": "off",
                 "secret_resolver_config_path": "",
                 "secret_resolver_namespaces": [
                     _tenant_credential_namespace().model_dump(mode="json")
