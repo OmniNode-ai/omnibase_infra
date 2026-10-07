@@ -232,8 +232,8 @@ config:
     # delivery is still gated behind OMN-14323 gate 1 (MSK network/IAM) and
     # OMN-16459 (HTTPS ingest replacing the direct-MSK leg).
     #
-    # `topics` is the four `governed_topics` of hook_edge_lane.yaml. This is
-    # a LOCAL lane-to-lane mirror inside one trusted host, not a trust-boundary
+    # `topic_sets.hook_edge` is the four `governed_topics` of
+    # hook_edge_lane.yaml. This is a LOCAL lane-to-lane mirror inside one trusted host, not a trust-boundary
     # crossing, so the OD-9 content restriction that scopes the cloud set does
     # not apply to it; the OD-9 scope is still enforced, unchanged, at the
     # cloud boundary by `mirror_topics.outbound`.
@@ -241,17 +241,35 @@ config:
     # Lanes are named, never addressed. The resolved deployment YAML supplies
     # the per-lane broker endpoint (`lane_mirror_source_bus` /
     # `lane_mirror_buses`), the same authority split `local_bus` already uses:
-    # this contract owns the topic set and the lane names, the resolved tenant
-    # file owns this deployment's broker addresses.
+    # this contract owns the topic sets and the declared lane set, the resolved
+    # tenant file owns this deployment's lane selection and broker addresses.
+    #
+    # OMN-19983: the contract owns the closed set of lanes this leg may bind
+    # (`declared_lanes`) and the named topic sets. WHICH lanes and WHICH sets
+    # a deployment uses come from its resolved deployment YAML
+    # (`forwarder.lane_mirror_binding`), the deployment overlay, so no lane is
+    # fixed in shipped code. `dev-local` is a developer laptop's compose-stack
+    # lane, mirrored to a lab lane. `delegation` contains delegation terminal
+    # events (consumed by omnimarket node_projection_delegation) and
+    # llm-call-completed (consumed by the llm cost projections). A mirror
+    # republishes bytes unchanged, so the envelope keeps the developer's tenant id.
     lane_mirror:
-      source_lane: "stability-test"
-      mirror_lanes:
+      declared_lanes:
+        - "stability-test"
         - "dev"
-      topics:
-        - "onex.evt.omniclaude.session-started.v1"
-        - "onex.evt.omniclaude.session-ended.v1"
-        - "onex.evt.omniclaude.tool-executed.v1"
-        - "onex.evt.omniclaude.prompt-submitted.v1"
+        - "dev-local"
+      topic_sets:
+        hook_edge:
+          - "onex.evt.omniclaude.session-started.v1"
+          - "onex.evt.omniclaude.session-ended.v1"
+          - "onex.evt.omniclaude.tool-executed.v1"
+          - "onex.evt.omniclaude.prompt-submitted.v1"
+        delegation:
+          - "onex.evt.omnimarket.delegate-skill-completed.v1"
+          - "onex.evt.omnimarket.delegate-skill-failed.v1"
+          - "onex.evt.omnibase-infra.delegation-completed.v1"
+          - "onex.evt.omnibase-infra.delegation-failed.v1"
+          - "onex.evt.omniintelligence.llm-call-completed.v1"
       # Poll batch size and the source-commit deadline for one drain pass.
       max_messages_per_poll: 50
       poll_timeout_ms: 1000

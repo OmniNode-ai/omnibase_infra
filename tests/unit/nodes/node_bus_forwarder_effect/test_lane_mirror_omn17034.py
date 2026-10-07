@@ -12,7 +12,7 @@ stay on dev, and ``mirror_topics.outbound`` (the cloud set) is unchanged --
 widening that set is OMN-16979, not this ticket.
 
 These tests are the red-first proof for:
-  * the CONTRACT declaring the source lane and the mirror-lane set;
+  * the DEPLOYMENT selecting the source lane and the mirror-lane set;
   * the MODEL refusing a self-mirroring or non-canonical declaration;
   * the RUNTIME CONFIG requiring a resolved bus for every declared mirror lane;
   * the SERVICE delivering one source record to each mirror exactly once and
@@ -64,19 +64,23 @@ def _lane_mirror_block() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_contract_declares_stability_as_the_lane_mirror_source() -> None:
+def test_deployment_selects_stability_as_the_lane_mirror_source() -> None:
     """The source lane is the lane the hook edge publishes to, not dev."""
-    assert _lane_mirror_block()["source_lane"] == "stability-test"
+    resolved = yaml.safe_load(_RESOLVED_CONFIG_PATH.read_text(encoding="utf-8"))
+    assert (
+        resolved["forwarder"]["lane_mirror_binding"]["source_lane"] == "stability-test"
+    )
 
 
-def test_contract_declares_dev_in_the_mirror_lane_set() -> None:
+def test_deployment_selects_dev_in_the_mirror_lane_set() -> None:
     """The operator ruling is BOTH lanes: dev is a declared mirror target."""
-    assert "dev" in _lane_mirror_block()["mirror_lanes"]
+    resolved = yaml.safe_load(_RESOLVED_CONFIG_PATH.read_text(encoding="utf-8"))
+    assert "dev" in resolved["forwarder"]["lane_mirror_binding"]["mirror_lanes"]
 
 
 def test_contract_lane_mirror_covers_every_governed_hook_topic() -> None:
     """All four hook_edge_lane.yaml governed topics cross stability -> dev."""
-    declared = set(_lane_mirror_block()["topics"])
+    declared = set(_lane_mirror_block()["topic_sets"]["hook_edge"])
     assert set(_GOVERNED_HOOK_TOPICS) <= declared
 
 
@@ -122,6 +126,7 @@ def test_lane_mirror_model_rejects_a_lane_mirroring_to_itself() -> None:
         ModelGatewayLaneMirrorConfig(
             source_lane="stability-test",
             mirror_lanes=("dev", "stability-test"),
+            declared_lanes=("stability-test", "dev"),
             topics=_GOVERNED_HOOK_TOPICS,
         )
 
@@ -136,6 +141,7 @@ def test_lane_mirror_model_rejects_a_tenant_prefixed_topic() -> None:
         ModelGatewayLaneMirrorConfig(
             source_lane="stability-test",
             mirror_lanes=("dev",),
+            declared_lanes=("stability-test", "dev"),
             topics=("tenant-beta.onex.evt.omniclaude.tool-executed.v1",),
         )
 
@@ -149,6 +155,7 @@ def test_lane_mirror_model_requires_at_least_one_mirror_lane() -> None:
         ModelGatewayLaneMirrorConfig(
             source_lane="stability-test",
             mirror_lanes=(),
+            declared_lanes=("stability-test",),
             topics=_GOVERNED_HOOK_TOPICS,
         )
 
