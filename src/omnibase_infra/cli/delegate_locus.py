@@ -32,12 +32,14 @@ import importlib.metadata
 import importlib.util
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import yaml
 
 from omnibase_infra.backends.backend_probe import (
     ConsumerGroupDescribeDeniedError,
+    ConsumerGroupLivenessTransientError,
     ConsumerGroupLivenessUnknownError,
     ConsumerGroupSaslRefusedError,
     live_chain_consumer_groups,
@@ -72,9 +74,17 @@ _ORCHESTRATOR_DISTRIBUTION = "omnimarket"
 
 # Seconds allowed for the consumer-group liveness question. Generous relative
 # to the 2s health probe: this answer gates the whole run, and a timeout here
-# refuses rather than degrades, so being impatient turns a slow broker into a
-# false refusal.
+# eventually refuses rather than degrades, so being impatient turns a slow
+# broker into a false refusal.
 _LIVENESS_TIMEOUT_SECONDS = 5.0
+
+# OMN-20646: an off-lab caller over the lab's degraded path (about 220 ms RTT,
+# 20% loss, DERP relay) lost 7 of 12 draws to one timed-out request. Retry a
+# transport timeout a bounded number of times. Worst case adds 6 s of backoff
+# before the same refusal; a broker that is down still refuses after the last
+# attempt. Backoff doubles: 2 s after attempt 1, then 4 s after attempt 2.
+_LIVENESS_ATTEMPTS = 3
+_LIVENESS_RETRY_BACKOFF_SECONDS = 2.0
 
 # OMN-18843. The named failure class this wait exists for: every
 # runtime-affecting merge to ``dev`` force-recreates the containers that bind
@@ -99,9 +109,9 @@ DOWNSTREAM_CHAIN_STAGE = "downstream-delegation-chain"
 # not rebinding.
 _REBIND_WAIT_SECONDS = 180.0
 
-# Seconds between re-probes inside that window. The liveness probe itself is
-# bounded by ``_LIVENESS_TIMEOUT_SECONDS``, so one re-probe costs at most this
-# plus that.
+# Seconds between re-probes inside that window. Each admin request has the
+# ``_LIVENESS_TIMEOUT_SECONDS`` bound; transport failures also incur the
+# bounded attempts and backoff above.
 _REBIND_POLL_SECONDS = 5.0
 
 # Indirection so the wait can be driven by a fake clock in unit tests.
@@ -528,6 +538,35 @@ def resolve_delegate_locus(
     )
 
 
+def _ask_liveness(
+    ask: Callable[[], tuple[str, ...]], *, question: str
+) -> tuple[str, ...]:
+    """Retry only transport failures, keeping UNKNOWN fail-closed (OMN-20646)."""
+    started = _monotonic()
+    backoff = _LIVENESS_RETRY_BACKOFF_SECONDS
+    for attempt in range(1, _LIVENESS_ATTEMPTS + 1):
+        try:
+            return ask()
+        except ConsumerGroupLivenessTransientError as exc:
+            if attempt == _LIVENESS_ATTEMPTS:
+                elapsed = _monotonic() - started
+                raise ConsumerGroupLivenessTransientError(
+                    f"{exc} (no answer after {_LIVENESS_ATTEMPTS} attempts "
+                    f"over {elapsed:.1f} s)"
+                ) from exc
+            logger.warning(
+                "onex delegate: %s, attempt %d of %d: %s; asking again in %.1f s",
+                question,
+                attempt,
+                _LIVENESS_ATTEMPTS,
+                exc,
+                backoff,
+            )
+            _sleep(backoff)
+            backoff *= 2
+    raise AssertionError("liveness attempts must be positive")
+
+
 def _assert_dispatch_viable(
     *,
     command_topic: str,
@@ -550,9 +589,11 @@ def _assert_dispatch_viable(
       bound it refuses exactly as before: publishing would succeed and the run
       would then sit until its timeout, reported as "the lane was slow" rather
       than "there was no lane".
-    * broker could not be asked → refuse at once, never retried. UNKNOWN is
-      not permission; that conflation is what let a probe report on an
-      executor it never reached.
+    * broker could not be asked → a transport timeout or dropped connection
+      is asked again up to ``_LIVENESS_ATTEMPTS`` times with doubling backoff
+      (OMN-20646); any other unanswerable question refuses at once. UNKNOWN
+      is still never permission; that conflation is what let a probe report
+      on an executor it never reached.
 
     The address is required (OMN-16871): the caller resolves it from the
     selected lane, so this function can never probe a broker the publish will
@@ -569,11 +610,14 @@ def _assert_dispatch_viable(
     while True:
         probes += 1
         try:
-            groups = live_consumer_groups(
-                topic=command_topic,
-                bootstrap_servers=kafka_bootstrap,
-                timeout=_LIVENESS_TIMEOUT_SECONDS,
-                owner=owner,
+            groups = _ask_liveness(
+                lambda: live_consumer_groups(
+                    topic=command_topic,
+                    bootstrap_servers=kafka_bootstrap,
+                    timeout=_LIVENESS_TIMEOUT_SECONDS,
+                    owner=owner,
+                ),
+                question=f"first-hop liveness on '{command_topic}'",
             )
         except ConsumerGroupDescribeDeniedError as exc:
             raise DelegateLocusAclRefusedError(
@@ -604,11 +648,15 @@ def _assert_dispatch_viable(
         downstream_groups: tuple[str, ...] = ()
         if groups and downstream is not None:
             try:
-                downstream_groups = live_chain_consumer_groups(
-                    command_topic=downstream.command_topic,
-                    subscribe_topics=downstream.subscribe_topics,
-                    bootstrap_servers=kafka_bootstrap,
-                    timeout=_LIVENESS_TIMEOUT_SECONDS,
+                downstream_groups = _ask_liveness(
+                    lambda: live_chain_consumer_groups(
+                        command_topic=downstream.command_topic,
+                        subscribe_topics=downstream.subscribe_topics,
+                        bootstrap_servers=kafka_bootstrap,
+                        timeout=_LIVENESS_TIMEOUT_SECONDS,
+                    ),
+                    question=f"{DOWNSTREAM_CHAIN_STAGE} liveness on "
+                    f"'{downstream.command_topic}'",
                 )
             except ConsumerGroupDescribeDeniedError as exc:
                 raise DelegateLocusAclRefusedError(
