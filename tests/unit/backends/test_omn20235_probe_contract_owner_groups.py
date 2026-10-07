@@ -9,6 +9,9 @@ cap nor stand in for the orchestrator when it is down.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from typing import Any
+
 import pytest
 
 from omnibase_infra.backends.backend_probe import (
@@ -58,6 +61,20 @@ class _Admin:
     async def describe_cluster(self) -> dict[str, object]:
         return {"brokers": [{"node_id": 1}]}
 
+    async def _send_request(
+        self, request: Any, node_id: int | None = None
+    ) -> SimpleNamespace:
+        struct = request.prepare({16: (0, 4)})
+        assert struct.states_filter == ["Stable"]
+        return SimpleNamespace(
+            error_code=0,
+            groups=[
+                (group_id, "consumer", state, {})
+                for group_id in self.listed
+                if (state := self.states.get(group_id, "Stable")) == "Stable"
+            ],
+        )
+
     async def list_consumer_groups(self) -> list[tuple[str, str]]:
         return [(group, "consumer") for group in _Admin.listed]
 
@@ -99,6 +116,8 @@ def test_contract_owner_describes_only_the_orchestrator_among_385_groups(
 
 
 def test_contract_owner_none_keeps_the_unfiltered_cap(admin: type[_Admin]) -> None:
+    # OMN-20646: only Stable candidates count toward the serial describe cap.
+    admin.states = dict.fromkeys(admin.listed, "Stable")
     with pytest.raises(
         ConsumerGroupLivenessUnknownError,
         match="refusing to run unbounded serial DescribeGroups probes",
@@ -116,7 +135,8 @@ def test_contract_owner_other_node_cannot_prove_an_empty_orchestrator_live(
         live_consumer_groups(topic=_TOPIC, bootstrap_servers=_BROKER, owner=_OWNER)
         == ()
     )
-    assert admin.describes == [[_OWN_GROUP]]
+    # OMN-20646: the Empty owner group is filtered before DescribeGroups.
+    assert admin.describes == []
 
 
 @pytest.mark.parametrize("env", ["local", "onex-dev", "prepr1"])
