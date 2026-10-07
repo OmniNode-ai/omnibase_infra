@@ -394,7 +394,8 @@ def test_ci_bus_topics_are_exactly_the_ci_bus_set(ci_bus: dict[str, Any]) -> Non
     same broker and is provisioned with them. Eleven lab-work bus topics cover
     lab-work units, host capacity, focused test runs and push validation (OMN-20213),
     and two more carry merge events and each host's canonical-clone refresh receipt
-    (OMN-20496).
+    (OMN-20496). OMN-20604 adds the lab job supervisor's submitted command topic,
+    for fourteen lab topics in total.
     """
     expected = {
         "onex.cmd.omnimarket.occ-autobind.v1",  # onex-topic-allow: OMN-18691 CI-bus provisioning set
@@ -415,6 +416,7 @@ def test_ci_bus_topics_are_exactly_the_ci_bus_set(ci_bus: dict[str, Any]) -> Non
         "onex.dlq.omnimarket.push-validation.v1",  # onex-topic-allow: OMN-20213
         "onex.evt.omnimarket.repo-merged.v1",  # onex-topic-allow: OMN-20496
         "onex.evt.omnimarket.canonical-clone-refreshed.v1",  # onex-topic-allow: OMN-20496
+        "onex.cmd.omnimarket.lab-job-submitted.v1",  # onex-topic-allow: OMN-20604
     }
 
     raw = CI_BUS_COMPOSE.read_text(encoding="utf-8")
@@ -429,7 +431,7 @@ def test_ci_bus_topics_are_exactly_the_ci_bus_set(ci_bus: dict[str, Any]) -> Non
     )
 
     # Cross-check the one name this repo owns a canonical constant for. The other
-    # seventeen are declared in omnimarket's topic registry, which this repo does not
+    # eighteen are declared in omnimarket's topic registry, which this repo does not
     # import -- stated rather than left as an apparent omission.
     from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_GITHUB_PR_MERGED
 
@@ -470,7 +472,7 @@ def test_ci_bus_labwork_principal_is_scoped_not_superuser(
     lab_topics = re.search(r'LAB_TOPICS="([^"]+)"', command)
     assert lab_topics is not None, "the lab-work ACL grant set must be explicit"
     granted = lab_topics.group(1).split()
-    assert len(granted) == 13
+    assert len(granted) == 14
     assert '--resource-pattern-type literal --topic "$$t"' in command
     topics_command = "\n".join(services["ci-bus-topics"]["command"])
     declared = set(re.findall(r"onex\.[a-z]+\.[a-z0-9.-]+\.v\d+", topics_command))

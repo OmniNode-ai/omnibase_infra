@@ -222,10 +222,12 @@ services:
   # the h105 dogfood broker onto this broker, which no lane rebuild reaches
   # (OMN-20213). Its contracts live in omnimarket: node_lab_work_unit_effect,
   # node_focused_test_run_effect, node_push_validation_effect. Six partitions
-  # matches DEFAULT_EVENT_TOPIC_PARTITIONS for these eleven lab topics too.
+  # matches DEFAULT_EVENT_TOPIC_PARTITIONS for the original eleven lab topics too.
   # OMN-20496 adds two: merge events and the per-host canonical-clone refresh
   # receipt (omnimarket node_canonical_clone_refresh_effect, one `clone-refresh
   # serve` per host in a group <prefix>.<host>), on the same login.
+  # OMN-20604 adds the lab job supervisor's submitted command topic
+  # (omnimarket node_lab_job_submit_effect), on the same login, for fourteen total.
   ci-bus-topics:
     image: redpandadata/redpanda:v24.2.7
     container_name: omninode-ci-bus-topics
@@ -249,7 +251,7 @@ services:
         # addition does not hit the Redpanda default of 1000 (OMN-7302).
         /usr/bin/rpk cluster config set topic_partitions_per_shard 7000 $$ADMIN
         CI_TOPICS="onex.cmd.omnimarket.occ-autobind.v1 onex.cmd.omnimarket.occ-companion-effect-requested.v1 onex.evt.github.pr-merged.v1 onex.cmd.omnimarket.redeploy-start.v1 onex.evt.deploy.rebuild-completed.v1"
-        LAB_TOPICS="onex.cmd.omnimarket.lab-work-unit-requested.v1 onex.evt.omnimarket.lab-work-unit-completed.v1 onex.evt.omnimarket.lab-work-unit-failed.v1 onex.evt.omnimarket.lab-host-capacity-advertised.v1 onex.cmd.omnimarket.focused-test-run-requested.v1 onex.evt.omnimarket.focused-test-run-completed.v1 onex.evt.omnimarket.focused-test-run-failed.v1 onex.cmd.omnimarket.push-validation-requested.v1 onex.evt.omnimarket.push-validation-completed.v1 onex.evt.omnimarket.push-validation-failed.v1 onex.dlq.omnimarket.push-validation.v1 onex.evt.omnimarket.repo-merged.v1 onex.evt.omnimarket.canonical-clone-refreshed.v1"
+        LAB_TOPICS="onex.cmd.omnimarket.lab-work-unit-requested.v1 onex.evt.omnimarket.lab-work-unit-completed.v1 onex.evt.omnimarket.lab-work-unit-failed.v1 onex.evt.omnimarket.lab-host-capacity-advertised.v1 onex.cmd.omnimarket.focused-test-run-requested.v1 onex.evt.omnimarket.focused-test-run-completed.v1 onex.evt.omnimarket.focused-test-run-failed.v1 onex.cmd.omnimarket.push-validation-requested.v1 onex.evt.omnimarket.push-validation-completed.v1 onex.evt.omnimarket.push-validation-failed.v1 onex.dlq.omnimarket.push-validation.v1 onex.evt.omnimarket.repo-merged.v1 onex.evt.omnimarket.canonical-clone-refreshed.v1 onex.cmd.omnimarket.lab-job-submitted.v1"
         TOPICS="$$CI_TOPICS $$LAB_TOPICS"
         for t in $$TOPICS; do
           if /usr/bin/rpk topic list $$BROKER | awk '{print $$1}' | grep -qx "$$t"; then
@@ -465,7 +467,7 @@ services:
         fi
         echo "OMN-20213: lab-work principal is not a superuser"
         # Kafka ACL creation is idempotent: an identical binding is a no-op.
-        LAB_TOPICS="onex.cmd.omnimarket.lab-work-unit-requested.v1 onex.evt.omnimarket.lab-work-unit-completed.v1 onex.evt.omnimarket.lab-work-unit-failed.v1 onex.evt.omnimarket.lab-host-capacity-advertised.v1 onex.cmd.omnimarket.focused-test-run-requested.v1 onex.evt.omnimarket.focused-test-run-completed.v1 onex.evt.omnimarket.focused-test-run-failed.v1 onex.cmd.omnimarket.push-validation-requested.v1 onex.evt.omnimarket.push-validation-completed.v1 onex.evt.omnimarket.push-validation-failed.v1 onex.dlq.omnimarket.push-validation.v1 onex.evt.omnimarket.repo-merged.v1 onex.evt.omnimarket.canonical-clone-refreshed.v1"
+        LAB_TOPICS="onex.cmd.omnimarket.lab-work-unit-requested.v1 onex.evt.omnimarket.lab-work-unit-completed.v1 onex.evt.omnimarket.lab-work-unit-failed.v1 onex.evt.omnimarket.lab-host-capacity-advertised.v1 onex.cmd.omnimarket.focused-test-run-requested.v1 onex.evt.omnimarket.focused-test-run-completed.v1 onex.evt.omnimarket.focused-test-run-failed.v1 onex.cmd.omnimarket.push-validation-requested.v1 onex.evt.omnimarket.push-validation-completed.v1 onex.evt.omnimarket.push-validation-failed.v1 onex.dlq.omnimarket.push-validation.v1 onex.evt.omnimarket.repo-merged.v1 onex.evt.omnimarket.canonical-clone-refreshed.v1 onex.cmd.omnimarket.lab-job-submitted.v1"
         for t in $$LAB_TOPICS; do
           /usr/bin/rpk security acl create --allow-principal "User:$$CI_BUS_LABWORK_SASL_USERNAME" \
             --resource-pattern-type literal --topic "$$t" \
@@ -491,7 +493,7 @@ services:
         for t in $$LAB_TOPICS; do
           printf '%s\n' "$$ACLS" | grep -q "$$t"
         done
-        echo "OMN-20213 + OMN-20496: ACL readback confirms all thirteen lab topics"
+        echo "OMN-20213 + OMN-20496: ACL readback confirms all fourteen lab topics"
         # A down broker also hides topics, so the negative alone proves nothing.
         # Capture once as the lab-work login: the positive proves authentication
         # and authorization, and the negative proves a CI topic is invisible.
