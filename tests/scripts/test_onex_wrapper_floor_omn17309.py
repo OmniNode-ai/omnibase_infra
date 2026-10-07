@@ -200,7 +200,7 @@ def test_below_floor_warns_but_runs_an_ordinary_subcommand(ws: _Workspace) -> No
         f"bash {ws.scripts}/reconcile-workspace-venvs.sh --omni-home {ws.root} --proven"
         in proc.stderr
     )
-    assert "reconcile-host.sh" not in proc.stderr
+    assert "onex-host-reconcile" not in proc.stderr
     assert ws.argv_log.read_text(encoding="utf-8").strip() == "info"
 
 
@@ -218,10 +218,12 @@ def test_delegate_never_runs_a_host_reconciler_that_would_stamp_the_floor(
         encoding="utf-8",
     )
     marker = ws.root / "host-reconciler-ran"
-    (ws.scripts / "reconcile-host.sh").write_text(
+    host_entry = ws.venv_bin / "onex-host-reconcile"
+    host_entry.write_text(
         f'#!/usr/bin/env bash\ntouch "{marker}"\ncp "{good_floor}" "{ws.floor}"\n',
         encoding="utf-8",
     )
+    host_entry.chmod(0o755)
 
     proc = ws.run("delegate", "x")
 
@@ -234,7 +236,7 @@ def test_delegate_never_runs_a_host_reconciler_that_would_stamp_the_floor(
             f"bash {ws.scripts}/reconcile-workspace-venvs.sh --omni-home {ws.root} --proven"
             in proc.stderr
         )
-        assert "reconcile-host.sh" not in proc.stderr
+        assert "onex-host-reconcile" not in proc.stderr
         assert "blocking :" not in proc.stderr
     else:
         assert not ws.floor.exists()
