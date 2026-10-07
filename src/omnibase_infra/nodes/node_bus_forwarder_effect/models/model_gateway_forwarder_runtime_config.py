@@ -171,7 +171,7 @@ class ModelGatewayForwarderRuntimeConfig(BaseModel):
 
         if self.lane_mirror_source_bus is None:
             raise ValueError(
-                "the node contract declares a lane_mirror with source_lane "
+                "the lane_mirror config selects source_lane "
                 f"{lane_mirror.source_lane!r} but no lane_mirror_source_bus was "
                 "resolved for it"
             )
