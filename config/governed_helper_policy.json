@@ -63,15 +63,30 @@
         "reconcile-host is running; nothing to do' and exited 0 while `ps` showed",
         "no reconcile process anywhere on the host. The dispatch venv went",
         "unreconciled for that whole window and only moved when the directory was",
-        "removed by hand."
+        "removed by hand.",
+        "",
+        "OMN-18630. `mkdir -p` is not matched: it succeeds when the directory",
+        "already exists, so it cannot exclude a second taker and is never a lock",
+        "acquisition. The one baselined hit that had it (scripts/ci/ensure_ci_env.sh,",
+        "creating the directory that HOLDS the locks) was a false positive; the",
+        "pattern is corrected here, where the change is reviewable, and the entry",
+        "is gone from the baseline.",
+        "",
+        "Every baselined site of this pair carries a verdict (OMN-18630). The",
+        "holder_record_pattern is what a `compliant` verdict is checked against:",
+        "a line writing the holder record, within holder_record_window lines at",
+        "or after the baselined mkdir."
       ],
-      "bare_pattern": "\\bmkdir\\s+(?:-p\\s+)?[\"']?\\$?\\{?[A-Za-z_]*(?:LOCK|lock)",
+      "bare_pattern": "\\bmkdir\\s+[\"']?\\$?\\{?[A-Za-z_]*(?:LOCK|lock)",
       "governed_helper": "scripts/deploy-agent/deploy_agent/reconcile_host_lock.py (holder protocol)",
       "governed_form": "write the holder (pid + host + timestamp) INTO the lock and decide staleness from it, as scripts/deploy-agent/deploy_agent/reconcile_host_lock.py does; never a bare mkdir released only by a trap",
       "scope_globs": ["*.sh", "*.bash"],
       "exclude_globs": [],
       "governed_prefix_pattern": null,
-      "established_by": "OMN-18608"
+      "established_by": "OMN-18608",
+      "verdict_required": true,
+      "holder_record_pattern": ">\\s*\"[^\"]*(?:holder|pid_file)[^\"]*\"",
+      "holder_record_window": 30
     },
     {
       "id": "kafka-consumer-commit-unbounded",

@@ -1396,9 +1396,25 @@ Pending targets: ${target_list}" "danger"
     else
         lock_kind="mkdir"
         if ! mkdir "${AUTO_BOUNCE_LOCKFILE}.d" 2>/dev/null; then
-            log "AUTO-BOUNCE skipped: a prior bounce is still in flight (lock held on ${AUTO_BOUNCE_LOCKFILE}.d)."
+            # OMN-18630: the holder (pid host started) is recorded INTO the
+            # lock, so a corpse is told from a live bounce. One monitor ticks
+            # at a time, so reclaiming a same-host dead holder cannot race a
+            # second taker; the bounce itself waits for the next tick.
+            local held_pid held_host held_by
+            held_by="$(cat "${AUTO_BOUNCE_LOCKFILE}.d/holder" 2>/dev/null || echo unrecorded)"
+            held_pid="$(cut -d' ' -f1 <<< "${held_by}")"
+            held_host="$(cut -d' ' -f2 <<< "${held_by}")"
+            if [[ "${held_pid}" =~ ^[0-9]+$ && "${held_host}" == "$(hostname -s 2>/dev/null || echo unknown)" ]] \
+                && ! kill -0 "${held_pid}" 2>/dev/null; then
+                log "AUTO-BOUNCE reclaimed a stale lock on ${AUTO_BOUNCE_LOCKFILE}.d (holder ${held_by} is gone); the bounce runs next tick."
+                rm -rf "${AUTO_BOUNCE_LOCKFILE}.d" 2>/dev/null || true
+                return 0
+            fi
+            log "AUTO-BOUNCE skipped: a prior bounce is still in flight (lock held on ${AUTO_BOUNCE_LOCKFILE}.d, holder: ${held_by})."
             return 0
         fi
+        printf '%s %s %s\n' "$$" "$(hostname -s 2>/dev/null || echo unknown)" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+            > "${AUTO_BOUNCE_LOCKFILE}.d/holder"
     fi
 
     log "AUTO-BOUNCE enabled (MONITOR_AUTO_BOUNCE=1). Force-recreating: ${target_list}"
@@ -1410,7 +1426,7 @@ Pending targets: ${target_list}" "danger"
         if [[ "${lock_kind}" == "flock" ]]; then
             exec 9>&-
         else
-            rmdir "${AUTO_BOUNCE_LOCKFILE}.d" 2>/dev/null || true
+            rm -rf "${AUTO_BOUNCE_LOCKFILE}.d" 2>/dev/null || true
         fi
         return 0
     fi
@@ -1429,7 +1445,12 @@ Pending targets: ${target_list}" "danger"
     # shellcheck disable=SC2086
     (
         if [[ "${lock_kind}" == "mkdir" ]]; then
-            trap 'rmdir "${AUTO_BOUNCE_LOCKFILE}.d" 2>/dev/null || true' EXIT
+            trap 'rm -rf "${AUTO_BOUNCE_LOCKFILE}.d" 2>/dev/null || true' EXIT
+            # The foreground pid that took the lock exits as soon as this
+            # subshell is forked; the holder is now the subshell that runs the
+            # bounce, so a live bounce is never read as a corpse.
+            printf '%s %s %s\n' "${BASHPID}" "$(hostname -s 2>/dev/null || echo unknown)" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+                > "${AUTO_BOUNCE_LOCKFILE}.d/holder"
         fi
 
         # OMN-16947 rule 6: ONE service per compose call, each verified before
