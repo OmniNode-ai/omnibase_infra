@@ -15,10 +15,12 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from deploy_agent import unit_drift
+from deploy_agent.agent import _unit_drift_report
 from deploy_agent.health import create_health_app
 from deploy_agent.job_state import JobStore
 from deploy_agent.unit_drift import (
@@ -249,3 +251,155 @@ async def test_route_without_a_provider_says_indeterminate_not_clean(
         body = await resp.json()
         assert body["drift"] is None
         assert unit_drift.INDETERMINATE_REASON in body["reason"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "script",
+    [
+        "disk-gc.sh",
+        "docker-volume-gc.sh",
+        "disk-watermark-check.sh",
+        "buildx-orphan-sweep.sh",
+        "runner-disk-admission-restore.sh",
+        "onex-build-loop-trigger.sh",
+        "monitor_logs.py",
+    ],
+)
+def test_scheduled_scripts_detect_stale_installed_bytes(
+    tmp_path: Path, script: str
+) -> None:
+    entries = load_manifest(_REPO_ROOT / "deploy" / "unit-drift-manifest.yaml")
+    entry = next((entry for entry in entries if entry.name == script), None)
+    assert entry is not None, f"scheduled script is unobserved: {script}"
+    assert entry.tracked == f"scripts/{script}"
+    assert "omninode-pc" in entry.hosts
+    expected = (_REPO_ROOT / entry.tracked).read_bytes()
+    installed = tmp_path / script
+    installed.write_bytes(expected)
+    kwargs = {
+        "repo_root": _REPO_ROOT,
+        "hostname": "omninode-pc",
+        "home": tmp_path,
+        "overrides": {script: installed},
+    }
+    matching = check_units([entry], **kwargs)
+    assert matching[0].status is EnumUnitStatus.OK
+    assert not has_drift(matching)
+    installed.write_bytes(expected + b"\n# stale installed revision\n")
+    stale = check_units([entry], **kwargs)
+    assert stale[0].status is EnumUnitStatus.DRIFT
+    assert has_drift(stale)
+
+
+@pytest.mark.unit
+def test_registry_bound_script_uses_declared_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, home = _tree(tmp_path, "new\n", None)
+    registry = tmp_path / "registry"
+    registry.mkdir()
+    installed = registry / "installed.sh"
+    installed.write_text("new\n")
+    monkeypatch.setenv("UNIT_DRIFT_REGISTRY_ROOT", str(registry))
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path / "deploy-source"))
+    entry = _entry(installed="{registry_root}/installed.sh")
+    results = check_units([entry], repo_root=repo, hostname=_HOST, home=home)
+    assert results[0].installed_path == installed
+    assert results[0].status is EnumUnitStatus.OK
+    installed.write_text("old\n")
+    assert (
+        check_units([entry], repo_root=repo, hostname=_HOST, home=home)[0].status
+        is EnumUnitStatus.DRIFT
+    )
+
+
+@pytest.mark.unit
+def test_registry_bound_script_refuses_an_undeclared_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, home = _tree(tmp_path, "new\n", None)
+    monkeypatch.delenv("UNIT_DRIFT_REGISTRY_ROOT", raising=False)
+    with pytest.raises(ValueError, match="UNIT_DRIFT_REGISTRY_ROOT"):
+        check_units(
+            [_entry(installed="{registry_root}/installed.sh")],
+            repo_root=repo,
+            hostname=_HOST,
+            home=home,
+        )
+
+
+@pytest.mark.unit
+def test_registry_binding_is_not_required_for_another_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, home = _tree(tmp_path, "new\n", None)
+    monkeypatch.delenv("UNIT_DRIFT_REGISTRY_ROOT", raising=False)
+    results = check_units(
+        [_entry(installed="{registry_root}/installed.sh")],
+        repo_root=repo,
+        hostname="other",
+        home=home,
+    )
+    assert results[0].status is EnumUnitStatus.NOT_APPLICABLE
+    assert not has_drift(results)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("bound", [True, False])
+def test_health_provider_resolves_registry_scripts_and_reports_missing_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bound: bool
+) -> None:
+    repo, home = _tree(tmp_path, "new\n", None)
+    agent_dir = repo / "scripts" / "deploy-agent"
+    agent_dir.mkdir(parents=True)
+    (repo / "deploy").mkdir()
+    (repo / "deploy" / "unit-drift-manifest.yaml").write_text(
+        "units:\n  - name: installed.sh\n    tracked: tracked/x.service\n"
+        "    installed: '{registry_root}/installed.sh'\n    hosts: [labhost]\n"
+    )
+    registry = tmp_path / "registry"
+    registry.mkdir()
+    (registry / "installed.sh").write_text("old\n")
+    monkeypatch.setenv("DEPLOY_AGENT_DIR", str(agent_dir))
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path / "deploy-source"))
+    if bound:
+        monkeypatch.setenv("UNIT_DRIFT_REGISTRY_ROOT", str(registry))
+    else:
+        monkeypatch.delenv("UNIT_DRIFT_REGISTRY_ROOT", raising=False)
+    with (
+        patch("deploy_agent.agent.socket.gethostname", return_value=_HOST),
+        patch.object(Path, "home", return_value=home),
+    ):
+        payload = _unit_drift_report()
+    if bound:
+        assert payload["drift"] is True
+        assert payload["units"][0]["installed_path"] == str(registry / "installed.sh")
+        assert payload["units"][0]["status"] == "DRIFT"
+    else:
+        assert payload["drift"] is None
+        assert "UNIT_DRIFT_REGISTRY_ROOT" in payload["reason"]
+
+
+@pytest.mark.unit
+def test_dev_agent_declares_and_protects_registry_binding() -> None:
+    unit = (
+        _REPO_ROOT / "scripts/deploy-agent/deploy/deploy-agent-dev.service"
+    ).read_text()
+    declarations = [
+        line for line in unit.splitlines() if line.startswith("Environment=")
+    ]
+    root = next(
+        line
+        for line in declarations
+        if line.startswith("Environment=UNIT_DRIFT_REGISTRY_ROOT=")
+    )
+    assert Path(root.split("=", 2)[2]).is_absolute()
+    protected = next(
+        line for line in declarations if "DEPLOY_AGENT_ENV_PROTECTED=" in line
+    )
+    assert "UNIT_DRIFT_REGISTRY_ROOT" in protected.split("=", 2)[2].rstrip('"').split()
+    source = next(
+        line for line in declarations if line.startswith("Environment=OMNI_HOME=")
+    )
+    assert root.split("=", 2)[2] != source.split("=", 2)[2]
