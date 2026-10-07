@@ -4657,6 +4657,7 @@ jobs:
           # Dependabot lane. Empty on non-PR events, which also drops
           # nothing.
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           # OMN-19167 — the three facts the CONDITIONAL sweep registry decides
           # against. `occ-autobind` and `occ-companion-effect` skip by their own
           # `if:` on a pull request with no ticket token, which doctrine's
@@ -4710,7 +4711,7 @@ jobs:
             # file is REMOVED, not left stale: the gate reads an absent file as
             # "no external context observed" → PENDING → fail-closed at the
             # deadline. It must never resolve green off a stale or partial file.
-            rm -f check_runs.json workflow_runs.json
+            rm -f check_runs.json workflow_runs.json pr_timeline.json
             if [ "${EVENT_NAME}" = "pull_request" ]; then
               if ! gh api --paginate \
                   "repos/${GH_REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
@@ -4734,9 +4735,20 @@ jobs:
                 rm -f workflow_runs.json
               fi
             fi
+            # OMN-19379: timeline transitions classify run creation times; a
+            # draft-era rerun never becomes a ready run just by starting later.
+            if [ "${EVENT_NAME}" = "pull_request" ]; then
+              if ! gh api --paginate \
+                  "repos/${GH_REPO}/issues/${PR_NUMBER}/timeline?per_page=100" \
+                  --jq '.[]' | jq -s '.' > pr_timeline.json; then
+                echo "PR timeline fetch failed; retaining draft-era rows (fail-closed)"
+                rm -f pr_timeline.json
+              fi
+            fi
             python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}" \
               --check-runs-file check_runs.json --event-name "${EVENT_NAME}" \
               --workflow-runs-file workflow_runs.json \
+              --pr-timeline-file pr_timeline.json --head-sha "${HEAD_SHA}" \
               --current-run-id "${RUN_ID}" \
               --pr-author "${PR_AUTHOR:-}" \
               --pr-title "${PR_TITLE:-}" \

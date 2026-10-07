@@ -219,6 +219,18 @@ while IFS= read -r src_file; do
       if [ -f "${dest_file}" ] && is_legacy_declared "${node_name}/${filename}"; then
         echo "[sync-node-migrations]   kept legacy-declared (OMN-16705) ${node_name}/${filename}"
       else
+        # OMN-14975: an absent declared copy can only be restored from its
+        # checksum-bound bytes, never from a divergent or stale upstream clone.
+        if is_legacy_declared "${node_name}/${filename}"; then
+          declared_sha="$(awk -F '\t' -v path="nodes/${node_name}/${filename}" \
+            '$1 == path { print $6 }' "${APPLICATION_MIGRATION_MANIFEST}")"
+          source_sha="$(shasum -a 256 "${src_file}" | awk '{ print $1 }')"
+          if [ "${source_sha}" != "${declared_sha}" ]; then
+            echo "[sync-node-migrations] DRIFT: declared migration checksum mismatch ${node_name}/${filename}" >&2
+            DRIFT=1
+            continue
+          fi
+        fi
         cp "${src_file}" "${dest_file}"
         echo "[sync-node-migrations]   vendored ${node_name}/${filename}"
         COPIED=$((COPIED + 1))

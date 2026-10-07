@@ -24,8 +24,8 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -50,14 +50,6 @@ from tests.scripts.test_reconcile_host_omn17307 import (
 
 pytestmark = pytest.mark.unit
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_LEDGER_LOCK = _REPO_ROOT / "scripts" / "ledger_lock.py"
-# ledger_lock.py loads its test-write guard from a path relative to itself and
-# refuses to write without it, so the fixture carries the real one beside it.
-_WRITE_GUARD = (
-    _REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_ledger_write_guard.py"
-)
-
 _OWNER = "owner-lane-7f"
 _CLAIM = (
     "2026-10-03T08:00:00Z | CLAIM | lane={lane} | ticket=OMN-1 | actor=claude | "
@@ -66,12 +58,32 @@ _CLAIM = (
 
 
 @pytest.fixture
-def ws(tmp_path: Path) -> Workspace:
+def ws(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Workspace:
     built = build_workspace(tmp_path)
-    shutil.copy2(_LEDGER_LOCK, built.scripts / "ledger_lock.py")
-    guard = built.infra / "src" / "omnibase_infra" / "handlers" / _WRITE_GUARD.name
-    guard.parent.mkdir(parents=True)
-    shutil.copy2(_WRITE_GUARD, guard)
+    internal = tmp_path / "omnibase_internal"
+    internal.mkdir()
+    (internal / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    uv = bin_dir / "uv"
+    # The ledger writer is a collaborator: pin its command boundary and record
+    # the row in the fixture. Its locking and guards are tested in internal.
+    uv.write_text(
+        f"#!{sys.executable}\n"
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "assert sys.argv[1:4] == ['run', '--project', "
+        "os.environ['OMNIBASE_INTERNAL_HOME']]\n"
+        "assert sys.argv[4] == 'onex-ledger'\n"
+        "assert sys.argv[6] == '--append' and len(sys.argv) == 8\n"
+        "assert 'PYTHONPATH' not in os.environ\n"
+        "with Path(sys.argv[5]).open('a', encoding='utf-8') as ledger:\n"
+        "    ledger.write(sys.argv[7] + '\\n')\n",
+        encoding="utf-8",
+    )
+    uv.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("OMNIBASE_INTERNAL_HOME", str(internal))
     return built
 
 

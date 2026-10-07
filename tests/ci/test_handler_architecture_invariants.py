@@ -58,8 +58,8 @@ _RUNTIME_UTILITY_EXCLUSIONS: frozenset[str] = frozenset(
         "handler_risk.py",
         # Onboarding orchestrator utility (module-level async function, not ONEX handler class)
         "handler_onboarding.py",
-        # Ledger test-write guard (stdlib module-level functions loaded by path from
-        # scripts/ledger_lock.py, not an ONEX handler class; OMN-19513)
+        # Ledger test-write guard (stdlib module-level functions,
+        # not an ONEX handler class; OMN-19513)
         "handler_ledger_write_guard.py",
         # Declarative runtime boot wrappers (lightweight callables, not full ONEX handler protocol)
         "handler_contract_scan.py",

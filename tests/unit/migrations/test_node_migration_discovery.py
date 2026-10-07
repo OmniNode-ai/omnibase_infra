@@ -720,6 +720,53 @@ class TestTenantIsolationMigrationSync:
     bytes even when upstream lacks or revises them (OMN-15717/OMN-16705).
     """
 
+    @pytest.mark.parametrize(
+        "missing_path",
+        [
+            "node_projection_delegation/0023_delegation_rls_tenant_isolation.sql",
+            "node_projection_registration/0002_node_service_registry_tenant_rls.sql",
+            "node_projection_savings/081_savings_estimates_rls_tenant_isolation.sql",
+        ],
+    )
+    def test_missing_declared_migration_rejects_divergent_upstream(
+        self, tmp_path: Path, missing_path: str
+    ) -> None:
+        source_root = tmp_path / "omnimarket-src"
+        node, filename = missing_path.split("/")
+        source = source_root / "src/omnimarket/nodes" / node / "migrations" / filename
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"-- stale upstream bytes\n")
+        dest_root = tmp_path / "nodes"
+        manifest = tmp_path / "application-migrations.tsv"
+        row = next(
+            row
+            for row in (FORWARD_DIR / "_ledger/application-migrations.tsv")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if row.split("\t")[0] == f"nodes/{missing_path}"
+        )
+        manifest.write_text(row + "\n", encoding="utf-8")
+        result = subprocess.run(
+            ["bash", str(SYNC_SCRIPT)],
+            env={
+                **os.environ,
+                "OMNIMARKET_SRC": str(source_root),
+                "SYNC_NODE_MIGRATIONS_DEST_ROOT": str(dest_root),
+                "APPLICATION_MIGRATION_MANIFEST": str(manifest),
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert f"DRIFT: declared migration checksum mismatch {missing_path}" in (
+            result.stderr
+        )
+        assert not (dest_root / missing_path).exists()
+        assert source.read_bytes() == b"-- stale upstream bytes\n"
+
     @pytest.mark.parametrize("check_mode", [False, True])
     @pytest.mark.parametrize(
         "missing_path",
