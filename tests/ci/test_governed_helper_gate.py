@@ -258,6 +258,8 @@ def test_the_checker_honours_no_annotation_and_no_environment_override() -> None
 def test_the_gate_is_wired_as_a_precommit_hook() -> None:
     config = (REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
     assert "id: governed-helper-primitive" in config
+    # The ratchet half: a commit may not widen the baseline against HEAD.
+    assert "governed_helper_gate.py --base-ref HEAD" in config
 
 
 def test_the_gate_is_wired_as_a_ci_workflow() -> None:
@@ -267,6 +269,7 @@ def test_the_gate_is_wired_as_a_ci_workflow() -> None:
     assert workflow.is_file()
     body = workflow.read_text(encoding="utf-8")
     assert "governed_helper_gate.py" in body
+    assert '--base-ref "$BASE_REF"' in body
     # No conditional on the gating step, and no skip input: an `if:` on the
     # enforcing step is how a required context quietly stops reporting.
     assert "continue-on-error" not in body
@@ -300,6 +303,8 @@ def test_a_second_identical_occurrence_in_a_baselined_file_is_refused(
                 line_sha256_12=gate.line_digest(line.strip()),
                 occurrences=1,
                 ticket="OMN-18608",
+                verdict="defect",
+                verdict_reason="fixture",
             ),
         )
     )
@@ -325,6 +330,8 @@ def test_a_baseline_entry_the_scanner_no_longer_matches_is_refused(
                 line_sha256_12=gate.line_digest(line.strip()),
                 occurrences=1,
                 ticket="OMN-18608",
+                verdict="defect",
+                verdict_reason="fixture",
             ),
         )
     )
@@ -332,6 +339,143 @@ def test_a_baseline_entry_the_scanner_no_longer_matches_is_refused(
     assert findings.new == []
     assert len(findings.stale) == 1
     assert "lockme.sh" in gate.render(findings)
+
+
+def _baseline_file(entries: list[dict[str, object]]) -> str:
+    return json.dumps({"contract_version": "1.0.0", "entries": entries})
+
+
+def _entry(path: str, occurrences: int = 1) -> dict[str, object]:
+    return {
+        "pair": "lock-without-holder-record",
+        "path": path,
+        "line_sha256_12": "a" * 12,
+        "occurrences": occurrences,
+        "ticket": "OMN-18630",
+        "verdict": "defect",
+        "verdict_reason": "fixture",
+    }
+
+
+def _repo_with_baseline_at_head(root: Path, entries: list[dict[str, object]]) -> None:
+    target = root / "config" / "governed_helper_baseline.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(_baseline_file(entries), encoding="utf-8")
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "add", "-A"],
+        [
+            "git",
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "base",
+        ],
+    ):
+        subprocess.run(argv, cwd=root, check=True, capture_output=True)
+
+
+def test_a_baseline_entry_without_a_verdict_is_refused(tmp_path: Path) -> None:
+    """AC7's falsifier: a baselined site that was never judged is a bare match."""
+    entry = _entry("scripts/a.sh")
+    del entry["verdict"]
+    path = tmp_path / "baseline.json"
+    path.write_text(_baseline_file([entry]), encoding="utf-8")
+    with pytest.raises(gate.PolicyError) as excinfo:
+        gate.load_baseline(path)
+    assert "verdict" in str(excinfo.value)
+    assert "scripts/a.sh" in str(excinfo.value)
+
+    entry["verdict"] = "fine"
+    path.write_text(_baseline_file([entry]), encoding="utf-8")
+    with pytest.raises(gate.PolicyError):
+        gate.load_baseline(path)
+
+
+def test_a_baseline_entry_without_a_verdict_reason_is_refused(tmp_path: Path) -> None:
+    entry = _entry("scripts/a.sh")
+    entry["verdict_reason"] = " "
+    path = tmp_path / "baseline.json"
+    path.write_text(_baseline_file([entry]), encoding="utf-8")
+    with pytest.raises(gate.PolicyError) as excinfo:
+        gate.load_baseline(path)
+    assert "verdict_reason" in str(excinfo.value)
+
+
+def test_every_shipped_baseline_entry_carries_a_verdict_and_a_reason() -> None:
+    """AC7 on the committed artifact: all 25 baselined sites are judged."""
+    baseline = gate.load_baseline(BASELINE_PATH)
+    assert sum(entry.occurrences for entry in baseline.entries) == 25
+    for entry in baseline.entries:
+        assert entry.verdict in gate.VERDICTS, entry
+        assert entry.verdict_reason.strip(), entry
+
+
+def test_the_baseline_may_not_widen_against_the_base_ref(tmp_path: Path) -> None:
+    """AC6's falsifier: a new key, or a larger count, citing a real ticket."""
+    _repo_with_baseline_at_head(tmp_path, [_entry("scripts/a.sh", 2)])
+    base = gate.load_baseline_counts_at_ref("HEAD", tmp_path)
+
+    def widened(entries: list[dict[str, object]]) -> list[str]:
+        path = tmp_path / "candidate.json"
+        path.write_text(_baseline_file(entries), encoding="utf-8")
+        return [e.path for e in gate.widened_against(gate.load_baseline(path), base)]
+
+    assert widened([_entry("scripts/a.sh", 2)]) == []
+    assert widened([_entry("scripts/a.sh", 1)]) == []
+    assert widened([]) == []
+    assert widened([_entry("scripts/a.sh", 3)]) == ["scripts/a.sh"]
+    assert widened([_entry("scripts/a.sh", 2), _entry("scripts/b.sh")]) == [
+        "scripts/b.sh"
+    ]
+
+
+def test_a_widened_baseline_fails_the_gate_and_names_the_entry(
+    tmp_path: Path,
+) -> None:
+    _repo_with_baseline_at_head(tmp_path, [])
+    candidate = gate.Baseline(
+        entries=(
+            gate.BaselineEntry(
+                pair="lock-without-holder-record",
+                path="scripts/b.sh",
+                line_sha256_12="b" * 12,
+                occurrences=1,
+                ticket="OMN-18630",
+                verdict="defect",
+                verdict_reason="fixture",
+            ),
+        )
+    )
+    findings = gate.Findings(
+        widened=gate.widened_against(
+            candidate, gate.load_baseline_counts_at_ref("HEAD", tmp_path)
+        )
+    )
+    assert not findings.clean
+    assert "scripts/b.sh" in gate.render(findings)
+
+
+def test_an_unresolvable_base_ref_is_a_refusal_not_a_pass(tmp_path: Path) -> None:
+    _repo_with_baseline_at_head(tmp_path, [])
+    with pytest.raises(gate.PolicyError):
+        gate.load_baseline_counts_at_ref("no-such-ref", tmp_path)
+
+
+def test_the_committed_baseline_does_not_widen_against_its_own_head() -> None:
+    """The CLI path the hook runs: --base-ref HEAD over the committed baseline."""
+    result = subprocess.run(
+        [sys.executable, str(GATE_MODULE), "--base-ref", "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
 
 
 def test_the_committed_baseline_matches_the_committed_tree_exactly() -> None:
