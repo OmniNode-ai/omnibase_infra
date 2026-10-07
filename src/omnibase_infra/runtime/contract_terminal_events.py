@@ -251,6 +251,8 @@ def resolve_terminal_verdict(event: object) -> bool | None:
     3. ``ok`` / ``success`` — explicit booleans.
     4. ``contract_passed`` — the generation-benchmark verdict field from this
        ticket's original live reproduction.
+    5. ``quality_passed`` / ``quality_gate_passed`` — the canonical delegation
+       consumer and delegate-skill port verdicts (OMN-18929).
 
     Returns ``None`` when the model declares no verdict at all, which is the
     common case and MUST leave routing exactly as it was: this is a fail-closed
@@ -269,7 +271,13 @@ def resolve_terminal_verdict(event: object) -> bool | None:
         if normalized in _SUCCEEDED_STATUS_VALUES:
             return True
 
-    for attribute in ("ok", "success", "contract_passed"):
+    for attribute in (
+        "ok",
+        "success",
+        "contract_passed",
+        "quality_passed",
+        "quality_gate_passed",
+    ):
         value = _read_field(event, attribute)
         if isinstance(value, bool):
             return value
