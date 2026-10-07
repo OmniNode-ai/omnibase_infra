@@ -239,7 +239,8 @@ def test_delegate_never_runs_a_host_reconciler_that_would_stamp_the_floor(
     else:
         assert not ws.floor.exists()
         assert (
-            f"bash {ws.scripts}/reconcile-host.sh --omni-home {ws.root}" in proc.stderr
+            f"{ws.root}/.onex-dispatch-venv/bin/onex-host-reconcile --omni-home {ws.root}"
+            in proc.stderr
         )
         assert "reconcile-workspace-venvs.sh" not in proc.stderr
 

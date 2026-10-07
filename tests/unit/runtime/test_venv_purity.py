@@ -244,7 +244,7 @@ def test_refusal_names_the_reconciler_not_a_bare_uv_sync(tmp_path: Path) -> None
         assert_venv_purity(lock_path=lock_path, search_paths=[str(site_packages)])
 
     message = str(excinfo.value)
-    assert "reconcile-host.sh" in message, (
+    assert "onex-host-reconcile" in message, (
         "the refusal does not name the reconciler, which is the only repair "
         f"that survives the next tick. Message: {message!r}"
     )
