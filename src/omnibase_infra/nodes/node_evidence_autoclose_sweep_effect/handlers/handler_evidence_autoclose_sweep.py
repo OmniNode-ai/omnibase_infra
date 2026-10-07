@@ -660,9 +660,10 @@ _CHECK_STATUS_SUPERSEDED = "superseded"
 #: this fact.
 _CHECK_STATUS_NON_PROBATIVE = "non_probative"
 
-#: This node's own `contract.yaml` `node_version`, part of the gap-comment
+#: This node's `contract.yaml` metadata.gap_comment_fingerprint_version is
+#: part of the gap-comment
 #: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
-#: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
+#: `test_the_gap_fingerprint_version_is_declared_in_the_contract`, so it
 #: cannot drift into describing a rule the closer no longer applies.
 #:
 #: 1.15.0 -> 1.16.0 (OMN-18490) is a deliberate, one-off refresh of every
@@ -2043,6 +2044,27 @@ def _live_check_not_executed(verdict: dict[str, object]) -> tuple[str, str]:
             str(cause) if cause is not None else "the check did not execute"
         )
     return "", ""
+
+
+def _skipped_verdict_reason(verdict: dict[str, object]) -> str:
+    """Preserve the verifier's reason without judging a skipped run's evidence."""
+    reasons: list[str] = []
+    error = verdict.get("error_message")
+    if isinstance(error, str) and error.strip():
+        reasons.append(error.strip())
+    for check in _check_records(verdict):
+        if _check_status(check) != _CHECK_STATUS_SKIPPED:
+            continue
+        details = [
+            str(check[key]).strip()
+            for key in (_CHECK_UNVERIFIABLE_CAUSE_KEY, "message")
+            if check.get(key) is not None and str(check[key]).strip()
+        ]
+        reasons.append(
+            f"{_check_id(check)}: "
+            + ("; ".join(dict.fromkeys(details)) or "the check did not execute")
+        )
+    return "; ".join(reasons) or "no reason supplied by dod_verify"
 
 
 def _withheld_check_ids(verdict: dict[str, object]) -> tuple[str, ...]:
@@ -3590,6 +3612,7 @@ class HandlerEvidenceAutocloseSweep:
                 # added without a bucket.
                 EnumEvidenceAutocloseDecision.SKIPPED_LIVE_SURFACE_UNAVAILABLE,
                 EnumEvidenceAutocloseDecision.SKIPPED_LIVE_CHECK_NOT_EXECUTED,
+                EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY,
                 # OMN-16106. A red or unresolvable gate probe is a hold on the
                 # same terms: the run reached no verdict on the ticket's OCC
                 # evidence, it read the surface the ticket named and found it
@@ -4490,6 +4513,22 @@ class HandlerEvidenceAutocloseSweep:
         # Absent key stays 0 and is handled as ERROR_VERIFY_UNPARSEABLE below
         # (OMN-15911) — this line never infers a value the verifier did not give.
         behavior_proving_count = _as_int(verdict.get(_DOD_VERIFY_BEHAVIOR_KEY))
+
+        # OMN-20520: partial proofs do not turn a skipped verifier run into an
+        # evidence verdict. Report its reason and leave the ticket untouched.
+        if verify_status == _CHECK_STATUS_SKIPPED:
+            return ModelEvidenceAutocloseOutcome(
+                ticket_id=ticket_id,
+                companion_pr_number=companion_pr_number,
+                companion_pr_url=companion_pr_url,
+                decision=EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY,
+                reason=f"dod_verify skipped: {_skipped_verdict_reason(verdict)}",
+                dod_verify_total_checks=total_checks,
+                dod_verify_verified_count=verified_count,
+                dod_verify_failed_count=failed_count,
+                dod_verify_non_probative_count=non_probative_count,
+                dod_verify_behavior_proving_count=behavior_proving_count,
+            )
 
         # Both dod_verify's OWN terminal status and the arithmetic must agree.
         # The arithmetic is the stricter of the two: dod_verify reports VERIFIED

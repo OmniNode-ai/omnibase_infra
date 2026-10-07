@@ -495,7 +495,7 @@ contract_version:
   major: 1
   minor: 10
   patch: 0
-node_version: "1.16.1"
+node_version: "1.17.0"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done, posts a gap comment, holds a closed cascade bump until verified supersession is proven via merged replacement and default-branch version readback, holds a criterion whose only declaring check marks it a proposal until a person accepts it, holds a criterion whose accepted binding is pinned to a revision of the criterion text the ticket no longer carries, and excludes explicitly superseded duplicate criteria from the live criteria set only when an unmarked replacement with the same label is present. Every outcome that reached a dod_verify verdict records one row per check -- id, status, proof class, declared bindings and a bounded message excerpt -- and a gap comment names the failing check ids, so a reader is never handed a tally with no names in it (OMN-18490). DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
@@ -546,6 +546,12 @@ error_handling:
     exponential_base: 1
     retry_on: []
   error_types:
+    - name: "DOD_VERIFY_SKIPPED"
+      description: >
+        dod_verify's terminal verdict is skipped. Record SKIPPED_DOD_VERIFY with the terminal error_message and skipped checks' causes/messages (or explicitly state that no reason was supplied). Count it as skipped even with partial behavior proofs; never post an evidence-gap comment or write Done (OMN-20520 AC2).
+
+      recoverable: true
+      retry_strategy: "none"
     - name: "GITHUB_ENUMERATION_FAILED"
       description: "gh api PR enumeration failed — sweep-level failure, no tickets processed."
       recoverable: true
@@ -809,11 +815,13 @@ health_check:
         Verify the FALLBACK personal key is set. Absent is not a fault when the application pair above is configured.
 
 metadata:
+  # Gap wording/set identity is unchanged by the skipped-run reporting fix.
+  gap_comment_fingerprint_version: "1.16.1"
   description: "Evidence autoclose sweep: companion-merge -> dod_verify -> governed Done flip (OMN-16106 first slice)"
   author: "OmniNode Team"
   transport_type: "http"
   created: "2026-08-17"
-  updated: "2026-09-28"
+  updated: "2026-10-07"
   tags:
     - "effect"
     - "linear"
