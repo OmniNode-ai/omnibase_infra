@@ -45,15 +45,9 @@
 # the OCC contexts (S6) are separate rulings that wait for this repository's own
 # S5 bar. The S6 change sets compare-with-occ back to "false".
 #
-# PLACEHOLDER PIN (OMN-20073): the reusable needs the `shadow` input, added by
-# omnibase_core#1901, whose head is 6d791925396535b44a5e72de2c3d4718a9ca72ed.
-# scripts/ci/check_pin_reachability.py (OMN-15538, pre-commit and CI) refuses a
-# pin that no protected branch contains, so that head cannot be committed here.
-# The pin is the head of omnibase_core dev instead, which has no `shadow`
-# input, so until the pin moves GitHub is expected to refuse this workflow's call
-# on the undeclared input and the gate records nothing. Re-pin to the squash
-# commit of omnibase_core#1901 once it merges, and keep this pull request a
-# draft until then.
+# The reusable is pinned by full SHA to the squash commit of omnibase_core#1901
+# on dev, which carries the `shadow` input. scripts/ci/check_pin_reachability.py
+# (OMN-15538) accepts it because dev contains it.
 
 name: Repo Evidence Gate
 
@@ -72,7 +66,7 @@ permissions:
 
 jobs:
   repo-evidence:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@94e551221bab9a9bdaf74a372a8e4bf74e0b3b3f # OMN-20073: PLACEHOLDER, the head of omnibase_core dev, which has no `shadow` input. Re-pin to the squash commit of omnibase_core#1901 once it merges.
+    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@033db282217c224f8063b94966a7f3fdd26b7894 # OMN-20073: the squash commit of omnibase_core#1901 on dev (receipt-gate shadow input)
     with:
       evidence-source: caller
       verifier-version: 0.4.294
