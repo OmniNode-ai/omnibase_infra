@@ -193,7 +193,8 @@ EXPECTED_REFS_OUT=""
 # ${OMNI_HOME}/<repo>, the shared canonical clone, leaving it on a detached HEAD
 # for the whole build (46 times in 30 hours on h202, 2026-10-01), and every lab
 # delegation that read the clone in that window refused. Keyed on the build
-# context like the manifest; DEPLOY_SOURCE_WORKTREE_ROOT overrides it.
+# context like the manifest; DEPLOY_SOURCE_WORKTREE_ROOT overrides it. Each
+# tree beneath it is keyed by the absolute source-clone path (OMN-20658).
 SOURCE_TREES_ROOT=""
 resolve_source_trees_root() {
     if [[ -n "${DEPLOY_SOURCE_WORKTREE_ROOT:-}" ]]; then
@@ -212,8 +213,16 @@ sibling_source() {
     if [[ -n "${SOURCE_TREES_ROOT}" ]]; then
         for vendored in "${SIBLING_REPOS[@]}"; do
             if [[ "${vendored}" == "${repo}" ]]; then
-                printf '%s\n' "${SOURCE_TREES_ROOT}/${repo}"
-                return 0
+                # RT-1 owns the clone key. Use the emitted path so staging and
+                # preflight cannot accidentally read another clone set's tree.
+                python3 - "${EXPECTED_REFS_OUT}" "${repo}" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as manifest:
+    print(json.load(manifest)["repos"][sys.argv[2]]["path"])
+PY
+                return
             fi
         done
     fi
