@@ -4513,7 +4513,7 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     timeout-minutes: 15
     env:
-      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@f50d00fc7918d0b12ccd0d3497160325e32e7ac5"
+      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dc1ad727637b44fcb2349ae293bff880f966c125"
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4567,6 +4567,64 @@ jobs:
             uv run --no-project --with "$CANONICAL_FILE_SHAPE_CORE" \
               python -m omnibase_core.validators.canonical_file_shape --head HEAD
           fi
+
+  # OMN-20703: node-boundary import gate (operator direction 2026-10-07,
+  # OMN-17427). Shrink-only baseline; same core pin as the pre-commit hook.
+  # Unconditional: no needs/if. The positive control must refuse a new edge.
+  node-boundary-imports:
+    name: Node Boundary Imports (OMN-20703)
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    timeout-minutes: 15
+    env:
+      NODE_BOUNDARY_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dc1ad727637b44fcb2349ae293bff880f966c125"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.8.3"
+      - name: Positive control (planted boundary import refused)
+        run: |
+          set -u
+          printf 'from omnibase_infra.nodes.node_registration_reducer.models import ModelRegistrationState\n' > src/omnibase_infra/zz_canary_boundary.py
+          git add src/omnibase_infra/zz_canary_boundary.py
+          if uv run --no-project --with "$NODE_BOUNDARY_CORE" \
+            python -m omnibase_core.nodes.node_boundary_import_check_compute.runtime_node_boundary_import_check --root . --base HEAD --bootstrap; then
+            echo "POSITIVE CONTROL FAILED: planted node-boundary import was accepted"
+            exit 1
+          fi
+          echo "positive control: planted boundary import refused"
+          git rm -q --cached src/omnibase_infra/zz_canary_boundary.py
+          rm src/omnibase_infra/zz_canary_boundary.py
+      - name: Refuse new node-boundary imports
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -u
+          # Growth is judged against the merge base's baseline, never only the
+          # candidate's own file. --bootstrap is passed only while the base has
+          # no baseline at all (the adoption PR).
+          base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
+          if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base="$(git merge-base "$base" HEAD)"
+          else
+            base="HEAD"
+          fi
+          bootstrap=""
+          if ! git cat-file -e "${base}:.onex_ratchets/node_boundary_import_baseline.yaml" 2>/dev/null; then
+            bootstrap="--bootstrap"
+          fi
+          uv run --no-project --with "$NODE_BOUNDARY_CORE" \
+            python -m omnibase_core.nodes.node_boundary_import_check_compute.runtime_node_boundary_import_check --root . --base "$base" $bootstrap
 
   ci-summary:
     name: CI Summary

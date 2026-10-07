@@ -28,10 +28,24 @@ repos:
   # .onex_ratchets/canonical_file_shape_baseline.txt. CI runs the same module
   # at the same commit (job "Canonical File Shape (OMN-20304)").
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: f50d00fc7918d0b12ccd0d3497160325e32e7ac5
+    rev: dc1ad727637b44fcb2349ae293bff880f966c125
     hooks:
       - id: canonical-file-shape
         require_serial: true
+  # OMN-20703: node-boundary import gate (operator direction 2026-10-07,
+  # OMN-17427). Refuses any new import crossing a node boundary. Shrink-only
+  # baseline .onex_ratchets/node_boundary_import_baseline.yaml; no allowlist,
+  # no suppression marker. CI twin job node-boundary-imports in
+  # .github/workflows/ci.yml; keep this rev equal to that job's pin.
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: dc1ad727637b44fcb2349ae293bff880f966c125
+    hooks:
+      - id: check-node-boundary-imports
+        require_serial: true
+        # --bootstrap only takes effect while HEAD carries no baseline (the
+        # adoption commit). Once the baseline is committed, growth against HEAD
+        # fails here, and CI judges growth against the merge base.
+        args: [--bootstrap]
   # OMN-20295: direct-model-call gate, BLOCKING. A model call (HTTP to a model
   # endpoint, provider or base_url; a model CLI exec such as crush, codex,
   # claude -p or llama-cli; a model SDK import; or a caller of one) must sit in a
