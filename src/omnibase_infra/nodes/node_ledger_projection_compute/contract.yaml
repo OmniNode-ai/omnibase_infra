@@ -67,8 +67,8 @@ node_name: "node_ledger_projection_compute"
 contract_version:
   major: 1
   minor: 6
-  patch: 0
-node_version: "0.6.0"
+  patch: 1
+node_version: "0.6.1"
 # Node type - COMPUTE for event projection logic
 node_type: "COMPUTE_GENERIC"
 runtime_profiles: [main]
@@ -207,7 +207,7 @@ output_model:
   name: "ModelIntent"
   module: "omnibase_core.models.reducer.model_intent"
   description: >
-    ModelIntent wrapping ModelPayloadLedgerAppend to be passed to NodeLedgerWriteEffect. Contains the event data with Kafka position for idempotent writes.
+    ModelIntent wrapping ModelPayloadLedgerAppend (omnibase_infra.models.ledger.model_payload_ledger_append, moved out of node_registration_reducer in OMN-20703; payload semantics unchanged) to be passed to NodeLedgerWriteEffect. Contains the event data with Kafka position for idempotent writes.
 
 # Handler routing - delegates compute logic to handler
 #
