@@ -354,7 +354,6 @@ scripts/lane_container_memory_event.py
 scripts/lane_scratch.py
 scripts/launchd/install-lab-alarm.sh
 scripts/launchd/install-worktree-prune.sh
-scripts/ledger_lock.py
 scripts/ledger_watermark.py
 scripts/lib/merge_sweep_common.sh
 scripts/lib/venv_reconcile_lock.sh

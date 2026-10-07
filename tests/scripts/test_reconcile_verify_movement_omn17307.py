@@ -59,6 +59,55 @@ def vm() -> ModuleType:
     return _load()
 
 
+def test_append_msg_requires_registry_root(
+    vm: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OMNI_HOME", raising=False)
+    with pytest.raises(RuntimeError, match="OMNI_HOME is not set"):
+        vm.append_msg(tmp_path / "ledger.md", "sender", "owner", "refused clone")
+    assert not (tmp_path / "ledger.md").exists()
+
+
+@pytest.mark.parametrize("internal_home", ["", "missing-clone"])
+def test_append_msg_refuses_an_invalid_canonical_clone(
+    vm: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    internal_home: str,
+) -> None:
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path / "registry"))
+    monkeypatch.setenv(
+        "OMNIBASE_INTERNAL_HOME",
+        str(tmp_path / internal_home) if internal_home else "",
+    )
+    with pytest.raises(RuntimeError, match=r"empty|project missing"):
+        vm.append_msg(tmp_path / "ledger.md", "sender", "owner", "refused clone")
+    assert not (tmp_path / "ledger.md").exists()
+
+
+def test_append_msg_reports_a_canonical_writer_refusal(
+    vm: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path / "registry"))
+    monkeypatch.delenv("OMNIBASE_INTERNAL_HOME", raising=False)
+    internal = tmp_path / "omnibase_internal"
+    internal.mkdir()
+    (internal / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+    monkeypatch.setattr(
+        vm.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args[0],
+            79,
+            stdout="",
+            stderr="ledger-test-write-guard: canonical write refused",
+        ),
+    )
+    with pytest.raises(RuntimeError, match=r"exit 79.*ledger-test-write-guard"):
+        vm.append_msg(tmp_path / "ledger.md", "sender", "owner", "refused clone")
+    assert not (tmp_path / "ledger.md").exists()
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #

@@ -5,13 +5,13 @@
 Operator ruling 2026-10-01: "it should be impossible to like fake test like that". A lane on a
 lab host ran a suite that inherited its shell's ledger and bus variables, and 17 fixture rows
 reached the ledger of record. Test isolation is a convention a test can forget; this guard sits in
-the write path itself (``scripts/ledger_lock.py`` calls it before the lock and before any write).
+the write path itself. The canonical ``onex-ledger`` writer uses the guard in omnibase_internal.
 
 THE RULE. A write is refused when BOTH hold:
 
 1. The process runs under a test runner: ``PYTEST_CURRENT_TEST`` is set, ``pytest`` or
    ``unittest`` is imported, or ``ONEX_TEST_CONTEXT`` is set to any non-empty value. The
-   environment signals are inherited, so a ``ledger_lock.py`` subprocess a test starts is in test
+   environment signals are inherited, so an ``onex-ledger`` subprocess a test starts is in test
    context too. No value of ``ONEX_TEST_CONTEXT`` removes a signal.
 2. The target is canonical:
 
@@ -23,7 +23,7 @@ THE RULE. A write is refused when BOTH hold:
 
 A test that needs a ledger uses a ``tmp_path`` file, a non-canonical topic or a loopback DSN.
 There is no bypass flag and no allowlist. The refusal is :class:`LedgerTestWriteRefusedError`; the
-command exit is :data:`EXIT_TEST_WRITE_REFUSED`. Stdlib only, so the script loads it by path. The module reads no environment: the caller passes
+command exit is :data:`EXIT_TEST_WRITE_REFUSED`. The module reads no environment: the caller passes
 its environment mapping, so this repo's "no new environment reads" gate has nothing to flag.
 """
 
