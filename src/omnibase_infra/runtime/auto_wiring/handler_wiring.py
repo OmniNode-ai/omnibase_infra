@@ -5069,6 +5069,9 @@ def _make_projection_dispatch_callback(
                 # handlers may use it as their durable idempotency key instead
                 # of inventing a fresh identity for every Kafka redelivery.
                 input_data["_envelope_id"] = envelope_id
+            # A copied payload cannot supply transport-owned event time when
+            # the authoritative envelope time is absent or unusable (OMN-18326).
+            input_data.pop("_envelope_timestamp", None)
             envelope_timestamp = _extract_projection_envelope_timestamp(typed_envelope)
             if envelope_timestamp is not None:
                 # OMN-18326 / OMN-15583. The producer-recorded event time, from

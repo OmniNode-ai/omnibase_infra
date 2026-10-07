@@ -131,3 +131,9 @@ jobs:
       - name: Deployed-migration-tree sync — logic regression gate
         run: |
           uv run --frozen pytest tests/scripts/test_check_deployed_migration_tree_sync.py -q -p no:cacheprovider
+      # OMN-14975: exercise vendoring and applied-history preservation in the
+      # required workflow, including absent delegation/registration/savings RLS
+      # copies and stale upstream clones. This suite needs no Docker or database.
+      - name: Node migration vendor sync — discovery regression gate
+        run: |
+          uv run --frozen pytest tests/unit/migrations/test_node_migration_discovery.py -q -p no:cacheprovider

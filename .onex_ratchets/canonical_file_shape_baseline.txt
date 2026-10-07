@@ -91,7 +91,6 @@ scripts/check_lane_census_drift.py
 scripts/check_lane_env_drift.py
 scripts/check_llm_endpoint_env_contract.py
 scripts/check_llm_endpoints.sh
-scripts/check_migration_freeze.sh
 scripts/check_migration_required.py
 scripts/check_migrations_complete.sh
 scripts/check_no_cloud_bus_wrapper.sh
@@ -355,7 +354,6 @@ scripts/lane_container_memory_event.py
 scripts/lane_scratch.py
 scripts/launchd/install-lab-alarm.sh
 scripts/launchd/install-worktree-prune.sh
-scripts/ledger_lock.py
 scripts/ledger_watermark.py
 scripts/lib/merge_sweep_common.sh
 scripts/lib/venv_reconcile_lock.sh
@@ -399,7 +397,6 @@ scripts/push_lanes/queue-runner.py
 scripts/push_lanes/queue-runner.sh
 scripts/rebalance-test-splits.sh
 scripts/recompute_measured_pricing.py
-scripts/reconcile-host.sh
 scripts/reconcile-workspace-venvs.sh
 scripts/reconcile_privilege_lib.sh
 scripts/reconcile_verify_movement.py
@@ -480,7 +477,6 @@ scripts/validate_delegation_cohort_keys.py
 scripts/validate_env.py
 scripts/validate_handler_contracts.py
 scripts/validate_no_direct_env.py
-scripts/validate_no_env_fallbacks.py
 scripts/validate_pr_contracts.py
 scripts/validation/__init__.py
 scripts/validation/check_ai_slop.py
@@ -488,7 +484,6 @@ scripts/validation/check_claudemd_references.py
 scripts/validation/check_cli_registry_vocabulary.py
 scripts/validation/check_exposed_identifiers.py
 scripts/validation/check_kafka_no_hardcoded_fallback.sh
-scripts/validation/check_migration_append_only.py
 scripts/validation/check_migration_class.py
 scripts/validation/check_migration_conflicts.py
 scripts/validation/check_migration_rls_policy_atomicity.py
@@ -510,8 +505,6 @@ scripts/validation/validate_application_migration_manifest.py
 scripts/validation/validate_clean_root.py
 scripts/validation/validate_db_quality_gate.py
 scripts/validation/validate_markdown_links.py
-scripts/validation/validate_migration_freeze.py
-scripts/validation/validate_migration_sequence.py
 scripts/validation/validate_model_dump_json_mode.py
 scripts/validation/validate_naming.py
 scripts/validation/validate_precommit_fail_loud.py

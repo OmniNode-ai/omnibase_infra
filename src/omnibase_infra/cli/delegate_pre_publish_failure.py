@@ -179,10 +179,15 @@ def _field_refusals(model_path: str, payload_path: Path) -> tuple[list[str], str
         model.model_validate(raw)
     except ValidationError as exc:
         refusals = [
-            "`{loc}` {type}: {msg}".format(
+            "`{loc}` {type}: {msg}{flag}".format(
                 loc=".".join(str(part) for part in error.get("loc", ())) or "<root>",
                 type=error.get("type", "?"),
                 msg=sanitize_error_string(str(error.get("msg", ""))),
+                flag=(
+                    "; supplied by `--timeout`"
+                    if error.get("loc") == ("requested_timeout_seconds",)
+                    else ""
+                ),
             )
             for error in exc.errors(include_url=False)
             if error.get("type") != "missing"

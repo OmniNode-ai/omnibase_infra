@@ -373,10 +373,7 @@ async def test_omn_17201_is_held_and_no_comment_is_written() -> None:
     """
     outcomes, linear = await _sweep([_omn_17201_run_33993316390()])
 
-    assert (
-        outcomes[0].decision
-        == EnumEvidenceAutocloseDecision.SKIPPED_LIVE_CHECK_NOT_EXECUTED
-    )
+    assert outcomes[0].decision == EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY
     assert linear.comments == []
     assert linear.state_updates == []
     assert outcomes[0].applied is False
@@ -395,10 +392,7 @@ async def test_the_two_measured_omn_17201_payloads_produce_one_comment() -> None
     )
 
     assert outcomes[0].decision == EnumEvidenceAutocloseDecision.GAP_POSTED
-    assert (
-        outcomes[1].decision
-        == EnumEvidenceAutocloseDecision.SKIPPED_LIVE_CHECK_NOT_EXECUTED
-    )
+    assert outcomes[1].decision == EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY
     assert len(linear.comments) == 1
 
 
@@ -418,12 +412,8 @@ async def test_a_genuine_unmet_ac_on_a_reachable_surface_is_still_a_gap() -> Non
     assert len(linear.comments) == 1
 
 
-async def test_a_behaviour_proving_run_is_not_held_by_an_unrelated_skip() -> None:
-    """The hold requires `behavior_proving == 0`.
-
-    A run that DID execute the claimed behaviour learned something, so its
-    shortfall is a real statement about the ticket even with a skip in it.
-    """
+async def test_a_skipped_run_is_held_even_with_a_partial_behaviour_proof() -> None:
+    """OMN-20520: partial proofs do not override the verifier's terminal skip."""
     payload = _receipt(
         checks=[
             _check("dod-a", "verified", proof_class="behavior"),
@@ -432,9 +422,10 @@ async def test_a_behaviour_proving_run_is_not_held_by_an_unrelated_skip() -> Non
         verdict_status="skipped",
         behavior_proving=1,
     )
-    outcomes, _ = await _sweep([payload])
+    outcomes, linear = await _sweep([payload])
 
-    assert outcomes[0].decision == EnumEvidenceAutocloseDecision.GAP_POSTED
+    assert outcomes[0].decision == EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY
+    assert linear.comments == linear.state_updates == []
 
 
 async def test_the_merge_state_only_corpus_still_reports_its_gap() -> None:
@@ -475,10 +466,7 @@ async def test_a_held_candidate_is_re_offered_and_flips_when_the_check_runs() ->
     # recovered verdict arms it, the second one flips.
     outcomes, linear = await _sweep([held, recovered, recovered])
 
-    assert (
-        outcomes[0].decision
-        == EnumEvidenceAutocloseDecision.SKIPPED_LIVE_CHECK_NOT_EXECUTED
-    )
+    assert outcomes[0].decision == EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY
     assert outcomes[1].decision == EnumEvidenceAutocloseDecision.SKIPPED_REDRAW_PENDING
     assert outcomes[2].decision == EnumEvidenceAutocloseDecision.FLIPPED
     assert len(linear.state_updates) == 1

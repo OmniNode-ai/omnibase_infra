@@ -109,6 +109,10 @@ fi
 unset OPERATOR_OMNI_HOME
 unset OPERATOR_HEALTH_CHECK_URL
 
+# shellcheck source=./runtime_build/sibling_clone_manifest.sh
+source "${SCRIPT_DIR_FOR_ENV}/runtime_build/sibling_clone_manifest.sh"
+resolve_deploy_source_clone_root
+
 # OMN-16729: the ONE derivation of a lane's `docker compose -f ...` token
 # sequence, shared with refresh_dev_lane.sh / refresh_stability_lane.sh. Those
 # wrappers issue their own compose calls -- service-id resolution and the
@@ -1213,14 +1217,23 @@ read_repo_ref_or_main() {
 # this run (its own detached worktrees, never the canonical clones). Empty when
 # RT-1 did not pin (release builds, hotpatch, explicitly-unpinned).
 SIBLING_SOURCE_ROOT=""
+SIBLING_SOURCE_REFS_OUT=""
 
 sibling_source_path() {
     # The tree a sibling was staged from: its RT-1 worktree when this run pinned
     # it, the OMNI_HOME clone otherwise.
     local omni_home="$1"
     local repo="$2"
-    if [[ -n "${SIBLING_SOURCE_ROOT}" && -d "${SIBLING_SOURCE_ROOT}/${repo}" ]]; then
-        echo "${SIBLING_SOURCE_ROOT}/${repo}"
+    if [[ -n "${SIBLING_SOURCE_ROOT}" ]]; then
+        # OMN-20658: RT-1 keys trees by the absolute source clone. Read its
+        # manifest for lock-pin checks and build refs instead of the old layout.
+        python3 - "${SIBLING_SOURCE_REFS_OUT}" "${repo}" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as manifest:
+    print(json.load(manifest)["repos"][sys.argv[2]]["path"])
+PY
     else
         echo "${omni_home}/${repo}"
     fi
@@ -1329,11 +1342,12 @@ stage_workspace_if_needed() {
         local build_ctx
         build_ctx="$(cd "${repo_root}" && pwd -P)"
         SIBLING_SOURCE_ROOT="${DEPLOY_SOURCE_WORKTREE_ROOT:-${HOME}/.omnibase/state/deploy_source_trees/${build_ctx//[!A-Za-z0-9._-]/_}}"
+        SIBLING_SOURCE_REFS_OUT="${DEPLOY_SOURCE_REFS_OUT:-${HOME}/.omnibase/state/deploy_source_refs/${build_ctx//[!A-Za-z0-9._-]/_}.json}"
     fi
 
     log_step "Stage Workspace Sibling Repos"
     log_cmd "OMNI_HOME=${omni_home} DEPLOY_SOURCE_WORKTREE_ROOT=${SIBLING_SOURCE_ROOT} bash ${stage_script}"
-    (cd "${repo_root}" && OMNI_HOME="${omni_home}" DEPLOY_SOURCE_WORKTREE_ROOT="${SIBLING_SOURCE_ROOT}" bash "${stage_script}")
+    (cd "${repo_root}" && OMNI_HOME="${omni_home}" DEPLOY_SOURCE_WORKTREE_ROOT="${SIBLING_SOURCE_ROOT}" DEPLOY_SOURCE_REFS_OUT="${SIBLING_SOURCE_REFS_OUT}" bash "${stage_script}")
 
     check_sibling_lock_pins "${repo_root}" "${omni_home}"
 }

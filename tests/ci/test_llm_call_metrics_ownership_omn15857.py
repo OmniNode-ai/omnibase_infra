@@ -70,7 +70,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 FORWARD = REPO_ROOT / "docker" / "migrations" / "forward"
 LEDGER = FORWARD / "_ledger"
 RUNNER = REPO_ROOT / "scripts" / "run-forward-migrations.sh"
-APPEND_ONLY = REPO_ROOT / "scripts" / "validation" / "check_migration_append_only.py"
+APPEND_ONLY = (
+    REPO_ROOT
+    / "src"
+    / "omnibase_infra"
+    / "nodes"
+    / "node_migration_append_only_check_compute"
+    / "handler.py"
+)
 
 LEGACY_031 = FORWARD / "031_create_llm_call_metrics_and_cost_aggregates.sql"
 NODE_0001 = (
@@ -165,7 +172,7 @@ def test_the_application_manifest_cannot_name_a_flat_migration() -> None:
 def test_the_supersession_manifest_cannot_name_a_flat_migration_either() -> None:
     """The other candidate manifest is likewise node-scoped by construction.
 
-    ``check_migration_append_only.py`` rejects any supersession path that is not
+    The append-only check node rejects any supersession path that is not
     ``nodes/<node>/<ordinal>_<name>.sql``, so a row retiring a flat migration
     could not be parsed even if someone wrote one.
     """
