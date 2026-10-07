@@ -3479,3 +3479,152 @@ class TestRunningRowWithFailureConclusionOmn20077:
         ]
         code, report = evaluate(jobs)
         assert code == EXIT_PENDING, report
+
+
+class TestDraftReadySupersessionOmn19379:
+    """Replay the #4039 shape and preserve refusals without a replacement."""
+
+    def _fixture(self) -> dict[str, Any]:
+        return json.loads(
+            (
+                REPO_ROOT / "tests/ci/fixtures/omn19379_draft_ready_replay.json"
+            ).read_text()
+        )
+
+    def _evaluate(self, fixture: dict[str, Any]) -> tuple[int, str]:
+        return evaluate(
+            _all_gates(),
+            check_runs=fixture["check_runs"],
+            workflow_runs=fixture["workflow_runs"],
+            pr_timeline=fixture["timeline"],
+            head_sha=fixture["head_sha"],
+            now=datetime(2026, 9, 24, 6, 12, tzinfo=UTC),
+        )
+
+    def test_4039_ready_green_clears_cancelled_draft_matrix(self) -> None:
+        code, report = self._evaluate(self._fixture())
+        assert code == EXIT_SUCCESS, report
+
+    def test_unmatched_draft_failure_names_row_and_run(self) -> None:
+        fixture = self._fixture()
+        fixture["check_runs"][0]["name"] = "Unmatched draft gate"
+        fixture["check_runs"][0]["conclusion"] = "failure"
+        code, report = self._evaluate(fixture)
+        assert code == EXIT_FAILURE, report
+        assert (
+            "draft_era_without_ready_counterpart: Unmatched draft gate run_id=35900000001"
+            in report
+        )
+
+    def test_ready_failure_fails_on_first_poll(self) -> None:
+        fixture = self._fixture()
+        fixture["check_runs"][3]["conclusion"] = "failure"
+        code, report = self._evaluate(fixture)
+        assert code == EXIT_FAILURE, report
+        assert "Tests (3.12, unit)" in report
+
+    @pytest.mark.parametrize(
+        "change",
+        ["head", "workflow", "missing_timeline", "back_to_draft", "missing_run"],
+    )
+    def test_unproven_replacement_never_clears_cancelled_row(self, change: str) -> None:
+        fixture = self._fixture()
+        if change == "head":
+            fixture["workflow_runs"][1]["head_sha"] = "other-head"
+        elif change == "workflow":
+            fixture["workflow_runs"][1]["workflow_id"] = 8
+        elif change == "missing_timeline":
+            fixture["timeline"] = []
+        elif change == "back_to_draft":
+            fixture["timeline"].append(
+                {"event": "converted_to_draft", "created_at": "2026-09-24T05:00:00Z"}
+            )
+        else:
+            fixture["workflow_runs"] = fixture["workflow_runs"][:1]
+        code, report = self._evaluate(fixture)
+        assert code != EXIT_SUCCESS, report
+
+    def test_draft_rerun_timestamp_cannot_replace_ready_failure(self) -> None:
+        fixture = self._fixture()
+        draft = dict(fixture["check_runs"][3])
+        draft.update(
+            id=99,
+            conclusion="success",
+            started_at="2026-09-24T06:00:00Z",
+            details_url="https://github.com/OmniNode-ai/omnibase_infra/actions/runs/35900000001/job/99",
+        )
+        fixture["check_runs"].append(draft)
+        fixture["check_runs"][3]["conclusion"] = "failure"
+        code, report = self._evaluate(fixture)
+        assert code == EXIT_FAILURE, report
+
+    def test_live_poller_fetches_timeline_and_passes_exact_head(self) -> None:
+        poll = _load_workflow(CI_WORKFLOW)["jobs"]["ci-summary"]["steps"][1]
+        assert "PR_NUMBER" in poll["env"]
+        assert "issues/${PR_NUMBER}/timeline" in poll["run"]
+        assert "--pr-timeline-file pr_timeline.json" in poll["run"]
+        assert '--head-sha "${HEAD_SHA}"' in poll["run"]
+
+    @pytest.mark.parametrize("event", ["pull_request", "push"])
+    def test_draft_creation_era_includes_push_runs(self, event: str) -> None:
+        fixture = self._fixture()
+        fixture["workflow_runs"][0]["event"] = event
+        code, report = self._evaluate(fixture)
+        assert code == EXIT_SUCCESS, report
+
+    def test_ready_matrix_pending_cannot_be_hidden(self) -> None:
+        fixture = self._fixture()
+        fixture["check_runs"][3].update(status="in_progress", conclusion=None)
+        code, report = self._evaluate(fixture)
+        assert code == EXIT_PENDING, report
+        assert "draft_era_ready_counterpart_pending" in report
+
+    def test_earlier_ready_cycle_is_not_draft_era(self) -> None:
+        fixture = self._fixture()
+        fixture["timeline"] = [
+            {"event": "ready_for_review", "created_at": "2026-09-24T02:00:00Z"},
+            {"event": "converted_to_draft", "created_at": "2026-09-24T03:10:00Z"},
+            {"event": "ready_for_review", "created_at": "2026-09-24T03:30:00Z"},
+        ]
+        code, report = self._evaluate(fixture)
+        assert code != EXIT_SUCCESS, report
+
+    def test_ready_failure_is_immediate_even_with_readable_completion(self) -> None:
+        fixture = self._fixture()
+        fixture["check_runs"][3].update(
+            conclusion="failure", completed_at="2026-09-24T06:11:59Z"
+        )
+        code, report = self._evaluate(fixture)
+        assert code == EXIT_FAILURE, report
+
+    def test_summary_never_waits_for_its_own_ready_row(self) -> None:
+        fixture = self._fixture()
+        for i, run_id in [(100, 35900000001), (101, 35900000002)]:
+            fixture["check_runs"].append(
+                {
+                    "id": i,
+                    "name": "CI Summary",
+                    "head_sha": fixture["head_sha"],
+                    "status": "completed" if i == 100 else "in_progress",
+                    "conclusion": "cancelled" if i == 100 else None,
+                    "details_url": f"https://github.com/OmniNode-ai/omnibase_infra/actions/runs/{run_id}/job/{i}",
+                }
+            )
+        code, report = self._evaluate(fixture)
+        assert code == EXIT_SUCCESS, report
+
+    def test_passed_draft_row_without_ready_counterpart_is_not_refused(self) -> None:
+        fixture = self._fixture()
+        fixture["check_runs"][0]["name"] = "Draft only gate"
+        fixture["check_runs"][0]["conclusion"] = "success"
+        code, report = self._evaluate(fixture)
+        assert code == EXIT_SUCCESS, report
+        assert "draft_era_without_ready_counterpart" not in report
+
+    def test_cancelled_draft_row_waits_while_ready_run_is_in_flight(self) -> None:
+        fixture = self._fixture()
+        fixture["check_runs"][0]["name"] = "Not yet created gate"
+        fixture["workflow_runs"][1]["status"] = "in_progress"
+        code, report = self._evaluate(fixture)
+        assert code == EXIT_PENDING, report
+        assert "draft_era_without_ready_counterpart" not in report
