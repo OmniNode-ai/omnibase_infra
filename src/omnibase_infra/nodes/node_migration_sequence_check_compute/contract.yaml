@@ -1,0 +1,47 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: "node_migration_sequence_check_compute"
+contract_name: "node_migration_sequence_check_compute"
+node_name: "node_migration_sequence_check_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+node_type: "COMPUTE_GENERIC"
+description: >
+  When a counted migration is staged, check the shared docker and src migration sequence namespace. Return one FAIL finding for each duplicate of the first sorted path, excluding separately namespaced node migrations. Pure: no I/O.
+
+input_model:
+  name: "ModelMigrationSequenceCheckInput"
+  module: "omnibase_infra.nodes.node_migration_sequence_check_compute.models.model_migration_sequence_check_input"
+  description: "Staged paths, on-disk migration paths and namespace prefixes."
+output_model:
+  name: "ModelValidationReport"
+  module: "omnibase_core.models.validation.model_validation_report"
+  description: "The canonical OMN-2362 validation report."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "migration_sequence.check"
+      handler_type: "migration_sequence_check"
+      handler:
+        name: "NodeMigrationSequenceCheckCompute"
+        module: "omnibase_infra.nodes.node_migration_sequence_check_compute.handler"
+      supported_operations:
+        - "migration_sequence.check"
+descriptor:
+  node_archetype: "compute"
+  purity: "pure"
+  idempotent: true
+  timeout_ms: 30000
+metadata:
+  description: "Pure COMPUTE check of migration sequence uniqueness. No I/O."
+  author: "OmniNode Team"
+  license: "MIT"
+  ticket: "OMN-20568"
+  tags:
+    - compute
+    - validator
+    - migration-sequence
+    - pure-function

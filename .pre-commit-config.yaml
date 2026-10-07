@@ -849,17 +849,20 @@ repos:
         files: ^(src/omnibase_infra/runtime/auto_wiring/handler_wiring\.py|src/omnibase_infra/runtime/observability/consumer_flow_counters\.py|src/omnibase_infra/runtime/service_dispatch_result_applier\.py|tests/ci/test_omn17214_publish_flow_attribution_gate\.py)$
         pass_filenames: false
         stages: [pre-commit]
-      # Migration freeze enforcement - block new migrations during DB-per-repo refactor
+      # Migration freeze enforcement - block new migrations during DB-per-repo refactor.
+      # OMN-20568: the node_migration_freeze_check_compute node, which replaced the
+      # three freeze implementations. Staged-file mode; CI runs the same module
+      # with --base (the `migration-freeze` job).
       - id: onex-validate-migration-freeze
         name: ONEX Migration Freeze Enforcement
-        entry: uv run --frozen python scripts/validate.py migration_freeze
+        entry: uv run --frozen python -m omnibase_infra.nodes.node_migration_freeze_check_compute.runtime_migration_freeze_check
         language: system
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
       - id: onex-validate-migration-sequence
         name: ONEX Migration Sequence Duplicate Check
-        entry: uv run --frozen python scripts/validation/validate_migration_sequence.py
+        entry: uv run --frozen python -m omnibase_infra.nodes.node_migration_sequence_check_compute.runtime_migration_sequence_check
         language: system
         pass_filenames: false
         always_run: false
@@ -954,7 +957,7 @@ repos:
       # the predicate is a git diff, not a per-file lint.
       - id: onex-check-migration-append-only
         name: ONEX Migration Append-Only Check
-        entry: uv run --frozen python scripts/validation/check_migration_append_only.py --staged --base origin/dev
+        entry: uv run --frozen python -m omnibase_infra.nodes.node_migration_append_only_check_compute.runtime_migration_append_only_check --staged --base origin/dev
         language: system
         pass_filenames: false
         always_run: true
@@ -1579,13 +1582,18 @@ repos:
         pass_filenames: false
         files: contract\.yaml$
         stages: [pre-commit]
-      # OMN-10741: Unified localhost/hardcoded-endpoint fallback validator
-      # Covers all 6 pattern types from OMN-10658 enforcement sweep.
-      # Annotation: add  # fallback-ok: <reason>  to exempt a justified line.
+      # OMN-10741 / OMN-20568: localhost/hardcoded-endpoint fallback validator.
+      # Covers all 6 pattern types from OMN-10658 enforcement sweep. The check is
+      # the omnibase_core node_no_env_fallbacks_check_compute node, run from this
+      # repo's locked omnibase-core install (same rule as no-plugin-daemon-classes
+      # above: a remote hook builds a separate pip env), so the hook, CI and the
+      # runtime resolve one version. The runtime's --report-json and zero-scan
+      # ERROR arrive with core's OMN-20565 retrofit. Annotation: add
+      # # fallback-ok: <reason>  to exempt a justified line.
       - id: no-env-fallbacks
         require_serial: true
         name: No localhost/hardcoded-endpoint fallbacks (OMN-10741)
-        entry: uv run --frozen python scripts/validate_no_env_fallbacks.py
+        entry: uv run --frozen python -m omnibase_core.nodes.node_no_env_fallbacks_check_compute.runtime_no_env_fallbacks_check
         language: system
         pass_filenames: true
         types_or: [python, shell]
@@ -2226,5 +2234,5 @@ ci:
   # Skip ONEX validation hooks in CI that require omnibase_core imports
   # Note: onex-validate-clean-root is NOT skipped (standalone script, no omnibase_core dependency)
   # Also skip migration freeze (checks staged files via git diff --cached, which is empty in CI;
-  # CI should run: uv run python scripts/validation/validate_migration_freeze.py --check-committed)
+  # CI runs the same node with --base: the `migration-freeze` job)
   skip: [no-env-file, onex-validate-architecture, onex-imperative-orchestrator-ratchet, onex-orchestration-monolith-ratchet, onex-orchestrator-reducer-state-invariant, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze, normalization-symmetry]
