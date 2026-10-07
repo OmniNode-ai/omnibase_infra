@@ -448,7 +448,7 @@ async def test_a_real_failure_still_gaps() -> None:
     assert result.tickets_flipped == 0
 
 
-async def test_an_all_non_probative_contract_still_gaps() -> None:
+async def test_an_all_non_probative_contract_is_skipped_without_a_flip() -> None:
     """The merge-state-only corpus stays un-flippable.
 
     Two independent guards hold here and both are load-bearing: dod_verify's
@@ -469,7 +469,9 @@ async def test_an_all_non_probative_contract_still_gaps() -> None:
     assert terminal["non_probative_count"] == terminal["total_checks"] == 4
 
     result = await _handler(payload, linear).handle(_request())
-    assert result.outcomes[0].decision is EnumEvidenceAutocloseDecision.GAP_POSTED
+    assert (
+        result.outcomes[0].decision is EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY
+    )
     assert result.tickets_flipped == 0
 
 
@@ -623,7 +625,7 @@ async def test_gap_wording_still_names_a_real_failure() -> None:
     assert "1 failed" in outcome.reason
 
 
-async def test_gap_wording_names_the_no_probative_evidence_refusal() -> None:
+async def test_skipped_non_probative_verdict_is_reported_without_a_gap() -> None:
     linear = _FakeLinear()
     payload = _skill_result(
         checks=[
@@ -633,10 +635,11 @@ async def test_gap_wording_names_the_no_probative_evidence_refusal() -> None:
     )
     result = await _handler(payload, linear).handle(_request(apply=True))
     outcome = result.outcomes[0]
-    assert outcome.decision is EnumEvidenceAutocloseDecision.GAP_POSTED
+    assert outcome.decision is EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY
     assert "not all ACs are receipt-proven" not in outcome.reason
-    assert "3 non-probative" in outcome.reason
-    assert "'skipped'" in outcome.reason
+    assert outcome.dod_verify_non_probative_count == 3
+    assert "skipped" in outcome.reason
+    assert linear.comments == linear.state_updates == []
 
 
 async def test_gap_fingerprint_tracks_the_non_probative_count() -> None:

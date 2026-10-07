@@ -219,7 +219,7 @@ class TestTheSweepReadsTheSuccessArm:
         result, _linear = await self._run(_summary_arm(), 1)
         outcome = result.outcomes[0]
 
-        assert outcome.decision == EnumEvidenceAutocloseDecision.GAP_POSTED
+        assert outcome.decision == EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY
         assert outcome.dod_verify_total_checks == 8
         assert outcome.dod_verify_verified_count == 0
 
