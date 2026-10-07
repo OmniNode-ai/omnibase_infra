@@ -397,7 +397,6 @@ scripts/push_lanes/queue-runner.py
 scripts/push_lanes/queue-runner.sh
 scripts/rebalance-test-splits.sh
 scripts/recompute_measured_pricing.py
-scripts/reconcile-host.sh
 scripts/reconcile-workspace-venvs.sh
 scripts/reconcile_privilege_lib.sh
 scripts/reconcile_verify_movement.py
