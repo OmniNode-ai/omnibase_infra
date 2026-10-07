@@ -4212,17 +4212,15 @@ def _extract_rows_refused(result: object) -> int:
     one the error line exists to surface. The second is an ordering guard doing
     its job: the consumer-flow writer's upsert carries
     ``OR ingest_sequence <= EXCLUDED.ingest_sequence`` on its conflict arm and a
-    ``RETURNING`` clause, so a redelivered or out-of-order message is refused by
-    SQL and legitimately returns no rows. That guard is deliberate -- a
-    read-compare-write would race under concurrent consumers and let an older
-    redelivery win -- and it fires routinely.
+    ``RETURNING`` clause, so an older same-node sequence is refused by SQL
+    and legitimately returns no rows. Equality is accepted by this predicate.
+    The guard is deliberate: read-compare-write would race under concurrent
+    consumers and let an older redelivery win.
 
-    Measured on the .201 dev lane at revision 430ff3434, 33 minutes: 26 zero-row
-    ERROR lines, of which 4 were this guard on a writer that was serving 500
-    rows and updating every few seconds while it emitted them. An ERROR that
-    fires on correct behaviour trains people to skip the class, so the real
-    defect it exists to surface stops being visible. That is the failure this
-    separates.
+    The captured 33-minute window contains 26 zero-row ERROR lines, four
+    from the consumer-flow writer. Those bytes do not establish whether SQL
+    refused a row or the heartbeat carried no flow window (B23 correction).
+    Refusals must be established by the real upsert's RETURNING outcome.
 
     A writer that does not report refusals returns 0 here and is treated
     exactly as it is today, which is what lets this land in ``omnibase_infra``
@@ -4236,6 +4234,30 @@ def _extract_rows_refused(result: object) -> int:
             return 0
         return refused if refused > 0 else 0
     return 0
+
+
+def _is_windowless_consumer_flow_heartbeat(
+    *, contract_name: str, event_type: str, payload: object, result: object
+) -> bool:
+    """Recognize the consumer-flow contract's deliberate empty heartbeat.
+
+    OMN-18992 / B23. This contract projects ``flow_window``, not node liveness.
+    Only its new, explicit zero/refusal result shape can attest the no-op;
+    legacy or malformed results keep the zero-write ERROR. Other heartbeat
+    projections may still owe rows, so event type alone cannot exempt them.
+    """
+    return (
+        contract_name == "projection_consumer_flow"
+        and event_type == "heartbeat"
+        and isinstance(payload, dict)
+        and payload.get("flow_window") is None
+        and isinstance(result, dict)
+        and type(result.get("rows_upserted")) is int
+        and result["rows_upserted"] == 0
+        and result.get("flow_rows") == []
+        and type(result.get(ROWS_REFUSED_KEY)) is int
+        and result[ROWS_REFUSED_KEY] == 0
+    )
 
 
 def _record_projection_apply(
@@ -5027,6 +5049,8 @@ def _make_projection_dispatch_callback(
             if hasattr(payload, "model_dump"):
                 # Why: Control flow narrows this union at runtime before the attribute access.
                 input_data = payload.model_dump(mode="json")  # type: ignore[union-attr]
+            # Keep the normalized event separate from handler-owned mutation.
+            projection_payload = dict(input_data)
             input_data["_db"] = adapter
             input_data["_event_type"] = event_type
             input_data["_topic"] = topic
@@ -5151,23 +5175,35 @@ def _make_projection_dispatch_callback(
                     result,
                 )
             else:
-                # OMN-18992. A zero-row return has two causes and this used to
-                # log both the same way. A writer that silently wrote nothing
-                # is the defect the ERROR exists to surface; an ordering guard
-                # refusing a redelivery is correct behaviour and fires
-                # routinely. Logging the second as ERROR trains people to skip
-                # the class, at which point the first stops being visible --
-                # which is the whole point of having the line.
+                # OMN-18992 / B23. Guard refusals and window-less heartbeats
+                # are distinct expected no-ops. Keep the original ERROR for
+                # a writer that expected rows and silently wrote none.
                 rows_refused = _extract_rows_refused(result)
                 if rows_refused > 0:
                     logger.info(
                         "Projection handler wrote zero rows, refused by the "
                         "ordering guard (expected, no terminal owed): "
+                        "outcome=ORDERING_GUARD_REFUSED "
                         "handler=%s topic=%s event_type=%s rows_refused=%s",
                         type(handler_instance).__name__,
                         topic or "unknown",
                         event_type,
                         rows_refused,
+                    )
+                elif _is_windowless_consumer_flow_heartbeat(
+                    contract_name=contract_name,
+                    event_type=event_type,
+                    payload=projection_payload,
+                    result=result,
+                ):
+                    logger.info(
+                        "Projection handler received a window-less heartbeat "
+                        "(expected, no terminal owed): "
+                        "outcome=WINDOW_LESS_HEARTBEAT "
+                        "handler=%s topic=%s event_type=%s",
+                        handler_name,
+                        topic or "unknown",
+                        event_type,
                     )
                 else:
                     logger.error(
