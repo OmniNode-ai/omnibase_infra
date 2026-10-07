@@ -18,12 +18,17 @@ class ModelGatewayLaneMirrorConfig(BaseModel):
     this deployment's per-lane broker endpoints. That is the same authority
     split ``mirror_topics`` already uses, and it is what keeps a lane rename
     or a broker move out of this contract.
+
+    The contract declares ``declared_lanes``, the deployment's resolved YAML
+    selects source and mirror lanes from it, and an undeclared lane is refused
+    at construction (OMN-19983).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     source_lane: str = Field(..., min_length=1)
     mirror_lanes: tuple[str, ...] = Field(..., min_length=1)
+    declared_lanes: tuple[str, ...] = Field(..., min_length=1)
     topics: tuple[str, ...] = Field(..., min_length=1)
     max_messages_per_poll: int = Field(default=50, ge=1, le=500)
     poll_timeout_ms: int = Field(default=1_000, ge=1)
@@ -37,6 +42,29 @@ class ModelGatewayLaneMirrorConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_lane_set(self) -> ModelGatewayLaneMirrorConfig:
+        if len(set(self.declared_lanes)) != len(self.declared_lanes):
+            repeated = sorted(
+                lane
+                for lane in set(self.declared_lanes)
+                if self.declared_lanes.count(lane) > 1
+            )
+            raise ValueError(
+                f"declared_lanes must not repeat lanes {repeated!r}: "
+                f"declared_lanes={self.declared_lanes!r}"
+            )
+        if self.source_lane not in self.declared_lanes:
+            raise ValueError(
+                f"source_lane {self.source_lane!r} is not in "
+                f"declared_lanes={self.declared_lanes!r}"
+            )
+        undeclared = [
+            lane for lane in self.mirror_lanes if lane not in self.declared_lanes
+        ]
+        if undeclared:
+            raise ValueError(
+                f"mirror_lanes {undeclared!r} are not in "
+                f"declared_lanes={self.declared_lanes!r}"
+            )
         if self.source_lane in self.mirror_lanes:
             raise ValueError(
                 "source_lane must not appear in mirror_lanes: a lane mirroring "
