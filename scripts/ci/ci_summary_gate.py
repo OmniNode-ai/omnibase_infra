@@ -2531,6 +2531,11 @@ def draft_ready_check_runs(
             retained.append(row)
             continue
         name = str(row.get("name") or "")
+        # A draft row that already passed or skipped needs no successor: ready
+        # runs never re-trigger every workflow, and the row stays judged as is.
+        if not carries_failure_conclusion(_state_from_check_run(name, row)):
+            retained.append(row)
+            continue
         # GitHub leaves expressions unexpanded in a cancelled matrix caller.
         pattern = ".+?".join(
             re.escape(part) for part in re.split(r"\$\{\{.*?\}\}", name)
@@ -2549,7 +2554,19 @@ def draft_ready_check_runs(
             if name
             else []
         )
-        if not counterparts:
+        ready_run_in_flight = any(
+            candidate.get("workflow_id") == run["workflow_id"]
+            and str(candidate["created_at"]) >= ready_at
+            and candidate.get("status") != "completed"
+            for candidate in runs.values()
+        )
+        if not counterparts and ready_run_in_flight:
+            # The ready run has not created this row yet: hold at PENDING.
+            retained.append(row)
+            pending.append(
+                f"draft_era_ready_counterpart_pending: {name} run_id={run_id}"
+            )
+        elif not counterparts:
             retained.append(row)
             refused.append(
                 f"draft_era_without_ready_counterpart: {name} run_id={run_id}"

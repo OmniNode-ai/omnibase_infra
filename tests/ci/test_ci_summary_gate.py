@@ -3612,3 +3612,19 @@ class TestDraftReadySupersessionOmn19379:
             )
         code, report = self._evaluate(fixture)
         assert code == EXIT_SUCCESS, report
+
+    def test_passed_draft_row_without_ready_counterpart_is_not_refused(self) -> None:
+        fixture = self._fixture()
+        fixture["check_runs"][0]["name"] = "Draft only gate"
+        fixture["check_runs"][0]["conclusion"] = "success"
+        code, report = self._evaluate(fixture)
+        assert code == EXIT_SUCCESS, report
+        assert "draft_era_without_ready_counterpart" not in report
+
+    def test_cancelled_draft_row_waits_while_ready_run_is_in_flight(self) -> None:
+        fixture = self._fixture()
+        fixture["check_runs"][0]["name"] = "Not yet created gate"
+        fixture["workflow_runs"][1]["status"] = "in_progress"
+        code, report = self._evaluate(fixture)
+        assert code == EXIT_PENDING, report
+        assert "draft_era_without_ready_counterpart" not in report
