@@ -499,10 +499,30 @@ def test_cli_checkout_pins_a_worktree_and_leaves_the_canonical_clone_on_its_bran
 
     for _run in range(2):
         assert mod.main(argv) == 0
-        tree = trees.resolve() / "omnimarket"
+        row = json.loads(out.read_text(encoding="utf-8"))["repos"]["omnimarket"]
+        tree = Path(row["path"])
         assert _git(tree, "rev-parse", "HEAD") == sha_a
         assert _git(tree, "status", "--porcelain") == ""
-        row = json.loads(out.read_text(encoding="utf-8"))["repos"]["omnimarket"]
-        assert row["path"] == str(tree)
+        assert trees.resolve() in tree.parents
         assert row["expected_sha"] == sha_a
         _assert_canonical_untouched(clone, sha_b)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("location", ["legacy", "keyed"])
+def test_pinned_worktree_refuses_non_git_entries(tmp_path: Path, location: str) -> None:
+    """Quarantining foreign Git trees never authorizes moving arbitrary work."""
+    clone = tmp_path / "repo"
+    _old_sha, sha = _make_behind_dirty_repo(clone)
+    root = tmp_path / "trees"
+    tree = mod.pinned_worktree(clone, sha, root, force=False)
+    _git(clone, "worktree", "remove", str(tree))
+    target = root / clone.name if location == "legacy" else tree
+    target.mkdir(parents=True)
+    sentinel = target / "operator-work.txt"
+    sentinel.write_text("must not move or delete\n")
+
+    with pytest.raises(mod.DeploySourceRefError, match="refusing to overwrite"):
+        mod.pinned_worktree(clone, sha, root, force=True)
+    assert sentinel.read_text() == "must not move or delete\n"
+    assert not list(target.parent.glob(f"{target.name}.foreign-*"))

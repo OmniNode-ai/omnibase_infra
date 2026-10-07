@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -124,6 +125,12 @@ def _trees(build_ctx: Path) -> Path:
     return build_ctx.parent / "source-trees" / build_ctx.name
 
 
+def _staged_tree(build_ctx: Path, repo: str) -> Path:
+    """Read the RT-1 path rather than assuming a staging-directory layout."""
+    rows = json.loads(_refs_out(build_ctx).read_text(encoding="utf-8"))["repos"]
+    return Path(rows[repo]["path"])
+
+
 def _run_stage(
     omni_home: Path,
     build_ctx: Path,
@@ -196,7 +203,9 @@ def test_deploy_ref_checks_out_behind_clone_and_asserts_green(tmp_path: Path) ->
 
     # dev HEAD was checked out in RT-1's own worktree before staging, and the
     # canonical clone itself was left where it was (OMN-20263).
-    assert _git(_trees(build_ctx) / "omnibase_core", "rev-parse", "HEAD") == new_sha
+    assert (
+        _git(_staged_tree(build_ctx, "omnibase_core"), "rev-parse", "HEAD") == new_sha
+    )
     assert _git(omni_home / "omnibase_core", "rev-parse", "HEAD") == old_sha
 
     # The vendored-SHA manifest carries the NEW ref SHA -- proof the checkout
@@ -437,7 +446,7 @@ def test_per_repo_pins_stage_distinct_immutable_commits(tmp_path: Path) -> None:
     assert expected["ref_pinned"] is True
     assert _git(omni_home / "omnibase_core", "rev-parse", "HEAD") == old_core
     for repo, sha in targets.items():
-        assert _git(_trees(build_ctx) / repo, "rev-parse", "HEAD") == sha
+        assert _git(_staged_tree(build_ctx, repo), "rev-parse", "HEAD") == sha
         assert expected["repos"][repo]["expected_sha"] == sha
         assert expected["repos"][repo]["hotpatch"] is False
         assert vcs["siblings"][repo]["vcs_ref"] == sha
@@ -513,9 +522,11 @@ def test_per_repo_dirty_clone_is_staged_from_a_worktree_without_touching_work(
     assert result.returncode == 0, result.stderr
     assert sentinel.read_text() == "must survive\n"
     assert _git(omni_home / "omnibase_core", "rev-parse", "HEAD") == before_core
-    trees = _trees(tmp_path / "ctx")
-    assert _git(trees / "omnibase_core", "rev-parse", "HEAD") == target_core
-    assert not (trees / "omnimarket" / "operator-work.txt").exists()
+    context = tmp_path / "ctx"
+    assert (
+        _git(_staged_tree(context, "omnibase_core"), "rev-parse", "HEAD") == target_core
+    )
+    assert not (_staged_tree(context, "omnimarket") / "operator-work.txt").exists()
 
 
 @pytest.mark.unit
@@ -533,7 +544,7 @@ def test_two_clone_sets_share_declared_deploy_source(
     assert second.returncode == 0, second.stderr
     for repo in ("omnibase_core", "omnibase_compat", "omnimarket"):
         common = _git(
-            _trees(build_ctx) / repo,
+            _staged_tree(build_ctx, repo),
             "rev-parse",
             "--path-format=absolute",
             "--git-common-dir",
@@ -555,3 +566,78 @@ def test_invalid_declared_source_refuses_before_staging(
     assert "DEPLOY_SOURCE_CLONE_ROOT" in result.stderr
     assert not _trees(build_ctx).exists()
     assert not _refs_out(build_ctx).exists()
+
+
+@pytest.mark.unit
+def test_stage_workspace_tree_keyed_by_source_clone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One build context can stage two clone sets without sharing source trees."""
+    monkeypatch.delenv("DEPLOY_SOURCE_CLONE_ROOT", raising=False)
+    first = _make_omni_home(tmp_path / "first")
+    second = _make_omni_home(tmp_path / "second")
+    context = tmp_path / "ctx"
+    result = _run_stage(first, context, deploy_ref="dev")
+    assert result.returncode == 0, result.stderr
+    first_rows = json.loads(_refs_out(context).read_text())["repos"]
+    first_tree = Path(first_rows["omnibase_core"]["path"])
+    sentinel = first_tree / "operator-work.txt"
+    sentinel.write_text("preserve the other clone's work\n")
+
+    result = _run_stage(second, context, deploy_ref="dev")
+    assert result.returncode == 0, result.stderr
+    second_rows = json.loads(_refs_out(context).read_text())["repos"]
+    assert sentinel.read_text() == "preserve the other clone's work\n"
+    for repo in ("omnibase_core", "omnibase_compat", "omnimarket"):
+        tree = Path(second_rows[repo]["path"])
+        assert tree != Path(first_rows[repo]["path"])
+        assert (
+            Path(
+                _git(tree, "rev-parse", "--path-format=absolute", "--git-common-dir")
+            ).resolve()
+            == (second / repo / ".git").resolve()
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("location", ["legacy", "keyed"])
+def test_stage_workspace_tree_keyed_by_source_clone_foreign_clone_tree_moved_aside(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, location: str
+) -> None:
+    """Foreign worktrees survive in a logged, dated quarantine while staging succeeds."""
+    monkeypatch.delenv("DEPLOY_SOURCE_CLONE_ROOT", raising=False)
+    current = _make_omni_home(tmp_path / "current")
+    foreign = _make_omni_home(tmp_path / "foreign")
+    context = tmp_path / "ctx"
+    result = _run_stage(current, context, deploy_ref="dev")
+    assert result.returncode == 0, result.stderr
+    rows = json.loads(_refs_out(context).read_text())["repos"]
+    keyed = Path(rows["omnibase_core"]["path"])
+    _git(current / "omnibase_core", "worktree", "remove", str(keyed))
+    target = _trees(context) / "omnibase_core" if location == "legacy" else keyed
+    _git(foreign / "omnibase_core", "worktree", "add", "--detach", str(target), "dev")
+    sentinel = target / "operator-work.txt"
+    sentinel.write_text("foreign work must survive\n")
+    git_file = (target / ".git").read_bytes()
+
+    result = _run_stage(current, context, deploy_ref="dev")
+    assert result.returncode == 0, result.stderr
+    quarantines = list(target.parent.glob(f"{target.name}.foreign-*"))
+    assert len(quarantines) == 1
+    quarantine = quarantines[0]
+    assert re.search(r"\.foreign-\d{8}T\d{12}Z$", quarantine.name)
+    assert (
+        quarantine / "operator-work.txt"
+    ).read_text() == "foreign work must survive\n"
+    assert (quarantine / ".git").read_bytes() == git_file
+    assert str(target) in result.stderr
+    assert str(quarantine) in result.stderr
+    rows = json.loads(_refs_out(context).read_text())["repos"]
+    tree = Path(rows["omnibase_core"]["path"])
+    assert (
+        Path(
+            _git(tree, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        ).resolve()
+        == (current / "omnibase_core" / ".git").resolve()
+    )
+    assert not (tree / "operator-work.txt").exists()
