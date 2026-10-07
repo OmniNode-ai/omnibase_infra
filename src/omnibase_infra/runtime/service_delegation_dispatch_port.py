@@ -337,7 +337,10 @@ class RuntimeDelegationDispatchPort:
         )
         if bounded_route is not None:
             logger.info(
-                "bounded delegation route accepted before dispatch",
+                "bounded delegation route accepted before dispatch: "
+                "correlation_id=%s route=%s",
+                str(correlation_id),
+                bounded_route.model_dump_json(),
                 extra={
                     "correlation_id": str(correlation_id),
                     **bounded_route.model_dump(mode="json"),
