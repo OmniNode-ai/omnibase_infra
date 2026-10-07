@@ -184,6 +184,7 @@ services:
   omninode-runtime:
     container_name: omninode-dev-202-runtime
     environment:
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       ONEX_RUNTIME_LANE: "compose-dev-202"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml
       # OMN-20590: this lane's main runtime publishes the runtime tick
@@ -205,6 +206,7 @@ services:
   runtime-effects:
     container_name: omninode-dev-202-runtime-effects
     environment:
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml
       # OMN-20533: docker-compose.dev-lane.yml binds runtime-effects to the .201
       # dev lane's tenant-credential READ config and its own Infisical identity.
@@ -246,6 +248,7 @@ services:
   runtime-worker:
     container_name: omninode-dev-202-runtime-worker
     environment:
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml
     volumes: !override
       - worker_logs:/app/logs
@@ -255,6 +258,7 @@ services:
   tenant-projection-writer:
     container_name: omnimarket-dev-202-tenant-projection-writer
     environment:
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml
     labels:
       com.omninode.lane: dev-202

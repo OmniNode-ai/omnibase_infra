@@ -158,7 +158,7 @@ _IN_REPO_PROVENANCE: dict[str, str] = {
     # OMN-14375 shifted this six lines down by adding the GITHUB_WEBHOOK_SECRET
     # runtime-env entry above it (885 -> 891). OMN-20260 shifted it eight more
     # by documenting the loopback-only Redpanda admin publish (891 -> 899).
-    "omnibase_infra:docker/docker-compose.infra.yml:899": "KC_DB_USERNAME: postgres",
+    "omnibase_infra:docker/docker-compose.infra.yml:902": "KC_DB_USERNAME: postgres",
     "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4": (
         "CREATE DATABASE keycloak"
     ),
@@ -190,7 +190,7 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
             "four-column checksum ledger"
         ),
         provenance=(
-            "omnibase_infra:docker/docker-compose.infra.yml:899",
+            "omnibase_infra:docker/docker-compose.infra.yml:902",
             "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4",
             "omninode_infra:k8s/auth/keycloak-values.yaml:32",
             "omninode_infra:scripts/init-databases.sh:603",

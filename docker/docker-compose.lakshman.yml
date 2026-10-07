@@ -132,6 +132,7 @@ x-runtime-base: &runtime-base
         cpus: "0.25"
         memory: 256M
 x-lakshman-runtime-env: &lakshman-runtime-env
+  ONEX_TRAJECTORY_EVALUATION_BACKEND: ${LAKSHMAN_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set LAKSHMAN_TRAJECTORY_EVALUATION_BACKEND}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_HOST: postgres

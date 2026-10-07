@@ -131,6 +131,9 @@ def render_env(contract: ModelRuntimePolicyContract) -> dict[str, str]:
         env[f"{profile_prefix}_BOUNDARY_DLQ_ENABLED"] = _bool_text(
             profile.boundary_dlq_enabled
         )
+        env[f"{profile_prefix}_TRAJECTORY_EVALUATION_BACKEND"] = (
+            profile.trajectory_evaluation_backend
+        )
         secret_resolver_config_json = ""
         if profile.secret_resolver_mappings or profile.secret_resolver_namespaces:
             # OMN-16944: rule-based sources for runtime-minted refs ride the
