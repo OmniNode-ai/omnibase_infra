@@ -596,7 +596,7 @@ services:
       - "com.omninode.service=projection-api"
   # OMN-13772 / OMN-13581 defence-in-depth. This file is designed to be run
   # STANDALONE (`-f docker/docker-compose.dogfood.yml`), and no sanctioned tool
-  # layers it — `scripts/deploy-runtime.sh` does not know this lane, deliberately
+  # layers it — `onex-runtime-deploy` does not know this lane, deliberately
   # (see the governance note in this file's header). But the base infra compose
   # defines keycloak and infisical with NO compose profile, so if anyone ever
   # renders `-f docker-compose.infra.yml -f docker-compose.dogfood.yml` the two

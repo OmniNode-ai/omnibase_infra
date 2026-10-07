@@ -5,7 +5,7 @@
 Phase B binds ``KAFKA_SASL_*`` on all 15 dev-lane Kafka clients in
 ``docker/docker-compose.dev-lane.yml``. A compose ``environment:`` entry only
 takes effect when the container is RECREATED, and the only sanctioned path that
-recreates anything on this lane is ``scripts/deploy-runtime.sh --execute``,
+recreates anything on this lane is ``src/omnibase_infra/handlers/handler_runtime_deploy.sh --execute``,
 which restarts exactly the services its own arrays name.
 
 ``context-audit-consumer`` was in NEITHER array. It is declared in the base
@@ -34,7 +34,9 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEV_LANE_OVERLAY = REPO_ROOT / "docker" / "docker-compose.dev-lane.yml"
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 
 AUTH_KEY = "KAFKA_SASL_USERNAME"
 
@@ -116,7 +118,7 @@ def test_every_authenticated_dev_lane_client_is_in_the_deploy_restart_set() -> N
         f"path recreates them: {uncovered}. The credential never reaches the "
         "process; each keeps speaking PLAINTEXT to a listener that refuses it, "
         "and the deploy reports success. Add them to "
-        "DEV_LANE_EXTRA_BROKER_CLIENTS in scripts/deploy-runtime.sh."
+        "DEV_LANE_EXTRA_BROKER_CLIENTS in src/omnibase_infra/handlers/handler_runtime_deploy.sh."
     )
 
 

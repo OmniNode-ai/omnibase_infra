@@ -284,7 +284,6 @@ scripts/deploy-agent/deploy_agent/unit_drift.py
 scripts/deploy-build-loop-trigger.sh
 scripts/deploy-gateway.sh
 scripts/deploy-runners.sh
-scripts/deploy-runtime.sh
 scripts/deploy-timers.sh
 scripts/deploy-trigger.py
 scripts/diagnose_e2e.sh

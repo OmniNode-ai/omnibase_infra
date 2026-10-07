@@ -18,7 +18,7 @@
 #   - a forward-progress ancestry assertion (refuses to "refresh" backwards),
 #   - a build SCOPED to the 4 core services only (omninode-runtime,
 #     runtime-effects, runtime-worker, projection-api) via the new
-#     RUNTIME_BUILD_SERVICES_OVERRIDE knob in deploy-runtime.sh -- this routes
+#     RUNTIME_BUILD_SERVICES_OVERRIDE knob in onex-runtime-deploy -- this routes
 #     around the still-open BUILD_SOURCE selector-mismatch defect on the 4
 #     release-only services (agent-actions-consumer, skill-lifecycle-consumer,
 #     intelligence-api, omninode-contract-resolver; OMN-14262 residual) as a
@@ -40,7 +40,7 @@
 # the only lane this session is authorized to mutate.
 #
 # Intended to run ON the host where the lane's containers live (.201) from
-# the canonical omnibase_infra clone, the same way deploy-runtime.sh and
+# the canonical omnibase_infra clone, the same way onex-runtime-deploy and
 # cut-lab-ref.sh already do -- NOT from a worktree, NOT over ssh wrapping.
 #
 # Required environment (OMN-15218 lane-deploy attribution + grant interlock):
@@ -66,7 +66,7 @@
 #   RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS (OMN-15718)  Bounded wall-clock
 #                           deadline (seconds, default 300) applied to every
 #                           `docker compose ... up ...` call this script and
-#                           deploy-runtime.sh issue (scripts/runtime_build/
+#                           onex-runtime-deploy issue (scripts/runtime_build/
 #                           compose_wait_timeout.sh). Closes the 2026-08-05
 #                           defect where the rollback's targeted recreate hung
 #                           indefinitely on a depends_on:condition:service_healthy
@@ -102,23 +102,23 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-DEPLOY_RUNTIME="${DEPLOY_RUNTIME:-${REPO_ROOT}/scripts/deploy-runtime.sh}"
+DEPLOY_RUNTIME="${DEPLOY_RUNTIME:-onex-runtime-deploy}"
 
 # OMN-16729: per-compose-project host lane lock. This wrapper holds it across
 # its WHOLE critical section -- pre-state capture, build, health gate, readback,
-# receipt -- which is the window deploy-runtime.sh's own .deploy.lock never
+# receipt -- which is the window onex-runtime-deploy's own .deploy.lock never
 # covered and in which two sanctioned refreshes collided on 2026-09-08.
 # shellcheck source=./lane_lock.sh
 source "${SCRIPT_DIR}/lane_lock.sh"
 
 # OMN-15718: bounded compose-up deadline + stranded-container reconciliation,
-# shared with deploy-runtime.sh. See that file for RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS,
+# shared with onex-runtime-deploy. See that file for RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS,
 # compose_up_bounded, reconcile_container_running_state, container_status.
 # shellcheck source=./compose_wait_timeout.sh
 source "${SCRIPT_DIR}/compose_wait_timeout.sh"
 
 # OMN-16729: the ONE derivation of a lane's `docker compose -f ...` token
-# sequence, shared with deploy-runtime.sh and refresh_dev_lane.sh. This script
+# sequence, shared with onex-runtime-deploy and refresh_dev_lane.sh. This script
 # already spelled both files correctly by hand, but a hand-spelled copy is
 # exactly what silently lost the dev lane's overlay on the sibling script's
 # rollback path; there is now one copy and every caller reads it.
@@ -152,16 +152,16 @@ require_contract_var() {
 }
 
 # Source the same contract-rendered runtime policy + operator env that
-# deploy-runtime.sh sources at its own top (docker/runtime-policy.env, then
-# ~/.omnibase/.env). deploy-runtime.sh's OWN docker compose calls already do
+# onex-runtime-deploy sources at its own top (docker/runtime-policy.env, then
+# ~/.omnibase/.env). onex-runtime-deploy's OWN docker compose calls already do
 # this internally, but this script ALSO issues a direct `docker compose`
 # invocation for the rollback targeted-recreate (step 6 below) -- without
 # these vars in scope, that compose invocation fails at config-interpolation
 # time (e.g. BIFROST_VERIFY_ENDPOINTS) before it can even attempt the
 # recreate. Preserve any operator-set OMNI_HOME/HEALTH_CHECK_URL exactly the
-# way deploy-runtime.sh's own header does.
+# way onex-runtime-deploy's own header does.
 _OPERATOR_OMNI_HOME="${OMNI_HOME:-}"
-# OMN-14958: operator env path is parameterized (same knob as deploy-runtime.sh)
+# OMN-14958: operator env path is parameterized (same knob as onex-runtime-deploy)
 # so the containerized deploy runner can point at its provisioned read-only
 # mount instead of a ${HOME} that carries no operator env.
 OMNIBASE_OPERATOR_ENV_FILE="${OMNIBASE_OPERATOR_ENV_FILE:-${HOME}/.omnibase/.env}"
@@ -237,7 +237,7 @@ readonly CORE_SERVICES=(omninode-runtime runtime-effects runtime-worker projecti
 # Without this the writers would be declared in the overlay, censused by
 # lane-manifest.yaml, and NEVER BUILT: this script has always exported a scoped
 # override (to route around the open OMN-14262 BUILD_SOURCE selector mismatch on
-# the four release-only services), and deploy-runtime.sh treats an explicit
+# the four release-only services), and onex-runtime-deploy treats an explicit
 # override as an instruction to touch ONLY the named services. A writer left out
 # keeps running on last-release code behind `restart: unless-stopped`, which
 # reads as healthy -- a slower version of the silent-loss defect these services
@@ -261,7 +261,7 @@ readonly REFRESH_BUILD_SERVICES=(
     # compose profile, and what makes it a real service HERE is this lane's
     # `profiles: !override` promoting it into `runtime`.
     #
-    # Membership is mandatory, not tidiness. deploy-runtime.sh keeps the same
+    # Membership is mandatory, not tidiness. onex-runtime-deploy keeps the same
     # name in STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES, but
     # resolve_lane_runtime_services returns early whenever
     # RUNTIME_BUILD_SERVICES_OVERRIDE is set -- and this script ALWAYS sets it.
@@ -304,9 +304,9 @@ declare -A CORE_CONTAINERS=(
     [runtime-worker]="omninode-stability-test-runtime-worker"
     [projection-api]="omnimarket-stability-test-projection-api"
 )
-# Siblings pinned to --ref via deploy-runtime.sh's DEPLOY_REF (RT-1, OMN-14438)
+# Siblings pinned to --ref via onex-runtime-deploy's DEPLOY_REF (RT-1, OMN-14438)
 # during workspace staging, PLUS the omnibase_infra ambient clone itself (which
-# is NOT part of that sibling set -- deploy-runtime.sh reads git_sha from
+# is NOT part of that sibling set -- onex-runtime-deploy reads git_sha from
 # wherever it is invoked FROM, i.e. this clone's own HEAD).
 # The clones this refresh records prior HEADs for and moves to the deployed
 # ref: SIBLING_LANE_REFRESH_REPOS from sibling_clone_manifest.sh, the single
@@ -391,7 +391,7 @@ fi
 # Safety: refuse to run if the operator env has repointed the compose project
 # at a non-stability-test target (e.g. a sourced prod/judge env file). This
 # script has no --lane flag by design; COMPOSE_PROJECT is hardcoded above, but
-# deploy-runtime.sh resolves ITS OWN compose project from
+# onex-runtime-deploy resolves ITS OWN compose project from
 # OMNIBASE_INFRA_COMPOSE_PROJECT at call time -- this script always exports the
 # correct value explicitly below, so this guard is a defense against a caller
 # who exported a conflicting value expecting it to leak through.
@@ -406,8 +406,8 @@ for cmd in docker git curl jq; do
     command -v "${cmd}" >/dev/null 2>&1 || { err "'${cmd}' is required but not found in PATH."; exit 64; }
 done
 
-if [[ ! -x "${DEPLOY_RUNTIME}" && ! -f "${DEPLOY_RUNTIME}" ]]; then
-    err "deploy-runtime.sh not found at ${DEPLOY_RUNTIME}"
+if ! command -v "${DEPLOY_RUNTIME}" >/dev/null 2>&1; then
+    err "onex-runtime-deploy not found at ${DEPLOY_RUNTIME}"
     exit 64
 fi
 if [[ ! -f "${VERIFY_SCRIPT}" ]]; then
@@ -485,7 +485,7 @@ trap 'rm -rf "${WORKDIR}"' EXIT
 # --- lane lock (OMN-16729) --------------------------------------------------
 # Taken before ANY live read of lane state, because the collision this closes
 # severed a post-deploy readback, not a build. Held until this script exits;
-# deploy-runtime.sh below inherits ONEX_LANE_LOCK_HELD and re-enters without
+# onex-runtime-deploy below inherits ONEX_LANE_LOCK_HELD and re-enters without
 # deadlocking. Plan mode takes nothing -- it mutates nothing, and a dry run must
 # not be blocked by a legitimately running refresh.
 if [[ "${MODE}" == "execute" ]]; then
@@ -511,7 +511,7 @@ log "mode            : ${MODE}"
 #
 # Runs BEFORE the ambient-clone checkout, the preflight image tags, and the
 # build — i.e. before this script's FIRST mutation, not just before
-# deploy-runtime.sh's. deploy-runtime.sh runs the same preflight itself, but
+# onex-runtime-deploy's. onex-runtime-deploy runs the same preflight itself, but
 # steps 2 and 3 below (docker tag / git checkout --force) happen earlier and
 # would otherwise be unattributed and un-interlocked.
 #
@@ -635,7 +635,7 @@ fi
 
 # =============================================================================
 # 3. Refresh the omnibase_infra ambient clone itself to --ref
-#    (deploy-runtime.sh reads its own git_sha from THIS clone's HEAD; DEPLOY_REF
+#    (onex-runtime-deploy reads its own git_sha from THIS clone's HEAD; DEPLOY_REF
 #    below only pins the 4 SIBLING repos staged by stage_workspace.sh -- it
 #    does not touch omnibase_infra's own tree.)
 #
@@ -671,7 +671,7 @@ NEW_INFRA_SHA_SHORT="$(git_clone "${INFRA_CLONE}" rev-parse --short=12 HEAD)"
 log "  omnibase_infra now at ${NEW_INFRA_SHA_SHORT} (full: ${NEW_INFRA_SHA})"
 
 # =============================================================================
-# 4. Build + restart (scoped to the 4 core services) via deploy-runtime.sh
+# 4. Build + restart (scoped to the 4 core services) via onex-runtime-deploy
 # =============================================================================
 log "=== Build + restart (scoped to: ${REFRESH_BUILD_SERVICES[*]}) ==="
 DEPLOY_EXIT=0
@@ -681,7 +681,7 @@ DEPLOY_EXIT=0
     export BUILD_SOURCE="workspace"
     export DEPLOY_REF="${REF}"
     export RUNTIME_BUILD_SERVICES_OVERRIDE="${REFRESH_BUILD_SERVICES[*]}"
-    bash "${DEPLOY_RUNTIME}" --execute --force --restart
+    "${DEPLOY_RUNTIME}" --repository-root "${REPO_ROOT}" --execute --force --restart
 ) || DEPLOY_EXIT=$?
 
 if [[ "${DEPLOY_EXIT}" -ne 0 ]]; then
@@ -700,7 +700,7 @@ if [[ "${DEPLOY_EXIT}" -ne 0 ]]; then
     # cleanup (guarded by OMN-17287 so it cannot rm -rf a deploy dir live
     # containers are bind-mounted to), and the operator gets the real exit code
     # instead of a health verdict about the wrong build.
-    err "deploy-runtime.sh exited ${DEPLOY_EXIT} -- failing the refresh"
+    err "onex-runtime-deploy exited ${DEPLOY_EXIT} -- failing the refresh"
     err "  The lane was NOT refreshed to ${REF} (${NEW_INFRA_SHA_SHORT})."
     err "  Not proceeding to the health-gate: it reports whether SOMETHING is"
     err "  healthy, not whether the requested build is the one running, so a"
@@ -874,7 +874,7 @@ else
     done
 
     # Targeted recreate against the rolled-back images (same command shape as
-    # deploy-runtime.sh's restart_services(), scoped to the 4 core services).
+    # onex-runtime-deploy's restart_services(), scoped to the 4 core services).
     # Guarded (never let a compose failure here abort the script under set -e
     # -- a rollback-recreate failure must still reach the health-gate +
     # receipt below, not crash silently with no receipt at all).

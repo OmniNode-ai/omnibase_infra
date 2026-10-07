@@ -4,7 +4,7 @@
 """OMN-14562: cut-lab-ref.sh must survive a same-version redeploy collision.
 
 The bug (found exercising OMN-14438's RT-1/RT-2 live on .201 for the first
-time): ``deploy-runtime.sh``'s version-directory collision guard
+time): ``onex-runtime-deploy``'s version-directory collision guard
 (``guard_existing_deployment()``, Phase 5) runs BEFORE ``sync_files()``'s
 ``stage_workspace_if_needed()`` (Phase 6) -- the function that engages RT-1's
 clean-ref checkout. Because the lab fast lane redeploys the SAME package
@@ -26,11 +26,11 @@ stub of RT-1 itself):
   checked out to the new ref SHA (not the stale one) and the vendored-SHA
   manifest proves it.
 
-Only deploy-runtime.sh's Docker-build phases (Phase 5 guard onward through
+Only onex-runtime-deploy's Docker-build phases (Phase 5 guard onward through
 image build) are represented by a small fixture stub, so these tests do not
 require a running Docker daemon -- consistent with every other
 ``tests/scripts/test_deploy_runtime_*.py`` test in this repo, none of which
-exercise deploy-runtime.sh's real Docker phases either. The stub's guard
+exercise onex-runtime-deploy's real Docker phases either. The stub's guard
 logic is a direct, log-string-faithful port of
 ``guard_existing_deployment()``; ``test_deploy_runtime_guard_precedes_staging``
 below locks the REAL script's call order so the fixture cannot silently drift
@@ -53,7 +53,9 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CUT_LAB_REF = REPO_ROOT / "scripts" / "runtime_build" / "cut-lab-ref.sh"
 STAGE_WORKSPACE = REPO_ROOT / "scripts" / "runtime_build" / "stage_workspace.sh"
-DEPLOY_RUNTIME_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_RUNTIME_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 
 SIBLING_REPOS = (
     "omnibase_core",
@@ -132,7 +134,7 @@ def _advance_dev_leave_behind(repo: Path) -> tuple[str, str]:
 def _write_deploy_runtime_stub(
     path: Path, *, fake_deploy_root: Path, fake_version: str
 ) -> None:
-    """A fixture stub standing in for deploy-runtime.sh's guard + Docker phases
+    """A fixture stub standing in for onex-runtime-deploy's guard + Docker phases
     ONLY. It replicates guard_existing_deployment()'s exact log strings and
     Phase 5 (guard) -> Phase 6 (stage_workspace_if_needed) ordering, then
     delegates the real RT-1 work to the REAL stage_workspace.sh -- RT-1 itself
@@ -183,7 +185,7 @@ def test_collision_without_force_blocks_before_rt1_checkout(tmp_path: Path) -> N
     deploy_target.mkdir(parents=True)
     (deploy_target / "stale-marker.txt").write_text("pre-existing\n", encoding="utf-8")
 
-    stub = tmp_path / "stub-deploy-runtime.sh"
+    stub = tmp_path / "stub-onex-runtime-deploy"
     _write_deploy_runtime_stub(
         stub, fake_deploy_root=fake_deploy_root, fake_version=_FAKE_APP_VERSION
     )
@@ -232,7 +234,7 @@ def test_cut_lab_ref_execute_overwrites_collision_and_runs_rt1_checkout(
     deploy_target.mkdir(parents=True)
     (deploy_target / "stale-marker.txt").write_text("pre-existing\n", encoding="utf-8")
 
-    stub = tmp_path / "stub-deploy-runtime.sh"
+    stub = tmp_path / "stub-onex-runtime-deploy"
     _write_deploy_runtime_stub(
         stub, fake_deploy_root=fake_deploy_root, fake_version=_FAKE_APP_VERSION
     )
@@ -285,19 +287,19 @@ def test_cut_lab_ref_execute_overwrites_collision_and_runs_rt1_checkout(
 
 
 # ---------------------------------------------------------------------------
-# Structural lock: the REAL deploy-runtime.sh's guard-before-stage ordering
+# Structural lock: the REAL onex-runtime-deploy's guard-before-stage ordering
 # ---------------------------------------------------------------------------
 
 
 def _function_body(name: str) -> str:
     """Return the source of a top-level shell function ``name() { ... }`` from
-    the REAL deploy-runtime.sh (mirrors the helper in
+    the REAL onex-runtime-deploy (mirrors the helper in
     test_deploy_runtime_cold_full_bringup.py)."""
     text = DEPLOY_RUNTIME_SCRIPT.read_text(encoding="utf-8")
     anchored = text.find(f"\n{name}() {{")
     start = 0 if text.startswith(f"{name}() {{") else anchored + 1
     assert anchored != -1 or text.startswith(f"{name}() {{"), (
-        f"function {name}() not found in deploy-runtime.sh"
+        f"function {name}() not found in onex-runtime-deploy"
     )
     rest = text[start:]
     end_rel = rest.find("\n}\n")

@@ -28,7 +28,7 @@ assertion unchanged.
 
 Same seam-level harness as `test_deploy_runtime_rt6_scoped_readback.py`: the
 real `readback_deployed_ref()` and its real dependencies are extracted from
-`scripts/deploy-runtime.sh` and executed under bash with only `docker` stubbed.
+`src/omnibase_infra/handlers/handler_runtime_deploy.sh` and executed under bash with only `docker` stubbed.
 """
 
 from __future__ import annotations
@@ -42,8 +42,10 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
-# OMN-16729: the lane -> compose-file mapping moved out of deploy-runtime.sh into
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
+# OMN-16729: the lane -> compose-file mapping moved out of onex-runtime-deploy into
 # a shared lib, because refresh_dev_lane.sh's rollback recreate needed the
 # identical derivation and its hand-spelled copy had lost the dev-lane overlay.
 # The harness sources the lib rather than extracting those functions by regex.
@@ -68,7 +70,7 @@ def _extract_function(name: str) -> str:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, (
-        f"could not extract function {name}() from deploy-runtime.sh"
+        f"could not extract function {name}() from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -80,7 +82,7 @@ def _extract_array(name: str) -> str:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, (
-        f"could not extract array {name}=() from deploy-runtime.sh"
+        f"could not extract array {name}=() from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -91,7 +93,7 @@ def _extract_scalar_omn18656(name: str) -> str:
         rf'^readonly {re.escape(name)}="[^"]*"$', _script_text(), re.MULTILINE
     )
     assert match is not None, (
-        f"could not extract readonly {name}= from deploy-runtime.sh"
+        f"could not extract readonly {name}= from onex-runtime-deploy"
     )
     return match.group(0)
 

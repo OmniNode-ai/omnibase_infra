@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 """OMN-18387 -- the deploy agent's runtime up-target/verification set must
-carry everything ``scripts/deploy-runtime.sh``'s ``RUNTIME_SERVICES`` array
+carry everything ``src/omnibase_infra/handlers/handler_runtime_deploy.sh``'s ``RUNTIME_SERVICES`` array
 restarts via ``up -d --no-deps``.
 
 ``deploy_agent.events.SCOPE_SERVICES[Scope.RUNTIME]`` is the single source
@@ -43,22 +43,24 @@ from deploy_agent.events import SCOPE_SERVICES, Scope
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 
 # Documented, one Python-only entry per reason -- never a catch-all escape
 # hatch. A new entry landing on either side without a matching change here
 # is exactly the drift this test exists to catch.
 #
-#   context-audit-consumer -- reached via deploy-runtime.sh's
+#   context-audit-consumer -- reached via onex-runtime-deploy's
 #       DEV_LANE_EXTRA_BROKER_CLIENTS (OMN-18012), a dev-lane addendum
 #       array, not the lane-agnostic RUNTIME_SERVICES array this test reads.
-#   intelligence-migration -- reached via deploy-runtime.sh's
+#   intelligence-migration -- reached via onex-runtime-deploy's
 #       RUNTIME_MIGRATION_SERVICES (OMN-13220): a one-shot preflight
 #       `docker wait` target applied before the --no-deps runtime restart,
 #       not a service the restart itself names.
 #   autoheal -- a sidecar with no build context of its own on this compose
-#       lane (no `build:` stanza deploy-runtime.sh's build phase could
-#       target); named only in a deploy-runtime.sh comment, never in any of
+#       lane (no `build:` stanza onex-runtime-deploy's build phase could
+#       target); named only in a onex-runtime-deploy comment, never in any of
 #       its restart arrays.
 PYTHON_ONLY_RUNTIME_EXTRAS = frozenset(
     {"context-audit-consumer", "intelligence-migration", "autoheal"}
@@ -99,7 +101,7 @@ class TestRuntimeServicesCannotDriftFromTheBashArray:
         from_python = set(SCOPE_SERVICES[Scope.RUNTIME])
         missing = from_bash - from_python
         assert not missing, (
-            "scripts/deploy-runtime.sh RUNTIME_SERVICES names service(s) the "
+            "src/omnibase_infra/handlers/handler_runtime_deploy.sh RUNTIME_SERVICES names service(s) the "
             "deploy agent's up-target/container-verification set "
             "(deploy_agent.events.SCOPE_SERVICES[Scope.RUNTIME]) never "
             f"reaches, so an agent-path deploy can leave them stale: {sorted(missing)}"
@@ -112,7 +114,7 @@ class TestRuntimeServicesCannotDriftFromTheBashArray:
         undocumented = python_only - PYTHON_ONLY_RUNTIME_EXTRAS
         assert not undocumented, (
             "deploy_agent.events.SCOPE_SERVICES[Scope.RUNTIME] carries "
-            "service(s) absent from scripts/deploy-runtime.sh RUNTIME_SERVICES "
+            "service(s) absent from src/omnibase_infra/handlers/handler_runtime_deploy.sh RUNTIME_SERVICES "
             "with no documented reason in PYTHON_ONLY_RUNTIME_EXTRAS above: "
             f"{sorted(undocumented)}"
         )

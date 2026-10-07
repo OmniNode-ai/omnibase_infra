@@ -1228,7 +1228,7 @@ class DeployAgent:
             # deploy-source clone was the shared thing it was reasoning about.
             # Every phase after it -- the build, the compose up, the verify,
             # the lab-overlay apply -- then ran with the lane UNLOCKED, so a
-            # concurrent `scripts/deploy-runtime.sh` took the same lock
+            # concurrent `onex-runtime-deploy` took the same lock
             # uncontended and recreated the project underneath a job that was
             # mid-flight. Measured 2026-09-17: a hand deploy entered at 11:20Z
             # against job 746a118a, accepted 11:07:45Z and still in its runtime

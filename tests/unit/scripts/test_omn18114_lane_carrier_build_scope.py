@@ -4,7 +4,7 @@
 
 The drift this closes
 ---------------------
-``deploy-runtime.sh`` keeps a per-lane array of services that lane restarts and
+``onex-runtime-deploy`` keeps a per-lane array of services that lane restarts and
 no other -- ``DEV_LANE_ONLY_RUNTIME_SERVICES`` and
 ``STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES``. ``resolve_lane_runtime_services``
 appends that array to the restart set, but ONLY when no build override is in
@@ -24,7 +24,7 @@ matter how correctly it is declared.
 
 Measured live on 2026-09-10. OMN-18114 added ``tenant-projection-writer`` to
 both lane overlays, to the lane census manifest, and to both lane-only arrays
-in ``deploy-runtime.sh`` -- and to neither refresh script. The stability-test
+in ``onex-runtime-deploy`` -- and to neither refresh script. The stability-test
 lane's own dry-run printed a ten-service build scope with the carrier absent,
 while the lane census reported ``container_absent`` for it at severity
 critical. The ticket was marked Done on the merge. Its AC4 asks that both lab
@@ -47,7 +47,7 @@ first is the restart-set array. The second is compose itself: a service whose
 LANE OVERLAY grants it ``runtime``/``full`` profile membership is a service that
 lane starts, whether or not the base also declares it. Neither derivation is a
 hand-maintained list, and the second holds even if the arrays in
-``deploy-runtime.sh`` are wrong.
+``onex-runtime-deploy`` are wrong.
 
 Related Tickets:
     - OMN-18114: the carrier, and the omission this gate closes
@@ -67,10 +67,12 @@ import pytest
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DEPLOY_RUNTIME = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_RUNTIME = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 BASE_COMPOSE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
 
-# lane -> its overlay, its governed refresh script, and the deploy-runtime.sh
+# lane -> its overlay, its governed refresh script, and the onex-runtime-deploy
 # array naming the services that lane restarts and no other. Only the two lanes
 # this repo refreshes: prod and judge declare no lane-only services and have no
 # refresh script here, and the collaborator lane is its owner's to deploy.
@@ -165,7 +167,7 @@ def _bash_array(script: str, name: str, source: Path) -> set[str]:
 
 
 def _lane_only_restart_services(lane: str) -> set[str]:
-    """The deploy-runtime.sh array of services only this lane restarts."""
+    """The onex-runtime-deploy array of services only this lane restarts."""
     _, _, array_name = GOVERNED_LANES[lane]
     return _bash_array(
         DEPLOY_RUNTIME.read_text(encoding="utf-8"), array_name, DEPLOY_RUNTIME

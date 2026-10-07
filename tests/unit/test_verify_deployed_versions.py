@@ -418,7 +418,7 @@ class TestVerifyRevision:
     def test_stale_container_goes_red(self) -> None:
         """ACCEPTANCE (RT-6, exists-but-WRONG): a stale running container whose
         image revision label != the intended git SHA must FAIL. Before this
-        wiring, deploy-runtime.sh only warned and returned 0 -- this is the
+        wiring, onex-runtime-deploy only warned and returned 0 -- this is the
         exact silent-pass the readback closes."""
         stale = "0000stale0000deadbeefcafef00dbaadf00dbaad"
         intended = "abc123def456"

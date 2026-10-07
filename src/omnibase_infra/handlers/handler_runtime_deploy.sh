@@ -4,7 +4,7 @@
 
 # Copyright (c) 2025 OmniNode Team
 #
-# deploy-runtime.sh -- Stable runtime deployment for omnibase_infra
+# onex-runtime-deploy -- Stable runtime deployment for omnibase_infra
 #
 # Rsyncs the current repository to a versioned deployment root
 # (~/.omnibase/infra/deployed/{version}/), then runs docker compose
@@ -17,11 +17,11 @@
 # dry-run by default.
 #
 # Usage:
-#   ./scripts/deploy-runtime.sh                   # Dry-run preview
-#   ./scripts/deploy-runtime.sh --execute         # Deploy + build
-#   ./scripts/deploy-runtime.sh --execute --restart  # Deploy + build + restart
-#   ./scripts/deploy-runtime.sh --print-compose-cmd  # Show compose commands
-#   ./scripts/deploy-runtime.sh --help            # Full usage
+#   onex-runtime-deploy --repository-root /absolute/infra/checkout                   # Dry-run preview
+#   onex-runtime-deploy --repository-root /absolute/infra/checkout --execute         # Deploy + build
+#   onex-runtime-deploy --repository-root /absolute/infra/checkout --execute --restart  # Deploy + build + restart
+#   onex-runtime-deploy --repository-root /absolute/infra/checkout --print-compose-cmd  # Show compose commands
+#   onex-runtime-deploy --repository-root /absolute/infra/checkout --help            # Full usage
 
 set -euo pipefail
 
@@ -38,7 +38,7 @@ set -euo pipefail
 # precondition failure (exit 64), never bash's bare
 # "source: .../.omnibase/.env: No such file or directory" crash that killed
 # deploy run 29977968728 before any build/compose action.
-SCRIPT_DIR_FOR_ENV="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR_FOR_ENV="${ONEX_DEPLOY_REPOSITORY_ROOT:?deployment handler must bind repository_root}/scripts"
 REPO_ROOT_FOR_ENV="$(cd "${SCRIPT_DIR_FOR_ENV}/.." && pwd)"
 
 # OMN-15718: bounded compose-up deadline + stranded-container reconciliation,
@@ -68,7 +68,7 @@ if [[ ! -e "${OMNIBASE_OPERATOR_ENV_FILE}" ]]; then
     {
         echo "[deploy-runtime] ERROR: OPERATOR_ENV_MISSING -- operator env file not found:"
         echo "  ${OMNIBASE_OPERATOR_ENV_FILE}"
-        echo "  deploy-runtime.sh requires the operator env (POSTGRES_PASSWORD etc.) for"
+        echo "  onex-runtime-deploy requires the operator env (POSTGRES_PASSWORD etc.) for"
         echo "  docker compose \${VAR} interpolation. Either provision it at"
         echo "  \${HOME}/.omnibase/.env, or set OMNIBASE_OPERATOR_ENV_FILE to a readable"
         echo "  env file. In the containerized deploy runner this is the read-only bind"
@@ -133,7 +133,7 @@ source "${SCRIPT_DIR_FOR_ENV}/runtime_build/compose_files.sh"
 # Constants
 # =============================================================================
 
-SCRIPT_NAME="$(basename "$0")"
+SCRIPT_NAME="onex-runtime-deploy"
 readonly SCRIPT_NAME
 readonly SCRIPT_VERSION="1.0.0"
 
@@ -1015,7 +1015,7 @@ resolve_lane_runtime_container_name() {
             ;;
         *)
             log_error "Unknown lane '${lane}' derived from compose project '${compose_project}'."
-            log_error "  deploy-runtime.sh only knows the dev / stability-test / prod / judge lanes."
+            log_error "  onex-runtime-deploy only knows the dev / stability-test / prod / judge lanes."
             log_error "  Refusing to resolve a runtime container name for an unknown lane (OMN-13826)."
             exit 1
             ;;
@@ -1099,7 +1099,7 @@ validate_prerequisites() {
 resolve_repo_root() {
     # Walk up from script location to find pyproject.toml
     local dir
-    dir="$(cd "$(dirname "$0")" && pwd)"
+    dir="${ONEX_DEPLOY_REPOSITORY_ROOT:?deployment handler must bind repository_root}"
 
     while [[ "${dir}" != "/" ]]; do
         if [[ -f "${dir}/pyproject.toml" ]]; then
@@ -1551,7 +1551,7 @@ guard_lane_deploy_attribution() {
     local preflight_args=(
         --lane "${lane}"
         --compose-project "${compose_project}"
-        --source "deploy-runtime.sh"
+        --source "onex-runtime-deploy"
         --invoking-command "${SCRIPT_NAME} ${DEPLOY_INVOCATION_ARGS[*]}"
     )
     # Dry-run evaluates and reports but writes no durable record — nothing was
@@ -4749,5 +4749,3 @@ main() {
     # Phase 14: Prune old deployments (non-fatal -- must not trigger rollback)
     prune_old_deployments || log_warn "Pruning old deployments failed (non-fatal)"
 }
-
-main "$@"

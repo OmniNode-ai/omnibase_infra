@@ -36,7 +36,7 @@
 #   Four separate false-green mechanisms are closed here:
 #     1. Lane coverage. Every lane's MAIN runtime health endpoint is probed,
 #        and the lane->port map is read from `docker/runtime-policy.env` (the
-#        rendered runtime-policy contract that `deploy-runtime.sh` and
+#        rendered runtime-policy contract that `onex-runtime-deploy` and
 #        `scripts/system_health_check.sh` already read) rather than being
 #        hardcoded per call site. A lane cannot be silently dropped.
 #     2. Body honesty. A runtime `/health` can return 200 with a body that says
