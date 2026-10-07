@@ -61,6 +61,10 @@ DELEGATION_CORRELATION_FILE = (
 #: Added by OMN-20025: the goal verdict column migration. Listed with the
 #: other files this node vendors so the ledger check below counts it.
 GOAL_FILE = NODE_DIR / "0003_dod_verify_runs_goal.sql"
+#: Added by OMN-20696 (split from OR.3, OMN-20071): the contract-subject
+#: columns, so a verdict row names the repository and commit its contract was
+#: read at. Listed here so the ledger check below counts it.
+CONTRACT_SUBJECT_FILE = NODE_DIR / "0004_dod_verify_runs_contract_subject.sql"
 LEDGER = (
     REPO_ROOT
     / "docker"
@@ -264,17 +268,19 @@ def test_the_vendored_pair_matches_the_checksum_the_ledger_records() -> None:
     test proves nothing -- the skip-count ratchet said so by name. This one
     executes everywhere.
 
-    The node vendors four files as of OMN-20025: the original create and grant
+    The node vendors five files as of OMN-20696: the original create and grant
     pair from OMN-18900, the delegation_correlation_id column migration
-    (OMN-19514, #4102), and the goal verdict column migration. "The pair" in
-    this test's name is historical; the ledger check below covers everything
-    this node vendors, not a fixed count of two.
+    (OMN-19514, #4102), the goal verdict column migration (OMN-20025) and the
+    contract-subject column migration. "The pair" in this test's name is
+    historical; the ledger check below covers everything this node vendors,
+    not a fixed count of two.
     """
     vendored_files = (
         CREATE_FILE,
         GRANT_FILE,
         DELEGATION_CORRELATION_FILE,
         GOAL_FILE,
+        CONTRACT_SUBJECT_FILE,
     )
     recorded = _ledger_digests()
     assert set(recorded) == {path.name for path in vendored_files}, (

@@ -29,6 +29,7 @@ from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.runtime.contract_terminal_events import apply_failure_terminal_guard
 from omnibase_infra.runtime.protocols.protocol_delegation_dispatch_port import (
     ProtocolDelegationDispatchPort,
 )
@@ -571,17 +572,54 @@ async def test_contract_violation_on_failed_terminal_reaches_caller_as_failed() 
 
 
 @pytest.mark.asyncio
-async def test_failure_verdict_on_the_success_topic_is_never_reported_completed() -> (
-    None
-):
+@pytest.mark.parametrize("verdict_field", ["quality_passed", "quality_gate_passed"])
+@pytest.mark.parametrize("passed", [False, True], ids=["rejected", "accepted"])
+async def test_quality_verdict_routes_to_the_contract_declared_terminal(
+    verdict_field: str,
+    passed: bool,
+) -> None:
+    """OMN-18929: the publisher guard and broker agree on quality-only terminals."""
+    route = _delegation_route()
+
+    def guarded_reply(request: ModelDelegationRequest) -> tuple[str, dict[str, object]]:
+        payload: dict[str, object] = {
+            "correlation_id": str(request.correlation_id),
+            "content": '{"summary": "ok", "labels": ["bug"]}',
+            verdict_field: passed,
+        }
+        topic = apply_failure_terminal_guard(
+            payload,
+            route.terminal_events[0],
+            success_topic=route.terminal_events[0],
+            failure_terminal_topics=(route.terminal_events[1],),
+        )
+        assert topic == route.terminal_events[0 if passed else 1]
+        return topic, payload
+
+    result, _published, _decoded = await _dispatch_through_real_broker(
+        response_contract=_K2_RESPONSE_CONTRACT, reply=guarded_reply
+    )
+
+    assert result["status"] == ("completed" if passed else "failed")
+    assert result["quality_gate_passed"] is passed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "verdict",
+    [{"status": "failed"}, {"quality_passed": False}, {"quality_gate_passed": False}],
+    ids=["status", "consumer-quality", "port-quality"],
+)
+async def test_failure_verdict_on_the_success_topic_is_never_reported_completed(
+    verdict: dict[str, object],
+) -> None:
     """AC2 backstop: a failure verdict mis-routed to the success topic stays failed."""
 
     def misroute(request: ModelDelegationRequest) -> tuple[str, dict[str, object]]:
         return _delegation_route().terminal_events[0], {
             "correlation_id": str(request.correlation_id),
-            "status": "failed",
             "content": '{"summary": "ok"}',
-            "quality_passed": False,
+            **verdict,
             "failure_reason": "MALFORMED: response violates the declared contract",
         }
 
