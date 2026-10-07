@@ -475,7 +475,8 @@ services:
         # local: pool host groups are <prefix>.<host>, client groups append a
         # random suffix, and EventBusKafka appends .__t.<topic>. These must be
         # prefixed grants rather than literal group names.
-        GROUP_PREFIXES="local.omnimarket.node_lab_work_unit_effect.consume.v1. local.omnimarket.lab_work_client.consume.v1. local.omnimarket.node_focused_test_run_effect.consume.v1 local.omnimarket.delegated_test_loop_client.consume.v1. local.omnimarket.node_canonical_clone_refresh_effect.consume.v1."
+        # The host drift sync hub reads repo-merged in its own group prefix (OMN-20689).
+        GROUP_PREFIXES="local.omnimarket.node_lab_work_unit_effect.consume.v1. local.omnimarket.lab_work_client.consume.v1. local.omnimarket.node_focused_test_run_effect.consume.v1 local.omnimarket.delegated_test_loop_client.consume.v1. local.omnimarket.node_canonical_clone_refresh_effect.consume.v1. local.omnibase_internal.host_drift_sync.hub."
         for g in $$GROUP_PREFIXES; do
           /usr/bin/rpk security acl create --allow-principal "User:$$CI_BUS_LABWORK_SASL_USERNAME" \
             --resource-pattern-type prefixed --group "$$g" \
