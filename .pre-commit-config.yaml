@@ -28,7 +28,7 @@ repos:
   # .onex_ratchets/canonical_file_shape_baseline.txt. CI runs the same module
   # at the same commit (job "Canonical File Shape (OMN-20304)").
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dc1ad727637b44fcb2349ae293bff880f966c125
+    rev: 8c8f6744c9612ae52abaa760a6423b995eddc871
     hooks:
       - id: canonical-file-shape
         require_serial: true
@@ -38,7 +38,7 @@ repos:
   # no suppression marker. CI twin job node-boundary-imports in
   # .github/workflows/ci.yml; keep this rev equal to that job's pin.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: dc1ad727637b44fcb2349ae293bff880f966c125
+    rev: 8c8f6744c9612ae52abaa760a6423b995eddc871
     hooks:
       - id: check-node-boundary-imports
         require_serial: true

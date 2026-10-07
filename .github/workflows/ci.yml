@@ -4513,7 +4513,7 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     timeout-minutes: 15
     env:
-      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dc1ad727637b44fcb2349ae293bff880f966c125"
+      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@8c8f6744c9612ae52abaa760a6423b995eddc871"
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4576,7 +4576,7 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     timeout-minutes: 15
     env:
-      NODE_BOUNDARY_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@dc1ad727637b44fcb2349ae293bff880f966c125"
+      NODE_BOUNDARY_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@8c8f6744c9612ae52abaa760a6423b995eddc871"
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4611,17 +4611,19 @@ jobs:
         run: |
           set -u
           # Growth is judged against the merge base's baseline, never only the
-          # candidate's own file. --bootstrap is passed only while the base has
-          # no baseline at all (the adoption PR).
+          # candidate's own file. --bootstrap is passed only when the event's
+          # base revision resolved and carries no baseline at all (the adoption
+          # PR). With no resolvable base (a dispatch), the tree is checked
+          # against HEAD's baseline and nothing is bootstrapped.
           base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
+          bootstrap=""
           if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
             base="$(git merge-base "$base" HEAD)"
+            if ! git cat-file -e "${base}:.onex_ratchets/node_boundary_import_baseline.yaml" 2>/dev/null; then
+              bootstrap="--bootstrap"
+            fi
           else
             base="HEAD"
-          fi
-          bootstrap=""
-          if ! git cat-file -e "${base}:.onex_ratchets/node_boundary_import_baseline.yaml" 2>/dev/null; then
-            bootstrap="--bootstrap"
           fi
           uv run --no-project --with "$NODE_BOUNDARY_CORE" \
             python -m omnibase_core.nodes.node_boundary_import_check_compute.runtime_node_boundary_import_check --root . --base "$base" $bootstrap
