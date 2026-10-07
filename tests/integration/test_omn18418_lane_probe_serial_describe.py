@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -50,6 +51,20 @@ class _RecordingAdminClient:
 
     async def describe_cluster(self) -> dict[str, Any]:
         return {"brokers": [{"node_id": 1}]}
+
+    async def _send_request(
+        self, request: Any, node_id: int | None = None
+    ) -> SimpleNamespace:
+        struct = request.prepare({16: (0, 4)})
+        assert struct.states_filter == ["Stable"]
+        return SimpleNamespace(
+            error_code=0,
+            groups=[
+                (group_id, "consumer", state, {})
+                for group_id, _ in self.listed_groups
+                if (state := "Stable") == "Stable"
+            ],
+        )
 
     async def list_consumer_groups(self) -> list[tuple[str, str]]:
         return list(_RecordingAdminClient.listed_groups)

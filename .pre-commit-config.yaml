@@ -944,6 +944,13 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      - id: delegation-response-contract-seam
+        name: Delegation response contract terminal seam (OMN-18929)
+        entry: uv run --frozen pytest -q tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py
+        language: system
+        pass_filenames: false
+        files: '^(src/omnibase_infra/runtime/(contract_terminal_events|service_delegation_dispatch_port|service_pattern_b_broker)\.py|tests/integration/runtime/test_delegation_dispatch_port_handler_compat\.py)$'
+        stages: [pre-commit]
       # OMN-16705: applied migration history is immutable. bootstrap.sql records
       # a content_sha256 for every node migration it applies and refuses every
       # later run when the file no longer hashes to it, so one in-place edit

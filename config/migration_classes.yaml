@@ -256,6 +256,7 @@ migrations:
   forward/nodes/node_projection_delegation/0055_model_routing_local_call_share.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
   forward/nodes/node_projection_delegation/0056_delegation_budget_applied_events.sql: forward-only # EXECUTE; ADD CONSTRAINT (OMN-15376 shape reconciliation of a guarded CREATE TABLE)
   forward/nodes/node_projection_delegation/0057_delegation_budget_applied_events_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP POLICY
+  forward/nodes/node_projection_delegation/0058_delegation_events_requested_model_and_timing.sql: expand-only
   forward/nodes/node_projection_delegation_disposition/0000_create_delegation_dispositions.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT; ROW LEVEL SECURITY; DROP
   forward/nodes/node_projection_delegation_disposition/0001_grant_tenant_projection_writer_delegation_dispositions.sql: expand-only
   forward/nodes/node_projection_delegation_disposition/0002_force_rls_delegation_dispositions.sql: forward-only # ENABLE/FORCE ROW LEVEL SECURITY; DROP
@@ -278,6 +279,7 @@ migrations:
   forward/nodes/node_projection_dod_verdict/0001_grant_omninode_runtime_dod_verify_runs.sql: expand-only
   forward/nodes/node_projection_dod_verdict/0002_dod_verify_runs_delegation_correlation_id.sql: expand-only
   forward/nodes/node_projection_dod_verdict/0003_dod_verify_runs_goal.sql: expand-only # additive
+  forward/nodes/node_projection_dod_verdict/0004_dod_verify_runs_contract_subject.sql: expand-only # additive
   forward/nodes/node_projection_event_chain/0001_create_event_chain.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT PK_EVENT_CHAIN; ALTER TABLE ADD CONSTRAINT NON_NEGATIVE_EVENT_CHAIN_SEQUEN
   forward/nodes/node_projection_event_chain/0002_grant_omninode_runtime_event_chain.sql: expand-only
   forward/nodes/node_projection_instruction_eval/0001_create_instruction_eval_aggregate_snapshots.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT INSTRUCTION_EVAL_AGGREGATE_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT UQ_I
