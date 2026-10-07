@@ -214,6 +214,12 @@ def _render_env(**overrides: str) -> dict[str, str]:
         "HOME": os.environ.get("HOME", ""),
         "PATH": os.environ.get("PATH", ""),
         "USER": os.environ.get("USER", ""),
+        # Preserve the headless lane's Compose isolation wrapper identity.
+        **{
+            key: os.environ[key]
+            for key in ("LANDING_REAL_DOCKER", "COMPOSE_PROJECT_NAME")
+            if key in os.environ
+        },
         **BASE_REQUIRED_ENV,
     }
     env.update(overrides)
@@ -1169,3 +1175,29 @@ def test_every_lane_layering_the_dev_overlay_is_listed() -> None:
         )
     )
     assert layering == sorted(_BORROWER_OVERLAYS)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("overlay", [None, "dev-200", "dev-202", "dev-105"])
+def test_trajectory_backend_is_isolated_to_dev(overlay: str | None) -> None:
+    env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
+    result = _run_compose_config(
+        env,
+        profile="runtime",
+        with_dev_lane_overlay=True,
+        borrower_overlay=(REPO_ROOT / f"docker/docker-compose.{overlay}.yml")
+        if overlay
+        else None,
+    )
+    assert result.returncode == 0, result.stderr
+    services = yaml.safe_load(result.stdout)["services"]
+    expected = "off" if overlay else "in_memory"
+    for name in ("omninode-runtime", "runtime-effects", "runtime-worker"):
+        assert (
+            services[name]["environment"]["ONEX_TRAJECTORY_EVALUATION_BACKEND"]
+            == expected
+        )
+    # Profile-gated carriers are covered separately by the raw policy test.
+    if overlay is None:
+        for key in ("DHARMA_API_KEY", "DHARMA_ORG_ID"):
+            assert services["runtime-effects"]["environment"][key] == ""

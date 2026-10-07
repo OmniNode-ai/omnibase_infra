@@ -210,6 +210,7 @@ x-runtime-env: &runtime-env
   # creation to one partition unless an operator explicitly opts into wider
   # contract-declared partition counts.
   ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS:-1}
+  ONEX_TRAJECTORY_EVALUATION_BACKEND: ${DEV_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set DEV_TRAJECTORY_EVALUATION_BACKEND}
   ONEX_BOUNDARY_DLQ_ENABLED: ${DEV_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set DEV_BOUNDARY_DLQ_ENABLED}
   ONEX_SINGLE_OWNER_COMMAND_TOPICS: ${ONEX_SINGLE_OWNER_COMMAND_TOPICS:-0}
   ONEX_TOPIC_ENFORCEMENT_MODE: ${ONEX_TOPIC_ENFORCEMENT_MODE:-warn}
@@ -478,6 +479,8 @@ x-runtime-env: &runtime-env
   # empty value is not a silent disable — the resolver is required=True and
   # raises at the effect boundary, and the stall alert records the undelivered
   # decision by name on its terminal event.
+  DHARMA_API_KEY: ${DHARMA_API_KEY:-}
+  DHARMA_ORG_ID: ${DHARMA_ORG_ID:-}
   SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
   SLACK_CHANNEL_ID: ${SLACK_CHANNEL_ID:-}
   LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST required for local LLM HTTP egress}

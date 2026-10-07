@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import json
 import shlex
 import subprocess
 import sys
@@ -11,9 +12,13 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from omnibase_infra.runtime.models.model_runtime_policy_contract import (
     ModelRuntimePolicyContract,
+)
+from omnibase_infra.runtime.models.model_runtime_profile_policy import (
+    ModelRuntimeProfilePolicy,
 )
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -442,3 +447,110 @@ def test_secret_resolver_mappings_satisfy_gateway_boot_check(tmp_path: Path) -> 
     assert exercised_profiles, (
         "expected at least one runtime profile to set secret_resolver_config_path"
     )
+
+
+def test_trajectory_evaluation_backend_is_rendered_per_profile() -> None:
+    from scripts.render_runtime_policy_env import render_env
+
+    env = render_env(_load_contract())
+    assert env["DEV_TRAJECTORY_EVALUATION_BACKEND"] == "in_memory"
+    for prefix in ("STABILITY_TEST", "JUDGE", "PROD", "LAKSHMAN", "DOGFOOD"):
+        assert env[f"{prefix}_TRAJECTORY_EVALUATION_BACKEND"] == "off"
+
+
+def test_trajectory_evaluation_backend_is_required() -> None:
+    raw = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))["profiles"]["dev"]
+    del raw["trajectory_evaluation_backend"]
+    with pytest.raises(ValidationError, match="trajectory_evaluation_backend"):
+        ModelRuntimeProfilePolicy(**raw)
+
+
+@pytest.mark.parametrize(
+    "backend", ["off", "in_memory", "dharma_metadata", "dharma_full"]
+)
+def test_trajectory_evaluation_backend_accepts_declared_values(backend: str) -> None:
+    raw = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))["profiles"]["dev"]
+    raw["trajectory_evaluation_backend"] = backend
+    assert ModelRuntimeProfilePolicy(**raw).trajectory_evaluation_backend == backend
+
+
+@pytest.mark.parametrize("backend", ["", "unknown", None, False])
+def test_trajectory_evaluation_backend_refuses_invalid_values(backend: object) -> None:
+    raw = yaml.safe_load(CONTRACT_PATH.read_text(encoding="utf-8"))["profiles"]["dev"]
+    raw["trajectory_evaluation_backend"] = backend
+    with pytest.raises(ValidationError, match="trajectory_evaluation_backend"):
+        ModelRuntimeProfilePolicy(**raw)
+
+
+def test_trajectory_rendered_file_adds_only_dharma_mappings(tmp_path: Path) -> None:
+    # Parent c965d543274ed2677bdfc69b36c2b35916731c95's rendered dev effects config.
+    baseline = json.loads(
+        (
+            ROOT / "tests/fixtures/omn20089/dev_effects_secret_resolver.parent.json"
+        ).read_text(encoding="utf-8")
+    )
+    rendered = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/render_runtime_policy_env.py")],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    scratch = tmp_path / "runtime-policy.env"
+    scratch.write_text(rendered, encoding="utf-8")
+    assert rendered == POLICY_ENV_PATH.read_text(encoding="utf-8")
+    env = _load_dotenv(scratch)
+    assert env["DEV_TRAJECTORY_EVALUATION_BACKEND"] == "in_memory"
+    for prefix in ("STABILITY_TEST", "JUDGE", "PROD", "LAKSHMAN", "DOGFOOD"):
+        assert env[f"{prefix}_TRAJECTORY_EVALUATION_BACKEND"] == "off"
+    observed = json.loads(
+        shlex.split(env["DEV_RUNTIME_EFFECTS_SECRET_RESOLVER_CONFIG_JSON"])[0]
+    )
+    expected_additions = {
+        "dharma.api_key": {
+            "logical_name": "dharma.api_key",
+            "source": {"source_type": "env", "source_path": "DHARMA_API_KEY"},
+        },
+        "dharma.org_id": {
+            "logical_name": "dharma.org_id",
+            "source": {"source_type": "env", "source_path": "DHARMA_ORG_ID"},
+        },
+    }
+    before = {row["logical_name"]: row for row in baseline["mappings"]}
+    after = {row["logical_name"]: row for row in observed["mappings"]}
+    assert after == before | expected_additions
+    assert {k: v for k, v in observed.items() if k != "mappings"} == {
+        k: v for k, v in baseline.items() if k != "mappings"
+    }
+    for name, profile in _load_contract().profiles.items():
+        if name != "dev":
+            assert not any(
+                row.logical_name.startswith("dharma.")
+                for row in profile.secret_resolver_mappings
+            )
+
+
+def test_trajectory_backend_does_not_leak_to_other_compose_lanes() -> None:
+    assert (
+        "ONEX_TRAJECTORY_EVALUATION_BACKEND: ${DEV_TRAJECTORY_EVALUATION_BACKEND:?"
+        in COMPOSE_PATH.read_text()
+    )
+    for name, prefix in (
+        ("stability-test", "STABILITY_TEST"),
+        ("prod", "PROD"),
+        ("judge", "JUDGE"),
+        ("lakshman", "LAKSHMAN"),
+        ("dogfood", "DOGFOOD"),
+    ):
+        text = (ROOT / f"docker/docker-compose.{name}.yml").read_text()
+        assert (
+            f"ONEX_TRAJECTORY_EVALUATION_BACKEND: ${{{prefix}_TRAJECTORY_EVALUATION_BACKEND:?"
+            in text
+        )
+        if name == "stability-test":
+            assert text.count("ONEX_TRAJECTORY_EVALUATION_BACKEND:") == text.count(
+                "ONEX_BOUNDARY_DLQ_ENABLED:"
+            )
+    # Borrowed dev profiles must override all four kernel environments.
+    for name in ("dev-200", "dev-202", "dev-105"):
+        text = (ROOT / f"docker/docker-compose.{name}.yml").read_text()
+        assert text.count('ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"') == 4
