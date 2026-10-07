@@ -157,7 +157,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: bd0002cc5ed2d10435e3294dce7d5adeb0e54b86 # .github/sibling-pins.yaml
+          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
           path: .ci-bus-overlay
           persist-credentials: false
           sparse-checkout: |
@@ -712,7 +712,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: bd0002cc5ed2d10435e3294dce7d5adeb0e54b86 # .github/sibling-pins.yaml
+          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
           path: .ci-bus-overlay
           persist-credentials: false
           sparse-checkout: |
