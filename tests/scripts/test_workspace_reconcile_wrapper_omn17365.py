@@ -54,9 +54,9 @@ _WRAPPER = _REPO_ROOT / "deploy" / "maintenance" / "omninode-workspace-reconcile
 
 def _make_tree(root: Path, marker: str) -> Path:
     """A tree shaped like `$OMNI_HOME`, whose reconciler announces which one it is."""
-    scripts = root / ".onex-dispatch-venv" / "bin"
+    scripts = root / "omnibase_infra" / "scripts"
     scripts.mkdir(parents=True)
-    reconciler = scripts / "onex-host-reconcile"
+    reconciler = scripts / "reconcile-host.sh"
     reconciler.write_text(
         "#!/usr/bin/env bash\n"
         f'printf "RAN_FROM={marker}\\n"\n'

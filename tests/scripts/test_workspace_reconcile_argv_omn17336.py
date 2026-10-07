@@ -32,7 +32,7 @@ accepts them and throws them away is not.
 
 WHY FORWARDING IS SAFE
 
-``onex-host-reconcile`` rejects an unknown argument with
+``scripts/reconcile-host.sh`` rejects an unknown argument with
 ``EXIT_INDETERMINATE`` rather than ignoring it, so a typo forwarded through this
 wrapper stays loud instead of becoming a surprise repair. That premise is what
 makes blanket forwarding correct, so it is asserted here rather than assumed.
@@ -62,6 +62,7 @@ pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _WRAPPER = _REPO_ROOT / "deploy" / "maintenance" / "omninode-workspace-reconcile.sh"
+_RECONCILER = _REPO_ROOT / "scripts" / "reconcile-host.sh"
 
 # `reconcile-host.sh`'s own exit code for a configuration it cannot resolve.
 _EXIT_INDETERMINATE = 3
@@ -69,9 +70,9 @@ _EXIT_INDETERMINATE = 3
 
 def _make_tree(root: Path) -> Path:
     """A tree shaped like `$OMNI_HOME`, whose reconciler echoes the argv it got."""
-    scripts = root / ".onex-dispatch-venv" / "bin"
+    scripts = root / "omnibase_infra" / "scripts"
     scripts.mkdir(parents=True)
-    reconciler = scripts / "onex-host-reconcile"
+    reconciler = scripts / "reconcile-host.sh"
     reconciler.write_text(
         "#!/usr/bin/env bash\n"
         # Newline-separated, so an assertion can pin an argument's exact
@@ -227,6 +228,25 @@ def test_both_spellings_of_omni_home_are_refused(
 # --------------------------------------------------------------------------- #
 # The premise that makes blanket forwarding safe
 # --------------------------------------------------------------------------- #
+def test_the_reconciler_rejects_an_unknown_argument(tmp_path: Path) -> None:
+    """Asserted, not assumed.
+
+    Blanket forwarding is only safe because a typo cannot be ignored downstream.
+    If ``reconcile-host.sh`` ever grew a permissive catch-all, forwarding would
+    quietly turn ``--dry-run`` (a flag it does not have) into a full repair --
+    the original incident wearing a different flag. This pins the premise so that
+    change goes red here.
+    """
+    result = subprocess.run(
+        ["bash", str(_RECONCILER), "--not-a-real-flag"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "OMNI_HOME": str(tmp_path)},
+        check=False,
+    )
+
+    assert result.returncode == _EXIT_INDETERMINATE
+    assert "unknown argument" in result.stderr
 
 
 # --------------------------------------------------------------------------- #

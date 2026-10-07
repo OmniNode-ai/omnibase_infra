@@ -81,6 +81,16 @@ from pathlib import Path
 
 import pytest
 
+from tests.scripts.test_reconcile_host_omn17307 import (
+    EXIT_FAILED,
+    Workspace,
+    _advance_origin,
+    _lock,
+    _make_clone,
+    _run,
+    _stub,
+    build_workspace,
+)
 from tests.scripts.test_reconcile_workspace_venvs import _make_uv_shim, _Workspace
 
 pytestmark = pytest.mark.unit
@@ -280,3 +290,66 @@ def test_the_gate_is_wired_into_precommit_and_ci() -> None:
 # --------------------------------------------------------------------------- #
 # Defect 2 -- the receipt must be machine-readable
 # --------------------------------------------------------------------------- #
+def _two_surface_run(ws: Workspace) -> subprocess.CompletedProcess[str]:
+    """A run that reports MORE THAN ONE surface, so a separator is emitted.
+
+    The pre-existing receipt test builds one clone and therefore one surface,
+    where the separator variable is never used. Two clones is the smallest
+    workspace that exercises it.
+    """
+    _clone, core_seed = _make_clone(ws.root, "omnibase_core")
+    _advance_origin(core_seed, "core-moved")
+    _make_clone(ws.root, "omnibase_spi")
+    _lock(ws)
+    _stub(
+        ws.scripts / "runtime_build" / "reconcile_deploy_clones.sh", ws.delegate_witness
+    )
+    _stub(ws.scripts / "reconcile-workspace-venvs.sh", ws.delegate_witness)
+    return _run(ws)
+
+
+def test_the_receipt_is_parseable_json_with_more_than_one_surface(
+    tmp_path: Path,
+) -> None:
+    """The receipt is evidence, and evidence nothing can read is not evidence.
+
+    Before this fix ``json.loads`` raised ``Expecting value: line 8 column 159``
+    on the live `.201` receipt AND on the Mac's, because the separator between
+    array elements was the literal three characters ``,\\n``.
+    """
+    ws = build_workspace(tmp_path)
+    proc = _two_surface_run(ws)
+    assert proc.returncode == EXIT_FAILED, proc.stdout + proc.stderr
+
+    raw = ws.receipt.read_text(encoding="utf-8")
+    try:
+        receipt = json.loads(raw)
+    except json.JSONDecodeError as exc:  # pragma: no cover - the failure message
+        pytest.fail(
+            f"the reconcile receipt is not valid JSON ({exc}). "
+            f"reconcile-host.sh writes it; every consumer has to parse it. "
+            f"Raw:\n{raw}"
+        )
+
+    assert len(receipt["surfaces"]) > 1, (
+        "this test is only meaningful with a separator to get wrong; "
+        "the workspace produced one surface"
+    )
+
+
+def test_the_receipt_carries_no_literal_backslash_escape(tmp_path: Path) -> None:
+    """Name the exact byte sequence, so a future rewrite cannot reintroduce it.
+
+    ``sep=",\\n"`` in bash is a comma, a backslash and an ``n`` -- not a newline.
+    ``$',\\n'`` is the form that interprets it. A JSON-parseability assertion
+    alone would pass on a receipt that had merely stopped separating at all.
+    """
+    ws = build_workspace(tmp_path)
+    _two_surface_run(ws)
+
+    raw = ws.receipt.read_text(encoding="utf-8")
+    assert "\\n" not in raw, (
+        "the receipt contains a literal backslash-n. bash does not interpret "
+        "escapes in a plain double-quoted assignment, nor printf in a %s "
+        "ARGUMENT -- use $',\\n' (OMN-17800)."
+    )

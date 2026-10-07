@@ -194,7 +194,7 @@ export OMNIBASE_PATH="${OMNIBASE_PATH:-$OMNI_HOME}"
 DISPATCH_VENV="${ONEX_DISPATCH_VENV:-$OMNI_HOME/.onex-dispatch-venv}"
 ENTRYPOINT="$DISPATCH_VENV/bin/onex"
 RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-workspace-venvs.sh"
-HOST_RECONCILER="$DISPATCH_VENV/bin/onex-host-reconcile"
+HOST_RECONCILER="$OMNI_HOME/omnibase_infra/scripts/reconcile-host.sh"
 FLOOR_FILE="$OMNI_HOME/.onex-workspace-floor.json"
 RECONCILE_RECEIPT="${ONEX_RECONCILE_RECEIPT:-$OMNI_HOME/.onex-workspace-reconcile.json}"
 RECONCILE_LOCK_DIR="$OMNI_HOME/.onex-reconcile-host.lock"
@@ -487,7 +487,7 @@ _enforce_floor() {
     else
       _explain_blocking_surfaces
       _say "  Reconcile to establish a proven floor, then retry:"
-      _say "     $HOST_RECONCILER --omni-home $OMNI_HOME"
+      _say "    bash $HOST_RECONCILER --omni-home $OMNI_HOME"
     fi
     exit "$EXIT_BELOW_FLOOR"
   fi
@@ -499,7 +499,7 @@ _enforce_floor() {
     _say "    bash $RECONCILER --omni-home $OMNI_HOME --proven"
   else
     _say "  Proceeding because this command does not mint evidence. Reconcile with:"
-    _say "     $HOST_RECONCILER --omni-home $OMNI_HOME"
+    _say "    bash $HOST_RECONCILER --omni-home $OMNI_HOME"
   fi
 }
 

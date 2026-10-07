@@ -257,7 +257,7 @@ def assert_venv_purity(
         "identity and manufacture DUPLICATE_REGISTRATION false REDs across "
         "the whole test suite (OMN-15620) rather than a real defect in the "
         "tree. Repair by running the workspace reconciler: "
-        "`onex-host-reconcile --omni-home $OMNI_HOME`. It composes "
+        "`bash scripts/reconcile-host.sh --omni-home $OMNI_HOME`. It composes "
         "the provider layer into the DISPATCH venv "
         "($OMNI_HOME/.onex-dispatch-venv, which is what `scripts/onex` execs) "
         "and syncs this gate venv exactly, so the repair holds. Do NOT reach "

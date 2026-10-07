@@ -593,7 +593,7 @@ def test_proven_refuses_a_commit_the_clone_has_not_reached(
 
     assert proc.returncode == _EXIT_FAILED, proc.stdout + proc.stderr
     assert ("not in the history" if present else "absent") in proc.stdout
-    assert "onex-host-reconcile" in proc.stdout
+    assert "reconcile-host.sh" in proc.stdout
     assert not (ws.omnimarket / ".git" / "FETCH_HEAD").exists()
     assert _git("rev-parse", "HEAD", cwd=ws.omnimarket) == ws.market_head
     assert floor.read_bytes() == previous

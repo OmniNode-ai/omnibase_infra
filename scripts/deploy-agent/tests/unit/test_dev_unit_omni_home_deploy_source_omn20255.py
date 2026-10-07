@@ -26,10 +26,7 @@ _DEPLOY_DIR = Path(__file__).resolve().parents[2] / "deploy"
 _DEV_UNIT = _DEPLOY_DIR / "deploy-agent-dev.service"
 _LAUNCHER = _DEPLOY_DIR / "deploy-agent-launch.sh"
 _LOCK = Path(__file__).resolve().parents[2] / "deploy_agent" / "reconcile_host_lock.py"
-_RECONCILE_HOST = (
-    Path(__file__).resolve().parents[4]
-    / "deploy/maintenance/omninode-workspace-reconcile.sh"
-)
+_RECONCILE_HOST = Path(__file__).resolve().parents[3] / "reconcile-host.sh"
 
 _DEPLOY_SOURCE_ROOT = "/data/omninode"
 _LANES_TREE = "/data/omninode/omni_home"
@@ -60,9 +57,7 @@ def test_the_launcher_sources_an_env_store_that_could_override_omni_home() -> No
 def test_the_build_lock_and_reconcile_host_lock_share_one_root_name() -> None:
     """Both sides derive the lock from OMNI_HOME, so the roots must agree."""
     assert '".onex-reconcile-host.lock"' in _LOCK.read_text()
-    assert (
-        'exec env OMNI_HOME="$OMNI_HOME" "$RECONCILER"' in _RECONCILE_HOST.read_text()
-    )
+    assert '"$OMNI_HOME/.onex-reconcile-host.lock"' in _RECONCILE_HOST.read_text()
 
 
 @pytest.mark.unit

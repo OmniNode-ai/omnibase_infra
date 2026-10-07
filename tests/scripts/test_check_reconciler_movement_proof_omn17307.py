@@ -28,7 +28,7 @@ pytestmark = pytest.mark.unit
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CHECKER = _REPO_ROOT / "scripts" / "check_reconciler_movement_proof.py"
 _VERIFIER = _REPO_ROOT / "scripts" / "reconcile_verify_movement.py"
-_HOST = _REPO_ROOT / "deploy/maintenance/omninode-workspace-reconcile.sh"
+_HOST = _REPO_ROOT / "scripts" / "reconcile-host.sh"
 
 
 def _load() -> ModuleType:
@@ -50,8 +50,7 @@ def fake_repo(tmp_path: Path) -> Path:
     """A minimal compliant repo: the real orchestrator and the real verifier."""
     root = tmp_path / "repo"
     (root / "scripts").mkdir(parents=True)
-    (root / "deploy/maintenance").mkdir(parents=True)
-    shutil.copy2(_HOST, root / "deploy/maintenance/omninode-workspace-reconcile.sh")
+    shutil.copy2(_HOST, root / "scripts" / "reconcile-host.sh")
     shutil.copy2(_VERIFIER, root / "scripts" / "reconcile_verify_movement.py")
     return root
 
@@ -66,9 +65,11 @@ def test_a_compliant_tree_passes(gate: ModuleType, fake_repo: Path) -> None:
 def test_orchestrator_that_stops_calling_the_verifier_fails(
     gate: ModuleType, fake_repo: Path
 ) -> None:
-    host = fake_repo / "deploy/maintenance/omninode-workspace-reconcile.sh"
+    host = fake_repo / "scripts" / "reconcile-host.sh"
     host.write_text(
-        host.read_text(encoding="utf-8").replace("onex-host-reconcile", "true"),
+        host.read_text(encoding="utf-8").replace(
+            "reconcile_verify_movement.py", "true"
+        ),
         encoding="utf-8",
     )
     failures = gate.check(fake_repo)
@@ -97,7 +98,7 @@ def test_verdict_signature_growing_an_exit_status_parameter_fails(
 
 
 def test_missing_orchestrator_fails(gate: ModuleType, fake_repo: Path) -> None:
-    (fake_repo / "deploy/maintenance/omninode-workspace-reconcile.sh").unlink()
+    (fake_repo / "scripts" / "reconcile-host.sh").unlink()
     assert any("is missing" in f for f in gate.check(fake_repo))
 
 
@@ -142,7 +143,7 @@ def test_delegation_to_a_real_file_is_accepted(
 ) -> None:
     (fake_repo / "scripts" / "reconcile-delegate.sh").write_text(
         "#!/usr/bin/env bash\n"
-        "# movement-proof-delegated-to: deploy/maintenance/omninode-workspace-reconcile.sh\n",
+        "# movement-proof-delegated-to: scripts/reconcile-host.sh\n",
         encoding="utf-8",
     )
     assert gate.check(fake_repo) == []
