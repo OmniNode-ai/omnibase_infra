@@ -401,3 +401,33 @@ def test_the_run_files_are_read_from_the_state_root_the_cli_resolves(
     assert obs["run_files"]["result.txt"] == "the answer"
     assert "ONEX_STATE_DIR" not in obs["customer_env_keys"]
     assert (home / ".onex_state" / "runs.keyless" / "run-unconfigured").is_dir()
+
+
+@pytest.mark.unit
+def test_every_delegate_step_asks_for_the_json_receipt_omn20124(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import argparse
+
+    from tests.ci._fake_delegate_cli_omn20505 import install_fakes
+
+    home, bin_dir, work, strace = install_fakes(tmp_path)
+    monkeypatch.setattr(probe.shutil, "which", lambda _name: str(strace))
+    monkeypatch.setattr(probe, "find_source_trees", lambda _roots: [])
+    monkeypatch.setenv("C29_TEST_KEY", "sk-or-test-not-a-real-key")
+    args = argparse.Namespace(
+        key_env="C29_TEST_KEY",
+        provider="openrouter",
+        customer_home=str(home),
+        customer_bin=str(bin_dir),
+        workdir=str(work),
+        trace_dir=str(tmp_path / "traces"),
+        step_timeout="60",
+        prompt="p",
+    )
+
+    obs = probe.observe_live(args)
+
+    assert "--json" in obs["steps"]["keyless"]["argv"]
+    assert "--json" in obs["steps"]["keyed"]["argv"]
+    assert obs["run_files"]["receipt.json"] is not None
