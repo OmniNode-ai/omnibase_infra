@@ -1,0 +1,73 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20073
+title: Repo-owned DoD evidence caller for omnibase_infra, S5 shadow count
+summary: omnibase_infra owns its DoD evidence contract and delegates verification to the receipt-gate reusable in caller-evidence shadow mode, so every pull request records the new-path verdict beside OCC's verdict on the same head while blocking nothing, and CI Summary's own sweep accepts the shadow shape.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-repo-evidence-shadow
+    statement: omnibase_infra must wire a caller evidence gate in shadow mode beside OCC, and CI Summary must stay green on the shape that mode reports.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: omnibase_infra carries a caller workflow for the receipt-gate caller-evidence mode that runs on pull requests (pull_request, the one pull request trigger this repository''s runner-routing audit allows), pins the reusable by full sha, sets evidence-source caller and has no steps, secrets or condition of its own -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k workflow_shape'
+      - id: AC2
+        statement: 'AC2: the caller sets compare-with-occ and shadow to "true" with a verifier-version that ships the occ-difference classifier, so the S5 count records the new-path verdict beside OCC''s without enforcing it -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s5_shadow'
+      - id: AC3
+        statement: 'AC3: CI Summary''s external sweep passes the shadow shape (both repo-evidence check-runs concluding success on a pull_request run) and refuses the non-shadow shapes (a skipped verify, a red dod-verify) -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k ci_summary_sweep'
+      - id: AC4
+        statement: 'AC4: every acceptance criterion of every contracts/OMN-*.yaml that declares binds_ac is bound to a test_passes item whose pytest selector names a test file that exists -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k contract_binds'
+evidence_requirements:
+  - kind: tests
+    description: The caller workflow has the required base-branch trigger, immutable pin, inputs and read-only permissions.
+    command: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k workflow_shape
+  - kind: tests
+    description: The caller turns the OCC difference step and shadow mode on with a verifier that ships the classifier.
+    command: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s5_shadow
+  - kind: tests
+    description: CI Summary's external sweep accepts the shadow shape and refuses the shapes shadow mode exists to avoid.
+    command: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k ci_summary_sweep
+  - kind: tests
+    description: Every repo-owned contract criterion that declares binds_ac binds to test evidence in an existing test file.
+    command: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k contract_binds
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-repo-evidence-ac1
+    description: The focused workflow test proves the caller's base-branch trigger, full-SHA reusable pin and caller-evidence input.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k workflow_shape
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-repo-evidence-ac2
+    description: The focused workflow test proves the caller compares with OCC in shadow mode and pins a verifier that ships the difference classifier.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s5_shadow
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-repo-evidence-ac3
+    description: The sweep test feeds CI Summary's external sweep the shadow shape and the two non-shadow shapes and asserts the verdict for each.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k ci_summary_sweep
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-repo-evidence-ac4
+    description: The contract binding test proves every binds_ac criterion binds to test evidence in an existing test file.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k contract_binds
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4

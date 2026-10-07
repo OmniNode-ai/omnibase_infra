@@ -1,0 +1,80 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Repo Evidence Gate caller (OMN-20073, OCC retirement OR.5) verifies
+# omnibase_infra's own contracts/<OMN-N>.yaml at the PR head through
+# omnibase_core's receipt-gate reusable with evidence-source: caller.
+# This is the path omnimarket proved as the canary (OMN-20070, OMN-20072).
+#
+# Why pull_request, not the base-branch trigger omnimarket's caller uses:
+# scripts/audit-runner-routing.py prohibits that trigger anywhere in this
+# repository's workflows (OMN-15699: untrusted fork code must never reach
+# self-hosted runners), and it matches the text, comments included. This caller
+# follows call-receipt-gate.yml. The weaker property is that a pull request can
+# edit this file and change what judges it; in shadow nothing is judged
+# against it, so nothing is lost. The reusable refuses fork heads and the
+# pull request's own code is only ever checked out as data. Enforcing the gate
+# (shadow back to "false") on the base-branch trigger needs a runner-policy
+# ruling first and is not part of this change.
+#
+# dev and main are the integration branches. The activity types cover new heads,
+# reopened and ready PRs, and edits to the ticket citation or base branch.
+# Per-PR concurrency cancels superseded runs so the latest event gets a verdict.
+# Read-only contents and pull-requests permissions are all this caller needs;
+# checkout and verification belong to the reusable, with no caller secrets.
+# The full-SHA pin makes the reusable immutable; verifier-version pins the
+# released verifier used to read the caller's contracts.
+#
+# The job id is the context prefix: repo-evidence / dod-verify carries the
+# verdict, so do not add a job name.
+#
+# S5 SHADOW (OMN-20073): this repository blocks nothing on this gate. CI Summary
+# is the sole required context here and its layer-5 sweep (ci_summary_gate.py,
+# SWEEP_GOOD_CONCLUSIONS) fails on any unregistered check-run that did not
+# conclude success, skipped included, and a pull_request run is exactly what it
+# judges. A caller-evidence run that reports a skipped repo-evidence / verify
+# (the OCC path, switched off by the input) or a red repo-evidence / dod-verify
+# would therefore red CI Summary. `shadow: "true"`
+# makes both jobs conclude success whatever the verdict and records the verdict
+# as one `Shadow verdict:` line in the dod-verify job summary and as a notice
+# annotation. compare-with-occ is "true", so every run also records this head's
+# new-path verdict beside OCC's occ-preflight / eligibility verdict on the same
+# head. That pair is the S5 count. Every OCC context stays required; neither
+# repo-evidence context is required or registered in CI Summary. Making the gate
+# enforcing (shadow back to "false", the context registered) and then removing
+# the OCC contexts (S6) are separate rulings that wait for this repository's own
+# S5 bar. The S6 change sets compare-with-occ back to "false".
+#
+# PLACEHOLDER PIN (OMN-20073): the reusable needs the `shadow` input, added by
+# omnibase_core#1901, whose head is 6d791925396535b44a5e72de2c3d4718a9ca72ed.
+# scripts/ci/check_pin_reachability.py (OMN-15538, pre-commit and CI) refuses a
+# pin that no protected branch contains, so that head cannot be committed here.
+# The pin is the head of omnibase_core dev instead, which has no `shadow`
+# input, so until the pin moves GitHub is expected to refuse this workflow's call
+# on the undeclared input and the gate records nothing. Re-pin to the squash
+# commit of omnibase_core#1901 once it merges, and keep this pull request a
+# draft until then.
+
+name: Repo Evidence Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+    branches: [dev, main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  repo-evidence:
+    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@94e551221bab9a9bdaf74a372a8e4bf74e0b3b3f # OMN-20073: PLACEHOLDER, the head of omnibase_core dev, which has no `shadow` input. Re-pin to the squash commit of omnibase_core#1901 once it merges.
+    with:
+      evidence-source: caller
+      verifier-version: 0.4.294
+      compare-with-occ: "true"
+      shadow: "true"
