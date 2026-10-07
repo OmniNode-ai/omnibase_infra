@@ -36,9 +36,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-# Overridable so an operator can point at a relocated onex-runtime-deploy (and so
-# the execute path is exercisable in tests without a real Docker deploy).
-DEPLOY_RUNTIME="${DEPLOY_RUNTIME:-onex-runtime-deploy}"
+# DEPLOY_RUNTIME stays overridable so an operator can point at a relocated
+# onex-runtime-deploy (and so the execute path is exercisable in tests without a
+# real Docker deploy); unset, resolve_runtime_deploy finds it (OMN-20687).
 
 # The repos --cut-tag tags: SIBLING_LAB_TAG_REPOS from sibling_clone_manifest.sh,
 # which is every clone the sibling-pin preflight reads (SIBLING_CLONE_MANIFEST,
@@ -240,6 +240,7 @@ cut_lab_tags() {
 }
 
 # --- build the plan -------------------------------------------------------
+resolve_runtime_deploy
 log "lane            : ${LANE} (compose project ${COMPOSE_PROJECT})"
 if [[ "${HOTPATCH}" == true ]]; then
     log "ref             : <hotpatch: current HEAD, dirty tree deployed AS-IS>"
@@ -278,7 +279,7 @@ fi
 
 # --- execute --------------------------------------------------------------
 if ! command -v "${DEPLOY_RUNTIME}" >/dev/null 2>&1; then
-    err "onex-runtime-deploy not found at ${DEPLOY_RUNTIME}"
+    err "onex-runtime-deploy not found; looked in: ${DEPLOY_RUNTIME_TRIED}"
     exit 1
 fi
 

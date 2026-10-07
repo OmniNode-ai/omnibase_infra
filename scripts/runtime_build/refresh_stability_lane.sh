@@ -102,7 +102,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-DEPLOY_RUNTIME="${DEPLOY_RUNTIME:-onex-runtime-deploy}"
 
 # OMN-16729: per-compose-project host lane lock. This wrapper holds it across
 # its WHOLE critical section -- pre-state capture, build, health gate, readback,
@@ -406,8 +405,9 @@ for cmd in docker git curl jq; do
     command -v "${cmd}" >/dev/null 2>&1 || { err "'${cmd}' is required but not found in PATH."; exit 64; }
 done
 
+resolve_runtime_deploy
 if ! command -v "${DEPLOY_RUNTIME}" >/dev/null 2>&1; then
-    err "onex-runtime-deploy not found at ${DEPLOY_RUNTIME}"
+    err "onex-runtime-deploy not found; looked in: ${DEPLOY_RUNTIME_TRIED}"
     exit 64
 fi
 if [[ ! -f "${VERIFY_SCRIPT}" ]]; then
