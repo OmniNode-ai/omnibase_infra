@@ -335,20 +335,18 @@ def _materialize_contract_lane_mirror(
     raw: dict[str, object],
     contract_path: Path,
 ) -> None:
-    """Resolve the lane-mirror lane names and topic set from the node contract.
+    """Bind deployment-selected lanes and topic sets to the node contract.
 
-    Same authority pattern as ``_materialize_contract_mirror_topics`` and
-    ``_materialize_contract_canary_config`` (OMN-17034): the resolved
-    deployment YAML names the contract via ``lane_mirror_set`` and may not
-    redeclare the block inline, so the source lane, the mirror-lane set and
-    the mirrored topics have exactly one home. The per-lane BROKER ADDRESSES
-    are not resolved here -- those are this deployment's answer and stay in
-    the resolved YAML's ``lane_mirror_source_bus``/``lane_mirror_buses``,
-    exactly as ``local_bus`` already works.
+    The resolved deployment YAML names the contract via ``lane_mirror_set``
+    (OMN-17034) and selects source/mirror lanes and named topic sets via
+    ``lane_mirror_binding`` (OMN-19983). The contract owns ``declared_lanes``
+    and the topic-set definitions; lane membership is checked only when the
+    config model is constructed. Selected topics are concatenated in binding
+    order, preserving the first occurrence of each topic.
 
-    A contract with no ``lane_mirror`` block and a resolved file that does not
-    name ``lane_mirror_set`` is a valid two-leg deployment and passes through
-    untouched.
+    Populated inline ``lane_mirror`` blocks remain refused. Broker addresses
+    stay in the resolved YAML's ``lane_mirror_source_bus``/``lane_mirror_buses``.
+    A deployment naming neither selector nor binding passes through untouched.
     """
     forwarder_object = raw.get("forwarder")
     if not isinstance(forwarder_object, dict):
@@ -366,11 +364,49 @@ def _materialize_contract_lane_mirror(
             "redeclaring the lane_mirror block"
         )
     selector = forwarder.pop("lane_mirror_set", None)
+    binding = forwarder.pop("lane_mirror_binding", None)
     if selector is None:
+        if binding is not None:
+            raise ValueError(
+                "resolved gateway config declares lane_mirror_binding but does "
+                "not name lane_mirror_set; the binding requires a node contract"
+            )
         return
     if selector != _GATEWAY_CONTRACT_NAME:
         raise ValueError(
             f"lane_mirror_set must be {_GATEWAY_CONTRACT_NAME!r}, got {selector!r}"
+        )
+    if binding is None:
+        raise ValueError(
+            "resolved gateway config names lane_mirror_set but no "
+            "lane_mirror_binding; the lanes come from the deployment, never "
+            "the contract"
+        )
+    if not isinstance(binding, Mapping):
+        raise ValueError("lane_mirror_binding must be a mapping")
+    required_keys = {"source_lane", "mirror_lanes", "topic_sets"}
+    missing = required_keys - binding.keys()
+    extra = binding.keys() - required_keys
+    if missing or extra:
+        raise ValueError(
+            f"lane_mirror_binding has missing keys {sorted(missing)!r} and "
+            f"extra keys {sorted(extra, key=str)!r}"
+        )
+    if not isinstance(binding["source_lane"], str):
+        raise ValueError("lane_mirror_binding.source_lane must be a string")
+    mirror_lanes = binding["mirror_lanes"]
+    selected_sets = binding["topic_sets"]
+    if not isinstance(mirror_lanes, list) or not all(
+        isinstance(lane, str) for lane in mirror_lanes
+    ):
+        raise ValueError("lane_mirror_binding.mirror_lanes must be a list of strings")
+    if (
+        not isinstance(selected_sets, list)
+        or not selected_sets
+        or not all(isinstance(name, str) for name in selected_sets)
+    ):
+        raise ValueError(
+            "lane_mirror_binding.topic_sets must be a non-empty list of strings"
         )
 
     gateway_config = _load_gateway_forwarder_config_block(contract_path, selector)
@@ -380,8 +416,40 @@ def _materialize_contract_lane_mirror(
             "resolved gateway config names lane_mirror_set but the node contract "
             "has no config.gateway_forwarder.lane_mirror block"
         )
+    declared_lanes = lane_mirror_object.get("declared_lanes")
+    topic_sets = lane_mirror_object.get("topic_sets")
+    if not isinstance(declared_lanes, list):
+        raise ValueError("contract lane_mirror.declared_lanes must be a list")
+    if not isinstance(topic_sets, Mapping) or not all(
+        isinstance(name, str)
+        and isinstance(topics, list)
+        and all(isinstance(topic, str) for topic in topics)
+        for name, topics in topic_sets.items()
+    ):
+        raise ValueError(
+            "contract lane_mirror.topic_sets must be a mapping of names to "
+            "lists of topic strings"
+        )
+    topics: list[str] = []
+    for name in selected_sets:
+        if name not in topic_sets:
+            raise ValueError(
+                f"unknown lane_mirror_binding topic set {name!r}; "
+                f"declared topic sets: {list(topic_sets)!r}"
+            )
+        for topic in topic_sets[name]:
+            if topic not in topics:
+                topics.append(topic)
     forwarder["lane_mirror"] = {
-        str(key): value for key, value in lane_mirror_object.items()
+        **{
+            str(key): value
+            for key, value in lane_mirror_object.items()
+            if key not in {"declared_lanes", "topic_sets"}
+        },
+        "source_lane": binding["source_lane"],
+        "mirror_lanes": list(mirror_lanes),
+        "declared_lanes": list(declared_lanes),
+        "topics": topics,
     }
 
 
