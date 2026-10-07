@@ -57,7 +57,7 @@ from omnibase_core.enums import EnumNodeKind
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.models.reducer import ModelIntent
 from omnibase_infra.models.registration import ModelNodeIntrospectionEvent
-from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_upsert_registration import (
+from omnibase_infra.models.registration.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
 )
 from omnibase_infra.nodes.node_registration_reducer.models.model_registration_state import (

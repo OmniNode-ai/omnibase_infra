@@ -65,7 +65,7 @@ from omnibase_infra.nodes.node_ledger_write_effect.models import ModelLedgerAppe
 
 if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
-    from omnibase_infra.nodes.node_registration_reducer.models import (
+    from omnibase_infra.models.ledger.model_payload_ledger_append import (
         ModelPayloadLedgerAppend,
     )
 
@@ -395,7 +395,7 @@ class HandlerLedgerAppend:
         Extracts the append payload from the auto-wired envelope, delegates to
         append(), and wraps the result identically to execute().
         """
-        from omnibase_infra.nodes.node_registration_reducer.models import (
+        from omnibase_infra.models.ledger.model_payload_ledger_append import (
             ModelPayloadLedgerAppend,
         )
 
@@ -479,7 +479,7 @@ class HandlerLedgerAppend:
         Returns:
             ModelHandlerOutput wrapping ModelLedgerAppendResult.
         """
-        from omnibase_infra.nodes.node_registration_reducer.models import (
+        from omnibase_infra.models.ledger.model_payload_ledger_append import (
             ModelPayloadLedgerAppend,
         )
 

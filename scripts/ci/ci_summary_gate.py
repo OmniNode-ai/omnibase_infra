@@ -347,6 +347,9 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # exceptions). The job is unconditional in ci.yml (no needs/if), so a skip
     # or absence fails closed here instead of reading green.
     "Canonical File Shape (OMN-20304)",  # canonical-file-shape
+    # OMN-20703: node-boundary import gate; unconditional in ci.yml (no needs/if).
+    # A skip or absence fails closed here instead of reading green.
+    "Node Boundary Imports (OMN-20703)",  # node-boundary-imports
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
