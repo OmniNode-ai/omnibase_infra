@@ -341,6 +341,14 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # pin-advance pull request naming all five, and the deletion rode that pull
     # request.
     #
+    # OMN-20578 and OMN-20613 added delegation_routing_feedback and
+    # delegation_budget_applied_events, and both were DELETED here by the pin
+    # advance to d2b0d9986ed7, which carries omnimarket#3416 and #3436 -- the
+    # retiring pull requests for each entry. node_projection_routing_feedback
+    # and node_projection_delegation now declare the relations. Same mechanism:
+    # the expiry module went red on the bot's pin-advance pull request naming
+    # both, and the deletion rode that pull request.
+    #
     # If you add a bridge here for a new infra-first vendoring, add it to that
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
@@ -368,50 +376,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="demo_readiness",
-        ),
-    ),
-    # OMN-20578: infra vendors delegation_routing_feedback before omnimarket#3416
-    # lands the node_projection_routing_feedback contract. This bridge keeps the
-    # shipped grants derivable until the pin advances; the expiry test then
-    # requires its removal.
-    # Retired by: omnimarket#3416 merging and the pin advancing past it.
-    ContractTableDeclaration(
-        node="legacy_migration:delegation_routing_feedback",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_routing_feedback/"
-            "0000_create_delegation_routing_feedback.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_routing_feedback",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_routing_feedback/"
-                "0000_create_delegation_routing_feedback.sql"
-            ),
-            access="read_write",
-            role="routing_feedback",
-        ),
-    ),
-    # OMN-20613: delegation_budget_applied_events is vendored here first; no
-    # pinned omnimarket contract declares it yet, so the derivation cannot
-    # reproduce the shipped writer grant until the retiring pull request lands.
-    ContractTableDeclaration(
-        node="legacy_migration:delegation_budget_applied_events",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/"
-            "0056_delegation_budget_applied_events.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_budget_applied_events",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/"
-                "0056_delegation_budget_applied_events.sql"
-            ),
-            access="read_write",
-            role="budget_applied_events",
         ),
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to
