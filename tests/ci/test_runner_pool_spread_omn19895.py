@@ -65,7 +65,7 @@ def _spread_verify_and_plane() -> list[dict[str, Any]]:
     # runner-name prefixes config/runner_fleet.yaml declares.
     return [
         _runner("omnipc2-verify-runner-1", "self-hosted", "omnibase-verify"),
-        _runner("omninode-air-runner-1", "self-hosted", "omnibase-verify"),
+        _runner("omninode-mini-runner-1", "self-hosted", "omnibase-verify"),
         _runner("omninode-runner-7", "self-hosted", "omnibase-customer-plane"),
         _runner("omnipc2-verify-runner-2", "self-hosted", "omnibase-customer-plane"),
     ]
