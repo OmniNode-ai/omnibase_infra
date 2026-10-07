@@ -73,6 +73,8 @@ _DEFAULT_MAX_RESPONSE_SIZE: int = parse_env_int(
     service_name="http_handler",
 )  # 50 MB default, min 1 KB, max 100 MB
 _SUPPORTED_OPERATIONS: frozenset[str] = frozenset({"http.get", "http.post"})
+_HTTP_PAYMENT_REQUIRED = 402
+_PAYMENT_REQUIRED_HEADER = "payment-required"
 # Streaming chunk size for responses without Content-Length header
 _STREAMING_CHUNK_SIZE: int = 8192  # 8 KB chunks
 
@@ -831,7 +833,9 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
             input_envelope_id: Envelope ID for causality tracking
 
         Returns:
-            ModelHandlerOutput wrapping response dict with status, payload, and correlation_id
+            ModelHandlerOutput wrapping response dict with status, payload, and
+            correlation_id. status is "success" for every response except a 402,
+            which is "payment_required" with no body and no PAYMENT-REQUIRED header.
         """
         content_type = response.headers.get("content-type", "")
         body: object
@@ -864,6 +868,28 @@ class HandlerHttpRest(MixinEnvelopeExtraction):
                 body = body_text
         else:
             body = body_text
+
+        if response.status_code == _HTTP_PAYMENT_REQUIRED:
+            # A 402 is a typed answer that ends the attempt: the raw body and
+            # the PAYMENT-REQUIRED header are third-party payment material and
+            # are not passed on. Only the status code and the other headers are.
+            return ModelHandlerOutput.for_compute(
+                input_envelope_id=input_envelope_id,
+                correlation_id=correlation_id,
+                handler_id=HANDLER_ID_HTTP,
+                result={
+                    "status": "payment_required",
+                    "payload": {
+                        "status_code": response.status_code,
+                        "headers": {
+                            name: value
+                            for name, value in response.headers.items()
+                            if name.lower() != _PAYMENT_REQUIRED_HEADER
+                        },
+                    },
+                    "correlation_id": str(correlation_id),
+                },
+            )
 
         return ModelHandlerOutput.for_compute(
             input_envelope_id=input_envelope_id,
