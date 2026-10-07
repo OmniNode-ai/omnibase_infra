@@ -965,6 +965,38 @@ jobs:
             python3 -m pytest \
             tests/k8s/test_onex_lab_rollout_wedge_omn18316.py -q
 
+      # OMN-18492. The contract corpus boots, asserted before the receipt says
+      # the candidate did.
+      #
+      # On 2026-09-16 one `handler_routing` operation declared twice with two
+      # different input models passed every gate in two repositories, then
+      # crash-looped omninode-runtime (`Duplicate local ingress route alias`,
+      # restart count 101) and failed delivery to staging closed for an
+      # afternoon. Route discovery runs on every boot before the runtime serves
+      # anything, so the same discovery function the runtime calls is run here,
+      # not a second copy of its alias rule.
+      #
+      # Two files, one claim each. The self-collision file walks this
+      # candidate's own shipped corpus and must not raise. The OMN-18492 file
+      # replays the verbatim pre-fix and post-fix omnimarket contract blobs of
+      # the incident: the pre-fix bytes must still raise, so a green run proves
+      # the check can fail, and the post-fix bytes must discover cleanly.
+      #
+      # `if: always()` for the same reason as every step above: a failed boot
+      # is when the receipt is read, and a skipped step would report `fail`
+      # into it for a reason that has nothing to do with this condition. After
+      # the setup-uv step, which `check_workflow_uv_available.py` enforces.
+      - name: Assert the contract corpus discovers without a duplicate ingress alias
+        id: contract-boot
+        if: always()
+        run: |
+          set -euo pipefail
+          cd omnibase_infra
+          uv run --frozen pytest \
+            tests/integration/runtime/test_local_ingress_self_collision_omn18550.py \
+            tests/integration/runtime/test_contract_boot_incident_omn18492.py \
+            -q -p no:cacheprovider
+
       - name: Collect diagnostics
         # always(): the failure case is the one the artifact exists for.
         if: always()
@@ -1059,6 +1091,7 @@ jobs:
             --check "migrations_applied:${{ steps.migrate.outcome == 'success' && 'ok' || 'fail' }}:${MIGRATE_JOB_NAME} Job on the candidate migration bundle" \
             --check "runtime_family_ready:${{ steps.boot-wait.outcome == 'success' && 'ok' || 'fail' }}:every runtime-family Deployment plus the projection snapshot topic, within ${BOOT_WAIT_SECONDS}s" \
             --check "rollout_deadline_bounded:${{ steps.rollout-deadline.outcome == 'success' && 'ok' || 'fail' }}:every Deployment's progressDeadlineSeconds under apply_lab_lane.sh's own 900s/300s rollout waits, and every Recreate Deployment naming its single-writer resource, on omninode_infra@dev ${MANIFEST_SHA:-unknown}" \
+            --check "contract_boot_invariants:${{ steps.contract-boot.outcome == 'success' && 'ok' || 'fail' }}:discover_runtime_local_ingress_routes, the function the runtime calls at boot, run over this candidate's shipped contract corpus (no duplicate local ingress alias) and over the verbatim pre-fix and post-fix omnimarket node_redeploy_deploy_effect contract of the 2026-09-16 incident (pre-fix raises, post-fix discovers) at omnibase_infra@${GITHUB_SHA} (OMN-18492)" \
             --out /tmp/lab-pass-receipt/receipt.json
 
       # OMN-18247. `if-no-files-found: error` below fires only when the whole
