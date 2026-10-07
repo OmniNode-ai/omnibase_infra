@@ -92,6 +92,11 @@ jobs:
           working-directory: scripts/deploy-agent
           install-args: "--extra dev"
 
+      - name: Scheduled script unit drift coverage (OMN-20037)
+        run: |
+          uv run --project scripts/deploy-agent --extra dev \
+            pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q
+
       - name: Run deploy-agent unit tests (OMN-15378)
         run: |
           uv run --project scripts/deploy-agent --extra dev \

@@ -41,6 +41,10 @@ Verdict model (mirrors ci_summary_gate exit codes)
   ancestor of an OCC durable branch (squash-only merges guarantee a
   feature-branch head SHA never becomes one — the OMN-15216 defect), or a
   malformed Evidence-Source value.
+* ``DECLINED`` (1) — the producer permanently declined to mint evidence for
+  this head. This is a named terminal refusal, reported with the producer's
+  reason and remediation rather than an error annotation. Evidence remains
+  required, so the exit status still blocks merging.
 
 The companion-must-merge-first ordering is safe: onex_change_control PRs have
 no reverse dependency on product-PR merge state (occ-preflight validates OCC's
@@ -60,7 +64,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, Literal
 
 _REPO_ROOT: Final = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -179,10 +183,11 @@ class Verdict:
 
     code: int  # EXIT_PASS | EXIT_FAIL | EXIT_PENDING
     reason: str
+    terminal_state: Literal["DECLINED"] | None = None
 
     @property
     def name(self) -> str:
-        return _VERDICT_NAMES[self.code]
+        return self.terminal_state or _VERDICT_NAMES[self.code]
 
 
 class GhFetcher:
@@ -537,6 +542,7 @@ def evaluate_once(
                     "will NOT appear on its own and re-running the publisher "
                     "will not change it. Hand-author the evidence: "
                     f"{HAND_AUTHORING_REFERENCE} (OMN-18647).",
+                    terminal_state="DECLINED",
                 )
             return Verdict(
                 EXIT_FAIL,
@@ -680,7 +686,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if verdict.code != EXIT_PENDING or args.once:
             if verdict.code == EXIT_FAIL:
-                print(f"::error::{verdict.reason}")
+                if verdict.terminal_state == AUTOBIND_OUTCOME_DECLINED:
+                    print(f"::warning::DECLINED — {verdict.reason}")
+                else:
+                    print(f"::error::{verdict.reason}")
             return verdict.code
 
         if time.monotonic() >= deadline:

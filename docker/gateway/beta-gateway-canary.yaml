@@ -20,6 +20,14 @@ forwarder:
   # lane set, topic set). The per-lane broker addresses are below, not here --
   # this file may not redeclare the block itself; the loader rejects that.
   lane_mirror_set: "node_bus_forwarder_effect"
+  # This deployment's lane selection (OMN-19983).
+  # The contract declares which lanes and topic sets may be named.
+  lane_mirror_binding:
+    source_lane: "stability-test"
+    mirror_lanes:
+      - "dev"
+    topic_sets:
+      - "hook_edge"
   heartbeat_interval_seconds: 15
   max_silence_window_seconds: 60
   lag_threshold_messages: 500
