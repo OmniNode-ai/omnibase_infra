@@ -3568,7 +3568,7 @@
     "generated_at_utc": "2026-10-06T18:33:45.393341+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.35",
-      "omnibase-infra": "0.38.67",
+      "omnibase-infra": "0.38.68",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,
