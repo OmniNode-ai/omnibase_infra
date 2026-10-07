@@ -23,7 +23,7 @@
 pins:
   omnibase_core: f43f97629182f463d233b564b19a2b27d4fc4888
   omnibase_compat: 65aed95fa710748654e37d5c15c5446e779fdf52
-  omnimarket: 3d39b97615a67fcb4341634565d543cd96e2f995
+  omnimarket: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495
   omniintelligence: 51e1cb356453ad325d76aea57ab371cf975df3a4
   omnimemory: c7175878b331628de9be9358cb178547d8247c34
   omniclaude: c86c9fe6330c789614126f5f106bfb1be364b20d

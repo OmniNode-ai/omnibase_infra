@@ -7,7 +7,7 @@ Infra vendored the ``alert_channel_liveness_verdicts`` migration (OMN-20578)
 before omnimarket#3417 landed the ``node_projection_alert_channel_liveness``
 contract, so a hand-authored ``LEGACY_MIGRATION_TABLE_DECLARATIONS`` entry
 carried it in the interim. The omnimarket contract pin advancing to
-3d39b97615a6 carries omnimarket#3417, so the bridge is redundant and was
+f859c7af5e1d carries omnimarket#3417, so the bridge is redundant and was
 deleted from ``table_grant_derivation.py`` and ``_INTERIM_ENTRIES``.
 
 This module asserts, on committed repository state alone, that the deletion
@@ -45,7 +45,7 @@ class TestTheAlertChannelLivenessBridgeWasRetired:
         assert _RELATION not in carried, (
             f"{_RELATION} still has a supplemental LEGACY_MIGRATION_TABLE_"
             "DECLARATIONS entry, but the pinned omnimarket contracts "
-            "(3d39b97615a6, omnimarket#3417) declare it."
+            "(f859c7af5e1d, omnimarket#3417) declare it."
         )
 
     def test_the_migration_lineage_that_created_it_is_still_in_the_tree(
