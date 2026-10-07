@@ -136,6 +136,22 @@ on frozen dataclasses. It is the SAME set of invariants a Pydantic model would
 carry -- they are load-bearing, so they are asserted in ``__post_init__`` rather
 than dropped -- and ``ValueError`` is the single failure type.
 
+Criterion bindings (OMN-18488)
+------------------------------
+Both emitters read the exact cited commit's ``contracts/<ticket>.yaml``. No
+ticket citation or no contract leaves the receipt unbound; several citations
+are ambiguous and refused. A contract author declares each lab check as a
+``dod_evidence`` item ``lab-pass-<lane>-<check name>`` (for example
+``lab-pass-compose-dev-ready_main``) with its ``binds_ac`` labels and accepted
+``ac_bindings`` records; the emitter never derives a mapping from criterion
+text, and draft records do not bind. The evidence autoclose node reads
+receipts for the merged product PR's exact merge commit through
+``receipt_evidence_for_ticket`` and feeds them to the shared criterion pin
+gate: only a PASS receipt supplies verified checks, a FAIL receipt supplies
+failed checks even when individual probes passed, and missing bindings,
+missing or stale pins and unreadable artifacts retain the ticket. Re-keying a
+receipt onto another commit clears its criterion claims.
+
 Exit codes: ``0`` a PASS receipt for the exact sha exists; ``1`` it does not, or
 could not be proven to.
 """

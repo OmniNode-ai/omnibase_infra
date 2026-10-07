@@ -109,6 +109,10 @@ on:
         description: 'A tenant slug the credential does NOT own; drives the wrong-tenant arm.'
         required: false
         default: 'onex-lab-house'
+      deploy_wait_seconds:
+        description: 'Total seconds the lane resolution may wait for a dev-lane deploy to converge before it grades RED (OMN-19811; the chain canary default).'
+        required: false
+        default: '2400'
 
 concurrency:
   # Four reads and one refused POST: a second run racing this one changes
@@ -124,7 +128,12 @@ jobs:
   c11-negative-paths:
     name: C11 negative paths (dev lane)
     runs-on: ${{ fromJSON(vars.LAB_PROBE_RUNS_ON_JSON) }}
-    timeout-minutes: 10
+    # OMN-19811: 10 -> 50. The added 40 minutes is the deploy_wait_seconds
+    # default of 2400 s (the chain canary's budget), spent only while the deploy
+    # agent reports a deploy around the lane. config/lab_probe_windows.yaml
+    # carries the longest needs chain and check_lab_probe_windows.py refuses a
+    # disagreement.
+    timeout-minutes: 50
 
     steps:
       - name: Checkout omnibase_infra
@@ -146,6 +155,11 @@ jobs:
         with:
           lanes-json: ${{ vars.LAB_LANES_JSON }}
           require: gateway_url
+          # OMN-19811: a lane that does not answer while its deploy agent reports
+          # a deploy in progress is waited for, not graded. Idle, unreadable or
+          # undeclared agents and an exhausted budget are still RED. The
+          # resolver's own busy test; nothing is re-derived here.
+          deploy-wait-seconds: ${{ github.event.inputs.deploy_wait_seconds || '2400' }}
 
       - name: Drive the four negative paths and grade them
         env:

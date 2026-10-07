@@ -2233,6 +2233,17 @@ repos:
         pass_filenames: false
         files: ^(\.pre-commit-config\.yaml|scripts/validation/check_precommit_additional_dependencies\.sh|tests/test_precommit_additional_dependencies_omn19666\.sh|tests/fixtures/omn19666/.*)$
         stages: [pre-commit]
+  # OMN-20037: scheduled script coverage uses the existing drift checker.
+  - repo: local
+    hooks:
+      - id: scheduled-script-unit-drift
+        name: Scheduled scripts are covered by unit drift (OMN-20037)
+        entry: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(deploy/unit-drift-manifest\.yaml|scripts/deploy-agent/(deploy_agent/unit_drift\.py|tests/unit/test_unit_drift\.py|deploy/.*\.service)|deploy/(disk-gc|systemd)/.*\.service|scripts/systemd/.*\.service)$
+        stages: [pre-commit]
 default_install_hook_types: [pre-commit, pre-push, commit-msg]
 default_stages: [pre-commit]
 fail_fast: false
