@@ -58,6 +58,11 @@
 #                           live grant id (the acknowledgement is recorded).
 #
 # Optional environment:
+#   DEPLOY_SOURCE_CLONE_ROOT  Explicit absolute directory holding the deploy
+#                           clones. Declare the same value in the host operator
+#                           env and deploy-agent-dev unit. It takes precedence
+#                           over the caller's registry OMNI_HOME after env load;
+#                           an empty, relative, or missing directory refuses.
 #   RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS (OMN-15718)  Bounded wall-clock
 #                           deadline (seconds, default 300) applied to every
 #                           `docker compose ... up ...` call this script and
@@ -191,6 +196,11 @@ fi
 if [[ -n "${_OPERATOR_OMNI_HOME}" ]]; then
     export OMNI_HOME="${_OPERATOR_OMNI_HOME}"
 fi
+
+# Resolve before preflight, clone provisioning, or selecting INFRA_CLONE.
+# shellcheck source=./sibling_clone_manifest.sh
+source "${SCRIPT_DIR}/sibling_clone_manifest.sh"
+resolve_deploy_source_clone_root
 
 # --- hardcoded lane identity (no --lane flag; stability-test ONLY) ---------
 # OMN-14984: COMPOSE_PROJECT duplicated the contract-rendered

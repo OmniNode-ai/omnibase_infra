@@ -13,9 +13,10 @@ failure mode.
 
 **Part 1 is structural and cannot be satisfied by editing a comment.**
 
-  * ``scripts/reconcile-host.sh`` -- the orchestrator every scheduler calls --
-    must actually invoke ``reconcile_verify_movement.py``. If someone deletes
-    the readback, this fails.
+  * The maintenance scheduler must resolve and execute the installed
+    ``onex-host-reconcile`` command. Independent movement and floor proof are
+    covered by the canonical node provider's ported behavioral/parity tests.
+    This structural gate detects a scheduler that bypasses that provider.
   * ``verdict()`` in ``reconcile_verify_movement.py`` must take exactly
     ``(before, after, target)``. Adding an exit-status parameter is the single
     change that would quietly re-open the whole defect class, so the signature
@@ -54,7 +55,7 @@ import sys
 from pathlib import Path
 
 VERIFIER_NAME = "reconcile_verify_movement.py"
-ORCHESTRATOR = "scripts/reconcile-host.sh"
+ORCHESTRATOR = "deploy/maintenance/omninode-workspace-reconcile.sh"
 
 # `reconcile*` under scripts/, at any depth. Deliberately a glob rather than a
 # list: a list is a thing you forget to update.
@@ -86,9 +87,15 @@ def check(repo_root: Path) -> list[str]:
             f"{ORCHESTRATOR} is missing. It is the single scheduled entry point "
             "on every host; without it nothing proves any surface moved."
         )
-    elif VERIFIER_NAME not in orchestrator.read_text(encoding="utf-8"):
+    elif not re.search(
+        r'(?m)^RECONCILER=.*?/bin/onex-host-reconcile"$',
+        orchestrator.read_text(encoding="utf-8"),
+    ) or not re.search(
+        r'(?m)^exec env OMNI_HOME="\$OMNI_HOME" "\$RECONCILER"',
+        orchestrator.read_text(encoding="utf-8"),
+    ):
         failures.append(
-            f"{ORCHESTRATOR} no longer invokes {VERIFIER_NAME}. The orchestrator's "
+            f"{ORCHESTRATOR} no longer invokes onex-host-reconcile. The node's "
             "whole job is the readback; without it a delegate that exits 0 "
             "without moving anything reports success (OMN-17291)."
         )

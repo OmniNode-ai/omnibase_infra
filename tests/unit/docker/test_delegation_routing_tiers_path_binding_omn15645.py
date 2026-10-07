@@ -46,6 +46,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_infra.docker.catalog.generator import generate_compose
+from omnibase_infra.docker.catalog.resolver import CatalogResolver
+
 # The exact key name the omnimarket consumer reads. Do not rename without
 # updating the omnimarket-side seam citation above.
 _ENV_KEY = "DELEGATION_ROUTING_TIERS_PATH"
@@ -227,4 +230,20 @@ def test_expected_path_is_never_shadowed_by_a_volume_mount(
         + "\n".join(f"  - {v}" for v in violations)
         + f"\n\nChoose a fixed path outside every mounted target for "
         f"{runtime_services}."
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("bundle", ["runtime-core", "runtime", "local"])
+@pytest.mark.parametrize("service_name", ["omninode-runtime", "runtime-effects"])
+def test_catalog_runtime_services_bind_the_packaged_tiers_path(
+    project_root: Path, bundle: str, service_name: str
+) -> None:
+    """Catalog-generated kernels need the same pin as the shared compose anchor."""
+    resolver = CatalogResolver(catalog_dir=str(project_root / "docker" / "catalog"))
+    compose = generate_compose(resolver.resolve(bundles=[bundle]))
+    environment = compose["services"][service_name]["environment"]
+    assert environment.get(_ENV_KEY) == _EXPECTED_PATH, (
+        f"{bundle}/{service_name} must bind {_ENV_KEY} to {_EXPECTED_PATH}; "
+        f"got {environment.get(_ENV_KEY)!r}"
     )

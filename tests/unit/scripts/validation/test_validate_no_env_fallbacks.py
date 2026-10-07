@@ -1,7 +1,12 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Tests for canonical unified validate_no_env_fallbacks.py (OMN-10741)."""
+"""Unit tests for the no-env-fallbacks rule, run against the core check node.
+
+Originally the tests of scripts/validate_no_env_fallbacks.py (OMN-10741); the
+script was replaced by omnibase_core's node_no_env_fallbacks_check_compute
+(OMN-20568) and every case below is unchanged.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +14,40 @@ from pathlib import Path
 
 import pytest
 
-from scripts.validate_no_env_fallbacks import run, scan_python_file, scan_shell_file
+from omnibase_core.nodes.node_no_env_fallbacks_check_compute.matcher_env_fallbacks import (
+    find_env_fallback_violations,
+)
+
+
+def _scan(path: Path) -> list[tuple[int, str]]:
+    findings = find_env_fallback_violations(path.name, path.read_text(encoding="utf-8"))
+    return [
+        (int(f.message.split(":", 2)[1]), f.message.split(":", 2)[2].strip())
+        for f in findings
+    ]
+
+
+def scan_python_file(path: Path) -> list[tuple[int, str]]:
+    return _scan(path)
+
+
+def scan_shell_file(path: Path) -> list[tuple[int, str]]:
+    return _scan(path)
+
+
+def run(scan_roots: list[Path], repo_root: Path) -> list[tuple[str, int, str]]:
+    violations: list[tuple[str, int, str]] = []
+    for base in scan_roots:
+        for path in sorted(base.rglob("*")):
+            if not path.is_file() or path.suffix not in {".py", ".sh", ".bash"}:
+                continue
+            rel = str(path.relative_to(repo_root))
+            for finding in find_env_fallback_violations(
+                rel, path.read_text(encoding="utf-8")
+            ):
+                _, lineno, text = finding.message.split(":", 2)
+                violations.append((rel, int(lineno), text.strip()))
+    return violations
 
 
 def _py(tmp_path: Path, content: str, name: str = "test_mod.py") -> Path:
@@ -238,17 +276,6 @@ class TestRunFunction:
 
         violations = run(
             scan_roots=[tmp_path / "src"],
-            repo_root=tmp_path,
-        )
-        assert violations == []
-
-    def test_run_skips_self(self, tmp_path: Path) -> None:
-        (tmp_path / "scripts").mkdir()
-        script = tmp_path / "scripts" / "validate_no_env_fallbacks.py"
-        script.write_text('# pattern references: os.environ.get("X", "localhost")\n')
-
-        violations = run(
-            scan_roots=[tmp_path / "scripts"],
             repo_root=tmp_path,
         )
         assert violations == []

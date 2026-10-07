@@ -95,11 +95,11 @@ def test_an_unreadable_check_list_yields_no_ids(verdict: dict[str, object]) -> N
     assert _withheld_check_ids(verdict) == ()
 
 
-def test_the_pinned_contract_version_is_the_node_contract_version() -> None:
-    """The version in the key is the node's own, read from the contract.
+def test_the_gap_fingerprint_version_is_declared_in_the_contract() -> None:
+    """The gap identity version is declared separately from the node version.
 
-    A hand-typed constant that drifts from `contract.yaml` would silence a
-    gap the bump was meant to refresh, so the two are pinned together.
+    Reporting a skipped run must not refresh unchanged gaps. The explicit
+    contract field still pins the fingerprint authority to its implementation.
     """
     contract = (
         Path(__file__).resolve().parents[4]
@@ -109,7 +109,9 @@ def test_the_pinned_contract_version_is_the_node_contract_version() -> None:
         / "node_evidence_autoclose_sweep_effect"
         / "contract.yaml"
     )
-    declared = yaml.safe_load(contract.read_text(encoding="utf-8"))["node_version"]
+    declared = yaml.safe_load(contract.read_text(encoding="utf-8"))["metadata"][
+        "gap_comment_fingerprint_version"
+    ]
     assert declared == _GAP_FINGERPRINT_CONTRACT_VERSION
 
 

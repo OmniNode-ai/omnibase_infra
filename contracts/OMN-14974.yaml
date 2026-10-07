@@ -35,7 +35,7 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "LC_ALL=C LANG=C uv run pytest tests/scripts/test_node_migration_fence_parity.py tests/ci/test_validate_migration_sequence.py -q"
+        check_value: "LC_ALL=C LANG=C uv run pytest tests/scripts/test_node_migration_fence_parity.py tests/ci/test_migration_sequence_check_node.py -q"
   - id: "dod-deploy"
     description: >
       Deploy-gate evidence: this PR adds one idempotent node-owned SQL migration to the deployed forward tree. It performs no deployment itself; the governed onex-dev redeploy will apply it through the existing namespaced migration runner before live readback.

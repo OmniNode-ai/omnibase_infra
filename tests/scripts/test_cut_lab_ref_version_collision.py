@@ -261,9 +261,11 @@ def test_cut_lab_ref_execute_overwrites_collision_and_runs_rt1_checkout(
     # RT-1 actually ran and checked the NEW (advanced) SHA out in its own
     # worktree -- a no-op checkout would have staged old_sha -- and left the
     # canonical clone where it was (OMN-20263).
-    assert (
-        _git(tmp_path / "source-trees" / "omnimarket", "rev-parse", "HEAD") == new_sha
+    refs = json.loads(
+        (tmp_path / "refs-state" / "cut-lab-ref.json").read_text(encoding="utf-8")
     )
+    tree = Path(refs["repos"]["omnimarket"]["path"])
+    assert _git(tree, "rev-parse", "HEAD") == new_sha
     assert _git(omni_home / "omnimarket", "rev-parse", "HEAD") == old_sha
 
     expected_refs = tmp_path / "refs-state" / "cut-lab-ref.json"

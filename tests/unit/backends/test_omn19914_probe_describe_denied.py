@@ -24,6 +24,7 @@ All names below are synthetic.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -83,6 +84,20 @@ class _Admin:
 
     async def describe_cluster(self) -> dict[str, Any]:
         return {"brokers": [{"node_id": 1}]}
+
+    async def _send_request(
+        self, request: Any, node_id: int | None = None
+    ) -> SimpleNamespace:
+        struct = request.prepare({16: (0, 4)})
+        assert struct.states_filter == ["Stable"]
+        return SimpleNamespace(
+            error_code=0,
+            groups=[
+                (group_id, "consumer", state, {})
+                for group_id in self.listed
+                if (state := self.states.get(group_id, "Stable")) == "Stable"
+            ],
+        )
 
     async def list_consumer_groups(self) -> list[tuple[str, str]]:
         return [(group, "consumer") for group in _Admin.listed]

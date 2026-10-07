@@ -17,11 +17,11 @@ are asserted, because only one of them is the defect:
 * a handler reporting rows refused by its ordering guard -> INFO, no ERROR;
 * a handler reporting a bare zero -> the ERROR line, unchanged.
 
-The second is the one that must not be softened. An ordering guard refusing a
-redelivery is correct behaviour and fires routinely -- 4 times in 33 minutes on
-the .201 dev lane while the writer emitting them was serving 500 rows and
-updating every few seconds -- and logging it as ERROR trains people to skip the
-class, at which point a writer that genuinely wrote nothing goes unseen.
+A healthy writer's zero-row log does not establish why it returned zero.
+B23 corrects that historical attribution. The real PostgreSQL fixture in
+``tests/integration/migrations/test_omn18992_projection_zero_rows.py`` forces
+an older-sequence refusal and separately drives a window-less heartbeat.
+
 """
 
 from __future__ import annotations
@@ -83,12 +83,18 @@ def _heartbeat_envelope() -> MagicMock:
     return envelope
 
 
-def _dispatch(result: dict[str, Any]) -> list[logging.LogRecord]:
+def _dispatch(
+    result: dict[str, Any],
+    *,
+    contract_name: str = "",
+    payload: dict[str, Any] | None = None,
+) -> list[logging.LogRecord]:
     """Run the real callback and return what the wiring logged."""
     callback = _make_projection_dispatch_callback(
         _Writer(result),
         projection_database_target("pr_merged_events", schema="omninode_internal"),
         (_TOPIC,),
+        contract_name=contract_name,
     )
     records: list[logging.LogRecord] = []
 
@@ -104,7 +110,10 @@ def _dispatch(result: dict[str, Any]) -> list[logging.LogRecord]:
     try:
         with patch(_PATCH_ENVIRON_GET, return_value=_TEST_DSN):
             with patch(_PATCH_BUILD_ADAPTER, return_value=MagicMock()):
-                asyncio.run(callback(_heartbeat_envelope()))
+                envelope = _heartbeat_envelope()
+                if payload is not None:
+                    envelope.payload = payload
+                asyncio.run(callback(envelope))
     finally:
         logger.removeHandler(handler)
         logger.setLevel(previous_level)
@@ -116,7 +125,7 @@ def _messages(records: list[logging.LogRecord], level: int) -> list[str]:
 
 
 def test_a_guard_refusal_reaches_the_runtime_as_info() -> None:
-    """The case the four live lines are, driven through the real callback."""
+    """An explicit reported refusal, driven through the real callback."""
     records = _dispatch(
         {"rows_upserted": 0, "flow_rows": [], ROWS_REFUSED_KEY: 1},
     )
@@ -124,7 +133,7 @@ def test_a_guard_refusal_reaches_the_runtime_as_info() -> None:
     info = _messages(records, logging.INFO)
     errors = _messages(records, logging.ERROR)
 
-    assert any("ordering guard" in message for message in info), (
+    assert any("ORDERING_GUARD_REFUSED" in message for message in info), (
         f"no INFO line naming the guard; INFO records were {info}"
     )
     assert not any("wrote zero rows (no terminal emitted)" in m for m in errors), (
@@ -153,10 +162,11 @@ def test_a_writer_that_never_heard_of_the_field_is_unchanged() -> None:
     """
     records = _dispatch({"projected": False})
 
-    assert any(
-        "wrote zero rows (no terminal emitted)" in m
-        for m in _messages(records, logging.ERROR)
-    )
+    assert _messages(records, logging.ERROR) == [
+        "Projection handler wrote zero rows (no terminal emitted): "
+        f"handler=_Writer topic={_TOPIC} event_type=heartbeat "
+        "rows_upserted=0 result={'projected': False}"
+    ]
 
 
 def test_a_successful_write_logs_neither_line() -> None:
@@ -171,3 +181,58 @@ def test_a_successful_write_logs_neither_line() -> None:
         "wrote zero rows" in m or "ordering guard" in m
         for m in _messages(records, logging.ERROR) + _messages(records, logging.INFO)
     )
+
+
+def test_windowless_consumer_flow_heartbeat_has_its_own_token() -> None:
+    records = _dispatch(
+        {"rows_upserted": 0, "flow_rows": [], ROWS_REFUSED_KEY: 0},
+        contract_name="projection_consumer_flow",
+        payload={"node_id": "omninode-runtime"},
+    )
+    assert any("WINDOW_LESS_HEARTBEAT" in m for m in _messages(records, logging.INFO))
+    assert not _messages(records, logging.ERROR)
+    assert not any("ORDERING_GUARD_REFUSED" in r.getMessage() for r in records)
+
+
+@pytest.mark.parametrize(
+    ("contract_name", "payload", "result"),
+    [
+        (
+            "projection_consumer_flow",
+            {"flow_window": {}},
+            {"rows_upserted": 0, "flow_rows": [], ROWS_REFUSED_KEY: 0},
+        ),
+        (
+            "projection_lab_lane_health",
+            {},
+            {"rows_upserted": 0, "flow_rows": [], ROWS_REFUSED_KEY: 0},
+        ),
+        ("projection_consumer_flow", {}, {"rows_upserted": 0, "flow_rows": []}),
+        (
+            "projection_consumer_flow",
+            {},
+            {"rows_upserted": 0, "flow_rows": [], ROWS_REFUSED_KEY: "invalid"},
+        ),
+        ("projection_consumer_flow", {}, {"rows_upserted": 0, ROWS_REFUSED_KEY: 0}),
+    ],
+)
+def test_unproven_noop_still_logs_error(
+    contract_name: str, payload: dict[str, Any], result: dict[str, Any]
+) -> None:
+    records = _dispatch(result, contract_name=contract_name, payload=payload)
+    assert any(
+        "wrote zero rows (no terminal emitted)" in m
+        for m in _messages(records, logging.ERROR)
+    )
+    assert not any("WINDOW_LESS_HEARTBEAT" in r.getMessage() for r in records)
+
+
+@pytest.mark.parametrize("refused", [False, 0.0, None, "0", -1])
+def test_malformed_empty_heartbeat_result_keeps_error(refused: object) -> None:
+    records = _dispatch(
+        {"rows_upserted": 0, "flow_rows": [], ROWS_REFUSED_KEY: refused},
+        contract_name="projection_consumer_flow",
+        payload={},
+    )
+    assert _messages(records, logging.ERROR)
+    assert not any("WINDOW_LESS_HEARTBEAT" in r.getMessage() for r in records)

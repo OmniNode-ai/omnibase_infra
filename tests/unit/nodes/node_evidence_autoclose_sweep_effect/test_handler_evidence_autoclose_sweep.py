@@ -914,7 +914,10 @@ class TestRealDodVerifyPayloadShape:
         )
         result = await handler.handle(_request(apply=True))
 
-        assert result.outcomes[0].decision == EnumEvidenceAutocloseDecision.GAP_POSTED
+        assert (
+            result.outcomes[0].decision
+            == EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY
+        )
         assert linear.state_updates == []
 
 
@@ -1524,8 +1527,8 @@ class TestOmn16905OutcomeRowReportsBehaviorProving:
         """The exact run-33210163405 shape: status=skipped, behavior_proving=1.
 
         `failed == 0` but dod_verify's own terminal status is `skipped`, so
-        `all_verified` is False and the ticket takes the gap path -- the precise
-        combination that produced the reported 1-vs-0 divergence.
+        `all_verified` is False. OMN-20520 now reports a skip, preserving the
+        partial behavior count that previously diverged on the gap path.
         """
         verdict = _dod_verify_ok(
             total=6,
@@ -1551,7 +1554,7 @@ class TestOmn16905OutcomeRowReportsBehaviorProving:
         )
         result = await handler.handle(_request(apply=False))
         outcome = result.outcomes[0]
-        assert outcome.decision == EnumEvidenceAutocloseDecision.GAP_POSTED
+        assert outcome.decision == EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY
         # Every other counter already matched the diagnose leg; only this one
         # did not, and the mismatch is what this ticket exists to close.
         assert outcome.dod_verify_total_checks == 6

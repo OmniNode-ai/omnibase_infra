@@ -37,8 +37,18 @@ profiles:
     # only (no nack/redelivery) per the forbid-verify ruling on
     # OMN-14507/OMN-14548 -- see stability-test's identical stance above.
     boundary_dlq_enabled: true
+    trajectory_evaluation_backend: in_memory
     secret_resolver_config_path: /app/data/delegation/secret_resolver.yaml
     secret_resolver_mappings:
+      # OMN-20089: dev-lane evaluator credentials; values stay on the host.
+      - logical_name: dharma.api_key
+        source:
+          source_type: env
+          source_path: DHARMA_API_KEY
+      - logical_name: dharma.org_id
+        source:
+          source_type: env
+          source_path: DHARMA_ORG_ID
       - logical_name: llm.openrouter.api_key
         source:
           source_type: env
@@ -269,6 +279,7 @@ profiles:
     # ruling on OMN-14507/OMN-14548 -- G1 stays deferred, this is scoped
     # strictly to the stability-test lane's live-proof requirement.
     boundary_dlq_enabled: true
+    trajectory_evaluation_backend: "off"
     secret_resolver_config_path: /app/data/delegation/secret_resolver.yaml
     secret_resolver_mappings:
       - logical_name: llm.openrouter.api_key
@@ -409,6 +420,7 @@ profiles:
     # OMN-14551: judge lane is read-only by lane boundary; not in scope for
     # this flip. OFF until an explicit judge-lane authorization.
     boundary_dlq_enabled: false
+    trajectory_evaluation_backend: "off"
     secret_resolver_config_path: /app/data/delegation/secret_resolver.yaml
     secret_resolver_mappings:
       - logical_name: llm.openrouter.api_key
@@ -523,6 +535,7 @@ profiles:
     # note in handler_wiring.py) AND a fresh prod-promotion grant (rule 2a/12).
     # Neither exists yet. OFF.
     boundary_dlq_enabled: false
+    trajectory_evaluation_backend: "off"
     services:
       main:
         runtime_id: prod-main
@@ -594,6 +607,7 @@ profiles:
     # something unmeasured. Its owner can request the flip once the lane is up
     # and a readback exists.
     boundary_dlq_enabled: false
+    trajectory_evaluation_backend: "off"
     secret_resolver_config_path: /app/data/delegation/secret_resolver.yaml
     secret_resolver_mappings:
       - logical_name: llm.openrouter.api_key
@@ -707,6 +721,7 @@ profiles:
     # something unmeasured. Its owner can request the flip once the lane is up
     # and a readback exists.
     boundary_dlq_enabled: false
+    trajectory_evaluation_backend: "off"
     secret_resolver_config_path: /app/data/delegation/secret_resolver.yaml
     secret_resolver_mappings:
       - logical_name: llm.openrouter.api_key

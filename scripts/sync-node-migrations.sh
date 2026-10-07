@@ -66,6 +66,8 @@
 # carries a row for it; an UNDECLARED file with no current omnimarket source
 # is still flagged stale (that combination is 6th-occurrence-class drift,
 # not preserved history).
+# The declaration also requires the vendored file to exist, even when a stale
+# upstream clone lacks it. Missing files cannot be exempted as applied history.
 #
 # ORDERING TRAP, recorded where a lane meets it (OMN-18768). Because the test
 # above is "does application-migrations.tsv carry a row", it fires for EVERY
@@ -94,7 +96,7 @@
 #
 # EXIT CODES
 #   0 — in sync (or vendored successfully)
-#   1 — --check mode and vendored tree differs from source (drift)
+#   1 — --check drift, or declared node migration history is missing
 #   2 — could not resolve omnimarket source tree
 
 set -euo pipefail
@@ -217,6 +219,18 @@ while IFS= read -r src_file; do
       if [ -f "${dest_file}" ] && is_legacy_declared "${node_name}/${filename}"; then
         echo "[sync-node-migrations]   kept legacy-declared (OMN-16705) ${node_name}/${filename}"
       else
+        # OMN-14975: an absent declared copy can only be restored from its
+        # checksum-bound bytes, never from a divergent or stale upstream clone.
+        if is_legacy_declared "${node_name}/${filename}"; then
+          declared_sha="$(awk -F '\t' -v path="nodes/${node_name}/${filename}" \
+            '$1 == path { print $6 }' "${APPLICATION_MIGRATION_MANIFEST}")"
+          source_sha="$(shasum -a 256 "${src_file}" | awk '{ print $1 }')"
+          if [ "${source_sha}" != "${declared_sha}" ]; then
+            echo "[sync-node-migrations] DRIFT: declared migration checksum mismatch ${node_name}/${filename}" >&2
+            DRIFT=1
+            continue
+          fi
+        fi
         cp "${src_file}" "${dest_file}"
         echo "[sync-node-migrations]   vendored ${node_name}/${filename}"
         COPIED=$((COPIED + 1))
@@ -224,6 +238,23 @@ while IFS= read -r src_file; do
     fi
   fi
 done < <(find "${NODES_DIR}" -type f -path "*/migrations/*.sql" | sort)
+
+# OMN-14975: source discovery alone cannot see a declared migration missing
+# from BOTH a stale upstream clone and the vendored tree. Require the declared
+# node inventory after copying, so write mode can still restore upstream files.
+if [ -f "${APPLICATION_MIGRATION_MANIFEST}" ]; then
+  while IFS= read -r declared_file; do
+    if [ ! -f "${DEST_ROOT}/${declared_file}" ]; then
+      echo "[sync-node-migrations] DRIFT: missing declared migration ${declared_file}" >&2
+      DRIFT=1
+    fi
+  done < <(awk -F '\t' '$1 ~ /^nodes\// { sub(/^nodes\//, "", $1); print $1 }' \
+    "${APPLICATION_MIGRATION_MANIFEST}")
+fi
+if [ "${CHECK_MODE}" -eq 0 ] && [ "${DRIFT}" -eq 1 ]; then
+  echo "[sync-node-migrations] declared node migration history is incomplete; restore the missing checked-in files." >&2
+  exit 1
+fi
 
 if [ -d "${DEST_ROOT}" ]; then
   find "${DEST_ROOT}" -type f -name "*.sql" \
