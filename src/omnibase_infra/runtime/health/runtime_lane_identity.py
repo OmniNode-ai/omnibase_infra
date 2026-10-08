@@ -7,8 +7,9 @@ own lane. Before this module nothing in the process could: the compose project
 name, the k3s namespace and the overlay are all facts about the DEPLOYMENT, and
 none of them is visible from inside the container.
 
-So the deployment states it, in one environment variable, and the runtime reads
-it back.
+The deployment states its lane in ``ONEX_RUNTIME_LANE``. OMN-19812 separates
+placement from health keying: a runtime may name its lane for placement without
+speaking for the lane's health, using ``ONEX_RUNTIME_LANE_HEALTH_SPEAKER=false``.
 
 **Why this returns ``None`` instead of raising.** Operating rule 8 says fail
 fast on missing env rather than pick a silent default, and that rule is about
@@ -40,6 +41,9 @@ logger = logging.getLogger(__name__)
 
 #: The environment variable a deployment sets to name its own lane.
 ENV_RUNTIME_LANE = "ONEX_RUNTIME_LANE"
+
+#: Whether this runtime speaks for its lane's health (OMN-19812).
+ENV_RUNTIME_LANE_HEALTH_SPEAKER = "ONEX_RUNTIME_LANE_HEALTH_SPEAKER"
 
 #: The lanes a runtime's HEALTH may be keyed on. Deliberately the LAB set and
 #: nothing else (OMN-18769 AC6): the stability-test, judge and collaborator
@@ -106,6 +110,27 @@ def _note_non_lab_lane(lane: str) -> None:
     )
 
 
+@lru_cache(maxsize=1)
+def _note_health_non_speaker() -> None:
+    """Say ONCE per process that this runtime leaves lane health to its speaker."""
+    logger.info(
+        "%s=false — this runtime names its lane for placement only; its "
+        "health events carry no lane (OMN-19812)",
+        ENV_RUNTIME_LANE_HEALTH_SPEAKER,
+    )
+
+
+@lru_cache(maxsize=8)
+def _warn_invalid_health_speaker(value: str) -> None:
+    """Say ONCE per process and value that the health-speaker value is refused."""
+    logger.warning(
+        "%s=%r is invalid; accepted values are absent/blank, 'true', or "
+        "'false' — emitting no health lane (OMN-19812)",
+        ENV_RUNTIME_LANE_HEALTH_SPEAKER,
+        value,
+    )
+
+
 def resolve_declared_runtime_lane(
     environ: Mapping[str, str] | None = None,
 ) -> str | None:
@@ -115,6 +140,7 @@ def resolve_declared_runtime_lane(
     checked against. Any registered lane is accepted -- stability-test
     included -- because the question here is "which deployment is this", not
     "which lab lane-health row is this".
+    The health-speaker setting does not affect placement (OMN-19812).
 
     Returns ``None`` when the variable is absent, blank or not a registered
     lane. ``None`` is not a default: the auto-wiring ownership filter treats
@@ -147,13 +173,24 @@ def describe_undeclared_runtime_lane(environ: Mapping[str, str] | None = None) -
 
 
 def resolve_runtime_lane(environ: Mapping[str, str] | None = None) -> str | None:
-    """Return this runtime's declared lane, or ``None`` when it has none.
+    """Return the lab lane this runtime speaks for, or ``None`` for unkeyed health.
+
+    OMN-19812: ``ONEX_RUNTIME_LANE_HEALTH_SPEAKER=false`` disables health
+    keying while preserving placement. Absent, blank or ``true`` keeps the
+    current behavior; any other value refuses to speak for health.
 
     Args:
         environ: Override for the process environment. Injected by tests; the
             default reads ``os.environ``.
     """
     source: Mapping[str, str] = os.environ if environ is None else environ
+    speaker = (source.get(ENV_RUNTIME_LANE_HEALTH_SPEAKER) or "").strip().lower()
+    if speaker == "false":
+        _note_health_non_speaker()
+        return None
+    if speaker not in ("", "true"):
+        _warn_invalid_health_speaker(speaker)
+        return None
     raw = (source.get(ENV_RUNTIME_LANE) or "").strip().lower()
     if not raw:
         _warn_absent_lane()
@@ -174,6 +211,7 @@ def resolve_runtime_lane(environ: Mapping[str, str] | None = None) -> str | None
 
 __all__: list[str] = [
     "ENV_RUNTIME_LANE",
+    "ENV_RUNTIME_LANE_HEALTH_SPEAKER",
     "KNOWN_LANES",
     "describe_undeclared_runtime_lane",
     "resolve_declared_runtime_lane",

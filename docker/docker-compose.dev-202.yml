@@ -206,6 +206,8 @@ services:
   runtime-effects:
     container_name: omninode-dev-202-runtime-effects
     environment:
+      # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
+      ONEX_RUNTIME_LANE: "compose-dev-202"
       ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml
       # OMN-20533: docker-compose.dev-lane.yml binds runtime-effects to the .201
