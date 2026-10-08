@@ -298,7 +298,7 @@ class TestReceiptKeepsTheDimensions:
 
 
 def _always_failing_runner(
-    cmd, capture_output=True, text=True, timeout=30, check=False
+    cmd, capture_output=True, text=True, timeout=30, check=False, env=None
 ):
     """Every docker/rpk probe fails. The health leg is what these tests read."""
     import subprocess

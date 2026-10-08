@@ -425,3 +425,27 @@ def main_generator(argv: list[str]) -> int:
 def test_declared_containers_reads_every_lane() -> None:
     m = _manifest(a=_lane("x", "y"), b=_lane("z"))
     assert declared_containers(m) == {"a": {"x", "y"}, "b": {"z"}}
+
+
+@pytest.mark.parametrize("count", [0, 1])
+def test_drift_count_one_refuses_and_zero_passes(count, tmp_path):
+    repo = _SCRIPTS.parent
+    snapshot = json.loads(
+        (repo / "deploy/lane-census/census-snapshot.json").read_text()
+    )
+    snapshot["drift_count"] = count
+    snapshot["findings"] = (
+        [
+            {
+                "lane": "dev",
+                "kind": "container_unhealthy",
+                "container": "known-bad-worker",
+                "detail": "known-bad fixture",
+            }
+        ]
+        if count
+        else []
+    )
+    path = tmp_path / "census.json"
+    path.write_text(json.dumps(snapshot))
+    assert main(["--snapshot", str(path)]) == count
