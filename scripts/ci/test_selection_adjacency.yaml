@@ -38,6 +38,10 @@ test_infrastructure_paths:
   - tests/helpers/
   - pytest.ini
   - pyproject.toml
+  # OMN-18266: tests read topology/catalog data by path, outside import
+  # adjacency. Narrowing these inputs can omit the integration grant proof.
+  - src/omnibase_infra/topology/
+  - docker/catalog/database-topology/
 # Reverse dependency edges. Key = changed module; value = modules that import it.
 # When `models` changes, also run tests for everything in `models.reverse_deps`.
 # Note: shared_modules entries here are not consulted at runtime

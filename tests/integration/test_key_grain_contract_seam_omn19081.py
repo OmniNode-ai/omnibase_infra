@@ -10,9 +10,9 @@ wiring factory, with no step in between supplying it.
 
 Those are different failures. Every accessor can be correct while the wiring
 never passes a grain, and that shape ships a silent regression past every
-unit test in the sibling module: the exemption would quietly come from the
-fallback on every runtime, including ones whose contracts declare it, and
-nothing would say so.
+unit test in the sibling module: no exemption would ever be taken, on any
+runtime, including ones whose contracts declare it, and the live content-
+addressed exposures would read as loss.
 
 So this walks the chain the runtime walks:
 
@@ -27,7 +27,7 @@ Related Tickets:
     - OMN-19081: this change
     - OMN-18908: the contract field it reads
     - OMN-18910: the dimension it feeds
-    - OMN-19093: deleting the fallback once every runtime declares
+    - OMN-19093: the version-window fallback this change deleted
 """
 
 from __future__ import annotations
@@ -43,7 +43,6 @@ from omnibase_infra.runtime.auto_wiring.handler_wiring import (
     resolve_key_grain,
 )
 from omnibase_infra.runtime.health.projection_apply_flow import (
-    FALLBACK_IMMUTABLE_GRAIN_PROJECTIONS,
     evaluate_projection_apply_flow,
     projection_delta_dropped_status,
 )
@@ -111,12 +110,11 @@ def _rising_verdict(projection: str = "_Writer") -> object:
         registered_projections=counters.registered_projections(),
         immutable_grain_projections=counters.immutable_grain_projections(),
         grain_unresolved_projections=counters.grain_unresolved_projections(),
-        fallback_immutable_projections=FALLBACK_IMMUTABLE_GRAIN_PROJECTIONS,
     )
 
 
 class _Writer:
-    """A projection whose class name is NOT in the fallback list.
+    """A projection whose class name this repository has never listed.
 
     Deliberately unknown to this repository, so an exemption it receives can
     only have come from the contract.
@@ -139,7 +137,6 @@ def test_a_declared_immutable_grain_reaches_the_verdict_through_the_seam(
     verdict = _rising_verdict()
 
     assert verdict.excluded_immutable_grain == ("_Writer",)
-    assert verdict.fallback_exempted_projections == ()
     assert projection_delta_dropped_status(verdict) == "HEALTHY"
 
 
@@ -166,11 +163,11 @@ def test_negative_control_a_declared_mutable_grain_still_grades(
 def test_an_undeclared_grain_is_graded_and_named_rather_than_exempted(
     tmp_path: Path,
 ) -> None:
-    """The version window, for a projection the fallback does not cover.
+    """No declaration: graded and reported rather than silently exempted.
 
-    This is the case the pre-PR proof measured on a runtime predating the
-    declaration: no grain resolves, the fallback does not name this handler,
-    so it is graded and reported rather than silently exempted.
+    A contract that declares no grain resolves none, and there is no list to
+    fall back on, so the projection is graded and named under the unresolved
+    token.
     """
     handler = _Writer()
     _drive(handler, _contract(tmp_path, None))
@@ -178,7 +175,6 @@ def test_an_undeclared_grain_is_graded_and_named_rather_than_exempted(
     verdict = _rising_verdict()
 
     assert verdict.grain_unresolved_projections == ("_Writer",)
-    assert verdict.fallback_exempted_projections == ()
     assert projection_delta_dropped_status(verdict) == "DEGRADED"
 
 

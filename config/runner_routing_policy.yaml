@@ -925,6 +925,12 @@ route:
     # tests/ci/test_scheduled_run_failure_rate_omn18322.py for the captured
     # evidence), so a workflow that is merely occasionally flaky does not page.
     scheduled_failure_threshold_pct: 10.0
+    # OMN-18780: routing drift is actionable even below the fleet's general
+    # noise threshold. Reuse B1's evaluator, destination and dedup window;
+    # this stricter per-workflow threshold changes no runner placement.
+    scheduled_workflow_thresholds:
+      omnibase_infra:
+        .github/workflows/runner-routing-audit.yml: 0.0
     # 7 days: long enough that a 10-minute cron (pr-ci-zombie-detector.yml
     # itself: ~1000 scheduled runs/week) and a nightly job (~7 runs/week) both
     # clear a sample size worth a percentage, short enough that the alert
@@ -1045,6 +1051,8 @@ route:
       # constants live and fails when the two disagree, so drift is a red test
       # rather than a silent false positive.
       omnibase_infra:
+        # OMN-18780: the reusable audit now belongs to the required CI Summary.
+        - runner-routing-audit / Runner Routing Audit
         # OMN-18796: the no-new-advisory-job gate. Enforced by the CI Summary
         # poller via EXPECTED_EXTERNAL_CONTEXTS and absent from branch
         # protection, which is exactly the shape this list records.

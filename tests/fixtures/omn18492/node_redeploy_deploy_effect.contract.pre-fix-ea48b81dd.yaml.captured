@@ -1,0 +1,146 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# ONEX Node Contract - Deploy Publish-Monitor + Rollback EFFECT
+#
+# Deploy publish-monitor + rollback effect (OMN-13211 / B3). Absorbs the
+# node_redeploy HandlerRedeployKafka (publish-monitor) and DeploymentAdapterKafka
+# (rollback). The only real I/O in the redeploy decomposition: publish the
+# HMAC-signed rebuild command to the external .201 deploy agent, poll for
+# completion, and roll back on failed post-deploy health. No SSH, no rpk, no
+# subprocess.
+---
+name: node_redeploy_deploy_effect
+contract_version: {major: 1, minor: 0, patch: 0}
+node_type: effect
+node_version: {major: 1, minor: 0, patch: 0}
+
+description: >
+  Deploy publish-monitor + rollback effect. Publishes the HMAC-signed deploy-agent
+  rebuild command to the external .201 deploy agent, subscribes the deploy-agent
+  completion event and polls by correlation_id, and on a deploy that succeeded then
+  failed post-deploy health (smoke/health/timeout) publishes the redeploy-rolled-back
+  event. The actual Docker rebuild and image restore are the external deploy agent's
+  job — this effect publishes the command, monitors the bus, and records the outcome.
+  Event bus is DI-injected; the exact topic names are declared below under event_bus
+  and are the single source of truth (no topic strings in this prose).
+
+# OMN-17888. Two topics of two different CATEGORIES reach ONE handler class, so they are
+# routed by TOPIC, not by operation: both entries name the same operation and
+# `operation_match` cannot tell them apart. This is the shape the sibling in the same FSM
+# already uses -- `node_redeploy_orchestrator` routes one command and four events to
+# `HandlerRedeployOrchestrator` by topic, and the handler branches on the event name.
+#
+# Each entry declares the model its OWN producer publishes. Declaring one model for both
+# is what dead-lettered 72 deploy-agent completion events on the .201 dev lane between
+# 2026-09-11T13:12:41Z and 2026-09-16T11:28:20Z: the event arrived, the route resolved,
+# and the handler validated a completion payload as the COMMAND model
+# (`12 validation errors for ModelDeployPublishCommand`). Enforced repo-wide by
+# `omnimarket.validators.routing_input_model_fit`.
+handler_routing:
+  routing_strategy: topic_match
+  handlers:
+    - operation: "redeploy.deploy.publish_monitor"
+      topic: onex.cmd.omnimarket.redeploy-deploy-publish.v1
+      message_category: command
+      handler:
+        name: HandlerDeployPublishMonitor
+        module: omnimarket.nodes.node_redeploy_deploy_effect.handlers.handler_deploy_publish_monitor
+      description: "Publish rebuild command, poll completion, roll back on failed health."
+      input_model:
+        name: ModelDeployPublishCommand
+        module: omnimarket.nodes.node_redeploy_deploy_effect.models.model_deploy_publish_command
+        description: "Inputs for one publish-monitor (+rollback) invocation."
+    - operation: "redeploy.deploy.publish_monitor"
+      topic: onex.evt.deploy.rebuild-completed.v1
+      message_category: event
+      handler:
+        name: HandlerDeployPublishMonitor
+        module: omnimarket.nodes.node_redeploy_deploy_effect.handlers.handler_deploy_publish_monitor
+      description: >-
+        Observe a deploy-agent completion. This durable arm records the completion under
+        its own model; the in-flight deploy is resolved by the correlation-scoped
+        subscription publish_and_monitor opens, because the runtime constructs a separate
+        handler instance per routing entry and this one cannot see that instance's future.
+      input_model:
+        name: ModelDeployRebuildCompleted
+        module: omnimarket.events.runtime_deployment
+        description: "The deploy agent's completion event, as it is published."
+
+handler:
+  module: omnimarket.nodes.node_redeploy_deploy_effect.handlers.handler_deploy_publish_monitor
+  class: HandlerDeployPublishMonitor
+  input_model: omnimarket.nodes.node_redeploy_deploy_effect.models.model_deploy_publish_command.ModelDeployPublishCommand
+
+input_model:
+  name: ModelDeployPublishCommand
+  module: omnimarket.nodes.node_redeploy_deploy_effect.models.model_deploy_publish_command
+  description: "Inputs for one deploy publish-monitor (+rollback) invocation."
+output_model:
+  name: ModelRedeployResult
+  module: omnimarket.events.runtime_deployment
+  description: "Structured deploy outcome (success/failure, digest, health, errors)."
+
+descriptor:
+  node_archetype: effect
+  purity: side_effect
+  idempotent: false
+  timeout_ms: 660000
+  runtime_profiles:
+    - effects
+
+terminal_event: onex.evt.omnimarket.redeploy-rolled-back.v1
+
+event_bus:
+  subscribe_topics:
+    - onex.cmd.omnimarket.redeploy-deploy-publish.v1
+    # Cross-service subscribe: deploy agent completion event.
+    - onex.evt.deploy.rebuild-completed.v1
+  publish_topics:
+    # Cross-service publish: deploy agent rebuild command.
+    - onex.cmd.deploy.rebuild-requested.v1
+    # OMN-9579 rollback: failed post-deploy health restores the previous image.
+    - onex.evt.omnimarket.redeploy-rolled-back.v1
+    # OMN-13440 defense-in-depth: prod deploy refused at the EFFECT boundary when
+    # the command is not target-bound to a verified prod-promotion grant.
+    - onex.evt.omnimarket.redeploy-deploy-refused.v1
+
+config_fields:
+  # === Runtime lane health URLs (OMN-12807) ===
+  # Semicolon-separated HTTP health-check URLs probed after each deploy phase.
+  # Resolved from overlay env vars via lane_target() in runtime_deployment;
+  # fails closed when the var is absent.
+  runtime_dev_health_urls:
+    default: "${env.RUNTIME_DEV_HEALTH_URLS}"
+    description: >
+      Dev-lane runtime health-check URLs (semicolon-separated).
+      Overlay binds RUNTIME_DEV_HEALTH_URLS.
+  runtime_stability_health_urls:
+    default: "${env.RUNTIME_STABILITY_HEALTH_URLS}"
+    description: >
+      Stability-test-lane runtime health-check URLs (semicolon-separated).
+      Overlay binds RUNTIME_STABILITY_HEALTH_URLS.
+  runtime_prod_health_urls:
+    default: "${env.RUNTIME_PROD_HEALTH_URLS}"
+    description: >
+      Prod-lane runtime health-check URLs (semicolon-separated).
+      Overlay binds RUNTIME_PROD_HEALTH_URLS.
+
+dependencies:
+  packages:
+    - "omnibase_core>=0.39.0"
+
+secret_dependencies:
+  DEPLOY_AGENT_HMAC_SECRET:
+    required: false
+    description: "Shared HMAC secret for signing the deploy-agent rebuild command."
+
+metadata:
+  transport_type: kafka
+  description: "Deploy publish-monitor + rollback effect"
+  author: "OmniNode Platform Team"
+  related_tickets:
+    - "OMN-13211"
+    - "OMN-9579"
+    - "OMN-12577"
+    - "OMN-13440"
+    - "OMN-12807"

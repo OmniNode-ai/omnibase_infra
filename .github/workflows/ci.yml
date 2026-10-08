@@ -140,6 +140,16 @@ env:
   LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
 
 jobs:
+  # OMN-18780: execute the existing audit inside this required umbrella run.
+  # No preflight dependency: routing drift must remain observable on a red base.
+  runner-routing-audit:
+    uses: ./.github/workflows/runner-routing-audit.yml
+    permissions:
+      contents: read
+      actions: read
+    secrets:
+      CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+
   # =============================================================================
   # Per-run runner routing (OMN-18031)
   # =============================================================================
@@ -2411,6 +2421,11 @@ jobs:
           fi
           echo "Changed files:"
           cat changed.txt
+
+      # OMN-18266: prove the selector before trusting its impacted subset.
+      # A failing regression must stop selection even for a data-only PR.
+      - name: Test impacted-test selector
+        run: uv run --frozen pytest tests/unit/scripts/ci/test_detect_test_paths.py -q --timeout=60
 
       # OMN-19927 (plan task S2): was this commit validated by a successful
       # merge group? A queue landing fast-forwards `dev` to the merge-group
