@@ -1,0 +1,8 @@
+{
+  "_provenance": {
+    "source": "git-object:OmniNode-ai/omninode_infra@14972e07c96041933d20aec101f962710cb79fcc:.github/workflows/c13-customer-local-delegation.yml",
+    "captured_utc": "2026-09-28T06:26:36Z",
+    "source_file": "tests/fixtures/omn19412/c13-customer-local-delegation.yml.captured",
+    "source_sha256": "52d7cf3d3a45812f3e8ac3141a94f424177cb66756e008e634db037653ffc2a7"
+  }
+}
