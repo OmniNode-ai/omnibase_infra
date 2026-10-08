@@ -8,6 +8,7 @@ import asyncio
 import io
 import json
 import subprocess
+import urllib.error
 from pathlib import Path
 from typing import Any
 
@@ -324,6 +325,154 @@ def test_boot_change_retries_the_whole_observation(
     if always_changes:
         assert "replaced during the run" in observed.read_error
         assert not any(argv[0] == "fake-pytest" for argv, _ in fake.calls)
+
+
+@pytest.mark.parametrize("refused_gets", [1, 2])
+@pytest.mark.parametrize(
+    "identity_change", ["replaced", "restarted", "stopped", "unreadable"]
+)
+def test_mid_run_redeploy_retries_after_connection_refused(
+    tmp_path: Path, refused_gets: int, identity_change: str
+) -> None:
+    target = tmp_path / script.WIRING_MODULE
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        "\n".join(
+            f'def {f}():\n    flow_counters.register("group")\n'
+            for f in script.BRANCHES.values()
+        )
+    )
+    fake = FakeIO()
+    failures = 0
+    identity_reread_pending = False
+
+    def http(url: str, **kwargs: Any) -> io.BytesIO:
+        nonlocal failures, identity_reread_pending
+        if failures < refused_gets:
+            failures += 1
+            identity_reread_pending = True
+            raise urllib.error.URLError(
+                ConnectionRefusedError(111, "Connection refused")
+            )
+        return fake.http(url, **kwargs)
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal identity_reread_pending
+        proc = fake.run(argv, **kwargs)
+        if argv[1] == "inspect" and failures:
+            body = json.loads(proc.stdout)
+            if identity_change in ("replaced", "restarted"):
+                body[0]["State"]["StartedAt"] = f"2026-10-08T00:59:{failures:02d}Z"
+                if identity_change == "replaced":
+                    body[0]["Id"] = f"new-{failures}-{argv[-1]}"
+            elif identity_reread_pending:
+                identity_reread_pending = False
+                if identity_change == "unreadable":
+                    return subprocess.CompletedProcess(argv, 1, "", "container missing")
+                body[0]["State"]["Status"] = "exited"
+            proc.stdout = json.dumps(body)
+        return proc
+
+    adapter = HandlerDockerConsumerFlowTarget(
+        runner=run, urlopen=http, sleep=lambda _: None, repo_root=tmp_path
+    )
+    request = ModelConsumerFlowRequest(
+        subject_lane="dev",
+        docker_bin="fake-docker",
+        samples=2,
+        sample_interval=0,
+        settle_seconds=0,
+        injection_wait=0,
+        attempts=3,
+        pytest_cmd="fake-pytest",
+        scratch=tmp_path,
+    )
+    observed = asyncio.run(adapter.observe(request))
+    assert observed.read_ok, observed.read_error
+    assert failures == refused_gets
+    assert grade_consumer_flow(request, observed).outcome == "PASS"
+    assert sum(
+        argv[1] == "logs" and "--since" not in argv for argv, _ in fake.calls
+    ) == (refused_gets + 1) * len(script.RUNTIME_CONTAINERS)
+    assert any(argv[0] == "fake-pytest" for argv, _ in fake.calls)
+
+
+def test_connection_refused_with_unchanged_running_identity_stays_unreadable(
+    tmp_path: Path,
+) -> None:
+    fake = FakeIO()
+    gets = 0
+
+    def http(url: str, **kwargs: Any) -> io.BytesIO:
+        nonlocal gets
+        gets += 1
+        raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+
+    adapter = HandlerDockerConsumerFlowTarget(
+        runner=fake.run, urlopen=http, sleep=lambda _: None, repo_root=tmp_path
+    )
+    request = ModelConsumerFlowRequest(
+        subject_lane="dev",
+        docker_bin="fake-docker",
+        settle_seconds=0,
+        pytest_cmd="fake-pytest",
+        scratch=tmp_path,
+    )
+    observed = asyncio.run(adapter.observe(request))
+    assert not observed.read_ok
+    assert "Connection refused" in observed.read_error
+    assert "replaced during the run" not in observed.read_error
+    assert "ConsumerFlowBootChangedError" not in observed.read_error
+    assert grade_consumer_flow(request, observed).outcome == "INDETERMINATE"
+    assert gets == 1
+    assert not any(argv[0] == "fake-pytest" for argv, _ in fake.calls)
+
+
+@pytest.mark.parametrize("attempts", [1, 3])
+def test_repeated_mid_run_redeploy_exhausts_attempts(
+    tmp_path: Path, attempts: int
+) -> None:
+    fake = FakeIO()
+    inspections = 0
+    gets = 0
+
+    def http(url: str, **kwargs: Any) -> io.BytesIO:
+        nonlocal gets
+        gets += 1
+        raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal inspections
+        proc = fake.run(argv, **kwargs)
+        if argv[1] == "inspect":
+            inspections += 1
+            body = json.loads(proc.stdout)
+            revision = (inspections - 1) // len(script.BOOT_CONTAINERS)
+            body[0]["Id"] = str(revision)
+            body[0]["State"]["StartedAt"] = f"2026-10-08T00:59:{revision:02d}Z"
+            proc.stdout = json.dumps(body)
+        return proc
+
+    adapter = HandlerDockerConsumerFlowTarget(
+        runner=run, urlopen=http, sleep=lambda _: None, repo_root=tmp_path
+    )
+    request = ModelConsumerFlowRequest(
+        subject_lane="dev",
+        docker_bin="fake-docker",
+        settle_seconds=0,
+        attempts=attempts,
+        pytest_cmd="fake-pytest",
+        scratch=tmp_path,
+    )
+    observed = asyncio.run(adapter.observe(request))
+    assert not observed.read_ok
+    assert "replaced during the run" in observed.read_error
+    assert "first read error:" in observed.read_error
+    assert "Connection refused" in observed.read_error
+    assert grade_consumer_flow(request, observed).outcome == "INDETERMINATE"
+    assert gets == request.attempts
+    assert inspections == 2 * request.attempts * len(script.BOOT_CONTAINERS)
+    assert not any(argv[0] == "fake-pytest" for argv, _ in fake.calls)
 
 
 def test_negative_timeout_restores_the_exact_original_bytes(tmp_path: Path) -> None:
