@@ -1753,6 +1753,19 @@ guard_hotpatch_ledger() {
 # Concurrency Lock
 # =============================================================================
 
+acquire_lock_with_holder() {
+    # Take the lock directory "$1" atomically and record the holder (pid, host,
+    # UTC timestamp) inside it, so an operator can tell a live holder from a
+    # corpse. Never reclaims: returns 1 when the directory already exists.
+    local dir="$1"
+    mkdir "${dir}" 2>/dev/null || return 1
+    # pid first, so a reader that sees the directory finds the owner soonest.
+    echo $$ > "${dir}/pid"
+    hostname > "${dir}/host" 2>/dev/null || true
+    date -u +%Y-%m-%dT%H:%M:%SZ > "${dir}/started_at" 2>/dev/null || true
+    return 0
+}
+
 acquire_lock() {
     # Acquire a mkdir-based concurrency lock to prevent parallel deployments.
     mkdir -p "${DEPLOY_ROOT}"
@@ -1762,12 +1775,10 @@ acquire_lock() {
     # Use mkdir for atomic, cross-platform locking (works on macOS + Linux).
     # mkdir is atomic on all POSIX systems -- it either creates the directory
     # or fails if it already exists, with no race window.
-    if mkdir "${LOCK_DIR}" 2>/dev/null; then
-        # Lock acquired -- write PID immediately to avoid a window where the
-        # lock directory exists but has no PID file (Issue: if the script is
-        # killed between mkdir and PID write, subsequent runs cannot verify
-        # the lock owner and refuse to proceed).
-        echo $$ > "${pid_file}"
+    if acquire_lock_with_holder "${LOCK_DIR}"; then
+        # Lock acquired; the holder record (pid, host, started_at) was written
+        # immediately after the mkdir by acquire_lock_with_holder.
+        :
     else
         # Never reclaim a lock during deployment. A missing/empty PID can be
         # the mkdir-to-publication window of a concurrent scoped deployment;
