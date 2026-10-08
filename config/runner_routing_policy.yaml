@@ -925,6 +925,12 @@ route:
     # tests/ci/test_scheduled_run_failure_rate_omn18322.py for the captured
     # evidence), so a workflow that is merely occasionally flaky does not page.
     scheduled_failure_threshold_pct: 10.0
+    # OMN-18780: routing drift is actionable even below the fleet's general
+    # noise threshold. Reuse B1's evaluator, destination and dedup window;
+    # this stricter per-workflow threshold changes no runner placement.
+    scheduled_workflow_thresholds:
+      omnibase_infra:
+        .github/workflows/runner-routing-audit.yml: 0.0
     # 7 days: long enough that a 10-minute cron (pr-ci-zombie-detector.yml
     # itself: ~1000 scheduled runs/week) and a nightly job (~7 runs/week) both
     # clear a sample size worth a percentage, short enough that the alert
@@ -1045,6 +1051,10 @@ route:
       # constants live and fails when the two disagree, so drift is a red test
       # rather than a silent false positive.
       omnibase_infra:
+        # OMN-18780: the reusable audit now belongs to the required CI Summary.
+        - runner-routing-audit / Runner Routing Audit
+        # OMN-18648: required through the CI Summary external assertion.
+        - CI Live Contact (OMN-18648)
         # OMN-18796: the no-new-advisory-job gate. Enforced by the CI Summary
         # poller via EXPECTED_EXTERNAL_CONTEXTS and absent from branch
         # protection, which is exactly the shape this list records.
@@ -1136,6 +1146,9 @@ route:
         # OMN-20562: the runtime_profiles validator, registered STRICT once its
         # allowlist was emptied and deleted.
         - Runtime Profiles / validate
+        # OMN-18786: the seed-provenance check, now unconditional and registered in
+        # EXPECTED_EXTERNAL_CONTEXTS.
+        - Seed Provenance Check
         # OMN-18926: the from-empty migration proof, now called from ci.yml and
         # registered STRICT. Enforced by the CI Summary poller and absent from
         # branch protection, which is exactly the shape this list records.

@@ -3,7 +3,7 @@
 
 """RT-6 deploy readback must verify exactly the rebuilt service scope [OMN-15348].
 
-Defect: `readback_deployed_ref()` in `scripts/deploy-runtime.sh` was hardcoded to
+Defect: `readback_deployed_ref()` in `src/omnibase_infra/handlers/handler_runtime_deploy.sh` was hardcoded to
 probe only the `omninode-runtime` container's image-revision label, regardless of
 `RUNTIME_BUILD_SERVICES_OVERRIDE` (the OMN-14873 scoped-rebuild override). Observed
 live 2026-07-28T23:08-23:17Z on the .201 dev lane: a correctly scoped rebuild
@@ -15,7 +15,7 @@ and `registry.json` on disk while the freshly-recreated `runtime-effects` contai
 stayed live.
 
 The fix loops the readback over `RUNTIME_BUILD_SERVICES` (the array
-`deploy-runtime.sh` already resolves from `RUNTIME_BUILD_SERVICES_OVERRIDE`, or the
+`onex-runtime-deploy` already resolves from `RUNTIME_BUILD_SERVICES_OVERRIDE`, or the
 full `RUNTIME_SERVICES` set when unset) instead of a single hardcoded container, so
 an out-of-scope container's stale label is never probed -- it can neither fail the
 deploy nor trigger restore.
@@ -40,7 +40,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 # OMN-16729: the lane -> compose-file resolvers live in a shared lib now, so the
 # refresh wrappers' rollback recreate derives the same file list.
 COMPOSE_FILES_SH = (
@@ -68,7 +70,7 @@ def _extract_function(name: str) -> str:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, (
-        f"could not extract function {name}() from deploy-runtime.sh"
+        f"could not extract function {name}() from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -88,7 +90,7 @@ def _extract_array(name: str) -> str:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, (
-        f"could not extract array {name}=() from deploy-runtime.sh"
+        f"could not extract array {name}=() from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -99,7 +101,7 @@ def _extract_scalar_omn18656(name: str) -> str:
         rf'^readonly {re.escape(name)}="[^"]*"$', _script_text(), re.MULTILINE
     )
     assert match is not None, (
-        f"could not extract readonly {name}= from deploy-runtime.sh"
+        f"could not extract readonly {name}= from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -205,6 +207,10 @@ def _run_readback(
             _extract_function("resolve_lane_runtime_container_name"),
             _extract_array("DEV_LANE_ONLY_RUNTIME_SERVICES"),
             _extract_array("STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES"),
+            # OMN-18496: readback scope is filtered through the cloud-migration gate.
+            _extract_array("DEV_LANE_CLOUD_DB_SERVICES"),
+            "DEV_LANE_CLOUD_MIGRATIONS_READY=true",
+            _extract_function("exclude_cloud_database_services"),
             _extract_function("resolve_lane_runtime_services"),
             # OMN-18656: readback_deployed_ref() now partitions by the repo
             # that BUILT each image before asserting its ref, so its new
@@ -265,7 +271,7 @@ def test_scoped_run_ignores_out_of_scope_stale_container(tmp_path: Path) -> None
 @pytest.mark.unit
 def test_scoped_run_fails_and_restores_on_in_scope_mismatch(tmp_path: Path) -> None:
     """(ii) Scoped run: the in-scope container genuinely fails readback -> RT-6
-    fails (exit 1), which is the same exit code that fires deploy-runtime.sh's
+    fails (exit 1), which is the same exit code that fires onex-runtime-deploy's
     auto-restore trap."""
     result = _run_readback(
         tmp_path,

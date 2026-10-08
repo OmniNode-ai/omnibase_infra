@@ -250,7 +250,7 @@ services:
       replicas: ${PROD_WORKER_REPLICAS:?runtime policy contract must set PROD_WORKER_REPLICAS (source docker/runtime-policy.env)}
   # OMN-13815: agent-actions-consumer, skill-lifecycle-consumer, intelligence-api
   # and omninode-contract-resolver are disabled-by-profile for the --profile
-  # runtime cold path, but deploy-runtime.sh's RUNTIME_SERVICES warm-restart path
+  # runtime cold path, but onex-runtime-deploy's RUNTIME_SERVICES warm-restart path
   # starts them explicitly by name (`up -d --no-deps --force-recreate <service>`),
   # which bypasses the profile gate. Without a lane-scoped container_name they
   # inherit the bare base name and collide with the dev lane's bring-up. Pin

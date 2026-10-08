@@ -18,9 +18,9 @@ written by two authorities that did not agree on its contents.
 2. The render requires nine ``${VAR:?}`` names that resolve from no committed
    source. The deploy agent supplied four of them from an inline sentinel dict
    inside ``_compose_env`` and the rest from whatever the lab host happened to
-   hold; ``scripts/deploy-runtime.sh`` and
+   hold; ``src/omnibase_infra/handlers/handler_runtime_deploy.sh`` and
    ``scripts/runtime_build/refresh_stability_lane.sh`` supply none of them. So
-   once the render had replaced the tracked file, every deploy-runtime.sh run --
+   once the render had replaced the tracked file, every onex-runtime-deploy run --
    the dev warm refresh and the stability refresh both -- failed compose
    validation on the first of them and auto-restored. The two lanes that are
    the proof surface for beta work were re-broken by every deploy-agent run.
@@ -106,6 +106,7 @@ def _tracked_files() -> list[str]:
     """Every path git tracks in this repo."""
     result = subprocess.run(
         ["git", "-C", str(_REPO_ROOT), "ls-files"],
+        env={},
         capture_output=True,
         text=True,
         check=True,
@@ -218,6 +219,7 @@ def test_generated_compose_path_is_gitignored_and_untracked() -> None:
     )
     result = subprocess.run(
         ["git", "-C", str(_REPO_ROOT), "check-ignore", "-q", _GENERATED_COMPOSE],
+        env={},
         check=False,
     )
     assert result.returncode == 0, (
@@ -232,7 +234,7 @@ def test_no_deploy_path_injects_a_parse_only_sentinel() -> None:
 
     The four sentinels this replaces were visible to exactly one deploy path,
     which is how the deploy agent came to be able to validate a compose render
-    that scripts/deploy-runtime.sh could not. Test fixtures are out of scope: a
+    that src/omnibase_infra/handlers/handler_runtime_deploy.sh could not. Test fixtures are out of scope: a
     fixture supplying render-only env cannot desynchronise one deploy path from
     another.
     """
@@ -317,7 +319,7 @@ def test_generated_compose_required_env_is_exactly_declared(tmp_path: Path) -> N
 
     Runs the real generator. Before OMN-17291 nine of these names were declared
     nowhere in the repo, so the only way to learn that a render could not be
-    validated by deploy-runtime.sh was to watch a lane deploy fail.
+    validated by onex-runtime-deploy was to watch a lane deploy fail.
     """
     assert _GENERATED_MANIFEST.is_file(), f"missing {_GENERATED_MANIFEST}"
 

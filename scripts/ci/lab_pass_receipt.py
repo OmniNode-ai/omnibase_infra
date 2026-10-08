@@ -5287,7 +5287,9 @@ def evaluate_workflow_verdict(
 
     ``dispatch_title_contains`` (OMN-19311, D11) narrows an admitted
     ``workflow_dispatch`` further: such a run is a measurement only when its run
-    title carries the token. D11's nightly takes a ``lane`` input and renders it
+    title carries the complete whitespace-delimited token. A substring such as
+    ``lane=stability-test-copy`` or ``other-lane=stability-test`` does not name
+    the governed lane. D11's nightly takes a ``lane`` input and renders it
     into its ``run-name``; admitting its dispatches (the fast path to a fresh
     measurement after a fix) without this would let a green dispatch aimed at
     the dev lane stand in for the governed stability-test verdict, dropping the
@@ -5421,7 +5423,7 @@ def evaluate_workflow_verdict(
         and (
             not dispatch_title_contains
             or r.get("event") != "workflow_dispatch"
-            or dispatch_title_contains in str(r.get("display_title", ""))
+            or dispatch_title_contains in str(r.get("display_title", "")).split()
         )
     ]
     ignored = len(runs) - len(candidates)
@@ -6004,7 +6006,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help=(
             "OMN-19311: an admitted workflow_dispatch run is a measurement only "
-            "when its run title carries this token (the lane it measured)"
+            "when its run title carries this complete whitespace-delimited "
+            "token (the lane it measured)"
         ),
     )
     verdict.add_argument(

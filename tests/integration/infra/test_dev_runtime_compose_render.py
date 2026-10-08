@@ -13,7 +13,7 @@ off-host client (CI runner, another machine).
 OMN-14968 (`DEV_WORKER_REPLICAS`): the `runtime-worker` deploy block resolved a
 BARE `${WORKER_REPLICAS:-0}` that no surface exported, so the dev lane rendered
 `replicas: 0`. `docker compose up -d --no-deps runtime-worker` then exited 0
-creating NOTHING, while `deploy-runtime.sh`'s `RUNTIME_SERVICES` / RT-6 deploy
+creating NOTHING, while `onex-runtime-deploy`'s `RUNTIME_SERVICES` / RT-6 deploy
 readback requires a running container — so every dev-lane deploy aborted at the
 readback and auto-restored. The lane-prefixed value is the ledgered policy
 contract's (`DEV_WORKER_REPLICAS=1`, rendered from
@@ -39,7 +39,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
 # OMN-17448: the dev lane's SECOND `-f` file. `resolve_compose_file_args()` in
-# scripts/deploy-runtime.sh appends this for the bare `omnibase-infra` project
+# src/omnibase_infra/handlers/handler_runtime_deploy.sh appends this for the bare `omnibase-infra` project
 # and never for a lane with its own overlay, so a service declared here reaches
 # the dev lane and provably no other.
 DEV_LANE_OVERLAY = REPO_ROOT / "docker" / "docker-compose.dev-lane.yml"
@@ -47,7 +47,7 @@ _DEFAULT_POLICY_ENV_FILE = "docker/runtime-policy.env"
 POLICY_ENV_PATH = REPO_ROOT / "docker" / "runtime-policy.env"
 
 # NOTE: docker-compose.infra.yml (bare, no overlay) is the dev lane's own
-# compose file (scripts/deploy-runtime.sh: "Dev lane: infra.yml alone"). A
+# compose file (src/omnibase_infra/handlers/handler_runtime_deploy.sh: "Dev lane: infra.yml alone"). A
 # `docker compose config` render interpolates every service's env block
 # regardless of --profile, so every other :?-required var in the file must
 # still be supplied here even though this suite only cares about
@@ -314,7 +314,7 @@ def test_dev_lane_renders_one_runtime_worker_replica() -> None:
     The value is the ledgered policy contract's `DEV_WORKER_REPLICAS`, supplied
     by `docker/runtime-policy.env`. A render of 0 reproduces the defect: compose
     creates no container, `up` exits 0 with no output, and the RT-6 deploy
-    readback in `scripts/deploy-runtime.sh` then fails closed on an in-scope
+    readback in `src/omnibase_infra/handlers/handler_runtime_deploy.sh` then fails closed on an in-scope
     service it can never resolve.
     """
     env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)

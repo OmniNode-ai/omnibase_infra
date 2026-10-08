@@ -1554,7 +1554,7 @@ def evaluate_work_ledger_projection_stale(
 
 #: A consent row in the CANONICAL shape Operating Rule 18 specifies.
 _CONSENT_ROW_LABELLED = re.compile(
-    r"OPERATOR-CONSENT.*?APPROVED SCOPE:(?P<approved>.*?)\|"
+    r"^[^|]+\|\s*OPERATOR-CONSENT\s*\|.*?APPROVED SCOPE:(?P<approved>.*?)\|"
     r"\s*OUT OF SCOPE:(?P<out>.*?)(\||$)",
     re.IGNORECASE,
 )
@@ -1578,11 +1578,14 @@ _CONSENT_ROW_LABELLED = re.compile(
 #: What still refuses, and is proven by its own control: a row with no
 #: approver, a row naming no channel, a row naming a DIFFERENT channel, a row
 #: with no exclusion clause at all, and an unreadable ledger.
-_CONSENT_ROW_RULING = re.compile(r"OPERATOR-CONSENT(?P<body>.*)", re.IGNORECASE)
+_CONSENT_ROW_RULING = re.compile(
+    r"^[^|]+\|\s*RULING\s*\|.*?OPERATOR-CONSENT(?P<body>.*)", re.IGNORECASE
+)
 _APPROVED_BY = re.compile(
     r"approved_by\s*=\s*(?P<who>[A-Za-z0-9_@.:-]+)", re.IGNORECASE
 )
 _EXCLUSION = re.compile(r"\bno\s+new\b|\bno\s+webhook\b|OUT OF SCOPE:", re.IGNORECASE)
+_LAB_ALARM_SCOPE = re.compile(r"\blab alarms?\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -1611,8 +1614,13 @@ def resolve_posting_consent(
 
     Two accepted shapes, both requiring the same four substantive facts: the
     OPERATOR-CONSENT token, an ``approved_by``, the destination channel, and an
-    explicit exclusion. See :data:`_CONSENT_ROW_RULING` for why the second
-    shape is accepted.
+    explicit exclusion. Both must authorize lab alarms: consent for another
+    purpose in the same channel does not authorize this sender. See
+    :data:`_CONSENT_ROW_RULING` for why the second shape is accepted.
+
+    Ledger rolls preserve authority in sibling ``archive/*-split.md`` files.
+    Read those after the live file, retaining the source file and line in the
+    citation rather than attributing an archived grant to the current ledger.
 
     An unreadable ledger returns ``None``: a grant that cannot be read is not
     a grant.
@@ -1622,36 +1630,68 @@ def resolve_posting_consent(
     except OSError:
         return None
 
-    for number, line in enumerate(lines, start=1):
-        labelled = _CONSENT_ROW_LABELLED.search(line)
-        if labelled is not None and labelled.group("out").strip():
-            if channel.lower() in labelled.group("approved").lower():
-                who = _APPROVED_BY.search(line)
-                return ModelPostingConsent(
-                    channel=channel,
-                    ledger_path=str(ledger_path),
-                    line=number,
-                    approved_by=who.group("who") if who else "operator",
-                )
-            continue
-
-        ruling = _CONSENT_ROW_RULING.search(line)
-        if ruling is None:
-            continue
-        body = ruling.group("body")
-        who = _APPROVED_BY.search(body)
-        if who is None:
-            continue
-        if channel.lower() not in body.lower():
-            continue
-        if _EXCLUSION.search(body) is None:
-            continue
-        return ModelPostingConsent(
-            channel=channel,
-            ledger_path=str(ledger_path),
-            line=number,
-            approved_by=who.group("who"),
+    channel_name = re.compile(
+        rf"(?<![\w#-]){re.escape(channel)}(?![\w-])", re.IGNORECASE
+    )
+    sources = [ledger_path]
+    try:
+        sources.extend(
+            sorted(
+                (ledger_path.parent / "archive").glob(f"{ledger_path.stem}_*-split.md"),
+                reverse=True,
+            )
         )
+    except OSError:
+        return None
+
+    for source in sources:
+        if source == ledger_path:
+            source_lines = lines
+        else:
+            try:
+                source_lines = source.read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()
+            except OSError:
+                continue
+        for number, line in enumerate(source_lines, start=1):
+            labelled = _CONSENT_ROW_LABELLED.search(line)
+            if labelled is not None:
+                approved = labelled.group("approved")
+                who = _APPROVED_BY.search(line)
+                if (
+                    who is not None
+                    and labelled.group("out").strip()
+                    and channel_name.search(approved) is not None
+                    and _LAB_ALARM_SCOPE.search(approved) is not None
+                ):
+                    return ModelPostingConsent(
+                        channel=channel,
+                        ledger_path=str(source),
+                        line=number,
+                        approved_by=who.group("who"),
+                    )
+                continue
+
+            ruling = _CONSENT_ROW_RULING.search(line)
+            if ruling is None:
+                continue
+            body = ruling.group("body")
+            who = _APPROVED_BY.search(body)
+            if who is None:
+                continue
+            if channel_name.search(body) is None:
+                continue
+            if _LAB_ALARM_SCOPE.search(body) is None:
+                continue
+            if _EXCLUSION.search(body) is None:
+                continue
+            return ModelPostingConsent(
+                channel=channel,
+                ledger_path=str(source),
+                line=number,
+                approved_by=who.group("who"),
+            )
     return None
 
 

@@ -47,12 +47,109 @@ from __future__ import annotations
 
 import argparse
 import ast
+import asyncio
+import json
 import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
+from uuid import uuid4
 
 import yaml
+
+from omnibase_core.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_core.models.event_bus.model_event_message import ModelEventMessage
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+from omnibase_core.models.validation.model_contract_validation_result import (
+    ModelContractValidationResult,
+)
+from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
+from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLike
+from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts_from_paths
+from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
+from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
+from omnibase_infra.runtime.service_dispatch_result_applier import (
+    build_contract_result_applier,
+)
+
+
+async def _validate_consumer_declarations(
+    requests: dict[str, dict[str, object]],
+) -> list[str]:
+    """Run the existing compute contract over the canonical local event bus."""
+    if not requests:
+        return []
+    contract_path = (
+        Path(__file__).resolve().parents[2]
+        / "src/omnibase_infra/nodes/node_contract_validate_compute/contract.yaml"
+    )
+    manifest = discover_contracts_from_paths([contract_path])
+    if manifest.errors or len(manifest.contracts) != 1:
+        raise ValueError(
+            f"Could not discover consumer validation contract: {manifest.errors}"
+        )
+    (contract,) = manifest.contracts
+    assert contract.event_bus is not None
+    (request_topic,) = contract.event_bus.subscribe_topics
+    response_topic = contract.terminal_event
+    if (
+        response_topic is None
+        or response_topic not in contract.event_bus.publish_topics
+    ):
+        raise ValueError("Consumer validation has no declared response topic")
+    bus = EventBusInmemory()
+    engine = MessageDispatchEngine()
+    responses: dict[str, ModelContractValidationResult] = {}
+
+    async def receive(message: ModelEventMessage) -> None:
+        envelope = json.loads(message.value)
+        responses[envelope["correlation_id"]] = (
+            ModelContractValidationResult.model_validate(envelope["payload"])
+        )
+
+    await bus.start()
+    try:
+        applier = build_contract_result_applier(
+            event_bus=cast("ProtocolEventBusLike", bus),
+            contract_path=contract_path,
+            publish_topics=contract.event_bus.publish_topics,
+            output_topic=response_topic,
+        )
+        report = await wire_from_manifest(
+            manifest,
+            engine,
+            event_bus=bus,
+            environment="local",
+            result_appliers_by_contract={contract.name: applier},
+        )
+        if report.total_failed or report.total_wired != 1:
+            raise ValueError("Consumer validation contract failed to wire")
+        engine.freeze()
+        await bus.subscribe(
+            response_topic, on_message=receive, group_id="topic-naming-lint"
+        )
+        violations: list[str] = []
+        for location, payload in requests.items():
+            correlation_id = uuid4()
+            envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+                payload=payload,
+                correlation_id=correlation_id,
+                event_type=derive_event_type_alias_for_topic(request_topic),
+            )
+            await bus.publish_envelope(envelope, request_topic)
+            response = responses.pop(str(correlation_id), None)
+            if response is None:
+                raise ValueError(
+                    f"Consumer validation returned no result for {location}"
+                )
+            violations.extend(
+                f"{location}: {violation}" for violation in response.violations
+            )
+        return violations
+    finally:
+        await bus.shutdown()
+
 
 # ---------------------------------------------------------------------------
 # Constants — must stay in sync with ContractTopicExtractor
@@ -290,6 +387,7 @@ def scan_contracts(contracts_root: Path) -> list[str]:
     Returns a list of violation strings (empty list = all clean).
     """
     all_violations: list[str] = []
+    requests: dict[str, dict[str, object]] = {}
     contract_files = sorted(contracts_root.rglob("contract.yaml"))
 
     for contract_path in contract_files:
@@ -304,12 +402,27 @@ def scan_contracts(contracts_root: Path) -> list[str]:
             continue  # no topics to check in non-mapping files
 
         raw_topics = _extract_raw_topics_from_contract(raw_yaml)
+        event_bus = raw_yaml.get("event_bus")
+        consumer_declaration = {
+            "consumed_events": raw_yaml.get("consumed_events"),
+            "event_bus": {
+                "subscribe_topics": event_bus.get("subscribe_topics")
+                if isinstance(event_bus, dict)
+                else None,
+            },
+        }
+        requests[str(contract_path)] = {
+            "consumer_topics": tuple(
+                _extract_raw_topics_from_contract(consumer_declaration)
+            ),
+        }
         for raw in raw_topics:
             result = lint_topic(raw)
             if not result.is_valid:
                 for violation in result.violations:
                     all_violations.append(f"{contract_path}: {violation}")
 
+    all_violations.extend(asyncio.run(_validate_consumer_declarations(requests)))
     return all_violations
 
 
@@ -387,12 +500,21 @@ def scan_python(python_root: Path) -> list[str]:
     Returns a list of violation strings (empty list = all clean).
     """
     all_violations: list[str] = []
+    requests: dict[str, dict[str, object]] = {}
     if python_root.is_file():
         py_files: list[Path] = [python_root]
     else:
         py_files = sorted(python_root.rglob("*.py"))
 
     for py_path in py_files:
+        try:
+            source = py_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            all_violations.append(
+                f"{py_path}: could not read consumer declarations: {exc}"
+            )
+            continue
+        requests[str(py_path)] = {"consumer_source": source}
         topics = _extract_topics_from_python_file(py_path)
         for raw, lineno in topics:
             result = lint_topic(raw)
@@ -400,6 +522,7 @@ def scan_python(python_root: Path) -> list[str]:
                 for violation in result.violations:
                     all_violations.append(f"{py_path}:{lineno}: {violation}")
 
+    all_violations.extend(asyncio.run(_validate_consumer_declarations(requests)))
     return all_violations
 
 
@@ -668,7 +791,10 @@ def main(argv: list[str] | None = None) -> int:
     suppressed_count = 0
     for violation in violations:
         # Check if any baselined topic appears in this violation string
-        is_suppressed = any(topic in violation for topic in baseline)
+        # Namespace mixing is a consumer-set invariant, never baseline debt.
+        is_suppressed = "mixed consumer topic namespace" not in violation and any(
+            topic in violation for topic in baseline
+        )
         if is_suppressed:
             suppressed_count += 1
         else:

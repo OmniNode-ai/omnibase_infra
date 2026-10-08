@@ -8,6 +8,7 @@ the loopback interface, so the whoami request the doctor sends (path, header,
 status handling) and the connection-refused mapping are exercised on the wire.
 """
 
+import json
 import socket
 import threading
 from collections.abc import Iterator
@@ -21,6 +22,9 @@ from omnibase_infra.doctor.checks.check_delegation_gateway import (
     CheckDelegationGateway,
 )
 from omnibase_infra.doctor.checks.check_delegation_key import CheckDelegationKey
+from omnibase_infra.doctor.checks.check_delegation_local_model import (
+    CheckDelegationLocalModel,
+)
 from omnibase_infra.doctor.enum_delegation_doctor_fault import (
     EnumDelegationDoctorFault,
 )
@@ -41,21 +45,26 @@ class _WhoamiHandler(BaseHTTPRequestHandler):
     """Serve the gateway whoami path: 200 for the good key, 401 otherwise."""
 
     seen_paths: list[str] = []
+    models_body: str = '{"data": []}'
 
     def do_GET(self) -> None:
         type(self).seen_paths.append(self.path)
-        if self.path != GATEWAY_WHOAMI_PATH:
+        if self.path == "/v1/models":
+            body = type(self).models_body.encode()
+            self.send_response(200)
+        elif self.path == GATEWAY_WHOAMI_PATH:
+            authorised = self.headers.get("x-api-key") == _GOOD_KEY
+            body = (
+                b'{"tenant_id": "11111111-1111-4111-8111-111111111111",'
+                b' "tenant_slug": "acme"}'
+                if authorised
+                else b"{}"
+            )
+            self.send_response(200 if authorised else 401)
+        else:
             self.send_response(404)
             self.end_headers()
             return
-        authorised = self.headers.get("x-api-key") == _GOOD_KEY
-        body = (
-            b'{"tenant_id": "11111111-1111-4111-8111-111111111111",'
-            b' "tenant_slug": "acme"}'
-            if authorised
-            else b"{}"
-        )
-        self.send_response(200 if authorised else 401)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -125,3 +134,39 @@ def test_refused_connection_is_named_gateway_down(tmp_path: Path) -> None:
 
     assert diagnosis.fault == EnumDelegationDoctorFault.GATEWAY_DOWN
     assert str(tmp_path / "config.yaml") in diagnosis.fix
+
+
+@pytest.mark.parametrize("declared_model", [None, "local/test-model"])
+@pytest.mark.parametrize("served_models", [[], ["local/test-model"]])
+def test_local_model_serving_state_over_http(
+    tmp_path: Path,
+    gateway_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+    declared_model: str | None,
+    served_models: list[str],
+) -> None:
+    monkeypatch.setattr(
+        _WhoamiHandler,
+        "models_body",
+        json.dumps({"data": [{"id": model} for model in served_models]}),
+    )
+    overlay = tmp_path / "overlay.yaml"
+    model_line = f"    model_name: {declared_model}\n" if declared_model else ""
+    overlay.write_text(
+        "backends:\n"
+        "  - backend_id: local-test\n"
+        "    tier: local\n"
+        f"    endpoint_url: {gateway_url}/v1/chat/completions\n"
+        f"{model_line}"
+    )
+
+    result = CheckDelegationLocalModel(overlay_path=overlay, environ={}).run()
+
+    assert _WhoamiHandler.seen_paths == ["/v1/models"]
+    if served_models:
+        assert result.status is EnumHealthStatusValue.HEALTHY
+        assert "Fix:" not in result.message
+    else:
+        assert result.status is EnumHealthStatusValue.UNHEALTHY
+        assert result.message.startswith("[local_model_not_serving] ")
+        assert result.message.endswith(f"Fix: Start the model server at {gateway_url}.")

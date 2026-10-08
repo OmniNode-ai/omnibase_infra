@@ -10,7 +10,7 @@ its 98.96 GiB volume at filing.
 
 The dev lane gets the dials through its override of ``redpanda-partition-cap``
 in docker/docker-compose.dev-lane.yml, the one-shot that
-scripts/deploy-runtime.sh force-recreates on every dev redeploy. These tests
+src/omnibase_infra/handlers/handler_runtime_deploy.sh force-recreates on every dev redeploy. These tests
 pin four things:
 
 * the three values equal the dogfood broker's, read from its file, so the two

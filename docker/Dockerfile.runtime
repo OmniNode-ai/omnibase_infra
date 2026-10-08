@@ -1055,7 +1055,7 @@ EXPOSE 8085
 # works and simply carries no inventory. That is the honest outcome: the
 # readback distinguishes an ABSENT label from an empty one and refuses both, so
 # no consumer is ever handed an empty inventory as if it were an answer. The
-# sanctioned build path (scripts/deploy-runtime.sh) always stamps.
+# sanctioned build path (onex-runtime-deploy) always stamps.
 ARG NODE_INVENTORY=""
 RUN set -eu; \
     if [ -n "${NODE_INVENTORY}" ]; then \

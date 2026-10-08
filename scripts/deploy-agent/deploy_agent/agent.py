@@ -127,6 +127,7 @@ from deploy_agent.routing import (
 )
 from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
 from deploy_agent.unit_drift import check_units, load_manifest, report
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 logger = logging.getLogger(__name__)
 
@@ -742,7 +743,7 @@ class DeployAgent:
         lag_refresher = LagRefresher(
             self._kafka_config,
             self._lag_sampler,
-            TOPIC_REBUILD_REQUESTED,
+            apply_topic_namespace(TOPIC_REBUILD_REQUESTED),
         )
         lag_refresh_task = asyncio.create_task(self._refresh_lag_forever(lag_refresher))
 
@@ -1227,7 +1228,7 @@ class DeployAgent:
             # deploy-source clone was the shared thing it was reasoning about.
             # Every phase after it -- the build, the compose up, the verify,
             # the lab-overlay apply -- then ran with the lane UNLOCKED, so a
-            # concurrent `scripts/deploy-runtime.sh` took the same lock
+            # concurrent `onex-runtime-deploy` took the same lock
             # uncontended and recreated the project underneath a job that was
             # mid-flight. Measured 2026-09-17: a hand deploy entered at 11:20Z
             # against job 746a118a, accepted 11:07:45Z and still in its runtime
@@ -2220,7 +2221,7 @@ class DeployAgent:
                 # so a healthy publish is unaffected.
                 max_block_ms=REJECTION_PUBLISH_MAX_BLOCK_MS,
             )
-            producer.send(TOPIC_REBUILD_REJECTED, payload)
+            producer.send(apply_topic_namespace(TOPIC_REBUILD_REJECTED), payload)
             producer.flush(timeout=5)
             producer.close()
         except Exception:  # noqa: BLE001
