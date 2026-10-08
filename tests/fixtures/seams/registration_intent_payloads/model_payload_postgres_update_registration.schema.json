@@ -1,0 +1,113 @@
+{
+  "$defs": {
+    "ModelRegistrationAckUpdate": {
+      "additionalProperties": false,
+      "description": "Typed column set for ACK state-transition UPDATE.\n\nProduced by ``RegistrationReducerService.decide_ack()`` when transitioning\na registration projection from AWAITING_ACK to ACTIVE.\n\nField names match SQL column names in ``registration_projections`` exactly.",
+      "properties": {
+        "current_state": {
+          "description": "New FSM state value.",
+          "title": "Current State",
+          "type": "string"
+        },
+        "liveness_deadline": {
+          "description": "Initial liveness deadline.",
+          "format": "date-time",
+          "title": "Liveness Deadline",
+          "type": "string"
+        },
+        "updated_at": {
+          "description": "Timestamp of this state change.",
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "current_state",
+        "liveness_deadline",
+        "updated_at"
+      ],
+      "title": "ModelRegistrationAckUpdate",
+      "type": "object"
+    },
+    "ModelRegistrationHeartbeatUpdate": {
+      "additionalProperties": false,
+      "description": "Typed column set for heartbeat liveness-extension UPDATE.\n\nProduced by ``RegistrationReducerService.decide_heartbeat()`` when extending\na node's liveness deadline after receiving a heartbeat.\n\nField names match SQL column names in ``registration_projections`` exactly.",
+      "properties": {
+        "last_heartbeat_at": {
+          "description": "Heartbeat event timestamp.",
+          "format": "date-time",
+          "title": "Last Heartbeat At",
+          "type": "string"
+        },
+        "liveness_deadline": {
+          "description": "Extended liveness deadline.",
+          "format": "date-time",
+          "title": "Liveness Deadline",
+          "type": "string"
+        },
+        "updated_at": {
+          "description": "Timestamp of this update.",
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "last_heartbeat_at",
+        "liveness_deadline",
+        "updated_at"
+      ],
+      "title": "ModelRegistrationHeartbeatUpdate",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Payload for plain UPDATE registration projection intent.\n\nUnlike ModelPayloadPostgresUpsertRegistration (INSERT...ON CONFLICT),\nthis payload performs a conditional UPDATE WHERE with monotonic guard\nfor idempotent heartbeat processing.\n\nAttributes:\n    intent_type: Discriminator literal for intent routing.\n    correlation_id: Correlation ID for distributed tracing.\n    entity_id: Entity UUID for WHERE clause.\n    domain: Domain for WHERE clause (composite PK).\n    updates: Typed column set for SET clause (structural union).",
+  "properties": {
+    "correlation_id": {
+      "description": "Correlation ID for distributed tracing.",
+      "format": "uuid",
+      "title": "Correlation Id",
+      "type": "string"
+    },
+    "domain": {
+      "default": "registration",
+      "description": "Domain for WHERE clause (composite PK).",
+      "title": "Domain",
+      "type": "string"
+    },
+    "entity_id": {
+      "description": "Entity UUID for WHERE clause.",
+      "format": "uuid",
+      "title": "Entity Id",
+      "type": "string"
+    },
+    "intent_type": {
+      "const": "postgres.update_registration",
+      "default": "postgres.update_registration",
+      "description": "Discriminator literal for intent routing.",
+      "title": "Intent Type",
+      "type": "string"
+    },
+    "updates": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ModelRegistrationAckUpdate"
+        },
+        {
+          "$ref": "#/$defs/ModelRegistrationHeartbeatUpdate"
+        }
+      ],
+      "description": "Typed column set for SET clause.",
+      "title": "Updates"
+    }
+  },
+  "required": [
+    "correlation_id",
+    "entity_id",
+    "updates"
+  ],
+  "title": "ModelPayloadPostgresUpdateRegistration",
+  "type": "object"
+}

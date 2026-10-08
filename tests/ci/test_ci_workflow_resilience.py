@@ -89,7 +89,11 @@ def test_migration_freeze_checkout_is_bounded_for_merge_group() -> None:
     freeze_step = next(
         step for step in steps if step.get("name") == "Check migration freeze"
     )
-    assert freeze_step["run"] == "./scripts/check_migration_freeze.sh --ci"
+    assert freeze_step["env"]["FREEZE_BASE_REF"] == "${{ github.base_ref || 'main' }}"
+    assert (
+        "uv run python -m omnibase_infra.nodes.node_migration_freeze_check_compute"
+        ".runtime_migration_freeze_check --base"
+    ) in freeze_step["run"]
 
 
 def test_prod_promotion_lineage_guard_uses_uncached_direct_setup() -> None:

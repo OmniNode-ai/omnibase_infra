@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import fnmatch
+import json
 import os
 import re
 import shlex
@@ -22,6 +23,86 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
 DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile.runtime"
 DOCKER_DIR = REPO_ROOT / "docker"
+
+
+@pytest.mark.unit
+def test_deploy_runtime_reads_clone_keyed_staging_manifest(tmp_path: Path) -> None:
+    """Build refs and the post-stage preflight must use the tree RT-1 selected."""
+    script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    function = script.split("sibling_source_path() {", 1)[1].split("\n}\n", 1)[0]
+    manifest = tmp_path / "refs.json"
+    tree = tmp_path / "source-trees" / "clone-key" / "omnimarket"
+    tree.mkdir(parents=True)
+    manifest.write_text(json.dumps({"repos": {"omnimarket": {"path": str(tree)}}}))
+    shell = (
+        "set -euo pipefail\n"
+        'SIBLING_SOURCE_ROOT="$1"\n'
+        'SIBLING_SOURCE_REFS_OUT="$2"\n'
+        f"sibling_source_path() {{{function}\n}}\n"
+        'sibling_source_path "$3" omnimarket\n'
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            shell,
+            "test",
+            str(tree.parents[1]),
+            str(manifest),
+            str(tmp_path / "ambient"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(tree)
+
+
+@pytest.mark.unit
+def test_deploy_runtime_forwards_and_reads_stage_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The deploy wrapper shares its manifest path with staging and preflight."""
+    text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    functions = []
+    for name in ("sibling_source_path", "stage_workspace_if_needed"):
+        body = text.split(f"{name}() {{", 1)[1].split("\n}\n", 1)[0]
+        functions.append(f"{name}() {{{body}\n}}")
+    context = tmp_path / "context"
+    scripts = context / "scripts" / "runtime_build"
+    scripts.mkdir(parents=True)
+    tree = tmp_path / "trees" / "clone-key" / "omnimarket"
+    tree.mkdir(parents=True)
+    manifest = tmp_path / "state" / "refs.json"
+    manifest_json = json.dumps({"repos": {"omnimarket": {"path": str(tree)}}})
+    (scripts / "stage_workspace.sh").write_text(
+        'set -euo pipefail\nmkdir -p "$(dirname "$DEPLOY_SOURCE_REFS_OUT")"\n'
+        f'printf "%s" {shlex.quote(manifest_json)} > "$DEPLOY_SOURCE_REFS_OUT"\n'
+    )
+    monkeypatch.setenv("DEPLOY_SOURCE_REFS_OUT", str(manifest))
+    monkeypatch.setenv("DEPLOY_SOURCE_WORKTREE_ROOT", str(tmp_path / "trees"))
+    monkeypatch.setenv("DEPLOY_REF", "dev")
+    monkeypatch.setenv("DEPLOY_HOTPATCH", "0")
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path / "ambient"))
+    shell = (
+        "set -euo pipefail\nSIBLING_SOURCE_ROOT=''\nSIBLING_SOURCE_REFS_OUT=''\n"
+        "resolve_build_source() { echo workspace; }\n"
+        "log_step() { :; }\nlog_cmd() { :; }\n"
+        'check_sibling_lock_pins() { sibling_source_path "$2" omnimarket; }\n'
+        + "\n".join(functions)
+        + '\nstage_workspace_if_needed "$1"\n'
+    )
+    result = subprocess.run(
+        ["bash", "-c", shell, "test", str(context)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(tree)
+    assert manifest.exists()
+
 
 # Matches a COPY directive's argument list. We discard `--from=<stage>` lines
 # (those copy from a prior build stage, not the host build context) and any

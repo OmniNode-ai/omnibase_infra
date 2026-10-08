@@ -27,7 +27,7 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "uv run python scripts/validation/validate_migration_sequence.py"
+        check_value: "uv run python -m omnibase_infra.nodes.node_migration_sequence_check_compute.runtime_migration_sequence_check"
   - id: "dod-deploy"
     description: >
       Deploy-gate evidence: 087 remains an idempotent DROP TABLE IF EXISTS targeting the stale decoy in the omnibase_infra DB, applied by the canonical forward-migration runner on the next redeploy. CASCADE only adds removal of the decoy's dead dependent views (same DB). REQUIRED_PROJECTION_TABLES checks target omnidash_analytics (the live table/views), so the drop does not break the migration gate; after merge, the prod promotion forward-migration clears the decoy automatically with no manual prod DB mutation.

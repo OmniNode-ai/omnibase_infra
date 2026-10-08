@@ -968,11 +968,16 @@ services:
   runtime-effects:
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env]
-      # runtime-effects carries no projection runtime binding on this lane:
-      # node_delegate_skill_orchestrator resolves its claim store through the same
-      # binding, and role_omnidash cannot write
-      # omninode_internal.delegate_skill_command_claims (OMN-17427). The /skill read
-      # edge needs the claim store to resolve a write principal separately first (OMN-20159).
+      # OMN-20159: node_projection_read_effect runs here and reads through its
+      # own read binding (omnimarket#3364); without it the /skill edge refuses
+      # every read with projection_binding_unconfigured. Deliberately NOT the
+      # runtime binding variable: that one also selects
+      # node_delegate_skill_orchestrator's claim store and evidence store, and
+      # role_omnidash cannot write omninode_internal.delegate_skill_command_claims
+      # (OMN-17427). With only the read variable both stores keep their
+      # container-local SQLite files. The dev-105, dev-200, dev-202 and pre-PR
+      # overlays replace this service's volumes, so each blanks this variable.
+      OMNIMARKET_PROJECTION_READ_BINDING_OVERLAY: /etc/onex/projection-read-binding.yaml
       #
       # -- BYOK credential READ (OMN-20533) ------------------------------------
       # onex-api (below) writes a tenant's provider key to Infisical env dev,
@@ -1008,6 +1013,9 @@ services:
       INFISICAL_CLIENT_ID: ${RUNTIME_EFFECTS_INFISICAL_CLIENT_ID:-}
       INFISICAL_CLIENT_SECRET: ${RUNTIME_EFFECTS_INFISICAL_CLIENT_SECRET:-}
       INFISICAL_ENVIRONMENT_SLUG: "dev"
+    volumes:
+      # Read-only; names OMNIDASH_ANALYTICS_DB_URL, rendered above as role_omnidash.
+      - ./projection-runtime-binding/runtime-read.yaml:/etc/onex/projection-read-binding.yaml:ro
     healthcheck:
       test:
         - CMD

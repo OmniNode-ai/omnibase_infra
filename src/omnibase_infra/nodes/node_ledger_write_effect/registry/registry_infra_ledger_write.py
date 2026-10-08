@@ -25,6 +25,11 @@ Example:
 
 from __future__ import annotations
 
+# Intent payload model (from reducers)
+from omnibase_infra.models.ledger.model_payload_ledger_append import (
+    ModelPayloadLedgerAppend,
+)
+
 # Handlers
 from omnibase_infra.nodes.node_ledger_write_effect.handlers import (
     HandlerLedgerAppend,
@@ -45,11 +50,6 @@ from omnibase_infra.nodes.node_ledger_write_effect.node import NodeLedgerWriteEf
 # Protocol
 from omnibase_infra.nodes.node_ledger_write_effect.protocols import (
     ProtocolLedgerPersistence,
-)
-
-# Intent payload model (from reducers)
-from omnibase_infra.nodes.node_registration_reducer.models import (
-    ModelPayloadLedgerAppend,
 )
 
 

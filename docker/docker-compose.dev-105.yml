@@ -177,6 +177,7 @@ services:
   omninode-runtime:
     container_name: omninode-dev-105-runtime
     environment:
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       ONEX_RUNTIME_LANE: "compose-dev-105"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-105.bifrost.yaml
     ports: !override
@@ -191,6 +192,7 @@ services:
   runtime-effects:
     container_name: omninode-dev-105-runtime-effects
     environment:
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-105.bifrost.yaml
       # OMN-20533: docker-compose.dev-lane.yml binds runtime-effects to the .201
       # dev lane's tenant-credential READ config and its own Infisical identity.
@@ -203,6 +205,12 @@ services:
       INFISICAL_CLIENT_ID: ${ONEX_RUNTIME_INFISICAL_CLIENT_ID:-}
       INFISICAL_CLIENT_SECRET: ${ONEX_RUNTIME_INFISICAL_CLIENT_SECRET:-}
       INFISICAL_ENVIRONMENT_SLUG: ""
+      # OMN-20159: docker-compose.dev-lane.yml gives runtime-effects the
+      # projection read binding variable, and this lane's `volumes: !override`
+      # drops the file it names. Blank is unset to omnimarket, so reads here keep
+      # refusing projection_binding_unconfigured instead of failing to load a file
+      # this lane never mounts (projection_binding_invalid).
+      OMNIMARKET_PROJECTION_READ_BINDING_OVERLAY: ""
     ports: !override
       - "127.0.0.1:43086:8085"
     networks: !override
@@ -217,6 +225,7 @@ services:
   runtime-worker:
     container_name: omninode-dev-105-runtime-worker
     environment:
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-105.bifrost.yaml
     volumes: !override
       - worker_logs:/app/logs
@@ -226,6 +235,7 @@ services:
   tenant-projection-writer:
     container_name: omnimarket-dev-105-tenant-projection-writer
     environment:
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-105.bifrost.yaml
     labels:
       com.omninode.lane: dev-105

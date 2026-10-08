@@ -144,7 +144,7 @@ def test_wrapper_delegates_to_the_one_reconciler(
     third incident would reveal.
     """
     source = _WRAPPER.read_text(encoding="utf-8")
-    assert "scripts/reconcile-host.sh" in source
+    assert "/bin/onex-host-reconcile" in source
     for repair in (
         "uv sync",
         "git pull",

@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# ONEX contract for the migration_freeze_check COMPUTE node.
+# Decides from explicit inputs (.migration_freeze text, today's date, the added or
+# renamed paths of a diff) whether new migration files are blocked by an active
+# freeze or the freeze has expired, and returns the canonical OMN-2362
+# ValidationReport. Collapses scripts/validation/validate_migration_freeze.py,
+# scripts/check_migration_freeze.sh and the validate.py migration_freeze entry.
+#
+# See: OMN-20568 (validator conversion program, omnibase_infra first batch)
+name: "node_migration_freeze_check_compute"
+contract_name: "node_migration_freeze_check_compute"
+node_name: "node_migration_freeze_check_compute"
+contract_version:
+  major: 1
+  minor: 0
+  patch: 0
+node_version: "1.0.0"
+node_type: "COMPUTE_GENERIC"
+description: >
+  While a .migration_freeze file exists, a new file under docker/migrations/ is a FAIL finding (modifying or deleting an existing migration is allowed). When the freeze file carries freeze_date=YYYY-MM-DD, an age of 30 or more days is a WARN finding and 60 or more days is a FAIL finding. Pure: no filesystem, git, clock or environment access.
+
+input_model:
+  name: "ModelMigrationFreezeCheckInput"
+  module: "omnibase_infra.nodes.node_migration_freeze_check_compute.models.model_migration_freeze_check_input"
+  description: "The .migration_freeze text, today's date (UTC) and the added or renamed paths of the diff under inspection."
+output_model:
+  name: "ModelValidationReport"
+  module: "omnibase_core.models.validation.model_validation_report"
+  description: "The canonical OMN-2362 validation report."
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "migration_freeze.check"
+      handler_type: "migration_freeze_check"
+      handler:
+        name: "NodeMigrationFreezeCheckCompute"
+        module: "omnibase_infra.nodes.node_migration_freeze_check_compute.handler"
+      supported_operations:
+        - "migration_freeze.check"
+descriptor:
+  node_archetype: "compute"
+  purity: "pure"
+  idempotent: true
+  timeout_ms: 30000
+metadata:
+  description: "Pure COMPUTE node deciding whether the migration freeze is violated or expired. No I/O."
+  author: "OmniNode Team"
+  license: "MIT"
+  ticket: "OMN-20568"
+  tags:
+    - compute
+    - validator
+    - migration-freeze
+    - pure-function

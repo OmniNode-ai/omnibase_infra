@@ -1,0 +1,11 @@
+{
+  "repository": "OmniNode-ai/omnimarket",
+  "commit": "d761f582f8a5167b4f665287560de792e8631449",
+  "writer": "src/omnimarket/nodes/node_projection_consumer_flow/handlers/handler_consumer_flow_runner.py",
+  "writer_sha256": "778b41873969ba45380161c9f20e5eb5f50816da322eecf2b11964c3abae4692",
+  "assets": {
+    "consumer-flow-upsert.sql.captured": "e62a28fdd7f652de5fc1b2088885013818ae031a270669f5a047ae5f603953e3",
+    "consumer-flow-schema.sql.captured": "a17e97ac7f5dcec8bdda583af662641931f11984b927658b7c1a0305acaff18b"
+  },
+  "note": "Frozen production SQL and node-owned migrations. Equality is accepted by <=; a strictly older same-node sequence forces the guard. Historical log lines do not prove refusals."
+}

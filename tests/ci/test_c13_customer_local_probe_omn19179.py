@@ -570,13 +570,41 @@ def test_the_runs_root_is_where_the_delegate_cli_writes_its_run(tmp_path: Path) 
     work.mkdir()
     env = {"HOME": str(home), "PATH": f"{bin_dir}:/usr/bin:/bin", "LANG": "C.UTF-8"}
     subprocess.run(
-        [str(bin_dir / "onex"), "delegate", "p"], env=env, cwd=work, check=False
+        [str(bin_dir / "onex"), "delegate", "p", "--json"],
+        env=env,
+        cwd=work,
+        check=False,
     )
 
     runs_root = probe.delegate_runs_root(env)
     assert (runs_root / "run-unconfigured" / "receipt.json").is_file()
     assert runs_root == home / ".onex_state" / "runs"
     assert not (work / ".onex_state").exists()
+
+
+@pytest.mark.unit
+def test_every_delegate_step_asks_for_the_json_receipt_omn20124() -> None:
+    """Since omnibase_infra 0.38.67 (OMN-20124) onex delegate prints the typed
+    receipt JSON only with --json; the default is a plain answer even when
+    stdout is redirected. The probe parses that JSON, so every delegate argv in
+    the live session must ask for it (C13 run 37595314813). Read from the
+    source: driving observe_live reaches the model server."""
+    import ast
+    import inspect
+    import textwrap
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(probe.observe_live)))
+    delegate_argvs = [
+        [elt.value for elt in node.elts if isinstance(elt, ast.Constant)]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.List)
+        and any(
+            isinstance(elt, ast.Constant) and elt.value == "delegate"
+            for elt in node.elts
+        )
+    ]
+    assert len(delegate_argvs) == 2
+    assert all("--json" in argv for argv in delegate_argvs)
 
 
 @pytest.mark.unit

@@ -136,6 +136,22 @@ on frozen dataclasses. It is the SAME set of invariants a Pydantic model would
 carry -- they are load-bearing, so they are asserted in ``__post_init__`` rather
 than dropped -- and ``ValueError`` is the single failure type.
 
+Criterion bindings (OMN-18488)
+------------------------------
+Both emitters read the exact cited commit's ``contracts/<ticket>.yaml``. No
+ticket citation or no contract leaves the receipt unbound; several citations
+are ambiguous and refused. A contract author declares each lab check as a
+``dod_evidence`` item ``lab-pass-<lane>-<check name>`` (for example
+``lab-pass-compose-dev-ready_main``) with its ``binds_ac`` labels and accepted
+``ac_bindings`` records; the emitter never derives a mapping from criterion
+text, and draft records do not bind. The evidence autoclose node reads
+receipts for the merged product PR's exact merge commit through
+``receipt_evidence_for_ticket`` and feeds them to the shared criterion pin
+gate: only a PASS receipt supplies verified checks, a FAIL receipt supplies
+failed checks even when individual probes passed, and missing bindings,
+missing or stale pins and unreadable artifacts retain the ticket. Re-keying a
+receipt onto another commit clears its criterion claims.
+
 Exit codes: ``0`` a PASS receipt for the exact sha exists; ``1`` it does not, or
 could not be proven to.
 """
@@ -156,7 +172,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
@@ -615,8 +631,34 @@ class ModelLabPassCheck:
     #: never opens anything -- so the pair has exactly one illegal combination
     #: (``ok`` and ``indeterminate`` both true) and it is refused below.
     indeterminate: bool = False
+    #: OMN-18488: author-declared labels, never inferred from probe names.
+    binds_ac: tuple[str, ...] = ()
+    ac_binding_hashes: tuple[tuple[str, str], ...] = ()
 
     def __post_init__(self) -> None:
+        if (
+            not isinstance(self.binds_ac, tuple)
+            or any(
+                not isinstance(label, str)
+                or not re.fullmatch(r"(?:AC|DoD)\d+[a-zA-Z]?", label)
+                for label in self.binds_ac
+            )
+            or len(set(self.binds_ac)) != len(self.binds_ac)
+        ):
+            raise ValueError("binds_ac must be a tuple of distinct criterion labels")
+        if not isinstance(self.ac_binding_hashes, tuple) or any(
+            not isinstance(pair, tuple)
+            or len(pair) != 2
+            or pair[0] not in self.binds_ac
+            or not isinstance(pair[1], str)
+            or not _CONTENT_HASH_RE.fullmatch(pair[1])
+            for pair in self.ac_binding_hashes
+        ):
+            raise ValueError(
+                "ac_binding_hashes must carry full pins for declared labels"
+            )
+        if len(dict(self.ac_binding_hashes)) != len(self.ac_binding_hashes):
+            raise ValueError("duplicate criterion pins")
         if not isinstance(self.name, str) or not self.name:
             msg = "check name is required and must be a non-empty string"
             raise ValueError(msg)
@@ -683,6 +725,10 @@ class ModelLabPassCheck:
         }
         if self.indeterminate:
             payload["outcome"] = EnumLabPassCheckOutcome.INDETERMINATE.value
+        if self.binds_ac:
+            payload["binds_ac"] = list(self.binds_ac)
+        if self.ac_binding_hashes:
+            payload["ac_binding_hashes"] = dict(self.ac_binding_hashes)
         return payload
 
     @classmethod
@@ -690,7 +736,10 @@ class ModelLabPassCheck:
         if not isinstance(payload, dict):
             msg = f"a check must be an object, got {type(payload).__name__}"
             raise ValueError(msg)
-        unknown = sorted(set(payload) - {"name", "ok", "evidence", "outcome"})
+        unknown = sorted(
+            set(payload)
+            - {"name", "ok", "evidence", "outcome", "binds_ac", "ac_binding_hashes"}
+        )
         if unknown:
             # extra="forbid", by hand: an unrecognised field means the writer
             # and the reader disagree about the contract.
@@ -719,11 +768,19 @@ class ModelLabPassCheck:
                 )
                 raise ValueError(msg)
         try:
+            labels = payload.get("binds_ac", [])
+            pins = payload.get("ac_binding_hashes", {})
+            if not isinstance(labels, list) or not isinstance(pins, dict):
+                raise ValueError(
+                    "binds_ac must be an array and ac_binding_hashes an object"
+                )
             return cls(
                 name=payload["name"],
                 ok=payload["ok"],
                 evidence=payload["evidence"],
                 indeterminate=indeterminate,
+                binds_ac=tuple(labels),
+                ac_binding_hashes=tuple(pins.items()),
             )
         except KeyError as exc:
             msg = f"check is missing required field {exc.args[0]!r}"
@@ -789,6 +846,8 @@ class ModelLabPassReceipt:
     #: ``node_inventory`` and ``converged_via``, absence preserves the exact
     #: wire form of every receipt written before this field existed.
     subject: ModelLabProofSubject | None = None
+    ticket_id: str = ""
+    criterion_labels: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         self._validate_version()
@@ -798,6 +857,33 @@ class ModelLabPassReceipt:
         self._validate_window()
         self._validate_node_inventory()
         self._validate_subject()
+        self._validate_criterion_bindings()
+
+    def _validate_criterion_bindings(self) -> None:
+        if not isinstance(self.ticket_id, str) or (
+            self.ticket_id and not re.fullmatch(r"OMN-\d+", self.ticket_id)
+        ):
+            raise ValueError("ticket_id must be an OMN ticket identifier")
+        if (
+            not isinstance(self.criterion_labels, tuple)
+            or any(
+                not isinstance(label, str)
+                or not re.fullmatch(r"(?:AC|DoD)\d+[a-zA-Z]?", label)
+                for label in self.criterion_labels
+            )
+            or len(set(self.criterion_labels)) != len(self.criterion_labels)
+        ):
+            raise ValueError(
+                "criterion_labels must be distinct ticket criterion labels"
+            )
+        bound = {label for check in self.checks for label in check.binds_ac}
+        if bound and not self.ticket_id:
+            raise ValueError("a bound receipt must identify its ticket")
+        unknown = bound - set(self.criterion_labels)
+        if unknown:
+            raise ValueError(
+                f"bindings name criterion labels absent from the ticket: {sorted(unknown)}"
+            )
 
     def _validate_version(self) -> None:
         if self.receipt_version != RECEIPT_VERSION:
@@ -943,6 +1029,14 @@ class ModelLabPassReceipt:
                 ),
                 **({"converged_via": self.converged_via} if self.converged_via else {}),
                 **({"subject": self.subject.to_dict()} if self.subject else {}),
+                **(
+                    {
+                        "ticket_id": self.ticket_id,
+                        "criterion_labels": list(self.criterion_labels),
+                    }
+                    if self.ticket_id
+                    else {}
+                ),
             },
             indent=indent,
         )
@@ -973,7 +1067,13 @@ class ModelLabPassReceipt:
         # OMN-18708: present only on receipts whose emitter probed the lane's
         # introspection manifest, so it is known-but-optional rather than
         # required. Absent means "not probed", which is a real answer.
-        optional = {"node_inventory", "converged_via", "subject"}
+        optional = {
+            "node_inventory",
+            "converged_via",
+            "subject",
+            "ticket_id",
+            "criterion_labels",
+        }
         unknown = sorted(set(payload) - known - optional)
         if unknown:
             msg = f"unknown receipt field(s) {unknown}"
@@ -986,6 +1086,9 @@ class ModelLabPassReceipt:
         if not isinstance(raw_checks, list):
             msg = "receipt 'checks' must be a list"
             raise ValueError(msg)
+        labels = payload.get("criterion_labels", [])
+        if not isinstance(labels, list):
+            raise ValueError("criterion_labels must be an array")
         agent_command_id = payload["agent_command_id"]
         if agent_command_id is not None and not isinstance(agent_command_id, str):
             msg = "agent_command_id must be a string or null"
@@ -999,6 +1102,8 @@ class ModelLabPassReceipt:
             result=EnumLabPassResult(payload["result"]),
             checks=tuple(ModelLabPassCheck.from_dict(c) for c in raw_checks),
             agent_command_id=agent_command_id,
+            ticket_id=payload.get("ticket_id", ""),
+            criterion_labels=tuple(labels),
             node_inventory=(
                 parse_node_inventory(payload["node_inventory"])
                 if "node_inventory" in payload
@@ -3037,6 +3142,8 @@ def build_receipt(
     node_inventory: Sequence[ModelNodeInventoryTriple] = (),
     converged_via: str = "",
     subject: ModelLabProofSubject | None = None,
+    ticket_id: str = "",
+    criterion_labels: tuple[str, ...] = (),
 ) -> ModelLabPassReceipt:
     """Build a receipt whose verdict is DERIVED from its checks.
 
@@ -3059,7 +3166,148 @@ def build_receipt(
         node_inventory=tuple(node_inventory),
         converged_via=converged_via,
         subject=subject,
+        ticket_id=ticket_id,
+        criterion_labels=criterion_labels,
     )
+
+
+def bind_commit_checks(
+    sha: str, lane: EnumLabLane, checks: Sequence[ModelLabPassCheck], repo_dir: Path
+) -> tuple[list[ModelLabPassCheck], str, tuple[str, ...]]:
+    """Copy explicit lab-check declarations from the cited commit's contract.
+
+    The declaration is a dod_evidence item whose id is the exact probe identity
+    ``lab-pass-<lane>-<check name>``. Matching an identity is not guessing a
+    criterion from a check name: only the author's binds_ac is copied. Both
+    the ticket citation and contract are read at sha, never from a later tree.
+    A commit with no citation or no contract remains an ordinary unbound pass.
+    """
+    if not _SHA_RE.fullmatch(sha):
+        raise ValueError("binding source must be an exact commit sha")
+
+    def git_show(object_name: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", "-C", str(repo_dir), "show", object_name],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+
+    commit = subprocess.run(
+        ["git", "-C", str(repo_dir), "show", "-s", "--format=%B", sha],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if commit.returncode:
+        raise ValueError(f"cannot read binding commit {sha}: {commit.stderr.strip()}")
+    tickets = set(re.findall(r"\bOMN-\d+\b", commit.stdout))
+    if not tickets:
+        return list(checks), "", ()
+    if len(tickets) != 1:
+        raise ValueError("ambiguous ticket citations on the binding commit")
+    ticket = next(iter(tickets))
+    source = git_show(f"{sha}:contracts/{ticket}.yaml")
+    if source.returncode:
+        # git's absence diagnostic is distinct from a broken object/read.
+        if (
+            "does not exist in" in source.stderr
+            or "exists on disk, but not in" in source.stderr
+        ):
+            return list(checks), "", ()
+        raise ValueError(f"cannot read binding contract: {source.stderr.strip()}")
+    # Emitters already install PyYAML; it is needed only for an authored
+    # contract, never for importing, parsing or reading receipt artifacts.
+    yaml = importlib.import_module("yaml")
+    contract = yaml.safe_load(source.stdout)
+    if not isinstance(contract, dict) or contract.get("ticket_id") != ticket:
+        raise ValueError("binding contract does not identify the cited ticket")
+    labels = tuple(
+        acceptance["id"]
+        for requirement in contract.get("requirements", [])
+        for acceptance in requirement.get("acceptance", [])
+    )
+    items = contract.get("dod_evidence", [])
+    identities = [item.get("id") for item in items]
+    if len(identities) != len(set(identities)):
+        raise ValueError("duplicate evidence identities in the binding contract")
+    by_id = {item["id"]: item for item in items}
+    bound = []
+    for check in checks:
+        item = by_id.get(f"lab-pass-{lane.value}-{check.name}", {})
+        declared = item.get("binds_ac", [])
+        if not isinstance(declared, list):
+            raise ValueError("contract binds_ac must be an array")
+        records = item.get("ac_bindings", [])
+        record_labels = [record["label"] for record in records]
+        if len(record_labels) != len(set(record_labels)):
+            raise ValueError("duplicate criterion pins in the binding contract")
+        if any(
+            bool(record.get("accepted_by")) != bool(record.get("accepted_at"))
+            for record in records
+        ):
+            raise ValueError("criterion acceptance must name both actor and time")
+        accepted = {
+            record["label"]: record["criterion_hash"]
+            for record in records
+            if record.get("accepted_by") and record.get("accepted_at")
+        }
+        # Draft records never become declarations; absent pins stay absent
+        # and the closer reports them as unvalidated, rather than inventing one.
+        drafts = {record["label"] for record in records} - set(accepted)
+        declared = [label for label in declared if label not in drafts]
+        bound.append(
+            replace(
+                check,
+                binds_ac=tuple(declared),
+                ac_binding_hashes=tuple(
+                    (label, accepted[label]) for label in declared if label in accepted
+                ),
+            )
+        )
+    return bound, ticket, labels
+
+
+def receipt_evidence_for_ticket(
+    repo: str, sha: str, ticket_id: str
+) -> list[dict[str, Any]]:
+    """The existing artifact reader's checks in the closer's verifier shape.
+
+    read_lane validates the entire receipt and matches both its lane and exact
+    sha. A FAIL receipt contributes no verified checks, including its locally
+    green checks. Missing pins are explicit empty pins so the shared pin gate
+    holds rather than treating a new receipt as legacy unpinned evidence.
+    """
+    records: list[dict[str, Any]] = []
+    for lane in ANY_OF_DEFAULT_LANES:
+        read = read_lane(repo, lane, sha)
+        if read.kind == "absent":
+            continue
+        if read.receipt is None:
+            raise ReceiptLookupError(read.problem)
+        receipt = read.receipt
+        if receipt.ticket_id != ticket_id:
+            continue
+        for check in receipt.checks:
+            if not check.binds_ac:
+                continue
+            verified = receipt.result is EnumLabPassResult.PASS and check.ok
+            records.append(
+                {
+                    "evidence_id": f"lab-pass-{lane.value}-{check.name}@{sha}",
+                    "status": "verified" if verified else "failed",
+                    "proof_class": "behavior",
+                    "binds_ac": list(check.binds_ac),
+                    "ac_binding_hashes": {
+                        label: dict(check.ac_binding_hashes).get(label, "")
+                        for label in check.binds_ac
+                    },
+                    "message": check.evidence,
+                }
+            )
+    return records
 
 
 #: The checks whose failure means THE RUN could not bind its observation, rather
@@ -3269,7 +3517,11 @@ def reemit_receipt(
         started_at=source.started_at,
         finished_at=source.finished_at,
         result=source.result,
-        checks=source.checks,
+        # A different commit may cite a different ticket. Re-keying a lab
+        # observation must never copy the source commit's criterion claims.
+        checks=tuple(
+            replace(check, binds_ac=(), ac_binding_hashes=()) for check in source.checks
+        ),
         agent_command_id=source.agent_command_id,
         node_inventory=source.node_inventory,
         # OMN-18988: the caller supplies this when it re-established the
@@ -5488,6 +5740,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     emit = sub.add_parser("emit", help="build, validate and write a receipt")
     emit.add_argument("--sha", required=True)
+    emit.add_argument(
+        "--bind-from-commit",
+        type=Path,
+        help="repository checkout containing the cited commit and its authored criterion bindings",
+    )
     emit.add_argument("--lane", required=True, choices=[e.value for e in EnumLabLane])
     emit.add_argument("--started-at", required=True)
     emit.add_argument("--finished-at", required=True)
@@ -6199,6 +6456,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             checks = [parse_check_argument(raw) for raw in args.check]
             checks.extend(load_checks_json(args.checks_json))
+            ticket_id, criterion_labels = "", ()
+            if args.bind_from_commit is not None:
+                checks, ticket_id, criterion_labels = bind_commit_checks(
+                    args.sha,
+                    EnumLabLane(args.lane),
+                    checks,
+                    args.bind_from_commit,
+                )
             receipt = build_receipt(
                 sha=args.sha,
                 lane=EnumLabLane(args.lane),
@@ -6208,6 +6473,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 agent_command_id=parse_agent_command_id(args.agent_command_id),
                 node_inventory=load_node_inventory_json(args.node_inventory_json),
                 converged_via=args.converged_via,
+                ticket_id=ticket_id,
+                criterion_labels=criterion_labels,
             )
         except (ValueError, TypeError, KeyError, OSError) as exc:
             print(

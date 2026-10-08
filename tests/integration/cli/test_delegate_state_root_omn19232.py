@@ -62,7 +62,9 @@ def _stand_in_contract(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "home").mkdir()
 
 
-def _invoke(tmp_path: Path, *extra: str) -> tuple[Result, Path]:
+def _invoke(
+    tmp_path: Path, *extra: str, json_output: bool = True
+) -> tuple[Result, Path]:
     cwd = tmp_path / "unrelated_cwd"
     cwd.mkdir()
     runner = CliRunner(env=_CALLER_ENV_CLEARED)
@@ -71,6 +73,7 @@ def _invoke(tmp_path: Path, *extra: str) -> tuple[Result, Path]:
             delegate_command,
             [
                 "Reply with exactly the word READY",
+                *(["--json"] if json_output else []),
                 "--task-type",
                 "summarization",
                 "--bus",
@@ -131,3 +134,35 @@ def test_explicit_flag_wins_over_the_environment(
     assert result.exit_code == 0, result.stderr
     assert (_only_run(flag_root) / "receipt.json").is_file()
     assert not (env_root / "runs").exists()
+
+
+def test_default_redirected_stdout_is_answer_then_artifacts(tmp_path: Path) -> None:
+    """OMN-20124: the #4609 DoD selector must detect the pre-fix JSON default.
+
+    Keep the real command, receipt mode, runtime, bus and artifact writer.
+    Only the model handler is the correlated no-op, which echoes the prompt.
+    CliRunner redirects stdout off a terminal, as the reported failure did.
+    """
+    state_root = tmp_path / "state"
+    result, _work = _invoke(
+        tmp_path, "--state-root", str(state_root), json_output=False
+    )
+
+    assert result.exit_code == 0, result.stderr
+    run_dir = _only_run(state_root)
+    answer = "Reply with exactly the word READY"
+    artifacts = (
+        "delegate artifacts: "
+        + " ".join(
+            str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
+        )
+        + f" state_root={state_root.resolve()}"
+    )
+    assert result.stdout == f"{answer}\n{artifacts}\n"
+    assert (run_dir / "result.txt").read_text(encoding="utf-8") == answer
+    receipt = json.loads((run_dir / "receipt.json").read_text(encoding="utf-8"))
+    assert receipt["receipt"]["result"]["response"] == answer
+    assert artifacts not in result.stderr
+    for diagnostic in ("task class:", "ticket:", "transport:", "identity:"):
+        assert diagnostic in result.stderr
+    assert "onex delegate: model fixture," in result.stderr

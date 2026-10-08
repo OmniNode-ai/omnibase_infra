@@ -2,11 +2,16 @@
 # SPDX-License-Identifier: MIT
 """Broker grants must follow the transport builders, including physical names."""
 
+import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 import yaml
+from aiokafka import AIOKafkaProducer
 
 from omnibase_core.models.event_bus.model_bus_binding import ModelBusBinding
 from omnibase_core.models.event_bus.model_bus_group_describe import (
@@ -16,6 +21,7 @@ from omnibase_core.models.event_bus.model_resolved_bus_bindings import (
     ModelResolvedBusBindings,
 )
 from omnibase_infra.event_bus.event_bus_kafka import EventBusKafka
+from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.handlers.handler_broker_grant_derive import (
     HandlerBrokerGrantDerive,
@@ -93,12 +99,15 @@ def test_gateway_builder_bindings_cover_every_transport(
     assert not any(g[1] == "GROUP" and g[3] == "DESCRIBE" for g in grants)
 
 
-def test_contract_topic_addition_changes_exactly_its_grants(tmp_path, monkeypatch):
+@pytest.mark.parametrize("direction", ["inbound", "outbound"])
+def test_contract_topic_addition_changes_exactly_its_grants(
+    tmp_path, monkeypatch, direction
+):
     monkeypatch.delenv("KAFKA_TOPIC_NAMESPACE", raising=False)
     before, _ = gateway_forwarder.build_gateway_transports(shipped_config(tmp_path))
     contract = yaml.safe_load(CONTRACT.read_text())
     added = "onex.evt.fixture.additional.v1"
-    contract["config"]["gateway_forwarder"]["mirror_topics"]["outbound"].append(added)
+    contract["config"]["gateway_forwarder"]["mirror_topics"][direction].append(added)
     path = tmp_path / "contract.yaml"
     path.write_text(yaml.safe_dump(contract))
     config = shipped_config(tmp_path, contract_path=path)
@@ -106,10 +115,13 @@ def test_contract_topic_addition_changes_exactly_its_grants(tmp_path, monkeypatc
     cloud = config.forwarder.cloud_bus.cloud_broker_ref
     physical = f"tenant-{config.forwarder.tenant_identity.tenant_slug}.{added}"
     assert grant_keys(before) - grant_keys(after) == set()
+    local_op, cloud_op = (
+        ("WRITE", "READ") if direction == "inbound" else ("READ", "WRITE")
+    )
     assert grant_keys(after) - grant_keys(before) == {
-        ("local", "TOPIC", added, "READ"),
+        ("local", "TOPIC", added, local_op),
         ("local", "TOPIC", added, "DESCRIBE"),
-        (cloud, "TOPIC", physical, "WRITE"),
+        (cloud, "TOPIC", physical, cloud_op),
         (cloud, "TOPIC", physical, "DESCRIBE"),
     }
 
@@ -148,23 +160,23 @@ def test_grants_are_deduplicated_sorted_and_preserve_principal():
     assert len(result.grants) == 4
 
 
-def test_runtime_consumer_builder_matches_derived_physical_binding(monkeypatch):
-    monkeypatch.setenv("KAFKA_TOPIC_NAMESPACE", "isolated")
+@pytest.mark.parametrize("namespace", ["", "isolated"])
+@pytest.mark.parametrize("instance_id", [None, "worker"])
+def test_runtime_consumer_builder_matches_derived_physical_binding(
+    monkeypatch, namespace, instance_id
+):
+    monkeypatch.setenv("KAFKA_TOPIC_NAMESPACE", namespace)
     bus = EventBusKafka(
         ModelKafkaEventBusConfig(
-            bootstrap_servers="fixture:9092", environment="dev", instance_id="worker"
+            bootstrap_servers="fixture:9092", environment="dev", instance_id=instance_id
         )
     )
-    topic = "onex.evt.fixture.input.v1"
+    topics = ("onex.evt.fixture.input.v1", "onex.cmd.fixture.request.v1")
     resolved = bus.resolve_bus_bindings(
         principal="runtime",
-        subscribe_topics=(topic,),
+        subscribe_topics=(*topics, topics[0]),
         publish_topics=(),
         group_id="runtime",
-    )
-    binding = resolved.bindings[0]
-    group = bus._resolve_effective_group_id(
-        "runtime", topic, uuid4(), (topic, "runtime")
     )
     calls = []
 
@@ -174,10 +186,24 @@ def test_runtime_consumer_builder_matches_derived_physical_binding(monkeypatch):
     monkeypatch.setattr(
         "omnibase_infra.event_bus.event_bus_kafka.AIOKafkaConsumer", consumer
     )
-    bus._build_consumer(topic, group, "instance", "earliest", group_id="runtime")
-    assert calls[0][0] == (binding.physical_topic,)
-    assert calls[0][1]["group_id"] == binding.consumer_group
-    assert ("dev", "GROUP", group, "READ") in grant_keys(resolved)
+    for topic in topics:
+        group = bus._resolve_effective_group_id(
+            "runtime", topic, uuid4(), (topic, "runtime")
+        )
+        bus._build_consumer(topic, group, "instance", "earliest", group_id="runtime")
+    built = {(args[0], kwargs["group_id"]) for args, kwargs in calls}
+    assert built == {
+        (binding.physical_topic, binding.consumer_group)
+        for binding in resolved.bindings
+    }
+    assert grant_keys(resolved) == (
+        {
+            ("dev", "TOPIC", topic, op)
+            for topic, _ in built
+            for op in ("READ", "DESCRIBE")
+        }
+        | {("dev", "GROUP", group, "READ") for _, group in built}
+    )
 
 
 def test_https_egress_requires_no_cloud_kafka_write(tmp_path, monkeypatch):
@@ -228,6 +254,56 @@ def test_runtime_publish_and_group_truncation_use_the_same_binding(monkeypatch):
     assert producing == bus.resolve_bus_binding(topic)
     assert len(resolved.bindings) == 2
     assert len(grant_keys(resolved)) == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("namespace", ["", "isolated"])
+async def test_runtime_published_wire_topics_match_exact_derived_grants(
+    monkeypatch, namespace
+):
+    monkeypatch.setenv("KAFKA_TOPIC_NAMESPACE", namespace)
+    bus = EventBusKafka(
+        ModelKafkaEventBusConfig(bootstrap_servers="fixture:9092", environment="dev")
+    )
+    topics = ("onex.evt.fixture.output.v1", "onex.cmd.fixture.request.v1")
+    resolved = bus.resolve_bus_bindings(
+        principal="runtime",
+        subscribe_topics=(),
+        publish_topics=(*topics, topics[0]),
+        group_id="runtime",
+    )
+    wire_topics = set()
+
+    async def send(topic, **kwargs):
+        wire_topics.add(topic)
+        acknowledgement = asyncio.get_running_loop().create_future()
+        acknowledgement.set_result(SimpleNamespace(topic=topic, partition=0, offset=0))
+        return acknowledgement
+
+    producer = AsyncMock(spec=AIOKafkaProducer)
+    producer.send.side_effect = send
+    bus._producer = producer
+    bus._started = True
+    try:
+        for topic in topics:
+            await bus.publish(
+                topic,
+                None,
+                b"{}",
+                ModelEventHeaders(
+                    timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+                    source="fixture",
+                    event_type="fixture.output",
+                ),
+            )
+        assert wire_topics == {binding.physical_topic for binding in resolved.bindings}
+        assert grant_keys(resolved) == {
+            ("dev", "TOPIC", topic, operation)
+            for topic in wire_topics
+            for operation in ("WRITE", "DESCRIBE")
+        }
+    finally:
+        await bus.close()
 
 
 def test_provisioning_pin_contains_no_topic_literals():

@@ -305,6 +305,12 @@ services:
       INFISICAL_CLIENT_ID: ${ONEX_RUNTIME_INFISICAL_CLIENT_ID:-}
       INFISICAL_CLIENT_SECRET: ${ONEX_RUNTIME_INFISICAL_CLIENT_SECRET:-}
       INFISICAL_ENVIRONMENT_SLUG: ""
+      # OMN-20159: docker-compose.dev-lane.yml gives runtime-effects the
+      # projection read binding variable, and this lane's `volumes: !override`
+      # drops the file it names. Blank is unset to omnimarket, so reads here keep
+      # refusing projection_binding_unconfigured instead of failing to load a file
+      # this lane never mounts (projection_binding_invalid).
+      OMNIMARKET_PROJECTION_READ_BINDING_OVERLAY: ""
     volumes: !override
       - prepr_effects_logs:/app/logs
       - prepr_effects_data:/app/data

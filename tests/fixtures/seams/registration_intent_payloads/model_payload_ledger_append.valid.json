@@ -1,0 +1,16 @@
+{
+  "correlation_id": "00000000-0000-0000-0000-000000000001",
+  "envelope_id": "00000000-0000-0000-0000-000000000002",
+  "event_key": "bm9kZQ==",
+  "event_timestamp": "2026-10-07T12:00:00Z",
+  "event_type": "node_registered",
+  "event_value": "e30=",
+  "intent_type": "ledger.append",
+  "kafka_offset": 42,
+  "onex_headers": {
+    "schema_version": 1
+  },
+  "partition": 1,
+  "source": "registration",
+  "topic": "registration-events"
+}

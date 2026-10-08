@@ -108,6 +108,11 @@ for __name in $__restore_names; do
 	eval "export ${__name}=\${__saved_${__name}}"
 done
 
+# Resolve after the unit/store precedence is restored, before agent startup.
+# shellcheck source=../../runtime_build/sibling_clone_manifest.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../../runtime_build/sibling_clone_manifest.sh"
+resolve_deploy_source_clone_root
+
 DEPLOY_AGENT_LAUNCHER="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 export DEPLOY_AGENT_LAUNCHER
 

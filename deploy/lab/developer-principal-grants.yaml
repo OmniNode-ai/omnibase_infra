@@ -82,6 +82,30 @@ grants:
     name: local.omnimarket.work_ledger_append_client.consume.v1.
     pattern: prefixed
     operations: [read, describe]
+  # PR HANDOFF (OMN-17427): `onex work-ledger handoff` publishes one request
+  # and reads acceptance or a terminal. Only the runtime writes these replies.
+  # Its per-call group is `pr-handoff-request.<correlation_id prefix>`;
+  # this prefix cannot join the orchestrator or ledger effect's runtime groups.
+  - resource: topic
+    name: onex.cmd.omnimarket.pr-handoff-requested.v1
+    pattern: literal
+    operations: [write, describe]
+  - resource: topic
+    name: onex.evt.omnimarket.pr-handoff-accepted.v1
+    pattern: literal
+    operations: [read, describe]
+  - resource: topic
+    name: onex.evt.omnimarket.pr-handoff-handed-off.v1
+    pattern: literal
+    operations: [read, describe]
+  - resource: topic
+    name: onex.evt.omnimarket.pr-handoff-failed.v1
+    pattern: literal
+    operations: [read, describe]
+  - resource: group
+    name: pr-handoff-request.
+    pattern: prefixed
+    operations: [read, describe]
   - resource: group
     name: "*"
     pattern: literal

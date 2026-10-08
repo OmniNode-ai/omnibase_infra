@@ -3076,4 +3076,70 @@ __all__: list[str] = [
     "TestHandlerHttpRestDeterministicIntegration",
     "TestHandlerHttpRestEnvVarParsing",
     "TestHandlerHttpRestEnvVarRangeValidation",
+    "TestHandlerHttpRestPaymentRequired",
 ]
+
+
+@pytest.mark.unit
+class TestHandlerHttpRestPaymentRequired:
+    """A 402 is a typed answer, not a success, and carries no raw payment text."""
+
+    _PAYMENT_BODY = '{"accepts": [{"payTo": "0xSECRETPAYEE"}]}'
+    _PAYMENT_HEADER = "eyJwYXlUbyI6IjB4U0VDUkVUUEFZRUUifQ=="
+
+    @pytest.fixture
+    def handler(self, mock_container: MagicMock) -> HandlerHttpRest:
+        return HandlerHttpRest(mock_container)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("status_code", "expected_status", "keeps_body"),
+        [
+            (200, "success", True),
+            (404, "success", True),
+            (402, "payment_required", False),
+        ],
+    )
+    async def test_status_mapping_and_payload(
+        self,
+        handler: HandlerHttpRest,
+        status_code: int,
+        expected_status: str,
+        keeps_body: bool,
+    ) -> None:
+        await handler.initialize({})
+        mock_response = create_mock_streaming_response(
+            status_code=status_code,
+            headers={
+                "content-type": "application/json",
+                "PAYMENT-REQUIRED": self._PAYMENT_HEADER,
+                "x-request-id": "abc",
+            },
+            body_bytes=self._PAYMENT_BODY.encode("utf-8"),
+        )
+
+        with patch.object(handler._client, "stream") as mock_stream:
+            mock_stream.return_value = mock_stream_context(mock_response)
+            output = await handler.execute(
+                {
+                    "operation": "http.get",
+                    "payload": {"url": "https://api.example.com/paid"},
+                }
+            )
+
+        result = output.result
+        payload = result["payload"]
+        assert result["status"] == expected_status
+        assert payload["status_code"] == status_code
+        if keeps_body:
+            assert "body" in payload
+            assert "payment-required" in {k.lower() for k in payload["headers"]}
+        else:
+            assert "body" not in payload
+            assert "payment-required" not in {k.lower() for k in payload["headers"]}
+            assert payload["headers"]["x-request-id"] == "abc"
+            serialized = repr(result)
+            assert "0xSECRETPAYEE" not in serialized
+            assert self._PAYMENT_HEADER not in serialized
+
+        await handler.shutdown()

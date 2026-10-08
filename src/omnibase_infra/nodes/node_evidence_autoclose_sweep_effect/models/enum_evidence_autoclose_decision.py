@@ -266,6 +266,9 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     # they are looking at. Both are holds: nothing written, candidate
     # re-offered next tick.
     SKIPPED_LIVE_CHECK_NOT_EXECUTED = "skipped_live_check_not_executed"
+    # OMN-20520: the verifier's terminal status is skipped, independently of
+    # partial check counts. Its reason is reported; no gap or Done is written.
+    SKIPPED_DOD_VERIFY = "skipped_dod_verify"
     # OMN-16106. THE GATE-PROBE HOLD. A ticket whose own description names the
     # workflow that PROVES it -- a `Gate:` line -- is a ticket that has told
     # this mechanism where its evidence lives. Reading dod_verify's counters
