@@ -1,0 +1,35 @@
+{
+  "_provenance": {
+    "source": "Unstubbed h202 rolling CLI missing-token preflight; no external API or credential-backed registration performed",
+    "captured_utc": "2026-10-08T09:30:24.112572+00:00",
+    "source_file": "scripts/deploy-runners.sh",
+    "source_sha256": "47ecfb30b6048e8b6489ac48b18df4faf9c9aaa9962f434ae4c1a0e40c85e9c1"
+  },
+  "responses": {
+    "normal": {
+      "command": [
+        "bash",
+        "scripts/deploy-runners.sh",
+        "--rolling",
+        "--only=omninode-runner-2"
+      ],
+      "returncode": 1,
+      "stderr": "[deploy-runners] ERROR: --rolling requires DEPLOY_RUNNER_TOKEN or --token-file with a registration token before recreating any container (also in --dry-run).\n",
+      "sync_started": false,
+      "recreate_started": false
+    },
+    "dry-run": {
+      "command": [
+        "bash",
+        "scripts/deploy-runners.sh",
+        "--rolling",
+        "--only=omninode-runner-2",
+        "--dry-run"
+      ],
+      "returncode": 1,
+      "stderr": "[deploy-runners] ERROR: --rolling requires DEPLOY_RUNNER_TOKEN or --token-file with a registration token before recreating any container (also in --dry-run).\n",
+      "sync_started": false,
+      "recreate_started": false
+    }
+  }
+}
