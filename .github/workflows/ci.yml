@@ -2412,6 +2412,11 @@ jobs:
           echo "Changed files:"
           cat changed.txt
 
+      # OMN-18266: prove the selector before trusting its impacted subset.
+      # A failing regression must stop selection even for a data-only PR.
+      - name: Test impacted-test selector
+        run: uv run --frozen pytest tests/unit/scripts/ci/test_detect_test_paths.py -q --timeout=60
+
       # OMN-19927 (plan task S2): was this commit validated by a successful
       # merge group? A queue landing fast-forwards `dev` to the merge-group
       # commit, so the answer is a lookup of that sha's merge-group `CI`
