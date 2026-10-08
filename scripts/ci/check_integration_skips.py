@@ -17,7 +17,9 @@ integration proofs) and fails when:
      (`required_services[*].missing_skip_patterns`), or
   2. fewer than `require_executed_min` integration tests actually EXECUTED
      (guards the zero-collection / all-skip false-green — a marker typo or a
-     broken selector collecting nothing).
+     broken selector collecting nothing), or
+  3. a config with `require_each_curated_module` enabled has no executed
+     test from one of its `curated_test_paths` modules (OMN-18811).
 
 Legitimately-optional skips — Kafka/Redpanda broker (not provisioned by design),
 Consul/Vault/Qdrant, live-LLM / live-e2e opt-in flags — are never treated as
@@ -67,6 +69,7 @@ class GuardConfig:
     require_executed_min: int
     required_service_patterns: dict[str, list[re.Pattern[str]]]
     allowed_optional_patterns: list[re.Pattern[str]] = field(default_factory=list)
+    required_test_modules: tuple[str, ...] = ()
 
     @classmethod
     def load(cls, path: Path) -> GuardConfig:
@@ -82,11 +85,25 @@ class GuardConfig:
             re.compile(p, re.IGNORECASE)
             for p in (raw.get("allowed_optional_skip_patterns") or [])
         ]
+        required_modules: tuple[str, ...] = ()
+        if raw.get("require_each_curated_module", False):
+            paths = raw.get("curated_test_paths")
+            if not isinstance(paths, list) or not paths:
+                raise ValueError("require_each_curated_module needs curated_test_paths")
+            if any(
+                not isinstance(path, str) or not path.endswith(".py") for path in paths
+            ):
+                raise ValueError("curated_test_paths must contain Python module paths")
+            required_modules = tuple(
+                Path(path).with_suffix("").as_posix().replace("/", ".")
+                for path in paths
+            )
         return cls(
             silent_skip_allowed=bool(raw.get("silent_skip_allowed", False)),
             require_executed_min=int(raw.get("require_executed_min", 1)),
             required_service_patterns=req,
             allowed_optional_patterns=allowed,
+            required_test_modules=required_modules,
         )
 
 
@@ -95,6 +112,15 @@ class ReportStats:
     executed: int = 0
     skipped: list[SkipRecord] = field(default_factory=list)
     total_cases: int = 0
+    executed_by_classname: dict[str, int] = field(default_factory=dict)
+
+    def executed_for_module(self, module: str) -> int:
+        """pytest class-based tests append a class name to the module name."""
+        return sum(
+            count
+            for classname, count in self.executed_by_classname.items()
+            if classname == module or classname.startswith(module + ".")
+        )
 
 
 def _testid(case: ET.Element) -> str:
@@ -127,6 +153,10 @@ def parse_junit(paths: list[Path]) -> ReportStats:
                 )
             else:
                 stats.executed += 1
+                classname = case.get("classname", "")
+                stats.executed_by_classname[classname] = (
+                    stats.executed_by_classname.get(classname, 0) + 1
+                )
     return stats
 
 
@@ -179,6 +209,13 @@ def evaluate(stats: ReportStats, cfg: GuardConfig, strict: bool) -> list[str]:
             f"(total cases seen: {stats.total_cases})"
         )
 
+    for module in cfg.required_test_modules:
+        if stats.executed_for_module(module) == 0:
+            violations.append(
+                f"MISSING-SUITE: no integration tests executed from required module "
+                f"{module!r}. Another suite's execution cannot satisfy this proof."
+            )
+
     return violations
 
 
@@ -190,6 +227,8 @@ def run_gate(paths: list[Path], cfg: GuardConfig, strict: bool) -> int:
         f"cases={stats.total_cases} executed={stats.executed} "
         f"skipped={len(stats.skipped)} require_executed_min={cfg.require_executed_min}"
     )
+    for module in cfg.required_test_modules:
+        print(f"  suite {module}: executed={stats.executed_for_module(module)}")
     for rec in stats.skipped:
         offending, is_allowed = classify_skip(rec.reason, cfg)
         tag = (
@@ -249,8 +288,44 @@ def selftest(cfg: GuardConfig) -> int:
         pass_xml.write_text(_JUNIT_PASS, encoding="utf-8")
         skip_xml.write_text(_JUNIT_SILENT_SKIP, encoding="utf-8")
 
+        if cfg.required_test_modules:
+            root = ET.Element("testsuites")
+            suite = ET.SubElement(root, "testsuite", name="pytest")
+            for module in cfg.required_test_modules:
+                ET.SubElement(suite, "testcase", classname=module, name="test_ran")
+            pass_xml.write_text(ET.tostring(root, encoding="unicode"), encoding="utf-8")
+
+            # Every required member is tested independently: a healthy peer
+            # must never hide a suite that was dropped from collection.
+            for case in list(suite):
+                suite.remove(case)
+                missing_xml = Path(td) / "missing.xml"
+                missing_xml.write_text(
+                    ET.tostring(root, encoding="unicode"), encoding="utf-8"
+                )
+                violations = evaluate(parse_junit([missing_xml]), cfg, strict=True)
+                module = case.get("classname", "")
+                if not any("MISSING-SUITE" in v and module in v for v in violations):
+                    ok = False
+                    print(f"SELFTEST FAIL: missing module {module} was not refused")
+                else:
+                    print(f"SELFTEST ok: missing module {module} -> RED")
+                suite.append(case)
+
+            empty_xml = Path(td) / "empty.xml"
+            empty_xml.write_text("<testsuites/>", encoding="utf-8")
+            if not evaluate(parse_junit([empty_xml]), cfg, strict=True):
+                ok = False
+                print("SELFTEST FAIL: empty runtime collection was not refused")
+
+            for case in suite:
+                ET.SubElement(case, "skipped", message="Runtime proof did not execute")
+            skip_xml.write_text(ET.tostring(root, encoding="unicode"), encoding="utf-8")
+
         # Case (a): Postgres provisioned, integration tests ran -> gate PASSES.
-        v_pass = evaluate(parse_junit([pass_xml]), cfg, strict=False)
+        v_pass = evaluate(
+            parse_junit([pass_xml]), cfg, strict=bool(cfg.required_test_modules)
+        )
         if v_pass:
             ok = False
             print(f"SELFTEST FAIL (case a should pass): {v_pass}")
@@ -258,7 +333,9 @@ def selftest(cfg: GuardConfig) -> int:
             print("SELFTEST ok: case (a) provisioned -> PASS")
 
         # Case (b): missing-service silent skip reintroduced -> gate goes RED.
-        v_skip = evaluate(parse_junit([skip_xml]), cfg, strict=False)
+        v_skip = evaluate(
+            parse_junit([skip_xml]), cfg, strict=bool(cfg.required_test_modules)
+        )
         if not v_skip:
             ok = False
             print("SELFTEST FAIL (case b should be RED): gate did not flag silent skip")
@@ -292,7 +369,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         cfg = GuardConfig.load(args.config)
-    except (OSError, yaml.YAMLError, re.error) as exc:
+    except (OSError, ValueError, yaml.YAMLError, re.error) as exc:
         print(f"::error::could not load guard config {args.config}: {exc}")
         return 2
 

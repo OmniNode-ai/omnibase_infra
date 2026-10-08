@@ -18,6 +18,7 @@ Postgres-absence reasons those tests emit, grepped from ``tests/``.
 from __future__ import annotations
 
 from pathlib import Path
+from xml.sax.saxutils import quoteattr
 
 import pytest
 import yaml
@@ -215,6 +216,79 @@ def test_embedded_selftest_passes(cfg: GuardConfig) -> None:
     assert selftest(cfg) == 0
 
 
+_RUNTIME_CONFIG = _CONFIG.with_name("runtime_boot_suites_skip_guard.yaml")
+_RUNTIME_MODULES = (
+    "tests.integration.test_runtime_consumes_build_loop_terminal_event",
+    "tests.integration.registration.e2e.test_runtime_e2e",
+)
+
+
+def _runtime_junit(classnames: tuple[str, ...]) -> str:
+    cases = "".join(
+        f'<testcase classname={quoteattr(classname)} name="test_runtime"/>'
+        for classname in classnames
+    )
+    return f'<testsuites><testsuite name="pytest">{cases}</testsuite></testsuites>'
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("missing_module", _RUNTIME_MODULES)
+def test_runtime_guard_refuses_one_missing_suite(
+    tmp_path: Path, missing_module: str
+) -> None:
+    """OMN-18811: one suite's execution cannot stand in for the other."""
+    present = tuple(module for module in _RUNTIME_MODULES if module != missing_module)
+    junit = _write(tmp_path, "runtime.xml", _runtime_junit(present))
+    assert (
+        main(["--junit", str(junit), "--config", str(_RUNTIME_CONFIG), "--strict"]) == 1
+    )
+
+
+@pytest.mark.unit
+def test_runtime_guard_accepts_both_suites_and_test_classes(tmp_path: Path) -> None:
+    junit = _write(
+        tmp_path,
+        "runtime.xml",
+        _runtime_junit((_RUNTIME_MODULES[0], _RUNTIME_MODULES[1] + ".TestRuntimeE2E")),
+    )
+    assert (
+        main(["--junit", str(junit), "--config", str(_RUNTIME_CONFIG), "--strict"]) == 0
+    )
+
+
+@pytest.mark.unit
+def test_runtime_guard_does_not_accept_similar_module_names(tmp_path: Path) -> None:
+    junit = _write(
+        tmp_path,
+        "runtime.xml",
+        _runtime_junit((_RUNTIME_MODULES[0], _RUNTIME_MODULES[1] + "_other")),
+    )
+    assert (
+        main(["--junit", str(junit), "--config", str(_RUNTIME_CONFIG), "--strict"]) == 1
+    )
+
+
+@pytest.mark.unit
+def test_runtime_guard_selftest_covers_the_shipped_config() -> None:
+    assert selftest(GuardConfig.load(_RUNTIME_CONFIG)) == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("paths", [[], ["tests/integration/README.md"]])
+def test_runtime_guard_refuses_invalid_required_module_config(
+    tmp_path: Path, paths: list[str]
+) -> None:
+    config = tmp_path / "invalid.yaml"
+    config.write_text(
+        yaml.safe_dump(
+            {"require_each_curated_module": True, "curated_test_paths": paths}
+        ),
+        encoding="utf-8",
+    )
+    junit = _write(tmp_path, "runtime.xml", _runtime_junit(_RUNTIME_MODULES))
+    assert main(["--junit", str(junit), "--config", str(config), "--strict"]) == 2
+
+
 # =============================================================================
 # The curated set is declared in two files, and they must agree (OMN-18419)
 # =============================================================================
@@ -293,13 +367,6 @@ def test_every_path_the_guard_job_runs_is_declared_curated() -> None:
 
 # --- OMN-20147 / OMN-18811 AC2: the runtime-backed suites tolerate zero skips ---
 
-_RUNTIME_BOOT_CONFIG = (
-    Path(__file__).resolve().parents[2]
-    / "scripts"
-    / "ci"
-    / "runtime_boot_suites_skip_guard.yaml"
-)
-
 _JUNIT_RUNTIME_ONE_SKIP = """<?xml version="1.0" encoding="utf-8"?>
 <testsuites><testsuite name="pytest" tests="2" skipped="1">
  <testcase classname="tests.integration.registration.e2e.test_runtime_e2e.TestRuntime"
@@ -312,13 +379,13 @@ _JUNIT_RUNTIME_ONE_SKIP = """<?xml version="1.0" encoding="utf-8"?>
 
 
 def test_runtime_boot_suites_allow_no_optional_skip() -> None:
-    cfg = GuardConfig.load(_RUNTIME_BOOT_CONFIG)
+    cfg = GuardConfig.load(_RUNTIME_CONFIG)
     assert cfg.allowed_optional_patterns == []
 
 
 def test_runtime_boot_suites_fail_on_any_skip(tmp_path: Path) -> None:
     """Any skip, whatever its reason, is a violation under the strict guard."""
-    cfg = GuardConfig.load(_RUNTIME_BOOT_CONFIG)
+    cfg = GuardConfig.load(_RUNTIME_CONFIG)
     report = tmp_path / "runtime-boot-suites.xml"
     report.write_text(_JUNIT_RUNTIME_ONE_SKIP, encoding="utf-8")
     violations = evaluate(parse_junit([report]), cfg, strict=True)
