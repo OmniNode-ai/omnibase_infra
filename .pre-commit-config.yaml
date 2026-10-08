@@ -582,6 +582,14 @@ repos:
         files: ^(\.github/workflows/deliver-dev-candidate-to-staging\.yml|tests/ci/test_boot_gate_rollout_deadline_check_omn18316\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-19084: CI's script-test selection collects this same focused file.
+      - id: runner-disk-admission-restore-regression
+        name: Runner disk-admission restore regression (OMN-19084)
+        entry: uv run --frozen pytest tests/scripts/test_runner_disk_admission_restore.py -q
+        language: system
+        files: ^(scripts/runner-disk-admission-restore\.sh|tests/scripts/test_runner_disk_admission_restore\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: lab-pass-criterion-bindings
         name: Lab-pass criterion bindings and closer pin gate (OMN-18488)
         entry: uv run --frozen pytest tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488.py -q
