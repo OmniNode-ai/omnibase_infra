@@ -460,6 +460,12 @@ readonly DEV_LANE_ONLY_MIGRATION_ONESHOTS=(
     cloud-migration-files
     cloud-migration
 )
+# OMN-18496: only these services depend on the cloud corpus. Keep this set
+# aligned with the dev overlay's cloud-migration dependencies; companions use
+# the required runtime migrations above, not omninode_cloud.
+readonly DEV_LANE_CLOUD_DB_SERVICES=(
+    onex-api
+)
 # Broker readiness services brought up (and waited on) before the runtime
 # restart. redpanda-partition-cap raises topic_partitions_per_shard so the cold
 # 1300+-topic provisioning burst on first boot does not exhaust the default
@@ -510,6 +516,9 @@ MODE="dry-run"           # dry-run | execute
 EFFECTS_PLAN=""          # typed immutable-image plan; separate mutation boundary
 FORCE=false
 RESTART=false
+# Per-invocation readiness, set by the migration preflight. Never an operator
+# override: a failed cloud one-shot stops only its declared consumers.
+DEV_LANE_CLOUD_MIGRATIONS_READY=true
 # OMN-15218: the raw argv this invocation was called with, captured before
 # parse_args consumes it, so the attribution record names the exact command that
 # mutated the lane instead of a reconstruction.
@@ -750,7 +759,7 @@ EXAMPLES
     jq . ~/.omnibase/infra/registry.omnibase-infra-stability-test.json  # stability
 
     # Who holds a lane right now
-    python3 scripts/runtime_build/lane_lock.py describe --compose-project omnibase-infra
+    uv run --frozen python scripts/runtime_build/lane_lock.py describe --compose-project omnibase-infra
 
     # Verify image labels match deployed SHA
     docker inspect omninode-runtime \\
@@ -3428,6 +3437,7 @@ run_runtime_migration_preflight() {
     resolve_compose_file_args compose_args "${deploy_target}" "${compose_project}"
 
     log_step "Runtime Migration Preflight"
+    DEV_LANE_CLOUD_MIGRATIONS_READY=true
 
     # The lane-agnostic set first. migration-gate is a long-running healthcheck
     # keepalive, NOT a one-shot, so it is deliberately excluded from the wait set
@@ -3444,7 +3454,7 @@ run_runtime_migration_preflight() {
             fi
         done
         refresh_one_migration_service \
-            "${compose_project}" "${service}" "${is_oneshot}" "${compose_args[@]}"
+            "${compose_project}" "${service}" "${is_oneshot}" "${compose_args[@]}" || return 1
     done
 
     # OMN-18438: then the lane's own migration services, if it declares any.
@@ -3478,6 +3488,25 @@ run_runtime_migration_preflight() {
             ;;
     esac
 
+    # An explicit build/restart scope that includes no cloud consumer must not
+    # migrate its database or stop an API outside that scope.
+    if [[ -n "${RUNTIME_BUILD_SERVICES_OVERRIDE:-}" ]]; then
+        local cloud_consumer_requested=false
+        local requested_service cloud_consumer
+        for requested_service in "${RUNTIME_BUILD_SERVICES[@]}"; do
+            for cloud_consumer in "${DEV_LANE_CLOUD_DB_SERVICES[@]}"; do
+                if [[ "${requested_service}" == "${cloud_consumer}" ]]; then
+                    cloud_consumer_requested=true
+                    break
+                fi
+            done
+        done
+        if [[ "${cloud_consumer_requested}" == false ]]; then
+            lane_migration_services=()
+            lane_migration_oneshots=()
+        fi
+    fi
+
     for service in "${lane_migration_services[@]}"; do
         is_oneshot=false
         for oneshot in "${lane_migration_oneshots[@]}"; do
@@ -3486,8 +3515,23 @@ run_runtime_migration_preflight() {
                 break
             fi
         done
-        refresh_one_migration_service \
-            "${compose_project}" "${service}" "${is_oneshot}" "${compose_args[@]}"
+        if ! refresh_one_migration_service \
+            "${compose_project}" "${service}" "${is_oneshot}" "${compose_args[@]}"; then
+            DEV_LANE_CLOUD_MIGRATIONS_READY=false
+            log_warn "Cloud migration '${service}' failed; gating only: ${DEV_LANE_CLOUD_DB_SERVICES[*]}. Runtime migrations remain required."
+            # A warm consumer must also stop. Merely omitting its recreate
+            # would leave an old API serving against a failed migration.
+            local stop_cmd=(
+                timeout --kill-after=15 "${RUNTIME_COMPOSE_WAIT_TIMEOUT_SECONDS}"
+                docker compose -p "${compose_project}" "${compose_args[@]}"
+                --profile "${COMPOSE_PROFILE}" stop --timeout 30
+                "${DEV_LANE_CLOUD_DB_SERVICES[@]}"
+            )
+            log_cmd "${stop_cmd[*]}"
+            "${stop_cmd[@]}" || return 1
+            # The copier failing must not launch the runner on a stale corpus.
+            break
+        fi
     done
 
     # Postgres follows the same lane-derivable naming as forward-migration:
@@ -3512,6 +3556,38 @@ run_runtime_migration_preflight() {
             return 1
         fi
     done
+}
+
+exclude_cloud_database_services() {
+    # OMN-18496: use one scope for recreate and terminal readback. Filtering
+    # happens after resolving the caller's scope, including explicit overrides.
+    local _cloud_scope_name="$1"
+    if [[ "${DEV_LANE_CLOUD_MIGRATIONS_READY}" == true ]]; then
+        return 0
+    fi
+    local -a _cloud_scope=() _cloud_filtered=()
+    eval "_cloud_scope=(\"\${${_cloud_scope_name}[@]}\")"
+    local _cloud_service _cloud_consumer _cloud_blocked
+    for _cloud_service in "${_cloud_scope[@]}"; do
+        _cloud_blocked=false
+        for _cloud_consumer in "${DEV_LANE_CLOUD_DB_SERVICES[@]}"; do
+            if [[ "${_cloud_service}" == "${_cloud_consumer}" ]]; then
+                _cloud_blocked=true
+                break
+            fi
+        done
+        if [[ "${_cloud_blocked}" == false ]]; then
+            _cloud_filtered+=("${_cloud_service}")
+        fi
+    done
+    eval "${_cloud_scope_name}=()"
+    for _cloud_service in "${_cloud_filtered[@]}"; do
+        eval "${_cloud_scope_name}+=( $(printf '%q' "${_cloud_service}") )"
+    done
+    if [[ ${#_cloud_filtered[@]} -eq 0 ]]; then
+        log_error "Cloud migration failed; all requested services require omninode_cloud. Refusing an empty service scope."
+        return 1
+    fi
 }
 
 bringup_full_stack() {
@@ -3549,6 +3625,28 @@ bringup_full_stack() {
         up -d
     )
 
+    # The full-profile fan-out must respect the same narrowed gate. Enumerate
+    # the resolved profile rather than reusing the smaller warm restart set.
+    if [[ "${DEV_LANE_CLOUD_MIGRATIONS_READY}" == false ]]; then
+        local full_service_names
+        full_service_names="$(docker compose -p "${compose_project}" "${compose_args[@]}" --profile "${COMPOSE_PROFILE}" config --services)" || return 1
+        local -a full_services=()
+        local full_service cloud_oneshot is_cloud_oneshot
+        while IFS= read -r full_service; do
+            [[ -n "${full_service}" ]] || continue
+            is_cloud_oneshot=false
+            for cloud_oneshot in "${DEV_LANE_ONLY_MIGRATION_SERVICES[@]}"; do
+                if [[ "${full_service}" == "${cloud_oneshot}" ]]; then
+                    is_cloud_oneshot=true
+                    break
+                fi
+            done
+            [[ "${is_cloud_oneshot}" == true ]] || full_services+=("${full_service}")
+        done <<< "${full_service_names}"
+        exclude_cloud_database_services full_services || return 1
+        cmd+=("${full_services[@]}")
+    fi
+
     log_info "Bringing the FULL ${COMPOSE_PROFILE}-profile project up: ${compose_project}"
     log_cmd "${cmd[*]}"
 
@@ -3575,6 +3673,7 @@ restart_services() {
     # writers, which are declared only in its own overlay.
     local -a lane_services
     resolve_lane_runtime_services lane_services "${compose_project}"
+    exclude_cloud_database_services lane_services || return 1
 
     local cmd=(
         docker compose
@@ -4031,6 +4130,7 @@ readback_deployed_ref() {
     # and restarted, or a dev-lane writer would be created and never verified.
     local -a readback_scope
     resolve_lane_runtime_services readback_scope "${compose_project}"
+    exclude_cloud_database_services readback_scope || return 1
 
     log_info "Verifying in-scope service(s): ${readback_scope[*]}"
 

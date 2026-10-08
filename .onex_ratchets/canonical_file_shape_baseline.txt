@@ -471,7 +471,6 @@ scripts/update-plugin-pins.py
 scripts/update_version_matrix.py
 scripts/validate-kafka-schema-handshake.py
 scripts/validate-pr-contract-sync.sh
-scripts/validate-pr-deploy-required.sh
 scripts/validate.py
 scripts/validate_delegation_cohort_keys.py
 scripts/validate_env.py

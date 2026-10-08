@@ -11272,7 +11272,10 @@ async def _subscribe_contract_topics(
                 f"contract '{contract.name}' declares consume_concurrency."
                 f"max_in_flight_records={consume_concurrency.max_in_flight_records}, "
                 f"but the wired event bus ({type(event_bus).__name__}) cannot "
-                "bound in-flight records. A declared bound that silently does "
+                "bound in-flight records. Implement "
+                "ProtocolConsumeConcurrencyDeclarer.declare_consume_concurrency "
+                "on the bus and record the declared bound before subscribing. "
+                "A declared bound that silently does "
                 "nothing is the defect OMN-18852 exists to remove"
             )
         concurrency_declarer = event_bus

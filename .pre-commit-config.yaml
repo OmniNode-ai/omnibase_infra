@@ -28,7 +28,7 @@ repos:
   # .onex_ratchets/canonical_file_shape_baseline.txt. CI runs the same module
   # at the same commit (job "Canonical File Shape (OMN-20304)").
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 8c8f6744c9612ae52abaa760a6423b995eddc871
+    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24
     hooks:
       - id: canonical-file-shape
         require_serial: true
@@ -38,7 +38,7 @@ repos:
   # no suppression marker. CI twin job node-boundary-imports in
   # .github/workflows/ci.yml; keep this rev equal to that job's pin.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 8c8f6744c9612ae52abaa760a6423b995eddc871
+    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24
     hooks:
       - id: check-node-boundary-imports
         require_serial: true
@@ -54,7 +54,7 @@ repos:
   # suppression marker. Keep this rev equal to the pin in
   # .github/workflows/direct-model-call.yml. Server-side backstop: OMN-20299.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 2685a264629c847c291d9e96e3d4ea2cb2773cec
+    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24
     hooks:
       - id: check-direct-model-call
         require_serial: true
@@ -89,7 +89,7 @@ repos:
   # shared baseline at omnibase_core/src/omnibase_core/validation/baselines/canonical_inference_baseline.json;
   # baseline is burn-down only. Suppression: # canonical-inference-ok: <reason>
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 940d2f2ab44d2f455a607926674b90ecbc9b74ba # pragma: allowlist secret
+    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24 # pragma: allowlist secret
     hooks:
       - id: check-canonical-inference
         require_serial: true
@@ -122,12 +122,57 @@ repos:
         require_serial: true
         args: [--allowlist, .onex_ratchets/noncanonical_class_allowlist.yaml, src/omnibase_infra]
         files: ^src/omnibase_infra/.*\.py$
+  - repo: local
+    hooks:
+      # OMN-18786: same blocking scan as the CI Summary context.
+      - id: seed-provenance-check
+        name: Seed Provenance Check
+        entry: uv run python scripts/check_seed_provenance.py --scripts-dir scripts/
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      - id: operator-script-topic-namespace
+        name: Operator broker topics honor the namespace (OMN-18913)
+        entry: uv run --frozen pytest tests/ci/test_operator_script_topic_namespace_omn18913.py -q
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(scripts/.*\.py|scripts/deploy-agent/(pyproject\.toml|uv\.lock)|src/omnibase_infra/topics/topic_namespace\.py|tests/ci/test_operator_script_topic_namespace_omn18913\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        stages: [pre-commit]
+  # OMN-18266: CI and pre-commit execute the same selector regression file.
+  - repo: local
+    hooks:
+      - id: impacted-test-selector
+        name: Impacted-test selector covers data dependencies (OMN-18266)
+        entry: uv run --frozen pytest tests/unit/scripts/ci/test_detect_test_paths.py -q --timeout=60
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(src/omnibase_infra/topology/|docker/catalog/database-topology/|scripts/ci/(detect_test_paths\.py|test_selection_(adjacency\.yaml|loader\.py|models\.py))$|tests/unit/scripts/ci/test_detect_test_paths\.py$|\.github/workflows/ci\.yml$|\.pre-commit-config\.yaml$)
+        stages: [pre-commit]
   # Shape-gate independence (OMN-20298): a shape-gate detector job never waits
   # on the change-control preflight and never reads its result. BLOCKING, zero
   # baseline, no allowlist, no suppression comment. CI twin: the
   # shape-gate-independence job in .github/workflows/ci.yml (STRICT CI Summary gate).
   - repo: local
     hooks:
+      # OMN-18780: the same drift controls run in the reusable audit's CI job.
+      - id: runner-routing-audit
+        name: Runner routing audit controls
+        entry: uv run pytest tests/ci/test_runner_routing_audit.py -q
+        language: system
+        stages: [pre-commit]
+        pass_filenames: false
+        files: ^(\.github/workflows/|config/runner_routing_policy\.yaml|scripts/audit-runner-routing\.py|scripts/ci/(ci_summary_gate|nonrequired_check_failure_rate)\.py|tests/ci/test_runner_routing_audit\.py|\.pre-commit-config\.yaml)
+      - id: ci-live-contact
+        name: CI tooling carries recorded live-contact evidence (OMN-18648)
+        entry: uv run --frozen onex node node_ci_live_contact_effect --backend event_bus=inmemory --state-root .onex_state/ci-live-contact
+        language: system
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+        stages: [pre-commit]
       - id: check-shape-gate-independence
         name: Shape-gate detectors never depend on the OCC preflight (OMN-20298)
         entry: uv run --no-project --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@efba6fb107f49c67e01f244c1830d55d0fffed29" python -m omnibase_core.handlers.handler_shape_gate_independence
@@ -317,6 +362,14 @@ repos:
         types: [shell]
         pass_filenames: true
         stages: [pre-commit]
+      - id: runner-disk-admission-self-pause
+        require_serial: true
+        name: Runner disk admission retries a marked self-pause (OMN-19070)
+        entry: uv run --frozen pytest tests/scripts/test_runner_job_started_disk_admission.py -q
+        language: system
+        pass_filenames: false
+        files: ^(docker/runners/runner-job-started\.sh|tests/scripts/test_runner_job_started_disk_admission\.py)$
+        stages: [pre-commit]
       - id: mypy-type-check
         require_serial: true
         name: mypy (type checking)
@@ -391,8 +444,16 @@ repos:
         name: Cross-repo pins must be reachable from dev/main (OMN-15538)
         entry: uv run --frozen python scripts/ci/check_pin_reachability.py --allow-undetermined
         language: system
-        files: ^(\.github/workflows/.*\.ya?ml|pyproject\.toml|uv\.lock)$
+        files: ^(\.github/workflows/.*\.ya?ml|\.pre-commit-config\.yaml|pyproject\.toml|uv\.lock)$
         pass_filenames: true
+        stages: [pre-commit]
+      # OMN-18496: mirrors the focused scoping regression in test-parallel.
+      - id: dev-cloud-migration-scope
+        name: Cloud migration failure gates only cloud consumers (OMN-18496)
+        entry: uv run --frozen pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py -q
+        language: system
+        files: ^(scripts/deploy-runtime\.sh|scripts/runtime_build/compose_files\.sh|docker/docker-compose\.(infra|dev-lane)\.yml|tests/scripts/test_deploy_runtime_cloud_gate_omn18496\.py)$
+        pass_filenames: false
         stages: [pre-commit]
       # OMN-16367: per-run compose proof images must be evicted at source
       # (always() teardown with --volumes --rmi local) and labeled
@@ -569,6 +630,14 @@ repos:
         entry: uv run --frozen pytest tests/ci/test_boot_gate_rollout_deadline_check_omn18316.py -q
         language: system
         files: ^(\.github/workflows/deliver-dev-candidate-to-staging\.yml|tests/ci/test_boot_gate_rollout_deadline_check_omn18316\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-19084: CI's script-test selection collects this same focused file.
+      - id: runner-disk-admission-restore-regression
+        name: Runner disk-admission restore regression (OMN-19084)
+        entry: uv run --frozen pytest tests/scripts/test_runner_disk_admission_restore.py -q
+        language: system
+        files: ^(scripts/runner-disk-admission-restore\.sh|tests/scripts/test_runner_disk_admission_restore\.py)$
         pass_filenames: false
         stages: [pre-commit]
       - id: lab-pass-criterion-bindings
@@ -1121,7 +1190,7 @@ repos:
       # requires and which this gate's own interpreter pair recommends.
       - id: governed-helper-primitive
         name: Governed helper primitive gate (OMN-18629)
-        entry: uv run --frozen python scripts/ci/governed_helper_gate.py
+        entry: uv run --frozen python scripts/ci/governed_helper_gate.py --base-ref HEAD
         language: system
         pass_filenames: false
         always_run: true
@@ -1933,13 +2002,21 @@ repos:
           ^(scripts/ci/check_integration_skips\.py|scripts/ci/integration_skip_guard\.yaml|tests/ci/test_check_integration_skips\.py|\.github/workflows/ci\.yml|tests/integration/runtime/db/test_postgres_repository_runtime_integration\.py|tests/integration/handlers/test_registration_storage_postgres_uuid_cast\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      - id: runtime-boot-suites-skip-guard
+        name: Runtime-backed suite execution guard selftest (OMN-18811)
+        language: system
+        entry: uv run python scripts/ci/check_integration_skips.py --selftest --config scripts/ci/runtime_boot_suites_skip_guard.yaml
+        files: >-
+          ^(scripts/ci/check_integration_skips\.py|scripts/ci/runtime_boot_suites_skip_guard\.yaml|tests/ci/test_check_integration_skips\.py|\.github/workflows/reusable-runtime-boot\.yml|tests/integration/test_runtime_consumes_build_loop_terminal_event\.py|tests/integration/registration/e2e/test_runtime_e2e\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
   # OMN-13291 (W0): validator-requirements fleet gate. Reports ALL missing
   # required gates for omnibase_infra against omnibase_core's
   # architecture-handshakes/validator-requirements.yaml, ratcheted by this
   # repo's own architecture-handshakes/validator-requirements-baseline.yaml.
   # Re-pin rev to the merged-dev SHA once the omnibase_core export PR lands.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: d163312724489f10f58ffdf8115ba1fa9d5783e8 # pragma: allowlist secret
+    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24 # pragma: allowlist secret
     hooks:
       - id: validate-validator-requirements
         require_serial: true
@@ -2186,7 +2263,7 @@ repos:
         entry: uv run python scripts/check_subscribe_wiring_health.py
         language: system
         pass_filenames: false
-        files: '^(src/omnibase_infra/nodes/.*/contract\.yaml|scripts/check_subscribe_wiring_health\.py)$'
+        files: '^(src/omnibase_infra/nodes/.*/contract\.yaml|src/omnibase_infra/runtime/topics\.yaml|scripts/check_subscribe_wiring_health\.py)$'
         stages: [pre-commit]
   - repo: local
     hooks:

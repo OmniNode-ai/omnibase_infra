@@ -33,6 +33,8 @@ from pathlib import Path
 from typing import Final
 from uuid import UUID, uuid4
 
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -238,7 +240,7 @@ async def _publish_setup_command(
     await producer.start()
     try:
         await producer.send_and_wait(
-            SETUP_ORCHESTRATION_TOPIC,
+            apply_topic_namespace(SETUP_ORCHESTRATION_TOPIC),
             payload,
             key=str(command.correlation_id).encode("utf-8"),
         )
@@ -373,7 +375,7 @@ def main() -> int:
             print(f"Error: {exc}", file=sys.stderr)
             return 1
     elif args.no_interactive:
-        topology = ModelDeploymentTopology.default_standard()  # type: ignore[assignment]
+        topology = ModelDeploymentTopology.default_standard()
     else:
         preset = _prompt_preset()
         topology = _topology_for_preset(preset)  # type: ignore[assignment]

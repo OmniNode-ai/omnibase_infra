@@ -572,7 +572,14 @@ def _parse_contract(
     Only reads the fields needed for auto-wiring. Unknown fields are ignored.
     """
     with open(contract_path) as f:
-        raw = yaml.safe_load(f)
+        # OMN-18843: cold discovery gates the first consumer bind. Use the
+        # safe LibYAML parser when available; the memo only helps later scans.
+        # Both loaders reject Python object tags, with a portable fallback.
+        loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)(f)
+        try:
+            raw = loader.get_single_data()
+        finally:
+            loader.dispose()
 
     if not isinstance(raw, dict):
         raise ValueError(f"Expected YAML dict, got {type(raw).__name__}")
