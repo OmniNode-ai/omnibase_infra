@@ -173,6 +173,14 @@ repos:
         always_run: true
         require_serial: true
         stages: [pre-commit]
+      - id: autoclose-history
+        name: Autoclose historical evidence controls (OMN-16106)
+        entry: uv run --frozen pytest tests/ci/test_autoclose_history_omn16106.py -q --no-cov
+        language: system
+        pass_filenames: false
+        require_serial: true
+        stages: [pre-commit]
+        files: ^(\.github/workflows/(evidence-autoclose-sweep|ci)\.yml|\.pre-commit-config\.yaml|tests/ci/(test_autoclose_history_omn16106\.py|fixtures/autoclose_history_omn16106\.json))$
       - id: check-shape-gate-independence
         name: Shape-gate detectors never depend on the OCC preflight (OMN-20298)
         entry: uv run --no-project --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@efba6fb107f49c67e01f244c1830d55d0fffed29" python -m omnibase_core.handlers.handler_shape_gate_independence
