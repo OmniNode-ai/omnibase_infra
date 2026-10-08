@@ -750,7 +750,7 @@ EXAMPLES
     jq . ~/.omnibase/infra/registry.omnibase-infra-stability-test.json  # stability
 
     # Who holds a lane right now
-    python3 scripts/runtime_build/lane_lock.py describe --compose-project omnibase-infra
+    uv run --frozen python scripts/runtime_build/lane_lock.py describe --compose-project omnibase-infra
 
     # Verify image labels match deployed SHA
     docker inspect omninode-runtime \\

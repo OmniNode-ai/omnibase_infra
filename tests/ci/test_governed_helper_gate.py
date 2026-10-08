@@ -218,6 +218,29 @@ def test_every_shipped_baseline_entry_cites_a_ticket() -> None:
         assert re.fullmatch(r"OMN-\d+", entry.ticket), entry
 
 
+def test_every_interpreter_baseline_entry_carries_a_verdict() -> None:
+    """OMN-18632: a retained interpreter site says why it is not yet converted.
+
+    The five sites left are host maintenance scripts whose systemd unit PATH has
+    no ``uv``. The other four were converted or deleted, so none of them may
+    reappear in the baseline.
+    """
+    raw = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    interpreter = [
+        e for e in raw["entries"] if e["pair"] == "interpreter-without-project-venv"
+    ]
+    for entry in interpreter:
+        verdict = entry.get("verdict")
+        assert verdict in gate.VERDICTS, entry
+        assert "RETAIN: " in entry["verdict_reason"], entry
+    retired = {
+        "scripts/deploy-runtime.sh",
+        "scripts/run-forward-migrations.sh",
+        "scripts/validate-pr-deploy-required.sh",
+    }
+    assert retired.isdisjoint({e["path"] for e in interpreter})
+
+
 # ---------------------------------------------------------------------------
 # AC4 — no suppression annotation, no skip surface
 # ---------------------------------------------------------------------------
@@ -407,9 +430,9 @@ def test_a_baseline_entry_without_a_verdict_reason_is_refused(tmp_path: Path) ->
 
 
 def test_every_shipped_baseline_entry_carries_a_verdict_and_a_reason() -> None:
-    """AC7 on the committed artifact: all 25 baselined sites are judged."""
+    """AC7 on the committed artifact: all 21 baselined sites are judged."""
     baseline = gate.load_baseline(BASELINE_PATH)
-    assert sum(entry.occurrences for entry in baseline.entries) == 25
+    assert sum(entry.occurrences for entry in baseline.entries) == 21
     for entry in baseline.entries:
         assert entry.verdict in gate.VERDICTS, entry
         assert entry.verdict_reason.strip(), entry
