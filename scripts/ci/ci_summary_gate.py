@@ -796,6 +796,10 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # dev; registered so a red run blocks a merge. Admitted under
     # POST_FIXTURE_WINDOW_CONTEXTS and placed at the tail for the same reason.
     "Direct Model Call Gate",
+    # OMN-18786: the existing seed-provenance workflow is blocking and now
+    # unfiltered on every PR and merge group. A missing or skipped context
+    # cannot silently remove provenance coverage.
+    "Seed Provenance Check",
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -818,6 +822,10 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
 # finding, not a fixture convenience.
 POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
     {
+        # OMN-18786: the unconditional context starts after the captured
+        # historical windows. Runtime enforcement still requires success;
+        # no synthetic rows are added to those historical fixtures.
+        "Seed Provenance Check",
         # OMN-19451: registered 2026-09-29, after both fixture windows closed.
         # Comes out at the next fixture re-capture.
         "delegation-health-check / Delegation Health Check",
