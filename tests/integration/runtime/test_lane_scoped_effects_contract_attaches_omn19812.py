@@ -14,9 +14,9 @@ from omnibase_infra.runtime.auto_wiring.profile_ownership import (
     filter_manifest_for_runtime_profile,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = pytest.mark.integration
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 CONTRACT_NAME = "branch_claim_check_effect"
 LAB_SCOPE = ("compose-dev", "onex-lab", "onex-lab-k3s")
 
