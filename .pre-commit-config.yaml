@@ -122,6 +122,16 @@ repos:
         require_serial: true
         args: [--allowlist, .onex_ratchets/noncanonical_class_allowlist.yaml, src/omnibase_infra]
         files: ^src/omnibase_infra/.*\.py$
+  - repo: local
+    hooks:
+      # OMN-18786: same blocking scan as the CI Summary context.
+      - id: seed-provenance-check
+        name: Seed Provenance Check
+        entry: uv run python scripts/check_seed_provenance.py --scripts-dir scripts/
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
   # OMN-18266: CI and pre-commit execute the same selector regression file.
   - repo: local
     hooks:
