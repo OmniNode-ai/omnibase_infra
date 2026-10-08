@@ -315,6 +315,35 @@ def test_a_bus_backed_exposure_with_a_typed_backend_reader_passes(
     )
 
 
+@pytest.mark.parametrize("read_all_rows", [True, False])
+def test_a_backend_reader_may_declare_read_all_rows(
+    tmp_path: Path, read_all_rows: bool
+) -> None:
+    """Market's reader model carries an optional ``read_all_rows`` (OMN-19716)."""
+    contracts = tmp_path / "contracts"
+    _write_contract(
+        contracts,
+        "node_projection_promotion_gate",
+        {
+            "expose": True,
+            "topic": "onex.snapshot.projection.prod-promotion-gate.v1",
+            "bus_backed": True,
+            "backend_readers": [_backend_reader(read_all_rows=read_all_rows)],
+        },
+    )
+    registry = _write_registry(tmp_path / "registry.json", {"w": [REGISTRATION_TOPIC]})
+    layouts = tmp_path / "layouts"
+    _write_layout(layouts, "default", ["w"])
+
+    assert (
+        evaluate(
+            collect_bus_backed_exposures([contracts], _SURFACE),
+            _readers(registry, layouts),
+        )
+        == []
+    )
+
+
 @pytest.mark.parametrize(
     "backend_readers",
     [
@@ -331,6 +360,10 @@ def test_a_bus_backed_exposure_with_a_typed_backend_reader_passes(
             [_backend_reader(projection_slot="other_panel")], id="unknown-slot"
         ),
         pytest.param([_backend_reader(id="other_status_page")], id="unknown-reader-id"),
+        pytest.param(
+            [_backend_reader(read_all_rows="yes")], id="non-bool-read-all-rows"
+        ),
+        pytest.param([_backend_reader(page_size=10)], id="unknown-key"),
         pytest.param(
             [_backend_reader(), _backend_reader(projection_slot="secondary_gate")],
             id="duplicate-id",

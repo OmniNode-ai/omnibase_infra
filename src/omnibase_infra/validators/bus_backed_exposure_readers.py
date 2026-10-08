@@ -591,6 +591,9 @@ def _parse_backend_readers(
     errors: list[str] = []
     seen_ids: set[str] = set()
     required_keys = frozenset({"id", "kind", "route", "projection_slot"})
+    # Market's ModelProjectionBackendReader also carries `read_all_rows: bool = False`
+    # (OMN-19716): how the page reads the slot, not which slot it reads.
+    optional_keys = frozenset({"read_all_rows"})
 
     for index, entry in enumerate(raw):
         prefix = f"`backend_readers[{index}]`"
@@ -604,7 +607,7 @@ def _parse_backend_readers(
 
         entry_keys = frozenset(entry)
         missing_keys = sorted(required_keys - entry_keys)
-        unknown_keys = sorted(entry_keys - required_keys)
+        unknown_keys = sorted(entry_keys - required_keys - optional_keys)
         if missing_keys:
             errors.append(f"{prefix} is missing {', '.join(missing_keys)}")
         if unknown_keys:
@@ -616,6 +619,9 @@ def _parse_backend_readers(
         kind = entry["kind"]
         route = entry["route"]
         projection_slot = entry["projection_slot"]
+        if not isinstance(entry.get("read_all_rows", False), bool):
+            errors.append(f"{prefix}.read_all_rows must be a boolean")
+            continue
         if not isinstance(reader_id, str) or not _BACKEND_READER_ID.fullmatch(
             reader_id
         ):
