@@ -122,6 +122,17 @@ repos:
         require_serial: true
         args: [--allowlist, .onex_ratchets/noncanonical_class_allowlist.yaml, src/omnibase_infra]
         files: ^src/omnibase_infra/.*\.py$
+  # OMN-18266: CI and pre-commit execute the same selector regression file.
+  - repo: local
+    hooks:
+      - id: impacted-test-selector
+        name: Impacted-test selector covers data dependencies (OMN-18266)
+        entry: uv run --frozen pytest tests/unit/scripts/ci/test_detect_test_paths.py -q --timeout=60
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(src/omnibase_infra/topology/|docker/catalog/database-topology/|scripts/ci/(detect_test_paths\.py|test_selection_(adjacency\.yaml|loader\.py|models\.py))$|tests/unit/scripts/ci/test_detect_test_paths\.py$|\.github/workflows/ci\.yml$|\.pre-commit-config\.yaml$)
+        stages: [pre-commit]
   # Shape-gate independence (OMN-20298): a shape-gate detector job never waits
   # on the change-control preflight and never reads its result. BLOCKING, zero
   # baseline, no allowlist, no suppression comment. CI twin: the

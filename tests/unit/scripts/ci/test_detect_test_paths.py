@@ -185,6 +185,73 @@ def test_test_infrastructure_change_escalates_to_full_suite() -> None:
     assert selection.full_suite_reason == EnumFullSuiteReason.TEST_INFRASTRUCTURE
 
 
+@pytest.mark.parametrize(
+    "changed_file",
+    [
+        "src/omnibase_infra/topology/instances/local.yaml",
+        "src/omnibase_infra/topology/instances/new-lane.yaml",
+        "docker/catalog/database-topology/local.yaml",
+        "docker/catalog/database-topology/new-lane.yaml",
+    ],
+)
+def test_data_file_dependency_forces_full_suite(changed_file: str) -> None:
+    # OMN-18266: tests open these inputs by path, outside import adjacency.
+    # A data-only PR must run integration tests as well as unit tests.
+    selection = compute_selection(
+        changed_files=[changed_file],
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+        feature_flag_enabled=True,
+    )
+    assert selection.is_full_suite is True
+    assert selection.full_suite_reason == EnumFullSuiteReason.TEST_INFRASTRUCTURE
+    assert selection.selected_paths == ["tests/"]
+    assert selection.split_count == 15
+    assert selection.matrix == list(range(1, 16))
+
+
+def test_data_only_replay_of_pr_3459_forces_full_suite() -> None:
+    # Exact YAML portion of merge ce70bd1eb's diff, read from git show.
+    # No Python or test change may accidentally supply the missing coverage.
+    changed_files = [
+        "docker/catalog/database-topology/judge.yaml",
+        "docker/catalog/database-topology/lakshman.yaml",
+        "docker/catalog/database-topology/local.yaml",
+        "docker/catalog/database-topology/onex-dev.yaml",
+        "docker/catalog/database-topology/onex-prod.yaml",
+        "docker/catalog/database-topology/prod.yaml",
+        "docker/catalog/database-topology/stability-test.yaml",
+        "docker/catalog/database-topology/test.yaml",
+        "src/omnibase_infra/topology/instances/local.yaml",
+        "src/omnibase_infra/topology/instances/onex-dev.yaml",
+        "src/omnibase_infra/topology/instances/onex-prod.yaml",
+    ]
+    selection = compute_selection(
+        changed_files=changed_files,
+        adjacency_path=ADJ,
+        ref_name="pr-branch",
+        feature_flag_enabled=True,
+    )
+    assert selection.is_full_suite is True
+    assert selection.selected_paths == ["tests/"]
+    assert selection.full_suite_reason == EnumFullSuiteReason.TEST_INFRASTRUCTURE
+
+
+@pytest.mark.parametrize(
+    "changed_file",
+    [
+        "src/omnibase_infra/topology-notes/local.yaml",
+        "docker/catalog/database-topology-notes/local.yaml",
+    ],
+)
+def test_data_file_escalation_respects_directory_boundaries(changed_file: str) -> None:
+    selection = compute_selection(
+        changed_files=[changed_file], adjacency_path=ADJ, ref_name="pr-branch"
+    )
+    assert selection.is_full_suite is False
+    assert selection.full_suite_reason is None
+
+
 def test_pyproject_toml_escalates_to_full_suite() -> None:
     selection = compute_selection(
         changed_files=["pyproject.toml"],
