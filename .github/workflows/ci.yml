@@ -2053,6 +2053,9 @@ jobs:
           uv run python scripts/validation/check_topic_literals.py \
             --baseline scripts/validation/topic_literal_baseline.txt
 
+      - name: Operator script topic namespace gate (OMN-18913)
+        run: uv run --frozen pytest tests/ci/test_operator_script_topic_namespace_omn18913.py -q
+
   plugin-env-service-completeness:
     needs: occ-preflight
     name: "Plugin ENV->Service Completeness (OMN-4313)"
