@@ -3176,6 +3176,7 @@ def bind_commit_checks(
 ) -> tuple[list[ModelLabPassCheck], str, tuple[str, ...]]:
     """Copy explicit lab-check declarations from the cited commit's contract.
 
+    The ticket citation is read from the commit subject, not the body.
     The declaration is a dod_evidence item whose id is the exact probe identity
     ``lab-pass-<lane>-<check name>``. Matching an identity is not guessing a
     criterion from a check name: only the author's binds_ac is copied. Both
@@ -3195,7 +3196,7 @@ def bind_commit_checks(
         )
 
     commit = subprocess.run(
-        ["git", "-C", str(repo_dir), "show", "-s", "--format=%B", sha],
+        ["git", "-C", str(repo_dir), "show", "-s", "--format=%s", sha],
         capture_output=True,
         text=True,
         check=False,
