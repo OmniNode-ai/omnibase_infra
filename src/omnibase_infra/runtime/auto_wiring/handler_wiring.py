@@ -5971,6 +5971,9 @@ def _make_stateful_dispatch_callback(
                 correlation_id=cid_uuid,
                 event_type=event_type,
                 parent_envelope_id=edge,
+                # OMN-18389: recovery has only the persisted entry; payload
+                # attribution alone cannot attribute a quality-gate verdict.
+                tenant_id=_extract_dispatch_tenant_id(entry),
             )
             key: bytes | None = None
             for attr in ("entity_id", "node_id", "session_id", "correlation_id"):
