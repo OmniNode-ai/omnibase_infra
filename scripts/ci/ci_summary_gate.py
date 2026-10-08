@@ -801,6 +801,9 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # unfiltered on every PR and merge group. A missing or skipped context
     # cannot silently remove provenance coverage.
     "Seed Provenance Check",
+    # OMN-18648: unconditional new admission workflow. Body edits re-evaluate
+    # this context without re-running the full CI matrix.
+    "CI Live Contact (OMN-18648)",
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -827,6 +830,9 @@ POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
         # historical windows. Runtime enforcement still requires success;
         # no synthetic rows are added to those historical fixtures.
         "Seed Provenance Check",
+        # OMN-18648: the producer first exists in this PR. This is historical
+        # recording metadata only; live missing/red admission always blocks.
+        "CI Live Contact (OMN-18648)",
         # OMN-19451: registered 2026-09-29, after both fixture windows closed.
         # Comes out at the next fixture re-capture.
         "delegation-health-check / Delegation Health Check",

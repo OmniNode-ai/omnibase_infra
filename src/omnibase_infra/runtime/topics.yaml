@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-# Topics emitted by the ONEX runtime kernel on behalf of node orchestrators.
+# Topics emitted by the ONEX runtime kernel and its generic node client.
 # Scanned by ContractTopicExtractor.extract_from_skill_manifests().
 #
 # These are the terminal-result topics that runtime/service_kernel.py wires a
@@ -25,3 +25,7 @@ topics:
   - onex.evt.omnimarket.delegate-skill-completed.v1
   - onex.evt.omnimarket.delegate-skill-failed.v1
   - onex.evt.omniclaude.session-coordination-signal.v1
+  # OMN-18648: cli_node invokes RuntimeLocal._run_event_driven, which publishes
+  # the contract's first subscribe_topic before waiting for its terminal event.
+  # Exercised through the real bus in tests/ci/test_ci_live_contact.py.
+  - onex.cmd.platform.ci-live-contact-check.v1
