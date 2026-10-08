@@ -23,6 +23,10 @@ class ModelObservedHop(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    source: str = Field(
+        default="",
+        description="Producer recorded on this envelope (event_ledger.source); evidence, not a verdict.",
+    )
     topic: str = Field(
         description="The topic this envelope was observed on. Becomes the hop name."
     )

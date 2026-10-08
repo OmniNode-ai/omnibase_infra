@@ -159,8 +159,8 @@ async def _projection(
 
 async def _ledger(
     source: str, correlation_id: str, timeout_s: float
-) -> tuple[tuple[str, ...] | None, bool, str, str]:
-    return _FULL_CHAIN, True, "pass", ""
+) -> tuple[tuple[str, ...] | None, bool, str, str, str]:
+    return _FULL_CHAIN, True, "pass", "complete", ""
 
 
 def _ledger_dsn_lookup(name: str) -> str:
