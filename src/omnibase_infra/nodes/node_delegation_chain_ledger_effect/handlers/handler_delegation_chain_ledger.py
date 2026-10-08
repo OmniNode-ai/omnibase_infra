@@ -264,7 +264,9 @@ class HandlerDelegationChainLedger:
         for attempt in range(self._settle_attempts):
             observed = await self._read_observed(correlation_id)
             observed_topics = {hop.topic for hop in observed}
-            if self._observation_is_settled(observed_topics):
+            if self._observation_is_settled(
+                observed_topics
+            ) or self._terminal_is_rootless(observed):
                 break
             if attempt + 1 < self._settle_attempts and self._settle_delay_seconds:
                 await asyncio.sleep(self._settle_delay_seconds)
@@ -335,6 +337,24 @@ class HandlerDelegationChainLedger:
         return all(
             any(topic in observed_topics for topic in hop.topics)
             for hop in self._declared_chain
+        )
+
+    def _terminal_is_rootless(self, observed: Sequence[ModelObservedHop]) -> bool:
+        """Does a terminal record no parent despite declaring one?
+
+        OMN-17427: a terminal that records no parent claims to be a chain
+        head. Its declared edge to its parent can never be re-derived, and
+        no later read can change that, so waiting is pure head-of-line delay
+        for every terminal queued behind it. On the .201 dev lane,
+        2026-10-08, about 270 such terminals in the 17:32Z--17:44Z burst
+        delayed the canary's write until 18:09:58Z, past its 120 s window.
+        """
+        if not self._declared_chain:
+            return False
+        terminal = self._declared_chain[-1]
+        return terminal.parent is not None and any(
+            hop.topic in terminal.topics and hop.parent_envelope_id is None
+            for hop in observed
         )
 
     async def _read_observed(

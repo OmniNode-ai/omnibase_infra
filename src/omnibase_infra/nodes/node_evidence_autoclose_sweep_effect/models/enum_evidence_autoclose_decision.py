@@ -59,6 +59,9 @@ class EnumEvidenceAutocloseDecision(StrEnum):
     #     RELEASE today via an `if not items` early exit — "nothing written
     #     down" is not "nothing to prove".
     GAP_AC_UNBOUND = "gap_ac_unbound"
+    # OMN-18490. A started ticket carries task-list boxes, all ticked. This
+    # names the author's assertion for a human; it never authorizes a Done.
+    GAP_TICKED_OPEN = "gap_ticked_open"
     # OMN-18056. THE RE-DRAW. A verdict that clears every conjunct is not
     # flipped in the run that FIRST observed it; the same fingerprint has to
     # come back on a later tick.
