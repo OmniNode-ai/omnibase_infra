@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -36,7 +37,7 @@ _LANES = tuple(
 )
 
 
-def _render(lane: str, overrides: dict[str, str] | None = None) -> dict:
+def _render(lane: str, overrides: dict[str, str] | None = None) -> dict[str, Any]:
     if lane in {"infra", "ci-bus"}:
         names = [lane]
     elif lane in {"dogfood", "sim-202"}:
@@ -92,7 +93,8 @@ def _render(lane: str, overrides: dict[str, str] | None = None) -> dict:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    return json.loads(result.stdout)
+    rendered: dict[str, Any] = json.loads(result.stdout)
+    return rendered
 
 
 @pytest.mark.unit

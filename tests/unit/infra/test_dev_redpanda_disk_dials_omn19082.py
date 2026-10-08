@@ -32,7 +32,8 @@ _FOURTEEN_DAYS_MS = 14 * 24 * 3600 * 1000
 @cache
 def _service(path: Path, name: str) -> dict[str, Any]:
     lane = "dogfood" if path == _DOGFOOD else "infra" if path == _BASE else "dev"
-    return _render(lane)["services"][name]
+    service: dict[str, Any] = _render(lane)["services"][name]
+    return service
 
 
 def _script_lines(path: Path) -> list[str]:
