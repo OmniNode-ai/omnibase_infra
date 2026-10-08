@@ -132,6 +132,14 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      - id: operator-script-topic-namespace
+        name: Operator broker topics honor the namespace (OMN-18913)
+        entry: uv run --frozen pytest tests/ci/test_operator_script_topic_namespace_omn18913.py -q
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(scripts/.*\.py|scripts/deploy-agent/(pyproject\.toml|uv\.lock)|src/omnibase_infra/topics/topic_namespace\.py|tests/ci/test_operator_script_topic_namespace_omn18913\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        stages: [pre-commit]
   # OMN-18266: CI and pre-commit execute the same selector regression file.
   - repo: local
     hooks:
