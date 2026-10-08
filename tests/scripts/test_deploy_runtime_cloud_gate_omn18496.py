@@ -17,7 +17,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = ROOT / "scripts/deploy-runtime.sh"
+SCRIPT = ROOT / "src/omnibase_infra/handlers/handler_runtime_deploy.sh"
 CLOUD_CONSUMERS = ("onex-api",)
 pytestmark = pytest.mark.unit
 
