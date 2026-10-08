@@ -52,10 +52,12 @@
 #                           days (2026-07-26, 2026-07-27) are why this is required.
 #   ONEX_DEPLOY_GRANT_ACK   Comma-separated grant ids. This refresh is REFUSED
 #                           while unconsumed, unexpired prod-promotion grants at
-#                           onex_change_control@main pin the lane's proof —
+#                           omninode_infra@main pin the lane's proof —
 #                           refreshing invalidates the stability-proven premise
 #                           those grants rest on. Proceeding requires naming EVERY
-#                           live grant id (the acknowledgement is recorded).
+#                           live grant id (the acknowledgement is recorded). An
+#                           empty registry also refuses; proceeding past it takes
+#                           the token 'empty-grant-registry' (OMN-20068).
 #
 # Optional environment:
 #   DEPLOY_SOURCE_CLONE_ROOT  Explicit absolute directory holding the deploy
@@ -516,9 +518,10 @@ log "mode            : ${MODE}"
 # would otherwise be unattributed and un-interlocked.
 #
 # Refuses when ONEX_DEPLOY_REASON is absent/placeholder, or when unconsumed,
-# unexpired prod-promotion grants at onex_change_control@main pin this lane's
+# unexpired prod-promotion grants at omninode_infra@main pin this lane's
 # proof (acknowledge each grant id via ONEX_DEPLOY_GRANT_ACK to proceed on the
-# record). Fails closed when grant state cannot be resolved.
+# record). Fails closed when grant state cannot be resolved or the registry
+# lists no entries.
 # =============================================================================
 ATTRIBUTION_PREFLIGHT="${REPO_ROOT}/scripts/preflight_lane_deploy_attribution.py"
 ATTRIBUTION_RECORD_JSON="null"

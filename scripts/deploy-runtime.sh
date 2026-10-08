@@ -698,10 +698,11 @@ ATTRIBUTION + GRANT INTERLOCK (OMN-15218)
                             reason).
     ONEX_DEPLOY_GRANT_ACK   Comma-separated grant ids. A stability-test deploy is
                             REFUSED while unconsumed, unexpired prod-promotion
-                            grants exist at onex_change_control@main; proceeding
+                            grants exist at omninode_infra@main; proceeding
                             requires naming EVERY live grant id here (or the token
                             'unreadable-grant-state' when grant state cannot be
-                            resolved — which also fails closed). The
+                            resolved, or 'empty-grant-registry' when the registry
+                            lists no entries — both also fail closed). The
                             acknowledgement is written into the record.
 
 DEPLOYMENT ROOT
@@ -1505,7 +1506,7 @@ guard_lane_deploy_attribution() {
     # for: mandatory ONEX_DEPLOY_REASON on governed lanes (stability-test / prod
     # / judge), durable actor+command+ticket capture, and the refuse-by-default
     # interlock when live, unconsumed prod-promotion grants at
-    # onex_change_control@main pin the stability lane's proof.
+    # omninode_infra@main pin the stability lane's proof.
     #
     # The preflight prints its human summary on stderr and the JSON attribution
     # record on stdout; the record is captured here and folded into registry.json
