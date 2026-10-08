@@ -807,7 +807,7 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # OMN-20074 S6 part 1: repo-owned DoD verdict, enforced beside OCC. THIS
     # LINE IS THE MECHANISM: dev requires only CI Summary, so registering the
     # verdict here makes an absent/skipped/red check block instead of silently
-    # retiring the gate. Producer: call-repo-evidence-gate.yml on pull_request
+    # retiring the gate. Producer: call-repo-evidence-gate.yml on pull_request_target
     # to dev/main, with no paths filter or job-level if. Admission measured
     # 16/16 completed-success check-runs on the most recent merged dev heads
     # (#4702 #4715 #4716 #4714 #4717 #4707 #4667 #4719 #4669 #4720 #4722 #4723
@@ -2539,7 +2539,7 @@ def draft_ready_check_runs(
     runs = {
         _run_int(run, "id"): run
         for run in workflow_runs or []
-        if run.get("event") in {"pull_request", "push"}
+        if run.get("event") in {"pull_request", "pull_request_target", "push"}
         and run.get("head_sha") == head_sha
         and _run_int(run, "workflow_id")
         and _parse_timestamp(str(run.get("created_at") or "")) is not None

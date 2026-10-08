@@ -53,11 +53,14 @@ def test_caller_workflow_shape() -> None:
     # PyYAML 1.1 resolves the bare `on:` key to the boolean True.
     triggers = data.get("on", data.get(True))
     assert isinstance(triggers, dict), "caller must declare a mapping on: block"
-    assert "pull_request" in triggers, "caller must run on pull requests"
-    # scripts/audit-runner-routing.py bans the base-branch pull request trigger
-    # in this repo, so the caller uses plain pull_request.
-    assert set(triggers) == {"pull_request"}, "caller must only use pull_request"
-    target = triggers["pull_request"]
+    # OMN-20074: the base-branch trigger makes GitHub read this definition from
+    # the base branch, so a pull request cannot edit what judges it. The operator
+    # ruled (2026-10-08T22:41:24Z) that this one file is the single named
+    # exception to the OMN-15699 ban in scripts/audit-runner-routing.py.
+    assert set(triggers) == {"pull_request_target"}, (
+        "caller must only use the base-branch pull request trigger"
+    )
+    target = triggers["pull_request_target"]
     assert not {"paths", "paths-ignore"} & set(target), (
         "the registered verdict must report without a paths filter"
     )
@@ -106,7 +109,7 @@ def test_caller_verifier_ships_the_occ_difference_classifier() -> None:
 
 def test_caller_enforces_after_the_s6_part1_cutover() -> None:
     job = _job()
-    assert job["uses"].endswith("@81b34fe91f995e75acd65694e81ecf2c385456a4")
+    assert job["uses"].endswith("@fb0c6c2117d5868a398b0920cd0048d0824415b1")
     assert job["with"].get("shadow") == "false"
     assert job["with"].get("compare-with-occ") == "false"
 
@@ -134,20 +137,24 @@ def _caller_rows(*, verify: str | None, dod_verify: str | None) -> list[dict[str
     return rows
 
 
-def _sweep(rows: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+def _sweep(
+    rows: list[dict[str, Any]], event: str = "pull_request"
+) -> tuple[list[str], list[str]]:
     failures, _in_flight, swept, _excluded, _provisional = evaluate_external_sweep(
         rows,
         expected=EXPECTED_EXTERNAL_CONTEXTS,
         in_run_names=frozenset(),
         self_name="CI Summary",
         exclusions=EXTERNAL_SWEEP_EXCLUSIONS,
-        events=check_run_event_index([{"id": _RUN_ID, "event": "pull_request"}]),
+        events=check_run_event_index([{"id": _RUN_ID, "event": event}]),
         now=_NOW,
     )
     return failures, swept
 
 
-def _ci_summary(rows: list[dict[str, Any]]) -> tuple[int, str]:
+def _ci_summary(
+    rows: list[dict[str, Any]], event: str = "pull_request"
+) -> tuple[int, str]:
     jobs = [
         {"name": name, "status": "completed", "conclusion": "success"}
         for name in (*STRICT_GATE_JOBS, *SKIPPABLE_GATE_JOBS)
@@ -161,14 +168,14 @@ def _ci_summary(rows: list[dict[str, Any]]) -> tuple[int, str]:
         jobs,
         check_runs=other_contexts + rows,
         external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
-        workflow_runs=[{"id": _RUN_ID, "event": "pull_request"}],
+        workflow_runs=[{"id": _RUN_ID, "event": event}],
         now=_NOW,
     )
 
 
 def test_ci_summary_accepts_the_registered_verdict_beside_occ() -> None:
-    assert "pull_request" not in SWEEP_NON_PR_EVENTS, (
-        "the sweep must judge the caller's pull_request rows"
+    assert {"pull_request", "pull_request_target"}.isdisjoint(SWEEP_NON_PR_EVENTS), (
+        "the sweep must judge the caller's pull_request_target rows"
     )
     assert _DOD_VERIFY in EXPECTED_EXTERNAL_CONTEXTS
     assert _VERIFY not in EXPECTED_EXTERNAL_CONTEXTS
@@ -216,6 +223,25 @@ def test_ci_summary_refuses_a_red_or_absent_registered_verdict(
         assert f"external contexts missing/pending: {_DOD_VERIFY}" in report
     else:
         assert f"external-context failures: {_DOD_VERIFY}" in report
+
+
+@pytest.mark.parametrize(
+    ("dod_verify", "expected_code"),
+    [
+        pytest.param("success", EXIT_SUCCESS, id="green"),
+        pytest.param("failure", EXIT_FAILURE, id="red"),
+        pytest.param("skipped", EXIT_FAILURE, id="skipped"),
+    ],
+)
+def test_ci_summary_judges_the_base_branch_trigger_rows(
+    dod_verify: str, expected_code: int
+) -> None:
+    """The caller's rows carry event pull_request_target after OMN-20074 (the
+    same-repository run attaches to the PR head); the sweep must judge them."""
+    rows = _caller_rows(verify="success", dod_verify=dod_verify)
+    assert _sweep(rows, "pull_request_target") == ([], [_VERIFY])
+    code, report = _ci_summary(rows, "pull_request_target")
+    assert code == expected_code, report
 
 
 @pytest.mark.live_contact("tests/ci/fixtures/omn20074_repo_evidence_check_runs.json")

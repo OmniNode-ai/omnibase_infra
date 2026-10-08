@@ -6,18 +6,23 @@
 # omnibase_core's receipt-gate reusable with evidence-source: caller.
 # This is the path omnimarket proved as the canary (OMN-20070, OMN-20072).
 #
-# Why pull_request, not the base-branch trigger omnimarket's caller uses:
-# scripts/audit-runner-routing.py prohibits that trigger anywhere in this
-# repository's workflows (OMN-15699: untrusted fork code must never reach
-# self-hosted runners), and it matches the text, comments included. This caller
-# follows call-receipt-gate.yml. The weaker property is that a pull request can
-# edit this file and change what judges it. The reusable refuses fork heads before
-# any checkout, but for a same-repository head it runs the cited contract's checks
-# (its bound tests) at the head and at the merge base on the trusted runner fleet.
-# Enforcing the gate from a definition the pull request cannot edit needs the
-# operator's runner-policy ruling (OMN-20074): whether this one caller may use the
-# base-branch trigger, as omnimarket's and omnibase_core's callers do, as the single
-# exemption to that audit. Until then this change stays draft.
+# Why pull_request_target (OMN-20074): GitHub reads a pull_request_target
+# workflow's definition from the base branch, so a pull request cannot edit the
+# caller, ci.yml or the CI Summary gate and change what judges it. omnimarket's
+# and omnibase_core's callers use the same trigger. scripts/audit-runner-routing.py
+# bans it in every workflow (OMN-15699: untrusted fork code must never reach
+# self-hosted runners); this file is the single named exception, ruled by the
+# operator at 2026-10-08T22:41:24Z and recorded as pull_request_target_exception in
+# config/runner_routing_policy.yaml. The audit holds this file to its present
+# shape: only this trigger, read-only permissions, one job that calls a
+# full-SHA-pinned reusable, no inline steps and no secrets. The reusable refuses
+# fork heads before any checkout; for a same-repository head it runs the cited
+# contract's checks (its bound tests) at the head and at the merge base on the
+# trusted runner fleet, as it did under pull_request. Check-runs of a
+# same-repository head attach to the PR head sha, so CI Summary still reads them.
+# Residual gap: a required check is matched by name, so a pull request could add
+# another workflow reporting the same name; only an org required-workflow rule
+# closes that, and the audit refuses any other workflow using this trigger.
 #
 # dev and main are the integration branches. The activity types cover new heads,
 # reopened and ready PRs, and edits to the ticket citation or base branch.
@@ -39,17 +44,18 @@
 # compare-with-occ is "false", so the difference step stops waiting for OCC.
 # verifier-version 0.4.305 ships the occ-difference classifier and omnimarket#3563,
 # so a rollback turns comparison back on with one input. The full-SHA pin is the
-# squash commit of omnibase_core#1912 on dev; caller-mode verify reports a success
-# no-op, leaving only dod-verify to carry the verdict, and a writer-app
+# squash commit of omnibase_core#1914 on dev; caller-mode verify reports a success
+# no-op, leaving only dod-verify to carry the verdict, a writer-app
 # dependency-pin-only head is exempt by a verdict derived in the job
-# (omnibase_core#1911). scripts/ci/check_pin_reachability.py
-# (OMN-15538) accepts it because dev contains it. The runner-policy ruling above
-# remains required before this change leaves draft.
+# (omnibase_core#1911), and so is the writer app's release cut that adds only a
+# changelog entry for the head's version (omnibase_core#1914).
+# scripts/ci/check_pin_reachability.py (OMN-15538) accepts it because dev
+# contains it.
 
 name: Repo Evidence Gate
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, edited, ready_for_review]
     branches: [dev, main]
 
@@ -63,7 +69,7 @@ permissions:
 
 jobs:
   repo-evidence:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@81b34fe91f995e75acd65694e81ecf2c385456a4 # OMN-20074: the squash commit of omnibase_core#1912 on dev; carries omnibase_core#1911 (the writer app's pin-only exemption derived in-job at the head) and #1909 (caller-mode verify reports a success no-op)
+    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@fb0c6c2117d5868a398b0920cd0048d0824415b1 # OMN-20074: the squash commit of omnibase_core#1914 on dev; carries omnibase_core#1912 (caller-mode verify success no-op, the pin-only exemption derived in the job) and the writer app's release-cut exemption
     with:
       evidence-source: caller
       verifier-version: 0.4.305
