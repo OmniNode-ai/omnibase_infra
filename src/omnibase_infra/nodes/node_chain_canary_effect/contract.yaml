@@ -294,6 +294,10 @@ error_handling:
       description: "The projection readback was configured and this node declined to run it (OMN-18060). Two refusals: a Postgres connection string reached the process through argv, where every process on the host can read it out of /proc and the dispatch step echoes its own configuration into the run log; or the DSN authenticates as a role carrying SUPERUSER or BYPASSRLS, established un-forgeably by asking the server for current_user's own pg_roles row BEFORE any data is read. The second is not about disclosure: such a role is exempt from row-level security unconditionally, so a green read through it cannot distinguish a readable projection from one readable only by an identity nothing else has. Distinct from PROJECTION_READBACK_FAILED — an error is the store not answering, a refusal is this node declining to ask."
       recoverable: true
       retry_strategy: "none"
+    - name: "LEDGER_CHAIN_IN_PROCESS_TERMINAL_ONLY"
+      description: "OMN-17427: the ledger writer labelled this run's chain in_process_terminal_only from its terminal (published by a contract-declared in-process producer, recording no parent). The delegation was served in-process and published only its terminal, so the probe did not exercise the bus chain. Not a pass, and not a chain fault: distinct from LEDGER_CHAIN_INCOMPLETE, which is a bus-routed chain short a hop."
+      recoverable: true
+      retry_strategy: "none"
     - name: "LEDGER_CHAIN_INCOMPLETE"
       description: "The ledger chain was assembled but a declared hop is missing, so there is nothing complete to replay (OMN-16964). Distinct from LEDGER_REPLAY_FAILED: the evidence was never there, rather than present and failing to reproduce."
       recoverable: true
