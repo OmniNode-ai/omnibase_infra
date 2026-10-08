@@ -9,20 +9,18 @@
 # Required status check: "contract-validation"
 # Must pass (or skip) before merging to main.
 #
-# The validation is intentionally lenient on missing contracts:
-# - If branch name has no OMN-XXXX ticket ID → skipped
-# - If contracts/<ticket_id>.yaml does not exist → skipped
-# - If contract file exists but fails schema validation → fails
-#
-# This prevents blocking PRs that legitimately have no contract
-# (e.g., dependency bumps, docs-only changes) while enforcing schema
-# correctness when a contract is present.
+# A pull request authored by a person whose title cites OMN-<n> must carry
+# contracts/OMN-<n>.yaml at its head (OMN-20074, OCC retirement S5: the shadow
+# repo-evidence / dod-verify verdict cannot count an infra PR without it).
+# Bot-authored pull requests and merge_group runs are not judged for presence.
+# Schema validation of a present contract is unchanged, keyed on the branch name.
 
 name: Contract Validation
 
 on:
   pull_request:
     branches: [main, dev, develop]
+    types: [opened, synchronize, reopened, edited]
   merge_group:
   workflow_dispatch:
     inputs:
@@ -92,6 +90,47 @@ jobs:
           fi
           echo "resolved_branch=$BRANCH" >> "$GITHUB_OUTPUT"
           echo "::notice::Resolved branch name: $BRANCH"
+
+      - name: Check out the contracts directory at the pull request head
+        id: contract_head
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: .contract-presence/head
+          sparse-checkout: contracts
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Refuse a cited ticket with no contract at the pull request head
+        id: contract_presence
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_TREE: .contract-presence/head
+        shell: bash
+        run: |
+          set -euo pipefail
+          tickets=$(printf '%s\n' "$PR_TITLE" | grep -oE 'OMN-[0-9]+' | sort -u || true)
+          if [[ -z "$tickets" ]]; then
+            echo "::notice::Contract presence: the pull request title cites no OMN ticket."
+            exit 0
+          fi
+
+          failed=0
+          while IFS= read -r ticket; do
+            if [[ ! -f "$HEAD_TREE/contracts/$ticket.yaml" ]]; then
+              echo "::error::pull request cites $ticket but carries no contracts/$ticket.yaml"
+              echo "::notice::Include contracts/$ticket.yaml at this PR head; a later companion merge cannot supply evidence for this head."
+              failed=1
+            fi
+          done <<< "$tickets"
+
+          if [[ "$failed" -ne 0 ]]; then
+            exit 1
+          fi
+          echo "::notice::Contract presence: every cited ticket carries contracts/<ticket>.yaml at the head."
+          exit 0
 
       - name: Run contract validation
         id: validate-contract

@@ -1,0 +1,59 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20074
+title: An infra pull request that cites a ticket carries that ticket's contract at its head
+summary: omnibase_infra's repo-evidence caller runs in shadow, so nothing refused an infra pull request that cited OMN-<n> without contracts/OMN-<n>.yaml and the S5 count read every such PR as an unclassified difference. contract-validation now refuses a human-authored pull request whose title cites a ticket with no contract at the head, with the receipt-gate reusable's own title rule and message; bot-authored pull requests are not judged for presence and the evidence verdict stays in shadow.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20074-contract-presence
+    statement: A human-authored omnibase_infra pull request whose title cites OMN-<n> must carry contracts/OMN-<n>.yaml at its head, refused in the registered contract-validation context before the merge.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: contract-validation refuses a pull request whose title cites OMN-<n> when the head has no contracts/OMN-<n>.yaml, naming every missing ticket with the receipt-gate reusable''s message -- falsifier: uv run pytest tests/ci/test_contract_presence_omn20074.py -q -k "refuses_a_cited_ticket or names_every_missing_ticket"'
+      - id: AC2
+        statement: 'AC2: the presence step admits a head that carries every cited contract and a title that cites no ticket, and reads the title exactly as the reusable does (upper-case OMN-<n>, exact file name) -- falsifier: uv run pytest tests/ci/test_contract_presence_omn20074.py -q -k "admits or reads_the_title"'
+      - id: AC3
+        statement: 'AC3: the presence steps run on human-authored pull_request events only, before schema validation, inside the contract-validation job that CI Summary registers, and re-run on a title edit -- falsifier: uv run pytest tests/ci/test_contract_presence_omn20074.py -q -k "steps_run_before or red_reds_ci_summary"'
+evidence_requirements:
+  - kind: tests
+    description: The presence step, run from the workflow text, exits 1 and names each cited ticket whose contract is missing.
+    command: uv run pytest tests/ci/test_contract_presence_omn20074.py -q -k "refuses_a_cited_ticket or names_every_missing_ticket"
+  - kind: tests
+    description: The presence step admits a carried contract and an uncited title, and matches the reusable's case-sensitive title rule.
+    command: uv run pytest tests/ci/test_contract_presence_omn20074.py -q -k "admits or reads_the_title"
+  - kind: tests
+    description: The workflow wiring gates both steps on a human pull_request event, orders them before schema validation, and the context is registered in CI Summary.
+    command: uv run pytest tests/ci/test_contract_presence_omn20074.py -q -k "steps_run_before or red_reds_ci_summary"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20074-ac1
+    description: The presence step, run from the workflow text, exits 1 and names each cited ticket whose contract is missing.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_presence_omn20074.py -q -k "refuses_a_cited_ticket or names_every_missing_ticket"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20074-ac2
+    description: The presence step admits a carried contract and an uncited title, and matches the reusable's case-sensitive title rule.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_presence_omn20074.py -q -k "admits or reads_the_title"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-20074-ac3
+    description: The workflow wiring gates both steps on a human pull_request event, orders them before schema validation, and the context is registered in CI Summary.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_presence_omn20074.py -q -k "steps_run_before or red_reds_ci_summary"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

@@ -294,6 +294,15 @@ change means a revert silently reverts the rules. Until then, treat any standing
 instruction that names the governed impacted-test selector as the final local pre-push
 check as superseded for this repo.
 
+### Every PR carries its ticket contract
+
+A PR whose title cites OMN-<n> commits `contracts/OMN-<n>.yaml` in the same PR.
+Bind every acceptance criterion with `binds_ac` to a check that fails at the merge
+base and passes at the head; copy an existing `contracts/OMN-*.yaml` with `binds_ac`.
+`contract-validation` refuses a cited ticket with no contract at the head.
+`repo-evidence / dod-verify` (shadow) judges the evidence; its verdict beside OCC's
+is the S5 count (OMN-20073, OMN-20074).
+
 ### Runtime Startup is a First-Class CI Gate
 
 Any PR that touches `auto_wiring/`, `service_kernel.py`, handler `__init__` signatures, or kernel-level registration MUST include a test that:
