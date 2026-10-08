@@ -129,7 +129,7 @@ backends:
   - backend_id: local-studio-planner
     endpoint_url: "http://192.168.86.200:8130/v1/chat/completions"
     served_model_id: "qwen3.6-35b-a3b"
-    parameter_count: "35B"
+    parameter_count: "35B-A3B"
     context_window: 262144
     max_tokens: 16384
     timeout_ms: 300000
