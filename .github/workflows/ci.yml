@@ -2277,6 +2277,9 @@ jobs:
           echo "================================================================"
           uv run pytest tests/ci/test_ci_evidence_policy.py -v --tb=short
 
+      - name: Check autoclose historical evidence controls (OMN-16106)
+        run: uv run --frozen pytest tests/ci/test_autoclose_history_omn16106.py -q --no-cov
+
   # Contract path pre-flight: verify all referenced module paths exist before expensive test splits (F8/OMN-6478)
   contract-path-preflight:
     needs: occ-preflight
@@ -2605,6 +2608,9 @@ jobs:
 
       - name: Verify lab-pass criterion bindings and closer pins (OMN-18488)
         run: uv run --frozen pytest tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488.py -q
+
+      - name: Verify D11 workflow verdict lane matching (OMN-19311)
+        run: uv run --frozen pytest tests/ci/test_workflow_verdict_omn_d11.py -q --no-cov
 
       - name: Verify cloud migration failure scope (OMN-18496)
         run: uv run --frozen pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py -q

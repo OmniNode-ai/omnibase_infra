@@ -182,6 +182,14 @@ repos:
         always_run: true
         require_serial: true
         stages: [pre-commit]
+      - id: autoclose-history
+        name: Autoclose historical evidence controls (OMN-16106)
+        entry: uv run --frozen pytest tests/ci/test_autoclose_history_omn16106.py -q --no-cov
+        language: system
+        pass_filenames: false
+        require_serial: true
+        stages: [pre-commit]
+        files: ^(\.github/workflows/(evidence-autoclose-sweep|ci)\.yml|\.pre-commit-config\.yaml|tests/ci/(test_autoclose_history_omn16106\.py|fixtures/autoclose_history_omn16106\.json))$
       - id: check-shape-gate-independence
         name: Shape-gate detectors never depend on the OCC preflight (OMN-20298)
         entry: uv run --no-project --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@efba6fb107f49c67e01f244c1830d55d0fffed29" python -m omnibase_core.handlers.handler_shape_gate_independence
@@ -257,7 +265,7 @@ repos:
       - id: check-added-large-files
         args: [--maxkb=1000]
   # OMN-13220: shellcheck the deploy surface this repo owns. Scoped to
-  # deploy-runtime.sh + its runtime_build sibling scripts (the deploy crash-loop
+  # onex-runtime-deploy + its runtime_build sibling scripts (the deploy crash-loop
   # blast radius) rather than all 56 scripts/*.sh, so the gate enforces real
   # defects without a 56-script pre-existing-cleanup detour. SC1091 (sourced
   # host-env files shellcheck cannot follow) is silenced in .shellcheckrc.
@@ -266,7 +274,7 @@ repos:
     hooks:
       - id: shellcheck
         name: shellcheck (deploy-runtime surface)
-        files: ^scripts/(deploy-runtime\.sh|runtime_build/.*\.sh)$
+        files: ^(src/omnibase_infra/handlers/handler_runtime_deploy\.sh|scripts/runtime_build/.*\.sh)$
         stages: [pre-commit]
   # actionlint (GitHub Actions linting) is intentionally NOT wired as a
   # repo-wide pre-commit hook in this PR: a baseline run flags pre-existing
@@ -461,7 +469,7 @@ repos:
         name: Cloud migration failure gates only cloud consumers (OMN-18496)
         entry: uv run --frozen pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py -q
         language: system
-        files: ^(scripts/deploy-runtime\.sh|scripts/runtime_build/compose_files\.sh|docker/docker-compose\.(infra|dev-lane)\.yml|tests/scripts/test_deploy_runtime_cloud_gate_omn18496\.py)$
+        files: ^(src/omnibase_infra/handlers/handler_runtime_deploy\.sh|scripts/runtime_build/compose_files\.sh|docker/docker-compose\.(infra|dev-lane)\.yml|tests/scripts/test_deploy_runtime_cloud_gate_omn18496\.py)$
         pass_filenames: false
         stages: [pre-commit]
       # OMN-16367: per-run compose proof images must be evicted at source
@@ -654,6 +662,13 @@ repos:
         entry: uv run --frozen pytest tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488.py -q
         language: system
         files: ^(scripts/ci/lab_pass_receipt\.py|src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/.*|tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488\.py|\.github/workflows/(runtime-rebuild-trigger|deliver-dev-candidate-to-staging)\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: d11-workflow-verdict-regression
+        name: D11 verdict admits only the governed lane (OMN-19311)
+        entry: uv run --frozen pytest tests/ci/test_workflow_verdict_omn_d11.py -q --no-cov
+        language: system
+        files: ^(scripts/ci/lab_pass_receipt\.py|tests/ci/test_workflow_verdict_omn_d11\.py|tests/ci/fixtures/omn19311_d11_failure_run\.json|\.github/workflows/deliver-dev-candidate-to-staging\.yml|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       # OMN-18272: the dependency-cascade generator may not silently stop
@@ -1622,7 +1637,7 @@ repos:
         entry: uv run --frozen pytest tests/scripts/test_check_prod_promotion_lineage.py tests/scripts/test_deploy_runtime_prod_lineage.py -q --tb=short --timeout=120 --timeout-method=signal
         language: system
         pass_filenames: false
-        files: ^(scripts/check_prod_promotion_lineage\.py|tests/scripts/test_(check_prod_promotion_lineage|deploy_runtime_prod_lineage)\.py|scripts/deploy-runtime\.sh|scripts/deploy-agent/deploy_agent/executor\.py)$
+        files: ^(scripts/check_prod_promotion_lineage\.py|tests/scripts/test_(check_prod_promotion_lineage|deploy_runtime_prod_lineage)\.py|src/omnibase_infra/handlers/handler_runtime_deploy\.sh|scripts/deploy-agent/deploy_agent/executor\.py)$
         stages: [pre-commit]
       # Lane restart-set / refresh build-scope agreement (OMN-18114, OMN-17448)
       # A governed refresh always exports RUNTIME_BUILD_SERVICES_OVERRIDE, and
@@ -1638,7 +1653,7 @@ repos:
         entry: uv run --frozen pytest tests/unit/scripts/test_omn18114_lane_carrier_build_scope.py tests/unit/scripts/test_omn17448_dev_lane_writer_build_scope.py -q --tb=short --timeout=120 --timeout-method=signal
         language: system
         pass_filenames: false
-        files: ^(scripts/deploy-runtime\.sh|scripts/runtime_build/refresh_(dev|stability)_lane\.sh|docker/docker-compose\.(infra|dev-lane|stability-test)\.yml|tests/unit/scripts/test_omn(18114_lane_carrier_build_scope|17448_dev_lane_writer_build_scope)\.py)$
+        files: ^(src/omnibase_infra/handlers/handler_runtime_deploy\.sh|scripts/runtime_build/refresh_(dev|stability)_lane\.sh|docker/docker-compose\.(infra|dev-lane|stability-test)\.yml|tests/unit/scripts/test_omn(18114_lane_carrier_build_scope|17448_dev_lane_writer_build_scope)\.py)$
         stages: [pre-commit]
       # Markdown link validation (PR #172)
       # Ensures all internal markdown links point to existing files and anchors

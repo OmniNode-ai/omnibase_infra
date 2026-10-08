@@ -12,7 +12,13 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "deploy-runtime.sh"
+SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "omnibase_infra"
+    / "handlers"
+    / "handler_runtime_deploy.sh"
+)
 pytestmark = pytest.mark.unit
 
 

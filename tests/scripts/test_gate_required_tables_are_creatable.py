@@ -78,7 +78,7 @@ GATE_HEALTHCHECK = REPO_ROOT / "scripts" / "check_migrations_complete.sh"
 #     file sets nothing),
 #   * each compose lane's explicit REQUIRED_PROJECTION_TABLES,
 #   * the service catalog manifest the compose files are generated against,
-#   * scripts/deploy-runtime.sh and the deploy agent, which run the SAME
+#   * src/omnibase_infra/handlers/handler_runtime_deploy.sh and the deploy agent, which run the SAME
 #     required-table check as a post-deploy verification (so a table missing
 #     here fails a deploy, not only a boot).
 REQUIRED_TABLE_SOURCES: tuple[tuple[str, str], ...] = (
@@ -103,7 +103,7 @@ REQUIRED_TABLE_SOURCES: tuple[tuple[str, str], ...] = (
 
 # The two array/tuple-shaped declarations, which do not fit the flat
 # whitespace-separated grammar above.
-DEPLOY_RUNTIME = "scripts/deploy-runtime.sh"
+DEPLOY_RUNTIME = "src/omnibase_infra/handlers/handler_runtime_deploy.sh"
 DEPLOY_AGENT = "scripts/deploy-agent/deploy_agent/executor.py"
 
 # CREATE TABLE targets. Unqualified or explicitly public-qualified only: the
@@ -147,7 +147,7 @@ def required_projection_tables() -> frozenset[str]:
         for group in found:
             tables.update(group.split())
 
-    # scripts/deploy-runtime.sh: bash array literal.
+    # src/omnibase_infra/handlers/handler_runtime_deploy.sh: bash array literal.
     runtime = _read(DEPLOY_RUNTIME)
     runtime_block = re.search(
         r"readonly REQUIRED_PROJECTION_TABLES=\((?P<body>.*?)\)", runtime, re.DOTALL

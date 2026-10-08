@@ -15,7 +15,7 @@ restarting on dev-202 (dev-200-lane TERMINAL, omni_home ledger 2026-09-25).
 
 The fix creates the topic in the dev lane's override of
 ``redpanda-partition-cap``. That one-shot runs on a cold ``up`` through
-depends_on and on every warm redeploy (scripts/deploy-runtime.sh
+depends_on and on every warm redeploy (src/omnibase_infra/handlers/handler_runtime_deploy.sh
 warm_broker_topic_provisioning). Every instance overlay inherits the command,
 because none of them overrides it. These tests run the real script against a
 fake ``rpk`` and pin:

@@ -99,7 +99,7 @@ jobs:
           fi
 
   # OMN-13415: logic-regression gate for the deployed-migration-tree sync check.
-  # The PRIMARY enforcement is at deploy time — deploy-runtime.sh calls
+  # The PRIMARY enforcement is at deploy time — onex-runtime-deploy calls
   # check_deployed_migration_tree_sync.py after sync_files and BEFORE the
   # forward-migration phase, aborting if the bind-mounted deployed tree drifted
   # from the canonical clone @ the target SHA (the stability-promotion footgun:

@@ -1428,7 +1428,7 @@ EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
             "job of prod-promotion-lineage.yml, which carries the condition "
             "github.event_name == 'workflow_call' && inputs.enforce_lineage. The "
             "workflow runs on pull_request for a path filter that includes the "
-            "deploy-agent executor and deploy-runtime.sh, so on every such pull "
+            "deploy-agent executor and onex-runtime-deploy, so on every such pull "
             "request the job skips without producing a verdict. Measured on "
             "omnibase_infra#3980 at head ba61dc95: every producer green, CI Summary "
             "red on this skipped row alone. The job does its real work only when the "

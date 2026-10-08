@@ -141,7 +141,7 @@ services:
       # per partition, more headroom per partition than a configuration already
       # proven here. The value is a Compose DEFAULT, so it needs no host env
       # edit, and it takes effect at this lane's next governed recreate of the
-      # broker (deploy-runtime.sh's broker warmup runs `up -d --no-deps redpanda`,
+      # broker (onex-runtime-deploy's broker warmup runs `up -d --no-deps redpanda`,
       # which recreates it when its rendered config changes). Raise it back by
       # setting STABILITY_TEST_REDPANDA_MEMORY.
       - ${STABILITY_TEST_REDPANDA_MEMORY:-12G}
@@ -186,9 +186,9 @@ services:
       - |
         set -eu
         # OMN-14013: this is the belt that ACTUALLY governs the durable cap for
-        # this lane. warm_broker_topic_provisioning() in deploy-runtime.sh
+        # this lane. warm_broker_topic_provisioning() in onex-runtime-deploy
         # force-recreates this one-shot service on EVERY redeploy of the lane
-        # (refresh_stability_lane.sh -> deploy-runtime.sh --restart), including
+        # (refresh_stability_lane.sh -> onex-runtime-deploy --restart), including
         # a restart-only deploy that never touches the volume. A raised cap
         # applied only via a live `rpk cluster config set` (not committed here)
         # is therefore NOT durable -- the next redeploy silently resets it back
@@ -511,7 +511,7 @@ services:
       replicas: ${STABILITY_TEST_WORKER_REPLICAS:?runtime policy contract must set STABILITY_TEST_WORKER_REPLICAS (source docker/runtime-policy.env)}
   # OMN-13815: agent-actions-consumer, skill-lifecycle-consumer, intelligence-api
   # and omninode-contract-resolver are disabled-by-profile for the --profile
-  # runtime cold path, but deploy-runtime.sh's RUNTIME_SERVICES warm-restart path
+  # runtime cold path, but onex-runtime-deploy's RUNTIME_SERVICES warm-restart path
   # starts them explicitly by name (`up -d --no-deps --force-recreate <service>`),
   # which bypasses the profile gate. Without a lane-scoped container_name they
   # inherit the bare base name and collide with the dev lane's bring-up (live
@@ -947,7 +947,7 @@ services:
   # fails if either lane loses it.
   #
   # The lane-scoped container_name is mandatory, not cosmetic: the base declares
-  # `omnimarket-tenant-projection-writer`, and deploy-runtime.sh's warm restart
+  # `omnimarket-tenant-projection-writer`, and onex-runtime-deploy's warm restart
   # path starts lane services explicitly by name, which bypasses the compose
   # profile gate. Without a lane-prefixed name this container would collide with
   # the dev lane's on the same host -- the live OMN-13815 repro.
