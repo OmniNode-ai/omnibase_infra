@@ -17,6 +17,10 @@
   "chain_canary_branch": "dev",
   "chain_canary_max_age_minutes": 180,
 
+  "_comment_census_command": "OMN-19418: census_command reads the live snapshot the existing lane-census timer writes on the lab host and emits on its census bus topics. It never reads the checked-in snapshot. A lane-census.json in the alarm state directory is the fixture injection seam. census_max_age_minutes is two hours: one hourly census period plus slack; missing, invalid or stale data stays INDETERMINATE and feeds the existing stale alarm.",
+  "census_command": ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "${ONEX_RUNTIME_SSH_HOST}", "cat", ".local/state/onex/census-snapshot.json"],
+  "census_max_age_minutes": 120,
+
   "work_ledger_db_container": "omnibase-infra-postgres",
   "work_ledger_database": "omnidash_analytics",
   "work_ledger_max_lag_minutes": 30,
