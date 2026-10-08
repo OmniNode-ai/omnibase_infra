@@ -36,12 +36,34 @@ class ModelContractValidateInput(BaseModel):
         default=None,
         description="Optional base directory used to constrain file_path.",
     )
+    consumer_topics: tuple[str, ...] | None = Field(
+        default=None,
+        description="One consumer's declared topic set for namespace validation.",
+    )
+    consumer_source: str | None = Field(
+        default=None,
+        description="Python source containing consumer topic declarations to validate.",
+    )
 
     @model_validator(mode="after")
     def validate_payload_shape(self) -> ModelContractValidateInput:
         """Require enough input for exactly one validation mode."""
         has_content = self.contract_content is not None
         has_file = self.file_path is not None
+        namespace_modes = sum(
+            value is not None for value in (self.consumer_topics, self.consumer_source)
+        )
+        if namespace_modes:
+            if (
+                namespace_modes != 1
+                or has_content
+                or has_file
+                or self.model_code is not None
+            ):
+                raise ValueError(
+                    "consumer namespace validation requires exactly one input mode"
+                )
+            return self
         if not has_content and not has_file:
             raise ValueError("contract_content or file_path is required")
         if self.model_code is not None and not has_content:

@@ -1268,6 +1268,13 @@ jobs:
           uv run python scripts/validation/lint_topic_names.py \
             --scan-contracts src/omnibase_infra/nodes
 
+      # OMN-19315: this required context checks consumer sets in Python too.
+      - name: Refuse mixed consumer topic namespaces
+        run: uv run --frozen python scripts/validation/lint_topic_names.py --scan-python src/omnibase_infra
+
+      - name: Prove consumer namespace refusal and valid controls
+        run: uv run --frozen pytest tests/unit/scripts/validation/test_lint_topic_names.py -q --no-cov
+
       - name: Check for placeholder topic names (OMN-4805)
         run: |
           echo "================================================================"
