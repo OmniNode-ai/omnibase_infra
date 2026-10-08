@@ -495,7 +495,12 @@ def test_ci_bus_topics_one_shot_authenticates_once_sasl_is_on(
     assert 'ADMIN="-X admin.hosts=redpanda:9644"' in command
     assert "cluster config get enable_sasl $$ADMIN" in command
     assert 'if [ "$$SASL_ENABLED" = true ]; then' in command
-    assert "sasl.mechanism=SCRAM-SHA-256" in command
+    # The publisher principal reaches rpk through RPK_* in the environment, never a -X
+    # flag: argv is readable by every user on the host (OMN-17427).
+    assert 'export RPK_USER="$$CI_BUS_KAFKA_SASL_USERNAME"' in command
+    assert 'RPK_PASS="$$CI_BUS_KAFKA_SASL_PASSWORD"' in command
+    assert "RPK_SASL_MECHANISM=SCRAM-SHA-256" in command
+    assert "-X pass" not in command
 
 
 def test_ci_bus_topics_are_created_explicitly_not_auto(

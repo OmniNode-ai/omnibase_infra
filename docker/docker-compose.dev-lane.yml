@@ -692,7 +692,6 @@ services:
         set -eu
         ADMIN="-X admin.hosts=redpanda:9644"
         BROKER="-X brokers=redpanda:9092"
-        AUTH="-X sasl.mechanism=SCRAM-SHA-256 -X user=$$DEV_KAFKA_SASL_USERNAME -X pass=$$DEV_KAFKA_SASL_PASSWORD"
         /usr/bin/rpk cluster config set superusers "['$$DEV_KAFKA_SASL_USERNAME']" $$ADMIN
         /usr/bin/rpk cluster config set enable_sasl true $$ADMIN
         /usr/bin/rpk cluster config get superusers $$ADMIN | grep -q "$$DEV_KAFKA_SASL_USERNAME"
@@ -704,7 +703,7 @@ services:
           exit 1
         fi
         echo "OMN-18012: unauthenticated client refused"
-        /usr/bin/rpk topic list $$BROKER $$AUTH >/dev/null
+        RPK_USER="$$DEV_KAFKA_SASL_USERNAME" RPK_PASS="$$DEV_KAFKA_SASL_PASSWORD" RPK_SASL_MECHANISM=SCRAM-SHA-256 /usr/bin/rpk topic list $$BROKER >/dev/null
         echo "OMN-18012: authenticated client accepted - positive control"
     depends_on:
       redpanda-scram-user:
