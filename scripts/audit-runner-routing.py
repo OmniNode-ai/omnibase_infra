@@ -477,11 +477,16 @@ def _live_repository_visibility(org: str = ORG) -> list[tuple[str, bool]]:
     # (not "all"), and omitting the flag already returns every repository the
     # token can see, of any visibility -- exactly the universe this check needs
     # since it filters on the returned `isPrivate` field itself.
+    # OMN-18780: --no-archived, because GitHub runs no workflows in an archived
+    # repository, so its stale ubuntu-latest pins can never place a job. With
+    # this pass now a merge gate, counting them reddened every PR on 95 dead
+    # pins across nine archived repositories nobody can push a fix to.
     result = _run_gh(
         [
             "repo",
             "list",
             org,
+            "--no-archived",
             "--limit",
             "500",
             "--json",

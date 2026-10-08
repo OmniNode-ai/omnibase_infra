@@ -780,6 +780,14 @@ if [[ "$*" == *"/omni_home/"* ]]; then
   echo "gh: Not Found (HTTP 404)" >&2
   exit 1
 fi
+if [[ "$*" == *"/actions/workflows/runner-routing-audit.yml"* ]]; then
+  echo '{"id": 12, "path": ".github/workflows/runner-routing-audit.yml", "state": "active"}'
+  exit 0
+fi
+if [[ "$*" == *"/actions/workflows/12/runs"* ]]; then
+  echo '{"workflow_runs": []}'
+  exit 0
+fi
 echo '{"workflows": []}'
 """,
     )
