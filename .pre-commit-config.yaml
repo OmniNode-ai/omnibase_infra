@@ -23,6 +23,13 @@
 repos:
   - repo: local
     hooks:
+      - id: lab-census-alarm-episodes
+        name: Census alarm episodes and recoveries (OMN-19418)
+        entry: uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k lane_drift -q
+        language: system
+        files: ^(scripts/(lab_alarm|lane_census_event|lane_census_plan)\.py|config/lab_alarm\.json|tests/ci/(test_lab_alarm_omn18867\.py|fixtures/lab_census_snapshot_omn19418\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: census-container-health
         name: Census unhealthy and restart bounds (OMN-19416)
         entry: uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "unhealthy or restart_loop" -q

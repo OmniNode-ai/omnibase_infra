@@ -175,29 +175,35 @@ instances:
       effects_container: omninode-dev-200-runtime-effects
       postgres_container: omnibase-infra-dev-200-postgres
       broker_container: omnibase-infra-dev-200-redpanda
-    # OMN-19507. .200 also runs the orchestration sessions and the gpt-oss-120b
-    # llama-server on :8130 (Metal, all layers on the GPU, so its weights live
-    # in unified memory). Every number below is a measured baseline, stated in
-    # the PR that set it:
+    # OMN-19507. .200 also runs the orchestration sessions and the llama-server
+    # on :8130 (Metal, all layers on the GPU, so its weights live in unified
+    # memory). The server has served qwen3.6-35b-a3b since 2026-10-08
+    # (OMN-17427); gpt-oss-120b before that. Every number below is a measured
+    # baseline, stated in the PR that set it:
     #   build_reserve_gib 24: the Docker VM is capped at 31 GiB (`docker info`
     #     MemTotal 33333612544) and the running dev-200 lane holds about 7.3 GiB
     #     of it (`docker stats`, ledger 2026-09-25T11:23:31Z), so a rebuild can
     #     grow the VM by about 24 GiB.
-    #   model_reserve_gib 70: the IOAccelerator "In use system memory" while
-    #     llama-server was serving peaked at 73418407936 bytes (68.4 GiB,
-    #     `ioreg -c IOAccelerator` 2026-09-25T12:49:08Z), against 3.5 GiB paged
-    #     out at 12:45:00Z.
+    #   model_reserve_gib 45: the IOAccelerator "In use system memory" of the
+    #     qwen3.6-35b-a3b llama-server (Q8_0, `-c 262144 --parallel 4
+    #     --kv-unified`) peaked at 44218843136 bytes (41.2 GiB) over 12 reads
+    #     of `ioreg -c IOAccelerator` taken 4 s apart from 2026-10-08T19:26:35Z,
+    #     with `llamacpp:requests_processing` at 0. The reserve rounds the peak
+    #     up to the next 5 GiB, as 70 did for the 68.4 GiB (73418407936 bytes,
+    #     2026-09-25T12:49:08Z) that gpt-oss-120b peaked at while serving.
     #   min_headroom_gib 16: what a build may leave the host after both reserves.
-    #   max_load1_per_cpu 3.0: a backstop, not the primary rule. The model runs
-    #     every layer on the GPU and its decode rate held at 66 tok/s single
-    #     stream at load1 47-49 on 24 cpu (llama-server /metrics 12:57Z) against
-    #     68.6 tok/s at 12:42Z; the sessions-and-provers baseline peaked at
-    #     load1 54.31 (2.26 per cpu, uptime 13:04Z). 3.0 per cpu is that peak
-    #     plus most of a Docker VM build's 24 vCPUs.
+    #   max_load1_per_cpu 3.0: a backstop, not the primary rule. Its evidence
+    #     was read with gpt-oss-120b serving and has not been re-read for
+    #     qwen3.6-35b-a3b. The model runs every layer on the GPU and its decode
+    #     rate held at 66 tok/s single stream at load1 47-49 on 24 cpu
+    #     (llama-server /metrics 12:57Z) against 68.6 tok/s at 12:42Z; the
+    #     sessions-and-provers baseline peaked at load1 54.31 (2.26 per cpu,
+    #     uptime 13:04Z). 3.0 per cpu is that peak plus most of a Docker VM
+    #     build's 24 vCPUs.
     load_gate:
       max_load1_per_cpu: 3.0
       build_reserve_gib: 24
-      model_reserve_gib: 70
+      model_reserve_gib: 45
       min_headroom_gib: 16
       recheck_seconds: 60
 routes:

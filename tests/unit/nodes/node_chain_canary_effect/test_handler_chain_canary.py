@@ -113,9 +113,9 @@ class _RecordingLedgerReplay:
 
     async def __call__(
         self, source: str, correlation_id: str, timeout_s: float
-    ) -> tuple[tuple[str, ...] | None, bool, str, str]:
+    ) -> tuple[tuple[str, ...] | None, bool, str, str, str]:
         self.calls.append(correlation_id)
-        return _FULL_CHAIN, True, "pass", ""
+        return _FULL_CHAIN, True, "pass", "complete", ""
 
 
 class _RecordingProjectionReadback:

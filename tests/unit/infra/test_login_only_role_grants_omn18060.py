@@ -41,6 +41,7 @@ CANARY_LEDGER_COLUMNS = (
     "hop_index",
     "replay_green",
     "verifier_verdict",
+    "chain_state",
 )
 # Present on the same relation and deliberately outside the grant: the
 # delegation's own request/response material, and the tenant discriminator.

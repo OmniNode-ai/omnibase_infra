@@ -180,6 +180,21 @@ services:
       - "com.omninode.layer=infrastructure"
       - "com.omninode.lane=ci-bus"
       - "com.omninode.ticket=OMN-18691"
+  # OMN-19419: import just the shared init service into this standalone graph.
+  redpanda-partition-cap:
+    extends:
+      file: docker-compose.broker-profile.yml
+      service: redpanda-settings
+    container_name: omninode-ci-bus-redpanda-partition-cap
+    environment:
+      REDPANDA_PROFILE_MEMORY: ${CI_BUS_REDPANDA_MEMORY:-1G}
+      RPK_USER: ${CI_BUS_KAFKA_SASL_USERNAME:?CI_BUS_KAFKA_SASL_USERNAME must be set}
+      RPK_PASS: ${CI_BUS_KAFKA_SASL_PASSWORD:?CI_BUS_KAFKA_SASL_PASSWORD must be set}
+    depends_on:
+      ci-bus-sasl-enable:
+        condition: service_completed_successfully
+    networks: !override
+      - ci-bus-network
   # ===========================================================================
   # (2) THE SIXTEEN CI AND LAB TOPICS — explicit, never broker auto-create
   # ===========================================================================

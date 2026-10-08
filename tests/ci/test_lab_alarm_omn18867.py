@@ -705,6 +705,8 @@ def _run(
             return _completed("2026-10-01 03:00:00+00\n")
         return _completed(restarts)
 
+    if not (tmp_path / "lane-census.json").exists():
+        _lane_drift_fixture(tmp_path)
     return run_once(
         config,
         state_dir=tmp_path,
@@ -720,6 +722,410 @@ def _run(
         posting_channel=CHANNEL,
         env_file=tmp_path / "absent.env",
     )
+
+
+def _lane_drift_fixture(tmp_path: Path, *kinds: str) -> None:
+    """Inject the producer's census document through the alarm state directory."""
+    from scripts.lane_census_event import build_event
+
+    event = build_event(
+        host="lab-fixture",
+        plan={
+            "host": "lab-fixture",
+            "lanes_checked": ["dev"],
+            "findings": [
+                {
+                    "lane": "dev",
+                    "kind": kind,
+                    "container": f"runtime-{index}",
+                    "detail": f"fixture {kind}",
+                    "severity": "critical",
+                }
+                for index, kind in enumerate(kinds)
+            ],
+        },
+    )
+    (tmp_path / "lane-census.json").write_text(json.dumps(event), encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_lane_drift_posts_once_and_again_when_the_finding_set_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-19418 AC1: drive the existing run and delivery path, including A-B-A."""
+    from scripts import lab_alarm
+
+    posts: list[ModelAlarm] = []
+    monkeypatch.setattr(
+        lab_alarm, "post_alarm", lambda alarm, **kw: posts.append(alarm) or "ts"
+    )
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+    for kinds in (
+        ("revision_mismatch",),
+        ("revision_mismatch",),
+        ("revision_mismatch", "config_hash_mismatch"),
+        ("revision_mismatch",),
+    ):
+        _lane_drift_fixture(tmp_path, *kinds)
+        _run(
+            tmp_path,
+            result=EnumLabPassResult.PASS,
+            restarts="0 running",
+            lag=0,
+            ledger=ledger,
+        )
+    assert [alarm.condition.value for alarm in posts] == ["lane_drift"] * 3
+    assert posts[0].subject == posts[2].subject
+    assert posts[0].subject != posts[1].subject
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("kind", "condition"),
+    [
+        ("revision_mismatch", "lane_drift"),
+        ("container_unhealthy", "container_unhealthy"),
+    ],
+)
+def test_lane_drift_recovery_posts_once_and_allows_a_new_episode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, condition: str
+) -> None:
+    from scripts import lab_alarm
+
+    posts: list[ModelAlarm] = []
+    recoveries: list[ModelRecoveryNotice] = []
+    monkeypatch.setattr(
+        lab_alarm, "post_alarm", lambda alarm, **kw: posts.append(alarm) or "ts"
+    )
+    monkeypatch.setattr(
+        lab_alarm,
+        "post_recovery",
+        lambda notice, **kw: recoveries.append(notice) or "recovery-ts",
+    )
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+    for kinds in ((kind,), (kind,), (), (), (kind,)):
+        _lane_drift_fixture(tmp_path, *kinds)
+        _run(
+            tmp_path,
+            result=EnumLabPassResult.PASS,
+            restarts="0 running",
+            lag=0,
+            ledger=ledger,
+        )
+    assert [alarm.condition.value for alarm in posts] == [condition, condition]
+    assert [notice.condition.value for notice in recoveries] == [condition]
+
+
+@pytest.mark.unit
+def test_lane_drift_unreadable_census_preserves_the_episode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import lab_alarm
+
+    posts: list[ModelAlarm] = []
+    recoveries: list[ModelRecoveryNotice] = []
+    monkeypatch.setattr(
+        lab_alarm, "post_alarm", lambda alarm, **kw: posts.append(alarm) or "ts"
+    )
+    monkeypatch.setattr(
+        lab_alarm,
+        "post_recovery",
+        lambda notice, **kw: recoveries.append(notice) or "ts",
+    )
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+    _lane_drift_fixture(tmp_path, "revision_mismatch")
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    (tmp_path / "lane-census.json").write_text("{broken", encoding="utf-8")
+    unreadable = _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    census_reports = [
+        r
+        for r in unreadable.reports
+        if r.condition.value in ("lane_drift", "container_unhealthy")
+    ]
+    assert len(census_reports) == 2
+    assert all(r.outcome is EnumConditionOutcome.INDETERMINATE for r in census_reports)
+    assert recoveries == []
+    _lane_drift_fixture(tmp_path, "revision_mismatch")
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    assert [a.condition.value for a in posts] == ["lane_drift"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "corruption", ["stale", "future", "key", "count", "kind", "missing"]
+)
+def test_lane_drift_rejects_invalid_or_stale_census(
+    tmp_path: Path, corruption: str
+) -> None:
+    from scripts.lab_alarm import evaluate_lane_census
+
+    _lane_drift_fixture(tmp_path, "revision_mismatch")
+    path = tmp_path / "lane-census.json"
+    census = json.loads(path.read_text(encoding="utf-8"))
+    now = datetime.now(UTC)
+    if corruption == "stale":
+        census["emitted_at"] = (now - timedelta(hours=3)).isoformat()
+    elif corruption == "future":
+        census["emitted_at"] = (now + timedelta(hours=1)).isoformat()
+    elif corruption == "key":
+        census["alert_key"] = "incorrect"
+    elif corruption == "count":
+        census["drift_count"] = 0
+    elif corruption == "kind":
+        census["findings"][0]["kind"] = "unknown"
+    else:
+        del census["findings"]
+    path.write_text(json.dumps(census), encoding="utf-8")
+    reports = evaluate_lane_census(
+        state_dir=tmp_path,
+        command=(),
+        runner=_docker_runner({}),
+        now=now.isoformat(),
+        max_age=timedelta(hours=2),
+    )
+    assert len(reports) == 2
+    assert all(
+        report.outcome is EnumConditionOutcome.INDETERMINATE for report in reports
+    )
+
+
+@pytest.mark.unit
+def test_lane_drift_reads_the_live_snapshot_through_the_declared_command(
+    tmp_path: Path,
+) -> None:
+    from scripts.lab_alarm import evaluate_lane_census
+
+    _lane_drift_fixture(tmp_path, "container_unhealthy", "revision_mismatch")
+    path = tmp_path / "lane-census.json"
+    raw = path.read_text(encoding="utf-8")
+    path.unlink()
+    seen: list[tuple[str, ...]] = []
+
+    def reader(
+        argv: Sequence[str], *, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        seen.append(tuple(argv))
+        return _completed(raw)
+
+    command = ("ssh", "fixture-host", "cat", ".local/state/onex/census-snapshot.json")
+    reports = evaluate_lane_census(
+        state_dir=tmp_path,
+        command=command,
+        runner=reader,
+        now=datetime.now(UTC).isoformat(),
+        max_age=timedelta(hours=2),
+    )
+    assert seen == [command]
+    assert [r.outcome for r in reports] == [EnumConditionOutcome.ALARM] * 2
+    assert reports[0].alarms[0].subject == reports[1].alarms[0].subject
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/lab_census_snapshot_omn19418.json")
+@pytest.mark.parametrize("age_hours", [0, 3])
+def test_lane_drift_recorded_live_snapshot_replays_declared_reader(
+    recorded_response: dict[str, Any], tmp_path: Path, age_hours: int
+) -> None:
+    from scripts.lab_alarm import evaluate_lane_census
+
+    event = recorded_response["event"]
+    snapshot = tmp_path / "census-snapshot.json"
+    snapshot.write_text(json.dumps(event), encoding="utf-8")
+    observed_at = datetime.fromisoformat(event["emitted_at"])
+    reports = evaluate_lane_census(
+        state_dir=tmp_path / "alarm",
+        command=("cat", str(snapshot)),
+        runner=make_runner(("docker",)),
+        now=(observed_at + timedelta(hours=age_hours)).isoformat(),
+        max_age=timedelta(hours=2),
+    )
+    expected = (
+        EnumConditionOutcome.OK
+        if age_hours == 0
+        else EnumConditionOutcome.INDETERMINATE
+    )
+    assert [r.condition for r in reports] == [
+        EnumAlarmCondition.LANE_DRIFT,
+        EnumAlarmCondition.CONTAINER_UNHEALTHY,
+    ]
+    assert [r.outcome for r in reports] == [expected, expected]
+    assert all(not r.alarms for r in reports)
+    if age_hours == 0:
+        assert all(event["alert_key"] in r.evidence for r in reports)
+    else:
+        assert all("census snapshot age" in r.evidence for r in reports)
+
+
+@pytest.mark.unit
+def test_lane_drift_shuffled_findings_do_not_raise_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import lab_alarm
+
+    posts: list[ModelAlarm] = []
+    monkeypatch.setattr(
+        lab_alarm, "post_alarm", lambda alarm, **kw: posts.append(alarm) or "ts"
+    )
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+    _lane_drift_fixture(tmp_path, "revision_mismatch", "config_hash_mismatch")
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    path = tmp_path / "lane-census.json"
+    census = json.loads(path.read_text(encoding="utf-8"))
+    census["findings"].reverse()
+    path.write_text(json.dumps(census), encoding="utf-8")
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    assert [a.condition.value for a in posts] == ["lane_drift"]
+
+
+@pytest.mark.unit
+def test_lane_drift_can_continue_while_container_health_recovers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import lab_alarm
+
+    posts: list[ModelAlarm] = []
+    recoveries: list[ModelRecoveryNotice] = []
+    monkeypatch.setattr(
+        lab_alarm, "post_alarm", lambda alarm, **kw: posts.append(alarm) or "ts"
+    )
+    monkeypatch.setattr(
+        lab_alarm,
+        "post_recovery",
+        lambda notice, **kw: recoveries.append(notice) or "ts",
+    )
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+    for kinds in (("revision_mismatch", "container_unhealthy"), ("revision_mismatch",)):
+        _lane_drift_fixture(tmp_path, *kinds)
+        _run(
+            tmp_path,
+            result=EnumLabPassResult.PASS,
+            restarts="0 running",
+            lag=0,
+            ledger=ledger,
+        )
+    assert [a.condition.value for a in posts] == [
+        "lane_drift",
+        "container_unhealthy",
+        "lane_drift",
+    ]
+    assert [n.condition.value for n in recoveries] == ["container_unhealthy"]
+
+
+@pytest.mark.unit
+def test_lane_drift_unreadable_census_feeds_the_existing_stale_alarm(
+    tmp_path: Path,
+) -> None:
+    from scripts.lab_alarm import evaluate_lane_census
+
+    state = ModelAlarmState()
+    now = datetime.now(UTC)
+    reports = evaluate_lane_census(
+        state_dir=tmp_path,
+        command=(),
+        runner=_docker_runner({}),
+        now=now.isoformat(),
+        max_age=timedelta(hours=2),
+    )
+    first = evaluate_stale_indeterminate(reports, state, now=now.isoformat())
+    assert first.outcome is EnumConditionOutcome.OK
+    stale = evaluate_stale_indeterminate(
+        reports, state, now=(now + STALE_INDETERMINATE_AFTER).isoformat()
+    )
+    assert {alarm.subject for alarm in stale.alarms} == {
+        "lane_drift",
+        "container_unhealthy",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("recovery", [False, True])
+def test_lane_drift_failed_delivery_is_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recovery: bool
+) -> None:
+    from scripts import lab_alarm
+
+    attempts: list[str] = []
+
+    def deliver(value: ModelAlarm | ModelRecoveryNotice, **kw: object) -> str:
+        attempts.append(value.condition.value)
+        if len(attempts) == 1:
+            raise lab_alarm.PostingError("fixture delivery refused")
+        return "ts"
+
+    monkeypatch.setattr(lab_alarm, "post_alarm", lambda *a, **kw: "ts")
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+    _lane_drift_fixture(tmp_path, "revision_mismatch")
+    if recovery:
+        _run(
+            tmp_path,
+            result=EnumLabPassResult.PASS,
+            restarts="0 running",
+            lag=0,
+            ledger=ledger,
+        )
+        _lane_drift_fixture(tmp_path)
+    monkeypatch.setattr(
+        lab_alarm, "post_recovery" if recovery else "post_alarm", deliver
+    )
+    failed = _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    assert "FAILED" in failed.posting
+    assert lab_alarm.exit_code(failed) == lab_alarm.EXIT_ALARM
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    assert attempts == ["lane_drift", "lane_drift"]
 
 
 @pytest.mark.unit

@@ -2222,6 +2222,10 @@ jobs:
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
 
+      - name: Check census alarm episodes and recoveries (OMN-19418)
+        # The same focused episode proof runs before commit.
+        run: uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k lane_drift -q
+
       - name: Check the lab-load probe reports honestly (OMN-18253)
         run: |
           echo "================================================================"

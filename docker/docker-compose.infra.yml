@@ -728,11 +728,11 @@ services:
     image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-redpanda-partition-cap
     entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
-        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
+    extends:
+      file: docker-compose.broker-profile.yml
+      service: redpanda-settings
+    environment:
+      REDPANDA_PROFILE_MEMORY: ${DEV_REDPANDA_MEMORY:-12G}
     depends_on:
       redpanda:
         condition: service_healthy
