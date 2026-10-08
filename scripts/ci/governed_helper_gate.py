@@ -33,7 +33,20 @@ The baseline may shrink and may never widen, and both halves are enforced here:
   growing the baseline without filing the work that removes it is unavailable;
 * an entry the scanner no longer matches is reported as STALE and fails the
   gate, so a fixed call site cannot leave cover behind for the next one at the
-  same path. Deleting the entry is part of fixing the occurrence.
+  same path. Deleting the entry is part of fixing the occurrence;
+* given ``--base-ref``, the baseline is compared with the copy committed at that
+  ref, and a key the ref does not carry, or a count above the ref's, fails the
+  gate. A ticket id alone proved nothing: an entry citing an existing ticket
+  could be added for any new occurrence. The pre-commit hook compares with
+  ``HEAD`` and the CI job with the event's base, so the ratchet binds in both
+  places.
+
+Every entry also carries a ``verdict`` and the reason for it, read from the
+call site rather than from the pattern: ``defect`` (the site has the failure the
+helper exists to prevent), ``benign`` (it matches but cannot fail that way as
+written), ``not-a-call-site`` (prose, or a path that is not the primitive in
+use) and ``dead`` (nothing reaches it). An entry without both is a load-time
+refusal.
 
 ## No suppression surface, deliberately
 
@@ -104,6 +117,10 @@ ALWAYS_EXCLUDED: Final[tuple[str, ...]] = (
     "tests/ci/test_governed_helper_gate.py",
     "tests/ci/test_incident_replay_omn18629.py",
 )
+
+
+#: What a baselined site is, as judged from its code (see the module docstring).
+VERDICTS: Final[tuple[str, ...]] = ("defect", "benign", "not-a-call-site", "dead")
 
 
 class PolicyError(Exception):
@@ -265,6 +282,8 @@ class BaselineEntry:
     line_sha256_12: str
     occurrences: int
     ticket: str
+    verdict: str
+    verdict_reason: str
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -322,6 +341,13 @@ def load_baseline(path: Path | None = None) -> Baseline:
                 f"{source}: entry for {where!r} must declare a positive integer "
                 f"'occurrences', got {occurrences!r}"
             )
+        verdict = item.get("verdict")
+        if verdict not in VERDICTS:
+            raise PolicyError(
+                f"{source}: the baseline entry for {where!r} carries verdict "
+                f"{verdict!r}; it must be one of {', '.join(VERDICTS)}. Every "
+                f"baselined site is judged from its code, not left as a match."
+            )
         entries.append(
             BaselineEntry(
                 pair=_require_str(item.get("pair"), "entries[].pair", source),
@@ -331,9 +357,58 @@ def load_baseline(path: Path | None = None) -> Baseline:
                 ),
                 occurrences=occurrences,
                 ticket=ticket.strip(),
+                verdict=verdict,
+                verdict_reason=_require_str(
+                    item.get("verdict_reason"), "entries[].verdict_reason", source
+                ),
             )
         )
     return Baseline(entries=tuple(entries))
+
+
+def load_baseline_counts_at_ref(
+    ref: str, root: Path
+) -> dict[tuple[str, str, str], int]:
+    """Occurrence counts of the baseline as committed at ``ref``.
+
+    Read only for the counts, not validated as a whole: the ref's copy may
+    predate fields the current schema requires, and the ratchet must still be
+    able to compare against it. A ref that cannot be resolved, or that carries
+    no baseline, is a refusal -- a ratchet with nothing to compare against has
+    not checked anything.
+    """
+    relpath = DEFAULT_BASELINE_PATH.relative_to(REPO_ROOT).as_posix()
+    result = subprocess.run(
+        ["git", "show", f"{ref}:{relpath}"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise PolicyError(
+            f"cannot read {relpath} at base ref {ref!r}: {result.stderr.strip()}"
+        )
+    try:
+        raw = json.loads(result.stdout)
+        return {
+            (item["pair"], item["path"], item["line_sha256_12"]): item["occurrences"]
+            for item in raw["entries"]
+        }
+    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise PolicyError(
+            f"{relpath} at base ref {ref!r} is unreadable: {exc!r}"
+        ) from exc
+
+
+def widened_against(
+    baseline: Baseline, base: dict[tuple[str, str, str], int]
+) -> list[BaselineEntry]:
+    """Entries that are new, or carry a larger count, than the base ref's."""
+    return sorted(
+        (e for e in baseline.entries if e.occurrences > base.get(e.key, 0)),
+        key=lambda e: (e.path, e.pair),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -356,10 +431,11 @@ class Finding:
 class Findings:
     new: list[Finding] = field(default_factory=list)
     stale: list[BaselineEntry] = field(default_factory=list)
+    widened: list[BaselineEntry] = field(default_factory=list)
 
     @property
     def clean(self) -> bool:
-        return not self.new and not self.stale
+        return not self.new and not self.stale and not self.widened
 
 
 def _in_scope(pair: Pair, relpath: str) -> bool:
@@ -463,6 +539,18 @@ def render(findings: Findings) -> str:
                 f"expected={entry.occurrences}  ticket={entry.ticket}"
             )
         lines.append("")
+    if findings.widened:
+        lines.append(
+            "REFUSED: the baseline grew. It is a ratchet: it may shrink and may "
+            "never widen, so a new occurrence is fixed, not baselined. Remove "
+            "these from config/governed_helper_baseline.json.\n"
+        )
+        for entry in findings.widened:
+            lines.append(
+                f"  {entry.path}  [{entry.pair}]  digest={entry.line_sha256_12} "
+                f"occurrences={entry.occurrences}  ticket={entry.ticket}"
+            )
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -489,6 +577,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--policy", type=Path, default=None)
     parser.add_argument("--baseline", type=Path, default=None)
     parser.add_argument("--root", type=Path, default=None)
+    parser.add_argument(
+        "--base-ref",
+        default=None,
+        help=(
+            "Git ref whose committed baseline the current one may not exceed. "
+            "The ratchet's other half: a ticket id proves nothing about growth."
+        ),
+    )
     parser.add_argument(
         "paths",
         nargs="*",
@@ -525,6 +621,13 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     findings = scan(policy, baseline, root, relpaths)
+    if args.base_ref is not None:
+        try:
+            base_counts = load_baseline_counts_at_ref(args.base_ref, root)
+        except PolicyError as exc:
+            print(f"governed-helper gate: {exc}", file=sys.stderr)
+            return 2
+        findings.widened = widened_against(baseline, base_counts)
     if findings.clean:
         return 0
     print(render(findings))

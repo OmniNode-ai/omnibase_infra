@@ -1121,7 +1121,7 @@ repos:
       # requires and which this gate's own interpreter pair recommends.
       - id: governed-helper-primitive
         name: Governed helper primitive gate (OMN-18629)
-        entry: uv run --frozen python scripts/ci/governed_helper_gate.py
+        entry: uv run --frozen python scripts/ci/governed_helper_gate.py --base-ref HEAD
         language: system
         pass_filenames: false
         always_run: true
