@@ -1595,6 +1595,7 @@ repos:
       # (OMN-3188: YAML contracts; OMN-3259: Python enum/constant files)
       # Triggers on contract*.yaml OR any *.py change; always scans full source tree.
       - id: topic-naming-lint
+        # OMN-19315: the existing wrapper also refuses mixed consumer topic sets.
         name: Topic Naming Lint
         entry: bash scripts/validation/run_topic_lint.sh
         language: system
