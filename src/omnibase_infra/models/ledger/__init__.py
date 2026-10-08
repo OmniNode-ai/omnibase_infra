@@ -12,6 +12,7 @@ Models:
     - ModelDbQueryRequested: Entry event for database operations
     - ModelDbQuerySucceeded: Success event with duration and row count
     - ModelDbQueryFailed: Failure event with error details
+    - ModelPayloadLedgerAppend: Shared intent payload for audit ledger writes
 
 Security:
     All models explicitly exclude raw SQL and unredacted parameters.
@@ -40,10 +41,14 @@ from omnibase_infra.models.ledger.model_db_query_failed import ModelDbQueryFaile
 from omnibase_infra.models.ledger.model_db_query_requested import ModelDbQueryRequested
 from omnibase_infra.models.ledger.model_db_query_succeeded import ModelDbQuerySucceeded
 from omnibase_infra.models.ledger.model_ledger_event_base import ModelLedgerEventBase
+from omnibase_infra.models.ledger.model_payload_ledger_append import (
+    ModelPayloadLedgerAppend,
+)
 
 __all__ = [
     "ModelDbQueryFailed",
     "ModelDbQueryRequested",
     "ModelDbQuerySucceeded",
     "ModelLedgerEventBase",
+    "ModelPayloadLedgerAppend",
 ]

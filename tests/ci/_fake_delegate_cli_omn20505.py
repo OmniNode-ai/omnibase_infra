@@ -8,6 +8,9 @@ omnibase_infra 0.38.64 (OMN-19232): an absolute ``ONEX_STATE_DIR``, then
 ``$HOME/.onex_state``, never the working directory. A probe that looks for the
 run directory anywhere else finds nothing, which is the C13/C29 red of
 2026-10-04.
+
+Since omnibase_infra 0.38.67 (OMN-20124), the fake prints the plain answer and
+artifact paths by default, and the typed receipt JSON only with ``--json``.
 """
 
 from __future__ import annotations
@@ -45,7 +48,11 @@ if verb == "delegate":
     (run / "result.txt").write_text("the answer")
     (run / "receipt.json").write_text(json.dumps({**doc, "status": "success"}))
     (run / "run.json").write_text(json.dumps(doc))
-    print(json.dumps(doc))
+    if "--json" in sys.argv:
+        print(json.dumps(doc))
+    else:
+        print("the answer")
+        print(f"delegate artifacts: {run}/result.txt {run}/receipt.json {run}/run.json state_root={root}")
     sys.exit(0 if configured else 1)
 sys.exit(2)
 """

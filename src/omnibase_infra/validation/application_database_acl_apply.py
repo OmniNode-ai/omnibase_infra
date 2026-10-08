@@ -214,7 +214,7 @@ def _resolve_by_stamp(
         # could land a file there -- a stray doc, a partial write, a crafted
         # name -- could carry a row with the target timestamp and the required
         # fields and authorise a live GRANT/REVOKE nobody consented to. The
-        # names accepted are the ones `ledger_lock.py` itself writes beside this
+        # names accepted are the ones `onex-ledger` itself writes beside this
         # ledger: `<ledger stem>_<date>-split.md`.
         for archive in sorted(archive_dir.glob(f"{path.stem}_*-split.md")):
             if not _is_real_file_inside(archive, archive_dir):

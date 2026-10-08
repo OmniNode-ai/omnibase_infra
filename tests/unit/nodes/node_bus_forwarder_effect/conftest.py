@@ -167,6 +167,7 @@ def lane_mirror_harness() -> _LaneMirrorHarness:
         "config": ModelGatewayLaneMirrorConfig(
             source_lane="stability-test",
             mirror_lanes=("dev",),
+            declared_lanes=("stability-test", "dev"),
             topics=(
                 "onex.evt.omniclaude.session-started.v1",
                 "onex.evt.omniclaude.session-ended.v1",

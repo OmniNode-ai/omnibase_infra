@@ -248,7 +248,7 @@
 # ============================================================================
 # INTERIM BY DESIGN -- the node-based successor
 # ============================================================================
-# movement-proof-delegated-to: scripts/reconcile-host.sh
+# movement-proof-delegated-to: deploy/maintenance/omninode-workspace-reconcile.sh
 #
 # ============================================================================
 # THIS SCRIPT DOES NOT PROVE ITS OWN WORK (OMN-17307)
@@ -1059,7 +1059,7 @@ say_clone_stale_remedy() {
   say "  This script deliberately never advances a clone: there is exactly one"
   say "  clone reconciler (scripts/runtime_build/reconcile_deploy_clones.sh)."
   say "  Fetch, fast-forward and prove all three surfaces with:"
-  say "    bash $INFRA_DIR/scripts/reconcile-host.sh --omni-home $OMNI_HOME --branch $BRANCH"
+  say "    ${ONEX_DISPATCH_VENV:-$OMNI_HOME/.onex-dispatch-venv}/bin/onex-host-reconcile --omni-home $OMNI_HOME --branch $BRANCH"
 }
 
 # Whether the lock-governed layer is satisfied. `--inexact` is what makes this
@@ -1727,7 +1727,7 @@ restore_proven_market() {
     fail "proven omnimarket commit $PROVEN_MARKET $why." \
       "Installing it would leave the CLI drift guard refusing the venv." \
       "Fetch and advance the clone first, then retry:" \
-      "  bash $INFRA_DIR/scripts/reconcile-host.sh --omni-home $OMNI_HOME --branch $BRANCH" \
+      "  ${ONEX_DISPATCH_VENV:-$OMNI_HOME/.onex-dispatch-venv}/bin/onex-host-reconcile --omni-home $OMNI_HOME --branch $BRANCH" \
       "  bash ${BASH_SOURCE[0]} --omni-home $OMNI_HOME --proven"
   fi
   say "proven: installing omnimarket ${PROVEN_MARKET:0:12}; the clone stays at ${head:0:12}"

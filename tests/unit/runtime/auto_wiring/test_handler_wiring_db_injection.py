@@ -1427,7 +1427,11 @@ def test_projection_callback_preserves_envelope_timestamp() -> None:
     topic = "onex.evt.platform.node-heartbeat.v1"
     envelope_timestamp = datetime(2026, 9, 13, 17, 44, 8, tzinfo=UTC)
     envelope = ModelEventEnvelope[object](
-        payload={"service_name": "svc-a", "health_status": "healthy"},
+        payload={
+            "service_name": "svc-a",
+            "health_status": "healthy",
+            "_envelope_timestamp": datetime(2000, 1, 1, tzinfo=UTC),
+        },
         envelope_id=uuid4(),
         envelope_timestamp=envelope_timestamp,
         event_type=derive_event_type_alias_for_topic(topic),
@@ -1471,7 +1475,11 @@ def test_projection_callback_omits_envelope_timestamp_when_absent() -> None:
     envelope = MagicMock()
     envelope.event_type = derive_event_type_alias_for_topic(topic)
     envelope.topic = topic
-    envelope.payload = {"service_name": "svc-a", "health_status": "healthy"}
+    envelope.payload = {
+        "service_name": "svc-a",
+        "health_status": "healthy",
+        "_envelope_timestamp": datetime(2000, 1, 1, tzinfo=UTC),
+    }
     envelope.envelope_id = uuid4()
     envelope.envelope_timestamp = None
     callback = _make_projection_dispatch_callback(
@@ -1489,6 +1497,7 @@ def test_projection_callback_omits_envelope_timestamp_when_absent() -> None:
 
     assert len(received) == 1
     assert "_envelope_timestamp" not in received[0]
+    assert envelope.payload["_envelope_timestamp"] == datetime(2000, 1, 1, tzinfo=UTC)
 
 
 @pytest.mark.unit
@@ -1538,7 +1547,11 @@ def test_projection_callback_injects_no_event_time_it_cannot_trust(
     envelope = MagicMock()
     envelope.event_type = derive_event_type_alias_for_topic(topic)
     envelope.topic = topic
-    envelope.payload = {"service_name": "svc-a", "health_status": "healthy"}
+    envelope.payload = {
+        "service_name": "svc-a",
+        "health_status": "healthy",
+        "_envelope_timestamp": datetime(2000, 1, 1, tzinfo=UTC),
+    }
     envelope.envelope_id = uuid4()
     envelope.envelope_timestamp = recorded
     callback = _make_projection_dispatch_callback(
@@ -1556,6 +1569,7 @@ def test_projection_callback_injects_no_event_time_it_cannot_trust(
 
     assert len(received) == 1
     assert "_envelope_timestamp" not in received[0]
+    assert envelope.payload["_envelope_timestamp"] == datetime(2000, 1, 1, tzinfo=UTC)
 
 
 @pytest.mark.unit

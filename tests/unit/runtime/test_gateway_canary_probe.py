@@ -13,12 +13,14 @@ from __future__ import annotations
 import asyncio
 import json
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
@@ -624,6 +626,53 @@ def test_canary_config_total_deadline_seconds_accounts_for_connect_and_send() ->
         readback_deadline_seconds=12,
     )
     assert canary.total_deadline_seconds == pytest.approx(2 * 15 + 12)
+
+
+@pytest.mark.asyncio
+async def test_declared_canary_allows_slow_authenticated_cloud_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-20006: the live cloud leg connects after the old 15s deadline.
+
+    Scale broker time by 100 so a 30s authenticated cold start takes 0.3s.
+    Still exercise the real connect timeout, send and readback path.
+    """
+    root = Path(__file__).resolve().parents[3]
+    contract = yaml.safe_load(
+        (
+            root / "src/omnibase_infra/nodes/node_bus_forwarder_effect/contract.yaml"
+        ).read_text()
+    )
+    canary = ModelGatewayCanaryConfig.model_validate(
+        contract["config"]["gateway_forwarder"]["canary"]
+    )
+    real_wait_for = asyncio.wait_for
+
+    async def scaled_wait_for(awaitable: Awaitable[Any], *, timeout: float) -> Any:
+        return await real_wait_for(awaitable, timeout=timeout / 100)
+
+    class SlowAuthenticatedTransport(_FakeHealthyTransport):
+        async def start(self) -> None:
+            await asyncio.sleep(0.3)
+            await super().start()
+
+    monkeypatch.setattr(gateway_canary_probe.asyncio, "wait_for", scaled_wait_for)
+    result = await gateway_canary_probe.check_canary_leg(
+        leg="cloud",
+        bus_config=_bus_config(),
+        topic=CANARY_TOPIC,
+        canary=canary,
+        transport_factory=cast(
+            "type[gateway_canary_probe.KafkaTransport]", SlowAuthenticatedTransport
+        ),
+        admin_factory=_FakeAdminClient,
+    )
+    assert result.passed, result.detail
+    compose = yaml.safe_load((root / "docker/docker-compose.gateway.yml").read_text())
+    healthcheck = compose["services"]["gateway-forwarder"]["healthcheck"]
+    assert (
+        float(healthcheck["timeout"].removesuffix("s")) >= canary.total_deadline_seconds
+    )
 
 
 @pytest.mark.asyncio

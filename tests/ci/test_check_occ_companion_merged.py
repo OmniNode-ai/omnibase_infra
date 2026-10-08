@@ -492,8 +492,70 @@ class TestAutobindOutcomeShortCircuit:
     def test_reported_error_fails_immediately_naming_the_reason(self) -> None:
         verdict = _evaluate(self._fetcher([self._outcome_run("ERROR")]))
         assert verdict.code == EXIT_FAIL
+        assert verdict.name == "FAIL"
         assert "Could not parse the provided public key." in verdict.reason
         assert "will NOT appear" in verdict.reason
+
+    @pytest.mark.parametrize(
+        "reason",
+        ["skip:NO_RED_DERIVABLE_CHECK", "skip:DEFER_HAND_AUTHORED"],
+    )
+    def test_permanent_decline_is_a_named_terminal_state(self, reason: str) -> None:
+        verdict = _evaluate(
+            self._fetcher([self._outcome_run("DECLINED", reason=reason)])
+        )
+        assert verdict.code == EXIT_FAIL
+        assert verdict.name == "DECLINED"
+        assert reason in verdict.reason
+        assert "Hand-author the evidence" in verdict.reason
+
+    @pytest.mark.parametrize(
+        "reason",
+        ["skip:NO_RED_DERIVABLE_CHECK", "skip:DEFER_HAND_AUTHORED"],
+    )
+    def test_permanent_decline_returns_without_polling_or_error_annotation(
+        self,
+        reason: str,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        import scripts.ci.check_occ_companion_merged as mod
+
+        fetcher = self._fetcher([self._outcome_run("DECLINED", reason=reason)])
+        monkeypatch.setattr(mod, "GhFetcher", lambda: fetcher)
+
+        def unexpected_sleep(seconds: float) -> None:
+            pytest.fail(f"terminal decline polled for {seconds}s")
+
+        monkeypatch.setattr(mod.time, "sleep", unexpected_sleep)
+        rc = main(
+            [
+                "--event-name",
+                "pull_request",
+                "--repo",
+                PRODUCT_REPO,
+                "--pr-number",
+                "2500",
+                "--deadline-seconds",
+                "1500",
+            ]
+        )
+        output = capsys.readouterr().out
+        assert rc == EXIT_FAIL  # Evidence is still required to merge.
+        assert "occ-companion-merged gate: DECLINED" in output
+        assert reason in output
+        assert "Hand-author the evidence" in output
+        assert "::warning::" in output
+        assert "::error::" not in output
+        assert "poll deadline" not in output
+
+    @pytest.mark.parametrize("reason", ["skip:LEASE_HELD", "skip:PR_DRAFT"])
+    def test_recoverable_decline_remains_pending(self, reason: str) -> None:
+        verdict = _evaluate(
+            self._fetcher([self._outcome_run("DECLINED", reason=reason)])
+        )
+        assert verdict.code == EXIT_PENDING
+        assert verdict.name == "PENDING"
 
     def test_no_outcome_posted_still_polls(self) -> None:
         """The ordinary in-flight case is unchanged — this is additive."""

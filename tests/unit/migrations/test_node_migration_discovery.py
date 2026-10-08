@@ -720,6 +720,172 @@ class TestTenantIsolationMigrationSync:
     bytes even when upstream lacks or revises them (OMN-15717/OMN-16705).
     """
 
+    @pytest.mark.parametrize(
+        "missing_path",
+        [
+            "node_projection_delegation/0023_delegation_rls_tenant_isolation.sql",
+            "node_projection_registration/0002_node_service_registry_tenant_rls.sql",
+            "node_projection_savings/081_savings_estimates_rls_tenant_isolation.sql",
+        ],
+    )
+    def test_missing_declared_migration_rejects_divergent_upstream(
+        self, tmp_path: Path, missing_path: str
+    ) -> None:
+        source_root = tmp_path / "omnimarket-src"
+        node, filename = missing_path.split("/")
+        source = source_root / "src/omnimarket/nodes" / node / "migrations" / filename
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"-- stale upstream bytes\n")
+        dest_root = tmp_path / "nodes"
+        manifest = tmp_path / "application-migrations.tsv"
+        row = next(
+            row
+            for row in (FORWARD_DIR / "_ledger/application-migrations.tsv")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if row.split("\t")[0] == f"nodes/{missing_path}"
+        )
+        manifest.write_text(row + "\n", encoding="utf-8")
+        result = subprocess.run(
+            ["bash", str(SYNC_SCRIPT)],
+            env={
+                **os.environ,
+                "OMNIMARKET_SRC": str(source_root),
+                "SYNC_NODE_MIGRATIONS_DEST_ROOT": str(dest_root),
+                "APPLICATION_MIGRATION_MANIFEST": str(manifest),
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert f"DRIFT: declared migration checksum mismatch {missing_path}" in (
+            result.stderr
+        )
+        assert not (dest_root / missing_path).exists()
+        assert source.read_bytes() == b"-- stale upstream bytes\n"
+
+    @pytest.mark.parametrize("check_mode", [False, True])
+    @pytest.mark.parametrize(
+        "missing_path",
+        [
+            "node_projection_delegation/0023_delegation_rls_tenant_isolation.sql",
+            "node_projection_registration/0002_node_service_registry_tenant_rls.sql",
+            "node_projection_savings/081_savings_estimates_rls_tenant_isolation.sql",
+        ],
+    )
+    def test_missing_declared_migration_with_no_upstream_source_fails(
+        self, tmp_path: Path, check_mode: bool, missing_path: str
+    ) -> None:
+        source_root = tmp_path / "omnimarket-src"
+        (source_root / "src/omnimarket/nodes").mkdir(parents=True)
+        dest_root = tmp_path / "nodes"
+        manifest = tmp_path / "application-migrations.tsv"
+        row = next(
+            row
+            for row in (FORWARD_DIR / "_ledger/application-migrations.tsv")
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if row.split("\t")[0] == f"nodes/{missing_path}"
+        )
+        manifest.write_text(row + "\n", encoding="utf-8")
+        args = ["bash", str(SYNC_SCRIPT)]
+        if check_mode:
+            args.append("--check")
+        result = subprocess.run(
+            args,
+            env={
+                **os.environ,
+                "OMNIMARKET_SRC": str(source_root),
+                "SYNC_NODE_MIGRATIONS_DEST_ROOT": str(dest_root),
+                "APPLICATION_MIGRATION_MANIFEST": str(manifest),
+            },
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert f"DRIFT: missing declared migration {missing_path}" in result.stderr
+        assert not dest_root.exists()
+
+    @pytest.mark.parametrize("check_mode", [False, True])
+    def test_missing_declared_tenant_isolation_migrations_are_not_exempt(
+        self, tmp_path: Path, check_mode: bool
+    ) -> None:
+        paths = (
+            "node_projection_delegation/0023_delegation_rls_tenant_isolation.sql",
+            "node_projection_registration/0002_node_service_registry_tenant_rls.sql",
+            "node_projection_savings/081_savings_estimates_rls_tenant_isolation.sql",
+        )
+        source_root = tmp_path / "omnimarket-src"
+        dest_root = tmp_path / "nodes"
+        expected = {path: (NODES_DIR / path).read_bytes() for path in paths}
+        manifest = tmp_path / "application-migrations.tsv"
+        manifest.write_text(
+            "".join(
+                row + "\n"
+                for row in (FORWARD_DIR / "_ledger/application-migrations.tsv")
+                .read_text(encoding="utf-8")
+                .splitlines()
+                if row.split("\t")[0] in {f"nodes/{path}" for path in paths}
+            ),
+            encoding="utf-8",
+        )
+        for path, content in expected.items():
+            node, filename = path.split("/")
+            source = (
+                source_root / "src/omnimarket/nodes" / node / "migrations" / filename
+            )
+            source.parent.mkdir(parents=True)
+            source.write_bytes(content)
+        env = {
+            **os.environ,
+            "OMNIMARKET_SRC": str(source_root),
+            "SYNC_NODE_MIGRATIONS_DEST_ROOT": str(dest_root),
+            "APPLICATION_MIGRATION_MANIFEST": str(manifest),
+        }
+        # These files are declared history, but an absent vendored copy must
+        # still fail the drift gate and be recoverable in write mode.
+        args = ["bash", str(SYNC_SCRIPT)]
+        if check_mode:
+            args.append("--check")
+        result = subprocess.run(
+            args, env=env, capture_output=True, text=True, timeout=60, check=False
+        )
+        assert result.returncode == (1 if check_mode else 0), (
+            result.stdout + result.stderr
+        )
+        if check_mode:
+            for path in paths:
+                assert f"DRIFT: {path}" in result.stderr
+            assert not dest_root.exists()
+            result = subprocess.run(
+                ["bash", str(SYNC_SCRIPT)],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            assert result.returncode == 0, result.stdout + result.stderr
+        assert {
+            path.relative_to(dest_root).as_posix(): path.read_bytes()
+            for path in dest_root.rglob("*.sql")
+        } == expected
+        result = subprocess.run(
+            ["bash", str(SYNC_SCRIPT), "--check"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
     @pytest.mark.parametrize("check_mode", [False, True])
     @pytest.mark.parametrize("upstream", ["matching", "missing", "divergent"])
     def test_preserves_original_tenant_isolation_migrations(

@@ -1,0 +1,26 @@
+
+    INSERT INTO omninode_internal.consumer_flow_windows (
+        consumer_group, topic, window_start, window_end, node_id,
+        ingest_sequence, messages_in, messages_out, messages_dlq,
+        handler_errors, upstream_produced, upstream_evidence, flow_state,
+        evaluated_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+    ON CONFLICT (consumer_group, topic, window_start) DO UPDATE SET
+        window_end = EXCLUDED.window_end,
+        node_id = EXCLUDED.node_id,
+        ingest_sequence = EXCLUDED.ingest_sequence,
+        messages_in = EXCLUDED.messages_in,
+        messages_out = EXCLUDED.messages_out,
+        messages_dlq = EXCLUDED.messages_dlq,
+        handler_errors = EXCLUDED.handler_errors,
+        upstream_produced = EXCLUDED.upstream_produced,
+        upstream_evidence = EXCLUDED.upstream_evidence,
+        flow_state = EXCLUDED.flow_state,
+        evaluated_at = EXCLUDED.evaluated_at
+    WHERE omninode_internal.consumer_flow_windows.node_id <> EXCLUDED.node_id
+       OR omninode_internal.consumer_flow_windows.ingest_sequence <= EXCLUDED.ingest_sequence
+    RETURNING consumer_group, topic, window_start, window_end, node_id,
+              ingest_sequence, messages_in, messages_out, messages_dlq,
+              handler_errors, upstream_produced, upstream_evidence,
+              flow_state, evaluated_at, projection_cursor

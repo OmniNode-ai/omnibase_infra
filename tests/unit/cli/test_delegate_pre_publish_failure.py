@@ -241,19 +241,19 @@ def test_runtime_injected_missing_fields_are_not_reported_as_cli_refusals(
     assert "`correlation_id` missing" not in message
 
 
+@pytest.mark.parametrize("field", ["requested_timeout_seconds", "unrelated_field"])
 def test_extra_field_is_named_without_its_private_value_or_missing_defaults(
     paths: tuple[Path, Path, Path],
+    field: str,
 ) -> None:
-    paths[1].write_text(
-        json.dumps({"requested_timeout_seconds": _PAYLOAD_SENTINEL}), encoding="utf-8"
-    )
+    paths[1].write_text(json.dumps({field: _PAYLOAD_SENTINEL}), encoding="utf-8")
     message = _describe(paths)
     assert f"Cause: the request payload was refused by {_MODEL_PATH}" in message
-    assert (
-        "`requested_timeout_seconds` extra_forbidden: Extra inputs are not permitted"
-        in message
-    )
+    assert f"`{field}` extra_forbidden: Extra inputs are not permitted" in message
     assert "`correlation_id` missing" not in message
+    assert ("supplied by `--timeout`" in message) == (
+        field == "requested_timeout_seconds"
+    )
 
 
 def test_nested_refusal_location_names_the_index_without_private_input(

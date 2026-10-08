@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "omnibase_infra"
-version = "0.38.67"
+version = "0.38.69"
 description = "ONEX Infrastructure - Service integration and database infrastructure tools"
 authors = [{ name = "OmniNode.ai", email = "contact@omninode.ai" }]
 license = {text = "MIT"}
@@ -70,7 +70,7 @@ dependencies = [
     #   - SHAs provide audit trail and tamper-evidence
     # Core dependencies
     "pydantic>=2.11.7,<3.0.0",
-    "fastapi>=0.120.1,<0.142.0",
+    "fastapi>=0.120.1,<0.143.0",
     "uvicorn>=0.32.0,<0.55.0",
     "pyyaml>=6.0.2,<7.0.0",
     # OMN-15688 (2026-08-04): floor raised to 3.14.3 to clear CVE-2026-69244
@@ -713,6 +713,9 @@ node_merge_sweep_classify_compute = "omnibase_infra.nodes.node_merge_sweep_class
 node_merge_sweep_pr_list_effect = "omnibase_infra.nodes.node_merge_sweep_pr_list_effect"
 node_merge_sweep_workflow_orchestrator = "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator"
 node_merge_sweep_workflow_reducer = "omnibase_infra.nodes.node_merge_sweep_workflow_reducer"
+node_migration_append_only_check_compute = "omnibase_infra.nodes.node_migration_append_only_check_compute"
+node_migration_freeze_check_compute = "omnibase_infra.nodes.node_migration_freeze_check_compute"
+node_migration_sequence_check_compute = "omnibase_infra.nodes.node_migration_sequence_check_compute"
 node_model_health_effect = "omnibase_infra.nodes.node_model_health_effect"
 node_model_router_compute = "omnibase_infra.nodes.node_model_router_compute"
 node_node_graph_reducer = "omnibase_infra.nodes.node_node_graph_reducer"

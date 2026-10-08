@@ -271,6 +271,7 @@ services:
       # OMN-14551 G6: flip the auto-wired consume boundary's DLQ routing ON
       # for this lane's live-proof, sourced from the ledgered contract value
       # (docker/runtime-policy.env), fail-fast if the policy env is missing.
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: ${STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND}
       ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     ports: !override
       - "${STABILITY_TEST_RUNTIME_MAIN_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PORT}:8085"
@@ -361,6 +362,7 @@ services:
       ONEX_DEAD_LETTER_ARCHIVE_DIR: /app/data/dead-letter-archive
       ONEX_CONSUMER_FLOW_ARCHIVE_DIR: /app/data/consumer-flow-archive
       # OMN-14551 G6: see omninode-runtime's ONEX_BOUNDARY_DLQ_ENABLED comment.
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: ${STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND}
       ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     ports: !override
       - "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085"
@@ -456,6 +458,7 @@ services:
       ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-worker
       # OMN-14551 G6: see omninode-runtime's ONEX_BOUNDARY_DLQ_ENABLED comment.
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: ${STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND}
       ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     volumes: !override
       - worker_logs:/app/logs
@@ -976,6 +979,7 @@ services:
       KAFKA_INSTANCE_ID: stability-test-tenant-projection
       OTEL_SERVICE_NAME: omnimarket-stability-test-tenant-projection-writer
       # OMN-14551 G6: see omninode-runtime's ONEX_BOUNDARY_DLQ_ENABLED comment.
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: ${STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND}
       ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     volumes: !override
       - stability_test_tenant_projection_logs:/app/logs

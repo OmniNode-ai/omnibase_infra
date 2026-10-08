@@ -300,10 +300,12 @@ def test_proven_delegate_does_not_wait_on_a_peer_or_run_reconcile(
     ws.write_receipt()
     ws.lock_dir.mkdir()
     marker = ws.root / "reconciler-ran"
-    for name in ("reconcile-host.sh", "reconcile-workspace-venvs.sh"):
-        (ws.scripts_dir / name).write_text(
-            f'#!/usr/bin/env bash\ntouch "{marker}"\n', encoding="utf-8"
-        )
+    for entry in (
+        ws.venv_bin / "onex-host-reconcile",
+        ws.scripts_dir / "reconcile-workspace-venvs.sh",
+    ):
+        entry.write_text(f'#!/usr/bin/env bash\ntouch "{marker}"\n', encoding="utf-8")
+        entry.chmod(0o755)
 
     proc = ws.run("delegate", "hello", wait_s=0)
 

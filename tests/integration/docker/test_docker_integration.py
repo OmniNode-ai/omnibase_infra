@@ -1203,6 +1203,7 @@ COMPOSE_CONFIG_RENDER_ENV: dict[str, str] = {
     # satisfy the compose `:?` fail-fast, but tracking the live value avoids
     # a misleading fixture).
     "DEV_BOUNDARY_DLQ_ENABLED": "true",
+    "DEV_TRAJECTORY_EVALUATION_BACKEND": "in_memory",
     # OMN-14968: runtime-worker's deploy.replicas is `:?`-required on the
     # lane-prefixed policy value (it was a bare ${WORKER_REPLICAS:-0} that no
     # surface exported, so the dev lane silently rendered zero replicas).

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -57,6 +58,21 @@ class _Admin:
         self.calls.append("cluster")
         return {"brokers": [{"node_id": 1}]}
 
+    async def _send_request(
+        self, request: Any, node_id: int | None = None
+    ) -> SimpleNamespace:
+        self.calls.append("list")
+        struct = request.prepare({16: (0, 4)})
+        assert struct.states_filter == ["Stable"]
+        return SimpleNamespace(
+            error_code=0,
+            groups=[
+                (group_id, "consumer", state, {})
+                for group_id in self.listed
+                if (state := self.states.get(group_id, "Stable")) == "Stable"
+            ],
+        )
+
     async def list_consumer_groups(self) -> list[tuple[str, str]]:
         self.calls.append("list")
         return [(group, "consumer") for group in self.listed]
@@ -103,7 +119,8 @@ def test_only_complete_footprints_are_described_and_only_stable_is_returned(
     assert backend_probe.live_chain_consumer_groups(
         command_topic=_COMMAND, subscribe_topics=_SUBSCRIBE, bootstrap_servers=_BROKER
     ) == (_A,)
-    assert admin.described == sorted([_A, _C])
+    # OMN-20646: the Empty command group is filtered before DescribeGroups.
+    assert admin.described == [_A]
     assert admin.calls == ["start", "cluster", "list", "close"]
 
 
@@ -111,6 +128,8 @@ def test_only_complete_footprints_are_described_and_only_stable_is_returned(
 def test_every_candidate_denied_is_a_typed_refusal(
     admin: type[_Admin], response_code: bool
 ) -> None:
+    # Both hidden candidates are Stable at listing time (OMN-20646).
+    admin.states[_C] = "Stable"
     if response_code:
         admin.denied_code = {_A, _C}
     else:
