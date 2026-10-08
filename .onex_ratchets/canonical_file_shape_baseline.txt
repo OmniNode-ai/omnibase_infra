@@ -284,7 +284,6 @@ scripts/deploy-agent/deploy_agent/unit_drift.py
 scripts/deploy-build-loop-trigger.sh
 scripts/deploy-gateway.sh
 scripts/deploy-runners.sh
-scripts/deploy-runtime.sh
 scripts/deploy-timers.sh
 scripts/deploy-trigger.py
 scripts/diagnose_e2e.sh
@@ -471,7 +470,6 @@ scripts/update-plugin-pins.py
 scripts/update_version_matrix.py
 scripts/validate-kafka-schema-handshake.py
 scripts/validate-pr-contract-sync.sh
-scripts/validate-pr-deploy-required.sh
 scripts/validate.py
 scripts/validate_delegation_cohort_keys.py
 scripts/validate_env.py

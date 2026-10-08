@@ -197,7 +197,6 @@ scope:
     - scripts/ci/verify_pypi_pin_resolvability.py
     - scripts/ci_check_kafka_no_localhost_default.py
     - scripts/deploy-agent/deploy_agent/executor.py
-    - scripts/deploy-runtime.sh
     - scripts/generate_claude_lane_block.py
     - scripts/generate_topic_enums.py
     - scripts/hooks/prepush_smart_tests.sh

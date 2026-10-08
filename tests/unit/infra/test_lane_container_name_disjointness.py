@@ -11,7 +11,7 @@ aborts the whole batch with a ``Conflict. The container name ... is already in
 use`` error.
 
 The stability-test and prod overlays disable most of these services via a
-``*-disabled`` profile, but that is NOT sufficient protection: ``deploy-runtime.sh``
+``*-disabled`` profile, but that is NOT sufficient protection: ``onex-runtime-deploy``
 starts several of them *explicitly by name* (``up -d --no-deps --force-recreate
 <service>``) which bypasses the profile gate. Explicitly-started services fall
 back to the inherited bare ``container_name`` unless the overlay overrides it.
@@ -58,7 +58,13 @@ _ComposeLoader.add_multi_constructor("", _construct_compose_value)
 
 
 DOCKER_DIR = Path(__file__).resolve().parents[3] / "docker"
-DEPLOY_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    Path(__file__).resolve().parents[3]
+    / "src"
+    / "omnibase_infra"
+    / "handlers"
+    / "handler_runtime_deploy.sh"
+)
 
 BASE_FILE = DOCKER_DIR / "docker-compose.infra.yml"
 STABILITY_FILE = DOCKER_DIR / "docker-compose.stability-test.yml"
@@ -89,14 +95,14 @@ def _container_names(services: dict[str, dict]) -> dict[str, str]:
 
 
 def _runtime_services_from_deploy_script() -> set[str]:
-    """Parse the explicit RUNTIME_SERVICES array from deploy-runtime.sh.
+    """Parse the explicit RUNTIME_SERVICES array from onex-runtime-deploy.
 
     These services are started by name, bypassing compose profile gating, so any
     bare container_name they inherit becomes a live host-name collision.
     """
     text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
     match = re.search(r"RUNTIME_SERVICES=\((.*?)\)", text, re.DOTALL)
-    assert match, "RUNTIME_SERVICES array not found in deploy-runtime.sh"
+    assert match, "RUNTIME_SERVICES array not found in onex-runtime-deploy"
     body = match.group(1)
     return {
         line.strip()
@@ -109,7 +115,7 @@ def _instantiated_services(overlay_file: Path) -> set[str]:
     """Base services a *layered* lane actually brings up via the deploy path.
 
     A service is instantiated in the lane if either:
-      * it is in deploy-runtime.sh's RUNTIME_SERVICES (started explicitly by name,
+      * it is in onex-runtime-deploy's RUNTIME_SERVICES (started explicitly by name,
         which bypasses profile gating), or
       * its *effective* profile (overlay override if present, else base) is empty
         (always-on) or contains ``runtime`` (the deploy ``--profile runtime`` set).
@@ -167,7 +173,7 @@ def test_deploy_runtime_services_are_named_and_reachable() -> None:
     assert runtime_explicit, "RUNTIME_SERVICES parsed empty"
     for service in runtime_explicit:
         assert service in base_services, (
-            f"deploy-runtime.sh starts unknown service {service!r}"
+            f"onex-runtime-deploy starts unknown service {service!r}"
         )
 
 
@@ -192,7 +198,7 @@ def test_layered_overlay_renames_every_instantiated_service(lane: str) -> None:
 
     assert not bare_survivors, (
         f"{lane} overlay instantiates {bare_survivors} but leaves them on the bare "
-        f"(dev/base) container_name; deploy-runtime.sh starts these explicitly and "
+        f"(dev/base) container_name; onex-runtime-deploy starts these explicitly and "
         f"they collide with the dev lane. Add a lane-prefixed container_name override."
     )
 
@@ -236,7 +242,7 @@ def test_judge_container_names_are_lane_scoped() -> None:
 @pytest.mark.parametrize(
     ("lane", "service", "expected"),
     [
-        # OMN-13815: the four RUNTIME_SERVICES consumers deploy-runtime.sh starts
+        # OMN-13815: the four RUNTIME_SERVICES consumers onex-runtime-deploy starts
         # explicitly in each non-dev layered lane (stability-test).
         (
             "stability-test",

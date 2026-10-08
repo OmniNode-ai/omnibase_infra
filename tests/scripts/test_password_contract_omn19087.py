@@ -10,7 +10,7 @@ minutes later in a different script naming a third variable.
 
 AC-1: a malformed value for any of the five is refused before any container
 starts, naming the variable and the contract. The refusal runs in
-``scripts/deploy-runtime.sh`` (``guard_password_contract``, called in ``main``
+``src/omnibase_infra/handlers/handler_runtime_deploy.sh`` (``guard_password_contract``, called in ``main``
 before attribution, build, sync or bring-up) and in
 ``scripts/preflight_required_compose_env.py`` (the deploy agent's and
 ``refresh_dev_lane.sh``'s pre-compose check).
@@ -41,7 +41,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPTS = _REPO_ROOT / "scripts"
 _CHECKER = _SCRIPTS / "preflight_password_contract.py"
 _COMPOSE_PREFLIGHT = _SCRIPTS / "preflight_required_compose_env.py"
-_DEPLOY_RUNTIME = _SCRIPTS / "deploy-runtime.sh"
+_DEPLOY_RUNTIME = (
+    _SCRIPTS.parent
+    / "src"
+    / "omnibase_infra"
+    / "handlers"
+    / "handler_runtime_deploy.sh"
+)
 _RUNNER = _SCRIPTS / "run-forward-migrations.sh"
 _BOOTSTRAP = (
     _REPO_ROOT

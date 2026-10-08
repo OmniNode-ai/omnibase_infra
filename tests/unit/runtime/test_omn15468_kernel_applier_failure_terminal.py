@@ -112,6 +112,7 @@ class ModelDemoSkillResponse(BaseModel):
     status: str
     correlation_id: UUID
     terminal_failure_cause: str | None = None
+    quality_gate_passed: bool | None = None
 
 
 class ModelDemoSkillFailed(BaseModel):
@@ -224,10 +225,12 @@ async def test_map_miss_failure_verdict_lands_on_the_failure_terminal(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_success_verdict_still_lands_on_the_success_terminal(
+@pytest.mark.parametrize("quality_gate_passed", [None, True, False])
+async def test_completed_status_respects_the_quality_verdict(
     tmp_path: Path,
+    quality_gate_passed: bool | None,
 ) -> None:
-    """Positive control: the guard corrects only the false-success direction."""
+    """OMN-18929: a completed model with rejected quality uses the failed topic."""
     contract_path = _write_contract(tmp_path)
     correlation_id = uuid4()
     applier = _applier(contract_path)
@@ -235,9 +238,13 @@ async def test_success_verdict_still_lands_on_the_success_terminal(
     topic = await _published_topic(
         applier,
         correlation_id,
-        ModelDemoSkillResponse(status="completed", correlation_id=correlation_id),
+        ModelDemoSkillResponse(
+            status="completed",
+            correlation_id=correlation_id,
+            quality_gate_passed=quality_gate_passed,
+        ),
     )
-    assert topic == COMPLETED_TOPIC
+    assert topic == (FAILED_TOPIC if quality_gate_passed is False else COMPLETED_TOPIC)
 
 
 @pytest.mark.unit

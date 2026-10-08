@@ -8,6 +8,7 @@ import asyncio
 import io
 import json
 import subprocess
+import urllib.error
 from pathlib import Path
 from typing import Any
 
@@ -167,6 +168,68 @@ def test_recorded_lane_runs_collection_grading_and_receipt(tmp_path: Path) -> No
     assert lane.sample >= 2
     assert any("produce" in argv for argv in lane.calls)
     assert sum(argv[0] == "fake-pytest" for argv in lane.calls) == 3
+
+
+class _RedeployedLane(_RecordedLane):
+    """A recorded lane whose containers are recreated right after the first read."""
+
+    def __init__(self, recorded: dict[str, Any]) -> None:
+        super().__init__(recorded)
+        self.refused = False
+
+    def http(self, url: str, *, timeout: float) -> io.BytesIO:
+        if not self.refused:
+            self.refused = True
+            raise urllib.error.URLError(
+                ConnectionRefusedError(111, "Connection refused")
+            )
+        return super().http(url, timeout=timeout)
+
+    def run(self, argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        proc = super().run(argv, **kwargs)
+        if argv[0] == "fake-docker" and argv[1] == "inspect" and self.refused:
+            body = json.loads(proc.stdout)
+            body[0]["Id"] = f"redeployed-{argv[-1]}"
+            body[0]["State"]["StartedAt"] = "2026-10-08T00:58:19Z"
+            proc.stdout = json.dumps(body)
+        return proc
+
+
+def test_mid_run_redeploy_is_remeasured_through_the_full_handler(
+    tmp_path: Path,
+) -> None:
+    wiring = tmp_path / script.WIRING_MODULE
+    wiring.parent.mkdir(parents=True)
+    wiring.write_text(
+        "\n".join(
+            f'def {factory}():\n    flow_counters.register("group")\n'
+            for factory in script.BRANCHES.values()
+        )
+    )
+    lane = _RedeployedLane(json.loads(FIXTURE.read_text()))
+    target = HandlerDockerConsumerFlowTarget(
+        runner=lane.run,
+        urlopen=lane.http,
+        sleep=lambda _: None,
+        repo_root=tmp_path,
+    )
+    request = ModelConsumerFlowRequest(
+        subject_lane="dev",
+        docker_bin="fake-docker",
+        base_url="http://projection.test",
+        samples=2,
+        sample_interval=0,
+        settle_seconds=0,
+        injection_wait=0,
+        attempts=3,
+        pytest_cmd="fake-pytest",
+        scratch=tmp_path,
+    )
+
+    result = asyncio.run(HandlerConsumerFlow(target=target).handle(request))
+
+    assert lane.refused
+    assert result.outcome == "PASS", result.reasons
 
 
 class _WindowLane:

@@ -3,7 +3,7 @@
 
 """Regression coverage for the OMN-13364 stability-redeploy fragility fixes.
 
-Two coupled deploy-runtime.sh defects, observed on the 2026-06-19 stability-test
+Two coupled onex-runtime-deploy defects, observed on the 2026-06-19 stability-test
 redeploy, are guarded here:
 
 1. Redpanda warmup false-fails on a prefixed-container-name conflict.
@@ -36,7 +36,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 MIGRATION_TREE = REPO_ROOT / "docker" / "migrations" / "forward"
 
 
@@ -45,7 +47,7 @@ def _deploy_script_text() -> str:
 
 
 def _deploy_script_noncomment() -> str:
-    """deploy-runtime.sh with comment-only lines stripped.
+    """onex-runtime-deploy with comment-only lines stripped.
 
     Assertions about *active* behavior must not be satisfied by a comment that
     merely mentions the token, so the active-code checks run against this view.

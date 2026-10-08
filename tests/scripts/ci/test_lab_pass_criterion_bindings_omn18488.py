@@ -151,6 +151,71 @@ def test_both_emitters_copy_authored_bindings_at_the_cited_commit(
     assert reads[-1][-1] == f"{SHA_4ACA}:contracts/OMN-18488.yaml"
 
 
+def test_a_squash_body_citing_other_tickets_binds_the_subject_ticket(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lane = lab.EnumLabLane.COMPOSE_DEV
+    reads = []
+    contract = {
+        "ticket_id": "OMN-18488",
+        "requirements": [
+            {"acceptance": [{"id": "AC1", "statement": "AC1: the lane is ready."}]}
+        ],
+        "dod_evidence": [
+            {
+                "id": f"lab-pass-{lane.value}-ready_main",
+                "binds_ac": ["AC1"],
+                "ac_bindings": [
+                    {
+                        "label": "AC1",
+                        "criterion_hash": "a" * 64,
+                        "accepted_by": "author",
+                        "accepted_at": "2026-10-07T19:30:00Z",
+                    }
+                ],
+            }
+        ],
+    }
+
+    def git_read(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        reads.append(args)
+        if args[-1].endswith(".yaml"):
+            output = json.dumps(contract)
+        elif "--format=%s" in args:
+            output = "refactor(OMN-18488): move payloads (#4687)"
+        elif "--format=%B" in args:
+            output = (
+                "refactor(OMN-18488): move payloads (#4687)\n\n"
+                "* ci(OMN-18488): x\nLane ticket OMN-17427.\n"
+                "CI Evidence Policy (OMN-18247)"
+            )
+        else:
+            pytest.fail(f"unexpected git read: {args}")
+        return subprocess.CompletedProcess(args, 0, output, "")
+
+    monkeypatch.setattr(lab.subprocess, "run", git_read)
+    checks, ticket, labels = lab.bind_commit_checks(
+        SHA_4ACA, lane, receipt(SHA_4ACA).checks, Path()
+    )
+    assert ticket == "OMN-18488"
+    assert checks[0].binds_ac == ("AC1",)
+    assert labels == ("AC1",)
+    assert reads[-1][-1] == f"{SHA_4ACA}:contracts/OMN-18488.yaml"
+
+
+def test_a_subject_citing_two_tickets_is_still_ambiguous(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def git_read(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(args, 0, "fix(OMN-1, OMN-2): both", "")
+
+    monkeypatch.setattr(lab.subprocess, "run", git_read)
+    with pytest.raises(ValueError, match="ambiguous"):
+        lab.bind_commit_checks(
+            SHA_4ACA, lab.EnumLabLane.COMPOSE_DEV, receipt(SHA_4ACA).checks, Path()
+        )
+
+
 def test_an_uncited_commit_emits_unbound_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

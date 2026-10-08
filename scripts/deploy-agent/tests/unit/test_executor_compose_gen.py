@@ -12,7 +12,7 @@ output. The tracked file was being overwritten in place on every deploy, which
 left the lab deploy-source clone permanently dirty and, because the render is a
 DIFFERENT stack (12 extra services, 31 required ``${VAR:?}`` names against the
 tracked file's 50), broke compose validation for every subsequent
-``scripts/deploy-runtime.sh`` run on the dev and stability lanes.
+``src/omnibase_infra/handlers/handler_runtime_deploy.sh`` run on the dev and stability lanes.
 """
 
 from __future__ import annotations

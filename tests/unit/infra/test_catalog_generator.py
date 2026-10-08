@@ -79,7 +79,7 @@ def test_runtime_image_build_carries_no_silent_omni_home_default() -> None:
     a ``BUILD_SOURCE=workspace`` build reads it, to stage sibling repositories
     from the operator's registry, and every sanctioned workspace build passes it
     as ``--build-arg`` after refusing an unset value (the deploy agent's
-    ``_build_source_args`` and ``deploy-runtime.sh``). A ``${OMNI_HOME:-}``
+    ``_build_source_args`` and ``onex-runtime-deploy``). A ``${OMNI_HOME:-}``
     entry in the render added nothing but a silent empty default, so the
     Dockerfile's own workspace guard is left to fail fast instead.
     """

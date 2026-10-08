@@ -18,11 +18,13 @@ class EnumPlatformTopic(str, Enum):
     All values are raw topic strings as declared in contract.yaml.
     Members are sorted by (kind, event_name, version).
     """
+    CMD_CI_LIVE_CONTACT_CHECK_V1 = "onex.cmd.platform.ci-live-contact-check.v1"  # onex.cmd.platform.ci-live-contact-check.v1
     CMD_LEDGER_APPEND_V1 = "onex.cmd.platform.ledger-append.v1"  # onex.cmd.platform.ledger-append.v1
     CMD_LEDGER_QUERY_V1 = "onex.cmd.platform.ledger-query.v1"  # onex.cmd.platform.ledger-query.v1
     CMD_NODE_REGISTRATION_ACKED_V1 = "onex.cmd.platform.node-registration-acked.v1"  # onex.cmd.platform.node-registration-acked.v1
     CMD_REQUEST_INTROSPECTION_V1 = "onex.cmd.platform.request-introspection.v1"  # onex.cmd.platform.request-introspection.v1
     CMD_TOPIC_CATALOG_QUERY_V1 = "onex.cmd.platform.topic-catalog-query.v1"  # onex.cmd.platform.topic-catalog-query.v1
+    EVT_CI_LIVE_CONTACT_CHECKED_V1 = "onex.evt.platform.ci-live-contact-checked.v1"  # onex.evt.platform.ci-live-contact-checked.v1
     EVT_CONTRACT_DEREGISTERED_V1 = "onex.evt.platform.contract-deregistered.v1"  # onex.evt.platform.contract-deregistered.v1
     EVT_CONTRACT_REGISTERED_V1 = "onex.evt.platform.contract-registered.v1"  # onex.evt.platform.contract-registered.v1
     EVT_FSM_STATE_TRANSITIONS_V1 = "onex.evt.platform.fsm-state-transitions.v1"  # onex.evt.platform.fsm-state-transitions.v1

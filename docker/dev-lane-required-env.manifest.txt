@@ -4,7 +4,7 @@
 # WHY A THIRD MANIFEST
 # --------------------
 # The dev lane brings up TWO compose files, not one. Both
-# scripts/deploy-runtime.sh resolve_compose_file_args() and the deploy agent's
+# onex-runtime-deploy resolve_compose_file_args() and the deploy agent's
 # _LANE_CONFIGS[DEV] resolve the bare `omnibase-infra` project to
 #   docker/docker-compose.infra.yml  +  docker/docker-compose.dev-lane.yml
 # and every ${VAR:?} in EITHER file is a hard requirement of the deploy.

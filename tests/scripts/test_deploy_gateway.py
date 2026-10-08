@@ -9,7 +9,7 @@ an image with an empty `org.opencontainers.image.revision` label, and had no
 recorded rollback target. These tests drive the REAL script (scripts/deploy-
 gateway.sh) via subprocess -- exactly the convention
 tests/scripts/test_deploy_runtime_promotion_class.py already uses for
-deploy-runtime.sh -- with `docker`/`sudo` replaced by inspectable fakes so the
+onex-runtime-deploy -- with `docker`/`sudo` replaced by inspectable fakes so the
 full --execute code path runs without a live Docker daemon, systemd, or root.
 
 Coverage maps 1:1 to the OMN-15521 falsifiable acceptance criteria:
@@ -38,7 +38,7 @@ derived the AC6 rollback target from gateway.env's GATEWAY_IMAGE= line
 instead of the container's actual running image, with no existence check --
 this produced a registry.json rollback_command that pointed at an already
 pruned/dangling image; (b) omitted the OMNIBASE_COMPAT_REF / OMNIMARKET_REF /
-ONEX_CHANGE_CONTROL_REF build-args deploy-runtime.sh always passes, silently
+ONEX_CHANGE_CONTROL_REF build-args onex-runtime-deploy always passes, silently
 falling back to the Dockerfile's hardcoded defaults; (c) verify_deployment()
 never compared the running container's actual image against the digest it
 just built, so a reload that silently failed to recreate the container still
@@ -481,7 +481,7 @@ def test_print_compose_cmd_targets_repo_resident_compose_project(
 @pytest.mark.unit
 def test_dry_run_default_performs_no_mutation(harness: _Harness) -> None:
     """Bare invocation (no --execute) must not touch the host dir, env file,
-    or registry -- mirrors deploy-runtime.sh's dry-run-by-default contract.
+    or registry -- mirrors onex-runtime-deploy's dry-run-by-default contract.
     """
     before_env = harness.env_file.read_text(encoding="utf-8")
     result = harness.run()
@@ -519,7 +519,7 @@ def test_build_command_stamps_oci_provenance_build_args(harness: _Harness) -> No
 
 @pytest.mark.unit
 def test_build_command_stamps_sibling_ref_build_args(harness: _Harness) -> None:
-    """AC2 remediation (OMN-15521): scripts/deploy-runtime.sh's build_images()
+    """AC2 remediation (OMN-15521): src/omnibase_infra/handlers/handler_runtime_deploy.sh's build_images()
     passes OMNIBASE_COMPAT_REF / OMNIMARKET_REF / ONEX_CHANGE_CONTROL_REF
     unconditionally on every build -- a prior version of this script silently
     dropped all three, so the gateway image fell back to the Dockerfile's
@@ -1263,7 +1263,7 @@ def test_execute_without_env_file_fails_closed(harness: _Harness) -> None:
 #
 # A prior version of this script honoured BUILD_SOURCE=workspace for the
 # stamped labels (promotion_class/non_main_lineage) but never actually staged
-# workspace/sibling-repos/ -- unlike scripts/deploy-runtime.sh's
+# workspace/sibling-repos/ -- unlike src/omnibase_infra/handlers/handler_runtime_deploy.sh's
 # build_images(), which always calls stage_workspace_if_needed() first.
 # docker/Dockerfile.runtime unconditionally COPYs workspace/sibling-repos/,
 # so a workspace-mode build silently used the committed placeholder (or
@@ -1272,7 +1272,7 @@ def test_execute_without_env_file_fails_closed(harness: _Harness) -> None:
 # and lineage guard consume. A full live staging run needs real OMNI_HOME
 # sibling git clones, so -- matching the established convention
 # tests/scripts/test_deploy_runtime_build_context.py already uses for the
-# identical deploy-runtime.sh wiring (test_deploy_runtime_stages_workspace_
+# identical onex-runtime-deploy wiring (test_deploy_runtime_stages_workspace_
 # and_passes_omni_home_arg / test_deploy_runtime_runs_sibling_lock_pin_
 # preflight) -- these are static assertions on the wiring, not a live
 # staging run.
@@ -1296,7 +1296,7 @@ def test_deploy_gateway_stages_workspace_before_build() -> None:
         "the build reads workspace/sibling-repos/ before it is populated"
     )
 
-    # The staging function itself must invoke the SAME script deploy-runtime.sh
+    # The staging function itself must invoke the SAME script onex-runtime-deploy
     # uses -- reused machinery, not a parallel reimplementation.
     assert (
         'stage_script="${repo_root}/scripts/runtime_build/stage_workspace.sh"'
@@ -1316,7 +1316,7 @@ def test_deploy_gateway_requires_omni_home_for_workspace_build_source(
     harness: _Harness,
 ) -> None:
     """BUILD_SOURCE=workspace with no OMNI_HOME must fail closed before any
-    build/mutation -- mirrors deploy-runtime.sh's validate_build_source_config.
+    build/mutation -- mirrors onex-runtime-deploy's validate_build_source_config.
     """
     result = harness.run(
         "--execute",
@@ -1339,7 +1339,7 @@ def test_deploy_gateway_requires_omni_home_for_workspace_build_source(
 @pytest.mark.unit
 def test_deploy_gateway_runs_sibling_lock_pin_preflight_in_workspace_mode() -> None:
     """Workspace staging must run the OMN-12987 lock-pin preflight before
-    build, same as deploy-runtime.sh -- the recurrence guard for a stale
+    build, same as onex-runtime-deploy -- the recurrence guard for a stale
     vendored sibling silently shipping (the 2026-06-11 stability crash).
     """
     deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
@@ -1362,7 +1362,7 @@ def test_lock_pin_preflight_argv_matches_deploy_runtime_package_set() -> None:
     manifest -- it is no longer installed into the runtime image, so
     ``check_sibling_lock_pins.py``'s ``DEFAULT_PACKAGE_REPO_DIRS`` no longer
     carries ``onex-change-control`` and its argparse ``--repo`` validator
-    rejects it. That PR updated ``deploy-runtime.sh``'s copy of this argv and
+    rejects it. That PR updated ``onex-runtime-deploy``'s copy of this argv and
     missed ``deploy-gateway.sh``'s, so every ``BUILD_SOURCE=workspace`` gateway
     deploy died in the preflight with::
 

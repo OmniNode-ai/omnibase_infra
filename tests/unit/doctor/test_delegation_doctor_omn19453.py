@@ -452,3 +452,36 @@ def test_embedding_backend_is_not_the_declared_chat_model(tmp_path: Path) -> Non
         .fault
         is EnumDelegationDoctorFault.NO_LOCAL_MODEL
     )
+
+
+@pytest.mark.parametrize("model_name", [None, _MODEL_ID])
+@pytest.mark.parametrize(
+    "models",
+    [
+        [],
+        [{"id": ""}],
+        [{"id": "   "}],
+        [{"id": None}],
+        [{}],
+        [None, 3, {}, {"id": 9}, {"id": " "}],
+    ],
+)
+def test_local_server_without_served_models_is_not_healthy(
+    tmp_path: Path, model_name: str | None, models: list[object]
+) -> None:
+    overlay = tmp_path / "overlay.yaml"
+    _write_overlay(overlay, model_name=model_name)
+    transport = FakeTransport(body=json.dumps({"data": models}))
+    check = CheckDelegationLocalModel(
+        overlay_path=overlay, environ={}, transport=transport
+    )
+
+    diagnosis = check.diagnose()
+    result = check.run()
+
+    assert diagnosis.fault is EnumDelegationDoctorFault.LOCAL_MODEL_NOT_SERVING
+    assert diagnosis.fix == "Start the model server at http://model.invalid."
+    assert result.status is EnumHealthStatusValue.UNHEALTHY
+    assert result.message.startswith("[local_model_not_serving] ")
+    assert result.message.count("Fix:") == 1
+    assert transport.urls == ["http://model.invalid/v1/models"] * 2

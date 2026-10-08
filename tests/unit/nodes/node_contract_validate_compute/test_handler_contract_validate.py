@@ -13,11 +13,13 @@ the same path returns a ``ModelDispatchResult`` carrying the validation result.
 
 from __future__ import annotations
 
+from typing import cast
 from uuid import uuid4
 
 import pytest
 
 from omnibase_core.models.container.model_onex_container import ModelONEXContainer
+from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_core.models.validation.model_contract_validation_result import (
     ModelContractValidationResult,
 )
@@ -32,7 +34,11 @@ from omnibase_infra.nodes.node_contract_validate_compute.models import (
 from omnibase_infra.nodes.node_contract_validate_compute.node import (
     NodeContractValidateCompute,
 )
-from omnibase_infra.runtime.auto_wiring.handler_wiring import _make_dispatch_callback
+from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    DispatcherFunc,
+    ProtocolHandleable,
+    _make_dispatch_callback,
+)
 
 _VALID_EFFECT_CONTRACT = """
 name: DatabaseWriterEffect
@@ -53,24 +59,25 @@ io_operations:
 """
 
 
-def _wire_dispatch() -> object:
+def _wire_dispatch() -> DispatcherFunc:
     """Bind the canonical handler through the real auto-wiring dispatch path."""
-    # event_model=None mirrors an operation_match def-B handler: the engine hands
-    # the dispatcher the raw materialized wire dict, and the adapter coerces it
-    # into the handler's declared input model from the handle() signature.
-    return _make_dispatch_callback(HandlerContractValidate())
+    # event_model=None mirrors an operation_match def-B handler. The adapter
+    # coerces the envelope payload into the declared handle() input model.
+    return _make_dispatch_callback(
+        cast("ProtocolHandleable", HandlerContractValidate())
+    )
 
 
-def _wire_envelope(payload: dict[str, object]) -> dict[str, object]:
-    """A raw materialized wire envelope; correlation_id triggers payload unwrap."""
-    return {"payload": payload, "correlation_id": str(uuid4())}
+def _wire_envelope(payload: dict[str, object]) -> ModelEventEnvelope[object]:
+    """The runtime wire envelope; correlation_id triggers payload unwrap."""
+    return ModelEventEnvelope(payload=payload, correlation_id=uuid4())
 
 
 @pytest.mark.unit
 @pytest.mark.asyncio
 async def test_handle_validates_yaml_content_via_real_dispatch() -> None:
     callback = _wire_dispatch()
-    result = await callback(  # type: ignore[operator]
+    result = await callback(
         _wire_envelope(
             {
                 "contract_content": _VALID_EFFECT_CONTRACT,
@@ -103,7 +110,7 @@ class ModelDatabaseWriteOutput(BaseModel):
 """
 
     callback = _wire_dispatch()
-    result = await callback(  # type: ignore[operator]
+    result = await callback(
         _wire_envelope(
             {
                 "contract_content": _VALID_EFFECT_CONTRACT,
@@ -135,6 +142,27 @@ async def test_handle_owns_behavior_direct_call() -> None:
     assert result.is_valid is True
     assert result.score >= 0.8
     assert result.violations == []
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefixed", [False, True])
+async def test_consumer_namespace_validation_via_real_dispatch(prefixed: bool) -> None:
+    bare = "onex.evt.platform.node-registration.v1"
+    physical = f"tenant-a.{bare}"
+    callback = _wire_dispatch()
+    result = await callback(
+        _wire_envelope({"consumer_topics": [physical if prefixed else bare, bare]})
+    )
+    assert isinstance(result, ModelDispatchResult)
+    assert result.status is EnumDispatchStatus.SUCCESS
+    (validation,) = result.output_events
+    assert isinstance(validation, ModelContractValidationResult)
+    assert validation.is_valid is not prefixed
+    if prefixed:
+        assert any(physical in v and bare in v for v in validation.violations)
+    else:
+        assert validation.violations == []
 
 
 @pytest.mark.unit

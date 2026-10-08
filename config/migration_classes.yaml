@@ -344,6 +344,7 @@ migrations:
   forward/nodes/node_projection_metering_summary/0000_create_metering_summary.sql: forward-only # UNIQUE INDEX on created table
   forward/nodes/node_projection_metering_summary/0001_grant_tenant_projection_writer_metering_summary.sql: expand-only
   forward/nodes/node_projection_metering_summary/0002_metering_summary_savings_per_measured_run.sql: expand-only
+  forward/nodes/node_projection_metering_summary/0003_metering_summary_compression_and_cache_hit.sql: expand-only
   forward/nodes/node_projection_lab_container_memory/0000_create_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_lab_container_memory/0001_grant_omninode_runtime_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_topic_activity/0000_create_topic_activity.sql: forward-only # ALTER TABLE on the created table
@@ -390,6 +391,7 @@ migrations:
   forward/nodes/node_projection_tenant_credentials/0000_create_tenant_inference_credentials.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/0001_relax_name_provider_not_null.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_tenant_credentials/0002_credential_identity_not_null.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_INFEREN
+  forward/nodes/node_projection_tenant_credentials/0005_tenant_credentials_fingerprint_and_set_at.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/003_grant_tenant_projection_writer_tenant_inference_credentials.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql: forward-only # DROP
   forward/nodes/node_projection_tenant_registry/0000_create_tenant_registry_mirror.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_REGISTR

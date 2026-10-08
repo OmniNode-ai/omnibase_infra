@@ -586,6 +586,8 @@ async def test_quality_verdict_routes_to_the_contract_declared_terminal(
             "correlation_id": str(request.correlation_id),
             "content": '{"summary": "ok", "labels": ["bug"]}',
             verdict_field: passed,
+            "status": "completed",
+            "ok": True,
         }
         topic = apply_failure_terminal_guard(
             payload,
@@ -607,8 +609,24 @@ async def test_quality_verdict_routes_to_the_contract_declared_terminal(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "verdict",
-    [{"status": "failed"}, {"quality_passed": False}, {"quality_gate_passed": False}],
-    ids=["status", "consumer-quality", "port-quality"],
+    [
+        {"status": "failed"},
+        {"quality_passed": False},
+        {"quality_gate_passed": False},
+        {"status": "completed", "quality_passed": False},
+        {"status": "completed", "quality_gate_passed": False},
+        {"ok": True, "quality_passed": False},
+        {"success": True, "quality_gate_passed": False},
+    ],
+    ids=[
+        "status",
+        "consumer-quality",
+        "port-quality",
+        "completed-consumer-quality-rejected",
+        "completed-port-quality-rejected",
+        "ok-consumer-quality-rejected",
+        "success-port-quality-rejected",
+    ],
 )
 async def test_failure_verdict_on_the_success_topic_is_never_reported_completed(
     verdict: dict[str, object],

@@ -1248,9 +1248,9 @@ EOSQL
         echo "[forward-migration]   recorded ${recorded_checksum} (applied on THIS lane), file on disk ${expected_checksum}" >&2
         echo "[forward-migration]   An already-applied migration was edited in place." >&2
         echo "[forward-migration]   Ask the lane -- not the manifest -- whether a migration is applied:" >&2
-        echo "[forward-migration]     python scripts/migrations/check_migration_applied_on_lane.py --version ${ledger_version} ..." >&2
+        echo "[forward-migration]     uv run --frozen python scripts/migrations/check_migration_applied_on_lane.py --version ${ledger_version} ..." >&2
         echo "[forward-migration]   Admit a proven schema-equivalent revision with:" >&2
-        echo "[forward-migration]     python scripts/migrations/verify_migration_checksum_adoption.py --emit-adoptions ... (OMN-17139)" >&2
+        echo "[forward-migration]     uv run --frozen python scripts/migrations/verify_migration_checksum_adoption.py --emit-adoptions ... (OMN-17139)" >&2
         exit 1
       fi
       ;;
