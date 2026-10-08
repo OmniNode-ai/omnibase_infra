@@ -128,6 +128,13 @@ repos:
   # shape-gate-independence job in .github/workflows/ci.yml (STRICT CI Summary gate).
   - repo: local
     hooks:
+      # OMN-18780: the same drift controls run in the reusable audit's CI job.
+      - id: runner-routing-audit
+        name: Runner routing audit controls
+        entry: uv run pytest tests/ci/test_runner_routing_audit.py -q
+        language: system
+        pass_filenames: false
+        files: ^(\.github/workflows/|config/runner_routing_policy\.yaml|scripts/audit-runner-routing\.py|scripts/ci/(ci_summary_gate|nonrequired_check_failure_rate)\.py|tests/ci/test_runner_routing_audit\.py|\.pre-commit-config\.yaml)
       - id: check-shape-gate-independence
         name: Shape-gate detectors never depend on the OCC preflight (OMN-20298)
         entry: uv run --no-project --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@efba6fb107f49c67e01f244c1830d55d0fffed29" python -m omnibase_core.handlers.handler_shape_gate_independence
