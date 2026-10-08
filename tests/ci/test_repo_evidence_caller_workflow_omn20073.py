@@ -98,11 +98,15 @@ def test_caller_verifier_ships_the_occ_difference_classifier() -> None:
         "verifier-version must ship node_dod_verify occ-difference "
         f"(>= {'.'.join(map(str, _DIFFERENCE_CLASSIFIER_FLOOR))})"
     )
+    assert version >= (0, 4, 305), (
+        "verifier-version must ship omnimarket#3563 (omnimarket v0.4.305), "
+        "the release the receipt-gate pin's contract-home step expects"
+    )
 
 
 def test_caller_enforces_after_the_s6_part1_cutover() -> None:
     job = _job()
-    assert job["uses"].endswith("@7394003b290a140df6ddf0921a510ca10f642218")
+    assert job["uses"].endswith("@81b34fe91f995e75acd65694e81ecf2c385456a4")
     assert job["with"].get("shadow") == "false"
     assert job["with"].get("compare-with-occ") == "false"
 
