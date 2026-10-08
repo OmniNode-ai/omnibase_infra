@@ -10,7 +10,7 @@ requirements:
     statement: omnibase_infra must enforce the repo-owned evidence verdict through CI Summary while retaining every existing OCC gate for the S6 part 1 overlap.
     acceptance:
       - id: AC1
-        statement: 'AC1: the caller pins receipt-gate.yml at 7394003b290a140df6ddf0921a510ca10f642218 (omnibase_core#1909), sets shadow to "false" and compare-with-occ to "false" -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s6_part1'
+        statement: 'AC1: the caller pins receipt-gate.yml at 81b34fe91f995e75acd65694e81ecf2c385456a4 (omnibase_core#1912), sets shadow to "false" and compare-with-occ to "false" -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s6_part1'
       - id: AC2
         statement: 'AC2: repo-evidence / dod-verify is registered in EXPECTED_EXTERNAL_CONTEXTS and repo-evidence / verify is not; green dod-verify passes and red, skipped or absent dod-verify blocks CI Summary through the registered-context check; verify / verify remains in EXPECTED_EXTERNAL_CONTEXTS and occ-preflight / eligibility and OCC Companion Merged Gate (OMN-15214) remain in STRICT_GATE_JOBS -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k ci_summary'
 evidence_requirements:

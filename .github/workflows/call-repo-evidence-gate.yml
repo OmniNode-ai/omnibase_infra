@@ -11,10 +11,13 @@
 # repository's workflows (OMN-15699: untrusted fork code must never reach
 # self-hosted runners), and it matches the text, comments included. This caller
 # follows call-receipt-gate.yml. The weaker property is that a pull request can
-# edit this file and change what judges it. The reusable refuses fork heads and the
-# pull request's own code is only ever checked out as data. Enforcing the gate
-# on this trigger needs a runner-policy ruling first; that ruling is still
-# required before this S6 part 1 change leaves draft.
+# edit this file and change what judges it. The reusable refuses fork heads before
+# any checkout, but for a same-repository head it runs the cited contract's checks
+# (its bound tests) at the head and at the merge base on the trusted runner fleet.
+# Enforcing the gate from a definition the pull request cannot edit needs the
+# operator's runner-policy ruling (OMN-20074): whether this one caller may use the
+# base-branch trigger, as omnimarket's and omnibase_core's callers do, as the single
+# exemption to that audit. Until then this change stays draft.
 #
 # dev and main are the integration branches. The activity types cover new heads,
 # reopened and ready PRs, and edits to the ticket citation or base branch.
@@ -34,10 +37,12 @@
 # occ-preflight / eligibility and OCC Companion Merged Gate (OMN-15214) in
 # STRICT_GATE_JOBS, and verify / verify in EXPECTED_EXTERNAL_CONTEXTS.
 # compare-with-occ is "false", so the difference step stops waiting for OCC.
-# verifier-version 0.4.294 ships the occ-difference classifier, so a rollback
-# turns comparison back on with one input. The full-SHA pin is the squash commit
-# of omnibase_core#1909 on dev; caller-mode verify reports a success no-op,
-# leaving only dod-verify to carry the verdict. scripts/ci/check_pin_reachability.py
+# verifier-version 0.4.305 ships the occ-difference classifier and omnimarket#3563,
+# so a rollback turns comparison back on with one input. The full-SHA pin is the
+# squash commit of omnibase_core#1912 on dev; caller-mode verify reports a success
+# no-op, leaving only dod-verify to carry the verdict, and a writer-app
+# dependency-pin-only head is exempt by a verdict derived in the job
+# (omnibase_core#1911). scripts/ci/check_pin_reachability.py
 # (OMN-15538) accepts it because dev contains it. The runner-policy ruling above
 # remains required before this change leaves draft.
 
@@ -58,9 +63,9 @@ permissions:
 
 jobs:
   repo-evidence:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@7394003b290a140df6ddf0921a510ca10f642218 # OMN-20074: the squash commit of omnibase_core#1909 on dev (caller-mode verify reports a success no-op)
+    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@81b34fe91f995e75acd65694e81ecf2c385456a4 # OMN-20074: the squash commit of omnibase_core#1912 on dev; carries omnibase_core#1911 (the writer app's pin-only exemption derived in-job at the head) and #1909 (caller-mode verify reports a success no-op)
     with:
       evidence-source: caller
-      verifier-version: 0.4.294
+      verifier-version: 0.4.305
       compare-with-occ: "false"
       shadow: "false"
