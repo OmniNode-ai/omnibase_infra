@@ -133,10 +133,25 @@ class Pair:
     #: before the verdict, not after.
     governed_prefix_pattern: str | None
     established_by: str
+    #: OMN-18630. When true, every baseline entry for this pair must carry a
+    #: ``verdict`` and a ``verdict_reason`` (see ``VERDICTS``), and a
+    #: ``compliant`` verdict is checked against the tree rather than believed.
+    verdict_required: bool = False
+    #: The evidence a ``compliant`` verdict stands on: a line, within
+    #: ``holder_record_window`` lines at or after each baselined hit, that
+    #: writes the holder record INTO the lock.
+    holder_record_pattern: str | None = None
+    holder_record_window: int = 20
 
     @property
     def compiled(self) -> re.Pattern[str]:
         return re.compile(self.bare_pattern)
+
+    @property
+    def compiled_holder_record(self) -> re.Pattern[str] | None:
+        if self.holder_record_pattern is None:
+            return None
+        return re.compile(self.holder_record_pattern)
 
     @property
     def compiled_prefix(self) -> re.Pattern[str] | None:
@@ -224,6 +239,36 @@ def load_policy(path: Path | None = None) -> Policy:
                     f"{source}: pair {pair_id!r} governed_prefix_pattern is not a "
                     f"regex ({exc})"
                 ) from exc
+        verdict_required = entry.get("verdict_required", False)
+        if not isinstance(verdict_required, bool):
+            raise PolicyError(
+                f"{source}: pair {pair_id!r} verdict_required must be a boolean, "
+                f"got {verdict_required!r}"
+            )
+        holder_record = entry.get("holder_record_pattern")
+        if holder_record is not None:
+            holder_record = _require_str(
+                holder_record, f"pairs[{pair_id!r}].holder_record_pattern", source
+            )
+            try:
+                re.compile(holder_record)
+            except re.error as exc:
+                raise PolicyError(
+                    f"{source}: pair {pair_id!r} holder_record_pattern is not a "
+                    f"regex ({exc})"
+                ) from exc
+        if verdict_required and holder_record is None:
+            raise PolicyError(
+                f"{source}: pair {pair_id!r} requires verdicts but declares no "
+                f"holder_record_pattern, so a 'compliant' verdict would be "
+                f"believed rather than checked."
+            )
+        holder_window = entry.get("holder_record_window", 20)
+        if not isinstance(holder_window, int) or holder_window < 1:
+            raise PolicyError(
+                f"{source}: pair {pair_id!r} holder_record_window must be a "
+                f"positive integer, got {holder_window!r}"
+            )
         pairs.append(
             Pair(
                 id=pair_id,
@@ -248,6 +293,9 @@ def load_policy(path: Path | None = None) -> Policy:
                 ),
                 governed_prefix_pattern=prefix,
                 established_by=ticket,
+                verdict_required=verdict_required,
+                holder_record_pattern=holder_record,
+                holder_record_window=holder_window,
             )
         )
     return Policy(pairs=tuple(pairs))
@@ -258,6 +306,15 @@ def load_policy(path: Path | None = None) -> Policy:
 # ---------------------------------------------------------------------------
 
 
+#: OMN-18630. The verdict a baselined site of a ``verdict_required`` pair
+#: carries, written in the entry as ``"verdict": "<verdict>: <reason>"``. ``compliant``: the site already records a holder in the lock and
+#: is baselined only because the pair's pattern reads one line at a time; the
+#: gate checks the holder write is really there. ``convert``: the site records
+#: no holder and the removal ticket owes the conversion. A site that is deleted
+#: or fixed to the governed form needs no verdict: its entry is deleted.
+VERDICTS: Final[tuple[str, ...]] = ("compliant", "convert")
+
+
 @dataclass(frozen=True)
 class BaselineEntry:
     pair: str
@@ -265,6 +322,8 @@ class BaselineEntry:
     line_sha256_12: str
     occurrences: int
     ticket: str
+    verdict: str = ""
+    verdict_reason: str = ""
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -322,6 +381,9 @@ def load_baseline(path: Path | None = None) -> Baseline:
                 f"{source}: entry for {where!r} must declare a positive integer "
                 f"'occurrences', got {occurrences!r}"
             )
+        # One field, "<verdict>: <reason>", so judging a site never grows the
+        # entry's field count (the canonical-file-shape ratchet counts fields).
+        verdict, _, reason = str(item.get("verdict", "")).partition(":")
         entries.append(
             BaselineEntry(
                 pair=_require_str(item.get("pair"), "entries[].pair", source),
@@ -331,6 +393,8 @@ def load_baseline(path: Path | None = None) -> Baseline:
                 ),
                 occurrences=occurrences,
                 ticket=ticket.strip(),
+                verdict=verdict.strip(),
+                verdict_reason=reason.strip(),
             )
         )
     return Baseline(entries=tuple(entries))
@@ -350,16 +414,21 @@ class Finding:
     governed_helper: str
     governed_form: str
     established_by: str
+    #: The hit line and the lines after it, for the verdict evidence check.
+    context: str = ""
 
 
 @dataclass
 class Findings:
     new: list[Finding] = field(default_factory=list)
     stale: list[BaselineEntry] = field(default_factory=list)
+    #: ``(entry, why)`` for a baseline entry whose verdict is missing, unknown,
+    #: unreasoned, or a ``compliant`` claim the tree does not bear out.
+    unjudged: list[tuple[BaselineEntry, str]] = field(default_factory=list)
 
     @property
     def clean(self) -> bool:
-        return not self.new and not self.stale
+        return not self.new and not self.stale and not self.unjudged
 
 
 def _in_scope(pair: Pair, relpath: str) -> bool:
@@ -386,6 +455,30 @@ def _hits(pair: Pair, text: str) -> list[tuple[int, str]]:
     return found
 
 
+def _verdict_problems(
+    pair: Pair, entry: BaselineEntry, hits: list[Finding]
+) -> list[str]:
+    """Why this entry's verdict is not acceptable, one string per reason."""
+    if entry.verdict not in VERDICTS:
+        return [
+            f"verdict {entry.verdict!r} is not one of {', '.join(VERDICTS)}; every "
+            f"baselined {pair.id} site must be judged"
+        ]
+    if not entry.verdict_reason:
+        return ["verdict_reason is empty; a verdict must say what it rests on"]
+    if entry.verdict != "compliant":
+        return []
+    holder_record = pair.compiled_holder_record
+    if holder_record is None:
+        return []
+    return [
+        f"verdict 'compliant' but {hit.path}:{hit.line_no} writes no holder record "
+        f"within {pair.holder_record_window} lines of the lock"
+        for hit in hits
+        if not holder_record.search(hit.context)
+    ]
+
+
 def scan(
     policy: Policy, baseline: Baseline, root: Path, relpaths: list[str]
 ) -> Findings:
@@ -402,8 +495,12 @@ def scan(
                 # it is also not a call site. Skipped loudly by the caller's own
                 # file listing, never silently treated as clean.
                 continue
+            file_lines = text.splitlines()
             for line_no, line_text in _hits(pair, text):
                 key = (pair.id, relpath, line_digest(line_text))
+                context = "\n".join(
+                    file_lines[line_no - 1 : line_no - 1 + pair.holder_record_window]
+                )
                 observed.setdefault(key, []).append(
                     Finding(
                         pair_id=pair.id,
@@ -413,6 +510,7 @@ def scan(
                         governed_helper=pair.governed_helper,
                         governed_form=pair.governed_form,
                         established_by=pair.established_by,
+                        context=context,
                     )
                 )
 
@@ -426,6 +524,14 @@ def scan(
     for key, entry in allowed.items():
         if len(observed.get(key, [])) < entry.occurrences:
             findings.stale.append(entry)
+    pairs_by_id = {pair.id: pair for pair in policy.pairs}
+    for key, entry in allowed.items():
+        pair = pairs_by_id.get(entry.pair)
+        if pair is not None and pair.verdict_required:
+            findings.unjudged.extend(
+                (entry, why)
+                for why in _verdict_problems(pair, entry, observed.get(key, []))
+            )
     findings.new.sort(key=lambda f: (f.path, f.line_no, f.pair_id))
     findings.stale.sort(key=lambda e: (e.path, e.pair))
     return findings
@@ -462,6 +568,18 @@ def render(findings: Findings) -> str:
                 f"  {entry.path}  [{entry.pair}]  digest={entry.line_sha256_12} "
                 f"expected={entry.occurrences}  ticket={entry.ticket}"
             )
+        lines.append("")
+    if findings.unjudged:
+        lines.append(
+            "REFUSED: a baselined site carries no acceptable verdict "
+            "(config/governed_helper_baseline.json).\n"
+        )
+        for entry, why in findings.unjudged:
+            lines.append(
+                f"  {entry.path}  [{entry.pair}]  digest={entry.line_sha256_12} "
+                f"ticket={entry.ticket}"
+            )
+            lines.append(f"    {why}")
         lines.append("")
     return "\n".join(lines)
 

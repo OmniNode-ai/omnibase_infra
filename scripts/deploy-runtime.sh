@@ -1758,7 +1758,7 @@ acquire_lock() {
         # lock directory exists but has no PID file (Issue: if the script is
         # killed between mkdir and PID write, subsequent runs cannot verify
         # the lock owner and refuse to proceed).
-        echo $$ > "${pid_file}"
+        printf '%s %s %s\n' "$$" "$(hostname -s 2>/dev/null || echo unknown)" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "${pid_file}"
     else
         # Never reclaim a lock during deployment. A missing/empty PID can be
         # the mkdir-to-publication window of a concurrent scoped deployment;
@@ -1767,7 +1767,7 @@ acquire_lock() {
         if [[ -f "${pid_file}" ]]; then
             local lock_pid
             lock_pid="$(cat "${pid_file}" 2>/dev/null || true)"
-            log_error "Deployment lock already exists (recorded PID: ${lock_pid:-unpublished})."
+            log_error "Deployment lock already exists (recorded holder, pid host started: ${lock_pid:-unpublished})."
         else
             log_error "Deployment lock exists with no published PID; ownership is unknown."
         fi

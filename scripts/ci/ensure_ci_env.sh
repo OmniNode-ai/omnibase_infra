@@ -165,11 +165,23 @@ if ! ready; then
     flock 9
   else
     lock_path="${lock_dir}/${digest}.lockdir"
+    # OMN-18630: a directory lock is not released by the kernel when its holder is
+    # SIGKILLed, so the holder (pid host started) is written INTO the lock and
+    # the wait is bounded. A leaked lock then ends in a loud failure naming its
+    # holder instead of an unbounded wait on an empty directory.
+    lock_deadline=$((SECONDS + ${OMNI_CI_ENV_LOCK_TIMEOUT_SECONDS:-1800}))
     until mkdir "${lock_path}" 2>/dev/null; do
-      echo "Waiting for shared CI env lock: ${lock_path}"
+      lock_holder="$(cat "${lock_path}/holder" 2>/dev/null || echo unrecorded)"
+      if ((SECONDS >= lock_deadline)); then
+        echo "::error::Timed out waiting for shared CI env lock ${lock_path}; holder (pid host started): ${lock_holder}. If that pid is gone on that host, remove the lock directory." >&2
+        exit 1
+      fi
+      echo "Waiting for shared CI env lock: ${lock_path} (holder: ${lock_holder})"
       sleep 2
     done
-    trap 'rmdir "${lock_path}" 2>/dev/null || true' EXIT
+    printf '%s %s %s\n' "$$" "$(hostname -s 2>/dev/null || echo unknown)" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+      > "${lock_path}/holder"
+    trap 'rm -rf "${lock_path}" 2>/dev/null || true' EXIT
   fi
 
   if ! ready; then

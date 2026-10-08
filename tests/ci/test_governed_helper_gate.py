@@ -397,3 +397,156 @@ def test_the_gate_excludes_only_its_own_surfaces() -> None:
     for path in gate.ALWAYS_EXCLUDED:
         assert "governed_helper" in path or "omn18629" in path, path
         assert (REPO_ROOT / path).is_file(), f"{path} is excluded but does not exist"
+
+
+# ---------------------------------------------------------------------------
+# OMN-18630 — every baselined lock site carries a verdict, and it is checked
+# ---------------------------------------------------------------------------
+
+LOCK_PAIR = "lock-without-holder-record"
+LOCK_LINE = 'if mkdir "${LOCK_DIR}" 2>/dev/null; then\n'
+HOLDER_WRITE = '  printf "%s\\n" "$$" > "${LOCK_DIR}/holder"\n'
+
+
+def _lock_entry(**overrides: str) -> gate.BaselineEntry:
+    fields: dict[str, str] = {
+        "verdict": "compliant",
+        "verdict_reason": "records the holder",
+    }
+    fields.update(overrides)
+    return gate.BaselineEntry(
+        pair=LOCK_PAIR,
+        path="lockme.sh",
+        line_sha256_12=gate.line_digest(LOCK_LINE.strip()),
+        occurrences=1,
+        ticket="OMN-18630",
+        verdict=fields["verdict"],
+        verdict_reason=fields["verdict_reason"],
+    )
+
+
+def _judge(tmp_path: Path, body: str, entry: gate.BaselineEntry) -> gate.Findings:
+    (tmp_path / "lockme.sh").write_text(body, encoding="utf-8")
+    return gate.scan(
+        gate.load_policy(POLICY_PATH),
+        gate.Baseline(entries=(entry,)),
+        tmp_path,
+        ["lockme.sh"],
+    )
+
+
+def test_every_shipped_lock_entry_carries_an_accepted_verdict() -> None:
+    """The acceptance on the committed artifact: no baselined lock is unjudged."""
+    entries = [
+        e for e in gate.load_baseline(BASELINE_PATH).entries if e.pair == LOCK_PAIR
+    ]
+    assert entries, "the lock pair has baselined sites; the test would be vacuous"
+    for entry in entries:
+        assert entry.verdict in gate.VERDICTS, entry
+        assert entry.verdict_reason, entry
+
+
+def test_a_compliant_verdict_with_a_holder_write_is_accepted(tmp_path: Path) -> None:
+    findings = _judge(tmp_path, LOCK_LINE + HOLDER_WRITE + "fi\n", _lock_entry())
+    assert findings.clean, gate.render(findings)
+
+
+def test_a_compliant_verdict_without_a_holder_write_is_refused(
+    tmp_path: Path,
+) -> None:
+    """The verdict is checked against the tree, not believed."""
+    findings = _judge(tmp_path, LOCK_LINE + "fi\n", _lock_entry())
+    assert findings.new == []
+    assert len(findings.unjudged) == 1
+    rendered = gate.render(findings)
+    assert "lockme.sh:1" in rendered
+    assert "writes no holder record" in rendered
+
+
+def test_a_holder_write_beyond_the_window_does_not_count(tmp_path: Path) -> None:
+    window = gate.load_policy(POLICY_PATH).pairs[0].holder_record_window
+    body = LOCK_LINE + ("  :\n" * window) + HOLDER_WRITE
+    findings = _judge(tmp_path, body, _lock_entry())
+    assert len(findings.unjudged) == 1
+
+
+@pytest.mark.parametrize(
+    ("overrides", "needle"),
+    [
+        ({"verdict": ""}, "is not one of"),
+        ({"verdict": "fine"}, "is not one of"),
+        ({"verdict_reason": ""}, "verdict_reason is empty"),
+    ],
+    ids=["missing", "unknown", "unreasoned"],
+)
+def test_a_lock_entry_without_an_acceptable_verdict_is_refused(
+    tmp_path: Path, overrides: dict[str, str], needle: str
+) -> None:
+    findings = _judge(tmp_path, LOCK_LINE + HOLDER_WRITE, _lock_entry(**overrides))
+    assert len(findings.unjudged) == 1
+    assert needle in gate.render(findings)
+
+
+def test_a_convert_verdict_with_a_reason_is_accepted(tmp_path: Path) -> None:
+    """`convert` owes work, so it is not checked against the tree."""
+    findings = _judge(tmp_path, LOCK_LINE + "fi\n", _lock_entry(verdict="convert"))
+    assert findings.clean, gate.render(findings)
+
+
+def test_a_pair_that_does_not_require_verdicts_is_not_asked_for_them(
+    tmp_path: Path,
+) -> None:
+    """Scope: OMN-18631 and OMN-18632 entries are untouched by this change."""
+    policy = gate.load_policy(POLICY_PATH)
+    required = {p.id for p in policy.pairs if p.verdict_required}
+    assert required == {LOCK_PAIR}
+
+
+def test_mkdir_dash_p_is_not_a_lock_acquisition(tmp_path: Path) -> None:
+    """`mkdir -p` succeeds on an existing directory, so it excludes nobody."""
+    (tmp_path / "mk.sh").write_text('mkdir -p "${lock_dir}"\n', encoding="utf-8")
+    findings = gate.scan(
+        gate.load_policy(POLICY_PATH), gate.Baseline(entries=()), tmp_path, ["mk.sh"]
+    )
+    assert findings.new == []
+
+
+def test_a_verdict_requiring_pair_must_name_its_evidence(tmp_path: Path) -> None:
+    policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+    for pair in policy["pairs"]:
+        if pair["id"] == LOCK_PAIR:
+            del pair["holder_record_pattern"]
+    bad = tmp_path / "policy.json"
+    bad.write_text(json.dumps(policy), encoding="utf-8")
+    with pytest.raises(gate.PolicyError, match="holder_record_pattern"):
+        gate.load_policy(bad)
+
+
+def test_the_verdict_is_one_field_read_as_verdict_colon_reason(
+    tmp_path: Path,
+) -> None:
+    def load(verdict: str) -> gate.BaselineEntry:
+        path = tmp_path / "baseline.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "entries": [
+                        {
+                            "pair": LOCK_PAIR,
+                            "path": "lockme.sh",
+                            "line_sha256_12": "0" * 12,
+                            "occurrences": 1,
+                            "ticket": "OMN-18630",
+                            "verdict": verdict,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return gate.load_baseline(path).entries[0]
+
+    judged = load("compliant: writes the holder, and says why: here")
+    assert judged.verdict == "compliant"
+    assert judged.verdict_reason == "writes the holder, and says why: here"
+    assert load("compliant").verdict_reason == ""

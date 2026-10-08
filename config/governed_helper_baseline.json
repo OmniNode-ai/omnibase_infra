@@ -24,7 +24,9 @@
     "file from riding in on the first one's entry.",
     "",
     "'note' is the matched line, for a reader. It is not read by the checker and",
-    "carries no authority: the digest is the key."
+    "carries no authority: the digest is the key.",
+    "",
+    "OMN-18630. Every entry of the lock-without-holder-record pair carries one 'verdict' field, '<compliant|convert>: <reason>' (one field, not two, because the canonical-file-shape ratchet counts fields). The gate refuses a missing or unknown verdict, an empty reason after the colon, and a 'compliant' verdict whose lock writes no holder record within holder_record_window lines (policy). The verdict is checked against the tree, not believed. The ensure_ci_env.sh mkdir -p entry is gone: mkdir -p cannot be a lock, so the pair pattern was corrected."
   ],
   "contract_version": "1.0.0",
   "entries": [
@@ -146,15 +148,8 @@
       "line_sha256_12": "e6174b90f524",
       "occurrences": 1,
       "ticket": "OMN-18630",
-      "note": "if ! mkdir \"${AUTO_BOUNCE_LOCKFILE}.d\" 2>/dev/null; then"
-    },
-    {
-      "pair": "lock-without-holder-record",
-      "path": "scripts/ci/ensure_ci_env.sh",
-      "line_sha256_12": "508871d4e725",
-      "occurrences": 1,
-      "ticket": "OMN-18630",
-      "note": "mkdir -p \"${lock_dir}\""
+      "note": "if ! mkdir \"${AUTO_BOUNCE_LOCKFILE}.d\" 2>/dev/null; then",
+      "verdict": "compliant: flock-less fallback only (the deployed Linux host takes flock). Writes pid host started into AUTO_BOUNCE_LOCKFILE.d/holder, names the holder when it skips, and reclaims a same-host dead holder (OMN-18630)."
     },
     {
       "pair": "lock-without-holder-record",
@@ -162,7 +157,8 @@
       "line_sha256_12": "a17cb45b46e7",
       "occurrences": 1,
       "ticket": "OMN-18630",
-      "note": "until mkdir \"${lock_path}\" 2>/dev/null; do"
+      "note": "until mkdir \"${lock_path}\" 2>/dev/null; do",
+      "verdict": "compliant: flock-less fallback only. Writes pid host started into the lockdir holder, names it while waiting, and fails loud after OMNI_CI_ENV_LOCK_TIMEOUT_SECONDS (default 1800) instead of waiting forever on a leaked directory (OMN-18630)."
     },
     {
       "pair": "lock-without-holder-record",
@@ -170,7 +166,8 @@
       "line_sha256_12": "4d7fe16da4c1",
       "occurrences": 1,
       "ticket": "OMN-18630",
-      "note": "if mkdir \"${LOCK_DIR}\" 2>/dev/null; then"
+      "note": "if mkdir \"${LOCK_DIR}\" 2>/dev/null; then",
+      "verdict": "compliant: Writes pid host started into .deploy.lock/pid on acquire. A held or unrecorded lock is refused with exit 2 naming the holder; automatic reclaim is deliberately absent because check-then-remove is not atomic during a deploy (OMN-18630)."
     },
     {
       "pair": "lock-without-holder-record",
@@ -178,7 +175,8 @@
       "line_sha256_12": "50de9f58afa8",
       "occurrences": 2,
       "ticket": "OMN-18630",
-      "note": "if mkdir \"$lockdir\" 2> /dev/null; then"
+      "note": "if mkdir \"$lockdir\" 2> /dev/null; then",
+      "verdict": "compliant: prepush_lock_acquire writes pid host timestamp into LOCK/holder and reclaims only a same-host holder whose pid is dead; this is the holder protocol itself, baselined because the pair pattern reads one line at a time."
     },
     {
       "pair": "lock-without-holder-record",
@@ -186,7 +184,8 @@
       "line_sha256_12": "ad7fd4cef8ba",
       "occurrences": 2,
       "ticket": "OMN-18630",
-      "note": "if mkdir \"$LOCKDIR\" 2> /dev/null; then return 0; fi"
+      "note": "if mkdir \"$LOCKDIR\" 2> /dev/null; then return 0; fi",
+      "verdict": "compliant: The remote leg's _lock_acquire and the holder write after it record pid host timestamp into LOCKDIR/holder and reclaim only a same-host dead pid; same protocol, baselined because the pair pattern reads one line at a time."
     }
   ]
 }
