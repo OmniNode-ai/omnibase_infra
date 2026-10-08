@@ -647,6 +647,13 @@ repos:
         files: ^(scripts/ci/lab_pass_receipt\.py|src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/.*|tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488\.py|\.github/workflows/(runtime-rebuild-trigger|deliver-dev-candidate-to-staging)\.yml)$
         pass_filenames: false
         stages: [pre-commit]
+      - id: d11-workflow-verdict-regression
+        name: D11 verdict admits only the governed lane (OMN-19311)
+        entry: uv run --frozen pytest tests/ci/test_workflow_verdict_omn_d11.py -q --no-cov
+        language: system
+        files: ^(scripts/ci/lab_pass_receipt\.py|tests/ci/test_workflow_verdict_omn_d11\.py|tests/ci/fixtures/omn19311_d11_failure_run\.json|\.github/workflows/deliver-dev-candidate-to-staging\.yml|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-18272: the dependency-cascade generator may not silently stop
       # emitting its machine-readable provenance block. Clause 1 of the
       # OMN-18233 verified-supersession predicate resolves against that block,
