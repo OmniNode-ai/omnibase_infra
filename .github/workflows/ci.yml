@@ -343,6 +343,11 @@ jobs:
       - name: Linear transport consolidation regression (OMN-17678)
         run: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q
 
+      # OMN-19421: same evidence gate as the pre-commit hook, including the
+      # passing safety/liveness controls and lock-removed counterexample.
+      - name: Reviewed lab reconcile model evidence (OMN-19421)
+        run: uv run --frozen pytest tests/ci/test_lab_reconcile_model.py -q --no-cov
+
       # OMN-19070: same focused suite as the self-pause pre-commit hook.
       - name: Runner disk admission self-pause regression (OMN-19070)
         run: uv run --frozen pytest tests/scripts/test_runner_job_started_disk_admission.py -q
