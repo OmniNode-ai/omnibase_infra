@@ -945,17 +945,20 @@ disk_admission_self_pause() {
 
     local marker="${_C3_DISK_ADMISSION_PAUSE_DIR}/${runner}"
     if [[ -f "${marker}" ]]; then
-        echo "[disk-admission] self-pause skipped: ${runner} already has a pause marker (previous pause not yet restored)."
-        return 0
+        # OMN-19070: the marker records intent, not a successful docker stop.
+        # A failed stop or an out-of-band restart can leave the listener running
+        # with this marker. Retry the stop on each later admission failure while
+        # preserving the original evidence and restore order for the host guard.
+        echo "[disk-admission] ${runner} already has a pause marker; retrying self-stop without replacing pause evidence."
+    else
+        {
+            echo "runner=${runner}"
+            echo "avail_gb=${avail_gb_frac}"
+            echo "paused_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "reason=consecutive_disk_admission_failures"
+        } > "${marker}.tmp" 2>/dev/null || return 0
+        mv "${marker}.tmp" "${marker}" 2>/dev/null || return 0
     fi
-
-    {
-        echo "runner=${runner}"
-        echo "avail_gb=${avail_gb_frac}"
-        echo "paused_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-        echo "reason=consecutive_disk_admission_failures"
-    } > "${marker}.tmp" 2>/dev/null || return 0
-    mv "${marker}.tmp" "${marker}" 2>/dev/null || return 0
 
     echo "[disk-admission] PAUSING ${runner}: ${_C3_DISK_ADMISSION_BACKOFF_N} consecutive disk-admission failures. Stopping this container so its listener stops polling GitHub; scripts/runner-disk-admission-restore.sh will restart it once /data recovers (slope-plus-canary)."
     nohup sh -c "sleep 2; docker stop '${runner}' >/dev/null 2>&1" >/dev/null 2>&1 &

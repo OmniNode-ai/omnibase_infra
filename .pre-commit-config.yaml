@@ -346,6 +346,14 @@ repos:
         types: [shell]
         pass_filenames: true
         stages: [pre-commit]
+      - id: runner-disk-admission-self-pause
+        require_serial: true
+        name: Runner disk admission retries a marked self-pause (OMN-19070)
+        entry: uv run --frozen pytest tests/scripts/test_runner_job_started_disk_admission.py -q
+        language: system
+        pass_filenames: false
+        files: ^(docker/runners/runner-job-started\.sh|tests/scripts/test_runner_job_started_disk_admission\.py)$
+        stages: [pre-commit]
       - id: mypy-type-check
         require_serial: true
         name: mypy (type checking)

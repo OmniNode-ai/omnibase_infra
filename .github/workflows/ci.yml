@@ -339,6 +339,10 @@ jobs:
       - name: Unit tests for endpoint guard (OMN-20173)
         run: uv run pytest tests/unit/scripts/test_check_no_coding_plan_endpoint.py -q -p no:cacheprovider
 
+      # OMN-19070: same focused suite as the self-pause pre-commit hook.
+      - name: Runner disk admission self-pause regression (OMN-19070)
+        run: uv run --frozen pytest tests/scripts/test_runner_job_started_disk_admission.py -q
+
       # OMN-18364. A hosted-runner step that invokes `uv` before its job
       # installs it exits 127, and where that step's outcome feeds a receipt
       # check the receipt records the missing interpreter as a substantive
