@@ -416,6 +416,14 @@ repos:
         files: ^(\.github/workflows/.*\.ya?ml|docker/.*/compose\.ya?ml|docker/docker-compose\..*\.ya?ml|tests/ci/test_compose_proof_teardown_policy\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      # The same focused slot lifecycle proof runs in the required CI job.
+      - id: prepr-tenant-lifecycle
+        name: Pre-PR slot tenant lifecycle (OMN-18894)
+        entry: uv run --frozen pytest tests/unit/scripts/test_prepr_tenant_lifecycle_omn18894.py -q --timeout=60
+        language: system
+        files: ^(scripts/runtime_build/prepr_(verify_lane\.sh|teardown_slot\.(py|sh))|scripts/smoke/smoke_delegation\.sh|docker/docker-compose\.prepr\.yml|tests/unit/scripts/test_prepr_tenant_lifecycle_omn18894\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-18247 (epic OMN-18232 phase 3): every artifact declared in
       # config/ci_evidence_policy.yaml must be asserted present and non-empty
       # at its uploader, on parsed workflow structure rather than file text.

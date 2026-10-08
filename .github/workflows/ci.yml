@@ -2152,6 +2152,8 @@ jobs:
           echo "compose files must never carry that label."
           echo "================================================================"
           uv run pytest tests/ci/test_compose_proof_teardown_policy.py -v --tb=short
+      - name: Verify pre-PR tenant lifecycle (OMN-18894)
+        run: uv run --frozen pytest tests/unit/scripts/test_prepr_tenant_lifecycle_omn18894.py -q --timeout=60
 
   # OMN-18247 (epic OMN-18232 phase 3): CI evidence-artifact honesty.
   #
