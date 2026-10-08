@@ -1053,6 +1053,8 @@ route:
       omnibase_infra:
         # OMN-18780: the reusable audit now belongs to the required CI Summary.
         - runner-routing-audit / Runner Routing Audit
+        # OMN-18648: required through the CI Summary external assertion.
+        - CI Live Contact (OMN-18648)
         # OMN-18796: the no-new-advisory-job gate. Enforced by the CI Summary
         # poller via EXPECTED_EXTERNAL_CONTEXTS and absent from branch
         # protection, which is exactly the shape this list records.

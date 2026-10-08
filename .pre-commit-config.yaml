@@ -157,6 +157,14 @@ repos:
         stages: [pre-commit]
         pass_filenames: false
         files: ^(\.github/workflows/|config/runner_routing_policy\.yaml|scripts/audit-runner-routing\.py|scripts/ci/(ci_summary_gate|nonrequired_check_failure_rate)\.py|tests/ci/test_runner_routing_audit\.py|\.pre-commit-config\.yaml)
+      - id: ci-live-contact
+        name: CI tooling carries recorded live-contact evidence (OMN-18648)
+        entry: uv run --frozen onex node node_ci_live_contact_effect --backend event_bus=inmemory --state-root .onex_state/ci-live-contact
+        language: system
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+        stages: [pre-commit]
       - id: check-shape-gate-independence
         name: Shape-gate detectors never depend on the OCC preflight (OMN-20298)
         entry: uv run --no-project --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@efba6fb107f49c67e01f244c1830d55d0fffed29" python -m omnibase_core.handlers.handler_shape_gate_independence
@@ -2230,7 +2238,7 @@ repos:
         entry: uv run python scripts/check_subscribe_wiring_health.py
         language: system
         pass_filenames: false
-        files: '^(src/omnibase_infra/nodes/.*/contract\.yaml|scripts/check_subscribe_wiring_health\.py)$'
+        files: '^(src/omnibase_infra/nodes/.*/contract\.yaml|src/omnibase_infra/runtime/topics\.yaml|scripts/check_subscribe_wiring_health\.py)$'
         stages: [pre-commit]
   - repo: local
     hooks:

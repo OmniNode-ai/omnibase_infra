@@ -517,6 +517,7 @@ asyncio_mode = "auto"
 # See: tests/conftest.py for detailed documentation on loop_scope configuration.
 asyncio_default_fixture_loop_scope = "function"
 markers = [
+    "live_contact(artifact): CI-tooling test consuming a recorded real API response or replay via recorded_response (OMN-18648)",
     "unit: Unit tests that test individual components in isolation",
     "integration: Integration tests that test multiple components together",
     "slow: Tests that take a long time to run (>1s)",
@@ -640,6 +641,7 @@ exclude_lines = [
 ]
 
 [project.entry-points."onex.nodes"]
+node_ci_live_contact_effect = "omnibase_infra.nodes.node_ci_live_contact_effect"
 node_architecture_validator = "omnibase_infra.nodes.node_architecture_validator"
 node_artifact_change_detector_effect = "omnibase_infra.nodes.node_artifact_change_detector_effect"
 node_artifact_reconciliation_orchestrator = "omnibase_infra.nodes.node_artifact_reconciliation_orchestrator"
