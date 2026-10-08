@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -337,6 +338,7 @@ def test_a_second_concurrent_build_blocks_on_the_pool_build_lock(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        start_new_session=True,
     )
     try:
         assert holder.stdout is not None
@@ -372,7 +374,7 @@ def test_a_second_concurrent_build_blocks_on_the_pool_build_lock(
             "the contention message must name the holder"
         )
     finally:
-        holder.kill()
+        os.killpg(holder.pid, signal.SIGKILL)
         holder.wait(timeout=30)
 
     # Control: with the holder gone the same invocation acquires at once, so the
