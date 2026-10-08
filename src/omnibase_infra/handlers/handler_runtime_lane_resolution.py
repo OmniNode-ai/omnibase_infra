@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import stat
 from collections.abc import Mapping
 from pathlib import Path
@@ -62,13 +61,13 @@ class HandlerRuntimeLaneResolution:
     def resolve(
         self,
         *,
-        environ: Mapping[str, str] | None = None,
+        environ: Mapping[str, str],
         home: Path | None = None,
     ) -> ModelRuntimeLaneResolution:
         """Resolve this runtime's lane from its overlay, or refuse naming why.
 
         Args:
-            environ: Process environment override, for tests.
+            environ: The process environment, injected by the caller.
             home: Home directory override, for tests.
 
         Raises:
@@ -77,10 +76,9 @@ class HandlerRuntimeLaneResolution:
                 ``runtime.lane`` document is absent at the scope, invalid, or
                 declares a different lane.
         """
-        env: Mapping[str, str] = os.environ if environ is None else environ
         key = EnumConfigOverlayKey.RUNTIME_LANE
-        environment = (env.get(ENV_RUNTIME_ENVIRONMENT) or "").strip()
-        declared_lane = env.get(ENV_RUNTIME_LANE)
+        environment = (environ.get(ENV_RUNTIME_ENVIRONMENT) or "").strip()
+        declared_lane = environ.get(ENV_RUNTIME_LANE)
         lane = (declared_lane or "").strip()
         if not environment:
             raise ProtocolConfigurationError(
@@ -106,7 +104,7 @@ class HandlerRuntimeLaneResolution:
             except ModelOnexError as exc:
                 raise ProtocolConfigurationError(exc.message) from exc
         scope = ModelConfigOverlayScope(environment=environment, lane=lane)
-        root = self._select_local_home(environ=env, home=home)
+        root = self._select_local_home(environ=environ, home=home)
         path = root / scope.environment / scope.lane / f"{key.value}.json"
         document = self._read_document(path, key)
         where = f"local-home {path}"
@@ -137,13 +135,13 @@ class HandlerRuntimeLaneResolution:
     def _select_local_home(
         self,
         *,
-        environ: Mapping[str, str] | None = None,
+        environ: Mapping[str, str],
         home: Path | None = None,
     ) -> Path:
         """Return the deployment's one overlay source, or refuse naming both.
 
         Args:
-            environ: Process environment override, for tests.
+            environ: The process environment, injected by the caller.
             home: Home directory override, for tests. ``~/.onex`` and
                 ``~/.omninode/config`` are both read under it.
 
@@ -151,7 +149,6 @@ class HandlerRuntimeLaneResolution:
             ProtocolConfigurationError: neither source is configured, both are,
                 the bootstrap file is unreadable, or the store is selected.
         """
-        env: Mapping[str, str] = os.environ if environ is None else environ
         home_dir = home if home is not None else Path.home()
         onex_files = StoreOnexHomeFiles(home_dir / ".onex")
         try:
@@ -162,7 +159,7 @@ class HandlerRuntimeLaneResolution:
                 f"{exc.message}"
             ) from exc
 
-        store_selected = bool((env.get(ENV_STORE_IDENTITY) or "").strip())
+        store_selected = bool((environ.get(ENV_STORE_IDENTITY) or "").strip())
         local_selected = (
             bootstrap.get(CONFIG_SOURCE_FIELD)
             == EnumConfigOverlaySource.LOCAL_HOME.value

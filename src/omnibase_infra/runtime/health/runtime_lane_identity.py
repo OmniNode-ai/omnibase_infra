@@ -29,6 +29,7 @@ monitor read it back through :func:`established_runtime_lane`.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -65,7 +66,9 @@ def resolve_runtime_lane_declaration(
     home: Path | None = None,
 ) -> ModelRuntimeLaneResolution:
     """Read the startup lane through the contract's filesystem handler."""
-    return HandlerRuntimeLaneResolution().resolve(environ=environ, home=home)
+    return HandlerRuntimeLaneResolution().resolve(
+        environ=os.environ if environ is None else environ, home=home
+    )
 
 
 def establish_runtime_lane(resolution: ModelRuntimeLaneResolution) -> None:

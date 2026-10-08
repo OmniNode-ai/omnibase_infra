@@ -8,8 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ModelRuntimeLaneResolutionRequest(BaseModel):
-    """Use process bootstrap facts, or explicit facts for an isolated caller."""
+    """The process environment the caller injects, and an optional home override."""
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
-    environ: dict[str, str] | None = Field(default=None, repr=False)
+    environ: dict[str, str] = Field(repr=False)
     home: Path | None = None

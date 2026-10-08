@@ -25,5 +25,6 @@ capabilities:
   - name: runtime.lane.resolve
     description: Read and validate the deployment lane with source and sha256 provenance.
 metadata:
+  description: Startup-only EFFECT that reads the runtime.lane overlay document for this deployment's environment and lane, and refuses to start the runtime when it is missing or invalid.
   bootstrap: true
   ticket: OMN-19747
