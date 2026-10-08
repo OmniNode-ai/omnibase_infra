@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-20073: omnibase_infra repo-owned evidence and its S5 shadow caller."""
+"""OMN-20073/OMN-20074: repo-owned evidence and S6 part 1 enforcement."""
 
 from __future__ import annotations
 
@@ -8,16 +8,23 @@ import re
 import shlex
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import yaml
 
 from scripts.ci.ci_summary_gate import (
+    EXIT_FAILURE,
+    EXIT_PENDING,
+    EXIT_SUCCESS,
     EXPECTED_EXTERNAL_CONTEXTS,
     EXTERNAL_SWEEP_EXCLUSIONS,
+    SKIPPABLE_GATE_JOBS,
+    STRICT_GATE_JOBS,
     SWEEP_NON_PR_EVENTS,
     check_run_event_index,
+    evaluate,
+    evaluate_external_contexts,
     evaluate_external_sweep,
 )
 
@@ -51,6 +58,9 @@ def test_caller_workflow_shape() -> None:
     # in this repo, so the caller uses plain pull_request.
     assert set(triggers) == {"pull_request"}, "caller must only use pull_request"
     target = triggers["pull_request"]
+    assert not {"paths", "paths-ignore"} & set(target), (
+        "the registered verdict must report without a paths filter"
+    )
     assert target["branches"] == ["dev", "main"], "caller must target dev and main"
     assert target["types"] == [
         "opened",
@@ -81,14 +91,8 @@ def test_caller_workflow_shape() -> None:
     assert "secrets: inherit" not in text, "caller must not inherit secrets"
 
 
-def test_caller_runs_in_shadow_and_compares_with_occ_for_the_s5_shadow_count() -> None:
+def test_caller_verifier_ships_the_occ_difference_classifier() -> None:
     inputs = _job()["with"]
-    assert inputs.get("compare-with-occ") == "true", (
-        'the S5 count requires compare-with-occ: "true" (a quoted string input)'
-    )
-    assert inputs.get("shadow") == "true", (
-        'the S5 shadow requires shadow: "true" (a quoted string input)'
-    )
     version = tuple(int(part) for part in inputs["verifier-version"].split("."))
     assert version >= _DIFFERENCE_CLASSIFIER_FLOOR, (
         "verifier-version must ship node_dod_verify occ-difference "
@@ -96,7 +100,14 @@ def test_caller_runs_in_shadow_and_compares_with_occ_for_the_s5_shadow_count() -
     )
 
 
-def _shadow_rows(*, verify: str | None, dod_verify: str | None) -> list[dict[str, Any]]:
+def test_caller_enforces_after_the_s6_part1_cutover() -> None:
+    job = _job()
+    assert job["uses"].endswith("@7394003b290a140df6ddf0921a510ca10f642218")
+    assert job["with"].get("shadow") == "false"
+    assert job["with"].get("compare-with-occ") == "false"
+
+
+def _caller_rows(*, verify: str | None, dod_verify: str | None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for name, conclusion in ((_VERIFY, verify), (_DOD_VERIFY, dod_verify)):
         if conclusion is None:
@@ -132,34 +143,92 @@ def _sweep(rows: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
     return failures, swept
 
 
-def test_ci_summary_sweep_accepts_the_shadow_shape() -> None:
+def _ci_summary(rows: list[dict[str, Any]]) -> tuple[int, str]:
+    jobs = [
+        {"name": name, "status": "completed", "conclusion": "success"}
+        for name in (*STRICT_GATE_JOBS, *SKIPPABLE_GATE_JOBS)
+    ]
+    other_contexts = [
+        {"name": name, "status": "completed", "conclusion": "success"}
+        for name in EXPECTED_EXTERNAL_CONTEXTS
+        if name != _DOD_VERIFY
+    ]
+    return evaluate(
+        jobs,
+        check_runs=other_contexts + rows,
+        external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+        workflow_runs=[{"id": _RUN_ID, "event": "pull_request"}],
+        now=_NOW,
+    )
+
+
+def test_ci_summary_accepts_the_registered_verdict_beside_occ() -> None:
     assert "pull_request" not in SWEEP_NON_PR_EVENTS, (
-        "the sweep judges pull_request rows, so the shadow shape must be green"
+        "the sweep must judge the caller's pull_request rows"
     )
-    assert not {_VERIFY, _DOD_VERIFY} & set(EXPECTED_EXTERNAL_CONTEXTS), (
-        "shadow checks are not registered as required external contexts"
-    )
+    assert _DOD_VERIFY in EXPECTED_EXTERNAL_CONTEXTS
+    assert _VERIFY not in EXPECTED_EXTERNAL_CONTEXTS
+    assert "verify / verify" in EXPECTED_EXTERNAL_CONTEXTS
+    assert "occ-preflight / eligibility" in STRICT_GATE_JOBS
+    assert "OCC Companion Merged Gate (OMN-15214)" in STRICT_GATE_JOBS
     assert not {_VERIFY, _DOD_VERIFY} & set(EXTERNAL_SWEEP_EXCLUSIONS), (
-        "shadow checks must pass the sweep on their own conclusion, not an exclusion"
+        "caller checks must not be excluded from enforcement"
     )
-    failures, swept = _sweep(_shadow_rows(verify="success", dod_verify="success"))
+    rows = _caller_rows(verify="success", dod_verify="success")
+    assert evaluate_external_contexts(rows, (_DOD_VERIFY,), now=_NOW) == ([], [])
+    failures, swept = _sweep(rows)
     assert failures == [], failures
-    assert swept == [_DOD_VERIFY, _VERIFY], "the sweep must have judged both rows"
+    assert swept == [_VERIFY], "the registered verdict belongs to layer 4"
+    code, report = _ci_summary(rows)
+    assert code == EXIT_SUCCESS, report
 
 
 @pytest.mark.parametrize(
-    ("verify", "dod_verify", "refused"),
+    ("dod_verify", "expected_code"),
     [
-        pytest.param("skipped", "success", _VERIFY, id="skipped-verify-without-shadow"),
-        pytest.param("success", "failure", _DOD_VERIFY, id="red-dod-verify"),
+        pytest.param("failure", EXIT_FAILURE, id="red-dod-verify"),
+        pytest.param("skipped", EXIT_FAILURE, id="skipped-dod-verify"),
+        pytest.param(None, EXIT_PENDING, id="absent-dod-verify"),
     ],
 )
-def test_ci_summary_sweep_refuses_the_shapes_shadow_mode_avoids(
-    verify: str, dod_verify: str, refused: str
+def test_ci_summary_refuses_a_red_or_absent_registered_verdict(
+    dod_verify: str | None, expected_code: int
 ) -> None:
-    failures, _swept = _sweep(_shadow_rows(verify=verify, dod_verify=dod_verify))
-    assert len(failures) == 1, failures
-    assert failures[0].startswith(refused), failures
+    assert _DOD_VERIFY in EXPECTED_EXTERNAL_CONTEXTS
+    assert _VERIFY not in EXPECTED_EXTERNAL_CONTEXTS
+    rows = _caller_rows(verify="success", dod_verify=dod_verify)
+    expected_failures = [] if dod_verify is None else [_DOD_VERIFY]
+    expected_unresolved = [_DOD_VERIFY] if dod_verify is None else []
+    assert evaluate_external_contexts(rows, (_DOD_VERIFY,), now=_NOW) == (
+        expected_failures,
+        expected_unresolved,
+    )
+    # Layer 5 excludes the registered verdict; layer 4 must be load-bearing.
+    assert _sweep(rows) == ([], [_VERIFY])
+    code, report = _ci_summary(rows)
+    assert code == expected_code, report
+    if dod_verify is None:
+        # Absence holds PENDING, then fails closed at the poller's deadline.
+        assert f"external contexts missing/pending: {_DOD_VERIFY}" in report
+    else:
+        assert f"external-context failures: {_DOD_VERIFY}" in report
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/omn20074_repo_evidence_check_runs.json")
+def test_ci_summary_registered_name_matches_the_recorded_admission_window(
+    recorded_response: dict[str, object],
+) -> None:
+    """The 16 admission heads' recorded check-runs satisfy the registered context."""
+    registered = tuple(
+        name for name in EXPECTED_EXTERNAL_CONTEXTS if name.startswith("repo-evidence")
+    )
+    assert registered == (_DOD_VERIFY,)
+    heads = cast("list[dict[str, Any]]", recorded_response["heads"])
+    assert len(heads) == 16
+    for head in heads:
+        rows = cast("list[dict[str, object]]", head["check_runs"])
+        assert {row["name"] for row in rows} == {_DOD_VERIFY, _VERIFY}, head["pr"]
+        assert evaluate_external_contexts(rows, registered) == ([], []), head["pr"]
 
 
 def test_every_repo_contract_binds_every_criterion() -> None:
