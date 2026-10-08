@@ -1,0 +1,16 @@
+{
+  "correlation_id": "00000000-0000-0000-0000-000000000001",
+  "intent_type": "postgres.upsert_registration",
+  "record": {
+    "current_state": "pending_registration",
+    "data": {
+      "node_version": "1.0.0",
+      "registered_at": "2026-10-07T12:00:00Z",
+      "updated_at": "2026-10-07T12:00:00Z"
+    },
+    "domain": "registration",
+    "entity_id": "00000000-0000-0000-0000-000000000002",
+    "node_type": "effect"
+  },
+  "unexpected_field": true
+}

@@ -161,7 +161,7 @@ intent_emission:
     - intent_type: "postgres.upsert_registration"
       target_pattern: "postgres://node_registrations/{node_id}"
       payload_model: "ModelPayloadPostgresUpsertRegistration"
-      payload_module: "omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_upsert_registration"
+      payload_module: "omnibase_infra.models.registration.model_payload_postgres_upsert_registration"
       description: "Upsert node registration record in PostgreSQL"
 # State Model Configuration
 # =========================

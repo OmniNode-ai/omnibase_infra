@@ -67,14 +67,14 @@ import pytest
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumDispatchStatus
 from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
+from omnibase_infra.models.ledger.model_payload_ledger_append import (
+    ModelPayloadLedgerAppend,
+)
 from omnibase_infra.nodes.node_ledger_write_effect.handlers.handler_ledger_append import (
     HandlerLedgerAppend,
 )
 from omnibase_infra.nodes.node_ledger_write_effect.models import (
     ModelLedgerAppendResult,
-)
-from omnibase_infra.nodes.node_registration_reducer.models import (
-    ModelPayloadLedgerAppend,
 )
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest

@@ -3,7 +3,8 @@
 """Registration models for ONEX 2-way registration pattern.
 
 Models for the ONEX 2-way registration workflow,
-including introspection events, heartbeats, and orchestrator decision events.
+including introspection events, heartbeats, orchestrator decision events,
+shared intent payloads, and Effect-layer updates.
 
 Submodules:
     events: Registration decision events emitted by the C1 Orchestrator
@@ -43,6 +44,18 @@ from omnibase_infra.models.registration.model_node_registration import (
 from omnibase_infra.models.registration.model_node_registration_record import (
     ModelNodeRegistrationRecord,
 )
+from omnibase_infra.models.registration.model_payload_postgres_update_registration import (
+    ModelPayloadPostgresUpdateRegistration,
+)
+from omnibase_infra.models.registration.model_payload_postgres_upsert_registration import (
+    ModelPayloadPostgresUpsertRegistration,
+)
+from omnibase_infra.models.registration.model_registration_ack_update import (
+    ModelRegistrationAckUpdate,
+)
+from omnibase_infra.models.registration.model_registration_heartbeat_update import (
+    ModelRegistrationHeartbeatUpdate,
+)
 from omnibase_infra.models.registration.model_service_heartbeat_event import (
     ModelRuntimeHeartbeatEvent,
 )
@@ -71,6 +84,11 @@ __all__ = [
     "ModelNodeRegistrationInitiated",
     "ModelNodeRegistrationRecord",
     "ModelNodeRegistrationRejected",
+    # Shared intent payloads and Effect-layer updates
+    "ModelPayloadPostgresUpdateRegistration",
+    "ModelPayloadPostgresUpsertRegistration",
+    "ModelRegistrationAckUpdate",
+    "ModelRegistrationHeartbeatUpdate",
     "ModelRuntimeHeartbeatEvent",
     "ModelTopicCatalogRequest",
 ]
