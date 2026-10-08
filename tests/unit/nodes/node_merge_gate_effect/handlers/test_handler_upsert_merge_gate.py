@@ -189,8 +189,8 @@ class TestHandlerUpsertMergeGateQuarantine:
         )
 
         with patch(
-            "omnibase_infra.nodes.node_merge_gate_effect.handlers."
-            "handler_upsert_merge_gate.httpx.AsyncClient"
+            "omnibase_infra.adapters.project_tracker."
+            "linear_graphql_project_tracker_adapter.httpx.AsyncClient"
         ) as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -221,8 +221,8 @@ class TestHandlerUpsertMergeGateQuarantine:
         payload = make_gate_payload(decision="PASS")
 
         with patch(
-            "omnibase_infra.nodes.node_merge_gate_effect.handlers."
-            "handler_upsert_merge_gate.httpx.AsyncClient"
+            "omnibase_infra.adapters.project_tracker."
+            "linear_graphql_project_tracker_adapter.httpx.AsyncClient"
         ) as mock_client_cls:
             handler = HandlerUpsertMergeGate(pool)
             result = await handler.handle(payload, uuid4())
@@ -241,8 +241,8 @@ class TestHandlerUpsertMergeGateQuarantine:
         payload = make_gate_payload(decision="QUARANTINE")
 
         with patch(
-            "omnibase_infra.nodes.node_merge_gate_effect.handlers."
-            "handler_upsert_merge_gate.httpx.AsyncClient"
+            "omnibase_infra.adapters.project_tracker."
+            "linear_graphql_project_tracker_adapter.httpx.AsyncClient"
         ) as mock_client_cls:
             handler = HandlerUpsertMergeGate(pool)
             result = await handler.handle(payload, uuid4())
@@ -275,8 +275,8 @@ class TestHandlerUpsertMergeGateQuarantine:
         payload = make_gate_payload(decision="QUARANTINE")
 
         with patch(
-            "omnibase_infra.nodes.node_merge_gate_effect.handlers."
-            "handler_upsert_merge_gate.httpx.AsyncClient"
+            "omnibase_infra.adapters.project_tracker."
+            "linear_graphql_project_tracker_adapter.httpx.AsyncClient"
         ) as mock_client_cls:
             mock_client = AsyncMock()
             mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -471,8 +471,8 @@ class TestHandlerUpsertMergeGateInjectedConfig:
                 clear=False,
             ),
             patch(
-                "omnibase_infra.nodes.node_merge_gate_effect.handlers."
-                "handler_upsert_merge_gate.httpx.AsyncClient"
+                "omnibase_infra.adapters.project_tracker."
+                "linear_graphql_project_tracker_adapter.httpx.AsyncClient"
             ) as mock_client_cls,
         ):
             mock_client = AsyncMock()
@@ -510,8 +510,8 @@ class TestHandlerUpsertMergeGateInjectedConfig:
                 clear=False,
             ),
             patch(
-                "omnibase_infra.nodes.node_merge_gate_effect.handlers."
-                "handler_upsert_merge_gate.httpx.AsyncClient"
+                "omnibase_infra.adapters.project_tracker."
+                "linear_graphql_project_tracker_adapter.httpx.AsyncClient"
             ) as mock_client_cls,
         ):
             handler = HandlerUpsertMergeGate(pool)

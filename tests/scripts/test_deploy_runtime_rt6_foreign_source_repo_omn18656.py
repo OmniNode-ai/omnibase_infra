@@ -35,7 +35,7 @@ pure damage, and ``docker tag`` cannot recall a container already recreated on
 the new image.
 
 Same seam-level harness as ``test_deploy_runtime_rt6_one_shot_omn16729.py``: the
-real functions are extracted from ``scripts/deploy-runtime.sh`` and executed
+real functions are extracted from ``src/omnibase_infra/handlers/handler_runtime_deploy.sh`` and executed
 under bash with only ``docker`` stubbed.
 """
 
@@ -50,7 +50,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 COMPOSE_FILES_SH = REPO_ROOT / "scripts" / "runtime_build" / "compose_files.sh"
 
 #: The omnibase_infra ref this deploy intends -- the `intended` half of the
@@ -80,7 +82,7 @@ def _extract_function(name: str) -> str:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, (
-        f"could not extract function {name}() from deploy-runtime.sh"
+        f"could not extract function {name}() from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -92,7 +94,7 @@ def _extract_array(name: str) -> str:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, (
-        f"could not extract array {name}=() from deploy-runtime.sh"
+        f"could not extract array {name}=() from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -104,7 +106,7 @@ def _extract_scalar(name: str) -> str:
         rf'^readonly {re.escape(name)}="[^"]*"$', _script_text(), re.MULTILINE
     )
     assert match is not None, (
-        f"could not extract readonly {name}= from deploy-runtime.sh"
+        f"could not extract readonly {name}= from onex-runtime-deploy"
     )
     return match.group(0)
 

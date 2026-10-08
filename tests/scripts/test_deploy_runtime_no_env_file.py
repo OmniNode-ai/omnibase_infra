@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Regression guard: deploy-runtime.sh must not use --env-file.
+"""Regression guard: onex-runtime-deploy must not use --env-file.
 
 F65 / OMN-6910: The old setup_env() approach copied ~/.omnibase/.env into a
 stale snapshot and then passed --env-file to docker compose. This caused env
@@ -20,50 +20,56 @@ from pathlib import Path
 
 import pytest
 
-DEPLOY_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "omnibase_infra"
+    / "handlers"
+    / "handler_runtime_deploy.sh"
+)
 
 
 def _read_script_lines() -> list[str]:
-    """Read deploy-runtime.sh, stripping comment-only lines."""
+    """Read onex-runtime-deploy, stripping comment-only lines."""
     text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
     return [line for line in text.splitlines() if not line.lstrip().startswith("#")]
 
 
 @pytest.mark.unit
 def test_no_env_file_flag_in_active_code() -> None:
-    """deploy-runtime.sh must not pass --env-file to docker compose."""
+    """onex-runtime-deploy must not pass --env-file to docker compose."""
     lines = _read_script_lines()
     violations = [(i + 1, line) for i, line in enumerate(lines) if "--env-file" in line]
     assert violations == [], (
-        f"Found --env-file in non-comment lines of deploy-runtime.sh: {violations}"
+        f"Found --env-file in non-comment lines of onex-runtime-deploy: {violations}"
     )
 
 
 @pytest.mark.unit
 def test_no_env_file_args_variable() -> None:
-    """deploy-runtime.sh must not declare env_file_args arrays."""
+    """onex-runtime-deploy must not declare env_file_args arrays."""
     lines = _read_script_lines()
     violations = [
         (i + 1, line) for i, line in enumerate(lines) if "env_file_args" in line
     ]
     assert violations == [], (
-        f"Found env_file_args in non-comment lines of deploy-runtime.sh: {violations}"
+        f"Found env_file_args in non-comment lines of onex-runtime-deploy: {violations}"
     )
 
 
 @pytest.mark.unit
 def test_no_setup_env_function() -> None:
-    """deploy-runtime.sh must not define a setup_env() function."""
+    """onex-runtime-deploy must not define a setup_env() function."""
     text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
     # Match function definition: setup_env() { (with possible whitespace)
     assert not re.search(r"^setup_env\s*\(\)", text, re.MULTILINE), (
-        "setup_env() function definition found in deploy-runtime.sh -- must not exist (F65)"
+        "setup_env() function definition found in onex-runtime-deploy -- must not exist (F65)"
     )
 
 
 @pytest.mark.unit
 def test_sources_operator_env_at_top() -> None:
-    """deploy-runtime.sh must source the operator env early in the script.
+    """onex-runtime-deploy must source the operator env early in the script.
 
     OMN-14958: the path is parameterized via OMNIBASE_OPERATOR_ENV_FILE
     (default ${HOME}/.omnibase/.env) so the containerized deploy runner can
@@ -79,7 +85,7 @@ def test_sources_operator_env_at_top() -> None:
         re.MULTILINE,
     )
     assert default_match is not None, (
-        "deploy-runtime.sh must default OMNIBASE_OPERATOR_ENV_FILE to "
+        "onex-runtime-deploy must default OMNIBASE_OPERATOR_ENV_FILE to "
         "${HOME}/.omnibase/.env (OMN-14958 parameterization)"
     )
     # The parameterized file is what gets sourced (never a hardcoded $HOME path).
@@ -89,7 +95,7 @@ def test_sources_operator_env_at_top() -> None:
         re.MULTILINE,
     )
     assert match is not None, (
-        "deploy-runtime.sh must source ${OMNIBASE_OPERATOR_ENV_FILE} "
+        "onex-runtime-deploy must source ${OMNIBASE_OPERATOR_ENV_FILE} "
         "(OMN-14958: parameterized operator env sourcing)"
     )
     # Ensure the sourcing still happens early (before any deploy logic).
@@ -106,7 +112,7 @@ def test_sources_operator_env_at_top() -> None:
     )
     # Named, fail-closed guard for the missing-file case.
     assert "OPERATOR_ENV_MISSING" in text, (
-        "deploy-runtime.sh must emit the named OPERATOR_ENV_MISSING error "
+        "onex-runtime-deploy must emit the named OPERATOR_ENV_MISSING error "
         "(exit 64) when the operator env file is absent -- a bare `source` "
         "crash is the OMN-14958 regression"
     )
@@ -128,7 +134,7 @@ def test_omnibase_env_cannot_override_runtime_health_url() -> None:
 
 @pytest.mark.unit
 def test_compose_project_defaults_to_live_runtime_project() -> None:
-    """deploy-runtime.sh must target the canonical live runtime compose project."""
+    """onex-runtime-deploy must target the canonical live runtime compose project."""
     text = "\n".join(_read_script_lines())
 
     assert "OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra" in text
@@ -137,7 +143,7 @@ def test_compose_project_defaults_to_live_runtime_project() -> None:
 
 @pytest.mark.unit
 def test_verify_deployment_uses_lane_scoped_runtime_container_name() -> None:
-    """deploy-runtime.sh must inspect the LANE-SCOPED runtime container by name.
+    """onex-runtime-deploy must inspect the LANE-SCOPED runtime container by name.
 
     OMN-13826: verify_deployment previously anchored on the hardcoded dev name
     ``name=^/omninode-runtime$``. Because the dev ``omninode-runtime`` container

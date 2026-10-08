@@ -689,6 +689,10 @@ def test_crash_after_commit_republishes_byte_identical_batch_from_row_alone() ->
     )
 
     # THE TENANT TRAP.
+    assert [e.tenant_id for e in recovered] == [TENANT] * 3, (
+        "OMN-18389: projection attribution reads the envelope tenant, "
+        "not the reconstructed payload's tenant"
+    )
     tenants = [_tenant_of(e) for e in recovered]
     assert tenants == [TENANT, TENANT, TENANT], (
         "SILENT DIVERGENCE: every recovered envelope must carry the tenant, and "
@@ -1628,6 +1632,56 @@ def test_sweep_heals_legacy_row_and_is_not_choked_by_an_unresolvable_poison_row(
 def _published_pairs(bus: _RecordingBus) -> list[tuple[str, ModelEventEnvelope[Any]]]:
     """(topic, envelope) pairs for CID, in publish order."""
     return [(t, e) for t, e in bus.published if e.correlation_id == CID]
+
+
+@pytest.mark.integration
+def test_outbox_carries_persisted_tenant_on_every_envelope() -> None:
+    """OMN-18389: live publish must stamp the field the projection reads."""
+    store = _DurableRows()
+    bus = _RecordingBus()
+    callback = _stateful_callback(
+        _FanOutHandler(_fanout_batch()),
+        _FakeStateStoreAdapter(store),
+        event_bus=bus,
+    )
+
+    asyncio.run(callback(_input_envelope()))
+
+    published = bus.envelopes_for(CID)
+    assert len(published) == 3, "positive control: the whole batch published"
+    assert [_tenant_of(e) for e in published] == [TENANT] * 3
+    assert [e.tenant_id for e in published] == [TENANT] * 3
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("stored_tenant", [None, "", "   "])
+def test_outbox_recovery_does_not_invent_missing_envelope_tenant(
+    stored_tenant: str | None,
+) -> None:
+    """OMN-18389: legacy unattributed entries stay unattributed on recovery."""
+    store = _DurableRows()
+    callback = _stateful_callback(
+        _FanOutHandler(_fanout_batch()), _FakeStateStoreAdapter(store)
+    )
+    asyncio.run(callback(_input_envelope()))
+    for entry in store.rows[str(CID)]["pending_emissions"]:
+        entry["tenant_id"] = stored_tenant
+    recovered_store = _DurableRows.reboot_from_bytes(store.crash_to_bytes())
+    bus = _RecordingBus()
+    callback = _stateful_callback(
+        _FanOutHandler(_fanout_batch()),
+        _FakeStateStoreAdapter(recovered_store),
+        event_bus=bus,
+    )
+    other = _input_envelope().model_copy(
+        update={"correlation_id": UUID("99999999-9999-9999-9999-999999999999")}
+    )
+
+    asyncio.run(callback(other))
+
+    published = bus.envelopes_for(CID)
+    assert len(published) == 3, "positive control: recovery published the batch"
+    assert [e.tenant_id for e in published] == [None] * 3
 
 
 @pytest.mark.integration

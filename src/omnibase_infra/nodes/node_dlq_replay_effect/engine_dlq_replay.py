@@ -529,17 +529,6 @@ class DLQConsumer:
                 self._started = False
                 self._consumer = None
 
-    async def commit(self) -> None:
-        """Commit the consumer's POSITION — only call after durable handling.
-
-        Retained for callers that genuinely mean "everything handed out of the
-        iterator completed". ``HandlerDlqReplay`` no longer uses it: a bare
-        position commit advances past any record that was in flight when the
-        loop exited (OMN-17896). Use :meth:`commit_offsets` instead.
-        """
-        if self._started and self._consumer is not None:
-            await self._consumer.commit()
-
     async def commit_offsets(self, offsets: Mapping[tuple[str, int], int]) -> None:
         """Commit an EXPLICIT offset map built from completed records only.
 

@@ -196,7 +196,7 @@ def test_a_baseline_entry_without_a_ticket_is_refused(tmp_path: Path) -> None:
                 "entries": [
                     {
                         "pair": "lock-without-holder-record",
-                        "path": "scripts/deploy-runtime.sh",
+                        "path": "src/omnibase_infra/handlers/handler_runtime_deploy.sh",
                         "line_sha256_12": "0" * 12,
                         "occurrences": 1,
                         "ticket": "",
@@ -209,7 +209,7 @@ def test_a_baseline_entry_without_a_ticket_is_refused(tmp_path: Path) -> None:
     with pytest.raises(gate.PolicyError) as excinfo:
         gate.load_baseline(path)
     assert "ticket" in str(excinfo.value)
-    assert "scripts/deploy-runtime.sh" in str(excinfo.value)
+    assert "src/omnibase_infra/handlers/handler_runtime_deploy.sh" in str(excinfo.value)
 
 
 def test_every_shipped_baseline_entry_cites_a_ticket() -> None:
@@ -430,9 +430,9 @@ def test_a_baseline_entry_without_a_verdict_reason_is_refused(tmp_path: Path) ->
 
 
 def test_every_shipped_baseline_entry_carries_a_verdict_and_a_reason() -> None:
-    """AC7 on the committed artifact: all 21 baselined sites are judged."""
+    """AC7 on the committed artifact: all 12 remaining baselined sites are judged."""
     baseline = gate.load_baseline(BASELINE_PATH)
-    assert sum(entry.occurrences for entry in baseline.entries) == 21
+    assert sum(entry.occurrences for entry in baseline.entries) == 12
     for entry in baseline.entries:
         assert entry.verdict in gate.VERDICTS, entry
         assert entry.verdict_reason.strip(), entry

@@ -44,7 +44,7 @@ from urllib.parse import urlparse, urlunparse
 
 import asyncpg
 from aiohttp import web
-from aiokafka import AIOKafkaConsumer
+from aiokafka import AIOKafkaConsumer, TopicPartition
 from aiokafka.errors import KafkaError
 
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
@@ -302,8 +302,13 @@ class ConsumerHealthProjectionConsumer:
                 len(events),
                 elapsed_ms,
             )
-            # Commit offsets
-            await self._consumer.commit()
+            # Commit one past the last record of each partition in THIS batch,
+            # not the consumer's position (OMN-18631)
+            next_offsets: dict[TopicPartition, int] = {}
+            for record, _ in batch:
+                tp = TopicPartition(record.topic, record.partition)
+                next_offsets[tp] = max(next_offsets.get(tp, 0), record.offset + 1)
+            await self._consumer.commit(next_offsets)
         except Exception:
             self._messages_failed += len(events)
             logger.exception("Failed to flush batch of %d events", len(events))

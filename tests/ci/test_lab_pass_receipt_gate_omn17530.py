@@ -184,8 +184,8 @@ class TestReceiptModel:
 
     def test_artifact_name_carries_the_exact_sha_and_lane(self) -> None:
         assert (
-            artifact_name(EnumLabLane.ONEX_LAB, SHA)
-            == f"lab-pass-receipt-onex-lab-{SHA}"
+            artifact_name(EnumLabLane.ONEX_LAB_K3S, SHA)
+            == f"lab-pass-receipt-onex-lab-k3s-{SHA}"
         )
         assert artifact_name(EnumLabLane.COMPOSE_DEV, SHA) != artifact_name(
             EnumLabLane.COMPOSE_DEV, OTHER_SHA
@@ -486,7 +486,7 @@ class _Surface:
 def _run_gate(surface: _Surface, monkeypatch: Any, sha: str = SHA) -> tuple[int, str]:
     monkeypatch.setattr("scripts.ci.lab_pass_receipt._gh_api", surface)
     out = io.StringIO()
-    code = evaluate_gate(REPO, sha, list(EnumLabLane), out)
+    code = evaluate_gate(REPO, sha, list(ANY_OF_DEFAULT_LANES), out)
     return code, out.getvalue()
 
 
@@ -562,9 +562,9 @@ class TestGate:
 
     def test_either_lab_lane_satisfies_the_gate(self, monkeypatch: Any) -> None:
         """Rule 24(b) asks for 'a passing lab receipt', not a specific lane's."""
-        receipt = _receipt(lane=EnumLabLane.ONEX_LAB)
+        receipt = _receipt(lane=EnumLabLane.ONEX_LAB_K3S)
         surface = _Surface(
-            {artifact_name(EnumLabLane.ONEX_LAB, SHA): receipt.to_json()}
+            {artifact_name(EnumLabLane.ONEX_LAB_K3S, SHA): receipt.to_json()}
         )
         code, output = _run_gate(surface, monkeypatch)
         assert code == 0
@@ -643,9 +643,10 @@ class TestGateWiring:
         rebuild = Path(".github/workflows/runtime-rebuild-trigger.yml").read_text(
             encoding="utf-8"
         )
-        # onex-lab, from the boot gate; compose-dev, from the .201 convergence job.
+        # Candidate smoke from kind; persistent lab and compose-dev from the agent.
         assert "lab_pass_receipt.py emit" in deliver
-        assert "--lane onex-lab" in deliver
+        assert "--lane candidate-boot" in deliver
+        assert "--lane onex-lab-k3s" in rebuild
         assert "lab_pass_receipt.py emit" in rebuild
         assert "--lane compose-dev" in rebuild
 
@@ -1118,7 +1119,7 @@ class TestRequireLaneIsAllOf:
         """The falsifier the design names: known-bad refused, sha named."""
         surface = _Surface(
             _bodies(
-                _receipt(lane=EnumLabLane.ONEX_LAB),
+                _receipt(lane=EnumLabLane.ONEX_LAB_K3S),
                 _receipt(lane=CHAIN, ok=False),
             )
         )
@@ -1135,7 +1136,7 @@ class TestRequireLaneIsAllOf:
         makes the refusal above a change, not a coincidence."""
         surface = _Surface(
             _bodies(
-                _receipt(lane=EnumLabLane.ONEX_LAB),
+                _receipt(lane=EnumLabLane.ONEX_LAB_K3S),
                 _receipt(lane=CHAIN, ok=False),
             )
         )
@@ -1144,7 +1145,7 @@ class TestRequireLaneIsAllOf:
 
     def test_require_lane_known_good_passes(self, monkeypatch: Any) -> None:
         surface = _Surface(
-            _bodies(_receipt(lane=EnumLabLane.ONEX_LAB), _receipt(lane=CHAIN))
+            _bodies(_receipt(lane=EnumLabLane.ONEX_LAB_K3S), _receipt(lane=CHAIN))
         )
         code, output = _gate(surface, monkeypatch, required=(CHAIN,))
         assert code == 0
@@ -1153,7 +1154,7 @@ class TestRequireLaneIsAllOf:
     def test_require_lane_absent_is_refused_as_no_receipt(
         self, monkeypatch: Any
     ) -> None:
-        surface = _Surface(_bodies(_receipt(lane=EnumLabLane.ONEX_LAB)))
+        surface = _Surface(_bodies(_receipt(lane=EnumLabLane.ONEX_LAB_K3S)))
         code, output = _gate(surface, monkeypatch, required=(CHAIN,))
         assert code == 1
         assert "compose-dev-chain does not pass" in output
@@ -1163,7 +1164,7 @@ class TestRequireLaneIsAllOf:
         corpus = EnumLabLane.COMPOSE_DEV_CORPUS
         surface = _Surface(
             _bodies(
-                _receipt(lane=EnumLabLane.ONEX_LAB),
+                _receipt(lane=EnumLabLane.ONEX_LAB_K3S),
                 _receipt(lane=CHAIN),
                 _receipt(lane=corpus, ok=False),
             )
@@ -1240,7 +1241,7 @@ class TestBoundedWait:
         self, monkeypatch: Any
     ) -> None:
         _install_fake_clock(monkeypatch)
-        surface = _Surface(_bodies(_receipt(lane=EnumLabLane.ONEX_LAB)))
+        surface = _Surface(_bodies(_receipt(lane=EnumLabLane.ONEX_LAB_K3S)))
         code, output = _gate(surface, monkeypatch, required=(CHAIN,), wait_seconds=120)
         assert code == 1
         assert "no receipt exists after waiting 120 s" in output
@@ -1252,7 +1253,7 @@ class TestBoundedWait:
         _install_fake_clock(monkeypatch)
         chain = _receipt(lane=CHAIN)
         surface = _LandingSurface(
-            _bodies(_receipt(lane=EnumLabLane.ONEX_LAB)), _bodies(chain), after=2
+            _bodies(_receipt(lane=EnumLabLane.ONEX_LAB_K3S)), _bodies(chain), after=2
         )
         code, output = _gate(surface, monkeypatch, required=(CHAIN,), wait_seconds=600)
         assert code == 0
@@ -1261,7 +1262,9 @@ class TestBoundedWait:
     def test_wait_does_not_wait_out_a_present_fail(self, monkeypatch: Any) -> None:
         _install_fake_clock(monkeypatch)
         surface = _Surface(
-            _bodies(_receipt(lane=EnumLabLane.ONEX_LAB), _receipt(lane=CHAIN, ok=False))
+            _bodies(
+                _receipt(lane=EnumLabLane.ONEX_LAB_K3S), _receipt(lane=CHAIN, ok=False)
+            )
         )
         code, output = _gate(surface, monkeypatch, required=(CHAIN,), wait_seconds=600)
         assert code == 1
@@ -1308,7 +1311,7 @@ class TestRuntimeAncestorSubject:
         assert subject == MIDDLE
         surface = _Surface(
             _bodies(
-                _receipt(lane=EnumLabLane.ONEX_LAB),
+                _receipt(lane=EnumLabLane.ONEX_LAB_K3S),
                 _receipt(sha=ANCESTOR, lane=CHAIN),
             )
         )
@@ -1323,7 +1326,7 @@ class TestRuntimeAncestorSubject:
     ) -> None:
         surface = _Surface(
             _bodies(
-                _receipt(lane=EnumLabLane.ONEX_LAB),
+                _receipt(lane=EnumLabLane.ONEX_LAB_K3S),
                 _receipt(sha=ANCESTOR, lane=CHAIN),
             )
         )

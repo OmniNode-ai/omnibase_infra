@@ -106,8 +106,9 @@ Subcommands
     ``--lane`` is ANY-OF: one PASS among them satisfies it. ``--require-lane``
     (OMN-19312) is ALL-OF: every named lane must carry its own PASS, and no
     other lane's PASS substitutes. The distinction is load-bearing: the push
-    path's unqualified call is satisfied by the onex-lab boot receipt the same
-    workflow emits, so a verdict can only bind delivery as a required lane.
+    delivery call selects only onex-lab-k3s for the exact sha; the compose-dev
+    primary receipt remains required for its resolved runtime subject. Candidate
+    boot smoke receipts cannot satisfy the lab premise (OMN-18276).
     ``--wait-seconds`` polls, bounded, for a required receipt that has not
     landed yet, and expiry refuses. ``--resolve-runtime-ancestor`` asks required
     lanes about the nearest runtime-affecting ancestor, by the release train's
@@ -329,10 +330,12 @@ class EnumLabLane(StrEnum):
     """The lab surfaces rule 24(a) names as receipt emitters.
 
     ``COMPOSE_DEV`` is the ``.201`` compose dev lane (compose project
-    ``omnibase-infra``, ports 8085/8086). ``ONEX_LAB`` is the ``k8s/onex-lab``
-    overlay applied from the same head.
+    ``omnibase-infra``, ports 8085/8086). ``CANDIDATE_BOOT`` is the ephemeral
+    kind render/wiring smoke check. Its artifact is named candidate-boot-receipt
+    and cannot satisfy a lab-pass gate (OMN-18276). ``ONEX_LAB`` identifies
+    historical kind receipts; it is excluded from the default lab premise.
 
-    ``ONEX_LAB_K3S`` (OMN-18200) is the PERSISTENT lab cluster -- the same
+    ``ONEX_LAB_K3S`` is the PERSISTENT lab cluster -- the same
     overlay, applied to the k3s node on the lab host by
     ``k8s/onex-lab/apply_lab_lane.sh`` rather than to a per-candidate ``kind``
     cluster. It is a separate value rather than a second emitter on ``ONEX_LAB``
@@ -398,6 +401,7 @@ class EnumLabLane(StrEnum):
     COMPOSE_DEV = "compose-dev"
     ONEX_LAB = "onex-lab"
     ONEX_LAB_K3S = "onex-lab-k3s"
+    CANDIDATE_BOOT = "candidate-boot"
     COMPOSE_DEV_CHAIN = "compose-dev-chain"
     COMPOSE_DEV_CORPUS = "compose-dev-corpus"
     COMPOSE_DEV_202 = "compose-dev-202"
@@ -405,7 +409,7 @@ class EnumLabLane(StrEnum):
     PR_HEAD = "pr-head"
 
 
-#: The lanes an unqualified ``gate`` reads with ANY-OF semantics: the three lab
+#: The lanes an unqualified ``gate`` reads with ANY-OF semantics: the persistent lab
 #: surfaces rule 24(b) means by "a passing lab receipt". The OMN-19312 verdict
 #: lanes are deliberately absent -- a chain canary PASS is not evidence that the
 #: candidate booted, and must never be able to stand in for that premise.
@@ -414,7 +418,6 @@ class EnumLabLane(StrEnum):
 #: take either for the any-of premise.
 ANY_OF_DEFAULT_LANES: Final[tuple[EnumLabLane, ...]] = (
     EnumLabLane.COMPOSE_DEV,
-    EnumLabLane.ONEX_LAB,
     EnumLabLane.ONEX_LAB_K3S,
 )
 
@@ -1173,6 +1176,8 @@ def artifact_name(lane: EnumLabLane, sha: str) -> str:
     reads a receipt it then has to check the sha of. (It checks anyway — see
     ``gate`` — because a name and a payload that disagree is itself a finding.)
     """
+    if lane is EnumLabLane.CANDIDATE_BOOT:
+        return f"candidate-boot-receipt-{sha}"
     return f"lab-pass-receipt-{lane.value}-{sha}"
 
 
@@ -2058,20 +2063,32 @@ class CommandRunner(Protocol):
     """
 
     def __call__(
-        self, argv: Sequence[str], *, timeout: float
+        self,
+        argv: Sequence[str],
+        *,
+        timeout: float,
+        env: Mapping[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]: ...
 
 
 def _run_read_only(
-    argv: Sequence[str], *, timeout: float
+    argv: Sequence[str],
+    *,
+    timeout: float,
+    env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a fixed-argv, no-shell, read-only command."""
+    """Run a fixed-argv, no-shell, read-only command.
+
+    ``env`` is added to the inherited environment. It is how a credential reaches a
+    child without sitting in argv, which every user on the host reads through ``ps``.
+    """
     return subprocess.run(
         list(argv),
         capture_output=True,
         text=True,
         check=False,
         timeout=timeout,
+        env={**os.environ, **env} if env else None,
     )
 
 
@@ -2252,17 +2269,31 @@ class ModelBrokerAccess:
         return bool(self.sasl_mechanism)
 
     def rpk_flags(self) -> list[str]:
-        flags = ["-X", f"brokers={self.brokers}"]
-        if self.authenticated:
-            flags += [
-                "-X",
-                f"user={self.sasl_username}",
-                "-X",
-                f"pass={self.sasl_password}",
-                "-X",
-                f"sasl.mechanism={self.sasl_mechanism}",
-            ]
-        return flags
+        """The rpk flags: the broker address only, never a credential (OMN-17427)."""
+        return ["-X", f"brokers={self.brokers}"]
+
+    def rpk_env(self) -> dict[str, str]:
+        """The credential as the ``RPK_*`` variables rpk reads, empty when anonymous.
+
+        Pass it to the runner as ``env``. A password flag would put the password in the
+        argv of ``docker exec`` and of the in-container ``rpk``, where ``ps`` shows it
+        to every user on the host.
+        """
+        if not self.authenticated:
+            return {}
+        return {
+            "RPK_USER": self.sasl_username,
+            "RPK_PASS": self.sasl_password,
+            "RPK_SASL_MECHANISM": self.sasl_mechanism,
+        }
+
+    def docker_exec_env_flags(self) -> list[str]:
+        """``-e NAME`` for each ``RPK_*`` variable, with no value.
+
+        ``docker exec -e NAME`` copies the value from the docker client's own
+        environment, so only the names appear in argv.
+        """
+        return [flag for name in self.rpk_env() for flag in ("-e", name)]
 
 
 def read_group_total_lag(
@@ -2282,9 +2313,11 @@ def read_group_total_lag(
     """
     run = runner or _run_read_only
     result = run(
-        ["docker", "exec", access.container, "rpk", "group", "describe", group]
+        ["docker", "exec", *access.docker_exec_env_flags(), access.container]
+        + ["rpk", "group", "describe", group]
         + access.rpk_flags(),
         timeout=timeout_seconds,
+        env=access.rpk_env(),
     )
     if result.returncode != 0:
         msg = (
@@ -4470,6 +4503,11 @@ def evaluate_gate(
             "sha": sha,
             "subject": subject,
             "required_lanes": [lane.value for lane in required],
+            "exact_lanes": (
+                {EnumLabLane.ONEX_LAB_K3S.value: sha}
+                if list(lanes) == [EnumLabLane.ONEX_LAB_K3S]
+                else {}
+            ),
             "lanes": dict(lane_tokens),
             "token": token.value,
             "first_read_at": _utc_stamp(first),
@@ -4492,6 +4530,17 @@ def evaluate_gate(
             )
             _record(EnumGateToken.UNREADABLE, {})
             return 1
+    if any(
+        lane in {EnumLabLane.CANDIDATE_BOOT, EnumLabLane.ONEX_LAB}
+        for lane in (*lanes, *required)
+    ):
+        print(
+            f"::error::lab-pass gate FAILED for {sha}: a kind boot receipt is a "
+            "render/wiring smoke check, never a lab pass. token=UNREADABLE",
+            file=out,
+        )
+        _record(EnumGateToken.UNREADABLE, {})
+        return 1
     if not lanes and not required:
         print(
             f"::error::lab-pass gate FAILED for {sha}: no lane was named to read, "
@@ -4532,7 +4581,11 @@ def evaluate_gate(
     # OMN-19233: one token per required lane, and the overall bound.
     lane_tokens: dict[str, EnumGateToken] = {}
     lane_notes: dict[str, str] = {}
-    for read in all_of:
+    # OMN-18276: a singleton persistent-lab selection is an exact-sha
+    # requirement, independently of the compose-dev ancestor subject. Record
+    # its actual failure class so absence can be re-read and a FAIL stands.
+    exact_reads = any_of if list(lanes) == [EnumLabLane.ONEX_LAB_K3S] else []
+    for read in [*all_of, *exact_reads]:
         if read.passed:
             lane_tokens[read.lane.value] = EnumGateToken.PASS
         elif read.receipt is not None:
@@ -4584,6 +4637,8 @@ def evaluate_gate(
         )
         if required_note:
             print(f"  subject    : {required_note}", file=out)
+    if exact_reads:
+        print(f"  exact      : onex-lab-k3s for delivered sha {sha}", file=out)
     if wait_seconds:
         print(f"  waited     : up to {wait_seconds:g} s, {polls} read(s)", file=out)
     rendered: set[tuple[EnumLabLane, str]] = set()
@@ -4638,7 +4693,7 @@ def evaluate_gate(
                 file=out,
             )
 
-    for read in all_of:
+    for read in [*all_of, *exact_reads]:
         if read.passed:
             continue
         if read.receipt is not None:
@@ -4664,7 +4719,7 @@ def evaluate_gate(
 
     any_of_ok = not any_of or any(r.passed for r in any_of)
     refusals = [t for t in lane_tokens.values() if t is not EnumGateToken.PASS]
-    if not any_of_ok:
+    if not any_of_ok and not exact_reads:
         refusals.append(EnumGateToken.ANY_OF_UNMET)
     if timed_out:
         refusals.append(EnumGateToken.TIMED_OUT)
@@ -5170,6 +5225,34 @@ def rerun_refused_deliveries(
         for reason in reasons:
             print(f"  {reason}", file=out)
         for run in selected:
+            # OMN-18276: the compose-dev PASS does not replace the persistent
+            # apply. Re-read the exact delivered sha only after both receipts
+            # have arrived. Old verdicts with no exact requirement retain
+            # their existing selection semantics.
+            exact_lanes = (run.verdict or {}).get("exact_lanes", {})
+            if exact_lanes:
+                delivered_sha = (run.verdict or {}).get("sha", "")
+                if (
+                    not isinstance(delivered_sha, str)
+                    or not _SHA_RE.match(delivered_sha)
+                    or exact_lanes != {EnumLabLane.ONEX_LAB_K3S.value: delivered_sha}
+                ):
+                    print(
+                        f"::error::delivery run {run.run_id}: unreadable exact-lane requirement",
+                        file=out,
+                    )
+                    failures += 1
+                    continue
+                persistent = read_lane(repo, EnumLabLane.ONEX_LAB_K3S, delivered_sha)
+                if not persistent.passed:
+                    print(
+                        f"delivery run {run.run_id}: persistent lab receipt for "
+                        f"{delivered_sha} is not PASS; no re-run",
+                        file=out,
+                    )
+                    if persistent.kind in {"unreadable", "mismatch"}:
+                        failures += 1
+                    continue
             path = f"repos/{repo}/actions/runs/{run.run_id}/rerun-failed-jobs"
             try:
                 _gh_api_post(path)
@@ -5287,7 +5370,9 @@ def evaluate_workflow_verdict(
 
     ``dispatch_title_contains`` (OMN-19311, D11) narrows an admitted
     ``workflow_dispatch`` further: such a run is a measurement only when its run
-    title carries the token. D11's nightly takes a ``lane`` input and renders it
+    title carries the complete whitespace-delimited token. A substring such as
+    ``lane=stability-test-copy`` or ``other-lane=stability-test`` does not name
+    the governed lane. D11's nightly takes a ``lane`` input and renders it
     into its ``run-name``; admitting its dispatches (the fast path to a fresh
     measurement after a fix) without this would let a green dispatch aimed at
     the dev lane stand in for the governed stability-test verdict, dropping the
@@ -5421,7 +5506,7 @@ def evaluate_workflow_verdict(
         and (
             not dispatch_title_contains
             or r.get("event") != "workflow_dispatch"
-            or dispatch_title_contains in str(r.get("display_title", ""))
+            or dispatch_title_contains in str(r.get("display_title", "")).split()
         )
     ]
     ignored = len(runs) - len(candidates)
@@ -5885,7 +5970,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[e.value for e in EnumLabLane],
         help=(
             "repeatable, ANY-OF: one PASS among these satisfies the rule 24(b) "
-            "premise. Defaults to compose-dev, onex-lab and onex-lab-k3s"
+            "premise. Defaults to compose-dev and onex-lab-k3s"
         ),
     )
     gate.add_argument(
@@ -6004,7 +6089,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help=(
             "OMN-19311: an admitted workflow_dispatch run is a measurement only "
-            "when its run title carries this token (the lane it measured)"
+            "when its run title carries this complete whitespace-delimited "
+            "token (the lane it measured)"
         ),
     )
     verdict.add_argument(

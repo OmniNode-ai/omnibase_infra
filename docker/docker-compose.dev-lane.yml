@@ -63,7 +63,7 @@
 # ------------
 # The dev lane's `-f` list, in the two places that own lane -> compose-file
 # mapping and are kept matched:
-#   * scripts/deploy-runtime.sh          resolve_compose_file_args()
+#   * onex-runtime-deploy          resolve_compose_file_args()
 #   * scripts/deploy-agent/deploy_agent/executor.py  _LANE_CONFIGS[DEV]
 # Manually:
 #   docker compose -p omnibase-infra \
@@ -273,7 +273,7 @@ x-dev-lane-strict-wiring-env: &dev_lane_strict_wiring_env
 # directions by tests/integration/infra/test_omn18012_dev_lane_broker_auth_scope.py.
 #
 # CREDENTIAL HANDLING: reference, never a literal -- identical to phase A. Both
-# values are resolved by scripts/deploy-runtime.sh from the operator env file
+# values are resolved by onex-runtime-deploy from the operator env file
 # (OMNIBASE_OPERATOR_ENV_FILE, default ${HOME}/.omnibase/.env). `:?` and not
 # `:-`: a lane that silently falls back to an empty password is a lane whose
 # refusal proves nothing. NOT A ROTATION (Operating Rule 22) -- this binds the
@@ -386,7 +386,7 @@ services:
   # postgres over the base block and would inherit a base `command:`, recreating
   # their servers for capacity only this lane's slots need.
   #
-  # TAKES EFFECT ON RECREATE ONLY. deploy-runtime.sh's ensure_core_infra_ready
+  # TAKES EFFECT ON RECREATE ONLY. onex-runtime-deploy's ensure_core_infra_ready
   # runs `up -d --no-deps --wait postgres valkey` on every --restart, so the
   # first dev-lane restart after this lands recreates this container and drops
   # every connection on the lane for the length of a Postgres restart.
@@ -454,7 +454,7 @@ services:
   #
   # DEV LANE ONLY, AND MECHANICALLY SO. This is an override in the lane's
   # SECOND `-f` file, which `resolve_compose_file_args()` in
-  # scripts/deploy-runtime.sh appends for the bare `omnibase-infra` project and
+  # onex-runtime-deploy appends for the bare `omnibase-infra` project and
   # never for a lane with its own overlay. stability-test and prod inherit the
   # base healthcheck untouched; judge and lakshman redeclare the old one in
   # their own overlays. All four are pinned by
@@ -552,7 +552,7 @@ services:
   # CREDENTIAL HANDLING
   # -------------------
   # SYNTHETIC dev credential, referenced and never inlined. Both variables are
-  # resolved by scripts/deploy-runtime.sh from the operator env file
+  # resolved by onex-runtime-deploy from the operator env file
   # (OMNIBASE_OPERATOR_ENV_FILE, default ${HOME}/.omnibase/.env, sourced under
   # `set -a`) exactly like POSTGRES_PASSWORD and ROLE_OMNIDASH_PASSWORD above.
   # The `$$` forms in the command are compose escapes: the shell inside the
@@ -667,7 +667,7 @@ services:
   # THE ADMIN API STAYS OPEN, DELIBERATELY. `admin_api_require_auth` is false
   # and this ticket does not change it. Two things depend on that and both were
   # checked before the flip: the `redpanda` healthcheck (`rpk cluster health`)
-  # and scripts/deploy-runtime.sh's broker-reachability probe (line ~2791, the
+  # and onex-runtime-deploy's broker-reachability probe (line ~2791, the
   # same command) are ADMIN-API calls. Had SASL gated them, this change would
   # have made the lane undeployable by the only sanctioned path to it.
   #
@@ -692,7 +692,6 @@ services:
         set -eu
         ADMIN="-X admin.hosts=redpanda:9644"
         BROKER="-X brokers=redpanda:9092"
-        AUTH="-X sasl.mechanism=SCRAM-SHA-256 -X user=$$DEV_KAFKA_SASL_USERNAME -X pass=$$DEV_KAFKA_SASL_PASSWORD"
         /usr/bin/rpk cluster config set superusers "['$$DEV_KAFKA_SASL_USERNAME']" $$ADMIN
         /usr/bin/rpk cluster config set enable_sasl true $$ADMIN
         /usr/bin/rpk cluster config get superusers $$ADMIN | grep -q "$$DEV_KAFKA_SASL_USERNAME"
@@ -704,7 +703,7 @@ services:
           exit 1
         fi
         echo "OMN-18012: unauthenticated client refused"
-        /usr/bin/rpk topic list $$BROKER $$AUTH >/dev/null
+        RPK_USER="$$DEV_KAFKA_SASL_USERNAME" RPK_PASS="$$DEV_KAFKA_SASL_PASSWORD" RPK_SASL_MECHANISM=SCRAM-SHA-256 /usr/bin/rpk topic list $$BROKER >/dev/null
         echo "OMN-18012: authenticated client accepted - positive control"
     depends_on:
       redpanda-scram-user:
@@ -732,7 +731,7 @@ services:
   #
   # WHY AN OVERRIDE OF `redpanda-partition-cap` AND NOT A NEW ONE-SHOT
   # ------------------------------------------------------------------
-  # scripts/deploy-runtime.sh warm_broker_topic_provisioning() force-recreates
+  # onex-runtime-deploy warm_broker_topic_provisioning() force-recreates
   # exactly this service on every dev-lane redeploy, including a restart-only
   # one, and a cold `up` runs it through depends_on. A separate service would
   # run on neither path. The service is declared in docker-compose.infra.yml,
@@ -943,7 +942,7 @@ services:
   # makes all three containers unhealthy on the next 30s interval; before this
   # block that would have been an autoheal restart loop, and after it, it is
   # three permanently-unhealthy containers. Deploy through the sanctioned
-  # attributed path (`scripts/deploy-runtime.sh --execute`) only.
+  # attributed path (`onex-runtime-deploy --execute`) only.
   #
   # Ticket: OMN-17562 (operator ruling 2026-09-03, item 4). Pattern source:
   #   docker/docker-compose.stability-test.yml (OMN-15217).
@@ -1127,7 +1126,7 @@ services:
       !!merge <<: *dev_lane_broker_auth_env
   # context-audit-consumer is additionally the one dev-lane Kafka client that NO
   # deploy path restarted: it is in neither RUNTIME_SERVICES nor
-  # DEV_LANE_ONLY_RUNTIME_SERVICES in scripts/deploy-runtime.sh, so it had been
+  # DEV_LANE_ONLY_RUNTIME_SERVICES in onex-runtime-deploy, so it had been
   # up 2 weeks across every intervening deploy. Binding the credential here is
   # inert on its own -- a container that is never recreated never reads a new
   # environment -- so the deploy script gains DEV_LANE_EXTRA_BROKER_CLIENTS in
@@ -1647,7 +1646,7 @@ services:
   # WHY IT IS HERE AND NOT IN docker-compose.infra.yml
   # --------------------------------------------------
   # Same reason as the six writers above. The base file is merged by every
-  # lane, and `scripts/deploy-runtime.sh` names RUNTIME_SERVICES verbatim in a
+  # lane, and `onex-runtime-deploy` names RUNTIME_SERVICES verbatim in a
   # lane-agnostic `up -d --no-deps`, so a service in the base plus an entry in
   # that array is a change to the prod, stability-test and judge deploy paths.
   # This service belongs to DEV_LANE_ONLY_RUNTIME_SERVICES and to this file, and

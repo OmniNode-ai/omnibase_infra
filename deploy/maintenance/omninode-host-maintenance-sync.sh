@@ -8,7 +8,7 @@
 # WHY THIS EXISTS (OMN-15525)
 #   `deploy/maintenance/omninode-system-slack-report.sh` runs as root from
 #   /data/maintenance/bin/ under /etc/cron.d/. No sanctioned deploy path covered
-#   that directory: `deploy-runtime.sh` deploys containers, not host files. So
+#   that directory: `onex-runtime-deploy` deploys containers, not host files. So
 #   the script was hand-copied once, drifted for weeks, and the divergence was
 #   invisible — OMN-15509 fixed the repo copy and changed nothing about what the
 #   platform actually alarmed on, because nothing installs or checks the host

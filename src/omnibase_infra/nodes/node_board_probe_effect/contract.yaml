@@ -52,7 +52,7 @@ board_checks:
   - check_id: "consumer_flow"
     surface_class: "lab_hardware"
     operation: "board_probe.consumer_flow"
-    description: "C28: both named kinds are instrumented in advancing windows, negative tests pass and bite per branch, cursor paging reaches every live group (a full final page with a null cursor passes only when a since= read past it returns zero rows), and the boot has applied events and observes the malformed trigger. Every rpk call pins the broker's internal listener (redpanda:9092), so an offset-range consume never dials the external advertised listener. Unreadable evidence is INDETERMINATE."
+    description: "C28: both named kinds are instrumented in advancing windows, negative tests pass and bite per branch, cursor paging reaches every live group (a full final page with a null cursor passes only when a since= read past it returns zero rows), and the boot has applied events and observes the malformed trigger. Every rpk call pins the broker's internal listener (redpanda:9092), so an offset-range consume never dials the external advertised listener, and the SASL credential reaches rpk through RPK_USER and RPK_PASS in its environment, never as a -X flag on its argv (OMN-17427). Unreadable evidence is INDETERMINATE."
 # These are observed through the projection API and broker probe; this node
 # does not subscribe to or publish on these topics.
 consumer_flow_topics:

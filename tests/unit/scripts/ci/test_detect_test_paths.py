@@ -514,7 +514,7 @@ def test_full_suite_split_count_is_15() -> None:
 # Recorded diff, OMN-15218 / omnibase_infra#2493.
 OMN_15218_DIFF = [
     "scripts/preflight_lane_deploy_attribution.py",
-    "scripts/deploy-runtime.sh",
+    "src/omnibase_infra/handlers/handler_runtime_deploy.sh",
     "scripts/runtime_build/refresh_stability_lane.sh",
     "tests/scripts/test_preflight_lane_deploy_attribution.py",
     "tests/scripts/test_deploy_runtime_lane_attribution.py",
@@ -682,7 +682,7 @@ def test_scripts_change_selects_the_tests_that_exercise_scripts() -> None:
     # scripts/ change mapped to neither (it fell through to the blanket
     # tests/unit/ fallback, which exercises none of them).
     selection = compute_selection(
-        changed_files=["scripts/deploy-runtime.sh"],
+        changed_files=["src/omnibase_infra/handlers/handler_runtime_deploy.sh"],
         adjacency_path=ADJ,
         ref_name="pr-branch",
     )

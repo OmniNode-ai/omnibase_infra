@@ -153,12 +153,14 @@ def test_this_node_contract_declares_no_undeliverable_output_model() -> None:
 
 def _handler(
     declared_chain: tuple[ModelDeclaredChainHop, ...] = _CHAIN,
+    *,
+    settle_attempts: int = 1,
 ) -> HandlerDelegationChainLedger:
     handler = HandlerDelegationChainLedger(
         cast("ModelONEXContainer", object()),
         db_dsn="postgresql://test.invalid/test",
         declared_chain=declared_chain,
-        settle_attempts=1,
+        settle_attempts=settle_attempts,
         settle_delay_seconds=0,
     )
     handler._ensure_db_ready = AsyncMock()  # type: ignore[method-assign]
@@ -312,6 +314,82 @@ async def test_missing_hop_is_persisted_as_incomplete_not_filled() -> None:
         "route-request",
         "completed",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_topic", [_CHAIN_TOPICS[-1], "failed"])
+async def test_rootless_terminal_is_read_once_and_persists_partial_chain(
+    terminal_topic: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-17427: an irreparable terminal must not delay queued chains."""
+    correlation_id = uuid4()
+    declared_chain = _CHAIN[:-1] + (
+        _CHAIN[-1].model_copy(update={"alternatives": ("failed",)}),
+    )
+    handler = _handler(declared_chain, settle_attempts=5)
+    read_observed = AsyncMock(
+        return_value=(
+            ModelObservedHop(
+                topic=terminal_topic,
+                envelope_id=uuid4(),
+                parent_envelope_id=None,
+                correlation_id=correlation_id,
+            ),
+        )
+    )
+    persisted = AsyncMock()
+    monkeypatch.setattr(handler, "_read_observed", read_observed)
+    monkeypatch.setattr(handler, "_persist_rows", persisted)
+
+    await handler.handle(_request(correlation_id))
+
+    assert read_observed.await_count == 1
+    persisted.assert_awaited_once()
+    assert persisted.await_args is not None
+    rows = persisted.await_args.args[0]
+    assert rows
+    assert terminal_topic in [row.hop for row in rows]
+    assert terminal_topic in [row.observed_topic for row in rows]
+    assert not all(row.replay_green for row in rows)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_observed", [True, False])
+async def test_incomplete_chain_without_rootless_terminal_keeps_waiting(
+    terminal_observed: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A terminal with a parent, or no terminal yet, uses the full budget."""
+    correlation_id = uuid4()
+    observed = _complete_observation(correlation_id)
+    settle_attempts = 5
+    handler = _handler(settle_attempts=settle_attempts)
+    read_observed = AsyncMock(
+        return_value=observed[:1] + observed[-1:] if terminal_observed else observed[:1]
+    )
+    persisted = AsyncMock()
+    monkeypatch.setattr(handler, "_read_observed", read_observed)
+    monkeypatch.setattr(handler, "_persist_rows", persisted)
+
+    await handler.handle(_request(correlation_id))
+
+    assert read_observed.await_count == settle_attempts
+    persisted.assert_awaited_once()
+
+
+def test_terminal_is_rootless_is_false_without_a_rootless_terminal() -> None:
+    observed = _complete_observation(uuid4())
+    handler = _handler()
+
+    assert not handler._terminal_is_rootless(())
+    assert not handler._terminal_is_rootless(observed[-1:])
+    assert not handler._terminal_is_rootless(observed[:1])
+
+
+def test_terminal_is_rootless_requires_a_declared_terminal_parent() -> None:
+    observed = _complete_observation(uuid4())[:1]
+
+    assert not _handler(())._terminal_is_rootless(observed)
+    assert not _handler(_CHAIN[:1])._terminal_is_rootless(observed)
 
 
 # --- OMN-18398: a write that cannot happen is never reported as success ---

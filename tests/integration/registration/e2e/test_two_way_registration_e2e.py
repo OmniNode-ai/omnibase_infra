@@ -1020,23 +1020,27 @@ class TestSuite3ReIntrospection:
                     "reason": "correlation_test",
                 }
 
-                await real_kafka_event_bus.publish(
-                    topic=DEFAULT_REQUEST_INTROSPECTION_TOPIC,
-                    key=b"correlation-test",
-                    value=json.dumps(request_event).encode("utf-8"),
-                )
-
-                # Wait for matching response. A timeout is a FAILURE: it means
-                # the request's correlation_id was NOT carried onto the node's
-                # introspection response, which is the whole claim of this test.
-                try:
-                    await asyncio.wait_for(event_received.wait(), timeout=30.0)
-                except TimeoutError:
-                    pytest.fail(
-                        f"No introspection response from "
-                        f"{introspectable_test_node.node_id} carried "
-                        f"correlation_id {request_correlation_id} within 30s."
+                # The subscription above may not have its partitions assigned
+                # when the first request lands (the consumer starts at "latest"),
+                # so re-publish the same request until a response carrying the
+                # correlation_id arrives. A deadline expiry is still a FAILURE.
+                deadline = asyncio.get_running_loop().time() + 30.0
+                while not event_received.is_set():
+                    if asyncio.get_running_loop().time() >= deadline:
+                        pytest.fail(
+                            f"No introspection response from "
+                            f"{introspectable_test_node.node_id} carried "
+                            f"correlation_id {request_correlation_id} within 30s."
+                        )
+                    await real_kafka_event_bus.publish(
+                        topic=DEFAULT_REQUEST_INTROSPECTION_TOPIC,
+                        key=b"correlation-test",
+                        value=json.dumps(request_event).encode("utf-8"),
                     )
+                    try:
+                        await asyncio.wait_for(event_received.wait(), timeout=3.0)
+                    except TimeoutError:
+                        continue
 
                 assert len(matching_responses) > 0, (
                     "Expected response with matching correlation_id"

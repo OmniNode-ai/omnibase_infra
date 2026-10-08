@@ -25,6 +25,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -162,6 +165,27 @@ class TestTheD11Verdict:
         code, _ = _read(monkeypatch, [untitled])
         assert code == 1
 
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Delegation Regression (nightly) lane=stability-test-copy",
+            "Delegation Regression (nightly) other-lane=stability-test",
+        ],
+    )
+    def test_a_lane_token_substring_cannot_launder_a_stability_red(
+        self, monkeypatch: Any, title: str
+    ) -> None:
+        dispatch = _run(
+            102,
+            event="workflow_dispatch",
+            title=title,
+            started=NOW - timedelta(minutes=50),
+        )
+        code, output = _read(monkeypatch, [dispatch, RUN_35832924275])
+        assert code == 1
+        assert "35832924275" in output
+        assert "'failure'" in output
+
     def test_without_the_token_the_same_dispatch_would_have_laundered_it(
         self, monkeypatch: Any
     ) -> None:
@@ -182,17 +206,27 @@ class TestTheD11Verdict:
         code, _ = _read(monkeypatch, [old_title])
         assert code == 0
 
-    def test_the_cli_carries_the_token(self, monkeypatch: Any, capsys: Any) -> None:
-        dev_dispatch = _run(
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Delegation Regression (nightly) lane=dev",
+            "Delegation Regression (nightly) lane=stability-test-copy",
+            "Delegation Regression (nightly) other-lane=stability-test",
+        ],
+    )
+    def test_the_cli_carries_the_token(
+        self, monkeypatch: Any, capsys: Any, title: str
+    ) -> None:
+        dispatch = _run(
             99,
             event="workflow_dispatch",
-            title="Delegation Regression (nightly) lane=dev",
+            title=title,
             started=datetime.now(tz=UTC) - timedelta(minutes=5),
         )
         monkeypatch.setattr(
             "scripts.ci.lab_pass_receipt._gh_api",
             lambda _path: json.dumps(
-                {"workflow_runs": [dev_dispatch, RUN_35832924275]}
+                {"workflow_runs": [dispatch, RUN_35832924275]}
             ).encode(),
         )
         code = main(
@@ -216,6 +250,82 @@ class TestTheD11Verdict:
         )
         assert code == 1
         assert "35832924275" in capsys.readouterr().out
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/omn19311_d11_failure_run.json")
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Delegation Regression (nightly) lane=stability-test-copy", 1),
+        ("Delegation Regression (nightly) other-lane=stability-test", 1),
+        ("Delegation Regression (nightly) lane=stability-test", 0),
+    ],
+)
+def test_recorded_d11_cli_replay_at_gh_boundary(
+    recorded_response: dict[str, Any], tmp_path: Path, title: str, expected: int
+) -> None:
+    """Replay the recorded failure through the CLI's real subprocess adapter.
+
+    The newer green dispatch is a synthetic title control, not a live capture.
+    Only the external gh response is replayed; the reader and CLI run unchanged.
+    """
+    recorded_run = recorded_response["response"]["workflow_runs"][0]
+    assert recorded_run == RUN_35832924275
+    dispatch = _run(
+        102,
+        event="workflow_dispatch",
+        title=title,
+        started=datetime.now(tz=UTC) - timedelta(minutes=50),
+    )
+    response = tmp_path / "response.json"
+    response.write_text(json.dumps({"workflow_runs": [dispatch, recorded_run]}))
+    calls = tmp_path / "calls.jsonl"
+    gh = tmp_path / "gh"
+    gh.write_text(
+        f"#!{sys.executable}\n"
+        "import json, sys\nfrom pathlib import Path\n"
+        "assert len(sys.argv) == 3 and sys.argv[1] == 'api'\n"
+        f"assert sys.argv[2].startswith('repos/{REPO}/actions/workflows/{WORKFLOW}/runs?')\n"
+        f"with Path({str(calls)!r}).open('a') as stream:\n"
+        "    stream.write(json.dumps(sys.argv[2]) + '\\n')\n"
+        f"sys.stdout.buffer.write(Path({str(response)!r}).read_bytes())\n"
+    )
+    gh.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = str(tmp_path) + os.pathsep + env["PATH"]
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/ci/lab_pass_receipt.py",
+            "workflow-verdict",
+            "--repo",
+            REPO,
+            "--workflow",
+            WORKFLOW,
+            "--branch",
+            "dev",
+            "--max-age-hours",
+            "26",
+            "--event",
+            "schedule",
+            "--event",
+            "workflow_dispatch",
+            "--dispatch-title-contains",
+            TOKEN,
+        ],
+        cwd=Path(__file__).resolve().parents[2],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == expected, result.stdout + result.stderr
+    assert len(calls.read_text().splitlines()) == 3
+    if expected:
+        assert "35832924275" in result.stdout
+        assert "'failure'" in result.stdout
+    else:
+        assert "run 102 concluded success" in result.stdout
 
 
 class TestWiring:

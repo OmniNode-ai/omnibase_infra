@@ -56,11 +56,13 @@ Ticket: OMN-18892. Parent epic: OMN-18888 (AC-4). Depends on: OMN-18890.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PROVISIONER = REPO_ROOT / "scripts" / "provision_db_slot.sh"
@@ -507,3 +509,292 @@ class TestTheDirectiveScanDistinguishesAbsenceFromABrokenScan:
             1
         ].split("fi", 1)[0]
         assert "exit" not in no_directive_branch
+
+
+INTELLIGENCE_RUNNER = REPO_ROOT / "scripts" / "run-intelligence-migrations.sh"
+OVERLAY = REPO_ROOT / "docker" / "docker-compose.prepr.yml"
+
+
+@pytest.mark.parametrize("runner", [RUNNER, INTELLIGENCE_RUNNER])
+def test_slot_runner_refuses_shared_principal_before_connecting(
+    runner: Path, tmp_path: Path
+) -> None:
+    log = tmp_path / "connections"
+    stub = tmp_path / "psql"
+    stub.write_text('#!/bin/sh\nprintf "connected\\n" >> "$PROBE_LOG"\nexit 23\n')
+    stub.chmod(0o700)
+    proc = subprocess.run(
+        ["sh", str(runner)],
+        env={
+            "PATH": f"{tmp_path}:/usr/bin:/bin",
+            "ONEX_DB_SLOT": "prepr1",
+            "POSTGRES_USER": "postgres",
+            "POSTGRES_PASSWORD": "test-only",
+            "PG_WAIT_RETRIES": "1",
+            "MIGRATION_LOCK_WAIT_SECONDS": "1",
+            "MIGRATIONS_DIR": str(REPO_ROOT / "docker" / "migrations" / "forward"),
+            "NODE_POSTGRES_DB": "omnidash_analytics",
+            "PROBE_LOG": str(log),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert proc.returncode == 4, proc.stdout + proc.stderr
+    assert "slot_fence_refusal" in proc.stderr
+    assert not log.exists(), "the unsafe identity reached PostgreSQL"
+
+
+def _compose_mapping(node: yaml.Node) -> dict[str, yaml.Node]:
+    assert isinstance(node, yaml.MappingNode)
+    return {key.value: value for key, value in node.value}
+
+
+@pytest.mark.parametrize(
+    ("service", "role", "password"),
+    [
+        ("forward-migration", "role_omnibase", "ROLE_OMNIBASE_PASSWORD"),
+        (
+            "intelligence-migration",
+            "role_omniintelligence",
+            "ROLE_OMNIINTELLIGENCE_PASSWORD",
+        ),
+    ],
+)
+def test_slot_overlay_binds_migrations_to_existing_slot_principals(
+    service: str, role: str, password: str
+) -> None:
+    # Compose nodes retain the override tags without constructing objects.
+    root = yaml.compose(OVERLAY.read_text(), Loader=yaml.SafeLoader)
+    assert root is not None
+    services = _compose_mapping(_compose_mapping(root)["services"])
+    env = _compose_mapping(_compose_mapping(services[service])["environment"])
+    assert env["POSTGRES_USER"].value.startswith(f"{role}_${{ONEX_DB_SLOT:?")
+    assert env["POSTGRES_PASSWORD"].value.startswith(f"${{{password}:?")
+    if service == "forward-migration":
+        assert env["ROLE_OMNIDASH_PASSWORD"].value.startswith(
+            "${ROLE_OMNIDASH_PASSWORD:?"
+        )
+        assert env["ROLE_OMNINODE_PASSWORD"].value.startswith(
+            "${ROLE_OMNINODE_PASSWORD:?"
+        )
+
+
+def _slot_connection_helpers() -> str:
+    text = RUNNER.read_text()
+    start = text.index("# ---- BEGIN slot migration connections (OMN-18892) ----")
+    end = text.index("# ---- END slot migration connections (OMN-18892) ----")
+    return text[start:end]
+
+
+def _run_slot_connection(
+    tmp_path: Path,
+    database: str,
+    *,
+    safe: str = "t",
+    credential_value: str = "test-only",
+) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    log = tmp_path / "connections"
+    stub = tmp_path / "psql"
+    stub.write_text(
+        """#!/bin/sh
+user=""
+db=""
+previous=""
+for arg in "$@"; do
+    [ "$previous" = "-U" ] && user="$arg"
+    [ "$previous" = "-d" ] && db="$arg"
+    previous="$arg"
+done
+printf '%s %s\n' "$db" "$user" >> "$PROBE_LOG"
+if [ "$PGPASSWORD" != "$PROBE_EXPECTED_CREDENTIAL" ]; then
+    echo "authentication mismatch" >&2
+    exit 23
+fi
+case "$*" in
+    *"rolsuper"*) printf '%s\n' "$PROBE_SAFE" ;;
+    *"-f"*) printf 'applied\n' ;;
+esac
+"""
+    )
+    stub.chmod(0o700)
+    proc = subprocess.run(
+        [
+            "sh",
+            "-c",
+            _slot_connection_helpers()
+            + '\nslot_verify_migration_identity "$1" && psql -d "$1" -U "$PGUSER" -f candidate.sql',
+            "sh",
+            database,
+        ],
+        env={
+            "PATH": f"{tmp_path}{os.pathsep}/usr/bin:/bin",
+            "SLOT_ACTIVE": "1",
+            "ONEX_DB_SLOT": "prepr1",
+            "PGUSER": "role_omnibase_prepr1",
+            "PGHOST": "postgres",
+            "PGPORT": "5432",
+            "POSTGRES_PASSWORD": f"{credential_value}-infra"
+            if credential_value
+            else "",
+            "ROLE_OMNIDASH_PASSWORD": f"{credential_value}-analytics"
+            if credential_value
+            else "",
+            "ROLE_OMNINODE_PASSWORD": f"{credential_value}-cloud"
+            if credential_value
+            else "",
+            "PROBE_EXPECTED_CREDENTIAL": f"{credential_value}-"
+            + {
+                "omnibase_infra_prepr1": "infra",
+                "omnidash_analytics_prepr1": "analytics",
+                "omninode_cloud_prepr1": "cloud",
+            }.get(database, "outside"),
+            "PROBE_SAFE": safe,
+            "PROBE_LOG": str(log),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    return proc, log.read_text().splitlines() if log.exists() else []
+
+
+@pytest.mark.parametrize(
+    ("database", "role"),
+    [
+        ("omnibase_infra_prepr1", "role_omnibase_prepr1"),
+        ("omnidash_analytics_prepr1", "role_omnidash_prepr1"),
+        ("omninode_cloud_prepr1", "role_omninode_prepr1"),
+    ],
+)
+def test_forward_connections_use_the_database_own_slot_principal(
+    tmp_path: Path, database: str, role: str
+) -> None:
+    proc, calls = _run_slot_connection(tmp_path, database)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "applied", (
+        "positive control: the file was not applied"
+    )
+    assert calls == [f"{database} {role}", f"{database} {role}"]
+
+
+@pytest.mark.parametrize(
+    "database", ["postgres", "omnibase_infra", "omnibase_infra_prepr2"]
+)
+def test_forward_connections_refuse_out_of_slot_databases(
+    tmp_path: Path, database: str
+) -> None:
+    proc, calls = _run_slot_connection(tmp_path, database)
+    assert proc.returncode == 4, proc.stderr
+    assert "slot_fence_refusal" in proc.stderr
+    assert calls == []
+
+
+@pytest.mark.parametrize("safe", ["f", "", "unexpected"])
+def test_forward_migration_refuses_escalated_or_unreadable_identity(
+    tmp_path: Path, safe: str
+) -> None:
+    proc, calls = _run_slot_connection(tmp_path, "omnibase_infra_prepr1", safe=safe)
+    assert proc.returncode == 4, proc.stderr
+    assert "slot_fence_refusal" in proc.stderr
+    assert len(calls) == 1
+    assert "applied" not in proc.stdout
+
+
+def test_forward_connections_refuse_missing_slot_credential(tmp_path: Path) -> None:
+    proc, calls = _run_slot_connection(
+        tmp_path, "omnidash_analytics_prepr1", credential_value=""
+    )
+    assert proc.returncode == 4, proc.stderr
+    assert "slot_fence_refusal" in proc.stderr
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("active", "expected"), [("0", "omninode_cloud"), ("1", "omninode_cloud_prepr1")]
+)
+def test_cloud_history_discovery_uses_the_lanes_own_database(
+    active: str, expected: str
+) -> None:
+    text = RUNNER.read_text()
+    helper = (
+        "import_cloud_history() {"
+        + text.split("import_cloud_history() {", 1)[1].split("\n}\n", 1)[0]
+        + "\n}\n"
+    )
+    proc = subprocess.run(
+        [
+            "sh",
+            "-c",
+            'validate_database_identifier() { :; }\nslot_fence_assert() { :; }\ndatabase_exists() { printf "%s\\n" "$1" >&2; return 1; }\n'
+            + helper
+            + "\nimport_cloud_history analytics",
+        ],
+        env={"PATH": "/usr/bin:/bin", "SLOT_ACTIVE": active, "ONEX_DB_SLOT": "prepr1"},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stderr.strip() == expected
+
+
+@pytest.mark.parametrize("safe", ["t", "f", "", "unexpected"])
+def test_intelligence_checks_identity_before_applying_branch_sql(
+    tmp_path: Path, safe: str
+) -> None:
+    log = tmp_path / "connections"
+    stub = tmp_path / "psql"
+    stub.write_text(
+        """#!/bin/sh
+user=""
+db=""
+previous=""
+for arg in "$@"; do
+    [ "$previous" = "-U" ] && user="$arg"
+    [ "$previous" = "-d" ] && db="$arg"
+    previous="$arg"
+done
+printf '%s %s\n' "$db" "$user" >> "$PROBE_LOG"
+case "$*" in
+    *"rolsuper"*) printf '%s\n' "$PROBE_SAFE" ;;
+    *"FROM pg_database WHERE datname"*) echo 1 ;;
+    *"-f"*) echo applied >> "$PROBE_LOG" ;;
+esac
+"""
+    )
+    stub.chmod(0o700)
+    proc = subprocess.run(
+        ["sh", str(INTELLIGENCE_RUNNER)],
+        env={
+            "PATH": f"{tmp_path}:/usr/bin:/bin",
+            "ONEX_DB_SLOT": "prepr1",
+            "POSTGRES_USER": "role_omniintelligence_prepr1",
+            "POSTGRES_PASSWORD": "test-only",
+            "PG_WAIT_RETRIES": "1",
+            "MIGRATIONS_DIR": str(REPO_ROOT / "docker" / "migrations" / "intelligence"),
+            "PROBE_SAFE": safe,
+            "PROBE_LOG": str(log),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    calls = log.read_text().splitlines()
+    assert calls, "positive control: the runner did not connect"
+    assert set(calls) <= {
+        "omniintelligence_prepr1 role_omniintelligence_prepr1",
+        "applied",
+    }
+    if safe == "t":
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "applied" in calls
+    else:
+        assert proc.returncode == 4, proc.stdout + proc.stderr
+        assert len(calls) == 2
+        assert "applied" not in calls
+        assert "slot_fence_refusal" in proc.stderr

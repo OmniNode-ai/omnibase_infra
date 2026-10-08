@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 #
 # lane_lock.sh -- shell front end for the per-compose-project lane lock
-# (OMN-16729). Sourced by scripts/deploy-runtime.sh,
+# (OMN-16729). Sourced by onex-runtime-deploy,
 # scripts/runtime_build/refresh_dev_lane.sh and
 # scripts/runtime_build/refresh_stability_lane.sh.
 #
@@ -16,7 +16,7 @@
 #       releases only a lock THIS shell acquired; a no-op otherwise.
 #
 # Re-entrancy: the acquiring shell exports ONEX_LANE_LOCK_HELD with the compose
-# project appended. A nested call (refresh_*_lane.sh -> deploy-runtime.sh) sees
+# project appended. A nested call (refresh_*_lane.sh -> onex-runtime-deploy) sees
 # its own project already listed and does NOT try to acquire again, so the
 # nested call cannot deadlock against its own parent. That token is inherited
 # only by real children of the holder, which is exactly the set of processes

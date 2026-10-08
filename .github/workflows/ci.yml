@@ -342,6 +342,10 @@ jobs:
       - name: Rolling runner registration preflight (OMN-18877)
         run: uv run --frozen pytest tests/ci/test_deploy_runners_registration_preflight.py -q
 
+      # OMN-17678: same focused suite as the pre-commit transport gate.
+      - name: Linear transport consolidation regression (OMN-17678)
+        run: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q
+
       # OMN-19070: same focused suite as the self-pause pre-commit hook.
       - name: Runner disk admission self-pause regression (OMN-19070)
         run: uv run --frozen pytest tests/scripts/test_runner_job_started_disk_admission.py -q
@@ -1270,6 +1274,13 @@ jobs:
           echo "================================================================"
           uv run python scripts/validation/lint_topic_names.py \
             --scan-contracts src/omnibase_infra/nodes
+
+      # OMN-19315: this required context checks consumer sets in Python too.
+      - name: Refuse mixed consumer topic namespaces
+        run: uv run --frozen python scripts/validation/lint_topic_names.py --scan-python src/omnibase_infra
+
+      - name: Prove consumer namespace refusal and valid controls
+        run: uv run --frozen pytest tests/unit/scripts/validation/test_lint_topic_names.py -q --no-cov
 
       - name: Check for placeholder topic names (OMN-4805)
         run: |
@@ -2269,6 +2280,9 @@ jobs:
           echo "================================================================"
           uv run pytest tests/ci/test_ci_evidence_policy.py -v --tb=short
 
+      - name: Check autoclose historical evidence controls (OMN-16106)
+        run: uv run --frozen pytest tests/ci/test_autoclose_history_omn16106.py -q --no-cov
+
   # Contract path pre-flight: verify all referenced module paths exist before expensive test splits (F8/OMN-6478)
   contract-path-preflight:
     needs: occ-preflight
@@ -2437,6 +2451,11 @@ jobs:
       - name: Test impacted-test selector
         run: uv run --frozen pytest tests/unit/scripts/ci/test_detect_test_paths.py -q --timeout=60
 
+      # OMN-18892: the required detection job must prove the migration
+      # principal fence before its selected test matrix can be trusted.
+      - name: Test slot migration principal confinement (OMN-18892)
+        run: uv run --frozen pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q --timeout=60
+
       # OMN-19927 (plan task S2): was this commit validated by a successful
       # merge group? A queue landing fast-forwards `dev` to the merge-group
       # commit, so the answer is a lookup of that sha's merge-group `CI`
@@ -2597,6 +2616,12 @@ jobs:
 
       - name: Verify lab-pass criterion bindings and closer pins (OMN-18488)
         run: uv run --frozen pytest tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488.py -q
+
+      - name: Verify persistent lab receipt and candidate smoke isolation (OMN-18276)
+        run: uv run --frozen pytest tests/scripts/ci/test_persistent_lab_receipt_omn18276.py -q --no-cov
+
+      - name: Verify D11 workflow verdict lane matching (OMN-19311)
+        run: uv run --frozen pytest tests/ci/test_workflow_verdict_omn_d11.py -q --no-cov
 
       - name: Verify cloud migration failure scope (OMN-18496)
         run: uv run --frozen pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py -q

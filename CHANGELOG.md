@@ -1,3 +1,31 @@
+## v0.38.69 (2026-10-08)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.69 by the scheduled release train.
+- 19 release-relevant commit(s) merged since v0.38.68.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.68
+- fix(cli): apply boolean defaults only when explicitly declared (#4724)
+- refactor: route host deployment through the operator node (#4656)
+- fix: carry persisted tenant on outbox envelopes (#4722)
+- : Enforce declared DLQ sink acknowledgment in consume callback (#4720)
+- feat: vendor the tenant-credentials fingerprint and set-time migration (#4669)
+- fix: refuse mixed consumer topic namespaces (#4707)
+- fix: resolve physical topics for drain-proof lookups (#4714)
+- fix: record in-memory consume concurrency declarations (#4715)
+- feat: require recorded live contact for CI tooling (#4702)
+- fix: re-check boot identity on consumer flow read failure (#4701)
+- : Use CSafeLoader for cold contract discovery with SafeLoader fallback (#4596)
+- fix: remove fallback immutable grain projections (#4688)
+- fix: preserve rejected response contracts across terminal dispatch (#4681)
+- feat: vendor metering_summary 0003, compression and cache hit rate as nullable columns (#4657)
+- refactor: move registration intent payloads out of the reducer node (#4687)
+- fix: carry pinned lab-pass bindings into autoclose (#4685)
+- feat: lane mirror lanes and topic sets come from the deployment overlay (#4684)
+- feat: vendor 0058_delegation_events_requested_model_and_timing.sql (#4673)
+- fix: HandlerHttpRest reports a 402 as payment_required without body or header (#4594)
+
 ## v0.38.68 (2026-10-07)
 
 ### Release

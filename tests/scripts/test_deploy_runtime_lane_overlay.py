@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""deploy-runtime.sh must layer the lane overlay on every compose invocation.
+"""onex-runtime-deploy must layer the lane overlay on every compose invocation.
 
-OMN-13581: deploy-runtime.sh historically passed ONLY ``-f docker-compose.infra.yml``
+OMN-13581: onex-runtime-deploy historically passed ONLY ``-f docker-compose.infra.yml``
 on every ``docker compose`` call -- including ``warm_broker_topic_provisioning``'s
 ``up redpanda`` step. The base infra compose hardcodes
 ``container_name: omnibase-infra-redpanda`` (the DEV name) and the dev network.
@@ -36,9 +36,15 @@ from pathlib import Path
 
 import pytest
 
-DEPLOY_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "omnibase_infra"
+    / "handlers"
+    / "handler_runtime_deploy.sh"
+)
 # OMN-16729: the three resolver functions moved into a shared lib that
-# deploy-runtime.sh, refresh_dev_lane.sh and refresh_stability_lane.sh all
+# onex-runtime-deploy, refresh_dev_lane.sh and refresh_stability_lane.sh all
 # source. They moved because the refresh wrappers' OWN compose calls -- notably
 # the failure rollback recreate -- needed the identical derivation, and their
 # hand-spelled copy of the file list had lost the dev-lane overlay.
@@ -68,7 +74,7 @@ def _extract_function(name: str) -> str:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, (
-        f"could not extract function {name}() from deploy-runtime.sh"
+        f"could not extract function {name}() from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -99,10 +105,10 @@ def _run_overlay_resolver(compose_project: str) -> subprocess.CompletedProcess[s
 
 @pytest.mark.unit
 def test_defines_lane_overlay_resolver_functions() -> None:
-    """The resolvers exist in the shared lib, and deploy-runtime.sh sources it.
+    """The resolvers exist in the shared lib, and onex-runtime-deploy sources it.
 
     Both halves matter: a lib nobody sources resolves nothing, and a
-    deploy-runtime.sh that re-declares its own copy is the duplication OMN-16729
+    onex-runtime-deploy that re-declares its own copy is the duplication OMN-16729
     removed.
     """
     lib = COMPOSE_FILES_SH.read_text(encoding="utf-8")
@@ -116,7 +122,7 @@ def test_defines_lane_overlay_resolver_functions() -> None:
         )
     text = _script_text()
     assert "runtime_build/compose_files.sh" in text, (
-        "deploy-runtime.sh must source the shared compose-file resolver"
+        "onex-runtime-deploy must source the shared compose-file resolver"
     )
     for fn in (
         "resolve_lane_name",
@@ -124,7 +130,7 @@ def test_defines_lane_overlay_resolver_functions() -> None:
         "resolve_compose_file_args",
     ):
         assert not re.search(rf"^{fn}\s*\(\)", text, re.MULTILINE), (
-            f"deploy-runtime.sh must NOT re-declare {fn}() -- one derivation only"
+            f"onex-runtime-deploy must NOT re-declare {fn}() -- one derivation only"
         )
 
 
@@ -278,7 +284,7 @@ def test_no_compose_invocation_uses_bare_infra_only() -> None:
         if re.search(r"compose_file=.*docker-compose\.infra\.yml", line)
     ]
     assert offenders == [], (
-        "Found bare single-compose-file locals in deploy-runtime.sh; every compose "
+        "Found bare single-compose-file locals in onex-runtime-deploy; every compose "
         f"call must layer the lane overlay via resolve_compose_file_args: {offenders}"
     )
 

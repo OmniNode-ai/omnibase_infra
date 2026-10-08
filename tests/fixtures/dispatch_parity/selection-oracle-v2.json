@@ -484,6 +484,21 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_contract_validate_compute.HandlerContractValidate.validate_contract_8b46cf07": {
+      "category": "command",
+      "contract_name": "node_contract_validate_compute",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_contract_validate_compute.HandlerContractValidate.validate_contract_8b46cf07",
+      "handler_module": "omnibase_infra.nodes.node_contract_validate_compute.handlers.handler_contract_validate",
+      "handler_name": "HandlerContractValidate",
+      "message_types": [
+        "omnibase-infra.contract-validation-requested",
+        "onex.cmd.omnibase-infra.contract-validation-requested.v1"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
     "dispatcher.auto.node_db_error_linear_effect.HandlerLinearDbErrorReporter.report_error_36391d3f": {
       "category": "event",
       "contract_name": "node_db_error_linear_effect",
@@ -3537,10 +3552,10 @@
       },
       "contracts_discovered": 155,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 92,
-      "probe_count": 1066,
-      "registered_dispatchers": 124,
-      "registered_routes": 109,
+      "distinct_subscribe_topics": 93,
+      "probe_count": 1068,
+      "registered_dispatchers": 125,
+      "registered_routes": 110,
       "type_scoped_dispatchers": 69
     },
     "duplicate_winners": [],
@@ -3581,10 +3596,10 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-10-08T03:46:06.735593+00:00",
+    "generated_at_utc": "2026-10-08T08:00:42.877105+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.35",
-      "omnibase-infra": "0.38.69",
+      "omnibase-infra": "0.38.70",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,
@@ -3779,6 +3794,23 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"
+    },
+    "P1a::onex.cmd.omnibase-infra.contract-validation-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "omnibase-infra.contract-validation-requested",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_contract_validate_compute.HandlerContractValidate.validate_contract_8b46cf07"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "omnibase-infra.contract-validation-requested",
+        "status": "success"
+      },
+      "topic": "onex.cmd.omnibase-infra.contract-validation-requested.v1"
     },
     "P1a::onex.cmd.omnibase-infra.delegation-request.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -5217,6 +5249,21 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"
+    },
+    "P1b::onex.cmd.omnibase-infra.contract-validation-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.omnibase-infra.contract-validation-requested.v1"
     },
     "P1b::onex.cmd.omnibase-infra.delegation-request.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -24291,6 +24338,16 @@
       "route_id": "route.auto.node_consumer_health_triage_effect.HandlerConsumerHealthTriage.triage_health_event_a7ef6e32.onex_evt_omnibase_infra_consumer_health_v1",
       "topic": "onex.evt.omnibase-infra.consumer-health.v1",
       "topic_pattern": "*.evt.omnibase-infra.consumer-health.*",
+      "type_scoped": false
+    },
+    {
+      "contract_name": "node_contract_validate_compute",
+      "dispatcher_id": "dispatcher.auto.node_contract_validate_compute.HandlerContractValidate.validate_contract_8b46cf07",
+      "handler_id": "dispatcher.auto.node_contract_validate_compute.HandlerContractValidate.validate_contract_8b46cf07",
+      "message_category": "command",
+      "route_id": "route.auto.node_contract_validate_compute.HandlerContractValidate.validate_contract_8b46cf07.onex_cmd_omnibase_infra_contract_validation_requested_v1",
+      "topic": "onex.cmd.omnibase-infra.contract-validation-requested.v1",
+      "topic_pattern": "*.cmd.omnibase-infra.contract-validation-requested.*",
       "type_scoped": false
     },
     {

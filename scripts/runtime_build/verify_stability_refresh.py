@@ -133,7 +133,7 @@ DEFAULT_MIN_DERIVED_COVERAGE = 0.90
 # Bounded re-read window after a --force-recreate: a consumer's Kafka client
 # needs a few seconds to rejoin its group, so an immediately-observed absence is
 # not yet a finding. Same shape as ``assert_broker_reachable()`` in
-# deploy-runtime.sh -- bounded attempts at a fixed interval, never a poll.
+# onex-runtime-deploy -- bounded attempts at a fixed interval, never a poll.
 DEFAULT_GROUP_AUDIT_ATTEMPTS = 10
 DEFAULT_GROUP_AUDIT_INTERVAL_SECONDS = 3.0
 # OMN-14013: fraction of topic_partitions_per_shard in use that triggers a

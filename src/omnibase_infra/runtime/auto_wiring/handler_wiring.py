@@ -5971,6 +5971,9 @@ def _make_stateful_dispatch_callback(
                 correlation_id=cid_uuid,
                 event_type=event_type,
                 parent_envelope_id=edge,
+                # OMN-18389: recovery has only the persisted entry; payload
+                # attribution alone cannot attribute a quality-gate verdict.
+                tenant_id=_extract_dispatch_tenant_id(entry),
             )
             key: bytes | None = None
             for attr in ("entity_id", "node_id", "session_id", "correlation_id"):
@@ -7299,6 +7302,7 @@ def _make_event_bus_callback(
     declares_output: bool | None = None,
     failure_terminal_topics: Sequence[str] = (),
     terminal_answer_topic: str | None = None,
+    dlq_topic: str | None = None,
 ) -> Callable[..., Awaitable[None]]:
     """Create a Kafka on_message callback that deserializes and dispatches to engine.
 
@@ -7363,6 +7367,12 @@ def _make_event_bus_callback(
     to nothing. See ``_resolve_boundary_terminal_answer_topic`` for the full
     precedence and the guards it keeps. ``None`` (the default) preserves the
     pre-OMN-17432 silence for callers/tests that wire no terminal address.
+
+    ``dlq_topic`` (OMN-18879): the contract's first declared dead-letter sink,
+    matching projection-sink routing. This address is independent of reply
+    terminals. A declared sink must acknowledge the write itself; success on
+    a category fallback cannot satisfy the contract. Undeclared contracts
+    retain category routing.
     """
     import json
 
@@ -7860,6 +7870,10 @@ def _make_event_bus_callback(
                 get_dlq_topic_for_original,
             )
 
+            resolved_dlq_topic = dlq_topic or get_dlq_topic_for_original(topic)
+            declared_dlq_options: dict[str, object] = (
+                {"require_declared_topic": True} if dlq_topic else {}
+            )
             dlq_persisted = await publish_dlq_fn(
                 original_topic=topic,
                 raw_msg=message,
@@ -7867,7 +7881,8 @@ def _make_event_bus_callback(
                 correlation_id=correlation_id,
                 failure_type="handler_exception",
                 consumer_group="auto-wiring",
-                dlq_topic=get_dlq_topic_for_original(topic),
+                dlq_topic=resolved_dlq_topic,
+                **declared_dlq_options,
             )
             if dlq_persisted:
                 from omnibase_infra.runtime.boundary_failure_terminal import (
@@ -7887,9 +7902,10 @@ def _make_event_bus_callback(
                     flow_counters.record_dlq(consumer_group, topic)
                 logger.error(
                     "metric_name=boundary_swallow_prevented dlq_routed=true "
-                    "dlq_enabled=%s topic=%s error_type=%s correlation_id=%s",
+                    "dlq_enabled=%s topic=%s dlq_topic=%s error_type=%s correlation_id=%s",
                     dlq_enabled,
                     topic,
+                    resolved_dlq_topic,
                     type(exc).__name__,
                     correlation_id,
                 )
@@ -7912,9 +7928,10 @@ def _make_event_bus_callback(
                 logger.error(
                     "metric_name=boundary_swallow_observed dlq_routed=false "
                     "dlq_enabled=%s dlq_publish_failed=true message_lost=true "
-                    "topic=%s error_type=%s correlation_id=%s",
+                    "topic=%s dlq_topic=%s error_type=%s correlation_id=%s",
                     dlq_enabled,
                     topic,
+                    resolved_dlq_topic,
                     type(exc).__name__,
                     correlation_id,
                 )
@@ -11282,6 +11299,12 @@ async def _subscribe_contract_topics(
 
     # Build callbacks for all topics first (synchronous, no I/O).
     topic_callbacks: list[tuple[str, Callable[..., Awaitable[None]]]] = []
+    # OMN-18879: provisioning already reads this declaration, and projection
+    # sinks route to its first entry. Carry that same address to the consume
+    # boundary instead of deriving a different category topic there.
+    declared_dlq_topics = contract.event_bus.dlq_topics or tuple(
+        _read_dlq_topics(contract.contract_path)
+    )
     for topic in contract.event_bus.subscribe_topics:
         # OMN-14758 (S6) / OMN-14771 (S8 §D1=4b): the ONE core RuntimeDispatch owns this
         # topic's OWNER route. Skip the legacy push callback for the OWNER only, so
@@ -11363,6 +11386,7 @@ async def _subscribe_contract_topics(
                 # publishes SUCCESS to, so it is inside the publish allowlist by
                 # construction and needs no second derivation.
                 terminal_answer_topic=output_topic,
+                dlq_topic=declared_dlq_topics[0] if declared_dlq_topics else None,
             )
         topic_callbacks.append((topic, callback))
 

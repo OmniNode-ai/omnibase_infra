@@ -4,9 +4,9 @@
 
 ``SCOPE_SERVICES[Scope.RUNTIME]`` is lane-agnostic and lists ten services.
 ``docker/docker-compose.dev-lane.yml`` declares eight more that exist on no
-other lane, and ``scripts/deploy-runtime.sh`` carries them in
+other lane, and ``src/omnibase_infra/handlers/handler_runtime_deploy.sh`` carries them in
 ``DEV_LANE_ONLY_RUNTIME_SERVICES``. That array is expanded only inside that
-script, so it is reachable only through ``deploy-runtime.sh`` /
+script, so it is reachable only through ``onex-runtime-deploy`` /
 ``refresh_dev_lane.sh`` -- never through the deploy agent.
 
 The consequence is not intermittent. EVERY agent-path deploy to the dev lane
@@ -55,7 +55,9 @@ from deploy_agent.executor import DeployExecutor, _requested_services_for_up
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 DEV_LANE_OVERLAY_BASENAME = "docker-compose.dev-lane.yml"
 
 
@@ -181,7 +183,7 @@ class TestTheTwoListsCannotDrift:
     def test_python_declaration_equals_the_bash_array(self) -> None:
         from_bash = _bash_array("DEV_LANE_ONLY_RUNTIME_SERVICES")
         assert set(DEV_LANE_ONLY_RUNTIME_SERVICES) == set(from_bash), (
-            "scripts/deploy-runtime.sh DEV_LANE_ONLY_RUNTIME_SERVICES and "
+            "src/omnibase_infra/handlers/handler_runtime_deploy.sh DEV_LANE_ONLY_RUNTIME_SERVICES and "
             "deploy_agent.events.DEV_LANE_ONLY_RUNTIME_SERVICES have drifted. "
             f"only in python: {sorted(set(DEV_LANE_ONLY_RUNTIME_SERVICES) - set(from_bash))}; "
             f"only in bash: {sorted(set(from_bash) - set(DEV_LANE_ONLY_RUNTIME_SERVICES))}"

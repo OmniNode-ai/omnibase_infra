@@ -148,6 +148,10 @@ if [ -n "$ONEX_DB_SLOT" ]; then
     echo "[forward-migration] slot_fence_refusal: ONEX_DB_SLOT '${ONEX_DB_SLOT}' is malformed (expected ^[a-z][a-z0-9]{0,11}\$)" >&2
     exit 3
   fi
+  if [ "$PGUSER" != "role_omnibase_${ONEX_DB_SLOT}" ]; then
+    echo "[forward-migration] slot_fence_refusal: a slot migration must authenticate as role_omnibase_${ONEX_DB_SLOT}, never a shared principal" >&2
+    exit 4
+  fi
   SLOT_ACTIVE=1
   PGDB="${PGDB}_${ONEX_DB_SLOT}"
   NODE_PGDB="${NODE_PGDB}_${ONEX_DB_SLOT}"
@@ -321,6 +325,67 @@ slot_migration_file() {
   printf '%s\n' "$_smf_out"
 }
 # ---- END slot \connect rewrite (OMN-18893) ----
+
+# ---- BEGIN slot migration connections (OMN-18892) ----
+# Every psql call uses the database's existing slot principal. The overlay
+# supplies only slot credentials; branch SQL never receives the shared admin
+# password and cannot regain it with RESET ROLE or a psql reconnect.
+slot_migration_connection() {
+  _smc_db="$1"
+  case "$_smc_db" in
+    "omnibase_infra_${ONEX_DB_SLOT}")
+      _smc_user="role_omnibase_${ONEX_DB_SLOT}"
+      _smc_password="${POSTGRES_PASSWORD:-}"
+      ;;
+    "omnidash_analytics_${ONEX_DB_SLOT}")
+      _smc_user="role_omnidash_${ONEX_DB_SLOT}"
+      _smc_password="${ROLE_OMNIDASH_PASSWORD:-}"
+      ;;
+    "omninode_cloud_${ONEX_DB_SLOT}")
+      _smc_user="role_omninode_${ONEX_DB_SLOT}"
+      _smc_password="${ROLE_OMNINODE_PASSWORD:-}"
+      ;;
+    *)
+      echo "[forward-migration] slot_fence_refusal: migration connection outside the slot's database set: ${_smc_db}" >&2
+      return 4
+      ;;
+  esac
+  if [ -z "$_smc_password" ]; then
+    echo "[forward-migration] slot_fence_refusal: missing credential for ${_smc_user}" >&2
+    return 4
+  fi
+}
+
+slot_psql() {
+  _sp_db=""
+  _sp_previous=""
+  for _sp_arg in "$@"; do
+    [ "$_sp_previous" != "-d" ] || _sp_db="$_sp_arg"
+    _sp_previous="$_sp_arg"
+  done
+  slot_migration_connection "$_sp_db" || return 4
+  PGPASSWORD="$_smc_password" command psql "$@" -U "$_smc_user"
+}
+
+slot_verify_migration_identity() {
+  _svmi_db="$1"
+  slot_migration_connection "$_svmi_db" || return 4
+  _svmi_safe="$(slot_psql -X -qAt -h "$PGHOST" -p "$PGPORT" -d "$_svmi_db" \
+    -v ON_ERROR_STOP=1 -c "SELECT current_user = '${_smc_user}'
+      AND NOT rolsuper AND NOT rolbypassrls AND NOT rolcreaterole
+      AND NOT rolcreatedb AND NOT rolreplication
+      FROM pg_roles WHERE rolname = current_user")" || _svmi_safe=""
+  if [ "$_svmi_safe" != "t" ]; then
+    echo "[forward-migration] slot_fence_refusal: unsafe or unreadable migration identity in ${_svmi_db}" >&2
+    return 4
+  fi
+}
+
+if [ "$SLOT_ACTIVE" -eq 1 ]; then
+  psql() { slot_psql "$@"; }
+fi
+# ---- END slot migration connections (OMN-18892) ----
+
 # ---- END pre-PR verify slot fence (OMN-18892) ----
 PG_WAIT_RETRIES="${PG_WAIT_RETRIES:-30}"
 LEDGER_BOOTSTRAP="${MIGRATIONS_DIR}/_ledger/bootstrap.sql"
@@ -762,6 +827,11 @@ until psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDB" -c "SELECT 1" >/dev
   sleep 2
 done
 echo "[forward-migration] Postgres is ready."
+
+if [ "$SLOT_ACTIVE" -eq 1 ]; then
+  slot_verify_migration_identity "$PGDB" || exit 4
+  slot_verify_migration_identity "$NODE_PGDB" || exit 4
+fi
 
 # ---- BEGIN canonical forward-migration advisory lock (OMN-15291) ----
 # Port of the OMN-15254 single-session lock to this runner, in POSIX sh (this
@@ -1409,11 +1479,18 @@ import_cloud_history() {
   target_database="$1"
   cloud_database="${OMNINODE_CLOUD_HISTORY_DB:-omninode_cloud}"
   validate_database_identifier "$cloud_database"
+  if [ "$SLOT_ACTIVE" -eq 1 ]; then
+    cloud_database="${cloud_database}_${ONEX_DB_SLOT}"
+    slot_fence_assert "$cloud_database" "cloud history database"
+  fi
   if ! database_exists "$cloud_database"; then
     echo "[forward-migration] Historical cloud database ${cloud_database} absent; no cloud history to import."
     return 0
   fi
 
+  if [ "$SLOT_ACTIVE" -eq 1 ]; then
+    slot_verify_migration_identity "$cloud_database" || exit 4
+  fi
   stage_file="$(mktemp)"
   validate_client_file_path "$CLOUD_MIGRATION_ALIASES"
   psql -X -q -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$cloud_database" \

@@ -63,8 +63,9 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-import httpx
-
+from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
+    AdapterLinearGraphQLProjectTracker,
+)
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -84,9 +85,6 @@ if TYPE_CHECKING:
     import asyncpg
 
 logger = logging.getLogger(__name__)
-
-# Linear GraphQL endpoint
-_LINEAR_API_URL: str = "https://api.linear.app/graphql"
 
 # Default timeout for Linear API calls (seconds)
 _DEFAULT_TIMEOUT_SECONDS: float = 15.0
@@ -370,24 +368,18 @@ class HandlerLinearDbErrorReporter:
         title = _build_ticket_title(event)
         description = _build_ticket_description(event)
 
-        payload = {
-            "query": _ISSUE_CREATE_MUTATION,
-            "variables": {
-                "teamId": self._linear_team_id,
-                "title": title,
-                "description": description,
-                "priority": 3,  # Normal priority
-            },
-        }
-
-        # Auth header: no "Bearer" prefix — matches generate_ticket_plan.py pattern
-        headers = {
-            "Authorization": self._linear_api_key,
-            "Content-Type": "application/json",
-        }
-
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(_LINEAR_API_URL, json=payload, headers=headers)
+        async with AdapterLinearGraphQLProjectTracker.graphql_transport(
+            api_key=self._linear_api_key, timeout_seconds=self._timeout
+        ) as transport:
+            response = await transport.post_graphql(
+                _ISSUE_CREATE_MUTATION,
+                {
+                    "teamId": self._linear_team_id,
+                    "title": title,
+                    "description": description,
+                    "priority": 3,  # Normal priority
+                },
+            )
             response.raise_for_status()
             data = response.json()
 
