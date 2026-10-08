@@ -245,8 +245,21 @@ hosts:
   # OMN-19505, the second deployed dev lane dev-202.
   lab-202:
     aliases: [omnipc2]
+# OMN-19419: expected broker keys are resolved from the settings service's
+# rendered environment; memory is compared with the broker startup command.
+# Lanes without a broker (prepr slots, principal-issuer) inherit their host's
+# dependency and do not reconcile it. Judge/collaborator mutation stays gated.
+x-broker-profile: &broker_profile
+  service: redpanda
+  settings_service: redpanda-partition-cap
+  keys:
+    segment_fallocation_step: REDPANDA_SEGMENT_FALLOCATION_STEP
+    log_segment_ms: REDPANDA_LOG_SEGMENT_MS
+    retention_bytes: REDPANDA_RETENTION_BYTES
+    memory: REDPANDA_PROFILE_MEMORY
 lanes:
   stability-test:
+    broker_profile: *broker_profile
     hosts: [lab-201]
     compose_file: docker/docker-compose.stability-test.yml
     compose_project: omnibase-infra-stability-test
@@ -432,6 +445,7 @@ lanes:
   # idle-converge window of this lane (OMN-19509). The backup delegation lane
   # is the h201 stability-test lane (OMN-20593).
   dev:
+    broker_profile: *broker_profile
     hosts: [lab-201]
     compose_file: docker/docker-compose.generated.yml
     compose_project: omnibase-infra
@@ -673,6 +687,7 @@ lanes:
   #   `docker ps -a` grouped by compose project returns the same 10 rows under
   #   omnibase-infra-dogfood. No lane was mutated: every command was a read.
   dogfood:
+    broker_profile: *broker_profile
     hosts: [lab-105, lab-101, lab-200]
     compose_file: docker/docker-compose.dogfood.yml
     compose_project: omnibase-infra-dogfood
@@ -741,6 +756,7 @@ lanes:
   # .202 at 2026-09-24T01:18Z (`ss -ltn`: listeners 22, 53, 631, 3389, 8000 and
   # 8002 only).
   sim-202:
+    broker_profile: *broker_profile
     hosts: [lab-202]
     compose_file: docker/docker-compose.sim-202.yml
     compose_project: omnibase-infra-sim-202
@@ -809,6 +825,7 @@ lanes:
   # of the unified verification plan (no clone and no `.git` on .202 while the
   # C13, C14 and C29 producers run bare there).
   dev-202:
+    broker_profile: *broker_profile
     hosts: [lab-202]
     compose_file: docker/docker-compose.dev-202.yml
     compose_project: omnibase-infra-dev-202
@@ -924,6 +941,7 @@ lanes:
   # `optional: true`: a declared lane with nothing running yields no finding,
   # and one with any declared service running is reconciled in full.
   dev-200:
+    broker_profile: *broker_profile
     hosts: [lab-200]
     compose_file: docker/docker-compose.dev-200.yml
     compose_project: omnibase-infra-dev-200
@@ -1039,6 +1057,7 @@ lanes:
   # `optional: true`: declared before it is built, and absent whenever the host
   # slot belongs to a prover.
   dev-105:
+    broker_profile: *broker_profile
     hosts: [lab-105]
     compose_file: docker/docker-compose.dev-105.yml
     compose_project: omnibase-infra-dev-105
@@ -1382,6 +1401,7 @@ lanes:
   # So: the project exists, its network exists, both ports it claims are now held by
   # it, and the credential works from where it will actually be used.
   ci-bus:
+    broker_profile: *broker_profile
     hosts: [lab-201]
     compose_file: docker/docker-compose.ci-bus.yml
     compose_project: omninode-ci-bus
@@ -1389,6 +1409,8 @@ lanes:
     image_tag_pattern: '.+'
     optional: false
     services:
+      - name: omninode-ci-bus-redpanda-partition-cap
+        kind: oneshot
       - name: omninode-ci-bus-redpanda
         kind: service
         replicas: 1

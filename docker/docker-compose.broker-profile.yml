@@ -1,0 +1,87 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-19419: shared service template, imported with extends, never a lane graph.
+# Keeping it separate from infra.yml prevents standalone dogfood/CI-bus renders
+# from interpolating the base runtime's unrelated required environment.
+services:
+  redpanda-settings:
+    image: redpandadata/redpanda:v24.2.7
+    entrypoint: ["/bin/sh", "-c"]
+    # OMN-19419: one disk profile on cold and warm deploys. Keep the existing
+    # service name: the governed deploy path force-recreates it on every run.
+    # Memory is a startup property; its declaration mirrors the broker's dial.
+    environment:
+      REDPANDA_SEGMENT_FALLOCATION_STEP: ${REDPANDA_SEGMENT_FALLOCATION_STEP:-1048576}
+      REDPANDA_LOG_SEGMENT_MS: ${REDPANDA_LOG_SEGMENT_MS:-86400000}
+      REDPANDA_RETENTION_BYTES: ${REDPANDA_RETENTION_BYTES:-1073741824}
+      REDPANDA_PROFILE_MEMORY: "12G"
+      REDPANDA_PARTITIONS_PER_SHARD: "7000"
+      REDPANDA_CONTROL_PLANE_TOPIC: ""
+    command:
+      - |
+        set -eu
+        PROFILE_TMP=$$(mktemp -d)
+        trap 'rm -rf "$$PROFILE_TMP"' EXIT
+        ADMIN="-X admin.hosts=redpanda:9644"
+        export RPK_BROKERS=redpanda:9092
+        # Log each prior value before any mutation, including on a warm volume.
+        for key in topic_partitions_per_shard topic_memory_per_partition segment_fallocation_step log_segment_ms retention_bytes; do
+          prior=$$(/usr/bin/rpk cluster config get "$$key" $$ADMIN)
+          echo "OMN-19419 prior $$key=$$prior"
+        done
+        echo "OMN-19419 profile memory=$$REDPANDA_PROFILE_MEMORY (broker startup --memory)"
+        if [ "$$(/usr/bin/rpk cluster config get enable_sasl $$ADMIN)" = "true" ]; then
+          : "$${RPK_USER:?authenticated broker requires RPK_USER}"
+          : "$${RPK_PASS:?authenticated broker requires RPK_PASS}"
+          export RPK_SASL_MECHANISM=SCRAM-SHA-256
+        fi
+        if [ -n "$$REDPANDA_CONTROL_PLANE_TOPIC" ]; then
+          CP_TOPIC="$$REDPANDA_CONTROL_PLANE_TOPIC"
+          # OMN-19543: onex.tenant.events is onex-api's control-plane topic. An
+          # instance lane (dev-202, dev-200, ...) disables onex-api, so nothing
+          # else creates it and projection-tenant-registry-writer subscribes to a
+          # missing topic. One partition, as onex-api creates it. The create may
+          # lose a race to onex-api on .201; the read-back is the gate.
+          /usr/bin/rpk topic list > "$$PROFILE_TMP/topics.txt"
+          if ! awk -v t="$$CP_TOPIC" 'NR>1 && $$1==t {found=1} END {exit !found}' "$$PROFILE_TMP/topics.txt"; then
+            /usr/bin/rpk topic create "$$CP_TOPIC" -p 1 || echo "OMN-19543: create of $$CP_TOPIC returned non-zero; reading back"
+            /usr/bin/rpk topic list > "$$PROFILE_TMP/topics.txt"
+            if ! awk -v t="$$CP_TOPIC" 'NR>1 && $$1==t {found=1} END {exit !found}' "$$PROFILE_TMP/topics.txt"; then
+              echo "OMN-19543 FAIL: control-plane topic $$CP_TOPIC is absent after create" >&2
+              exit 1
+            fi
+          fi
+          echo "OMN-19543: control-plane topic $$CP_TOPIC present"
+        fi
+        /usr/bin/rpk topic list > "$$PROFILE_TMP/topics.txt"
+        DLQ=$$(awk 'NR>1 && tolower($$1) ~ /dlq/ {print $$1}' "$$PROFILE_TMP/topics.txt")
+        echo "OMN-19419: $$(awk 'NR>1' "$$PROFILE_TMP/topics.txt" | wc -l) topics, $$(echo "$$DLQ" | awk 'NF' | wc -l) DLQ topics"
+        PIN_BYTES=""
+        PIN_SEGMENT=""
+        for t in $$DLQ; do
+          /usr/bin/rpk topic describe "$$t" -c > "$$PROFILE_TMP/cfg.txt"
+          if [ "$$(awk '$$1=="retention.bytes"{print $$3}' "$$PROFILE_TMP/cfg.txt")" = "DEFAULT_CONFIG" ]; then PIN_BYTES="$$PIN_BYTES $$t"; fi
+          if [ "$$(awk '$$1=="segment.ms"{print $$3}' "$$PROFILE_TMP/cfg.txt")" = "DEFAULT_CONFIG" ]; then PIN_SEGMENT="$$PIN_SEGMENT $$t"; fi
+        done
+        if [ -n "$$PIN_BYTES" ]; then /usr/bin/rpk topic alter-config $$PIN_BYTES --set retention.bytes=-1; fi
+        if [ -n "$$PIN_SEGMENT" ]; then /usr/bin/rpk topic alter-config $$PIN_SEGMENT --set segment.ms=1209600000; fi
+        for t in $$DLQ; do
+          /usr/bin/rpk topic describe "$$t" -c > "$$PROFILE_TMP/cfg.txt"
+          if awk '($$1=="retention.bytes" || $$1=="segment.ms") && $$3=="DEFAULT_CONFIG" {found=1} END {exit !found}' "$$PROFILE_TMP/cfg.txt"; then
+            echo "OMN-19419 FAIL: DLQ topic $$t still inherits retention.bytes or segment.ms" >&2
+            exit 1
+          fi
+        done
+        echo "OMN-19419: every DLQ topic carries its own retention.bytes and segment.ms"
+        /usr/bin/rpk cluster config set topic_partitions_per_shard "$$REDPANDA_PARTITIONS_PER_SHARD" $$ADMIN
+        /usr/bin/rpk cluster config set topic_memory_per_partition 1048576 $$ADMIN
+        /usr/bin/rpk cluster config set segment_fallocation_step "$$REDPANDA_SEGMENT_FALLOCATION_STEP" $$ADMIN
+        /usr/bin/rpk cluster config set log_segment_ms "$$REDPANDA_LOG_SEGMENT_MS" $$ADMIN
+        /usr/bin/rpk cluster config set retention_bytes "$$REDPANDA_RETENTION_BYTES" $$ADMIN
+        test "$$(/usr/bin/rpk cluster config get topic_partitions_per_shard $$ADMIN)" = "$$REDPANDA_PARTITIONS_PER_SHARD"
+        test "$$(/usr/bin/rpk cluster config get topic_memory_per_partition $$ADMIN)" = "1048576"
+        test "$$(/usr/bin/rpk cluster config get segment_fallocation_step $$ADMIN)" = "$$REDPANDA_SEGMENT_FALLOCATION_STEP"
+        test "$$(/usr/bin/rpk cluster config get log_segment_ms $$ADMIN)" = "$$REDPANDA_LOG_SEGMENT_MS"
+        test "$$(/usr/bin/rpk cluster config get retention_bytes $$ADMIN)" = "$$REDPANDA_RETENTION_BYTES"
+        echo "OMN-19419: broker profile read back"
+    restart: "no"

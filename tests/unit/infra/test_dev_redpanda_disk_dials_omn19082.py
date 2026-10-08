@@ -1,36 +1,21 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-19082: the .201 dev broker carries the same disk dials as the .105 one.
+"""OMN-19082/OMN-19419: inherited disk dials retain DLQ and SASL safety.
 
-The dogfood broker got ``segment_fallocation_step`` 1 MiB, ``log_segment_ms``
-1 day and ``retention_bytes`` 1 GiB in omnibase_infra#4025 (basis in
-test_dogfood_redpanda_disk_dials_omn19070.py). The dev lane's broker stayed at
-the 32 MiB default step with no byte cap, and preallocation held 46.26 GiB of
-its 98.96 GiB volume at filing.
-
-The dev lane gets the dials through its override of ``redpanda-partition-cap``
-in docker/docker-compose.dev-lane.yml, the one-shot that
-src/omnibase_infra/handlers/handler_runtime_deploy.sh force-recreates on every dev redeploy. These tests
-pin four things:
-
-* the three values equal the dogfood broker's, read from its file, so the two
-  cannot drift apart silently;
-* the override still sets the two base values it replaces (a ``command:``
-  override replaces the base list, it does not extend it);
-* every DLQ topic is pinned to ``retention.bytes=-1`` and its current 14-day
-  ``segment.ms`` BEFORE either retention-affecting cluster value is set, so no
-  dead-lettered record waiting for replay is deleted sooner than it was;
-* the base service carries none of it, so no other lane inherits the dials by
-  merging the base without overriding ``command``.
+The shared profile replaces the dev/dogfood command copies. These regressions
+still assert the values, prior DLQ pinning and authenticated deploy ordering.
 """
 
 from __future__ import annotations
 
+import shlex
+from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any
 
 import pytest
-import yaml
+
+from tests.unit.infra.test_broker_profile_omn19419 import _render
 
 _DOCKER = Path(__file__).resolve().parents[3] / "docker"
 _DEV_LANE = _DOCKER / "docker-compose.dev-lane.yml"
@@ -44,46 +29,31 @@ _BASE_KEYS = ("topic_partitions_per_shard", "topic_memory_per_partition")
 _FOURTEEN_DAYS_MS = 14 * 24 * 3600 * 1000
 
 
-def _construct_compose_value(loader: yaml.SafeLoader, node: yaml.Node) -> object:
-    """Passthrough constructor for Docker Compose `!override` / `!reset` tags."""
-    if isinstance(node, yaml.SequenceNode):
-        return loader.construct_sequence(node)
-    if isinstance(node, yaml.MappingNode):
-        return loader.construct_mapping(node)
-    assert isinstance(node, yaml.ScalarNode)
-    return loader.construct_scalar(node)
-
-
-class _ComposeLoader(yaml.SafeLoader):
-    """SafeLoader that unwraps compose override tags."""
-
-
-_ComposeLoader.add_constructor("!override", _construct_compose_value)
-_ComposeLoader.add_constructor("!reset", _construct_compose_value)
-
-
+@cache
 def _service(path: Path, name: str) -> dict[str, Any]:
-    # _ComposeLoader extends SafeLoader; the extra constructors only unwrap
-    # compose override tags.
-    compose: dict[str, Any] = yaml.load(
-        path.read_text(encoding="utf-8"),
-        Loader=_ComposeLoader,  # noqa: S506
-    )
-    service: dict[str, Any] = compose["services"][name]
-    return service
+    lane = "dogfood" if path == _DOGFOOD else "infra" if path == _BASE else "dev"
+    return _render(lane)["services"][name]
 
 
 def _script_lines(path: Path) -> list[str]:
     command = _service(path, "redpanda-partition-cap")["command"]
     # Compose turns `$$` into a literal `$` before the shell sees it.
-    return "\n".join(str(c) for c in command).replace("$$", "$").splitlines()
+    script = "\n".join(str(c) for c in command).replace("$$", "$")
+    for key, value in _service(path, "redpanda-partition-cap")["environment"].items():
+        script = script.replace(f"${key}", str(value))
+    return script.splitlines()
 
 
 def _cluster_sets(lines: list[str]) -> dict[str, tuple[int, str]]:
     """Map each `rpk cluster config set KEY VALUE` to (line index, value)."""
     found: dict[str, tuple[int, str]] = {}
     for index, line in enumerate(lines):
-        parts = line.split()
+        if (
+            not line.strip().startswith("/usr/bin/rpk")
+            or "cluster config set" not in line
+        ):
+            continue
+        parts = shlex.split(line)
         if parts[:1] != ["/usr/bin/rpk"]:
             continue
         for start in range(1, len(parts) - 4):
@@ -150,18 +120,22 @@ def test_credentials_never_reach_a_command_line() -> None:
     script = "\n".join(_script_lines(_DEV_LANE))
     assert "-X user=" not in script
     assert "-X pass=" not in script
-    assert 'RPK_PASS="$DEV_KAFKA_SASL_PASSWORD"' in script
+    assert (
+        _service(_DEV_LANE, "redpanda-partition-cap")["environment"]["RPK_PASS"]
+        == "render-only"
+    )
 
 
 @pytest.mark.unit
 def test_the_override_runs_after_the_sasl_flip() -> None:
     depends_on = _service(_DEV_LANE, "redpanda-partition-cap")["depends_on"]
-    assert depends_on["redpanda-sasl-enable"] == {
-        "condition": "service_completed_successfully"
-    }
+    assert (
+        depends_on["redpanda-sasl-enable"]["condition"]
+        == "service_completed_successfully"
+    )
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize("key", _DIALS)
-def test_the_base_service_does_not_carry_the_dial(key: str) -> None:
-    assert key not in _cluster_sets(_script_lines(_BASE))
+def test_the_shared_service_carries_the_dial(key: str) -> None:
+    assert key in _cluster_sets(_script_lines(_BASE))
