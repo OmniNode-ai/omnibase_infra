@@ -19,6 +19,8 @@ Strategy reference: OMN-7709 ("Primary: Linear GraphQL API").
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from types import TracebackType
 from typing import Final, cast
 
@@ -45,6 +47,9 @@ from omnibase_infra.handlers.done_write_receipt_guard import (
     is_done_state,
 )
 from omnibase_infra.mixins import MixinAsyncCircuitBreaker
+from omnibase_infra.protocols.protocol_linear_graphql_transport import (
+    ProtocolLinearGraphQLTransport,
+)
 from omnibase_infra.utils.util_error_sanitization import sanitize_error_string
 
 # Default Linear GraphQL endpoint; overridable via constructor.
@@ -421,6 +426,55 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
 
     # -- lifecycle (ProtocolExternalService) --
 
+    @classmethod
+    @asynccontextmanager
+    async def graphql_transport(
+        cls,
+        api_key: str,
+        timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        client: httpx.AsyncClient | None = None,
+    ) -> AsyncIterator[ProtocolLinearGraphQLTransport]:
+        """Scope a transport to an existing caller's attempt without probing.
+
+        The injected credential may already be an OAuth Authorization value.
+        A borrowed client stays open; an owned client closes even on failure.
+        Status/error interpretation stays with the caller, so a sweep retains
+        its bounded retry policy and does not retry a write implicitly.
+        """
+        if client is not None:
+            adapter = cls(
+                api_key=api_key, timeout_seconds=timeout_seconds, client=client
+            )
+            try:
+                yield adapter
+            finally:
+                await adapter.close()
+        else:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as owned_client:
+                adapter = cls(
+                    api_key=api_key,
+                    timeout_seconds=timeout_seconds,
+                    client=owned_client,
+                )
+                try:
+                    yield adapter
+                finally:
+                    await adapter.close()
+
+    async def post_graphql(
+        self, query: str, variables: dict[str, object] | None = None
+    ) -> httpx.Response:
+        """The single GraphQL POST implementation used by domain callers."""
+        payload: dict[str, object] = {"query": query}
+        if variables is not None:
+            payload["variables"] = variables
+        return await self._client.post(
+            self._endpoint,
+            json=payload,
+            headers=self._request_headers,
+            timeout=self._timeout_seconds,
+        )
+
     async def connect(self) -> bool:
         """Verify the Linear API key by issuing a viewer query.
 
@@ -720,17 +774,8 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
         async with self._circuit_breaker_lock:
             await self._check_circuit_breaker(operation=operation)
 
-        payload: dict[str, object] = {"query": query}
-        if variables is not None:
-            payload["variables"] = variables
-
         try:
-            response = await self._client.post(
-                self._endpoint,
-                json=payload,
-                headers=self._request_headers,
-                timeout=self._timeout_seconds,
-            )
+            response = await self.post_graphql(query, variables)
         except httpx.TimeoutException as exc:
             async with self._circuit_breaker_lock:
                 await self._record_circuit_failure(operation=operation)

@@ -206,6 +206,9 @@ from omnibase_core.handlers.handler_done_write_receipt_gate import (
 from omnibase_core.handlers.handler_done_write_receipt_gate import (
     live_acceptance_criteria_items as _live_acceptance_criteria_items,
 )
+from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
+    AdapterLinearGraphQLProjectTracker,
+)
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.gate_binding import (
     EnumGateBindingProbe,
@@ -323,7 +326,6 @@ _DOD_VERIFY_NON_PROBATIVE_KEY = "non_probative_count"
 _CONTRACT_FILE_RE = re.compile(r"^contracts/(OMN-\d+)\.yaml$")
 _TITLE_EVIDENCE_RE = re.compile(r"evidence\((OMN-\d+)\)", re.IGNORECASE)
 
-_LINEAR_API_URL = "https://api.linear.app/graphql"  # url-authority-ok: fixed public GraphQL API, no ONEX routing authority
 
 # OMN-17664. THE IDENTITY THE CLOSER WRITES AS.
 #
@@ -2525,18 +2527,13 @@ class _LinearClient:
         auth_header = await self._resolve_auth_header()
         if auth_header is None:
             return None
-        headers = {
-            "Authorization": auth_header,
-            "Content-Type": "application/json",
-        }
-        payload = {"query": query, "variables": variables}
         for attempt_index in range(self._max_attempts):
             retry_after: float | None = None
             try:
-                async with httpx.AsyncClient(timeout=self._timeout) as client:
-                    response = await client.post(
-                        _LINEAR_API_URL, json=payload, headers=headers
-                    )
+                async with AdapterLinearGraphQLProjectTracker.graphql_transport(
+                    api_key=auth_header, timeout_seconds=self._timeout
+                ) as transport:
+                    response = await transport.post_graphql(query, variables)
                 status = response.status_code
                 if status == _HTTP_TOO_MANY_REQUESTS or status >= _HTTP_SERVER_ERROR:
                     self.last_error = f"Linear API returned HTTP {status}."
