@@ -233,7 +233,7 @@ jobs:
     # destroys a Kubernetes cluster and side-loads a multi-gigabyte image. The
     # .201 fleet runs the lab lanes; a per-candidate kind cluster does not belong
     # on the same Docker daemon.
-    name: Boot the candidate on an ephemeral cluster
+    name: Candidate render/wiring smoke on an ephemeral kind cluster
     needs: [build-runtime-candidate, build-migrate-bundle]
     runs-on: ubuntu-latest
     # OMN-17778: raised with BOOT_WAIT_SECONDS 900 -> 1800. Run 33771560584 used
@@ -1063,19 +1063,11 @@ jobs:
           path: /tmp/boot-gate-diagnostics
           retention-days: 14
 
-      # OMN-17530 rule 24(a). This job IS the onex-lab lab pass; until now it
-      # left nothing behind that outlived the run. The receipt is a durable,
-      # sha-keyed record of what was exercised, which the lab-pass-gate job
-      # below reads and which anybody can read afterwards to answer "was this
-      # commit ever booted on a lab lane".
-      #
-      # if: always() on BOTH steps deliberately. A FAILED lab pass is exactly as
-      # worth recording as a passing one -- a receipt that only exists when
-      # everything worked cannot distinguish "it failed" from "nobody ran it",
-      # and those are the two states the gate must tell apart. The emit step
-      # itself exits non-zero on a FAIL receipt, so the failure stays visible on
-      # this run; the artifact is uploaded either way.
-      - name: Emit the onex-lab lab-pass receipt
+      # OMN-18276: this is a candidate render/wiring smoke check on kind.
+      # Its sha-keyed receipt records that smoke result, independently of the
+      # persistent lab's apply receipt. It never satisfies the lab-pass gate.
+      # Always emit and upload so a failed smoke is retained too.
+      - name: Emit the candidate render/wiring smoke receipt
         if: always()
         run: |
           set -euo pipefail
@@ -1083,7 +1075,7 @@ jobs:
             python3 omnibase_infra/scripts/ci/lab_pass_receipt.py emit \
             --sha "${GITHUB_SHA}" \
             --bind-from-commit omnibase_infra \
-            --lane onex-lab \
+            --lane candidate-boot \
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             --check "manifests_render:${{ steps.render.outcome == 'success' && 'ok' || 'fail' }}:kubectl kustomize ${LAB_OVERLAY} against omninode_infra@dev ${MANIFEST_SHA:-unknown}" \
@@ -1092,28 +1084,28 @@ jobs:
             --check "runtime_family_ready:${{ steps.boot-wait.outcome == 'success' && 'ok' || 'fail' }}:every runtime-family Deployment plus the projection snapshot topic, within ${BOOT_WAIT_SECONDS}s" \
             --check "rollout_deadline_bounded:${{ steps.rollout-deadline.outcome == 'success' && 'ok' || 'fail' }}:every Deployment's progressDeadlineSeconds under apply_lab_lane.sh's own 900s/300s rollout waits, and every Recreate Deployment naming its single-writer resource, on omninode_infra@dev ${MANIFEST_SHA:-unknown}" \
             --check "contract_boot_invariants:${{ steps.contract-boot.outcome == 'success' && 'ok' || 'fail' }}:discover_runtime_local_ingress_routes, the function the runtime calls at boot, run over this candidate's shipped contract corpus (no duplicate local ingress alias) and over the verbatim pre-fix and post-fix omnimarket node_redeploy_deploy_effect contract of the 2026-09-16 incident (pre-fix raises, post-fix discovers) at omnibase_infra@${GITHUB_SHA} (OMN-18492)" \
-            --out /tmp/lab-pass-receipt/receipt.json
+            --out /tmp/candidate-boot-receipt/receipt.json
 
       # OMN-18247. `if-no-files-found: error` below fires only when the whole
       # /tmp/lab-pass-receipt directory matches nothing. A receipt that exists
       # and is zero bytes satisfies it, passes the uploader, and then fails the
       # lab-pass gate that reads it — the worst of the three states, because the
       # failure surfaces one workflow away from its cause.
-      - name: Assert the onex-lab lab-pass receipt is present and non-empty
+      - name: Assert the candidate render/wiring smoke receipt is present and non-empty
         if: always()
         run: |
           set -euo pipefail
           python3 omnibase_infra/scripts/ci/assert_evidence_artifact.py \
-            --artifact lab-pass-receipt-onex-lab \
-            --require /tmp/lab-pass-receipt/receipt.json
-      - name: Upload the onex-lab lab-pass receipt
+            --artifact candidate-boot-receipt \
+            --require /tmp/candidate-boot-receipt/receipt.json
+      - name: Upload the candidate render/wiring smoke receipt
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          # The artifact NAME is the key the gate queries by. It must match
+          # The artifact NAME identifies the smoke receipt. It must match
           # scripts/ci/lab_pass_receipt.py's artifact_name() exactly.
-          name: lab-pass-receipt-onex-lab-${{ github.sha }}
-          path: /tmp/lab-pass-receipt
+          name: candidate-boot-receipt-${{ github.sha }}
+          path: /tmp/candidate-boot-receipt
           retention-days: 90
           if-no-files-found: error
 
@@ -1121,7 +1113,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "### Candidate boot gate (OMN-17534)"
+            echo "### Candidate render/wiring smoke (OMN-18276)"
             echo ""
             echo "| field | value |"
             echo "| --- | --- |"
@@ -1298,7 +1290,8 @@ jobs:
       # 14,400 s after this run's first gate read refuses TIMED_OUT, never a
       # pass. The verdict JSON is uploaded below for that re-run selector.
       #
-      # The any-of rule 24(b) premise on the exact sha is unchanged. No `if:`,
+      # OMN-18276: the exact-sha premise comes only from the persistent lab
+      # apply receipt. The compose-dev required subject is resolved separately. No `if:`,
       # no force, skip or override (tests/scripts/ci/test_lab_pass_gate_no_force_skip.py).
       - name: Read the lab-pass receipt for the delivered sha
         id: own-sha-gate
@@ -1310,6 +1303,7 @@ jobs:
             python3 scripts/ci/lab_pass_receipt.py gate \
             --sha "${GITHUB_SHA}" \
             --repo "${GITHUB_REPOSITORY}" \
+            --lane onex-lab-k3s \
             --require-lane compose-dev \
             --resolve-runtime-ancestor \
             --clone . \

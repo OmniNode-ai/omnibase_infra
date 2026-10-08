@@ -2605,6 +2605,9 @@ jobs:
       - name: Verify lab-pass criterion bindings and closer pins (OMN-18488)
         run: uv run --frozen pytest tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488.py -q
 
+      - name: Verify persistent lab receipt and candidate smoke isolation (OMN-18276)
+        run: uv run --frozen pytest tests/scripts/ci/test_persistent_lab_receipt_omn18276.py -q --no-cov
+
       - name: Verify D11 workflow verdict lane matching (OMN-19311)
         run: uv run --frozen pytest tests/ci/test_workflow_verdict_omn_d11.py -q --no-cov
 
