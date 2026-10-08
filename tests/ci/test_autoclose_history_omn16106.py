@@ -126,12 +126,14 @@ def test_shallow_source_reproduces_control_checkout_failure(
     _git(source, "cat-file", "-e", f"{earlier}^{{commit}}")
     result = _shared_checkout(source, tmp_path / "control", earlier)
     assert result.returncode != 0, result.stdout + result.stderr
-    assert "reference is not a tree" in result.stderr
     recording = cast("dict[str, object]", recorded_response["response"])
     assert result.returncode == recording["returncode"]
-    assert (
-        result.stderr.replace(earlier, "<pre-change sha>")
-        == recording["stderr_template"]
+    # Git words the missing-tree failure differently across versions: the
+    # recording (git 2.43.0 on h202) and the hosted runner's git.
+    normalized = result.stderr.replace(earlier, "<pre-change sha>")
+    assert normalized in (
+        recording["stderr_template"],
+        "fatal: unable to read tree (<pre-change sha>)\n",
     )
 
 
