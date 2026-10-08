@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import pytest
@@ -92,11 +92,17 @@ class FakeRunner:
         self.raises = raises
         self.per_call = list(per_call or [])
         self.calls: list[list[str]] = []
+        self.envs: list[dict[str, str]] = []
 
     def __call__(
-        self, argv: Sequence[str], *, timeout: float
+        self,
+        argv: Sequence[str],
+        *,
+        timeout: float,
+        env: Mapping[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         self.calls.append(list(argv))
+        self.envs.append(dict(env or {}))
         if self.raises is not None:
             raise self.raises
         if self.per_call:
@@ -432,8 +438,47 @@ def test_the_credential_never_reaches_the_evidence() -> None:
         access, ["g"], max_lag=100, runner=FakeRunner(stdout=_describe(1))
     )
     assert "probe-secret-value" not in check.evidence
-    # The flags themselves must still carry it, or the probe cannot authenticate.
-    assert "pass=probe-secret-value" in access.rpk_flags()
+    # The credential must still reach rpk or the probe cannot authenticate, but through
+    # the environment of the call: argv is readable by every user on the host (OMN-17427).
+    assert access.rpk_env() == {
+        "RPK_USER": "probe-user",
+        "RPK_PASS": "probe-secret-value",
+        "RPK_SASL_MECHANISM": "SCRAM-SHA-256",
+    }
+    assert not any("pass" in flag for flag in access.rpk_flags())
+
+
+def test_the_credential_rides_the_environment_and_never_argv() -> None:
+    access = ModelBrokerAccess(
+        container="c",
+        brokers="redpanda:9092",
+        sasl_mechanism="SCRAM-SHA-256",
+        sasl_username="probe-user",
+        sasl_password="probe-secret-value",
+    )
+    runner = FakeRunner(stdout=_describe(1))
+    read_group_total_lag(access, "g", runner=runner)
+    argv = runner.calls[0]
+    assert "probe-secret-value" not in " ".join(argv)
+    assert "probe-user" not in " ".join(argv)
+    assert argv[:8] == [
+        "docker",
+        "exec",
+        "-e",
+        "RPK_USER",
+        "-e",
+        "RPK_PASS",
+        "-e",
+        "RPK_SASL_MECHANISM",
+    ]
+    assert runner.envs[0]["RPK_PASS"] == "probe-secret-value"
+
+
+def test_an_anonymous_probe_sends_no_credential_environment() -> None:
+    runner = FakeRunner(stdout=_describe(1))
+    read_group_total_lag(ACCESS, "g", runner=runner)
+    assert runner.envs == [{}]
+    assert runner.calls[0][:3] == ["docker", "exec", "broker-x"]
 
 
 def test_a_baseline_omits_groups_it_could_not_read(tmp_path: Path) -> None:

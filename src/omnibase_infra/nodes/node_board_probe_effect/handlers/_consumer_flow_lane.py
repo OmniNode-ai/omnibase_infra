@@ -118,10 +118,13 @@ class ConsumerFlowLane:
 
     # ---- broker (credential stays inside the broker container) -----------
     def rpk(self, *args: str, stdin: str | None = None, timeout: float = 60.0) -> str:
+        # The credential reaches rpk through its environment, never as a -X flag:
+        # the expanded flag would sit in the in-container rpk argv, which every user
+        # on the host reads through `ps` (OMN-17427).
         script = (
-            f'rpk "$@" -X brokers="{BROKER_INTERNAL_ADDRESS}" '
-            '-X user="$DEV_KAFKA_SASL_USERNAME" '
-            '-X pass="$DEV_KAFKA_SASL_PASSWORD" -X sasl.mechanism=SCRAM-SHA-256'
+            'RPK_USER="$DEV_KAFKA_SASL_USERNAME" RPK_PASS="$DEV_KAFKA_SASL_PASSWORD" '
+            "RPK_SASL_MECHANISM=SCRAM-SHA-256 "
+            f'rpk "$@" -X brokers="{BROKER_INTERNAL_ADDRESS}"'
         )
         return self._run(
             [

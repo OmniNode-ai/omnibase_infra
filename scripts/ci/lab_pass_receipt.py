@@ -2058,20 +2058,32 @@ class CommandRunner(Protocol):
     """
 
     def __call__(
-        self, argv: Sequence[str], *, timeout: float
+        self,
+        argv: Sequence[str],
+        *,
+        timeout: float,
+        env: Mapping[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]: ...
 
 
 def _run_read_only(
-    argv: Sequence[str], *, timeout: float
+    argv: Sequence[str],
+    *,
+    timeout: float,
+    env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a fixed-argv, no-shell, read-only command."""
+    """Run a fixed-argv, no-shell, read-only command.
+
+    ``env`` is added to the inherited environment. It is how a credential reaches a
+    child without sitting in argv, which every user on the host reads through ``ps``.
+    """
     return subprocess.run(
         list(argv),
         capture_output=True,
         text=True,
         check=False,
         timeout=timeout,
+        env={**os.environ, **env} if env else None,
     )
 
 
@@ -2252,17 +2264,31 @@ class ModelBrokerAccess:
         return bool(self.sasl_mechanism)
 
     def rpk_flags(self) -> list[str]:
-        flags = ["-X", f"brokers={self.brokers}"]
-        if self.authenticated:
-            flags += [
-                "-X",
-                f"user={self.sasl_username}",
-                "-X",
-                f"pass={self.sasl_password}",
-                "-X",
-                f"sasl.mechanism={self.sasl_mechanism}",
-            ]
-        return flags
+        """The rpk flags: the broker address only, never a credential (OMN-17427)."""
+        return ["-X", f"brokers={self.brokers}"]
+
+    def rpk_env(self) -> dict[str, str]:
+        """The credential as the ``RPK_*`` variables rpk reads, empty when anonymous.
+
+        Pass it to the runner as ``env``. A password flag would put the password in the
+        argv of ``docker exec`` and of the in-container ``rpk``, where ``ps`` shows it
+        to every user on the host.
+        """
+        if not self.authenticated:
+            return {}
+        return {
+            "RPK_USER": self.sasl_username,
+            "RPK_PASS": self.sasl_password,
+            "RPK_SASL_MECHANISM": self.sasl_mechanism,
+        }
+
+    def docker_exec_env_flags(self) -> list[str]:
+        """``-e NAME`` for each ``RPK_*`` variable, with no value.
+
+        ``docker exec -e NAME`` copies the value from the docker client's own
+        environment, so only the names appear in argv.
+        """
+        return [flag for name in self.rpk_env() for flag in ("-e", name)]
 
 
 def read_group_total_lag(
@@ -2282,9 +2308,11 @@ def read_group_total_lag(
     """
     run = runner or _run_read_only
     result = run(
-        ["docker", "exec", access.container, "rpk", "group", "describe", group]
+        ["docker", "exec", *access.docker_exec_env_flags(), access.container]
+        + ["rpk", "group", "describe", group]
         + access.rpk_flags(),
         timeout=timeout_seconds,
+        env=access.rpk_env(),
     )
     if result.returncode != 0:
         msg = (
