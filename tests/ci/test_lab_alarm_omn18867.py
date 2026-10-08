@@ -1433,7 +1433,7 @@ def test_stale_indeterminate_never_reads_indeterminate_about_itself() -> None:
 # ---------------------------------------------------------------------------
 
 _CONSENT = (
-    '2026-09-21T00:00Z | OPERATOR-CONSENT | lane=x | "go ahead" | '
+    '2026-09-21T00:00Z | OPERATOR-CONSENT | lane=x | approved_by=operator | "go ahead" | '
     "APPROVED SCOPE: post lab alarms to #omninode-notifications | "
     "OUT OF SCOPE: every other channel | durable authorization evidence"
 )
@@ -1493,6 +1493,165 @@ def test_a_consent_row_for_another_channel_does_not_resolve(tmp_path: Path) -> N
     ledger = tmp_path / "ledger.md"
     ledger.write_text(_CONSENT + "\n", encoding="utf-8")
     assert resolve_posting_consent(ledger, channel="#some-other-channel") is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("suffix", ["-sandbox", "_sandbox"])
+def test_consent_for_a_channel_with_the_same_prefix_does_not_resolve(
+    tmp_path: Path, suffix: str
+) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(
+        _CONSENT.replace(CHANNEL, CHANNEL + suffix) + "\n", encoding="utf-8"
+    )
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+
+
+@pytest.mark.unit
+def test_consent_for_landing_alerts_does_not_authorize_lab_alarms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import lab_alarm
+
+    ledger = tmp_path / "ROLLING_WORK_LEDGER.md"
+    ledger.write_text(
+        '2026-09-27T12:38:41Z | OPERATOR-CONSENT | approved_by=operator | "yes" | '
+        "APPROVED SCOPE: the landing controller posts failure alerts to "
+        "#omninode-notifications | OUT OF SCOPE: any message other than "
+        "landing-process failure alerts\n",
+        encoding="utf-8",
+    )
+    sent: list[str] = []
+    monkeypatch.setattr(
+        lab_alarm, "post_alarm", lambda *a, **k: sent.append("sent") or "ts"
+    )
+    run = _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+    )
+    assert len(run.raised) == 1
+    assert run.raised[0].subject == SHA
+    assert sent == []
+    assert run.posting.startswith("disabled")
+
+
+@pytest.mark.unit
+def test_archived_alarm_consent_delivers_once_and_cites_the_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import lab_alarm
+
+    ledger = tmp_path / "ROLLING_WORK_LEDGER.md"
+    ledger.write_text("# current ledger\n", encoding="utf-8")
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    rolled = archive / "ROLLING_WORK_LEDGER_2026-09-24-split.md"
+    rolled.write_text("# archived ledger\n" + _CONSENT + "\n", encoding="utf-8")
+    posts: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        lab_alarm,
+        "post_alarm",
+        lambda alarm, **k: posts.append((alarm.subject, k["consent"].citation)) or "ts",
+    )
+
+    first = _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+    )
+    repeat = _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+    )
+    assert posts == [(SHA, f"{rolled}:2")]
+    assert "delivered 1/1" in first.posting
+    assert "nothing new to deliver" in repeat.posting
+    assert resolve_posting_consent(ledger, channel="#some-other-channel") is None
+
+    # Consent is re-read on every run, so removing the archived grant disables it.
+    rolled.write_text("# grant removed\n", encoding="utf-8")
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+
+
+@pytest.mark.unit
+def test_archive_consent_requires_a_readable_live_ledger(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "ROLLING_WORK_LEDGER_2026-09-24-split.md").write_text(
+        _CONSENT + "\n", encoding="utf-8"
+    )
+    assert (
+        resolve_posting_consent(tmp_path / "ROLLING_WORK_LEDGER.md", channel=CHANNEL)
+        is None
+    )
+
+
+@pytest.mark.unit
+def test_consent_in_an_unrelated_archive_file_is_ignored(tmp_path: Path) -> None:
+    ledger = tmp_path / "ROLLING_WORK_LEDGER.md"
+    ledger.write_text("# current ledger\n", encoding="utf-8")
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "notes.md").write_text(_CONSENT + "\n", encoding="utf-8")
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("row_type", ["MSG", "CLAIM", "STATUS"])
+def test_a_message_quoting_alarm_consent_is_not_authority(
+    tmp_path: Path, row_type: str
+) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(
+        f"2026-09-21T00:00Z | {row_type} | lane=x | quoted: " + _CONSENT + "\n",
+        encoding="utf-8",
+    )
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+
+
+@pytest.mark.unit
+def test_ruling_consent_for_another_purpose_is_not_alarm_authority(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(
+        "2026-09-21T00:00Z | RULING | OPERATOR-CONSENT Slack channel | "
+        "landing controller may post to #omninode-notifications; "
+        "no new Slack app | approved_by=operator\n",
+        encoding="utf-8",
+    )
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+
+
+@pytest.mark.unit
+def test_lab_alarms_only_in_the_excluded_scope_do_not_resolve(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(
+        "2026-09-21T00:00Z | OPERATOR-CONSENT | approved_by=operator | "
+        "APPROVED SCOPE: landing alerts to #omninode-notifications | "
+        "OUT OF SCOPE: lab alarms\n",
+        encoding="utf-8",
+    )
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+
+
+@pytest.mark.unit
+def test_labelled_alarm_consent_without_an_approver_does_not_resolve(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(
+        _CONSENT.replace("approved_by=operator | ", "") + "\n", encoding="utf-8"
+    )
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
 
 
 @pytest.mark.unit
