@@ -1519,7 +1519,19 @@ def test_live_repository_visibility_uses_a_gh_cli_flag_that_actually_exists(
     result = module._live_repository_visibility("OmniNode-ai")
 
     assert captured_args == [
-        ["repo", "list", "OmniNode-ai", "--limit", "500", "--json", "name,isPrivate"]
+        [
+            "repo",
+            "list",
+            "OmniNode-ai",
+            "--no-archived",
+            "--limit",
+            "500",
+            "--json",
+            "name,isPrivate",
+        ]
     ]
     assert "--visibility" not in captured_args[0]
+    # OMN-18780: archived repositories run no workflows, so their pins are
+    # out of scope for a merge-gating placement check.
+    assert "--no-archived" in captured_args[0]
     assert result == [("a-private-repo", True), ("a-public-repo", False)]
