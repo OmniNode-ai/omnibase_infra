@@ -122,6 +122,10 @@ dependencies:
     type: "library"
     library: "httpx"
     description: "Async HTTP client for the Linear GraphQL API."
+  - name: "linear_graphql_transport"
+    type: "service"
+    description: "OMN-17678: every Linear GraphQL POST goes through AdapterLinearGraphQLProjectTracker.graphql_transport (ProtocolLinearGraphQLTransport). The handler keeps its own status, retry and Done-write handling."
+    required: false
   - name: "pyyaml"
     type: "library"
     library: "pyyaml"

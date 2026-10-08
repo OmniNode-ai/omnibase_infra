@@ -339,6 +339,10 @@ jobs:
       - name: Unit tests for endpoint guard (OMN-20173)
         run: uv run pytest tests/unit/scripts/test_check_no_coding_plan_endpoint.py -q -p no:cacheprovider
 
+      # OMN-17678: same focused suite as the pre-commit transport gate.
+      - name: Linear transport consolidation regression (OMN-17678)
+        run: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q
+
       # OMN-19070: same focused suite as the self-pause pre-commit hook.
       - name: Runner disk admission self-pause regression (OMN-19070)
         run: uv run --frozen pytest tests/scripts/test_runner_job_started_disk_admission.py -q
