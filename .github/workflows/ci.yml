@@ -2417,6 +2417,11 @@ jobs:
       - name: Test impacted-test selector
         run: uv run --frozen pytest tests/unit/scripts/ci/test_detect_test_paths.py -q --timeout=60
 
+      # OMN-18892: the required detection job must prove the migration
+      # principal fence before its selected test matrix can be trusted.
+      - name: Test slot migration principal confinement (OMN-18892)
+        run: uv run --frozen pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q --timeout=60
+
       # OMN-19927 (plan task S2): was this commit validated by a successful
       # merge group? A queue landing fast-forwards `dev` to the merge-group
       # commit, so the answer is a lookup of that sha's merge-group `CI`

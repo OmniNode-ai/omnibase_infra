@@ -133,6 +133,17 @@ repos:
         require_serial: true
         files: ^(src/omnibase_infra/topology/|docker/catalog/database-topology/|scripts/ci/(detect_test_paths\.py|test_selection_(adjacency\.yaml|loader\.py|models\.py))$|tests/unit/scripts/ci/test_detect_test_paths\.py$|\.github/workflows/ci\.yml$|\.pre-commit-config\.yaml$)
         stages: [pre-commit]
+  # OMN-18892: same focused principal-confinement proof as the CI gate.
+  - repo: local
+    hooks:
+      - id: slot-migration-principal-confinement
+        name: Slot migrations use confined principals (OMN-18892)
+        entry: uv run --frozen pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q --timeout=60
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(scripts/(run-forward-migrations|run-intelligence-migrations|provision_db_slot)\.sh|docker/docker-compose\.prepr\.yml|tests/unit/infra/test_db_slot_provisioner_omn18892\.py|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
   # Shape-gate independence (OMN-20298): a shape-gate detector job never waits
   # on the change-control preflight and never reads its result. BLOCKING, zero
   # baseline, no allowlist, no suppression comment. CI twin: the

@@ -218,15 +218,18 @@ services:
       # connection failure that reads like an unreachable server rather than
       # like a name this lane built wrong.
       #
-      # It also needs the SUPERUSER connection rather than a slot principal:
-      # it runs the migrations, and the slot's own roles deliberately cannot.
-      # That is inherited unchanged from docker-compose.infra.yml, which is
-      # the other half of why this block merges nothing else.
+      # OMN-18892: branch migrations authenticate as slot principals. The
+      # runner selects the analytics principal for its node phase. Neither
+      # connection receives the shared server's admin credential.
       !!merge <<: [*prepr_slot_marker_env]
+      POSTGRES_USER: "role_omnibase_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}"
+      POSTGRES_PASSWORD: "${ROLE_OMNIBASE_PASSWORD:?ROLE_OMNIBASE_PASSWORD must be set}"
+      ROLE_OMNIDASH_PASSWORD: "${ROLE_OMNIDASH_PASSWORD:?ROLE_OMNIDASH_PASSWORD must be set}"
+      ROLE_OMNINODE_PASSWORD: "${ROLE_OMNINODE_PASSWORD:?ROLE_OMNINODE_PASSWORD must be set}"
   # The slot's intelligence migration (OMN-19404). Same shape as the forward
   # migration above and for the same reasons: its own `prepr-migrate` profile,
-  # the superuser connection inherited unchanged, and only the slot marker
-  # merged. ONEX_DB_SLOT makes scripts/run-intelligence-migrations.sh target
+  # the slot's intelligence principal, and only the slot marker merged.
+  # ONEX_DB_SLOT makes scripts/run-intelligence-migrations.sh target
   # omniintelligence_<slot> and refuse to create it. It used to be fenced,
   # and then nothing created public.db_metadata in the slot's intelligence
   # database, so the fourth slot boot (2026-09-24) failed stamping there.
@@ -236,6 +239,8 @@ services:
     depends_on: !override []
     environment:
       !!merge <<: [*prepr_slot_marker_env]
+      POSTGRES_USER: "role_omniintelligence_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}"
+      POSTGRES_PASSWORD: "${ROLE_OMNIINTELLIGENCE_PASSWORD:?ROLE_OMNIINTELLIGENCE_PASSWORD must be set}"
   # =========================================================================
   # THE SLOT'S TWELVE. Names, ports, volumes and namespace only -- every other
   # property is inherited, which is the whole reason this is an overlay.
