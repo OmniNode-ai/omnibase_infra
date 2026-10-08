@@ -28,7 +28,7 @@ repos:
   # .onex_ratchets/canonical_file_shape_baseline.txt. CI runs the same module
   # at the same commit (job "Canonical File Shape (OMN-20304)").
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 8c8f6744c9612ae52abaa760a6423b995eddc871
+    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24
     hooks:
       - id: canonical-file-shape
         require_serial: true
@@ -38,7 +38,7 @@ repos:
   # no suppression marker. CI twin job node-boundary-imports in
   # .github/workflows/ci.yml; keep this rev equal to that job's pin.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 8c8f6744c9612ae52abaa760a6423b995eddc871
+    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24
     hooks:
       - id: check-node-boundary-imports
         require_serial: true
@@ -391,7 +391,7 @@ repos:
         name: Cross-repo pins must be reachable from dev/main (OMN-15538)
         entry: uv run --frozen python scripts/ci/check_pin_reachability.py --allow-undetermined
         language: system
-        files: ^(\.github/workflows/.*\.ya?ml|pyproject\.toml|uv\.lock)$
+        files: ^(\.github/workflows/.*\.ya?ml|\.pre-commit-config\.yaml|pyproject\.toml|uv\.lock)$
         pass_filenames: true
         stages: [pre-commit]
       # OMN-16367: per-run compose proof images must be evicted at source
