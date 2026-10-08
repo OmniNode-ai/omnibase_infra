@@ -1136,6 +1136,9 @@ route:
         # OMN-20562: the runtime_profiles validator, registered STRICT once its
         # allowlist was emptied and deleted.
         - Runtime Profiles / validate
+        # OMN-18786: the seed-provenance check, now unconditional and registered in
+        # EXPECTED_EXTERNAL_CONTEXTS.
+        - Seed Provenance Check
         # OMN-18926: the from-empty migration proof, now called from ci.yml and
         # registered STRICT. Enforced by the CI Summary poller and absent from
         # branch protection, which is exactly the shape this list records.
