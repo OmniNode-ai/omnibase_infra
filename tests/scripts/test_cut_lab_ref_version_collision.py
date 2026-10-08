@@ -105,7 +105,7 @@ def _write_consumer_lock(omni_home: Path) -> None:
     ]
     market = omni_home / "omnimarket"
     (market / "uv.lock").write_text("\n".join(blocks), encoding="utf-8")
-    _git(market, "add", "uv.lock")
+    _git(market, "add", "-f", "uv.lock")
     _git(market, "commit", "-q", "-m", "add uv.lock")
 
 
