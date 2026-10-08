@@ -560,6 +560,27 @@ def _parse_bool_field(raw_dict: dict, field_name: str, default: bool = False) ->
     return value
 
 
+def read_contract_yaml(contract_path: Path) -> object:
+    """Read contract YAML safely for discovery and pre-subscription wiring.
+
+    Cold wiring re-reads contract extensions after discovery. Keep those reads
+    on the same fast safe parser so they do not restore the pure-Python parse
+    delay before the first consumer bind (OMN-18843). I/O and parse errors
+    propagate to the caller, which owns the field's refusal semantics.
+    """
+    with open(contract_path) as f:
+        # OMN-18843: cold discovery gates the first consumer bind. Use the
+        # safe LibYAML parser when available; the memo only helps later scans.
+        # Both loaders reject Python object tags, with a portable fallback.
+        loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)(f)
+        try:
+            raw = loader.get_single_data()
+        finally:
+            loader.dispose()
+
+    return raw
+
+
 def _parse_contract(
     *,
     contract_path: Path,
@@ -571,15 +592,7 @@ def _parse_contract(
 
     Only reads the fields needed for auto-wiring. Unknown fields are ignored.
     """
-    with open(contract_path) as f:
-        # OMN-18843: cold discovery gates the first consumer bind. Use the
-        # safe LibYAML parser when available; the memo only helps later scans.
-        # Both loaders reject Python object tags, with a portable fallback.
-        loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)(f)
-        try:
-            raw = loader.get_single_data()
-        finally:
-            loader.dispose()
+    raw = read_contract_yaml(contract_path)
 
     if not isinstance(raw, dict):
         raise ValueError(f"Expected YAML dict, got {type(raw).__name__}")
