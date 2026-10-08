@@ -405,9 +405,12 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
             "Content-Type": "application/json",
         }
         self._owns_client: bool = client is None
-        self._client: httpx.AsyncClient = client or httpx.AsyncClient(
-            timeout=timeout_seconds,
-            headers=self._request_headers,
+        self._client: httpx.AsyncClient = (
+            client
+            or httpx.AsyncClient(  # no-contract-check: the seam
+                timeout=timeout_seconds,
+                headers=self._request_headers,
+            )
         )
         self._connected: bool = False
         self._done_write_guard: DoneWriteReceiptGuard = (
@@ -450,7 +453,9 @@ class AdapterLinearGraphQLProjectTracker(MixinAsyncCircuitBreaker):
             finally:
                 await adapter.close()
         else:
-            async with httpx.AsyncClient(timeout=timeout_seconds) as owned_client:
+            async with httpx.AsyncClient(  # no-contract-check: the seam
+                timeout=timeout_seconds
+            ) as owned_client:
                 adapter = cls(
                     api_key=api_key,
                     timeout_seconds=timeout_seconds,
