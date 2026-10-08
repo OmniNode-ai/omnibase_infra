@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""deploy-runtime.sh must enforce the prod promotion-lineage guard (OMN-12626).
+"""onex-runtime-deploy must enforce the prod promotion-lineage guard (OMN-12626).
 
-Before OMN-12626, deploy-runtime.sh only `log_warn`ed on a dirty tree and had
+Before OMN-12626, onex-runtime-deploy only `log_warn`ed on a dirty tree and had
 no promoted-lineage check, so it could build the prod image from a dirty or
 dev-only source clone. These tests assert the script:
 
@@ -21,7 +21,13 @@ from pathlib import Path
 
 import pytest
 
-DEPLOY_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "omnibase_infra"
+    / "handlers"
+    / "handler_runtime_deploy.sh"
+)
 
 
 def _script_text() -> str:
@@ -32,7 +38,7 @@ def _script_text() -> str:
 def test_defines_prod_lineage_guard_function() -> None:
     text = _script_text()
     assert re.search(r"^guard_prod_promotion_lineage\s*\(\)", text, re.MULTILINE), (
-        "deploy-runtime.sh must define guard_prod_promotion_lineage()"
+        "onex-runtime-deploy must define guard_prod_promotion_lineage()"
     )
 
 
@@ -61,14 +67,14 @@ def test_guard_hard_fails_not_warns() -> None:
 @pytest.mark.unit
 def test_exposes_prod_flag() -> None:
     text = _script_text()
-    assert re.search(r"--prod\)", text), "deploy-runtime.sh must expose a --prod flag"
+    assert re.search(r"--prod\)", text), "onex-runtime-deploy must expose a --prod flag"
 
 
 @pytest.mark.unit
 def test_honors_onex_deploy_lane_env() -> None:
     text = _script_text()
     assert "ONEX_DEPLOY_LANE" in text, (
-        "deploy-runtime.sh must honor ONEX_DEPLOY_LANE=prod"
+        "onex-runtime-deploy must honor ONEX_DEPLOY_LANE=prod"
     )
 
 

@@ -21,7 +21,7 @@ RUNTIME_POLICY_ENV_FILE = REPO_ROOT / "docker" / "runtime-policy.env"
 # stability-test has historically accumulated ~4x dev's topic count with no
 # retirement process, and a cap raised only via a live `rpk cluster config
 # set` does NOT survive this lane's redeploys (warm_broker_topic_provisioning()
-# in deploy-runtime.sh force-recreates the redpanda-partition-cap one-shot on
+# in onex-runtime-deploy force-recreates the redpanda-partition-cap one-shot on
 # every redeploy, re-running whatever value is hardcoded in the compose
 # override below). Both belts that declare this value in
 # docker-compose.stability-test.yml -- the `redpanda` service's `--set

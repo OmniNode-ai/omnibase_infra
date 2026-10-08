@@ -10,7 +10,7 @@
 # only compose file in this directory that no lane deploy path can reach:
 # `resolve_lane_overlay_filename` in scripts/runtime_build/compose_files.sh has
 # no `prepr-*` arm, so its fail-closed default refuses a pool project outright
-# and scripts/deploy-runtime.sh cannot be pointed at a slot. That refusal is
+# and onex-runtime-deploy cannot be pointed at a slot. That refusal is
 # the point of a separate entrypoint (rule 24(e)) and is pinned by a test.
 #
 # WHY AN OVERLAY AND NOT A STANDALONE FILE

@@ -27,7 +27,7 @@ on:
       - "scripts/check_prod_promotion_lineage.py"
       - "tests/scripts/test_check_prod_promotion_lineage.py"
       - "tests/scripts/test_deploy_runtime_prod_lineage.py"
-      - "scripts/deploy-runtime.sh"
+      - "src/omnibase_infra/handlers/handler_runtime_deploy.sh"
       - "scripts/deploy-agent/deploy_agent/executor.py"
       - "scripts/deploy-agent/tests/unit/test_executor_promotion_lineage.py"
       - ".github/workflows/prod-promotion-lineage.yml"
@@ -38,7 +38,7 @@ on:
     paths:
       - "scripts/check_prod_promotion_lineage.py"
       - "tests/scripts/test_check_prod_promotion_lineage.py"
-      - "scripts/deploy-runtime.sh"
+      - "src/omnibase_infra/handlers/handler_runtime_deploy.sh"
       - "scripts/deploy-agent/deploy_agent/executor.py"
       - ".github/workflows/prod-promotion-lineage.yml"
   workflow_call:
