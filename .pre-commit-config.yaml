@@ -30,6 +30,27 @@ repos:
         files: ^(formal/lab_reconcile/|tests/ci/test_lab_reconcile_model\.py$|tests/ci/fixtures/lab_reconcile_ticket_omn19421\.json$|\.pre-commit-config\.yaml$|\.github/workflows/ci\.yml$)
         pass_filenames: false
         stages: [pre-commit]
+      - id: lane-sync-receipt
+        name: Lane sync refuses every census finding (OMN-19417)
+        entry: uv run --frozen pytest tests/ci/test_lab_pass_receipt_integration_probes_omn18866.py -q
+        language: system
+        pass_filenames: false
+        files: ^(scripts/(ci/lab_pass_receipt\.py|lane-census-check\.sh|lane_census_(inventory|plan)\.py|runtime_build/verify_stability_refresh\.py)|tests/ci/test_lab_pass_receipt_integration_probes_omn18866\.py|\.github/workflows/(ci|runtime-rebuild-trigger-reusable)\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: lane-sync-stability
+        name: Stability refresh retains lane sync failure (OMN-19417)
+        entry: uv run --frozen pytest scripts/runtime_build/tests/test_verify_stability_refresh.py -q
+        language: system
+        pass_filenames: false
+        files: ^(scripts/(ci/lab_pass_receipt\.py|lane-census-check\.sh|runtime_build/(verify_stability_refresh\.py|tests/test_verify_stability_refresh\.py))|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: lane-sync-drift
+        name: Census drift count refuses nonzero (OMN-19417)
+        entry: uv run --frozen pytest tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q
+        language: system
+        pass_filenames: false
+        files: ^(scripts/check_lane_census_drift\.py|tests/unit/scripts/test_check_lane_census_drift_omn18949\.py|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
       - id: lab-census-alarm-episodes
         name: Census alarm episodes and recoveries (OMN-19418)
         entry: uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k lane_drift -q

@@ -2620,6 +2620,13 @@ jobs:
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
           "${HOME}/.local/bin/shellcheck" --version
 
+      - name: Verify lane-sync receipt refusal and stability refresh (OMN-19417)
+        if: matrix.split == 1
+        run: |
+          uv run --frozen pytest tests/ci/test_lab_pass_receipt_integration_probes_omn18866.py -q
+          uv run --frozen pytest tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q
+          uv run --frozen pytest scripts/runtime_build/tests/test_verify_stability_refresh.py -q
+
       - name: Verify lab-pass criterion bindings and closer pins (OMN-18488)
         run: uv run --frozen pytest tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488.py -q
 
