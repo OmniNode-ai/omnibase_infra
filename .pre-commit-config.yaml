@@ -655,6 +655,13 @@ repos:
         files: ^(scripts/ci/lab_pass_receipt\.py|src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/.*|tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488\.py|\.github/workflows/(runtime-rebuild-trigger|deliver-dev-candidate-to-staging)\.yml)$
         pass_filenames: false
         stages: [pre-commit]
+      - id: persistent-lab-receipt
+        name: Persistent lab apply receipt and candidate smoke isolation (OMN-18276)
+        entry: uv run --frozen pytest tests/scripts/ci/test_persistent_lab_receipt_omn18276.py -q --no-cov
+        language: system
+        files: ^(scripts/ci/(lab_pass_receipt|fetch_lab_overlay_record)\.py|tests/scripts/ci/test_persistent_lab_receipt_omn18276\.py|\.github/workflows/(runtime-rebuild-trigger|deliver-dev-candidate-to-staging|ci)\.yml|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: d11-workflow-verdict-regression
         name: D11 verdict admits only the governed lane (OMN-19311)
         entry: uv run --frozen pytest tests/ci/test_workflow_verdict_omn_d11.py -q --no-cov
