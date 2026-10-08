@@ -804,6 +804,19 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # OMN-18648: unconditional new admission workflow. Body edits re-evaluate
     # this context without re-running the full CI matrix.
     "CI Live Contact (OMN-18648)",
+    # OMN-20074 S6 part 1: repo-owned DoD verdict, enforced beside OCC. THIS
+    # LINE IS THE MECHANISM: dev requires only CI Summary, so registering the
+    # verdict here makes an absent/skipped/red check block instead of silently
+    # retiring the gate. Producer: call-repo-evidence-gate.yml on pull_request
+    # to dev/main, with no paths filter or job-level if. Admission measured
+    # 16/16 completed-success check-runs on the most recent merged dev heads
+    # (#4702 #4715 #4716 #4714 #4717 #4707 #4667 #4719 #4669 #4720 #4722 #4723
+    # #4656 #4724 #4725 #4728), 2026-10-08T07:42:22Z to 2026-10-08T15:09:44Z,
+    # in shadow mode. Only dod-verify carries the verdict; repo-evidence / verify
+    # is a caller-mode success no-op and is not registered. All OCC entries stay
+    # enforced until S6 part 2. Admitted under POST_FIXTURE_WINDOW_CONTEXTS
+    # because both historical fixture windows predate this caller.
+    "repo-evidence / dod-verify",
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -826,6 +839,10 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
 # finding, not a fixture convenience.
 POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
     {
+        # OMN-20074: the repo-evidence caller postdates both captured historical
+        # windows. Live missing/skipped/red verdicts still block; no synthetic
+        # rows are added to the historical fixtures.
+        "repo-evidence / dod-verify",
         # OMN-18786: the unconditional context starts after the captured
         # historical windows. Runtime enforcement still requires success;
         # no synthetic rows are added to those historical fixtures.

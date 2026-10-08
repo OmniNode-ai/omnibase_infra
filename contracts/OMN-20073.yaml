@@ -1,20 +1,20 @@
 schema_version: "1.0.0"
 ticket_id: OMN-20073
 title: Repo-owned DoD evidence caller for omnibase_infra, S5 shadow count
-summary: omnibase_infra owns its DoD evidence contract and delegates verification to the receipt-gate reusable in caller-evidence shadow mode, so every pull request records the new-path verdict beside OCC's verdict on the same head while blocking nothing, and CI Summary's own sweep accepts the shadow shape.
+summary: omnibase_infra owns its DoD evidence contract and delegates verification to the receipt-gate reusable in caller-evidence mode, with a verifier that ships the OCC difference classifier and CI Summary enforcing the dod-verify verdict beside OCC after the OMN-20074 S6 part 1 cutover.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
   - id: req-repo-evidence-shadow
-    statement: omnibase_infra must wire a caller evidence gate in shadow mode beside OCC, and CI Summary must stay green on the shape that mode reports.
+    statement: omnibase_infra must wire a caller evidence gate beside OCC, retain a verifier that ships the difference classifier and enforce the dod-verify verdict through CI Summary.
     acceptance:
       - id: AC1
         statement: 'AC1: omnibase_infra carries a caller workflow for the receipt-gate caller-evidence mode that runs on pull requests (pull_request, the one pull request trigger this repository''s runner-routing audit allows), pins the reusable by full sha, sets evidence-source caller and has no steps, secrets or condition of its own -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k workflow_shape'
       - id: AC2
-        statement: 'AC2: the caller sets compare-with-occ and shadow to "true" with a verifier-version that ships the occ-difference classifier, so the S5 count records the new-path verdict beside OCC''s without enforcing it -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s5_shadow'
+        statement: 'AC2: the caller pins a verifier-version that ships the occ-difference classifier, so comparison with OCC can be turned back on with one input -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k verifier_ships_the_occ_difference_classifier'
       - id: AC3
-        statement: 'AC3: CI Summary''s external sweep passes the shadow shape (both repo-evidence check-runs concluding success on a pull_request run) and refuses the non-shadow shapes (a skipped verify, a red dod-verify) -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k ci_summary_sweep'
+        statement: 'AC3: CI Summary registers repo-evidence / dod-verify as an expected external context, passes a green verdict and blocks a red, skipped or absent verdict through the registered-context check, while repo-evidence / verify stays unregistered and all OCC contexts stay enforced -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k ci_summary'
       - id: AC4
         statement: 'AC4: every acceptance criterion of every contracts/OMN-*.yaml that declares binds_ac is bound to a test_passes item whose pytest selector names a test file that exists -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k contract_binds'
 evidence_requirements:
@@ -22,11 +22,11 @@ evidence_requirements:
     description: The caller workflow has the required base-branch trigger, immutable pin, inputs and read-only permissions.
     command: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k workflow_shape
   - kind: tests
-    description: The caller turns the OCC difference step and shadow mode on with a verifier that ships the classifier.
-    command: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s5_shadow
+    description: The caller pins a verifier that ships the OCC difference classifier for rollback comparison.
+    command: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k verifier_ships_the_occ_difference_classifier
   - kind: tests
-    description: CI Summary's external sweep accepts the shadow shape and refuses the shapes shadow mode exists to avoid.
-    command: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k ci_summary_sweep
+    description: CI Summary enforces the registered dod-verify verdict beside all existing OCC contexts.
+    command: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k ci_summary
   - kind: tests
     description: Every repo-owned contract criterion that declares binds_ac binds to test evidence in an existing test file.
     command: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k contract_binds
@@ -43,18 +43,18 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k workflow_shape
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-repo-evidence-ac2
-    description: The focused workflow test proves the caller compares with OCC in shadow mode and pins a verifier that ships the difference classifier.
+    description: The focused workflow test proves the caller pins a verifier that ships the OCC difference classifier.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s5_shadow
+        check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k verifier_ships_the_occ_difference_classifier
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-repo-evidence-ac3
-    description: The sweep test feeds CI Summary's external sweep the shadow shape and the two non-shadow shapes and asserts the verdict for each.
+    description: The CI Summary tests prove a green dod-verify passes and red, skipped or absent verdicts block through registration while OCC stays enforced.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k ci_summary_sweep
+        check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k ci_summary
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-repo-evidence-ac4
     description: The contract binding test proves every binds_ac criterion binds to test evidence in an existing test file.
