@@ -2592,6 +2592,9 @@ jobs:
       - name: Verify lab-pass criterion bindings and closer pins (OMN-18488)
         run: uv run --frozen pytest tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488.py -q
 
+      - name: Verify cloud migration failure scope (OMN-18496)
+        run: uv run --frozen pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py -q
+
       - name: Run pytest (smart selection)
         if: vars.ENABLE_SMART_TESTS == 'true' && needs.detect-changes.outputs.is_full_suite == 'false'
         # OMN-15233: tests/integration/ci/test_workflow_uses_refs_resolve_live.py

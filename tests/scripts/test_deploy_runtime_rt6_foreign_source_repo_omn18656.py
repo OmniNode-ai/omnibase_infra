@@ -238,6 +238,10 @@ def _run_readback(
             _extract_function("resolve_lane_runtime_container_name"),
             _extract_array("DEV_LANE_ONLY_RUNTIME_SERVICES"),
             _extract_array("STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES"),
+            # OMN-18496: readback scope is filtered through the cloud-migration gate.
+            _extract_array("DEV_LANE_CLOUD_DB_SERVICES"),
+            "DEV_LANE_CLOUD_MIGRATIONS_READY=true",
+            _extract_function("exclude_cloud_database_services"),
             _extract_scalar("OWN_SOURCE_REPO"),
             _extract_function("resolve_lane_runtime_services"),
             _extract_function("service_is_one_shot"),

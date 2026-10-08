@@ -431,6 +431,14 @@ repos:
         files: ^(\.github/workflows/.*\.ya?ml|\.pre-commit-config\.yaml|pyproject\.toml|uv\.lock)$
         pass_filenames: true
         stages: [pre-commit]
+      # OMN-18496: mirrors the focused scoping regression in test-parallel.
+      - id: dev-cloud-migration-scope
+        name: Cloud migration failure gates only cloud consumers (OMN-18496)
+        entry: uv run --frozen pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py -q
+        language: system
+        files: ^(scripts/deploy-runtime\.sh|scripts/runtime_build/compose_files\.sh|docker/docker-compose\.(infra|dev-lane)\.yml|tests/scripts/test_deploy_runtime_cloud_gate_omn18496\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-16367: per-run compose proof images must be evicted at source
       # (always() teardown with --volumes --rmi local) and labeled
       # org.omninode.retention=disposable. Mirrors the ci.yml step in the
