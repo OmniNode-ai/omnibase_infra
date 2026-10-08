@@ -245,6 +245,11 @@ hosts:
   # OMN-19505, the second deployed dev lane dev-202.
   lab-202:
     aliases: [omnipc2]
+# OMN-19416: a service with Docker health is graded after 1800 continuous
+# unhealthy seconds (FailingStreak times interval). unhealthy_after_seconds
+# may be an integer in 1..1800. restart_bound is a non-negative restart count;
+# a count above it is drift, including an exited container. The alarm reads
+# these same per-service bounds through config/lab_alarm.json's census_lane.
 lanes:
   stability-test:
     hosts: [lab-201]
@@ -439,10 +444,29 @@ lanes:
     image_tag_pattern: '.+'
     optional: true
     services:
+      # OMN-19416: bounds moved from the alarm; both readers use this manifest.
+      - name: omnibase-infra-postgres
+        kind: service
+        replicas: 1
+        restart_bound: 5
+      - name: omnibase-infra-redpanda
+        kind: service
+        replicas: 1
+        restart_bound: 5
+      - name: omnibase-infra-valkey
+        kind: service
+        replicas: 1
+        restart_bound: 5
+      - name: omnimarket-projection-api
+        kind: service
+        replicas: 1
+        restart_bound: 5
       - name: omninode-runtime
+        restart_bound: 5
         kind: service
         replicas: 1
       - name: omninode-runtime-effects
+        restart_bound: 5
         kind: service
         replicas: 1
       # OMN-17448: the standalone projection writers. Declared here so the lane
@@ -457,21 +481,27 @@ lanes:
       # how "undocumented-but-running" (and its mirror, "declared-but-never-
       # started") both hide.
       - name: omnimarket-projection-tenant-registry-writer
+        restart_bound: 5
         kind: service
         replicas: 1
       - name: omnimarket-projection-delegation-writer
+        restart_bound: 5
         kind: service
         replicas: 1
       - name: omnimarket-projection-registration-writer
+        restart_bound: 5
         kind: service
         replicas: 1
       - name: omnimarket-projection-savings-writer
+        restart_bound: 2
         kind: service
         replicas: 1
       - name: omnimarket-projection-tenant-credentials-writer
+        restart_bound: 5
         kind: service
         replicas: 1
       - name: omnimarket-projection-live-events-writer
+        restart_bound: 5
         kind: service
         replicas: 1
       # OMN-18114: the TENANT-domain projection CARRIER. Not one of the writers

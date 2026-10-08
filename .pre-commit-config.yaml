@@ -23,6 +23,27 @@
 repos:
   - repo: local
     hooks:
+      - id: census-container-health
+        name: Census unhealthy and restart bounds (OMN-19416)
+        entry: uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "unhealthy or restart_loop" -q
+        language: system
+        files: ^(scripts/lane_census_plan\.py|deploy/lane-census/lane-manifest\.yaml|tests/unit/scripts/test_lane_census_plan\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: census-health-collector
+        name: Census health inspect transport (OMN-19416)
+        entry: uv run --frozen pytest tests/unit/scripts/test_lane_census_inventory.py -q
+        language: system
+        files: ^(scripts/lane_census_inventory\.py|tests/unit/scripts/(test_lane_census_inventory|fake_docker_engine_omn19959)\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: alarm-manifest-restart-bounds
+        name: Alarm reads census restart bounds (OMN-19416)
+        entry: uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k "restart or shipped_config or manifest" -q
+        language: system
+        files: ^(scripts/(lab_alarm|lane_census_plan)\.py|config/lab_alarm\.json|deploy/lane-census/lane-manifest\.yaml|tests/ci/test_lab_alarm_omn18867\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: linear-transport-consolidation
         name: Linear GraphQL has one transport owner (OMN-17678)
         entry: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q

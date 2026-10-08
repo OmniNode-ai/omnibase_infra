@@ -1042,6 +1042,12 @@ jobs:
       - name: SPDX header check (OMN-19612)
         run: uv run --frozen onex spdx validate src tests scripts
 
+      - name: Census health and shared restart bounds (OMN-19416)
+        run: |
+          uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "unhealthy or restart_loop" -q
+          uv run --frozen pytest tests/unit/scripts/test_lane_census_inventory.py -q
+          uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k "restart or shipped_config or manifest" -q
+
   infra-node-handler-ownership:
     needs: occ-preflight
     name: Infra Node Handler Ownership
