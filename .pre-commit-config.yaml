@@ -161,6 +161,14 @@ repos:
         files: ^src/omnibase_infra/.*\.py$
   - repo: local
     hooks:
+      - id: rolling-runner-registration-preflight
+        name: Rolling runner registration preflight (OMN-18877)
+        entry: uv run --frozen pytest tests/ci/test_deploy_runners_registration_preflight.py -q
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(scripts/deploy-runners\.sh|tests/ci/test_deploy_runners_registration_preflight\.py|tests/ci/fixtures/rolling_runner_registration_preflight\.json|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
       # OMN-18786: same blocking scan as the CI Summary context.
       - id: seed-provenance-check
         name: Seed Provenance Check
