@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-20074: CI Summary requires the repo-owned evidence verdict on PR runs."""
+"""OMN-20074: CI Summary requires the repo-owned evidence verdict on PR runs.
+
+Scratch control: this docstring line changes no behaviour, so the test passes at
+the merge base and at the head alike.
+"""
 
 from __future__ import annotations
 
