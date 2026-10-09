@@ -1,0 +1,34 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20422
+title: Use Qwen3.6-35B-A3B as the Hostile Reviewer's second voter
+summary: Bind the second voter to the Studio's port 8131 while preserving the first voter and quorum keys, as ruled on 2026-10-09T04:15:56Z.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-distinct-hostile-review-voters
+    statement: The Hostile Reviewer uses Qwen3.6-35B-A3B as its second voter alongside Qwen3.8-27B, with the existing review keys and quorum rule.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the recorded second-voter response identifies qwen3.6-35b-a3b and a completed reply, distinct from the first voter Qwen3.8-27B -- falsifier: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_second_voter_endpoint_serves_a_different_model_than_the_first'
+      - id: AC2
+        statement: 'AC2: the review and preflight read one job-level LLM_GPT_OSS_REVIEW_URL on port 8131 -- falsifier: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_review_and_preflight_share_one_second_voter_url_on_port_8131'
+      - id: AC3
+        statement: 'AC3: qwen3-review and gpt-oss-review remain the quorum keys -- falsifier: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_the_quorum_keys_are_unchanged'
+evidence_requirements:
+  - kind: tests
+    description: Recorded live-contact evidence and workflow checks cover the second voter's model, shared endpoint and quorum keys.
+    command: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-hostile-review-second-voter
+    description: The PR's focused tests verify the recorded second-voter response and the workflow's endpoint and quorum keys.
+    source: manual
+    binds_ac: [AC1, AC2, AC3]
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
