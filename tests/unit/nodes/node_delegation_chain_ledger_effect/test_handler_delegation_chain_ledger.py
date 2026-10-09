@@ -452,6 +452,7 @@ async def test_upsert_that_changes_no_row_is_a_typed_refusal() -> None:
     correlation_id = uuid4()
     handler = _handler()
     row = ModelLedgerChainRow(
+        chain_state="complete",
         correlation_id=correlation_id,
         hop_index=0,
         hop=_CHAIN_TOPICS[0],
@@ -486,6 +487,7 @@ async def test_upsert_that_changes_a_row_is_accepted() -> None:
     correlation_id = uuid4()
     handler = _handler()
     row = ModelLedgerChainRow(
+        chain_state="complete",
         correlation_id=correlation_id,
         hop_index=0,
         hop=_CHAIN_TOPICS[0],

@@ -489,13 +489,20 @@
 #     restate every standing gap comment once (it is part of the gap
 #     fingerprint) for a refactor that says nothing new to a ticket's reader.
 #
+# OMN-18490 AC1–AC4 (contract 1.11.0): a started candidate with at least
+# one task-list checkbox and none unticked records GAP_TICKED_OPEN, before
+# dod_verify and every Done path. The existing exclusion, label, terminal-state
+# and open-child gates take precedence. The shared gap-comment writer dedups
+# the assertion across ticks. tickets_ticked_open counts the class separately
+# in the receipt; the outcome and job log name the ticket. No Done authority
+# is derived from a ticked box, and the scheduled arming policy is unchanged.
 name: "node_evidence_autoclose_sweep_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 10
+  minor: 11
   patch: 0
-node_version: "1.18.0"
+node_version: "1.18.1"
 description: >
   Scheduled sweep wiring companion-merge -> dod_verify -> governed Done flip. Enumerates merged onex_change_control evidence companions, extracts their Evidence-Ticket binding, re-runs dod_verify, and flips Done, posts a gap comment, holds a closed cascade bump until verified supersession is proven via merged replacement and default-branch version readback, holds a criterion whose only declaring check marks it a proposal until a person accepts it, holds a criterion whose accepted binding is pinned to a revision of the criterion text the ticket no longer carries, and excludes explicitly superseded duplicate criteria from the live criteria set only when an unmarked replacement with the same label is present. Every outcome that reached a dod_verify verdict records one row per check -- id, status, proof class, declared bindings and a bounded message excerpt -- and a gap comment names the failing check ids, so a reader is never handed a tally with no names in it (OMN-18490). DRY-RUN by default; ONEX_AUTOCLOSE_DISABLED kill switch checked first.
 
@@ -506,7 +513,7 @@ input_model:
 output_model:
   name: "ModelEvidenceAutocloseSweepResult"
   module: "omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_evidence_autoclose_sweep_result"
-  description: "Per-ticket outcomes (flipped/gap/skipped/errored) and run-level counts."
+  description: "Per-ticket outcomes (flipped/gap/skipped/errored), including gap_ticked_open, and run-level counts including tickets_ticked_open."
 # Top-level handler block: RuntimeLocal's single-shot "compute execution path"
 # (no terminal_event / no event bus, mirrors node_dod_verify's own contract
 # shape) resolves the handler + its input model from THIS block, not from

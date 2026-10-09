@@ -23,6 +23,34 @@
 repos:
   - repo: local
     hooks:
+      - id: lane-sync-receipt
+        name: Lane sync refuses every census finding (OMN-19417)
+        entry: uv run --frozen pytest tests/ci/test_lab_pass_receipt_integration_probes_omn18866.py -q
+        language: system
+        pass_filenames: false
+        files: ^(scripts/(ci/lab_pass_receipt\.py|lane-census-check\.sh|lane_census_(inventory|plan)\.py|runtime_build/verify_stability_refresh\.py)|tests/ci/test_lab_pass_receipt_integration_probes_omn18866\.py|\.github/workflows/(ci|runtime-rebuild-trigger-reusable)\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: lane-sync-stability
+        name: Stability refresh retains lane sync failure (OMN-19417)
+        entry: uv run --frozen pytest scripts/runtime_build/tests/test_verify_stability_refresh.py -q
+        language: system
+        pass_filenames: false
+        files: ^(scripts/(ci/lab_pass_receipt\.py|lane-census-check\.sh|runtime_build/(verify_stability_refresh\.py|tests/test_verify_stability_refresh\.py))|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: lane-sync-drift
+        name: Census drift count refuses nonzero (OMN-19417)
+        entry: uv run --frozen pytest tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q
+        language: system
+        pass_filenames: false
+        files: ^(scripts/check_lane_census_drift\.py|tests/unit/scripts/test_check_lane_census_drift_omn18949\.py|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: lab-census-alarm-episodes
+        name: Census alarm episodes and recoveries (OMN-19418)
+        entry: uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k lane_drift -q
+        language: system
+        files: ^(scripts/(lab_alarm|lane_census_event|lane_census_plan)\.py|config/lab_alarm\.json|tests/ci/(test_lab_alarm_omn18867\.py|fixtures/lab_census_snapshot_omn19418\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: linear-transport-consolidation
         name: Linear GraphQL has one transport owner (OMN-17678)
         entry: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q

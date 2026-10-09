@@ -79,7 +79,7 @@ EMIT_JSON=false
 # OMN-18606: destination for the gate-valid census snapshot document. Empty means
 # "do not write one" (the pre-OMN-18606 behaviour). "-" means stdout.
 SNAPSHOT_OUT=""
-LOG_FILE="${HOME}/.local/log/onex/lane-census.log"
+LOG_FILE="${LANE_CENSUS_LOG_FILE:-${HOME}/.local/log/onex/lane-census.log}"
 DRIFT_TOPIC="onex.evt.infra.lane-census-drift.v1"
 # OMN-18769: published on EVERY run, drift or not. The drift topic stays the
 # ALERT authority (a consumer opens a ticket from it); this one is the FACT

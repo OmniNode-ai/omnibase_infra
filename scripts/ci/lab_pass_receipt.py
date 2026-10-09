@@ -168,6 +168,7 @@ import os
 import re
 import subprocess  # fixed argv, no shell, trusted git/gh binaries
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -1461,6 +1462,7 @@ class ModelSettleBudget:
 #: PROBES_NOT_YET_WIRED because it needs nothing the other four do not -- the
 #: introspection manifest is served by the same health server, on the same
 #: port, as ``/ready`` and ``/health``.
+LANE_SYNC_CHECK: Final[str] = "lane_sync"
 MIGRATIONS_APPLIED_CHECK: Final[str] = "migrations_applied"
 CONSUMER_GROUP_LAG_CHECK: Final[str] = "consumer_group_lag"
 DELEGATION_GOLDEN_CHAIN_CHECK: Final[str] = "delegation_golden_chain"
@@ -1473,16 +1475,12 @@ COMPOSE_DEV_HTTP_CHECKS = (
     "node_inventory",
 )
 
-#: The three integration checks OMN-18866 wired, named here beside the HTTP set
-#: because they are emitted by a different mechanism -- the docker socket and
-#: the chain canary's receipt, not an HTTP GET -- and a reader counting the
-#: checks on a receipt should be able to see where each came from.
-#:
-#: Each is emitted ONLY when the caller supplies its subject, on the same rule
-#: the settle budget and the generation binding already follow: supplying the
-#: input IS the claim, so an ad hoc read makes no claim about migrations, lag
-#: or delegation instead of making an empty one.
+#: Socket-backed compose probes. The receipt CLI always supplies lane_sync
+#: (OMN-19417); migration and lag checks run when their subjects are supplied.
+#: The HTTP set above and this tuple are cross-checks of the emitting code,
+#: rather than the versioned wave-exit policy's enforcement authority.
 COMPOSE_DEV_INTEGRATION_CHECKS = (
+    LANE_SYNC_CHECK,
     MIGRATIONS_APPLIED_CHECK,
     CONSUMER_GROUP_LAG_CHECK,
 )
@@ -2090,6 +2088,80 @@ def _run_read_only(
         timeout=timeout,
         env={**os.environ, **env} if env else None,
     )
+
+
+def check_lane_sync(
+    *,
+    lane: str | None = None,
+    runner: CommandRunner | None = None,
+) -> ModelLabPassCheck:
+    """Run the existing census against this daemon; every finding refuses (OMN-19417).
+
+    The host identity comes from the daemon, as in the census refresh job.
+    Report-only transport reuses the collector and planner without publishing
+    another alert. A zero must name at least one checked lane.
+    """
+    run = runner or _run_read_only
+    try:
+        host_read = run(["docker", "info", "--format", "{{.Name}}"], timeout=30)
+        host = host_read.stdout.strip()
+        if host_read.returncode or not host or "\n" in host:
+            raise ValueError(f"daemon identity unreadable: {host_read.stderr.strip()}")
+        repo = Path(__file__).resolve().parents[2]
+        argv = ["bash", str(repo / "scripts" / "lane-census-check.sh")]
+        if lane is not None:
+            argv.extend(["--lane", lane])
+        argv.append("--json")
+        with tempfile.TemporaryDirectory(prefix="lane-sync-") as scratch:
+            result = run(
+                argv,
+                timeout=120,
+                env={
+                    "LANE_CENSUS_HOST": host,
+                    "LANE_CENSUS_PYTHON": sys.executable,
+                    "LANE_MANIFEST": str(
+                        repo / "deploy" / "lane-census" / "lane-manifest.yaml"
+                    ),
+                    "LANE_CENSUS_LOG_FILE": str(Path(scratch) / "census.log"),
+                    "KAFKA_BOOTSTRAP_SERVERS": "",
+                },
+            )
+        if result.returncode not in (0, 30):
+            raise ValueError(
+                f"census exit={result.returncode}: {result.stderr.strip()}"
+            )
+        plan = json.loads(result.stdout)
+        if not isinstance(plan, dict):
+            raise ValueError("census plan is not an object")
+        checked = plan.get("lanes_checked")
+        findings = plan.get("findings")
+        if (
+            not isinstance(plan.get("host"), str)
+            or not plan["host"]
+            or not isinstance(checked, list)
+            or any(not isinstance(item, str) or not item for item in checked)
+            or not isinstance(findings, list)
+            or any(
+                not isinstance(item, dict) or not item.get("kind") for item in findings
+            )
+            or (not checked and not findings)
+            or type(plan.get("has_drift")) is not bool
+            or plan["has_drift"] != bool(findings)
+            or (result.returncode == 30) != bool(findings)
+        ):
+            raise ValueError(
+                "census plan is empty, malformed or disagrees with its drift exit"
+            )
+        return ModelLabPassCheck(
+            name=LANE_SYNC_CHECK,
+            ok=not findings,
+            evidence=json.dumps(plan, sort_keys=True),
+        )
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        return ModelLabPassCheck.indeterminate_check(
+            name=LANE_SYNC_CHECK,
+            evidence=f"census unreadable: {type(exc).__name__}: {exc}",
+        )
 
 
 @dataclass(frozen=True)
@@ -2896,6 +2968,7 @@ def probe_compose_dev(
     expected_generation: ModelLaneGeneration | None = None,
     generation_container: str | None = None,
     read_node_inventory: Callable[[], ModelNodeInventoryProbe] | None = None,
+    read_lane_sync: Callable[[], ModelLabPassCheck] | None = None,
     health_observe_budget_seconds: float | None = None,
     declared_migrations: Sequence[str] | None = None,
     migration_ledger: ModelMigrationLedger | None = None,
@@ -3022,6 +3095,8 @@ def probe_compose_dev(
     # what they mean. A migration ledger, a consumer group's lag and a
     # delegation's terminal are not properties of the lane's boot, and stamping
     # a settle phrase onto them would imply a relationship that is not there.
+    if read_lane_sync is not None:
+        annotated.append(read_lane_sync())
     if migration_ledger is not None:
         annotated.append(
             check_migrations_applied(
@@ -6503,6 +6578,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             expected_generation=expected_generation,
             generation_container=args.generation_container,
             read_node_inventory=read_node_inventory,
+            read_lane_sync=check_lane_sync,
             health_observe_budget_seconds=args.health_observe_budget_seconds,
             declared_migrations=declared_migrations,
             migration_ledger=migration_ledger,

@@ -7,11 +7,11 @@ runtime_profiles:
   - effects
 contract_version:
   major: 1
-  minor: 3
-  patch: 1
+  minor: 4
+  patch: 0
 node_version: "0.3.0"
 description: >
-  Records a correlation-scoped delegation chain after its terminal event. The handler reads envelope identity and parent identity from event_ledger, re-derives every causal edge against the parent this contract DECLARES for each hop (the chain is a tree, so a positional re-derivation grades a correct edge red -- OMN-18419), verifies the observed topics against this contract's declared topology, and idempotently writes public.ledger_chain. A write that cannot happen is a typed failure, never a success (OMN-18398): when the event_ledger read yields no hop at all on any topic in chain_topology, the handler refuses with a typed error naming the correlation id, the topics it looked for and the settle attempts it made, rather than reporting success having written nothing. A PARTIAL observation is still persisted as-is -- absence of a hop is honest evidence the canary reports as an incomplete chain, while absence of a whole chain is a success verdict resting on nothing. Each upsert is additionally required to affect a row: the statement always touches exactly one, so a zero count means the row this node claims to have recorded is not in the relation. The settle loop stops early when the terminal hop is rootless (OMN-17427): a terminal whose contract declares a parent but whose observed envelope records none can never have that edge re-derived by a later read, so the handler writes the partial chain at once instead of holding every terminal queued behind it for the full settle_attempts x settle_delay_ms window.
+  Records a correlation-scoped delegation chain after its terminal event. The handler reads envelope identity and parent identity from event_ledger, re-derives every causal edge against the parent this contract DECLARES for each hop (the chain is a tree, so a positional re-derivation grades a correct edge red -- OMN-18419), verifies the observed topics against this contract's declared topology, and idempotently writes public.ledger_chain. A write that cannot happen is a typed failure, never a success (OMN-18398): when the event_ledger read yields no hop at all on any topic in chain_topology, the handler refuses with a typed error naming the correlation id, the topics it looked for and the settle attempts it made, rather than reporting success having written nothing. A PARTIAL observation is still persisted as-is -- absence of a hop is honest evidence the canary reports as an incomplete chain, while absence of a whole chain is a success verdict resting on nothing. Each upsert is additionally required to affect a row: the statement always touches exactly one, so a zero count means the row this node claims to have recorded is not in the relation. The settle loop stops early when the terminal hop is rootless (OMN-17427): a terminal whose contract declares a parent but whose observed envelope records none can never have that edge re-derived by a later read, so the handler writes the partial chain at once instead of holding every terminal queued behind it for the full settle_attempts x settle_delay_ms window. OMN-17427: parentless terminals from contract-declared in-process producers are labelled in-process terminal-only, neither a pass nor a chain fault; bus chains missing hops remain incomplete.
 
 input_model:
   name: "ModelDelegationTerminalPayload"
@@ -129,6 +129,17 @@ chain_topology:
     parent: "onex.cmd.omnimarket.delegate-skill.v1"
     alternatives:
       - "onex.evt.omnimarket.delegate-skill-failed.v1"
+# OMN-17427: the in-process path deliberately publishes only its terminal.
+# Label from producer and absent parent evidence, never arrival timing. Only
+# observations of the declared terminal qualify; any upstream hop makes a
+# partial chain incomplete. The canary cannot count this label as a bus pass.
+chain_states:
+  - "complete"
+  - "incomplete"
+  - "in_process_terminal_only"
+in_process_terminal_only:
+  terminal_sources:
+    - "node_event_emit_effect"
 writer:
   settle_attempts: 20
   settle_delay_ms: 250
@@ -152,9 +163,9 @@ metadata:
   description: "Evidence-derived writer for OMN-16025 chain-canary link 5."
   author: "OmniNode Team"
   created: "2026-09-13"
-  updated: "2026-09-20"
+  updated: "2026-10-08"
   ticket: "OMN-16964"
-  note: "OMN-18390: output_model dropped -- nothing consumed ModelLedgerChainWriteResult and the node has no publish_topics, so every declared output dead-lettered. OMN-18398: contract 1.0.1 records the refusal semantics above. The evidence this node reads is written only by node_ledger_projection_compute, whose subscription carried none of the four chain_topology topics below -- so the read was empty by construction and public.ledger_chain held zero rows on the .201 dev lane while this node reported success on every dispatch. That node's contract 1.3.0 now records and dispatches all four. OMN-18419: contract 1.1.0 turns chain_topology from an ordered list of topics into an ordered list of hops that each declare their parent topic, because the chain is a tree -- delegate-skill-completed branches off the head -- while the replay re-derived a line and graded the correct edge red. The same revision declares the delegation-request.v1 hop, which was always on the wire and never in the declaration. OMN-18937: contract 1.2.0 subscribes and dispatches the delegation FAILURE terminal and declares it as an ALTERNATIVE of the terminal hop. Subscribed to the success terminal only, this writer was never dispatched at all for a failed delegation, so ledger_chain held no chain for it rather than an incomplete one -- and node_ledger_projection_compute did not record that terminal either, so even a dispatched writer would have read an empty relation. Both halves are fixed together; a producer-derived gate (tests/unit/nodes/test_delegation_terminal_topics_projected_omn18937.py) now derives the terminal set from the OMN-13202 producer mirror and refuses a consumer that covers less than the producer emits."
+  note: "OMN-18390: output_model dropped -- nothing consumed ModelLedgerChainWriteResult and the node has no publish_topics, so every declared output dead-lettered. OMN-18398: contract 1.0.1 records the refusal semantics above. The evidence this node reads is written only by node_ledger_projection_compute, whose subscription carried none of the four chain_topology topics below -- so the read was empty by construction and public.ledger_chain held zero rows on the .201 dev lane while this node reported success on every dispatch. That node's contract 1.3.0 now records and dispatches all four. OMN-18419: contract 1.1.0 turns chain_topology from an ordered list of topics into an ordered list of hops that each declare their parent topic, because the chain is a tree -- delegate-skill-completed branches off the head -- while the replay re-derived a line and graded the correct edge red. The same revision declares the delegation-request.v1 hop, which was always on the wire and never in the declaration. OMN-18937: contract 1.2.0 subscribes and dispatches the delegation FAILURE terminal and declares it as an ALTERNATIVE of the terminal hop. Subscribed to the success terminal only, this writer was never dispatched at all for a failed delegation, so ledger_chain held no chain for it rather than an incomplete one -- and node_ledger_projection_compute did not record that terminal either, so even a dispatched writer would have read an empty relation. Both halves are fixed together; a producer-derived gate (tests/unit/nodes/test_delegation_terminal_topics_projected_omn18937.py) now derives the terminal set from the OMN-13202 producer mirror and refuses a consumer that covers less than the producer emits. OMN-17427: parentless terminals from contract-declared in-process producers are labelled in-process terminal-only, neither a pass nor a chain fault; bus chains missing hops remain incomplete."
   tags:
     - "effect"
     - "delegation"

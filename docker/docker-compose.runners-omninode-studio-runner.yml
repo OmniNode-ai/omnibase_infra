@@ -15,7 +15,7 @@
 # is cloud/lane-touching and carries no architecture assumption, so it is the
 # one that can sit on an arm64 host without any workflow changing. It is
 # deliberately NOT labelled `omnibase-ci`: an action-class job must never be
-# placed on the host that serves the always-on gpt-oss-120b planner
+# placed on the host that serves the always-on qwen3.6-35b-a3b planner
 # (:8130) and the dev-200 compose lane.
 #
 # WHAT THIS RUNNER IS FOR. The per-merge verify job for a merge the deploy

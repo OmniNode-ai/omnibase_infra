@@ -249,8 +249,9 @@ def test_dev_105_lane_boundary_verify_ports_are_loopback_publishes() -> None:
 
 def test_dev_105_lane_boundary_broker_is_sized_for_the_host() -> None:
     """The .105 VM is 15.6 GiB with dogfood holding about 4.1 GiB, so the broker
-    takes 2G; the disk dials come from the dev lane's partition-cap override
-    (OMN-19082), which this overlay renames and never replaces."""
+    takes 2G; the disk dials come from the shared broker profile (OMN-19419)
+    the dev lane's partition-cap extends, which this overlay renames, never
+    replaces, and only hands the broker's memory dial."""
     raw = OVERLAY_PATH.read_text(encoding="utf-8")
     assert f"- {REDPANDA_MEMORY_DEFAULT}" in raw
     dev_202 = (ROOT / "docker" / "docker-compose.dev-202.yml").read_text(
@@ -260,12 +261,14 @@ def test_dev_105_lane_boundary_broker_is_sized_for_the_host() -> None:
     block = re.search(r"^  redpanda-partition-cap:\n((?:    .*\n)+)", raw, re.MULTILINE)
     assert block is not None
     assert block.group(1).strip() == (
-        "container_name: omnibase-infra-dev-105-redpanda-partition-cap"
-    ), "the overlay renames the one-shot and keeps the dev lane's disk dials"
-    dev_lane = (ROOT / "docker" / "docker-compose.dev-lane.yml").read_text(
+        "container_name: omnibase-infra-dev-105-redpanda-partition-cap\n"
+        "    environment:\n"
+        f"      REDPANDA_PROFILE_MEMORY: {REDPANDA_MEMORY_DEFAULT}"
+    ), "the overlay renames the one-shot and keeps the shared disk dials"
+    profile = (ROOT / "docker" / "docker-compose.broker-profile.yml").read_text(
         encoding="utf-8"
     )
-    assert "segment_fallocation_step 1048576" in dev_lane
+    assert "${REDPANDA_SEGMENT_FALLOCATION_STEP:-1048576}" in profile
 
 
 def test_dev_105_lane_boundary_block_is_clear_of_every_other_lane() -> None:
