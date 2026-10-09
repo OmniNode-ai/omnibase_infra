@@ -1,0 +1,67 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20422
+title: Use Qwen3.6-35B-A3B as the Hostile Reviewer's second voter
+summary: Bind the second voter to the Studio's port 8131 while preserving the first voter and quorum keys, as ruled on 2026-10-09T04:15:56Z.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-distinct-hostile-review-voters
+    statement: The Hostile Reviewer uses Qwen3.6-35B-A3B as its second voter alongside Qwen3.8-27B, with the existing review keys and quorum rule.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the recorded second-voter response identifies qwen3.6-35b-a3b and a completed reply, distinct from the first voter Qwen3.8-27B -- falsifier: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_second_voter_endpoint_serves_a_different_model_than_the_first'
+      - id: AC2
+        statement: 'AC2: the review and preflight read one job-level LLM_LOCAL_STUDIO_PLANNER_URL on port 8131 -- falsifier: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_review_and_preflight_share_one_second_voter_url_on_port_8131'
+      - id: AC3
+        statement: 'AC3: qwen3-review and local-studio-planner remain the quorum keys -- falsifier: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_the_quorum_keys_are_unchanged'
+  - id: req-reviewer-pin-and-key
+    statement: The Hostile Reviewer clones omniintelligence at the dev tip that carries the failed-vote parse fix and the registry key rename, and every roster site names the renamed second voter.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: sibling-pins.yaml and the hostile-reviewer clone name omniintelligence 33a29cdfba6f14be6f94c3c77a05e29f345c692b, and the retired gpt-oss-review key and its URL env var are gone -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_pin_omn20422.py -q'
+evidence_requirements:
+  - kind: tests
+    description: Recorded live-contact evidence and workflow checks cover the second voter's model, shared endpoint and quorum keys.
+    command: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20422-ac1
+    description: The recorded second-voter response identifies qwen3.6-35b-a3b and a completed reply, distinct from the first voter Qwen3.8-27B.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_second_voter_endpoint_serves_a_different_model_than_the_first
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20422-ac2
+    description: The review and preflight steps read one job-level LLM_LOCAL_STUDIO_PLANNER_URL on port 8131.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_review_and_preflight_share_one_second_voter_url_on_port_8131
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-20422-ac3
+    description: qwen3-review and local-studio-planner remain the quorum keys.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_the_quorum_keys_are_unchanged
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-20422-ac4
+    description: The omniintelligence pin is the parse-fix sha and the renamed second voter is requested at every roster site.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hostile_reviewer_pin_omn20422.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
