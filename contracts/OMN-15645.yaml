@@ -5,6 +5,12 @@ summary: The runtime-worker catalog service binds DELEGATION_ROUTING_TIERS_PATH 
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
+requirements:
+  - id: req-omn15645
+    statement: The runtime-worker catalog service must bind DELEGATION_ROUTING_TIERS_PATH to /app/config/delegation/routing_tiers.yaml, as the main and effects kernels do.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: catalog resolver and generator renders of runtime-worker in the runtime and runtime-infrastructure bundles carry DELEGATION_ROUTING_TIERS_PATH=/app/config/delegation/routing_tiers.yaml -- falsifier: uv run pytest tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py -q'
 evidence_requirements:
   - kind: tests
     description: Catalog resolver and generator tests show main, effects and worker renders carry the fixed in-image tiers path.
@@ -21,3 +27,5 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
