@@ -1,0 +1,22 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20805: this schedule ran from /etc/cron.d, which records a start and no end.
+# As a oneshot service under a timer, the journal records every run's start, end and
+# exit status. Installed and enabled by deploy/maintenance/omninode-host-maintenance-sync.sh.
+# Minute :49 is chosen, not arbitrary: it sits clear of the */15 system report, the
+# :19 workspace reconcile and the :37 maintenance sync, so four root jobs never
+# contend on the same clones. tests/scripts/test_runner_tree_converge_omn18567.py and
+# tests/ci/test_cron_entries_have_completion_evidence_omn20805.py assert the
+# separation. Output appends to one cumulative log, as the cron line did.
+
+[Unit]
+Description=Schedule: Converge the deploy runner's private OMNI_HOME clone tree (OMN-18567)
+
+[Timer]
+OnCalendar=*-*-* *:49:00
+AccuracySec=1s
+Unit=omninode-runner-tree-converge.service
+
+[Install]
+WantedBy=timers.target

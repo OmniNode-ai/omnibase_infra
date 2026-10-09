@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20805: this schedule ran from /etc/cron.d, which records a start and no end.
+# As a oneshot service under a timer, the journal records every run's start, end and
+# exit status. Installed and enabled by deploy/maintenance/omninode-host-maintenance-sync.sh.
+
+[Unit]
+Description=30-day retention for /data/inference log directories (logs only, never model weights)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+
+[Service]
+Type=oneshot
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# The retention is two find invocations, declared here rather than wrapped in a
+# script: the unit supplies what the script's lock and run log did (systemd will
+# not start a second instance of a running oneshot, and the journal holds the
+# list of deleted files and the exit status). SCOPE IS LOG DIRECTORIES ONLY:
+# /data/inference also holds live model weights, which these paths never name.
+# find does not follow a symlinked top directory (-P, the default), and -mindepth 1
+# keeps the directory itself, so a symlink or a missing path deletes nothing;
+# a missing path fails the unit loudly instead of being skipped.
+ExecStart=/usr/bin/find /data/inference/logs /data/inference/opt-vllm/logs -mindepth 1 -type f -mtime +30 -print -delete
+# Keep 60 days of the old per-run logs the retired script wrote.
+ExecStart=/usr/bin/find /data/maintenance/logs -maxdepth 1 -type f -name inference-log-retention-*.log -mtime +60 -delete
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=omninode-inference-log-retention

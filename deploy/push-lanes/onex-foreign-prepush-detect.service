@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20805: the foreign-prepush detector ran from a user crontab line, which
+# records a start and no end. As a oneshot user service under a timer, the journal
+# records every run's start, end and exit status; the detector still appends its
+# own per-run verdict line to the log file below.
+#
+# Installed by scripts/push_lanes/deploy-push-lanes.sh.
+[Unit]
+Description=ONEX foreign pre-push process detector (OMN-16968, OMN-20805)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/push-lanes/detect_foreign_prepush.py --log-file %h/push-lanes/foreign-prepush-detector.log
+SyslogIdentifier=onex-foreign-prepush-detect

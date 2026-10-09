@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20805: this schedule ran from /etc/cron.d, which records a start and no end.
+# As a oneshot service under a timer, the journal records every run's start, end and
+# exit status. Installed and enabled by deploy/maintenance/omninode-host-maintenance-sync.sh.
+
+[Unit]
+Description=Reconcile the deploy-source clones and host venvs (OMN-17311)
+Documentation=https://github.com/OmniNode-ai/omnibase_infra
+
+[Service]
+Type=oneshot
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/data/maintenance/bin/omninode-workspace-reconcile.sh
+StandardOutput=append:/data/maintenance/logs/workspace-reconcile.log
+StandardError=append:/data/maintenance/logs/workspace-reconcile.log
+SyslogIdentifier=omninode-workspace-reconcile

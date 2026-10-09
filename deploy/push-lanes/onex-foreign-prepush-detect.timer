@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20805: every 3 minutes, the slot the crontab line held.
+[Unit]
+Description=Schedule the ONEX foreign pre-push process detector (OMN-20805)
+
+[Timer]
+OnCalendar=*:0/3
+AccuracySec=1s
+Unit=onex-foreign-prepush-detect.service
+
+[Install]
+WantedBy=timers.target
