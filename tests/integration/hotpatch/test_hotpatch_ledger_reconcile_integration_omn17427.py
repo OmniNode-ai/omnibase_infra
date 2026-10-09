@@ -24,6 +24,10 @@ pytestmark = pytest.mark.integration
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PREFLIGHT = REPO_ROOT / "scripts" / "preflight_hotpatch_ledger.py"
 ONEX = Path(sys.executable).parent / "onex"
+# ``onex node`` binds its omnimarket drift guard to $OMNIBASE_PATH. The node under
+# test does not use omnimarket, so a host whose canonical clone has drifted must
+# not decide this test; the guard itself is untouched.
+HERMETIC_ENV = {k: v for k, v in os.environ.items() if k != "OMNIBASE_PATH"}
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -134,6 +138,7 @@ class Host:
             text=True,
             check=False,
             cwd=REPO_ROOT,
+            env=HERMETIC_ENV,
         )
 
     def refusal_reason(self) -> str:
@@ -162,6 +167,7 @@ def test_preflight_refusal_names_a_command_that_clears_it(tmp_path: Path) -> Non
         capture_output=True,
         text=True,
         check=False,
+        env=HERMETIC_ENV,
     )
     assert ran.returncode == 0, ran.stderr
     row = yaml.safe_load(host.ledger.read_text())["rows"][0]
