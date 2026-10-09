@@ -7,9 +7,10 @@ WHY THIS EXISTS
 Operator RULING, omni_home ledger 2026-09-25T12:40:36Z, item (b): "add a deploy
 lane on .200 with a load gate". The .200 host (Stickybeatz-Studio, 24 cores,
 192 GiB unified memory) is also where the orchestration sessions run and where
-the qwen3.6-35b-a3b llama-server on port 8130 serves the local review model the
+the Qwen3.8-27B llama-server on port 8130 serves the local review model the
 same ruling adopts (item a; the model behind that server changed from
-gpt-oss-120b on 2026-10-08, OMN-17427). A lane rebuild is a workspace build
+gpt-oss-120b to Qwen3.6-35B-A3B on 2026-10-08, OMN-17427, and to Qwen3.8-27B
+on 2026-10-09, OMN-20422). A lane rebuild is a workspace build
 plus a compose recreate inside a Docker VM capped at 31 GiB and 24 vCPUs, so an
 unconditional deploy can take the memory the model's weights live in. On Apple
 silicon GPU memory IS system memory: a model whose pages are squeezed out

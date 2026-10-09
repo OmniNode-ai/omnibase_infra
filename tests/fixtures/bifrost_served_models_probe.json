@@ -80,18 +80,18 @@
     },
     {
       "endpoint": "http://192.168.86.200:8130/v1/models",
-      "probed_at": "2026-10-08T18:14:41Z",
+      "probed_at": "2026-10-09T00:04:45Z",
       "command": "docker exec omninode-runtime-effects curl -sS -m 10 -w '\\nhttp=%{http_code} t=%{time_total}\\n' http://192.168.86.200:8130/v1/models (run on 192.168.86.201, dev lane compose project omnibase-infra, so the reachability recorded is the runtime's own)",
       "http_status": 200,
       "reachable": true,
       "served_model_ids": [
-        "qwen3.6-35b-a3b"
+        "Qwen3.8-27B"
       ],
       "owned_by": "llamacpp",
       "max_model_len": 262144,
       "max_model_len_source": "llama.cpp reports the context as data[].meta.n_ctx rather than max_model_len; the value is that field (n_ctx 262144, n_ctx_train 262144). The server runs --parallel 4 --kv-unified -c 262144, so the 262144 tokens are one pool shared by the four slots, not 262144 per slot.",
-      "control": "Negative control in the same container with the same curl: http://192.168.86.200:8131/v1/models returned curl exit 7, http=000 in 0.003s (could not connect), so the http=200 in 0.008s on :8130 is that port answering. Keyless (no Authorization header sent).",
-      "revalidation_note": "OMN-17427. The served model changed: the .200 Mac Studio planner now serves Qwen3.6-35B-A3B (Q8_0 GGUF from ggml-org/Qwen3.6-35B-A3B-GGUF, sha256 d8d7842cc657d720f39546878e431937c84473aa130c36371669ac17c80c7361, meta.ftype Q8_0, n_params 34660610688) under the alias qwen3.6-35b-a3b, supervised by the user LaunchAgent ai.omninode.planner-studio, replacing gpt-oss-120b (operator RULING 2026-10-08T17:38:56Z). First recorded 2026-09-30T15:31:26Z for gpt-oss-120b under OMN-19432."
+      "control": "Negative control in the same container with the same curl: http://192.168.86.200:8131/v1/models returned curl exit 7, http=000 in 0.003s (could not connect), so the http=200 in 0.006s on :8130 is that port answering. Keyless (no Authorization header sent).",
+      "revalidation_note": "OMN-20422. The served model changed: the .200 Mac Studio server now serves Qwen3.8-27B (Q8_0 GGUF Qwen3.8-27B-MTP-Q8_0.gguf from Jackrong/Qwen3.8-27B-MTP-GGUF revision 422451108d80, sha256 ab48c2f5edbdc7068f9f30e886b4964324b5f716aaf07f7af3887f14a377c3f1, meta.ftype Q8_0, n_params 27320697856) under the alias Qwen3.8-27B, the id .201 and .202 serve, supervised by the user LaunchAgent ai.omninode.planner-studio, replacing Qwen3.6-35B-A3B (RULING 2026-10-08T23:48:01Z). Qwen3.6-35B-A3B replaced gpt-oss-120b on 2026-10-08 under OMN-17427. First recorded 2026-09-30T15:31:26Z for gpt-oss-120b under OMN-19432."
     }
   ]
 }
