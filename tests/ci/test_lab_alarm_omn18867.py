@@ -2645,6 +2645,9 @@ def test_crash_loop_reaches_ledger_replay(tmp_path: Path) -> None:
         )
         <= window_end
     ]
+    # The row the changed alarm appends for the crash, quoted by lab proof runs
+    # (pytest -rP) so a reader sees the text and not only the assertions.
+    print(rows[0] if rows else "NO ROW")
     assert len(rows) == 1, "exactly one row for the one raise across the whole replay"
     assert in_window == rows
     stamp = rows[0].split(" | ", 1)[0]
