@@ -14,6 +14,7 @@ bounded wait, and a lane whose effects runtime never answers fails closed.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import json
 import sys
 import urllib.error
@@ -179,19 +180,16 @@ def test_a_degraded_effects_verdict_is_not_a_pass() -> None:
 
 
 @pytest.mark.unit
-def test_the_effects_probe_is_not_optional() -> None:
+def test_the_effects_probe_is_not_optional(monkeypatch: pytest.MonkeyPatch) -> None:
     """A gate that can be handed no effects URL is a gate that skips it."""
-    with pytest.raises(TypeError, match="effects_health_url"):
-        _DEV.run_health_gate(
-            lane="dev",
-            pre_image_ids={},
-            container_ids={},
-            expected_revision="rev",
-            manifest_url=_MANIFEST,
-            health_url=_MAIN_HEALTH,
-            broker_container="redpanda",
-            min_contracts=1,
-        )
+    param = inspect.signature(_DEV.run_health_gate).parameters.get("effects_health_url")
+    assert param is not None, "run_health_gate takes no effects_health_url"
+    assert param.default is inspect.Parameter.empty, "the effects URL has a default"
+
+    def _no_network(**_: object) -> object:
+        raise AssertionError("the gate ran although no effects URL was given")
+
+    monkeypatch.setattr(_DEV, "run_health_gate", _no_network)
     with pytest.raises(SystemExit) as excinfo:
         _DEV.main(["--expected-revision", "rev", "--container-ids", "{}"])
     assert excinfo.value.code == 2
