@@ -776,6 +776,14 @@ repositories:
   # of those shadows, so the scoped-variable pass now asserts their ABSENCE here
   # too.
   - omnistream
+# OMN-20074: the single named exception to the OMN-15699 ban on the base-branch
+# pull request trigger. Exactly one workflow, by exact path (a pattern or a list
+# is refused by scripts/audit-runner-routing.py). The audit also holds that file
+# to a pinned read-only reusable call with no inline steps and no secrets.
+pull_request_target_exception:
+  path: .github/workflows/call-repo-evidence-gate.yml
+  ruling: "RULING 2026-10-08T22:41:24Z lane=orchestrator-9f8a (OMN-20074), operator words \"1 yes\""
+  reason: "GitHub reads the Repo Evidence Gate caller from dev, so a pull request cannot edit the workflow that judges it, which is what lets repo-evidence / dod-verify later be required on dev, as omnimarket and omnibase_core already do. Same-repository heads run on the trusted runners as they do under pull_request, and the pinned reusable refuses fork heads before any checkout."
 hosted_runner_allowlist:
   - path: .github/workflows/application-acl-postgres16-proof.yml
     reason: "OMN-18291: the `request-cloud-capacity` job is bare hosted BY NECESSITY -- it is the job that asks the scale-to-zero cloud fleet for the runner the routed job below it needs, so it cannot itself resolve through the routing variable it is serving. Pinning it by literal also means no future flip of any seam can relocate the requester onto the capacity it is trying to request. The workflow's other job, `rebuilt-postgres16-proof`, is NOT hosted -- it is the canary routed to the cloud fleet through cloud_canary_runner_variable."

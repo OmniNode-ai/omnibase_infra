@@ -1,0 +1,71 @@
+{
+  "ticket": "OMN-19421",
+  "archive_sha256": "396c22ac77a2b60ff392d5dc947430e1e80641e692b81ef41ba5d53afbaf16b3",
+  "attachment_url": "https://uploads.linear.app/f00f74d3-d620-4464-ba9d-edc2ab5351a1/396e0693-f587-434b-a67a-fa23d3032547/28c3be97-87d5-4d56-9bce-c1b9c940ca25",
+  "model_sha256": "5ef83ea14b2810b6b74202b3cb1ab037fbdb0abbf17ac4022dd44b2292ef958d",
+  "review": {
+    "verdict": "CHANGE",
+    "comment_id": "e63757a3-90d9-42f2-85cf-e19ec8685831",
+    "recorded_at": "2026-09-24T17:23:57.998Z",
+    "url": "https://linear.app/omninode/issue/OMN-19421"
+  },
+  "tlc_version": "2026.09.23.154203 (rev: 4260e47)",
+  "bounds": {
+    "MaxT": 10,
+    "Windows": [
+      5
+    ],
+    "Guard": 1,
+    "ProbeDur": 1,
+    "Ceiling": 2,
+    "MaxMut": 3,
+    "MaxRel": 1,
+    "MaxMerge": 1,
+    "MaxHand": 1
+  },
+  "tick_minutes": 10,
+  "historical_model_comment_tick_minutes": 5,
+  "log_normalization": "Parsing and trace locations replaced by basenames; jar URI paths replaced by jar basenames. TLC results and traces retained.",
+  "runs": {
+    "MC_design": {
+      "config_sha256": "4ae2393d4a68c366cc0578f3a53e53e0e957217357b8990891e58733107eef78",
+      "source_log_sha256": "6e351c489bafeeefe29bb1d14188a7a6dee373e52da268d418eb11ddeea31585",
+      "log_sha256": "2fd7e9d3ab0902fd8f300e4895920f790e495836fd4bbc74e031f495aff614b9"
+    },
+    "MC_design_live": {
+      "config_sha256": "733df7be5ff80dd918a0e125310f7f1cc6aafc81b85bc5b80ab7a45f305f4fb6",
+      "source_log_sha256": "2a092a9ca6b9a8f393c86a97a9c13309a2de0235c5b9f29479d6e49987177d63",
+      "log_sha256": "cd43c2d042b47658af45a63165283a4f53244ab322f389d9fc242bff841f5f15"
+    },
+    "MC_guard_in_callers": {
+      "config_sha256": "964dba7980709f000e74a2517c44655dcdcc8312ce74153de0bd3aebfe9b8ed4",
+      "source_log_sha256": "7e803ae0fa8cddc782084651156264417d4fca41c15821ea9f5c40e356df20d3",
+      "log_sha256": "8681750e5f3cc21ddefc5c1d87d3884cb7b116f0aae031aad3819773a1647e3a"
+    },
+    "MC_guard_in_callers_agent_only": {
+      "config_sha256": "83e28967189f18cccaacd0de6d59c21de7981da314a48ad20c137c3b2690b72f",
+      "source_log_sha256": "374d8e59880c8e8ce8e02b891c1970b525127a48d37d898f0b8dff2ed728e979",
+      "log_sha256": "97831f130a13a855f1bffbc4e8f46f7890de714e21dcec40597b930967ca516c"
+    },
+    "MC_no_noop": {
+      "config_sha256": "364923483b4dbb34c44e544b3eed503d60d9833df2f558318f7c32c7e12f3f0a",
+      "source_log_sha256": "306727b7e0b563aa708a956a3011b21d72485f186d077c744a7b17bb6a919a47",
+      "log_sha256": "6177eb7555dffc754c4feca59f9dd207e2871ca11544cf5ec50fb4b0e7d0cfb7"
+    },
+    "MC_no_reaper_live": {
+      "config_sha256": "81f3f34b7f07ce53b0a5975984567f6912b12650c6f9d8441b291cfa2e5791f0",
+      "source_log_sha256": "9cfbd139fd13e33728e43d93319405ac421ac75224716d45323d365a8efdd79a",
+      "log_sha256": "e4aa6f18143cd817e661bed5b55612b9d4533177065cf95e6c69dbde8875faa0"
+    },
+    "MC_nolock": {
+      "config_sha256": "6a9a4cea4fe0f360110fb8f472a1e211f2b81ed78a17c4273d4df24f2b9c3493",
+      "source_log_sha256": "3abd0bac0e310fa0b2c7ebb395cbeea915d01d6c27c9ca433f2ac42bc475dd03",
+      "log_sha256": "bba6cedbda7891a7925a1581d9cb9b9141df79ba4cb36add1d521e94e64d4845"
+    },
+    "MC_reaper_blind": {
+      "config_sha256": "67f6d298883b8111f72d8b0b8d89f2da402ded134bae4657b94ef0954339942b",
+      "source_log_sha256": "5e0f4b34c4a50b703ef51f270c22cd0bf0b8ed950e64096dc3a683ea477b7023",
+      "log_sha256": "897f209638438f28902a5c6dbf972c9659a700c106e9907a1bdbe4b0a82bbf71"
+    }
+  }
+}

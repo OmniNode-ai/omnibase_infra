@@ -175,6 +175,33 @@ def test_gate_scans_only_explicit_staged_file(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_gate_allows_a_single_staged_allowlisted_file(tmp_path: Path) -> None:
+    module = tmp_path / "src" / "omnibase_infra" / "runtime" / "service_kernel.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(
+        "from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory\n",
+        encoding="utf-8",
+    )
+
+    result = _run_gate(tmp_path, paths=["src/omnibase_infra/runtime/service_kernel.py"])
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_gate_names_the_file_for_a_single_staged_violation(tmp_path: Path) -> None:
+    module = tmp_path / "src" / "omnibase_infra" / "nodes" / "bad_import.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(
+        "from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory\n",
+        encoding="utf-8",
+    )
+
+    result = _run_gate(tmp_path, paths=["src/omnibase_infra/nodes/bad_import.py"])
+
+    assert result.returncode == 1
+    assert "bad_import.py" in result.stdout
+
+
 # --------------------------------------------------------------------------
 # OMN-14988: doubled-slash path normalization
 # --------------------------------------------------------------------------

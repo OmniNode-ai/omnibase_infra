@@ -182,6 +182,163 @@ jobs:
     assert "pull_request_target is prohibited" in findings[0].message
 
 
+_CALLER = ".github/workflows/call-repo-evidence-gate.yml"
+_PINNED = "OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@" + "a" * 40
+_EXCEPTION = {
+    "path": _CALLER,
+    "ruling": "RULING 2026-10-08T22:41:24Z lane=orchestrator-9f8a (OMN-20074)",
+    "reason": "test",
+}
+
+
+def _caller_text(
+    *,
+    trigger: str = "pull_request_target",
+    permissions: str = "  contents: read\n  pull-requests: read\n",
+    job: str | None = None,
+) -> str:
+    body = job or f"    uses: {_PINNED}\n    with:\n      evidence-source: caller\n"
+    return (
+        f"name: Repo Evidence Gate\non:\n  {trigger}:\n    branches: [dev]\n"
+        f"permissions:\n{permissions}jobs:\n  repo-evidence:\n{body}"
+    )
+
+
+def _audit_with_caller(tmp_path: Path, text: str, exception: object) -> list:
+    module = _load_script()
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (tmp_path / _CALLER).write_text(text, encoding="utf-8")
+    policy: dict[str, object] = {"hosted_runner_allowlist": []}
+    if exception is not None:
+        policy["pull_request_target_exception"] = exception
+    return module.audit_local_workflows(policy, tmp_path)
+
+
+def test_pull_request_target_exception_admits_the_named_caller(tmp_path: Path) -> None:
+    assert _audit_with_caller(tmp_path, _caller_text(), _EXCEPTION) == []
+
+
+def test_pull_request_target_exception_admits_no_other_workflow(
+    tmp_path: Path,
+) -> None:
+    module = _load_script()
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (tmp_path / _CALLER).write_text(_caller_text(), encoding="utf-8")
+    (workflow_dir / "other.yml").write_text(
+        _caller_text().replace("Repo Evidence Gate", "other"), encoding="utf-8"
+    )
+
+    findings = module.audit_local_workflows(
+        {"pull_request_target_exception": _EXCEPTION}, tmp_path
+    )
+
+    assert [f.scope for f in findings] == [".github/workflows/other.yml"]
+    assert "pull_request_target is prohibited" in findings[0].message
+
+
+def test_pull_request_target_is_prohibited_without_a_policy_exception(
+    tmp_path: Path,
+) -> None:
+    findings = _audit_with_caller(tmp_path, _caller_text(), None)
+
+    assert len(findings) == 1
+    assert "pull_request_target is prohibited" in findings[0].message
+
+
+@pytest.mark.parametrize(
+    "exception",
+    [
+        pytest.param({**_EXCEPTION, "path": ".github/workflows/*.yml"}, id="glob"),
+        pytest.param({**_EXCEPTION, "path": ".github/workflows/"}, id="directory"),
+        pytest.param({**_EXCEPTION, "path": "call-repo-evidence-gate.yml"}, id="bare"),
+        pytest.param({**_EXCEPTION, "ruling": ""}, id="no-ruling"),
+        pytest.param({**_EXCEPTION, "reason": ""}, id="no-reason"),
+        pytest.param([_EXCEPTION], id="list-of-exceptions"),
+    ],
+)
+def test_pull_request_target_exception_must_be_one_named_file_citing_a_ruling(
+    tmp_path: Path, exception: object
+) -> None:
+    findings = _audit_with_caller(tmp_path, _caller_text(), exception)
+
+    messages = [f.message for f in findings]
+    assert any("pull_request_target_exception" in m for m in messages), messages
+    assert any("pull_request_target is prohibited" in m for m in messages), messages
+
+
+@pytest.mark.parametrize(
+    ("text", "needle"),
+    [
+        pytest.param(
+            _caller_text(trigger="pull_request"),
+            "only the pull_request_target trigger",
+            id="wrong-trigger",
+        ),
+        pytest.param(
+            _caller_text(permissions="  contents: write\n"),
+            "read-only",
+            id="write-permission",
+        ),
+        pytest.param(
+            _caller_text(permissions="  contents: read\n"),
+            "",
+            id="read-only-is-fine",
+        ),
+        pytest.param(
+            _caller_text(
+                job="    runs-on: ubuntu-latest\n    steps:\n      - run: x\n"
+            ),
+            "reusable workflow",
+            id="inline-steps",
+        ),
+        pytest.param(
+            _caller_text(job=f"    uses: {_PINNED}\n    secrets: inherit\n"),
+            "secrets",
+            id="inherits-secrets",
+        ),
+        pytest.param(
+            _caller_text(
+                job="    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@dev\n"
+            ),
+            "full-SHA",
+            id="unpinned",
+        ),
+    ],
+)
+def test_pull_request_target_caller_stays_a_pinned_read_only_reusable_call(
+    tmp_path: Path, text: str, needle: str
+) -> None:
+    findings = _audit_with_caller(tmp_path, text, _EXCEPTION)
+
+    if not needle:
+        assert findings == []
+        return
+    assert any(needle in f.message for f in findings), [f.message for f in findings]
+
+
+def test_policy_names_exactly_the_repo_evidence_caller_as_the_exception() -> None:
+    import yaml
+
+    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
+    exception = policy["pull_request_target_exception"]
+
+    assert exception["path"] == _CALLER
+    assert "RULING 2026-10-08T22:41:24Z" in exception["ruling"]
+    assert "OMN-20074" in exception["ruling"]
+
+
+def test_only_the_named_caller_mentions_the_base_branch_trigger() -> None:
+    carriers = sorted(
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in (REPO_ROOT / ".github" / "workflows").iterdir()
+        if path.is_file() and "pull_request_target" in path.read_text("utf-8")
+    )
+
+    assert carriers == [_CALLER]
+
+
 def test_policy_tracks_repos_that_drifted_to_hosted_minutes() -> None:
     import yaml
 

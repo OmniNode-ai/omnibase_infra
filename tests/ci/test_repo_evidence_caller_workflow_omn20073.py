@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-20073: omnibase_infra repo-owned evidence and its S5 shadow caller."""
+"""OMN-20073/OMN-20074: repo-owned evidence caller and its S6 part 1 trigger."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import re
 import shlex
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -46,11 +46,17 @@ def test_caller_workflow_shape() -> None:
     # PyYAML 1.1 resolves the bare `on:` key to the boolean True.
     triggers = data.get("on", data.get(True))
     assert isinstance(triggers, dict), "caller must declare a mapping on: block"
-    assert "pull_request" in triggers, "caller must run on pull requests"
-    # scripts/audit-runner-routing.py bans the base-branch pull request trigger
-    # in this repo, so the caller uses plain pull_request.
-    assert set(triggers) == {"pull_request"}, "caller must only use pull_request"
-    target = triggers["pull_request"]
+    # OMN-20074: the base-branch trigger makes GitHub read this definition from
+    # the base branch, so a pull request cannot edit what judges it. The operator
+    # ruled (2026-10-08T22:41:24Z) that this one file is the single named
+    # exception to the OMN-15699 ban in scripts/audit-runner-routing.py.
+    assert set(triggers) == {"pull_request_target"}, (
+        "caller must only use the base-branch pull request trigger"
+    )
+    target = triggers["pull_request_target"]
+    assert not {"paths", "paths-ignore"} & set(target), (
+        "the registered verdict must report without a paths filter"
+    )
     assert target["branches"] == ["dev", "main"], "caller must target dev and main"
     assert target["types"] == [
         "opened",
@@ -81,22 +87,27 @@ def test_caller_workflow_shape() -> None:
     assert "secrets: inherit" not in text, "caller must not inherit secrets"
 
 
-def test_caller_runs_in_shadow_and_compares_with_occ_for_the_s5_shadow_count() -> None:
+def test_caller_verifier_ships_the_occ_difference_classifier() -> None:
     inputs = _job()["with"]
-    assert inputs.get("compare-with-occ") == "true", (
-        'the S5 count requires compare-with-occ: "true" (a quoted string input)'
-    )
-    assert inputs.get("shadow") == "true", (
-        'the S5 shadow requires shadow: "true" (a quoted string input)'
-    )
     version = tuple(int(part) for part in inputs["verifier-version"].split("."))
     assert version >= _DIFFERENCE_CLASSIFIER_FLOOR, (
         "verifier-version must ship node_dod_verify occ-difference "
         f"(>= {'.'.join(map(str, _DIFFERENCE_CLASSIFIER_FLOOR))})"
     )
+    assert version >= (0, 4, 305), (
+        "verifier-version must ship omnimarket#3563 (omnimarket v0.4.305), "
+        "the release the receipt-gate pin's contract-home step expects"
+    )
 
 
-def _shadow_rows(*, verify: str | None, dod_verify: str | None) -> list[dict[str, Any]]:
+def test_caller_pins_the_s6_part1_inputs() -> None:
+    job = _job()
+    assert job["uses"].endswith("@fb0c6c2117d5868a398b0920cd0048d0824415b1")
+    assert job["with"].get("shadow") == "false"
+    assert job["with"].get("compare-with-occ") == "false"
+
+
+def _caller_rows(*, verify: str | None, dod_verify: str | None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for name, conclusion in ((_VERIFY, verify), (_DOD_VERIFY, dod_verify)):
         if conclusion is None:
@@ -119,30 +130,32 @@ def _shadow_rows(*, verify: str | None, dod_verify: str | None) -> list[dict[str
     return rows
 
 
-def _sweep(rows: list[dict[str, Any]]) -> tuple[list[str], list[str]]:
+def _sweep(
+    rows: list[dict[str, Any]], event: str = "pull_request"
+) -> tuple[list[str], list[str]]:
     failures, _in_flight, swept, _excluded, _provisional = evaluate_external_sweep(
         rows,
         expected=EXPECTED_EXTERNAL_CONTEXTS,
         in_run_names=frozenset(),
         self_name="CI Summary",
         exclusions=EXTERNAL_SWEEP_EXCLUSIONS,
-        events=check_run_event_index([{"id": _RUN_ID, "event": "pull_request"}]),
+        events=check_run_event_index([{"id": _RUN_ID, "event": event}]),
         now=_NOW,
     )
     return failures, swept
 
 
-def test_ci_summary_sweep_accepts_the_shadow_shape() -> None:
-    assert "pull_request" not in SWEEP_NON_PR_EVENTS, (
-        "the sweep judges pull_request rows, so the shadow shape must be green"
+def test_ci_summary_sweep_accepts_the_caller_shape() -> None:
+    assert {"pull_request", "pull_request_target"}.isdisjoint(SWEEP_NON_PR_EVENTS), (
+        "the sweep judges the caller's pull_request and pull_request_target rows"
     )
     assert not {_VERIFY, _DOD_VERIFY} & set(EXPECTED_EXTERNAL_CONTEXTS), (
-        "shadow checks are not registered as required external contexts"
+        "the caller's checks are not registered as required external contexts yet"
     )
     assert not {_VERIFY, _DOD_VERIFY} & set(EXTERNAL_SWEEP_EXCLUSIONS), (
-        "shadow checks must pass the sweep on their own conclusion, not an exclusion"
+        "caller checks must pass the sweep on their own conclusion, not an exclusion"
     )
-    failures, swept = _sweep(_shadow_rows(verify="success", dod_verify="success"))
+    failures, swept = _sweep(_caller_rows(verify="success", dod_verify="success"))
     assert failures == [], failures
     assert swept == [_DOD_VERIFY, _VERIFY], "the sweep must have judged both rows"
 
@@ -150,16 +163,67 @@ def test_ci_summary_sweep_accepts_the_shadow_shape() -> None:
 @pytest.mark.parametrize(
     ("verify", "dod_verify", "refused"),
     [
-        pytest.param("skipped", "success", _VERIFY, id="skipped-verify-without-shadow"),
+        pytest.param("success", "success", None, id="green"),
+        pytest.param("skipped", "success", _VERIFY, id="skipped-verify"),
         pytest.param("success", "failure", _DOD_VERIFY, id="red-dod-verify"),
     ],
 )
-def test_ci_summary_sweep_refuses_the_shapes_shadow_mode_avoids(
+def test_ci_summary_sweep_judges_the_base_branch_trigger_rows(
+    verify: str, dod_verify: str, refused: str | None
+) -> None:
+    """OMN-20074: the caller's rows carry event pull_request_target."""
+    failures, swept = _sweep(
+        _caller_rows(verify=verify, dod_verify=dod_verify), "pull_request_target"
+    )
+    assert swept == [_DOD_VERIFY, _VERIFY], "the sweep must have judged both rows"
+    if refused is None:
+        assert failures == [], failures
+    else:
+        assert len(failures) == 1, failures
+        assert failures[0].startswith(refused), failures
+
+
+@pytest.mark.parametrize(
+    ("verify", "dod_verify", "refused"),
+    [
+        pytest.param("skipped", "success", _VERIFY, id="skipped-verify"),
+        pytest.param("success", "failure", _DOD_VERIFY, id="red-dod-verify"),
+    ],
+)
+def test_ci_summary_sweep_refuses_a_skipped_verify_and_a_red_dod_verify(
     verify: str, dod_verify: str, refused: str
 ) -> None:
-    failures, _swept = _sweep(_shadow_rows(verify=verify, dod_verify=dod_verify))
+    failures, _swept = _sweep(_caller_rows(verify=verify, dod_verify=dod_verify))
     assert len(failures) == 1, failures
     assert failures[0].startswith(refused), failures
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/omn20074_repo_evidence_check_runs.json")
+def test_ci_summary_sweep_accepts_the_recorded_caller_rows_of_merged_heads(
+    recorded_response: dict[str, object],
+) -> None:
+    """The recorded repo-evidence check-runs of 16 merged dev heads pass the sweep."""
+    heads = cast("list[dict[str, Any]]", recorded_response["heads"])
+    assert len(heads) == 16
+    for head in heads:
+        rows = cast("list[dict[str, Any]]", head["check_runs"])
+        assert {row["name"] for row in rows} == {_VERIFY, _DOD_VERIFY}, head["pr"]
+        runs = [
+            {"id": int(match.group(1)), "event": "pull_request"}
+            for row in rows
+            if (match := re.search(r"/runs/(\d+)/job/", str(row["html_url"])))
+        ]
+        failures, _in_flight, swept, _excluded, _provisional = evaluate_external_sweep(
+            rows,
+            expected=EXPECTED_EXTERNAL_CONTEXTS,
+            in_run_names=frozenset(),
+            self_name="CI Summary",
+            exclusions=EXTERNAL_SWEEP_EXCLUSIONS,
+            events=check_run_event_index(runs),
+            now=_NOW,
+        )
+        assert failures == [], (head["pr"], failures)
+        assert sorted(swept) == [_DOD_VERIFY, _VERIFY], head["pr"]
 
 
 def test_every_repo_contract_binds_every_criterion() -> None:
