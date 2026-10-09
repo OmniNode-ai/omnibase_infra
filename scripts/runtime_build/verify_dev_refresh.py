@@ -66,6 +66,7 @@ from health_payload import (
     default_max_verdict_age,
     derive_verdict_wait_bound,
     evaluate_health_body,
+    http_error_verdict,
     unreachable_verdict,
     wait_for_verdict,
 )
@@ -391,6 +392,15 @@ def check_health(
         with open_fn(health_url, timeout=10) as resp:  # type: ignore[operator]
             status_code = getattr(resp, "status", 200)
             raw = resp.read()
+    except urllib.error.HTTPError as exc:
+        # OMN-17427: a non-2xx still carries the runtime's body. A 503 that
+        # says "still starting" is waitable; anything else stays terminal.
+        try:
+            error_body = exc.read()
+        except (OSError, AttributeError, ValueError):
+            # An HTTPError built without a file object has no body to read.
+            error_body = b""
+        return http_error_verdict(exc.code, error_body)
     except (urllib.error.URLError, OSError) as exc:
         return unreachable_verdict(f"health fetch failed: {exc}")
     if status_code and status_code != 200:

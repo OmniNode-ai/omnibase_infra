@@ -34,16 +34,22 @@ first-pass framing:
 
 from __future__ import annotations
 
+import io
 import json
+import urllib.error
+from email.message import Message
 
 import pytest
 from health_payload import (
+    _WAITABLE_REASONS,
     HEALTH_POLICY_VERDICT_REQUIRED,
+    REASON_RUNTIME_STARTING,
     REASON_STATUS_UNREADABLE,
     REASON_VERDICT_ABSENT,
     REASON_VERDICT_STALE,
     VERDICT_PROBE_TIMEOUT_SECONDS,
     VERDICT_STALE_AFTER_INTERVALS,
+    HealthVerdictReason,
     default_max_verdict_age,
     derive_verdict_wait_bound,
     evaluate_health_body,
@@ -471,3 +477,136 @@ def test_verdict_reason_vocabulary_is_exhaustive_for_wait_policy() -> None:
         "status_unreadable",
     }
     assert default_max_verdict_age(300.0) == 300.0 * VERDICT_STALE_AFTER_INTERVALS
+
+
+# ── OMN-17427: a 503 that says "still starting" is waited on, not terminal ──
+#
+# Measured on the .201 dev lane 2026-10-09T14:04Z (refresh log line 4431):
+# the new runtime had already served /v1/introspection/manifest (404
+# contracts), then /health answered HTTP 503 -- the startup-pending body
+# ``ServiceHealth._handle_health`` serves while the runtime is not yet
+# attached. ``urlopen`` raises on any non-2xx, ``check_health`` mapped the
+# exception to ``status_unreadable``, and the wait loop treated it as terminal
+# on attempt 1 -- so boot grace and the derived bound were never applied, and
+# the refresh rolled a booting runtime back onto the crash-looping image.
+
+_STARTING_503_BODY: dict[str, object] = {
+    "status": "degraded",
+    "details": {
+        "healthy": False,
+        "degraded": True,
+        "is_running": False,
+        "runtime_attached": False,
+        "startup_phase": "runtime_pending",
+        "runtime_health": None,
+    },
+}
+
+_UNHEALTHY_503_BODY: dict[str, object] = {
+    "status": "unhealthy",
+    "details": {
+        "healthy": False,
+        "is_running": True,
+        "runtime_attached": True,
+        "startup_in_progress": False,
+    },
+}
+
+_HEALTHY_BODY: dict[str, object] = {
+    "status": "healthy",
+    "details": {"runtime_health": {"status": "HEALTHY", "age_seconds": 1.0}},
+}
+
+
+def _http_error(code: int, body: bytes) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        "http://x/health", code, "Service Unavailable", Message(), io.BytesIO(body)
+    )
+
+
+def _opener_for_responses(
+    *responses: tuple[int, bytes],
+) -> tuple[object, dict[str, int]]:
+    """Each response is (http status, body); non-200 raises like ``urlopen``."""
+    calls = {"n": 0}
+
+    def _open(url: str, timeout: int = 10) -> _Resp:
+        index = min(calls["n"], len(responses) - 1)
+        calls["n"] += 1
+        code, body = responses[index]
+        if code != 200:
+            raise _http_error(code, body)
+        return _Resp(body)
+
+    return _open, calls
+
+
+@_BOTH_GATES
+def test_a_startup_pending_503_is_waited_on_until_the_runtime_is_healthy(
+    gate: ModuleType,
+) -> None:
+    opener, calls = _opener_for_responses(
+        (503, json.dumps(_STARTING_503_BODY).encode()),
+        (503, json.dumps(_STARTING_503_BODY).encode()),
+        (200, json.dumps(_HEALTHY_BODY).encode()),
+    )
+    verdict, described = gate.check_health_with_retry(
+        "http://x/health", opener=opener, sleep_fn=lambda _s: None
+    )
+    assert verdict.ok is True
+    assert calls["n"] == 3
+    assert "satisfied on attempt 3" in described
+
+
+@_BOTH_GATES
+def test_a_runtime_that_never_finishes_starting_fails_at_the_bound(
+    gate: ModuleType,
+) -> None:
+    """The wait is a window, not retry-until-green: still starting at the end
+    of the bound is reported as exactly that, and the probe count is the bound."""
+    opener, calls = _opener_for_responses(
+        (503, json.dumps(_STARTING_503_BODY).encode())
+    )
+    bound = derive_verdict_wait_bound(
+        check_interval_seconds=300.0, boot_grace_seconds=120.0
+    )
+    verdict, described = gate.check_health_with_retry(
+        "http://x/health", opener=opener, sleep_fn=lambda _s: None
+    )
+    assert verdict.ok is False
+    assert verdict.reason == REASON_RUNTIME_STARTING
+    assert calls["n"] == bound.attempts
+    assert "exhausted" in described
+    assert "503" in verdict.detail
+
+
+@_BOTH_GATES
+def test_a_503_that_is_not_a_startup_body_stays_terminal(gate: ModuleType) -> None:
+    """Only a body that SAYS it is starting earns the wait. An attached,
+    running runtime reporting unhealthy is a finding on attempt 1."""
+    opener, calls = _opener_for_responses(
+        (503, json.dumps(_UNHEALTHY_503_BODY).encode())
+    )
+    verdict, described = gate.check_health_with_retry(
+        "http://x/health", opener=opener, sleep_fn=lambda _s: None
+    )
+    assert verdict.ok is False
+    assert verdict.reason == REASON_STATUS_UNREADABLE
+    assert calls["n"] == 1
+    assert "terminal" in described
+
+
+@_BOTH_GATES
+def test_a_503_with_an_unreadable_body_stays_terminal(gate: ModuleType) -> None:
+    opener, calls = _opener_for_responses((503, b"<html>bad gateway</html>"))
+    verdict, _described = gate.check_health_with_retry(
+        "http://x/health", opener=opener, sleep_fn=lambda _s: None
+    )
+    assert verdict.ok is False
+    assert verdict.reason == REASON_STATUS_UNREADABLE
+    assert calls["n"] == 1
+
+
+def test_starting_reason_is_in_the_waitable_vocabulary() -> None:
+    assert REASON_RUNTIME_STARTING == "runtime_starting"
+    assert HealthVerdictReason(REASON_RUNTIME_STARTING) in _WAITABLE_REASONS

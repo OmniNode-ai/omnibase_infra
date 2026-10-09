@@ -115,6 +115,12 @@ class HealthVerdictReason(StrEnum):
     #: ``_normalise_verdict_reason`` mapped it to ``None`` and the wait loop
     #: treated a first DEGRADED verdict as terminal on attempt 1.
     RUNTIME_DEGRADED = "runtime_degraded"
+    #: OMN-17427. ``/health`` answered non-2xx with a body that SAYS the
+    #: runtime is still coming up (``startup_phase`` set, ``runtime_attached``
+    #: false, or ``startup_in_progress`` true). ``ServiceHealth._handle_health``
+    #: serves exactly that as HTTP 503 until the runtime attaches, so it is a
+    #: state the bound can resolve -- not an unreadable endpoint.
+    RUNTIME_STARTING = "runtime_starting"
 
 
 #: The reason string that justifies waiting for a first monitor verdict.
@@ -125,6 +131,9 @@ REASON_VERDICT_STALE = "verdict_stale"
 
 #: The reason string for a body that is not a runtime health endpoint.
 REASON_STATUS_UNREADABLE = "status_unreadable"
+
+#: The reason string for a non-2xx ``/health`` whose body says "still starting".
+REASON_RUNTIME_STARTING = "runtime_starting"
 
 #: The only ``status`` value that means healthy.
 HEALTH_STATUS_HEALTHY = "healthy"
@@ -178,6 +187,7 @@ _WAITABLE_REASONS = frozenset(
         HealthVerdictReason.VERDICT_ABSENT,
         HealthVerdictReason.VERDICT_STALE,
         HealthVerdictReason.RUNTIME_DEGRADED,
+        HealthVerdictReason.RUNTIME_STARTING,
     }
 )
 
@@ -665,6 +675,50 @@ def evaluate_health_body(
         reason=None if ok else container_verdict.reason,
         dimensions=dimensions,
     )
+
+
+def _body_says_starting(raw: bytes) -> bool:
+    """True only for a ``/health`` body that positively reports startup.
+
+    Fails closed: an undecodable body, a body with no ``details`` mapping, or
+    one carrying none of the runtime's own startup markers is NOT starting.
+    """
+    try:
+        document = decode_health_body(raw)
+    except HealthPayloadError:
+        return False
+    details = document.get("details")
+    if not isinstance(details, dict):
+        return False
+    phase = details.get("startup_phase")
+    return (
+        (isinstance(phase, str) and bool(phase))
+        or details.get("runtime_attached") is False
+        or details.get("startup_in_progress") is True
+    )
+
+
+def http_error_verdict(status_code: int, raw: bytes) -> HealthVerdict:
+    """Verdict for a ``/health`` that answered non-2xx (OMN-17427).
+
+    ``urlopen`` raises on every non-2xx, which used to send a 503 straight to
+    :func:`unreachable_verdict` -- terminal on attempt 1, so a runtime serving
+    its startup-pending 503 was rolled back before boot grace or the derived
+    bound applied. A body that positively says the runtime is still starting
+    is waitable (:data:`REASON_RUNTIME_STARTING`); every other non-2xx stays
+    ``status_unreadable`` and terminal, exactly as before. Waiting never makes
+    the verdict ``ok`` -- only a later 200 with a fresh healthy verdict does.
+    """
+    if _body_says_starting(raw):
+        return HealthVerdict(
+            ok=False,
+            policy=HEALTH_POLICY_STATUS_ONLY_STRICT,
+            status=None,
+            details_healthy=None,
+            detail=f"health endpoint returned HTTP {status_code}: runtime still starting",
+            reason=REASON_RUNTIME_STARTING,
+        )
+    return unreachable_verdict(f"health endpoint returned HTTP {status_code}")
 
 
 def unreachable_verdict(detail: str) -> HealthVerdict:
