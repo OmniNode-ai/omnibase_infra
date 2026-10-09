@@ -320,9 +320,6 @@ scripts/generate_onboarding_docs.py
 scripts/generate_ticket_plan.py
 scripts/generate_topic_enums.py
 scripts/git-gc-auto.sh
-scripts/git-hooks/canonical_clone_guard.sh
-scripts/git-hooks/canonical_clone_paths.sh
-scripts/git-hooks/canonical_clone_ref_guard.sh
 scripts/git-maintenance.sh
 scripts/headless-close-out.sh
 scripts/headless-pipeline/validate-state.sh
@@ -335,7 +332,6 @@ scripts/hooks/pytest_full_suite_host_guard.py
 scripts/infra-signature-rerun.sh
 scripts/infra-watchdog.sh
 scripts/install-bare-clone-sync.sh
-scripts/install-canonical-clone-git-hooks.sh
 scripts/install-git-hooks.sh
 scripts/install-node-skill-package.sh
 scripts/install-watchdog.sh
