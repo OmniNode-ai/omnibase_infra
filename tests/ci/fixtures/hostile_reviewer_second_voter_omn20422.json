@@ -1,0 +1,34 @@
+{
+  "_provenance": {
+    "source": "Real HTTP responses from the llama-server on the .200 Mac Studio, port 8131 (launchd ai.omninode.reviewer-studio, Qwen3.6-35B-A3B Q8_0), captured over loopback on that host; not a hosted-runner capture",
+    "captured_utc": "2026-10-09T04:42:15.849615+00:00",
+    "source_sha256": "789ba647f970564354d352683a1c3930e95145ee1d8e19b55c9b2f6fe56f5c82",
+    "ticket": "OMN-20422",
+    "command": "GET /v1/models; POST /v1/chat/completions"
+  },
+  "response": {
+    "models": {
+      "data": [
+        {
+          "id": "qwen3.6-35b-a3b",
+          "n_ctx_train": 262144,
+          "n_params": 34660610688,
+          "ftype": "Q8_0"
+        }
+      ]
+    },
+    "completion": {
+      "model": "qwen3.6-35b-a3b",
+      "content": "ready",
+      "finish_reason": "stop",
+      "usage": {
+        "completion_tokens": 2,
+        "prompt_tokens": 19,
+        "total_tokens": 21,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      }
+    }
+  }
+}

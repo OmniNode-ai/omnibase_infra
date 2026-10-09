@@ -12,7 +12,7 @@ agreed on a critical finding in 2 of 8 runs and both agreed findings were
 false; the pair with gpt-oss-120b blocked nothing.
 
 The roster is now ``qwen3-review`` (Qwen3.8-27B on .201) and
-``gpt-oss-review`` (gpt-oss-120b on the .200 Mac Studio, registered in
+``local-studio-planner`` (gpt-oss-120b on the .200 Mac Studio, registered in
 omniintelligence under OMN-17492). ``glm-review`` is removed: it is a
 third-party cloud model and private diffs go only to lab models (operator,
 2026-09-25, OPERATOR-CONSENT ledger row 4842). .200 is always on (operator,
@@ -36,7 +36,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "hostile-reviewer.yml"
 REVIEW_JOB = "hostile-review"
-ROSTER = ["qwen3-review", "gpt-oss-review"]
+ROSTER = ["qwen3-review", "local-studio-planner"]
 ALIASES_OF_201_8000 = ("qwen3-review-b", "deepseek-r1")
 NOT_VOTERS = (*ALIASES_OF_201_8000, "glm-review")
 CLOUD_REVIEW_ENV = ("LLM_GLM_API_KEY", "LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST")
@@ -117,18 +117,18 @@ def test_a_lost_reviewer_is_named_and_the_run_has_no_verdict(
 ) -> None:
     """One lab model left is no quorum: degraded, which the enforce step fails."""
     unreachable = (
-        "unreachable: the TCP reachability probe of gpt-oss-review at "
+        "unreachable: the TCP reachability probe of local-studio-planner at "
         "192.168.86.200:8130 failed, so this reviewer was not called"  # onex-allow-internal-ip
     )
     out = _parse(
         tmp_path,
         {
             "models_succeeded": ["qwen3-review"],
-            "models_failed": ["gpt-oss-review"],
+            "models_failed": ["local-studio-planner"],
             "total_findings": 0,
             "results": [
                 _result("qwen3-review", success=True),
-                _result("gpt-oss-review", success=False, error=unreachable),
+                _result("local-studio-planner", success=False, error=unreachable),
             ],
             "quorum": {
                 "verdict": "degraded_quorum",
@@ -139,7 +139,7 @@ def test_a_lost_reviewer_is_named_and_the_run_has_no_verdict(
     )
     assert out["verdict"] == "degraded"
     assert out["models_succeeded"] == "qwen3-review"
-    assert out["models_failed"].startswith("gpt-oss-review (unreachable")
+    assert out["models_failed"].startswith("local-studio-planner (unreachable")
 
 
 def test_review_step_sends_nothing_to_a_cloud_reviewer() -> None:

@@ -118,7 +118,7 @@ class _RecordedLane:
         elif "consume" in argv:
             out = (
                 json.dumps(self.envelope)
-                if script.GENERIC_DLQ in argv
+                if script.SEAM_DLQ in argv
                 else json.dumps({"value": json.dumps({"payload": {}}), "offset": 10})
             )
         else:

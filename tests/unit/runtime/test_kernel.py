@@ -61,6 +61,19 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
 
+@pytest.fixture(autouse=True)
+def declared_runtime_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[None, None, None]:
+    """These tests exercise bootstrap after lane resolution; refusals have their own tests."""
+    from omnibase_infra.runtime.health import runtime_lane_identity
+    from tests.unit.runtime.conftest import declare_runtime_lane_for_bootstrap
+
+    declare_runtime_lane_for_bootstrap(monkeypatch)
+    yield
+    runtime_lane_identity.clear_established_runtime_lane()
+
+
 @pytest.mark.unit
 class TestLoadRuntimeConfig:
     """Tests for load_runtime_config function."""
