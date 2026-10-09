@@ -18,6 +18,13 @@ requirements:
     acceptance:
       - id: AC3
         statement: 'AC3: a caught-up group with a heartbeat in flight passes and a frozen partition fails -- falsifier: uv run pytest tests/ci/test_lab_pass_receipt_lag_stall_omn17427.py -q'
+  - id: req-omn17427-refresh-gate-waits
+    statement: The dev refresh gates wait for a running one-shot and for a runtime that has not finished starting instead of rolling back.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: RT-6 waits for a one-shot that is mid-run and accepts it when it exits 0, and rejects one still running at the bound or exiting non-zero -- falsifier: uv run pytest tests/scripts/test_deploy_runtime_rt6_one_shot_omn16729.py -q'
+      - id: AC5
+        statement: 'AC5: the health verdict wait treats a startup-pending 503 as waitable until the runtime is healthy or the bound is reached, and keeps any other 503 terminal -- falsifier: uv run pytest scripts/runtime_build/tests -q -k omn17624'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -28,6 +35,12 @@ evidence_requirements:
   - kind: tests
     description: The consumer_group_lag check judges a grown lag per partition.
     command: uv run pytest tests/ci/test_lab_pass_receipt_lag_stall_omn17427.py -q
+  - kind: tests
+    description: RT-6 reads a mid-run one-shot again until it settles.
+    command: uv run pytest tests/scripts/test_deploy_runtime_rt6_one_shot_omn16729.py -q
+  - kind: tests
+    description: The health verdict wait waits on a starting runtime and keeps other 503s terminal.
+    command: uv run pytest scripts/runtime_build/tests -q -k omn17624
 emergency_bypass:
   enabled: false
   justification: ''
@@ -60,3 +73,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn-17427-ac4
+    description: RT-6 waits for a one-shot that is mid-run and rejects one that never settles or exits non-zero.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_deploy_runtime_rt6_one_shot_omn16729.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn-17427-ac5
+    description: The health verdict wait treats a startup-pending 503 as waitable and every other 503 as terminal.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/runtime_build/tests -q -k omn17624
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
