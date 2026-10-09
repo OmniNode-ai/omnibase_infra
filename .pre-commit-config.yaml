@@ -1891,6 +1891,14 @@ repos:
         language: system
         files: docker/(docker-compose\.dev-lane\.yml|dev-lane-required-env\.manifest\.txt)
         pass_filenames: false
+      # OMN-15645: cover the explicit tiers pin, including catalog workers.
+      - id: delegation-routing-tiers-binding
+        name: Check delegation routing tiers deployment bindings
+        entry: uv run --frozen pytest tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py -q --no-cov
+        language: system
+        files: ^(docker/(Dockerfile\.runtime|docker-compose\..*\.yml|catalog/.*\.ya?ml)|src/omnibase_infra/docker/catalog/.*\.py|tests/(unit/docker/test_delegation_routing_tiers_path_binding_omn15645\.py|fixtures/omn15645_worker_tiers_live_contact\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-4857: Block Consul references in source (decommissioned service)
       # Prevents reintroduction of CONSUL_HOST or consul.connect.io references in src/.
       - id: no-consul-references

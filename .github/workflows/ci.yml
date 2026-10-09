@@ -2189,6 +2189,9 @@ jobs:
           echo "================================================================"
           uv run pytest tests/ci/test_compose_proof_teardown_policy.py -v --tb=short
 
+      - name: Check delegation routing tiers deployment bindings (OMN-15645)
+        run: uv run --frozen pytest tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py -q --no-cov
+
   # OMN-18247 (epic OMN-18232 phase 3): CI evidence-artifact honesty.
   #
   # An evidence-producing job that reports green while producing nothing is the
