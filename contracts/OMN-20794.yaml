@@ -47,7 +47,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci -q -k fleet_repos_include_internal
+        check_value: uv run pytest tests/ci/test_fleet_repos_include_internal_omn20794.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
