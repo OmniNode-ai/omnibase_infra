@@ -1,45 +1,24 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-15645: static (no-Docker) regression guards for the
-``DELEGATION_ROUTING_TIERS_PATH`` binding.
+"""OMN-15645: static guards for the explicit routing-tiers deployment pin.
 
-omnimarket#2000 (OMN-15628) removed the packaged-default fallback for this key
-in the delegation routing reducer's ``_get_config()`` singleton
-(``resolve_required_path_config("DELEGATION_ROUTING_TIERS_PATH")`` —
-omnimarket ``src/omnimarket/nodes/node_delegation_routing_reducer/handlers/
-handler_delegation_routing.py:392-393``, wrapping
-``src/omnimarket/inference/delegation_config_provenance.py:126-158``). An
-unbound (or blank) key now raises ``ProtocolConfigurationError`` at first
-config read instead of silently defaulting — verified live against merged
-``dev`` in the OMN-15645 PR body (a real, non-mocked drive of
-``_get_config()``, not this file).
+The shared compose anchor and runtime image already bind and bake
+``DELEGATION_ROUTING_TIERS_PATH=/app/config/delegation/routing_tiers.yaml``.
+Catalog renders must carry the same pin on main, effects and worker kernels.
+These tests exercise the catalog resolver and generator without Docker and
+check that the pinned image path has no Python version or shadowing mount.
 
-Seam contract with the omnimarket consumer (documented here since omnimarket
-is not a pyproject dependency of omnibase_infra and cannot be imported by this
-repo's own test suite):
-
-* env-var key name: ``DELEGATION_ROUTING_TIERS_PATH`` (exact string, no alias).
-* blank-is-absent: the consumer reads via ``os.environ.get(key, "").strip()``
-  (``delegation_config_provenance.py:225``) — an empty string is treated
-  identically to unset. The ``""`` opt-out used below for services with no
-  delegation-routing surface relies on this exact semantics.
-* required, no fallback: ``resolve_required_path_config`` raises ``ValueError``
-  (wrapped into ``ProtocolConfigurationError`` by the handler) when the
-  resolved value is falsy — there is no packaged/bootstrap default for this
-  key (unlike ``BIFROST_CONTRACT_PATH``, which uses the optional
-  ``resolve_path_config`` variant and is NOT in scope for this ticket).
-
-These tests are deliberately static (text/regex over the Dockerfile and
-compose file content, no ``docker`` invocation) so they fire on hosts without
-Docker. The real, end-to-end proof (real container, real omnimarket wheel,
-real routing-reducer invocation, sha256-verified packaged file) is the
-``docker compose config`` integration tests in
-``tests/integration/infra/test_{dev,stability_test,judge,prod}*compose_render*.py``
-plus the GREEN cold bring-up captured in the OMN-15645 PR body.
+The ticket originally described a consumer that refused an unbound key.
+The current lab worker resolves an unset or blank key to packaged tiers, so
+these checks assert the explicit deployment binding rather than that historical
+refusal. Services without a delegation-routing surface retain their blank
+opt-outs. Container loader probes and lane bring-up evidence are separate from
+these static checks.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -61,6 +40,18 @@ _EXPECTED_PATH = "/app/config/delegation/routing_tiers.yaml"
 # runtime entrypoint self-heal exists to correct for a *stale* pin — the
 # compose default itself must never regress into one.
 _VERSION_EMBEDDED_LITERAL = re.compile(r"python3\.\d+/site-packages")
+
+
+@pytest.fixture
+def recorded_response(
+    request: pytest.FixtureRequest, project_root: Path
+) -> dict[str, object]:
+    """Read the worker contact recorded for the marked catalog test."""
+    marker = request.node.get_closest_marker("live_contact")
+    assert marker is not None and len(marker.args) == 1
+    document = json.loads((project_root / marker.args[0]).read_text())
+    assert isinstance(document, dict)
+    return document
 
 
 @pytest.mark.unit
@@ -234,16 +225,35 @@ def test_expected_path_is_never_shadowed_by_a_volume_mount(
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("bundle", ["runtime-core", "runtime", "local"])
-@pytest.mark.parametrize("service_name", ["omninode-runtime", "runtime-effects"])
+@pytest.mark.live_contact("tests/fixtures/omn15645_worker_tiers_live_contact.json")
+@pytest.mark.parametrize(
+    ("bundle", "service_name"),
+    [
+        ("runtime-core", "omninode-runtime"),
+        ("runtime-core", "runtime-effects"),
+        ("runtime", "omninode-runtime"),
+        ("runtime", "runtime-effects"),
+        ("local", "omninode-runtime"),
+        ("local", "runtime-effects"),
+        ("runtime", "runtime-worker"),
+        ("runtime-infrastructure", "runtime-worker"),
+    ],
+)
 def test_catalog_runtime_services_bind_the_packaged_tiers_path(
-    project_root: Path, bundle: str, service_name: str
+    project_root: Path,
+    bundle: str,
+    service_name: str,
+    recorded_response: dict[str, object],
 ) -> None:
     """Catalog-generated kernels need the same pin as the shared compose anchor."""
+    assert recorded_response["runtime_profile"] == "workers"
+    assert recorded_response["loader_type"] == "ModelDelegationConfig"
+    assert recorded_response["file_sha256"] == recorded_response["packaged_sha256"]
+    assert recorded_response["tiers_path"] == _EXPECTED_PATH
     resolver = CatalogResolver(catalog_dir=str(project_root / "docker" / "catalog"))
     compose = generate_compose(resolver.resolve(bundles=[bundle]))
     environment = compose["services"][service_name]["environment"]
-    assert environment.get(_ENV_KEY) == _EXPECTED_PATH, (
+    assert environment.get(_ENV_KEY) == recorded_response["tiers_path"], (
         f"{bundle}/{service_name} must bind {_ENV_KEY} to {_EXPECTED_PATH}; "
         f"got {environment.get(_ENV_KEY)!r}"
     )
