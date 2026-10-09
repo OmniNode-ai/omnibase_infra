@@ -21,6 +21,71 @@
 #   pre-commit install --hook-type pre-push  # Install pre-push hooks
 #   pre-commit run --all-files            # Run all pre-commit hooks
 repos:
+  - repo: local
+    hooks:
+      - id: lab-reconcile-model-evidence
+        name: Reviewed lab reconcile model evidence (OMN-19421)
+        entry: uv run --frozen pytest tests/ci/test_lab_reconcile_model.py -q --no-cov
+        language: system
+        files: ^(formal/lab_reconcile/|tests/ci/test_lab_reconcile_model\.py$|tests/ci/fixtures/lab_reconcile_ticket_omn19421\.json$|\.pre-commit-config\.yaml$|\.github/workflows/ci\.yml$)
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: lane-sync-receipt
+        name: Lane sync refuses every census finding (OMN-19417)
+        entry: uv run --frozen pytest tests/ci/test_lab_pass_receipt_integration_probes_omn18866.py -q
+        language: system
+        pass_filenames: false
+        files: ^(scripts/(ci/lab_pass_receipt\.py|lane-census-check\.sh|lane_census_(inventory|plan)\.py|runtime_build/verify_stability_refresh\.py)|tests/ci/test_lab_pass_receipt_integration_probes_omn18866\.py|\.github/workflows/(ci|runtime-rebuild-trigger-reusable)\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: lane-sync-stability
+        name: Stability refresh retains lane sync failure (OMN-19417)
+        entry: uv run --frozen pytest scripts/runtime_build/tests/test_verify_stability_refresh.py -q
+        language: system
+        pass_filenames: false
+        files: ^(scripts/(ci/lab_pass_receipt\.py|lane-census-check\.sh|runtime_build/(verify_stability_refresh\.py|tests/test_verify_stability_refresh\.py))|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: lane-sync-drift
+        name: Census drift count refuses nonzero (OMN-19417)
+        entry: uv run --frozen pytest tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q
+        language: system
+        pass_filenames: false
+        files: ^(scripts/check_lane_census_drift\.py|tests/unit/scripts/test_check_lane_census_drift_omn18949\.py|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: lab-census-alarm-episodes
+        name: Census alarm episodes and recoveries (OMN-19418)
+        entry: uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k lane_drift -q
+        language: system
+        files: ^(scripts/(lab_alarm|lane_census_event|lane_census_plan)\.py|config/lab_alarm\.json|tests/ci/(test_lab_alarm_omn18867\.py|fixtures/lab_census_snapshot_omn19418\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: census-container-health
+        name: Census unhealthy and restart bounds (OMN-19416)
+        entry: uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "unhealthy or restart_loop" -q
+        language: system
+        files: ^(scripts/lane_census_plan\.py|deploy/lane-census/lane-manifest\.yaml|tests/unit/scripts/test_lane_census_plan\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: census-health-collector
+        name: Census health inspect transport (OMN-19416)
+        entry: uv run --frozen pytest tests/unit/scripts/test_lane_census_inventory.py -q
+        language: system
+        files: ^(scripts/lane_census_inventory\.py|tests/unit/scripts/(test_lane_census_inventory|fake_docker_engine_omn19959)\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: alarm-manifest-restart-bounds
+        name: Alarm reads census restart bounds (OMN-19416)
+        entry: uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k "restart or shipped_config or manifest" -q
+        language: system
+        files: ^(scripts/(lab_alarm|lane_census_plan)\.py|config/lab_alarm\.json|deploy/lane-census/lane-manifest\.yaml|tests/ci/test_lab_alarm_omn18867\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: linear-transport-consolidation
+        name: Linear GraphQL has one transport owner (OMN-17678)
+        entry: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q
+        language: system
+        files: ^(src/.*\.py|tests/ci/test_linear_transport_consolidation\.py|tests/ci/fixtures/linear_graphql_issue_omn17678\.json|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
   # OMN-20304: canonical-file-shape ratchet (operator ruling 2026-10-01). No
   # new code file outside the canonical contract/node/handler/models/
   # protocols/tests/docs locations, no new imperative lines in a SKILL.md, no
@@ -28,10 +93,24 @@ repos:
   # .onex_ratchets/canonical_file_shape_baseline.txt. CI runs the same module
   # at the same commit (job "Canonical File Shape (OMN-20304)").
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: f50d00fc7918d0b12ccd0d3497160325e32e7ac5
+    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24
     hooks:
       - id: canonical-file-shape
         require_serial: true
+  # OMN-20703: node-boundary import gate (operator direction 2026-10-07,
+  # OMN-17427). Refuses any new import crossing a node boundary. Shrink-only
+  # baseline .onex_ratchets/node_boundary_import_baseline.yaml; no allowlist,
+  # no suppression marker. CI twin job node-boundary-imports in
+  # .github/workflows/ci.yml; keep this rev equal to that job's pin.
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24
+    hooks:
+      - id: check-node-boundary-imports
+        require_serial: true
+        # --bootstrap only takes effect while HEAD carries no baseline (the
+        # adoption commit). Once the baseline is committed, growth against HEAD
+        # fails here, and CI judges growth against the merge base.
+        args: [--bootstrap]
   # OMN-20295: direct-model-call gate, BLOCKING. A model call (HTTP to a model
   # endpoint, provider or base_url; a model CLI exec such as crush, codex,
   # claude -p or llama-cli; a model SDK import; or a caller of one) must sit in a
@@ -40,7 +119,7 @@ repos:
   # suppression marker. Keep this rev equal to the pin in
   # .github/workflows/direct-model-call.yml. Server-side backstop: OMN-20299.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 2685a264629c847c291d9e96e3d4ea2cb2773cec
+    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24
     hooks:
       - id: check-direct-model-call
         require_serial: true
@@ -75,7 +154,7 @@ repos:
   # shared baseline at omnibase_core/src/omnibase_core/validation/baselines/canonical_inference_baseline.json;
   # baseline is burn-down only. Suppression: # canonical-inference-ok: <reason>
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 940d2f2ab44d2f455a607926674b90ecbc9b74ba # pragma: allowlist secret
+    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24 # pragma: allowlist secret
     hooks:
       - id: check-canonical-inference
         require_serial: true
@@ -108,12 +187,101 @@ repos:
         require_serial: true
         args: [--allowlist, .onex_ratchets/noncanonical_class_allowlist.yaml, src/omnibase_infra]
         files: ^src/omnibase_infra/.*\.py$
+  - repo: local
+    hooks:
+      # OMN-18713: CI's required Lint job runs the same discovery reconciliation gate.
+      - id: contract-discovery-reconciliation
+        name: Contract discovery reports every path outcome (OMN-18713)
+        entry: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_discovery.py -q --timeout=60
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(src/omnibase_infra/(runtime/auto_wiring/|models/model_discovery_skip\.py)|tests/unit/runtime/auto_wiring/test_discovery\.py|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: discovery-manifest-live-replay
+        name: Discovery manifest accepts recorded runtime responses (OMN-18713)
+        entry: uv run --frozen pytest tests/ci/test_discovery_manifest_live_replay.py -q --timeout=60
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(src/omnibase_infra/(runtime/auto_wiring/|models/model_discovery_skip\.py)|tests/ci/(test_discovery_manifest_live_replay\.py|fixtures/discovery_manifest_live\.json)|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: rolling-runner-registration-preflight
+        name: Rolling runner registration preflight (OMN-18877)
+        entry: uv run --frozen pytest tests/ci/test_deploy_runners_registration_preflight.py -q
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(scripts/deploy-runners\.sh|tests/ci/test_deploy_runners_registration_preflight\.py|tests/ci/fixtures/rolling_runner_registration_preflight\.json|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      # OMN-18786: same blocking scan as the CI Summary context.
+      - id: seed-provenance-check
+        name: Seed Provenance Check
+        entry: uv run python scripts/check_seed_provenance.py --scripts-dir scripts/
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      - id: operator-script-topic-namespace
+        name: Operator broker topics honor the namespace (OMN-18913)
+        entry: uv run --frozen pytest tests/ci/test_operator_script_topic_namespace_omn18913.py -q
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(scripts/.*\.py|scripts/deploy-agent/(pyproject\.toml|uv\.lock)|src/omnibase_infra/topics/topic_namespace\.py|tests/ci/test_operator_script_topic_namespace_omn18913\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        stages: [pre-commit]
+  # OMN-18266: CI and pre-commit execute the same selector regression file.
+  - repo: local
+    hooks:
+      - id: impacted-test-selector
+        name: Impacted-test selector covers data dependencies (OMN-18266)
+        entry: uv run --frozen pytest tests/unit/scripts/ci/test_detect_test_paths.py -q --timeout=60
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(src/omnibase_infra/topology/|docker/catalog/database-topology/|scripts/ci/(detect_test_paths\.py|test_selection_(adjacency\.yaml|loader\.py|models\.py))$|tests/unit/scripts/ci/test_detect_test_paths\.py$|\.github/workflows/ci\.yml$|\.pre-commit-config\.yaml$)
+        stages: [pre-commit]
+  # OMN-18892: same focused principal-confinement proof as the CI gate.
+  - repo: local
+    hooks:
+      - id: slot-migration-principal-confinement
+        name: Slot migrations use confined principals (OMN-18892)
+        entry: uv run --frozen pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q --timeout=60
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(scripts/(run-forward-migrations|run-intelligence-migrations|provision_db_slot)\.sh|docker/docker-compose\.prepr\.yml|tests/unit/infra/test_db_slot_provisioner_omn18892\.py|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
   # Shape-gate independence (OMN-20298): a shape-gate detector job never waits
   # on the change-control preflight and never reads its result. BLOCKING, zero
   # baseline, no allowlist, no suppression comment. CI twin: the
   # shape-gate-independence job in .github/workflows/ci.yml (STRICT CI Summary gate).
   - repo: local
     hooks:
+      # OMN-18780: the same drift controls run in the reusable audit's CI job.
+      - id: runner-routing-audit
+        name: Runner routing audit controls
+        entry: uv run pytest tests/ci/test_runner_routing_audit.py -q
+        language: system
+        stages: [pre-commit]
+        pass_filenames: false
+        files: ^(\.github/workflows/|config/runner_routing_policy\.yaml|scripts/audit-runner-routing\.py|scripts/ci/(ci_summary_gate|nonrequired_check_failure_rate)\.py|tests/ci/test_runner_routing_audit\.py|\.pre-commit-config\.yaml)
+      - id: ci-live-contact
+        name: CI tooling carries recorded live-contact evidence (OMN-18648)
+        entry: uv run --frozen onex node node_ci_live_contact_effect --backend event_bus=inmemory --state-root .onex_state/ci-live-contact
+        language: system
+        pass_filenames: false
+        always_run: true
+        require_serial: true
+        stages: [pre-commit]
+      - id: autoclose-history
+        name: Autoclose historical evidence controls (OMN-16106)
+        entry: uv run --frozen pytest tests/ci/test_autoclose_history_omn16106.py -q --no-cov
+        language: system
+        pass_filenames: false
+        require_serial: true
+        stages: [pre-commit]
+        files: ^(\.github/workflows/(evidence-autoclose-sweep|ci)\.yml|\.pre-commit-config\.yaml|tests/ci/(test_autoclose_history_omn16106\.py|fixtures/autoclose_history_omn16106\.json))$
       - id: check-shape-gate-independence
         name: Shape-gate detectors never depend on the OCC preflight (OMN-20298)
         entry: uv run --no-project --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@efba6fb107f49c67e01f244c1830d55d0fffed29" python -m omnibase_core.handlers.handler_shape_gate_independence
@@ -189,7 +357,7 @@ repos:
       - id: check-added-large-files
         args: [--maxkb=1000]
   # OMN-13220: shellcheck the deploy surface this repo owns. Scoped to
-  # deploy-runtime.sh + its runtime_build sibling scripts (the deploy crash-loop
+  # onex-runtime-deploy + its runtime_build sibling scripts (the deploy crash-loop
   # blast radius) rather than all 56 scripts/*.sh, so the gate enforces real
   # defects without a 56-script pre-existing-cleanup detour. SC1091 (sourced
   # host-env files shellcheck cannot follow) is silenced in .shellcheckrc.
@@ -198,7 +366,7 @@ repos:
     hooks:
       - id: shellcheck
         name: shellcheck (deploy-runtime surface)
-        files: ^scripts/(deploy-runtime\.sh|runtime_build/.*\.sh)$
+        files: ^(src/omnibase_infra/handlers/handler_runtime_deploy\.sh|scripts/runtime_build/.*\.sh)$
         stages: [pre-commit]
   # actionlint (GitHub Actions linting) is intentionally NOT wired as a
   # repo-wide pre-commit hook in this PR: a baseline run flags pre-existing
@@ -303,6 +471,14 @@ repos:
         types: [shell]
         pass_filenames: true
         stages: [pre-commit]
+      - id: runner-disk-admission-self-pause
+        require_serial: true
+        name: Runner disk admission retries a marked self-pause (OMN-19070)
+        entry: uv run --frozen pytest tests/scripts/test_runner_job_started_disk_admission.py -q
+        language: system
+        pass_filenames: false
+        files: ^(docker/runners/runner-job-started\.sh|tests/scripts/test_runner_job_started_disk_admission\.py)$
+        stages: [pre-commit]
       - id: mypy-type-check
         require_serial: true
         name: mypy (type checking)
@@ -377,8 +553,16 @@ repos:
         name: Cross-repo pins must be reachable from dev/main (OMN-15538)
         entry: uv run --frozen python scripts/ci/check_pin_reachability.py --allow-undetermined
         language: system
-        files: ^(\.github/workflows/.*\.ya?ml|pyproject\.toml|uv\.lock)$
+        files: ^(\.github/workflows/.*\.ya?ml|\.pre-commit-config\.yaml|pyproject\.toml|uv\.lock)$
         pass_filenames: true
+        stages: [pre-commit]
+      # OMN-18496: mirrors the focused scoping regression in test-parallel.
+      - id: dev-cloud-migration-scope
+        name: Cloud migration failure gates only cloud consumers (OMN-18496)
+        entry: uv run --frozen pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py -q
+        language: system
+        files: ^(src/omnibase_infra/handlers/handler_runtime_deploy\.sh|scripts/runtime_build/compose_files\.sh|docker/docker-compose\.(infra|dev-lane)\.yml|tests/scripts/test_deploy_runtime_cloud_gate_omn18496\.py)$
+        pass_filenames: false
         stages: [pre-commit]
       # OMN-16367: per-run compose proof images must be evicted at source
       # (always() teardown with --volumes --rmi local) and labeled
@@ -555,6 +739,35 @@ repos:
         entry: uv run --frozen pytest tests/ci/test_boot_gate_rollout_deadline_check_omn18316.py -q
         language: system
         files: ^(\.github/workflows/deliver-dev-candidate-to-staging\.yml|tests/ci/test_boot_gate_rollout_deadline_check_omn18316\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-19084: CI's script-test selection collects this same focused file.
+      - id: runner-disk-admission-restore-regression
+        name: Runner disk-admission restore regression (OMN-19084)
+        entry: uv run --frozen pytest tests/scripts/test_runner_disk_admission_restore.py -q
+        language: system
+        files: ^(scripts/runner-disk-admission-restore\.sh|tests/scripts/test_runner_disk_admission_restore\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: lab-pass-criterion-bindings
+        name: Lab-pass criterion bindings and closer pin gate (OMN-18488)
+        entry: uv run --frozen pytest tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488.py -q
+        language: system
+        files: ^(scripts/ci/lab_pass_receipt\.py|src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/.*|tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488\.py|\.github/workflows/(runtime-rebuild-trigger|deliver-dev-candidate-to-staging)\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: persistent-lab-receipt
+        name: Persistent lab apply receipt and candidate smoke isolation (OMN-18276)
+        entry: uv run --frozen pytest tests/scripts/ci/test_persistent_lab_receipt_omn18276.py -q --no-cov
+        language: system
+        files: ^(scripts/ci/(lab_pass_receipt|fetch_lab_overlay_record)\.py|tests/scripts/ci/test_persistent_lab_receipt_omn18276\.py|\.github/workflows/(runtime-rebuild-trigger|deliver-dev-candidate-to-staging|ci)\.yml|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: d11-workflow-verdict-regression
+        name: D11 verdict admits only the governed lane (OMN-19311)
+        entry: uv run --frozen pytest tests/ci/test_workflow_verdict_omn_d11.py -q --no-cov
+        language: system
+        files: ^(scripts/ci/lab_pass_receipt\.py|tests/ci/test_workflow_verdict_omn_d11\.py|tests/ci/fixtures/omn19311_d11_failure_run\.json|\.github/workflows/deliver-dev-candidate-to-staging\.yml|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       # OMN-18272: the dependency-cascade generator may not silently stop
@@ -849,17 +1062,20 @@ repos:
         files: ^(src/omnibase_infra/runtime/auto_wiring/handler_wiring\.py|src/omnibase_infra/runtime/observability/consumer_flow_counters\.py|src/omnibase_infra/runtime/service_dispatch_result_applier\.py|tests/ci/test_omn17214_publish_flow_attribution_gate\.py)$
         pass_filenames: false
         stages: [pre-commit]
-      # Migration freeze enforcement - block new migrations during DB-per-repo refactor
+      # Migration freeze enforcement - block new migrations during DB-per-repo refactor.
+      # OMN-20568: the node_migration_freeze_check_compute node, which replaced the
+      # three freeze implementations. Staged-file mode; CI runs the same module
+      # with --base (the `migration-freeze` job).
       - id: onex-validate-migration-freeze
         name: ONEX Migration Freeze Enforcement
-        entry: uv run --frozen python scripts/validate.py migration_freeze
+        entry: uv run --frozen python -m omnibase_infra.nodes.node_migration_freeze_check_compute.runtime_migration_freeze_check
         language: system
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
       - id: onex-validate-migration-sequence
         name: ONEX Migration Sequence Duplicate Check
-        entry: uv run --frozen python scripts/validation/validate_migration_sequence.py
+        entry: uv run --frozen python -m omnibase_infra.nodes.node_migration_sequence_check_compute.runtime_migration_sequence_check
         language: system
         pass_filenames: false
         always_run: false
@@ -941,6 +1157,13 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      - id: delegation-response-contract-seam
+        name: Delegation response contract terminal seam (OMN-18929)
+        entry: uv run --frozen pytest -q tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py
+        language: system
+        pass_filenames: false
+        files: '^(src/omnibase_infra/runtime/(contract_terminal_events|service_delegation_dispatch_port|service_pattern_b_broker)\.py|tests/integration/runtime/test_delegation_dispatch_port_handler_compat\.py)$'
+        stages: [pre-commit]
       # OMN-16705: applied migration history is immutable. bootstrap.sql records
       # a content_sha256 for every node migration it applies and refuses every
       # later run when the file no longer hashes to it, so one in-place edit
@@ -954,7 +1177,7 @@ repos:
       # the predicate is a git diff, not a per-file lint.
       - id: onex-check-migration-append-only
         name: ONEX Migration Append-Only Check
-        entry: uv run --frozen python scripts/validation/check_migration_append_only.py --staged --base origin/dev
+        entry: uv run --frozen python -m omnibase_infra.nodes.node_migration_append_only_check_compute.runtime_migration_append_only_check --staged --base origin/dev
         language: system
         pass_filenames: false
         always_run: true
@@ -1090,7 +1313,7 @@ repos:
       # requires and which this gate's own interpreter pair recommends.
       - id: governed-helper-primitive
         name: Governed helper primitive gate (OMN-18629)
-        entry: uv run --frozen python scripts/ci/governed_helper_gate.py
+        entry: uv run --frozen python scripts/ci/governed_helper_gate.py --base-ref HEAD
         language: system
         pass_filenames: false
         always_run: true
@@ -1513,7 +1736,7 @@ repos:
         entry: uv run --frozen pytest tests/scripts/test_check_prod_promotion_lineage.py tests/scripts/test_deploy_runtime_prod_lineage.py -q --tb=short --timeout=120 --timeout-method=signal
         language: system
         pass_filenames: false
-        files: ^(scripts/check_prod_promotion_lineage\.py|tests/scripts/test_(check_prod_promotion_lineage|deploy_runtime_prod_lineage)\.py|scripts/deploy-runtime\.sh|scripts/deploy-agent/deploy_agent/executor\.py)$
+        files: ^(scripts/check_prod_promotion_lineage\.py|tests/scripts/test_(check_prod_promotion_lineage|deploy_runtime_prod_lineage)\.py|src/omnibase_infra/handlers/handler_runtime_deploy\.sh|scripts/deploy-agent/deploy_agent/executor\.py)$
         stages: [pre-commit]
       # Lane restart-set / refresh build-scope agreement (OMN-18114, OMN-17448)
       # A governed refresh always exports RUNTIME_BUILD_SERVICES_OVERRIDE, and
@@ -1529,7 +1752,7 @@ repos:
         entry: uv run --frozen pytest tests/unit/scripts/test_omn18114_lane_carrier_build_scope.py tests/unit/scripts/test_omn17448_dev_lane_writer_build_scope.py -q --tb=short --timeout=120 --timeout-method=signal
         language: system
         pass_filenames: false
-        files: ^(scripts/deploy-runtime\.sh|scripts/runtime_build/refresh_(dev|stability)_lane\.sh|docker/docker-compose\.(infra|dev-lane|stability-test)\.yml|tests/unit/scripts/test_omn(18114_lane_carrier_build_scope|17448_dev_lane_writer_build_scope)\.py)$
+        files: ^(src/omnibase_infra/handlers/handler_runtime_deploy\.sh|scripts/runtime_build/refresh_(dev|stability)_lane\.sh|docker/docker-compose\.(infra|dev-lane|stability-test)\.yml|tests/unit/scripts/test_omn(18114_lane_carrier_build_scope|17448_dev_lane_writer_build_scope)\.py)$
         stages: [pre-commit]
       # Markdown link validation (PR #172)
       # Ensures all internal markdown links point to existing files and anchors
@@ -1564,6 +1787,7 @@ repos:
       # (OMN-3188: YAML contracts; OMN-3259: Python enum/constant files)
       # Triggers on contract*.yaml OR any *.py change; always scans full source tree.
       - id: topic-naming-lint
+        # OMN-19315: the existing wrapper also refuses mixed consumer topic sets.
         name: Topic Naming Lint
         entry: bash scripts/validation/run_topic_lint.sh
         language: system
@@ -1579,13 +1803,18 @@ repos:
         pass_filenames: false
         files: contract\.yaml$
         stages: [pre-commit]
-      # OMN-10741: Unified localhost/hardcoded-endpoint fallback validator
-      # Covers all 6 pattern types from OMN-10658 enforcement sweep.
-      # Annotation: add  # fallback-ok: <reason>  to exempt a justified line.
+      # OMN-10741 / OMN-20568: localhost/hardcoded-endpoint fallback validator.
+      # Covers all 6 pattern types from OMN-10658 enforcement sweep. The check is
+      # the omnibase_core node_no_env_fallbacks_check_compute node, run from this
+      # repo's locked omnibase-core install (same rule as no-plugin-daemon-classes
+      # above: a remote hook builds a separate pip env), so the hook, CI and the
+      # runtime resolve one version. The runtime's --report-json and zero-scan
+      # ERROR arrive with core's OMN-20565 retrofit. Annotation: add
+      # # fallback-ok: <reason>  to exempt a justified line.
       - id: no-env-fallbacks
         require_serial: true
         name: No localhost/hardcoded-endpoint fallbacks (OMN-10741)
-        entry: uv run --frozen python scripts/validate_no_env_fallbacks.py
+        entry: uv run --frozen python -m omnibase_core.nodes.node_no_env_fallbacks_check_compute.runtime_no_env_fallbacks_check
         language: system
         pass_filenames: true
         types_or: [python, shell]
@@ -1700,6 +1929,14 @@ repos:
         language: system
         files: docker/(docker-compose\.dev-lane\.yml|dev-lane-required-env\.manifest\.txt)
         pass_filenames: false
+      # OMN-15645: cover the explicit tiers pin, including catalog workers.
+      - id: delegation-routing-tiers-binding
+        name: Check delegation routing tiers deployment bindings
+        entry: uv run --frozen pytest tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py -q --no-cov
+        language: system
+        files: ^(docker/(Dockerfile\.runtime|docker-compose\..*\.yml|catalog/.*\.ya?ml)|src/omnibase_infra/docker/catalog/.*\.py|tests/(unit/docker/test_delegation_routing_tiers_path_binding_omn15645\.py|fixtures/omn15645_worker_tiers_live_contact\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-4857: Block Consul references in source (decommissioned service)
       # Prevents reintroduction of CONSUL_HOST or consul.connect.io references in src/.
       - id: no-consul-references
@@ -1896,13 +2133,21 @@ repos:
           ^(scripts/ci/check_integration_skips\.py|scripts/ci/integration_skip_guard\.yaml|tests/ci/test_check_integration_skips\.py|\.github/workflows/ci\.yml|tests/integration/runtime/db/test_postgres_repository_runtime_integration\.py|tests/integration/handlers/test_registration_storage_postgres_uuid_cast\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      - id: runtime-boot-suites-skip-guard
+        name: Runtime-backed suite execution guard selftest (OMN-18811)
+        language: system
+        entry: uv run python scripts/ci/check_integration_skips.py --selftest --config scripts/ci/runtime_boot_suites_skip_guard.yaml
+        files: >-
+          ^(scripts/ci/check_integration_skips\.py|scripts/ci/runtime_boot_suites_skip_guard\.yaml|tests/ci/test_check_integration_skips\.py|\.github/workflows/reusable-runtime-boot\.yml|tests/integration/test_runtime_consumes_build_loop_terminal_event\.py|tests/integration/registration/e2e/test_runtime_e2e\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
   # OMN-13291 (W0): validator-requirements fleet gate. Reports ALL missing
   # required gates for omnibase_infra against omnibase_core's
   # architecture-handshakes/validator-requirements.yaml, ratcheted by this
   # repo's own architecture-handshakes/validator-requirements-baseline.yaml.
   # Re-pin rev to the merged-dev SHA once the omnibase_core export PR lands.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: d163312724489f10f58ffdf8115ba1fa9d5783e8 # pragma: allowlist secret
+    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24 # pragma: allowlist secret
     hooks:
       - id: validate-validator-requirements
         require_serial: true
@@ -2149,7 +2394,7 @@ repos:
         entry: uv run python scripts/check_subscribe_wiring_health.py
         language: system
         pass_filenames: false
-        files: '^(src/omnibase_infra/nodes/.*/contract\.yaml|scripts/check_subscribe_wiring_health\.py)$'
+        files: '^(src/omnibase_infra/nodes/.*/contract\.yaml|src/omnibase_infra/runtime/topics\.yaml|scripts/check_subscribe_wiring_health\.py)$'
         stages: [pre-commit]
   - repo: local
     hooks:
@@ -2211,6 +2456,17 @@ repos:
         pass_filenames: false
         files: ^(\.pre-commit-config\.yaml|scripts/validation/check_precommit_additional_dependencies\.sh|tests/test_precommit_additional_dependencies_omn19666\.sh|tests/fixtures/omn19666/.*)$
         stages: [pre-commit]
+  # OMN-20037: scheduled script coverage uses the existing drift checker.
+  - repo: local
+    hooks:
+      - id: scheduled-script-unit-drift
+        name: Scheduled scripts are covered by unit drift (OMN-20037)
+        entry: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_unit_drift.py -q
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(deploy/unit-drift-manifest\.yaml|scripts/deploy-agent/(deploy_agent/unit_drift\.py|tests/unit/test_unit_drift\.py|deploy/.*\.service)|deploy/(disk-gc|systemd)/.*\.service|scripts/systemd/.*\.service)$
+        stages: [pre-commit]
 default_install_hook_types: [pre-commit, pre-push, commit-msg]
 default_stages: [pre-commit]
 fail_fast: false
@@ -2226,5 +2482,5 @@ ci:
   # Skip ONEX validation hooks in CI that require omnibase_core imports
   # Note: onex-validate-clean-root is NOT skipped (standalone script, no omnibase_core dependency)
   # Also skip migration freeze (checks staged files via git diff --cached, which is empty in CI;
-  # CI should run: uv run python scripts/validation/validate_migration_freeze.py --check-committed)
+  # CI runs the same node with --base: the `migration-freeze` job)
   skip: [no-env-file, onex-validate-architecture, onex-imperative-orchestrator-ratchet, onex-orchestration-monolith-ratchet, onex-orchestrator-reducer-state-invariant, onex-validate-architecture-layers, onex-validate-contracts, onex-validate-patterns, onex-validate-unions, onex-validate-imports, onex-validate-any-types, onex-validate-migration-freeze, normalization-symmetry]

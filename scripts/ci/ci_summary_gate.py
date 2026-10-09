@@ -123,6 +123,7 @@ SELF_JOB_NAME = "CI Summary"
 # the ``name:`` display strings the Actions jobs API returns (verified against
 # ci.yml on 2026-07-07).
 STRICT_GATE_JOBS: tuple[str, ...] = (
+    "runner-routing-audit / Runner Routing Audit",  # OMN-18780: live + local routing assertions
     "occ-preflight / eligibility",  # occ-preflight reusable gate
     "CI Tests Gate",  # tests-gate — aggregator over the split matrix
     "Lint",  # lint
@@ -347,6 +348,9 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     # exceptions). The job is unconditional in ci.yml (no needs/if), so a skip
     # or absence fails closed here instead of reading green.
     "Canonical File Shape (OMN-20304)",  # canonical-file-shape
+    # OMN-20703: node-boundary import gate; unconditional in ci.yml (no needs/if).
+    # A skip or absence fails closed here instead of reading green.
+    "Node Boundary Imports (OMN-20703)",  # node-boundary-imports
 )
 
 # Gates the old ci-summary accepted as ``success`` OR ``skipped``. Each carries
@@ -793,6 +797,29 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # dev; registered so a red run blocks a merge. Admitted under
     # POST_FIXTURE_WINDOW_CONTEXTS and placed at the tail for the same reason.
     "Direct Model Call Gate",
+    # OMN-18786: the existing seed-provenance workflow is blocking and now
+    # unfiltered on every PR and merge group. A missing or skipped context
+    # cannot silently remove provenance coverage.
+    "Seed Provenance Check",
+    # OMN-18648: unconditional new admission workflow. Body edits re-evaluate
+    # this context without re-running the full CI matrix.
+    "CI Live Contact (OMN-18648)",
+    # OMN-20074: require the repo-owned verdict, so ABSENCE cannot silently
+    # pass dev's sole required context, CI Summary. The operator ruling at
+    # 2026-10-08T22:41:24Z admits call-repo-evidence-gate.yml's
+    # pull_request_target producer: GitHub reads the base-branch definition,
+    # and the reusable reports this verdict on the PR head. Caller-mode
+    # "repo-evidence / verify" is a success no-op and is NOT registered.
+    # Admission evidence: merged dev heads #4767
+    # 28b945ef0e9cbf033f189e41a1dfbdb184c63ad9, run 37928489908
+    # (pull_request_target), check 113813114010 success (app id 15368);
+    # #4765 44e1c42234c271f5c38405485ec3083cdcae7fbb, check 113802506448
+    # success; #4758 adf88b2586003e68978d10ad798beb6e00d3b650, check
+    # 113731199381 success. These postdate both historical fixture windows.
+    # EXPECTED_EXTERNAL_CONTEXTS is asserted only on pull_request CI Summary
+    # runs, so this PR-only producer needs no merge_group trigger. Every OCC
+    # context remains enforced until S6 part 2.
+    "repo-evidence / dod-verify",
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -815,6 +842,17 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
 # finding, not a fixture convenience.
 POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
     {
+        # OMN-20074: the repo-owned caller's October merged-head runs postdate
+        # both historical fixture windows (#2546...#2567, #2705...#2720).
+        # Historical recording metadata only; live absence/red still blocks.
+        "repo-evidence / dod-verify",
+        # OMN-18786: the unconditional context starts after the captured
+        # historical windows. Runtime enforcement still requires success;
+        # no synthetic rows are added to those historical fixtures.
+        "Seed Provenance Check",
+        # OMN-18648: the producer first exists in this PR. This is historical
+        # recording metadata only; live missing/red admission always blocks.
+        "CI Live Contact (OMN-18648)",
         # OMN-19451: registered 2026-09-29, after both fixture windows closed.
         # Comes out at the next fixture re-capture.
         "delegation-health-check / Delegation Health Check",
@@ -1410,7 +1448,7 @@ EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
             "job of prod-promotion-lineage.yml, which carries the condition "
             "github.event_name == 'workflow_call' && inputs.enforce_lineage. The "
             "workflow runs on pull_request for a path filter that includes the "
-            "deploy-agent executor and deploy-runtime.sh, so on every such pull "
+            "deploy-agent executor and onex-runtime-deploy, so on every such pull "
             "request the job skips without producing a verdict. Measured on "
             "omnibase_infra#3980 at head ba61dc95: every producer green, CI Summary "
             "red on this skipped row alone. The job does its real work only when the "
@@ -1470,10 +1508,11 @@ DEPENDENCY_BOT_AUTHORS: frozenset[str] = frozenset({"dependabot[bot]", "renovate
 TICKET_TOKEN_RE = re.compile(r"OMN-\d+")
 
 # A MIRROR, not a second policy. Source of truth, read live on 2026-09-22; the
-# reusable was re-read byte-identical at ebe30bc on 2026-09-29:
+# reusable was re-read byte-identical at ebe30bc on 2026-09-29 and at 326ebee
+# on 2026-10-06:
 #   OmniNode-ai/onex_change_control
 #   .github/workflows/pr-title-check-reusable.yml
-#   @ebe30bc3589c9f803e8920b941ddaef07b17ed90
+#   @326ebee0561ab42b3d970e533ae9f447abed2292
 # which is the exact ref .github/workflows/pr-title-check.yml in THIS repo
 # pins, so the mirror and the enforcer cannot be reading different revisions
 # without that pin moving. Its shell tests, in order, are:
@@ -2468,6 +2507,123 @@ def check_run_workflow_run_id(raw: dict[str, object]) -> int | None:
     return None
 
 
+def draft_ready_check_runs(
+    check_runs: list[dict[str, object]] | None,
+    workflow_runs: list[dict[str, object]] | None,
+    timeline: list[dict[str, object]] | None,
+    head_sha: str | None,
+    self_name: str,
+) -> tuple[list[dict[str, object]] | None, list[str], list[str]]:
+    """Supersede draft rows only with the same producer's ready rows (OMN-19379).
+
+    Run creation time, never check start time, owns the event era: rerunning a
+    draft run replays its original payload. The most recent ready transition
+    must still be in force. Missing provenance retains the existing strict bar.
+    Reusable and matrix names are structural successors, not arbitrary aliases.
+    """
+    transitions = sorted(
+        (str(row.get("created_at") or ""), str(row.get("event")))
+        for row in timeline or []
+        if row.get("event") in {"ready_for_review", "converted_to_draft"}
+    )
+    if not head_sha or not transitions or transitions[-1][1] != "ready_for_review":
+        return check_runs, [], []
+    if any(_parse_timestamp(ts) is None for ts, _ in transitions):
+        return check_runs, [], []
+    ready_at = transitions[-1][0]
+    draft_at = next(
+        (
+            ts
+            for ts, event in reversed(transitions[:-1])
+            if event == "converted_to_draft"
+        ),
+        "",
+    )
+    runs = {
+        _run_int(run, "id"): run
+        for run in workflow_runs or []
+        if run.get("event") in {"pull_request", "pull_request_target", "push"}
+        and run.get("head_sha") == head_sha
+        and _run_int(run, "workflow_id")
+        and _parse_timestamp(str(run.get("created_at") or "")) is not None
+    }
+    ready_rows = [
+        row
+        for row in check_runs or []
+        if row.get("head_sha") == head_sha
+        and (run := runs.get(check_run_workflow_run_id(row) or 0))
+        and str(run["created_at"]) >= ready_at
+    ]
+    retained: list[dict[str, object]] = []
+    refused: list[str] = []
+    pending: list[str] = []
+    for row in check_runs or []:
+        run_id = check_run_workflow_run_id(row) or 0
+        run = runs.get(run_id)
+        if (
+            row.get("name") == self_name
+            or row.get("head_sha") != head_sha
+            or not run
+            or not draft_at <= str(run["created_at"]) < ready_at
+        ):
+            retained.append(row)
+            continue
+        name = str(row.get("name") or "")
+        # A draft row that already passed or skipped needs no successor: ready
+        # runs never re-trigger every workflow, and the row stays judged as is.
+        if not carries_failure_conclusion(_state_from_check_run(name, row)):
+            retained.append(row)
+            continue
+        # GitHub leaves expressions unexpanded in a cancelled matrix caller.
+        pattern = ".+?".join(
+            re.escape(part) for part in re.split(r"\$\{\{.*?\}\}", name)
+        )
+        counterparts = (
+            [
+                replacement
+                for replacement in ready_rows
+                if runs[check_run_workflow_run_id(replacement) or 0]["workflow_id"]
+                == run["workflow_id"]
+                and (
+                    re.fullmatch(pattern, str(replacement.get("name") or ""))
+                    or str(replacement.get("name") or "").startswith(name + " / ")
+                )
+            ]
+            if name
+            else []
+        )
+        ready_run_in_flight = any(
+            candidate.get("workflow_id") == run["workflow_id"]
+            and str(candidate["created_at"]) >= ready_at
+            and candidate.get("status") != "completed"
+            for candidate in runs.values()
+        )
+        if not counterparts and ready_run_in_flight:
+            # The ready run has not created this row yet: hold at PENDING.
+            retained.append(row)
+            pending.append(
+                f"draft_era_ready_counterpart_pending: {name} run_id={run_id}"
+            )
+        elif not counterparts:
+            retained.append(row)
+            refused.append(
+                f"draft_era_without_ready_counterpart: {name} run_id={run_id}"
+            )
+        else:
+            for replacement in latest_check_run_rows(counterparts).values():
+                state = _state_from_check_run(str(replacement["name"]), replacement)
+                if carries_failure_conclusion(state):
+                    refused.append(
+                        f"ready_state_counterpart_failure: {state.name} "
+                        f"run_id={check_run_workflow_run_id(replacement)}"
+                    )
+                elif not is_decided(state):
+                    pending.append(
+                        f"draft_era_ready_counterpart_pending: {name} run_id={run_id}"
+                    )
+    return retained, refused, pending
+
+
 def own_workflow_run_ids(
     jobs: list[dict[str, object]],
     current_run_id: int | None = None,
@@ -2778,6 +2934,8 @@ def evaluate(
     pr_context: PullRequestContext | None = None,
     workflow_runs: list[dict[str, object]] | None = None,
     current_run_id: int | None = None,
+    pr_timeline: list[dict[str, object]] | None = None,
+    head_sha: str | None = None,
 ) -> tuple[int, str]:
     """Return ``(exit_code, human_report)`` for the current job snapshot.
 
@@ -2806,6 +2964,9 @@ def evaluate(
     production caller never passes it.
     """
 
+    check_runs, draft_refusals, draft_pending = draft_ready_check_runs(
+        check_runs, workflow_runs, pr_timeline, head_sha, self_name
+    )
     external_contexts = applicable_external_contexts(external_contexts, pr_author)
     latest = dedup_latest(jobs, run_attempt=run_attempt)
     gate_names = frozenset(strict_gates) | frozenset(skippable_gates)
@@ -2946,7 +3107,8 @@ def evaluate(
     )
 
     all_failures = (
-        strict_failures
+        draft_refusals
+        + strict_failures
         + skippable_failures
         + sweep_failures
         + external_failures
@@ -2960,37 +3122,42 @@ def evaluate(
     # the same row reds with a named reason, and the caller's deadline still
     # converts a sustained PENDING into FAILURE.
     all_unresolved = (
-        gate_missing_or_pending
+        draft_pending
+        + gate_missing_or_pending
         + sweep_running
         + external_unresolved
         + ext_sweep_provisional
     )
 
     def _verdict(label: str) -> str:
-        return _report(
-            label,
-            latest,
-            strict_gates,
-            skippable_gates,
-            strict_failures,
-            skippable_failures,
-            sweep_failures,
-            gate_missing_or_pending,
-            external_contexts,
-            external_failures,
-            external_unresolved,
-            external_provisional,
-            docs_only=docs_only,
-            relaxed=relaxed,
-            sweep_running=sweep_running,
-            sweep_names=ext_sweep_names,
-            sweep_external_failures=ext_sweep_failures,
-            sweep_in_flight=ext_sweep_in_flight,
-            sweep_excluded=ext_sweep_excluded,
-            sweep_expired=list(expired_exclusions),
-            sweep_findings=exclusion_findings,
-            sweep_external=sweep_external,
-            sweep_provisional=ext_sweep_provisional,
+        return (
+            "\n".join(draft_refusals + draft_pending)
+            + "\n"
+            + _report(
+                label,
+                latest,
+                strict_gates,
+                skippable_gates,
+                strict_failures,
+                skippable_failures,
+                sweep_failures,
+                gate_missing_or_pending,
+                external_contexts,
+                external_failures,
+                external_unresolved,
+                external_provisional,
+                docs_only=docs_only,
+                relaxed=relaxed,
+                sweep_running=sweep_running,
+                sweep_names=ext_sweep_names,
+                sweep_external_failures=ext_sweep_failures,
+                sweep_in_flight=ext_sweep_in_flight,
+                sweep_excluded=ext_sweep_excluded,
+                sweep_expired=list(expired_exclusions),
+                sweep_findings=exclusion_findings,
+                sweep_external=sweep_external,
+                sweep_provisional=ext_sweep_provisional,
+            )
         )
 
     if all_failures:
@@ -3285,6 +3452,17 @@ def main(argv: list[str] | None = None) -> int:
         "caller jobs' own actor arm. Omitted/empty is not a bot login, the "
         "stricter reading.",
     )
+    parser.add_argument(
+        "--pr-timeline-file",
+        default=None,
+        help="PR timeline for draft/ready run provenance; missing admits no supersession.",
+    )
+    parser.add_argument(
+        "--head-sha",
+        default=None,
+        help="Exact PR head; omitted admits no draft-era supersession.",
+    )
+
     args = parser.parse_args(argv)
 
     jobs = _load_jobs(args.jobs_file)
@@ -3311,6 +3489,8 @@ def main(argv: list[str] | None = None) -> int:
         ),
         workflow_runs=_load_workflow_runs(args.workflow_runs_file),
         current_run_id=args.current_run_id,
+        pr_timeline=_load_workflow_runs(args.pr_timeline_file),
+        head_sha=args.head_sha,
         # The poller runs this module once per poll, so wall-clock IS the
         # observation time for the OMN-18355 cancellation grace. It is not a
         # caller-supplied input: there is no flag for it, so it cannot be

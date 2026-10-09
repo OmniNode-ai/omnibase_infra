@@ -117,6 +117,9 @@ class EnumChainCanaryVerdict(StrEnum):
     #
     # The assembled chain has a gap, so there is no complete chain to replay.
     LEDGER_CHAIN_INCOMPLETE = "ledger_chain_incomplete"
+    # OMN-17427: served in-process with only a terminal; the probe did not
+    # exercise the bus chain. Neither a pass nor a chain fault.
+    LEDGER_CHAIN_IN_PROCESS_TERMINAL_ONLY = "ledger_chain_in_process_terminal_only"
     # A COMPLETE chain was replayed and the replay was not green. Distinct
     # from CHAIN_INCOMPLETE: there the replay never had material to run on.
     # Named FAILED rather than NOT_GREEN to match the contract member that

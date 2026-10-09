@@ -34,6 +34,9 @@ from uuid import uuid4
 
 import httpx
 
+from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
+    AdapterLinearGraphQLProjectTracker,
+)
 from omnibase_infra.enums import EnumInfraTransportType
 from omnibase_infra.errors import (
     InfraConnectionError,
@@ -50,9 +53,6 @@ from omnibase_infra.models.errors.model_infra_error_context import (
 # Metadata dict type for unimplemented create_ticket stub.
 # ONEX_EXCLUDE: dict_str_any - unimplemented stub; no domain type exists yet
 _TicketMetadata = dict[str, object]
-
-# Linear GraphQL endpoint
-_LINEAR_API_URL: str = "https://api.linear.app/graphql"
 
 # Default timeout for Linear API calls (seconds)
 _DEFAULT_TIMEOUT_SECONDS: float = 15.0
@@ -211,13 +211,6 @@ class AdapterTicketLinear:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _headers(self) -> dict[str, str]:
-        """Build HTTP headers for Linear API calls."""
-        return {
-            "Authorization": self._api_key,
-            "Content-Type": "application/json",
-        }
-
     async def _get_client(self) -> httpx.AsyncClient:
         """Lazily create or return the shared httpx client."""
         if self._client is None or self._client.is_closed:
@@ -248,11 +241,10 @@ class AdapterTicketLinear:
         client = await self._get_client()
 
         try:
-            response = await client.post(
-                _LINEAR_API_URL,
-                json={"query": query, "variables": variables},
-                headers=self._headers(),
-            )
+            async with AdapterLinearGraphQLProjectTracker.graphql_transport(
+                api_key=self._api_key, timeout_seconds=self._timeout, client=client
+            ) as transport:
+                response = await transport.post_graphql(query, variables)
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             context = ModelInfraErrorContext.with_correlation(
@@ -407,14 +399,10 @@ class AdapterTicketLinear:
         """
         try:
             client = await self._get_client()
-            response = await client.post(
-                _LINEAR_API_URL,
-                json={
-                    "query": "query { viewer { id } }",
-                    "variables": {},
-                },
-                headers=self._headers(),
-            )
+            async with AdapterLinearGraphQLProjectTracker.graphql_transport(
+                api_key=self._api_key, timeout_seconds=self._timeout, client=client
+            ) as transport:
+                response = await transport.post_graphql("query { viewer { id } }", {})
             return response.status_code == 200
         except httpx.HTTPError:
             return False

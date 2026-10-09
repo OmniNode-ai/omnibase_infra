@@ -3,12 +3,12 @@
 """OMN-18438 -- the agent path must run the dev lane's omninode_cloud one-shots.
 
 ``omnibase_infra#3636`` put ``cloud-migration-files`` and ``cloud-migration``
-into ``DEV_LANE_ONLY_MIGRATION_SERVICES`` in ``scripts/deploy-runtime.sh`` and
+into ``DEV_LANE_ONLY_MIGRATION_SERVICES`` in ``src/omnibase_infra/handlers/handler_runtime_deploy.sh`` and
 wired them into that script's migration preflight. They still never ran. This
 is OMN-18108's finding repeated one layer over: **the deploy agent does not
-invoke ``deploy-runtime.sh`` at all**, so an array expanded only inside that
+invoke ``onex-runtime-deploy`` at all**, so an array expanded only inside that
 script is unreachable from the path that actually deploys the dev lane. Every
-mention of ``deploy-runtime.sh`` in the agent package is a comment.
+mention of ``onex-runtime-deploy`` in the agent package is a comment.
 
 Measured on the .201 dev lane after the 14:43Z governed rebuild (agent command
 ``ee3d2cc6``, ref ``3586e65dc``, which carried those arrays): zero
@@ -58,7 +58,9 @@ from deploy_agent.executor import (
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 DEV_LANE_OVERLAY = REPO_ROOT / "docker" / "docker-compose.dev-lane.yml"
 
 CLOUD_ONESHOTS = ("cloud-migration-files", "cloud-migration")
@@ -123,7 +125,7 @@ class TestTheTwoDeclarationsCannotDrift:
     def test_every_member_is_a_one_shot_on_the_bash_side(self) -> None:
         """Why Python needs one tuple where bash carries two arrays.
 
-        ``deploy-runtime.sh`` separates services from one-shots because its
+        ``onex-runtime-deploy`` separates services from one-shots because its
         lane-agnostic set mixes a keepalive (``migration-gate``) in. Every
         member of the dev-lane set is a one-shot, so a second Python tuple
         would be a second thing to drift rather than a distinction.
@@ -212,7 +214,7 @@ class TestThePreflightRunsThem:
         for service in DEV_LANE_ONLY_MIGRATION_SERVICES:
             assert service in started, (
                 f"the DEV migration preflight never started {service} -- this is "
-                "the defect: the agent does not call deploy-runtime.sh, so an "
+                "the defect: the agent does not call onex-runtime-deploy, so an "
                 "array declared only there is unreachable"
             )
 

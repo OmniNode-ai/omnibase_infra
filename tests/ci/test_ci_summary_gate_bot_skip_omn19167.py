@@ -459,7 +459,7 @@ class TestTheTitleRuleMirrorIsPinnedToItsSource:
 
     def test_the_caller_still_pins_the_ref_this_mirror_was_read_from(self) -> None:
         assert _pinned_title_check_ref() == (
-            "ebe30bc3589c9f803e8920b941ddaef07b17ed90"
+            "326ebee0561ab42b3d970e533ae9f447abed2292"
         ), (
             "the PR-title reusable pin moved. Re-read its exemption arms at the new "
             "ref and update title_rule_exempts_ticket and this pin together, in one "

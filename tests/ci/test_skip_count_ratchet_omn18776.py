@@ -221,8 +221,9 @@ def test_ac4_ratchet_job_is_unconditional() -> None:
 def test_ac5_selector_narrowed_real_runs_do_not_false_fail(fixture_name: str) -> None:
     """Falsifier: a run fails on a count the impacted-test selector explains.
 
-    Both fixtures are the real skipped-case sets of two live selector-narrowed
-    omnibase_infra runs (45 and 95 unique skips against a 547 baseline).
+    Both fixtures come from live selector-narrowed omnibase_infra runs
+    (originally 45 and 95 unique skips against a 547 baseline). Retired test
+    subjects are removed with their baseline ids (OMN-19626).
     """
     result = _run(
         "--baseline",

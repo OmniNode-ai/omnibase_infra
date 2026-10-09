@@ -15,7 +15,7 @@ seconds from ready, restarted its clock, and swapped the container id under
 the compose-dev receipt's generation binding.
 
 The fix makes verification consult docker's own reading of that container
-before the recreate, through the SAME helpers ``deploy-runtime.sh`` uses
+before the recreate, through the SAME helpers ``onex-runtime-deploy`` uses
 (``scripts/runtime_build/runtime_health_wait.sh``, OMN-18349): while docker
 reports it ``starting`` and the wait is inside the declared budget, keep
 probing. Anything else -- unhealthy, not running, restarted, absent, no

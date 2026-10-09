@@ -44,14 +44,14 @@ from omnibase_infra.models.registration.events.model_node_became_active import (
 from omnibase_infra.models.registration.events.model_node_registration_ack_received import (
     ModelNodeRegistrationAckReceived,
 )
+from omnibase_infra.models.registration.model_payload_postgres_update_registration import (
+    ModelPayloadPostgresUpdateRegistration,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.models.model_reducer_decision import (
     ModelReducerDecision,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.services import (
     RegistrationReducerService,
-)
-from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_update_registration import (
-    ModelPayloadPostgresUpdateRegistration,
 )
 
 # ---------------------------------------------------------------------------

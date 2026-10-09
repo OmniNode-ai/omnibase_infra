@@ -29,4 +29,8 @@ def stand_in_registry(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture(autouse=True)
 def _initialised_install(monkeypatch: pytest.MonkeyPatch) -> None:
     """Give ``onex delegate`` an install that has minted its identity (OMN-17427)."""
+    # These tests clear OMNI_HOME and use a stand-in install. A remote lab
+    # declaration would otherwise refuse before the runtime under test runs.
+    for key in ("ONEX_LANE_HOST", "ONEX_REMOTE_LANE_HOST", "ONEX_LAB_RUN_HOSTS"):
+        monkeypatch.delenv(key, raising=False)
     use_initialised_install(monkeypatch)

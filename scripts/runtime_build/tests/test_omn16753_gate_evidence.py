@@ -258,6 +258,7 @@ class TestReceiptKeepsTheDimensions:
             )
         else:
             kwargs["container_ids"] = {}
+            kwargs["effects_health_url"] = "http://x/effects/health"
         report = module.run_health_gate(**kwargs)
         rendered = report.to_dict()
         assert rendered["health_dimensions"], (
@@ -298,7 +299,7 @@ class TestReceiptKeepsTheDimensions:
 
 
 def _always_failing_runner(
-    cmd, capture_output=True, text=True, timeout=30, check=False
+    cmd, capture_output=True, text=True, timeout=30, check=False, env=None
 ):
     """Every docker/rpk probe fails. The health leg is what these tests read."""
     import subprocess

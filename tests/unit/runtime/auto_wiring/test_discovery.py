@@ -9,12 +9,20 @@ from textwrap import dedent
 from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 from omnibase_infra.runtime.auto_wiring.discovery import (
     _parse_contract,
     _resolve_contract_path,
     discover_contracts,
     discover_contracts_from_paths,
+)
+from omnibase_infra.runtime.auto_wiring.introspection_manifest_identity import (
+    bind_introspection_manifest_identity,
+)
+from omnibase_infra.runtime.auto_wiring.models import ModelAutoWiringManifest
+from omnibase_infra.runtime.auto_wiring.profile_ownership import (
+    filter_manifest_for_runtime_profile,
 )
 
 _EP_MODULE = "omnibase_infra.runtime.auto_wiring.discovery.entry_points"
@@ -193,6 +201,72 @@ class TestParseContract:
         path = tmp_path / "contract.yaml"
         path.write_text("- just a list")
         with pytest.raises(ValueError, match="Expected YAML dict"):
+            _parse_contract(
+                contract_path=path,
+                entry_point_name="bad",
+                package_name="pkg",
+                package_version="1.0.0",
+            )
+
+    @pytest.mark.unit
+    def test_cold_discovery_avoids_python_yaml_scanning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A cold rebuild must benefit before the discovery memo is populated."""
+        path = _make_contract_yaml(tmp_path, with_event_bus=True)
+
+        def python_scan_refused(*args: object, **kwargs: object) -> object:
+            raise AssertionError("cold discovery used the Python YAML scanner")
+
+        if hasattr(yaml, "CSafeLoader"):
+            monkeypatch.setattr(yaml.SafeLoader, "get_single_data", python_scan_refused)
+
+        manifest = discover_contracts_from_paths([path])
+        assert manifest.total_errors == 0
+        assert manifest.total_discovered == 1
+        assert manifest.get_all_subscribe_topics() == frozenset(
+            {"onex.evt.platform.test-input.v1"}
+        )
+
+    @pytest.mark.unit
+    def test_shipped_contracts_match_without_libyaml(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The accelerator and portable fallback produce identical wiring data."""
+        root = Path(__file__).resolve().parents[4]
+        paths = sorted((root / "src/omnibase_infra/nodes").rglob("contract.yaml"))
+        assert paths
+        accelerated = discover_contracts_from_paths(paths)
+        assert accelerated.total_discovered > 0
+        assert accelerated.total_errors == 0
+
+        monkeypatch.delattr(yaml, "CSafeLoader", raising=False)
+        portable = discover_contracts_from_paths(paths)
+        assert portable == accelerated
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("portable", [False, True])
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "name: !!python/object/apply:builtins.str [unsafe]",
+            "name: !!python/object:builtins.object {}",
+            "name: [unterminated",
+        ],
+    )
+    def test_rejects_unsafe_and_malformed_yaml(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        portable: bool,
+        content: str,
+    ) -> None:
+        """Neither loader may construct Python objects or accept broken YAML."""
+        if portable:
+            monkeypatch.delattr(yaml, "CSafeLoader", raising=False)
+        path = tmp_path / "contract.yaml"
+        path.write_text(content)
+        with pytest.raises(yaml.YAMLError):
             _parse_contract(
                 contract_path=path,
                 entry_point_name="bad",
@@ -707,3 +781,157 @@ class TestModelAutoWiringManifest:
         # Must not raise AttributeError
         topics = manifest.all_subscribe_topics()
         assert "onex.evt.platform.test-input.v1" in topics
+
+
+@pytest.mark.unit
+def test_skip_and_parse_rows_reconcile_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Each input has one outcome, with policy skips separate from failures."""
+    monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "omnibase_infra")
+    monkeypatch.setenv("ONEX_GATEWAY_CLOUD_MIRRORING_ENABLED", "false")
+    paths = []
+    for name in ("active", "inactive", "gateway", "malformed"):
+        directory = tmp_path / name
+        directory.mkdir()
+        paths.append(_make_contract_yaml(directory, name=name))
+    paths[1].write_text(
+        paths[1].read_text()
+        + "\nevent_bus:\n  publish_topics:\n    - onex.evt.omniclaude.agent-status.v1\n"
+    )
+    paths[2].write_text(
+        paths[2].read_text() + "\nconfig:\n  gateway_forwarder:\n    cloud_leg: {}\n"
+    )
+    paths[3].write_text("name: [malformed")
+
+    manifest = discover_contracts_from_paths(paths)
+
+    assert [c.name for c in manifest.contracts] == ["active"]
+    assert manifest.total_errors == 1
+    assert len(manifest.skips) == 2
+    outcomes = (*manifest.contracts, *manifest.errors, *manifest.skips)
+    assert len(outcomes) == len(paths)
+    assert {row.contract_path for row in outcomes} == set(paths)
+    assert {row.reason for row in (*manifest.errors, *manifest.skips)} == {
+        "parse_error",
+        "inactive_runtime_package",
+        "dormant_cloud_gateway",
+    }
+    assert all(row.message for row in manifest.skips)
+    assert "Failed to parse contract" in manifest.errors[0].error
+
+
+@pytest.mark.unit
+def test_real_contract_paths_have_no_unreported_outcomes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The repository's dormant gateway is a non-vacuous skip control."""
+    monkeypatch.delenv("ONEX_ACTIVE_RUNTIME_PACKAGES", raising=False)
+    monkeypatch.setenv("ONEX_GATEWAY_CLOUD_MIRRORING_ENABLED", "false")
+    root = Path(__file__).resolve().parents[4] / "src" / "omnibase_infra"
+    paths = sorted(root.rglob("contract.yaml"))
+    assert paths
+
+    manifest = discover_contracts_from_paths(paths)
+
+    assert manifest.contracts
+    assert any(
+        row.reason == "dormant_cloud_gateway"
+        and Path(row.contract_path).parent.name == "node_bus_forwarder_effect"
+        for row in manifest.skips
+    )
+    outcomes = (*manifest.contracts, *manifest.errors, *manifest.skips)
+    assert len(outcomes) == len(paths)
+    assert {row.contract_path for row in outcomes} == set(paths)
+
+
+@pytest.mark.unit
+def test_duplicate_report_shape_matches_both_discovery_variants(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same duplicate has the same typed report through either API."""
+    monkeypatch.delenv("ONEX_ACTIVE_RUNTIME_PACKAGES", raising=False)
+    monkeypatch.setenv("ONEX_AUTOWIRING_DISCOVERY_CACHE", "false")
+    paths = []
+    eps = []
+    for name in ("first", "second"):
+        directory = tmp_path / name
+        directory.mkdir()
+        path = _make_contract_yaml(directory, name="duplicate")
+        paths.append(path)
+        cls = type(name, (), {"contract_path": path})
+        eps.append(_make_entry_point(name, node_cls=cls, dist_name="local"))
+
+    from_paths = discover_contracts_from_paths(paths)
+    with patch(_EP_MODULE, return_value=eps):
+        from_entries = discover_contracts()
+
+    assert from_paths.total_discovered == from_entries.total_discovered == 1
+    assert from_paths.total_errors == from_entries.total_errors == 1
+    assert from_paths.errors[0].model_dump() == from_entries.errors[0].model_dump()
+    assert from_paths.errors[0].contract_path == paths[1]
+    assert from_paths.errors[0].reason == "duplicate_contract_name"
+    assert not from_paths.skips
+    assert not from_entries.skips
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "reason", ["inactive_runtime_package", "dormant_cloud_gateway"]
+)
+def test_policy_skip_report_matches_both_discovery_variants(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    reason: str,
+) -> None:
+    monkeypatch.setenv("ONEX_ACTIVE_RUNTIME_PACKAGES", "local")
+    monkeypatch.setenv("ONEX_GATEWAY_CLOUD_MIRRORING_ENABLED", "false")
+    path = _make_contract_yaml(tmp_path)
+    if reason == "inactive_runtime_package":
+        path.write_text(
+            path.read_text()
+            + "\nevent_bus:\n  publish_topics:\n    - onex.evt.omniclaude.agent-status.v1\n"
+        )
+    else:
+        path.write_text(
+            path.read_text() + "\nconfig:\n  gateway_forwarder:\n    cloud_leg: {}\n"
+        )
+    cls = type("SkippedNode", (), {"contract_path": path})
+    ep = _make_entry_point(tmp_path.name, node_cls=cls, dist_name="local")
+    from_paths = discover_contracts_from_paths([path])
+    with patch(_EP_MODULE, return_value=[ep]):
+        from_entries = discover_contracts()
+
+    assert from_paths.total_discovered == from_entries.total_discovered == 0
+    assert from_paths.total_errors == from_entries.total_errors == 0
+    assert len(from_paths.skips) == len(from_entries.skips) == 1
+    assert from_paths.skips[0].model_dump() == from_entries.skips[0].model_dump()
+    assert from_paths.skips[0].reason == reason
+
+
+@pytest.mark.unit
+def test_skip_rows_survive_boot_manifest_transformations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Filtering and introspection must retain the reason a path was excluded."""
+    monkeypatch.setenv("ONEX_GATEWAY_CLOUD_MIRRORING_ENABLED", "false")
+    path = _make_contract_yaml(tmp_path)
+    path.write_text(
+        path.read_text() + "\nconfig:\n  gateway_forwarder:\n    cloud_leg: {}\n"
+    )
+    manifest = discover_contracts_from_paths([path])
+    assert manifest.total_skips == 1
+    filtered = filter_manifest_for_runtime_profile(
+        manifest=manifest, runtime_profile="main"
+    ).manifest
+    bound = bind_introspection_manifest_identity(
+        filtered,
+        runtime_profile="main",
+        image_sha=manifest.image_sha,
+        deployment_sha=manifest.deployment_sha,
+    )
+    reloaded = ModelAutoWiringManifest.model_validate_json(bound.model_dump_json())
+    assert filtered.skips == bound.skips == reloaded.skips == manifest.skips
+    assert bound.total_errors == bound.total_discovered == 0

@@ -1124,6 +1124,62 @@ jobs:
             exit 1
           fi
 
+      # OMN-19972 AC2, falsified on this runner and not only against a stub
+      # Docker: the criterion says the health step must not pass with an added
+      # service stopped. Docker keeps the last health status of a container that
+      # exits unless the engine flips it, so the step above is only a real gate
+      # if THIS runner's engine reports a stopped container unhealthy. Stop each
+      # added service in turn, run the unmodified text of the step above, and
+      # require it to fail naming that service; then start the service again and
+      # require the step to pass. A runner whose engine left a stopped container
+      # reading healthy turns this step red. The step text is read from this
+      # workflow by name, so a rename breaks it loudly. Regression test:
+      # tests/ci/test_runtime_boot_catalog_local_health_omn19972.py.
+      - name: Stopped laptop service fails the health step and restoring it passes (negative control)
+        run: |
+          set -euo pipefail
+          step_file="$(mktemp)"
+          STEP_NAME='Every health-checked laptop service reports healthy' \
+          JOB_NAME='boot-catalog-local' uv run python - >"$step_file" <<'PY'
+          import os
+          import sys
+
+          import yaml
+
+          with open(".github/workflows/reusable-runtime-boot.yml", encoding="utf-8") as fh:
+              steps = yaml.safe_load(fh)["jobs"][os.environ["JOB_NAME"]]["steps"]
+          hits = [s for s in steps if s.get("name") == os.environ["STEP_NAME"]]
+          if len(hits) != 1:
+              sys.exit(f"expected exactly one step named {os.environ['STEP_NAME']!r}, found {len(hits)}")
+          sys.stdout.write(hits[0]["run"])
+          PY
+          [ -s "$step_file" ] || { echo "::error::could not read the health step text"; exit 1; }
+          for svc in projection-api omnimarket-projection-llm-cost consumer-health-projection; do
+            container="${LOCAL_PROJECT}-${svc}"
+            before="$(docker inspect --format '{{.State.Health.Status}}' "$container")"
+            if [ "$before" != "healthy" ]; then
+              echo "::error::${svc} reads ${before} before the negative control; the control needs a healthy start"
+              exit 1
+            fi
+            docker stop "$container" >/dev/null
+            echo "${svc} after stop: $(docker inspect --format '{{.State.Status}} health={{.State.Health.Status}}' "$container")"
+            if out="$(bash -e "$step_file" 2>&1)"; then
+              echo "$out"
+              docker start "$container" >/dev/null || true
+              echo "::error::the health step passed with ${svc} stopped (AC2 falsifier)"
+              exit 1
+            fi
+            echo "$out" | tail -n 3
+            if ! grep -F "laptop services not healthy:" <<<"$out" | grep -Fq "${svc}="; then
+              docker start "$container" >/dev/null || true
+              echo "::error::the health step failed with ${svc} stopped, but not because of ${svc}"
+              exit 1
+            fi
+            docker start "$container" >/dev/null
+            bash -e "$step_file"
+            echo "${svc}: stopped -> step failed naming it; started -> step passed"
+          done
+
       - name: Delegate-skill command topic has a live consumer group
         run: |
           set -euo pipefail

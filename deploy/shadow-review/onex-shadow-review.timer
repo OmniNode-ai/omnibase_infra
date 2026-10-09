@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-shadow-review.timer — triggers one shadow-review tick every 15 minutes
+# (OMN-20422).
+#
+# Systemd USER timer on a lab host, following the onex-rung-eval.timer pattern.
+# Each tick reviews at most two newly observed PRs, so a 15-minute cadence keeps
+# up with the observed PR rate while a slow GLM call (600 s budget) cannot pile
+# ticks up: systemd never starts a oneshot service that is still running.
+#
+# Persistent=false: a tick missed while the host was down is not replayed; the
+# next tick reviews every PR the store has not seen, in created_at order.
+#
+# Install: see onex-shadow-review.service.
+#
+# Check:
+#   systemctl --user list-timers onex-shadow-review.timer
+
+[Unit]
+Description=ONEX shadow PR reviewer experiment tick timer (OMN-20422)
+
+[Timer]
+OnCalendar=*-*-* *:00/15:00 UTC
+RandomizedDelaySec=60
+Persistent=false
+Unit=onex-shadow-review.service
+
+[Install]
+WantedBy=timers.target

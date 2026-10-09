@@ -157,7 +157,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: bd0002cc5ed2d10435e3294dce7d5adeb0e54b86 # .github/sibling-pins.yaml
+          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
           path: .ci-bus-overlay
           persist-credentials: false
           sparse-checkout: |
@@ -169,7 +169,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniclaude
-          ref: c86c9fe6330c789614126f5f106bfb1be364b20d # .github/sibling-pins.yaml
+          ref: 3b8addff365b1a53e04106284b9275b6d5fad3c6 # .github/sibling-pins.yaml
           path: .deploy-gate-source
           persist-credentials: false
           sparse-checkout: |
@@ -380,7 +380,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniclaude
-          ref: c86c9fe6330c789614126f5f106bfb1be364b20d # .github/sibling-pins.yaml
+          ref: 3b8addff365b1a53e04106284b9275b6d5fad3c6 # .github/sibling-pins.yaml
           path: .deploy-gate-source
           persist-credentials: false
           sparse-checkout: |
@@ -712,7 +712,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: bd0002cc5ed2d10435e3294dce7d5adeb0e54b86 # .github/sibling-pins.yaml
+          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
           path: .ci-bus-overlay
           persist-credentials: false
           sparse-checkout: |
@@ -1008,6 +1008,7 @@ jobs:
           esac
           uv run python scripts/ci/lab_pass_receipt.py emit \
             --sha "$MERGE_SHA" \
+            --bind-from-commit . \
             --lane "$RECEIPT_LANE" \
             --started-at "${LAB_PASS_STARTED_AT}" \
             --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -1234,10 +1235,10 @@ jobs:
   # deliberate design (scripts/ci/lab_pass_receipt.py's header: no new credential,
   # no bucket, no cluster access). One writer of facts, one publisher of receipts.
   #
-  # THE LANE VALUE IS `onex-lab-k3s`, NOT `onex-lab`. `onex-lab` is ALREADY the
-  # ephemeral kind cluster the candidate-boot-gate job creates in
-  # deliver-dev-candidate-to-staging.yml, which emits
-  # lab-pass-receipt-onex-lab-<sha> for the same sha on this same repository.
+  # THE LANE VALUE IS `onex-lab-k3s`. OMN-18276 separates the ephemeral
+  # candidate render/wiring smoke receipt (candidate-boot-receipt-<sha>) from
+  # this persistent lab apply. Only this lane satisfies delivery
+  # for the exact delivered sha; the compose-dev primary remains required too.
   # evaluate_gate reads the NEWEST artifact per name, on the premise that a name
   # has one emitter; a second emitter on that name would silently supersede the
   # boot gate's verdict. They are also different claims -- a throwaway node with
@@ -1466,7 +1467,7 @@ jobs:
   # advisory-ok: OMN-19233 post-merge re-read of a refused delivery; the delivery gate itself blocks
   rerun-refused-deliveries:
     name: Re-run staging deliveries refused while this subject's receipt was pending
-    needs: [trigger-rebuild, verify-lane-converged, reemit-queued-receipts]
+    needs: [trigger-rebuild, verify-lane-converged, reemit-queued-receipts, verify-lab-overlay-converged]
     # OMN-18976: an observation run (nothing published) re-reads only when it
     # answered for something; with no candidate there is no new receipt.
     if: >-
@@ -1505,7 +1506,9 @@ jobs:
           install-args: --frozen
           shared-env-enabled: "true"
 
-      - name: Re-run refused staging deliveries whose subject now has a compose-dev PASS
+      # OMN-18276: wait for the overlay publisher and read its exact-sha PASS
+      # as well as compose-dev before requesting a re-read.
+      - name: Re-run refused staging deliveries whose required receipts now pass
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}

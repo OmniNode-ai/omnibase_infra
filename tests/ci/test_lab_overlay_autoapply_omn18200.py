@@ -205,27 +205,25 @@ def test_the_checkout_is_pinned_to_the_trusted_base_ref(job: dict[str, Any]) -> 
 # the lane value is distinct from the boot gate's                             #
 # --------------------------------------------------------------------------- #
 def test_the_k3s_lane_does_not_share_the_boot_gates_artifact_name() -> None:
-    """``onex-lab`` is already the ephemeral kind cluster's lane, emitted for the
-    same sha on this same repository by deliver-dev-candidate-to-staging.yml.
-    ``evaluate_gate`` reads the NEWEST artifact per name, so two emitters on one
-    name would silently discard one verdict."""
+    """The candidate smoke and persistent apply have distinct artifact keys.
+
+    Only the persistent apply may satisfy delivery's exact-sha lab premise.
+    """
     sys.path.insert(0, str(REPO_ROOT / "scripts" / "ci"))
     try:
         from lab_pass_receipt import EnumLabLane, artifact_name
     finally:
         sys.path.pop(0)
 
-    assert artifact_name(EnumLabLane.ONEX_LAB, SHA) != artifact_name(
+    assert artifact_name(EnumLabLane.CANDIDATE_BOOT, SHA) != artifact_name(
         EnumLabLane.ONEX_LAB_K3S, SHA
     )
 
     delivery = (
         REPO_ROOT / ".github" / "workflows" / "deliver-dev-candidate-to-staging.yml"
     ).read_text(encoding="utf-8")
-    assert "lab-pass-receipt-onex-lab-${{ github.sha }}" in delivery, (
-        "the premise of the separate lane value is that the boot gate already "
-        "owns the onex-lab name; if that upload moved, re-derive the split"
-    )
+    assert "candidate-boot-receipt-${{ github.sha }}" in delivery
+    assert "lab-pass-receipt-onex-lab-${{ github.sha }}" not in delivery
     trigger = WORKFLOW.read_text(encoding="utf-8")
     assert "lab-pass-receipt-onex-lab-${{" not in trigger
 

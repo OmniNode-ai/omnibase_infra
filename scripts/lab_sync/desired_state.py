@@ -36,8 +36,25 @@ must be sorted and unique (``x-sorted-by``) and every label list sorted
 CLI::
 
     desired_state.py validate PATH [PATH...]     exit 0 all valid, 1 any refused
+    desired_state.py render --input INPUTS.json [--output DESIRED.json]
+    desired_state.py render --ref REF --host HOST --lane LANE
+                           --compose-file FILE [--compose-file OVERLAY]
+                           [--composition REFS.json] [--broker-file PROFILE]
     desired_state.py self-check [--schema PATH] [--fixtures DIR]
                                                  exit 0 OK, 1 refused
+
+``render`` runs in the repository's uv environment. Its source adapter reads
+manifest and lock at the resolved commit, refuses Compose files differing from
+that ref, and runs only ``compose config --format json`` and ``config --hash``.
+Supply the accepted deploy's environment, exact file order and original project
+directory: Compose includes absolute bind paths in its hash. ``--composition``
+is the accepted build's list of sibling ``{repo, ref, commit}`` records. For
+stability-test, the caller supplies the latest release tag (D2); for dev, the
+last accepted build tuple. Resolving release/deploy authority and rollout stays
+with those existing owners. ``--input`` replays the typed source-artifact bundle
+for generated deployments; the bundle may contain credentials and is not an
+output artifact. Only desired state is printed. ``--output`` preserves the
+file's mtime when the rendered bytes already match.
 
 ``self-check`` proves the contract holds together: every keyword in the schema
 is one this module enforces, every ``desired_state_valid*.json`` fixture
@@ -56,6 +73,7 @@ import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -531,6 +549,192 @@ def load_desired_state(path: Path, *, schema_path: Path | None = None) -> Desire
 # ---------------------------------------------------------------------- CLI
 
 
+def render_desired_state(inputs: dict[str, Any]) -> bytes:
+    """Render recorded target-ref artifacts, then validate against T0.1.
+
+    Dependencies are lazy: validate/self-check remain stdlib-only under -I -S.
+    Rendering needs the repository environment (uv run). Raw compose inputs may
+    contain credentials; only the resulting desired state is ever printed.
+    """
+    import asyncio
+    import importlib
+
+    import yaml
+
+    from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
+    from omnibase_core.errors.model_onex_error import ModelOnexError
+    from omnibase_core.event_bus.event_bus_inmemory import EventBusInmemory
+    from omnibase_core.models.dispatch.model_handler_ref import ModelHandlerRef
+    from omnibase_core.models.event_bus.model_event_message import ModelEventMessage
+    from omnibase_infra.runtime.contract_loaders.handler_routing_loader import (
+        load_and_validate_contract_yaml,
+    )
+    from omnibase_infra.runtime.core_runtime.routing_map_builder import (
+        import_model_cls,
+    )
+
+    contract = load_and_validate_contract_yaml(
+        _REPO_ROOT
+        / "src/omnibase_infra/nodes/node_lab_proof_plan_compute/contract.yaml"
+    )
+    operation = "lab_desired_state.render"
+    routing = contract.raw["handler_routing"]
+    entries = [e for e in routing["handlers"] if e.get("operation") == operation]
+    if routing["routing_strategy"] != "operation_match" or len(entries) != 1:
+        raise ValueError("desired-state operation must resolve to exactly one route")
+    entry = entries[0]
+    handler_ref = ModelHandlerRef.model_validate(entry["handler"])
+    request_cls = import_model_cls(ModelHandlerRef.model_validate(entry["input_model"]))
+    result_cls = import_model_cls(ModelHandlerRef.model_validate(entry["output_model"]))
+    request = request_cls.model_validate(inputs)
+    handler = getattr(importlib.import_module(handler_ref.module), handler_ref.name)()
+
+    async def dispatch() -> bytes:
+        # This invocation owns a private, zero-infrastructure bus. The channel is
+        # the contract's operation key, not a new shared-broker topic. No caller
+        # can select a node implementation or override the declared model seam.
+        bus = EventBusInmemory(group=operation, max_history=1)
+        results: list[bytes] = []
+
+        async def receive(message: ModelEventMessage) -> None:
+            try:
+                model = request_cls.model_validate_json(message.value)
+                result = handler.handle(model)
+                validated = result_cls.model_validate(result).model_dump(mode="json")
+                results.append(validated["document_json"].encode("utf-8"))
+            except (ValueError, TypeError, KeyError, AttributeError, yaml.YAMLError):
+                # Refuse at the transport boundary without logging source
+                # artifacts: validation errors can contain credentials. The
+                # bus propagates ModelOnexError; it cannot swallow this failure.
+                raise ModelOnexError(
+                    message="desired-state render refused",
+                    error_code=EnumCoreErrorCode.INVALID_INPUT,
+                ) from None
+
+        await bus.start()
+        try:
+            unsubscribe = await bus.subscribe(
+                operation, on_message=receive, group_id=operation
+            )
+            try:
+                await bus.publish(operation, None, request.model_dump_json().encode())
+            finally:
+                await unsubscribe()
+        finally:
+            await bus.close()
+        if len(results) != 1:
+            raise ValueError("desired-state route did not return exactly one result")
+        return results[0]
+
+    try:
+        payload = asyncio.run(dispatch())
+    except ModelOnexError:
+        raise ValueError("desired-state render refused") from None
+    parse_desired_state(payload.decode("utf-8"))
+    return payload
+
+
+def _capture_render_inputs(args: argparse.Namespace) -> dict[str, Any]:
+    """Read versioned sources and ask Compose for its own hashes, read-only.
+
+    The caller supplies the deploy's exact file order, project directory and
+    environment. Compose resolves relative bind paths into absolute paths, so
+    moving a checkout or substituting an environment changes the config hash.
+    Never approximate that hash, or use a running label as a desired value.
+    """
+    import yaml
+
+    def run(argv: list[str]) -> str:
+        result = subprocess.run(
+            argv,
+            cwd=args.source_root,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        if result.returncode:
+            # Compose stderr can include interpolated credentials. Do not echo it.
+            raise ValueError(
+                f"{argv[0]} source read/render failed (exit {result.returncode})"
+            )
+        return result.stdout
+
+    commit = run(["git", "rev-parse", "--verify", f"{args.ref}^{{commit}}"]).strip()
+
+    def source(path: str) -> str:
+        return run(["git", "show", f"{commit}:{path}"])
+
+    manifest = source("deploy/lane-census/lane-manifest.yaml")
+    inputs: dict[str, Any] = {
+        "target_ref": {
+            "repo": "OmniNode-ai/omnibase_infra",
+            "ref": args.ref,
+            "commit": commit,
+            "kind": args.kind,
+            "composition": json.loads(args.composition.read_text())
+            if args.composition
+            else [],
+        },
+        "host": args.host,
+        "lane": args.lane,
+        "surface_kind": args.surface_kind,
+        "manifest_yaml": manifest,
+        "lock_toml": source("uv.lock"),
+        "compose_json": '{"services": {}}',
+        "compose_hashes": "",
+    }
+    if args.surface_kind != "host":
+        if not args.compose_file:
+            raise ValueError("render requires the deploy's ordered --compose-file list")
+        # Refuse a checkout whose compose inputs differ from the target ref.
+        # Generated overlays belong to the accepted deployment, not this source
+        # adapter; those inputs are replayed explicitly with --input instead.
+        for path in args.compose_file:
+            if (args.source_root / path).read_text() != source(path):
+                raise ValueError(f"compose file {path} differs from target ref")
+        project = (
+            yaml.safe_load(manifest)["lanes"][args.lane]["compose_project"]
+            if args.surface_kind == "compose_lane"
+            else args.project
+        )
+        if not project:
+            raise ValueError("runner render requires --project")
+        command = ["docker", "compose"]
+        for path in args.compose_file:
+            command.extend(["-f", path])
+        command.extend(["-p", project, "--profile", "*", "config"])
+        inputs["compose_json"] = run([*command, "--format", "json"])
+        services = sorted(json.loads(inputs["compose_json"])["services"])
+        if not services:
+            raise ValueError("compose render returned no services")
+        inputs["compose_hashes"] = run([*command, "--hash", ",".join(services)])
+        inputs["broker_yaml"] = source(args.broker_file) if args.broker_file else "{}"
+    if args.surface_kind == "runner_fleet":
+        inputs.update(
+            fleet_yaml=source("config/runner_fleet.yaml"),
+            runner_host_address=args.runner_host,
+            runner_workdir=args.runner_workdir,
+        )
+    return inputs
+
+
+def _cmd_render(args: argparse.Namespace) -> int:
+    inputs = (
+        json.loads(args.input.read_text())
+        if args.input
+        else _capture_render_inputs(args)
+    )
+    payload = render_desired_state(inputs)
+    if args.output:
+        # A replay for the same key rewrites nothing, including the file's mtime.
+        if not args.output.exists() or args.output.read_bytes() != payload:
+            args.output.write_bytes(payload)
+    else:
+        sys.stdout.buffer.write(payload)
+    return 0
+
+
 def _cmd_validate(paths: list[Path], schema_path: Path | None) -> int:
     refused = 0
     for path in paths:
@@ -590,13 +794,52 @@ def main(argv: list[str] | None = None) -> int:
     check = sub.add_parser("self-check", help="check the schema and fixtures agree")
     check.add_argument("--schema", type=Path, default=None)
     check.add_argument("--fixtures", type=Path, default=DEFAULT_FIXTURE_DIR)
+    render = sub.add_parser(
+        "render", help="render target-ref desired state (uv environment required)"
+    )
+    render.add_argument(
+        "--input",
+        type=Path,
+        help="replay recorded source artifacts; may contain secrets",
+    )
+    render.add_argument("--output", type=Path)
+    render.add_argument("--source-root", type=Path, default=_REPO_ROOT)
+    render.add_argument("--ref")
+    render.add_argument("--kind", choices=["release", "merge"], default="merge")
+    render.add_argument(
+        "--composition",
+        type=Path,
+        help="accepted build tuple's sibling refs as a JSON list",
+    )
+    render.add_argument("--host")
+    render.add_argument("--lane")
+    render.add_argument(
+        "--surface-kind",
+        choices=["compose_lane", "runner_fleet", "host"],
+        default="compose_lane",
+    )
+    render.add_argument("--compose-file", action="append")
+    render.add_argument(
+        "--broker-file", help="target ref's mounted broker bootstrap profile"
+    )
+    render.add_argument("--project", help="runner compose project")
+    render.add_argument("--runner-host")
+    render.add_argument("--runner-workdir")
     args = parser.parse_args(argv)
     try:
+        if args.command == "render":
+            if not args.input and not all((args.ref, args.host, args.lane)):
+                parser.error("render requires --input or --ref, --host and --lane")
+            return _cmd_render(args)
         if args.command == "validate":
             return _cmd_validate(args.paths, args.schema)
         return _cmd_self_check(args.schema, args.fixtures)
     except SchemaUnsupportedError as exc:
         sys.stderr.write(f"schema refused: {exc}\n")
+        return 1
+    except (ValueError, KeyError, OSError, subprocess.TimeoutExpired):
+        # Validation exceptions may include their input (including secrets).
+        sys.stderr.write("render REFUSED: invalid or unreadable target-ref artifacts\n")
         return 1
 
 

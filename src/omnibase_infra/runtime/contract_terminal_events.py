@@ -241,9 +241,12 @@ def resolve_terminal_verdict(event: object) -> bool | None:
     decoded ``Mapping`` (the broker's post-publish side) via :func:`_read_field`
     — the same reader closes the verdict gap on both ends of the wire.
 
-    Fields are consulted in decreasing order of explicitness. Each is a field
-    ONEX producers already carry; nothing new is required of a handler to be
-    covered:
+    An explicit quality rejection takes precedence over a success status or
+    boolean: a malformed contract result must never become completed merely
+    because its terminal also carries a generic success field (OMN-18929).
+    Otherwise fields are consulted in decreasing order of explicitness. Each
+    is a field ONEX producers already carry; nothing new is required of a
+    handler to be covered:
 
     1. ``terminal_failure_cause`` — a typed non-``None`` cause is an
        unambiguous failure declaration (the delegate-skill seam, OMN-15469).
@@ -251,6 +254,8 @@ def resolve_terminal_verdict(event: object) -> bool | None:
     3. ``ok`` / ``success`` — explicit booleans.
     4. ``contract_passed`` — the generation-benchmark verdict field from this
        ticket's original live reproduction.
+    5. ``quality_passed`` / ``quality_gate_passed`` — the canonical delegation
+       consumer and delegate-skill port verdicts (OMN-18929).
 
     Returns ``None`` when the model declares no verdict at all, which is the
     common case and MUST leave routing exactly as it was: this is a fail-closed
@@ -261,6 +266,10 @@ def resolve_terminal_verdict(event: object) -> bool | None:
     if cause is not None:
         return False
 
+    for attribute in ("quality_passed", "quality_gate_passed"):
+        if _read_field(event, attribute) is False:
+            return False
+
     status = _read_field(event, "status")
     if isinstance(status, str):
         normalized = status.strip().lower()
@@ -269,7 +278,13 @@ def resolve_terminal_verdict(event: object) -> bool | None:
         if normalized in _SUCCEEDED_STATUS_VALUES:
             return True
 
-    for attribute in ("ok", "success", "contract_passed"):
+    for attribute in (
+        "ok",
+        "success",
+        "contract_passed",
+        "quality_passed",
+        "quality_gate_passed",
+    ):
         value = _read_field(event, attribute)
         if isinstance(value, bool):
             return value

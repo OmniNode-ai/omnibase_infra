@@ -140,6 +140,16 @@ env:
   LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
 
 jobs:
+  # OMN-18780: execute the existing audit inside this required umbrella run.
+  # No preflight dependency: routing drift must remain observable on a red base.
+  runner-routing-audit:
+    uses: ./.github/workflows/runner-routing-audit.yml
+    permissions:
+      contents: read
+      actions: read
+    secrets:
+      CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+
   # =============================================================================
   # Per-run runner routing (OMN-18031)
   # =============================================================================
@@ -329,6 +339,29 @@ jobs:
       - name: Unit tests for endpoint guard (OMN-20173)
         run: uv run pytest tests/unit/scripts/test_check_no_coding_plan_endpoint.py -q -p no:cacheprovider
 
+      - name: Rolling runner registration preflight (OMN-18877)
+        run: uv run --frozen pytest tests/ci/test_deploy_runners_registration_preflight.py -q
+
+      # OMN-17678: same focused suite as the pre-commit transport gate.
+      - name: Linear transport consolidation regression (OMN-17678)
+        run: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q
+
+      # OMN-19421: same evidence gate as the pre-commit hook, including the
+      # passing safety/liveness controls and lock-removed counterexample.
+      - name: Reviewed lab reconcile model evidence (OMN-19421)
+        run: uv run --frozen pytest tests/ci/test_lab_reconcile_model.py -q --no-cov
+
+      # OMN-19070: same focused suite as the self-pause pre-commit hook.
+      - name: Runner disk admission self-pause regression (OMN-19070)
+        run: uv run --frozen pytest tests/scripts/test_runner_job_started_disk_admission.py -q
+
+      # OMN-18713: same focused suite as contract-discovery-reconciliation in pre-commit.
+      - name: Contract discovery reconciliation (OMN-18713)
+        run: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_discovery.py -q --timeout=60
+
+      - name: Discovery manifest recorded runtime replay (OMN-18713)
+        run: uv run --frozen pytest tests/ci/test_discovery_manifest_live_replay.py -q --timeout=60
+
       # OMN-18364. A hosted-runner step that invokes `uv` before its job
       # installs it exits 127, and where that step's outcome feeds a receipt
       # check the receipt records the missing interpreter as a substantive
@@ -355,8 +388,11 @@ jobs:
       - name: Check Kafka hardcoded broker fallbacks (whole-tree backstop)
         run: bash scripts/validation/check_kafka_no_hardcoded_fallback.sh
 
-      - name: Check no localhost env fallbacks in src/ (OMN-10732)
-        run: uv run python scripts/validate_no_env_fallbacks.py
+      # OMN-20568: the same hook entry as pre-commit, the omnibase_core
+      # node_no_env_fallbacks_check_compute node over every tracked Python and
+      # shell file (the old backstop scanned src/ and scripts/ only).
+      - name: Check no localhost env fallbacks (OMN-10732)
+        run: uv run pre-commit run no-env-fallbacks --all-files
 
       - name: Check topic suffix exports (F56)
         run: python scripts/validation/check_topic_suffix_exports.py
@@ -1021,6 +1057,12 @@ jobs:
       - name: SPDX header check (OMN-19612)
         run: uv run --frozen onex spdx validate src tests scripts
 
+      - name: Census health and shared restart bounds (OMN-19416)
+        run: |
+          uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "unhealthy or restart_loop" -q
+          uv run --frozen pytest tests/unit/scripts/test_lane_census_inventory.py -q
+          uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k "restart or shipped_config or manifest" -q
+
   infra-node-handler-ownership:
     needs: occ-preflight
     name: Infra Node Handler Ownership
@@ -1150,8 +1192,23 @@ jobs:
           fetch-depth: 2
           fetch-tags: false
 
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: ${{ env.CACHE_VERSION }}
+          cache-enabled: "false"
+
+      # OMN-20568: the node_migration_freeze_check_compute node replaced
+      # scripts/check_migration_freeze.sh. Same base-ref rule: GITHUB_BASE_REF,
+      # or main on a push, where the diff is empty and the check is a no-op.
       - name: Check migration freeze
-        run: ./scripts/check_migration_freeze.sh --ci
+        env:
+          FREEZE_BASE_REF: ${{ github.base_ref || 'main' }}
+        run: |
+          git fetch origin "${FREEZE_BASE_REF}" --quiet || echo "Warning: could not fetch origin/${FREEZE_BASE_REF} (may already be available from checkout)" >&2
+          uv run python -m omnibase_infra.nodes.node_migration_freeze_check_compute.runtime_migration_freeze_check --base "origin/${FREEZE_BASE_REF}"
 
   # Topic enum drift check -- CI gate for contract-driven topic enum pipeline (OMN-3187)
   # Ensures generated enum files stay in sync with contract.yaml definitions
@@ -1235,6 +1292,13 @@ jobs:
           echo "================================================================"
           uv run python scripts/validation/lint_topic_names.py \
             --scan-contracts src/omnibase_infra/nodes
+
+      # OMN-19315: this required context checks consumer sets in Python too.
+      - name: Refuse mixed consumer topic namespaces
+        run: uv run --frozen python scripts/validation/lint_topic_names.py --scan-python src/omnibase_infra
+
+      - name: Prove consumer namespace refusal and valid controls
+        run: uv run --frozen pytest tests/unit/scripts/validation/test_lint_topic_names.py -q --no-cov
 
       - name: Check for placeholder topic names (OMN-4805)
         run: |
@@ -1667,7 +1731,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: bd0002cc5ed2d10435e3294dce7d5adeb0e54b86 # .github/sibling-pins.yaml
+          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -1797,7 +1861,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
+          ref: 33a29cdfba6f14be6f94c3c77a05e29f345c692b # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1813,7 +1877,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniclaude
-          ref: c86c9fe6330c789614126f5f106bfb1be364b20d # .github/sibling-pins.yaml
+          ref: 3b8addff365b1a53e04106284b9275b6d5fad3c6 # .github/sibling-pins.yaml
           path: omniclaude
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1886,7 +1950,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
+          ref: 33a29cdfba6f14be6f94c3c77a05e29f345c692b # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1902,7 +1966,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: bd0002cc5ed2d10435e3294dce7d5adeb0e54b86 # .github/sibling-pins.yaml
+          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1918,7 +1982,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: bd0002cc5ed2d10435e3294dce7d5adeb0e54b86 # .github/sibling-pins.yaml
+          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -2020,6 +2084,9 @@ jobs:
           echo "================================================================"
           uv run python scripts/validation/check_topic_literals.py \
             --baseline scripts/validation/topic_literal_baseline.txt
+
+      - name: Operator script topic namespace gate (OMN-18913)
+        run: uv run --frozen pytest tests/ci/test_operator_script_topic_namespace_omn18913.py -q
 
   plugin-env-service-completeness:
     needs: occ-preflight
@@ -2135,6 +2202,9 @@ jobs:
           echo "================================================================"
           uv run pytest tests/ci/test_compose_proof_teardown_policy.py -v --tb=short
 
+      - name: Check delegation routing tiers deployment bindings (OMN-15645)
+        run: uv run --frozen pytest tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py -q --no-cov
+
   # OMN-18247 (epic OMN-18232 phase 3): CI evidence-artifact honesty.
   #
   # An evidence-producing job that reports green while producing nothing is the
@@ -2169,6 +2239,10 @@ jobs:
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
+
+      - name: Check census alarm episodes and recoveries (OMN-19418)
+        # The same focused episode proof runs before commit.
+        run: uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k lane_drift -q
 
       - name: Check the lab-load probe reports honestly (OMN-18253)
         run: |
@@ -2230,6 +2304,9 @@ jobs:
           echo "Read from parsed workflow structure, never from file text."
           echo "================================================================"
           uv run pytest tests/ci/test_ci_evidence_policy.py -v --tb=short
+
+      - name: Check autoclose historical evidence controls (OMN-16106)
+        run: uv run --frozen pytest tests/ci/test_autoclose_history_omn16106.py -q --no-cov
 
   # Contract path pre-flight: verify all referenced module paths exist before expensive test splits (F8/OMN-6478)
   contract-path-preflight:
@@ -2394,6 +2471,16 @@ jobs:
           echo "Changed files:"
           cat changed.txt
 
+      # OMN-18266: prove the selector before trusting its impacted subset.
+      # A failing regression must stop selection even for a data-only PR.
+      - name: Test impacted-test selector
+        run: uv run --frozen pytest tests/unit/scripts/ci/test_detect_test_paths.py -q --timeout=60
+
+      # OMN-18892: the required detection job must prove the migration
+      # principal fence before its selected test matrix can be trusted.
+      - name: Test slot migration principal confinement (OMN-18892)
+        run: uv run --frozen pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q --timeout=60
+
       # OMN-19927 (plan task S2): was this commit validated by a successful
       # merge group? A queue landing fast-forwards `dev` to the merge-group
       # commit, so the answer is a lookup of that sha's merge-group `CI`
@@ -2551,6 +2638,25 @@ jobs:
           chmod +x "${HOME}/.local/bin/shellcheck"
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
           "${HOME}/.local/bin/shellcheck" --version
+
+      - name: Verify lane-sync receipt refusal and stability refresh (OMN-19417)
+        if: matrix.split == 1
+        run: |
+          uv run --frozen pytest tests/ci/test_lab_pass_receipt_integration_probes_omn18866.py -q
+          uv run --frozen pytest tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q
+          uv run --frozen pytest scripts/runtime_build/tests/test_verify_stability_refresh.py -q
+
+      - name: Verify lab-pass criterion bindings and closer pins (OMN-18488)
+        run: uv run --frozen pytest tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488.py -q
+
+      - name: Verify persistent lab receipt and candidate smoke isolation (OMN-18276)
+        run: uv run --frozen pytest tests/scripts/ci/test_persistent_lab_receipt_omn18276.py -q --no-cov
+
+      - name: Verify D11 workflow verdict lane matching (OMN-19311)
+        run: uv run --frozen pytest tests/ci/test_workflow_verdict_omn_d11.py -q --no-cov
+
+      - name: Verify cloud migration failure scope (OMN-18496)
+        run: uv run --frozen pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py -q
 
       - name: Run pytest (smart selection)
         if: vars.ENABLE_SMART_TESTS == 'true' && needs.detect-changes.outputs.is_full_suite == 'false'
@@ -4478,6 +4584,9 @@ jobs:
       - name: Run delegation cross-boundary seam test
         run: uv run pytest tests/integration/runtime/test_s8_delegation_fsm_seam.py -v
 
+      - name: Prove response contract terminal seam (OMN-18929)
+        run: uv run --frozen pytest -q tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py
+
   # Canonical-file-shape ratchet (OMN-20304). Operator ruling 2026-10-01: no
   # new scripts, plugins or exceptions in any repository. Refuses a new code
   # file outside src/<pkg>/{nodes,handlers,models,protocols,contracts,enums}/,
@@ -4492,7 +4601,7 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     timeout-minutes: 15
     env:
-      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@f50d00fc7918d0b12ccd0d3497160325e32e7ac5"
+      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@422e207e953841b11b7ae4919bd486f8c84b8c24"
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4546,6 +4655,66 @@ jobs:
             uv run --no-project --with "$CANONICAL_FILE_SHAPE_CORE" \
               python -m omnibase_core.validators.canonical_file_shape --head HEAD
           fi
+
+  # OMN-20703: node-boundary import gate (operator direction 2026-10-07,
+  # OMN-17427). Shrink-only baseline; same core pin as the pre-commit hook.
+  # Unconditional: no needs/if. The positive control must refuse a new edge.
+  node-boundary-imports:
+    name: Node Boundary Imports (OMN-20703)
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
+    timeout-minutes: 15
+    env:
+      NODE_BOUNDARY_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@422e207e953841b11b7ae4919bd486f8c84b8c24"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.8.3"
+      - name: Positive control (planted boundary import refused)
+        run: |
+          set -u
+          printf 'from omnibase_infra.nodes.node_registration_reducer.models import ModelRegistrationState\n' > src/omnibase_infra/zz_canary_boundary.py
+          git add src/omnibase_infra/zz_canary_boundary.py
+          if uv run --no-project --with "$NODE_BOUNDARY_CORE" \
+            python -m omnibase_core.nodes.node_boundary_import_check_compute.runtime_node_boundary_import_check --root . --base HEAD --bootstrap; then
+            echo "POSITIVE CONTROL FAILED: planted node-boundary import was accepted"
+            exit 1
+          fi
+          echo "positive control: planted boundary import refused"
+          git rm -q --cached src/omnibase_infra/zz_canary_boundary.py
+          rm src/omnibase_infra/zz_canary_boundary.py
+      - name: Refuse new node-boundary imports
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          MQ_BASE: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          set -u
+          # Growth is judged against the merge base's baseline, never only the
+          # candidate's own file. --bootstrap is passed only when the event's
+          # base revision resolved and carries no baseline at all (the adoption
+          # PR). With no resolvable base (a dispatch), the tree is checked
+          # against HEAD's baseline and nothing is bootstrapped.
+          base="${PR_BASE:-${MQ_BASE:-${PUSH_BEFORE:-}}}"
+          bootstrap=""
+          if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            base="$(git merge-base "$base" HEAD)"
+            if ! git cat-file -e "${base}:.onex_ratchets/node_boundary_import_baseline.yaml" 2>/dev/null; then
+              bootstrap="--bootstrap"
+            fi
+          else
+            base="HEAD"
+          fi
+          uv run --no-project --with "$NODE_BOUNDARY_CORE" \
+            python -m omnibase_core.nodes.node_boundary_import_check_compute.runtime_node_boundary_import_check --root . --base "$base" $bootstrap
 
   ci-summary:
     name: CI Summary
@@ -4639,6 +4808,7 @@ jobs:
           # Dependabot lane. Empty on non-PR events, which also drops
           # nothing.
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           # OMN-19167 — the three facts the CONDITIONAL sweep registry decides
           # against. `occ-autobind` and `occ-companion-effect` skip by their own
           # `if:` on a pull request with no ticket token, which doctrine's
@@ -4692,7 +4862,7 @@ jobs:
             # file is REMOVED, not left stale: the gate reads an absent file as
             # "no external context observed" → PENDING → fail-closed at the
             # deadline. It must never resolve green off a stale or partial file.
-            rm -f check_runs.json workflow_runs.json
+            rm -f check_runs.json workflow_runs.json pr_timeline.json
             if [ "${EVENT_NAME}" = "pull_request" ]; then
               if ! gh api --paginate \
                   "repos/${GH_REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
@@ -4716,9 +4886,20 @@ jobs:
                 rm -f workflow_runs.json
               fi
             fi
+            # OMN-19379: timeline transitions classify run creation times; a
+            # draft-era rerun never becomes a ready run just by starting later.
+            if [ "${EVENT_NAME}" = "pull_request" ]; then
+              if ! gh api --paginate \
+                  "repos/${GH_REPO}/issues/${PR_NUMBER}/timeline?per_page=100" \
+                  --jq '.[]' | jq -s '.' > pr_timeline.json; then
+                echo "PR timeline fetch failed; retaining draft-era rows (fail-closed)"
+                rm -f pr_timeline.json
+              fi
+            fi
             python3 scripts/ci/ci_summary_gate.py --jobs-file jobs.json --run-attempt "${RUN_ATTEMPT}" \
               --check-runs-file check_runs.json --event-name "${EVENT_NAME}" \
               --workflow-runs-file workflow_runs.json \
+              --pr-timeline-file pr_timeline.json --head-sha "${HEAD_SHA}" \
               --current-run-id "${RUN_ID}" \
               --pr-author "${PR_AUTHOR:-}" \
               --pr-title "${PR_TITLE:-}" \
@@ -4876,7 +5057,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
+          ref: 33a29cdfba6f14be6f94c3c77a05e29f345c692b # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4892,7 +5073,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: bd0002cc5ed2d10435e3294dce7d5adeb0e54b86 # .github/sibling-pins.yaml
+          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4908,7 +5089,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: bd0002cc5ed2d10435e3294dce7d5adeb0e54b86 # .github/sibling-pins.yaml
+          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -5376,7 +5557,7 @@ jobs:
       - name: Check node migration append-only immutability
         env:
           APPEND_ONLY_BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/dev' }}
-        run: uv run python scripts/validation/check_migration_append_only.py --base "${APPEND_ONLY_BASE}"
+        run: uv run python -m omnibase_infra.nodes.node_migration_append_only_check_compute.runtime_migration_append_only_check --base "${APPEND_ONLY_BASE}"
 
       # OMN-17298: RLS enabled with no admitting policy is an outage, not a
       # stricter boundary -- PostgreSQL denies every row to every non-owner,
@@ -5705,6 +5886,7 @@ jobs:
             tests/integration/migrations/test_session_content_live_apply_omn19550.py \
             tests/integration/migrations/test_delegation_updated_at_absorb_omn19561.py \
             tests/integration/migrations/test_102_tenant_projection_writer_role_omn15425.py \
+            tests/integration/migrations/test_omn18992_projection_zero_rows.py \
             -m ephemeral_pg \
             -v -rs --tb=short -p no:randomly
 

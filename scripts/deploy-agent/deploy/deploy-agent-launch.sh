@@ -16,12 +16,12 @@
 # Measured on the lab host 2026-09-09, values identified by length and sha256-12
 # only: the store's line yields 1679 bytes through bash `source` (parses as a
 # PEM) and 1682 bytes through systemd's EnvironmentFile= (still $'...'-wrapped,
-# zero backslashes). scripts/deploy-runtime.sh has always bash-`source`d the very
+# zero backslashes). onex-runtime-deploy has always bash-`source`d the very
 # same file and decoded it correctly, which is why only the agent path produced
 # broken containers.
 #
 # This launcher makes the agent's process environment the bash-decoded one, by
-# doing exactly what deploy-runtime.sh does. It is the transport fix; the
+# doing exactly what onex-runtime-deploy does. It is the transport fix; the
 # executor's UndecodedAnsiCQuotingError guard stays as the fail-closed backstop
 # for any path that still arrives mangled.
 #
@@ -92,7 +92,7 @@ for __name in $DEPLOY_AGENT_ENV_PROTECTED; do
 done
 
 # `set -a` so every assignment in the store is exported, exactly as
-# scripts/deploy-runtime.sh does. `set +u` only for the duration of the source:
+# onex-runtime-deploy does. `set +u` only for the duration of the source:
 # the store is the operator's file, not ours, and a line referencing an unset
 # variable must not abort the agent. Errexit stays armed -- a store that fails to
 # parse is a refusal, not something to run past.
@@ -107,6 +107,11 @@ set +a
 for __name in $__restore_names; do
 	eval "export ${__name}=\${__saved_${__name}}"
 done
+
+# Resolve after the unit/store precedence is restored, before agent startup.
+# shellcheck source=../../runtime_build/sibling_clone_manifest.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../../runtime_build/sibling_clone_manifest.sh"
+resolve_deploy_source_clone_root
 
 DEPLOY_AGENT_LAUNCHER="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 export DEPLOY_AGENT_LAUNCHER

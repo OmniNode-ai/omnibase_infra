@@ -51,15 +51,17 @@ from omnibase_infra.models.registration import ModelNodeHeartbeatEvent
 from omnibase_infra.models.registration.model_node_capabilities import (
     ModelNodeCapabilities,
 )
+from omnibase_infra.models.registration.model_payload_postgres_update_registration import (
+    ModelPayloadPostgresUpdateRegistration,
+)
+from omnibase_infra.models.registration.model_registration_heartbeat_update import (
+    ModelRegistrationHeartbeatUpdate,
+)
 from omnibase_infra.nodes.node_registration_orchestrator.handlers import (
     HandlerNodeHeartbeat,
 )
 from omnibase_infra.nodes.node_registration_orchestrator.services import (
     RegistrationReducerService,
-)
-from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_update_registration import (
-    ModelPayloadPostgresUpdateRegistration,
-    ModelRegistrationHeartbeatUpdate,
 )
 
 if TYPE_CHECKING:

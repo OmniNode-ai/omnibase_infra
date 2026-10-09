@@ -23,7 +23,7 @@ suites:
     repo: omnibase_infra
     job: Tests (Split n/m)
     mode: nodeids
-    max_skips: 583
+    max_skips: 569
     baseline_collected: 38874
     provenance:
       measured_at: '2026-09-18'
@@ -684,20 +684,6 @@ suites:
       - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_offline]
       - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[runner_workdir_mismatch]
       - tests.unit.scripts.test_lane_census_plan::test_lab_sync_fixture_produces_its_named_kind[undeclared_container]
-      - tests.unit.scripts.test_ledger_cost_sentence_omn18554::test_live_goal_source_declares_a_resolvable_stamp
-      - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheFlagIsNotAGeneralWaiver::test_a_future_window_is_refused_as_a_blanket_waiver
-      - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheFlagIsNotAGeneralWaiver::test_a_payload_with_no_timestamp_is_refused
-      - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheFlagIsNotAGeneralWaiver::test_a_present_day_row_cannot_ride_the_flag
-      - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheFlagIsNotAGeneralWaiver::test_a_row_one_second_before_the_window_is_accepted
-      - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheFlagIsNotAGeneralWaiver::test_a_row_stamped_exactly_at_the_window_is_refused
-      - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheOrdinaryPathIsUnchanged::test_an_ordinary_row_still_lands_and_exits_zero
-      - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheOrdinaryPathIsUnchanged::test_the_clock_guard_still_refuses_a_backdated_row
-      - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheRestoreIsVerbatim::test_a_replayed_row_mints_no_claim_token
-      - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheRestoreIsVerbatim::test_the_marker_lands_immediately_before_the_restored_row
-      - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheRestoreIsVerbatim::test_the_marker_makes_no_claim_about_a_guard_effective_date
-      - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheRestoreIsVerbatim::test_the_marker_records_provenance_and_the_waiver
-      - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheRestoreIsVerbatim::test_the_recovered_row_is_refused_without_the_flag
-      - tests.unit.scripts.test_ledger_lock_replay_omn18757.TestTheRestoreIsVerbatim::test_with_the_flag_it_is_restored_byte_for_byte
       - tests.unit.scripts.test_omn_18083_lane_model_tracks_the_live_overlay::test_the_live_overlay_still_validates_against_this_repos_lane_model
       - tests.unit.scripts.test_prepush_host_table::test_the_slot_probe_counts_held_locks_under_real_zsh
       - tests.unit.scripts.test_runner_private_omni_home_safe_directory::test_mode1_green_scoped_safe_directory_succeeds

@@ -50,4 +50,11 @@ jobs:
         # Standard library only, deliberately: this same module runs in
         # pre-commit where the resolved interpreter may be a bare system python,
         # so it must not need an install step to be able to refuse.
-        run: python3 scripts/ci/governed_helper_gate.py
+        #
+        # --base-ref is the ratchet's other half: the baseline may not carry a
+        # key or a count the event's base does not. A pull request run checks out
+        # the merge of the head into the base, so the base sha is the right
+        # comparison; a push compares with the sha before it.
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        run: python3 scripts/ci/governed_helper_gate.py --base-ref "$BASE_REF"

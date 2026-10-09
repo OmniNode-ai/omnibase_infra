@@ -1,3 +1,76 @@
+## v0.38.69 (2026-10-08)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.69 by the scheduled release train.
+- 19 release-relevant commit(s) merged since v0.38.68.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.68
+- fix(cli): apply boolean defaults only when explicitly declared (#4724)
+- refactor: route host deployment through the operator node (#4656)
+- fix: carry persisted tenant on outbox envelopes (#4722)
+- : Enforce declared DLQ sink acknowledgment in consume callback (#4720)
+- feat: vendor the tenant-credentials fingerprint and set-time migration (#4669)
+- fix: refuse mixed consumer topic namespaces (#4707)
+- fix: resolve physical topics for drain-proof lookups (#4714)
+- fix: record in-memory consume concurrency declarations (#4715)
+- feat: require recorded live contact for CI tooling (#4702)
+- fix: re-check boot identity on consumer flow read failure (#4701)
+- : Use CSafeLoader for cold contract discovery with SafeLoader fallback (#4596)
+- fix: remove fallback immutable grain projections (#4688)
+- fix: preserve rejected response contracts across terminal dispatch (#4681)
+- feat: vendor metering_summary 0003, compression and cache hit rate as nullable columns (#4657)
+- refactor: move registration intent payloads out of the reducer node (#4687)
+- fix: carry pinned lab-pass bindings into autoclose (#4685)
+- feat: lane mirror lanes and topic sets come from the deployment overlay (#4684)
+- feat: vendor 0058_delegation_events_requested_model_and_timing.sql (#4673)
+- fix: HandlerHttpRest reports a 402 as payment_required without body or header (#4594)
+
+## v0.38.68 (2026-10-07)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.68 by the scheduled release train.
+- 8 release-relevant commit(s) merged since v0.38.67.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.67
+- fix: filter liveness listing and bound transient retries (#4674)
+- fix(delegation): honor quality-only terminal failures (#4672)
+- chore: vendor migration 0004 for node_projection_dod_verdict (#4665)
+- fix: classify window-less heartbeats and prove SQL refusals (#4664)
+- chore: advance omnimarket contract pin to 3d39b97615a6 (#4641)
+- feat: declare trajectory evaluation lane policy (#4661)
+- : preserve authoritative projection event time (#4623)
+- refactor: replace host reconciliation script with canonical command (#4653)
+
+## v0.38.67 (2026-10-07)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.67 by the scheduled release train.
+- 19 release-relevant commit(s) merged since v0.38.66.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.66
+- fix: report skipped autoclose verifications without gap comments (#4651)
+- fix: remove scripts/ledger_lock.py from omnibase_infra; callers run onex-ledger (#4645)
+- fix: preserve bounded route identities in runtime logs (#4600)
+- chore(deps): update fastapi requirement from <0.142.0,>=0.120.1 to >=0.120.1,<0.143.0 (#4614)
+- feat: infra validator conversion batch 1, env-fallback and migration gates become check nodes (#4638)
+- fix: name --timeout in pre-publish field refusals (#4599)
+- fix: budget gateway canary for authenticated cloud startup (#4640)
+- fix: read workspace configuration from its owning repository (#4630)
+- fix: MCP tool execution reports a 402 as a typed payment refusal, no breaker failure, no server body (#4632)
+- : Stamp lab caller delegations from the declared host tenant (#4624)
+- feat: vendor the budget applied-events migrations, fence the RLS step, grant the writer (#4595)
+- fix: print the answer by default when stdout is redirected (#4609)
+- feat: onex delegate names the delegation it falls back or escalates from, and vendors migration 0055 (#4592)
+- feat: map the authorize skill to node_authorize (#4587)
+- fix: a 402 in the LLM transport is one attempt, no retry, no breaker failure (#4593)
+- fix: resolve_project_tracker fails loud instead of returning the local stub (#4580)
+- feat: vendor the run-locally share and saving-per-run migrations (#4568)
+- feat: vendor usage_by_model_day 0002, measured cost apart from estimates (#4559)
+- feat: vendor measured savings provenance (#4547)
+
 ## v0.38.66 (2026-10-05)
 
 ### Release

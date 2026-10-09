@@ -45,12 +45,12 @@ pytestmark = [pytest.mark.unit]
 from omnibase_infra.errors import RuntimeHostError
 from omnibase_infra.event_bus.models.model_event_headers import ModelEventHeaders
 from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
+from omnibase_infra.models.ledger.model_payload_ledger_append import (
+    ModelPayloadLedgerAppend,
+)
 from omnibase_infra.nodes.node_ledger_projection_compute import (
     HandlerLedgerProjection,
     NodeLedgerProjectionCompute,
-)
-from omnibase_infra.nodes.node_registration_reducer.models.model_payload_ledger_append import (
-    ModelPayloadLedgerAppend,
 )
 
 # =============================================================================

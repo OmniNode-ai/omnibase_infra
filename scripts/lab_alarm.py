@@ -136,6 +136,13 @@ from scripts.ci.lab_pass_receipt import (
     evaluate_workflow_verdict,
     list_artifacts,
 )
+from scripts.lane_census_event import _alert_key as census_alert_key
+from scripts.lane_census_event import validate_event as validate_census_event
+from scripts.lane_census_plan import (
+    FINDING_KIND_SEVERITY,
+    load_manifest,
+    restart_bounds_for_lane,
+)
 
 #: OMN-18867/OMN-19091: the consumer-lag condition reads the dev broker
 #: in-process via aiokafka, using the same ~/.onex client store the hook edge
@@ -211,6 +218,8 @@ class EnumAlarmCondition(StrEnum):
     EFFECTS_HELD_BEHIND_RUNTIME = "effects_held_behind_runtime"
     WORK_LEDGER_PROJECTION_STALE = "work_ledger_projection_stale"
     DELEGATION_CHAIN_CANARY = "delegation_chain_canary"
+    LANE_DRIFT = "lane_drift"
+    CONTAINER_UNHEALTHY = "container_unhealthy"
     STALE_INDETERMINATE = "stale_indeterminate"
 
 
@@ -335,7 +344,7 @@ class ModelConditionReport:
 
 @dataclass(frozen=True)
 class ModelAlarmRun:
-    """One tick. Carries all seven conditions whether or not anything fired."""
+    """One tick. Carries every declared condition whether or not anything fired."""
 
     started_at: str
     finished_at: str
@@ -1199,6 +1208,138 @@ class ModelRecoveryNotice:
         }
 
 
+_CENSUS_CONDITIONS = (
+    EnumAlarmCondition.LANE_DRIFT,
+    EnumAlarmCondition.CONTAINER_UNHEALTHY,
+)
+
+
+def evaluate_lane_census(
+    *,
+    state_dir: Path,
+    command: Sequence[str],
+    runner: CommandRunner,
+    now: str,
+    max_age: timedelta,
+) -> tuple[ModelConditionReport, ...]:
+    """Read the existing census snapshot, also emitted on the census bus topics.
+
+    The local state-directory fixture is the timer's injection seam. Otherwise
+    the declared command reads the lab's live snapshot, never the checked-in
+    snapshot. Invalid, stale or unreadable input preserves every active episode
+    and participates in the existing STALE_INDETERMINATE condition.
+    """
+    fixture = state_dir / "lane-census.json"
+    try:
+        if fixture.exists() or not command:
+            raw = fixture.read_text(encoding="utf-8")
+        else:
+            completed = runner(command, timeout=15.0)
+            if completed.returncode != 0:
+                raise ValueError(
+                    f"census snapshot command exited {completed.returncode}: "
+                    f"{completed.stderr.strip()}"
+                )
+            raw = completed.stdout
+        census = json.loads(raw)
+        if not isinstance(census, dict):
+            raise ValueError("census snapshot is not an object")
+        errors = validate_census_event(census, kind_severity=FINDING_KIND_SEVERITY)
+        if errors:
+            raise ValueError("; ".join(errors))
+        if census["event_type"] != "lane-census-drift" or not census["host"]:
+            raise ValueError("census snapshot has no census event type or host")
+        if census["alert_key"] != census_alert_key(census["host"], census):
+            raise ValueError("census alert_key does not match its finding set")
+        age = datetime.fromisoformat(now) - datetime.fromisoformat(census["emitted_at"])
+        # _now() records whole seconds; the producer retains microseconds.
+        if age < -timedelta(seconds=1) or age > max_age:
+            raise ValueError(f"census snapshot age {age} is outside -1s..{max_age}")
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
+        return tuple(
+            ModelConditionReport(
+                condition=condition,
+                outcome=EnumConditionOutcome.INDETERMINATE,
+                evidence=f"lane census unreadable: {exc}",
+            )
+            for condition in _CENSUS_CONDITIONS
+        )
+
+    reports: list[ModelConditionReport] = []
+    for condition in _CENSUS_CONDITIONS:
+        findings = [
+            finding
+            for finding in census["findings"]
+            if (finding["kind"] == "container_unhealthy")
+            == (condition is EnumAlarmCondition.CONTAINER_UNHEALTHY)
+        ]
+        evidence = (
+            f"census host={census['host']} emitted_at={census['emitted_at']} "
+            f"alert_key={census['alert_key']}; {len(findings)} {condition.value} findings"
+        )
+        alarms: tuple[ModelAlarm, ...] = ()
+        if findings:
+            alarms = (
+                ModelAlarm(
+                    condition=condition,
+                    subject=census["alert_key"],
+                    detail="\n".join(
+                        f"{finding['lane']}/{finding['container']}: "
+                        f"{finding['kind']} — {finding['detail']}"
+                        for finding in findings
+                    ),
+                ),
+            )
+        reports.append(
+            ModelConditionReport(
+                condition=condition,
+                outcome=EnumConditionOutcome.ALARM
+                if alarms
+                else EnumConditionOutcome.OK,
+                evidence=evidence,
+                alarms=alarms,
+            )
+        )
+    return tuple(reports)
+
+
+def select_census_recoveries(
+    reports: Sequence[ModelConditionReport], state: ModelAlarmState, *, now: str
+) -> tuple[ModelRecoveryNotice, ...]:
+    """Read exits before select_new_alarms clears their durable episode state."""
+    notices: list[ModelRecoveryNotice] = []
+    for report in reports:
+        if report.condition not in _CENSUS_CONDITIONS:
+            continue
+        if report.outcome is not EnumConditionOutcome.OK:
+            continue
+        prefix = f"{report.condition.value}:"
+        for key, since in state.active.items():
+            if key.startswith(prefix):
+                notices.append(
+                    ModelRecoveryNotice(
+                        condition=report.condition,
+                        subject=key[len(prefix) :],
+                        detail=f"census episode cleared; raised_at={since}; recovered_at={now}; {report.evidence}",
+                    )
+                )
+    return tuple(notices)
+
+
+def restore_census_episode(
+    condition: EnumAlarmCondition, state: ModelAlarmState, previous: Mapping[str, str]
+) -> None:
+    """Keep a failed census delivery eligible on the next durable tick."""
+    if condition not in _CENSUS_CONDITIONS:
+        return
+    prefix = f"{condition.value}:"
+    for key in [key for key in state.active if key.startswith(prefix)]:
+        del state.active[key]
+    state.active.update(
+        {key: value for key, value in previous.items() if key.startswith(prefix)}
+    )
+
+
 def evaluate_effects_held_behind_runtime(
     reader: EffectsHeldReader,
     *,
@@ -1554,7 +1695,7 @@ def evaluate_work_ledger_projection_stale(
 
 #: A consent row in the CANONICAL shape Operating Rule 18 specifies.
 _CONSENT_ROW_LABELLED = re.compile(
-    r"OPERATOR-CONSENT.*?APPROVED SCOPE:(?P<approved>.*?)\|"
+    r"^[^|]+\|\s*OPERATOR-CONSENT\s*\|.*?APPROVED SCOPE:(?P<approved>.*?)\|"
     r"\s*OUT OF SCOPE:(?P<out>.*?)(\||$)",
     re.IGNORECASE,
 )
@@ -1578,11 +1719,14 @@ _CONSENT_ROW_LABELLED = re.compile(
 #: What still refuses, and is proven by its own control: a row with no
 #: approver, a row naming no channel, a row naming a DIFFERENT channel, a row
 #: with no exclusion clause at all, and an unreadable ledger.
-_CONSENT_ROW_RULING = re.compile(r"OPERATOR-CONSENT(?P<body>.*)", re.IGNORECASE)
+_CONSENT_ROW_RULING = re.compile(
+    r"^[^|]+\|\s*RULING\s*\|.*?OPERATOR-CONSENT(?P<body>.*)", re.IGNORECASE
+)
 _APPROVED_BY = re.compile(
     r"approved_by\s*=\s*(?P<who>[A-Za-z0-9_@.:-]+)", re.IGNORECASE
 )
 _EXCLUSION = re.compile(r"\bno\s+new\b|\bno\s+webhook\b|OUT OF SCOPE:", re.IGNORECASE)
+_LAB_ALARM_SCOPE = re.compile(r"\blab alarms?\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -1611,8 +1755,13 @@ def resolve_posting_consent(
 
     Two accepted shapes, both requiring the same four substantive facts: the
     OPERATOR-CONSENT token, an ``approved_by``, the destination channel, and an
-    explicit exclusion. See :data:`_CONSENT_ROW_RULING` for why the second
-    shape is accepted.
+    explicit exclusion. Both must authorize lab alarms: consent for another
+    purpose in the same channel does not authorize this sender. See
+    :data:`_CONSENT_ROW_RULING` for why the second shape is accepted.
+
+    Ledger rolls preserve authority in sibling ``archive/*-split.md`` files.
+    Read those after the live file, retaining the source file and line in the
+    citation rather than attributing an archived grant to the current ledger.
 
     An unreadable ledger returns ``None``: a grant that cannot be read is not
     a grant.
@@ -1622,36 +1771,68 @@ def resolve_posting_consent(
     except OSError:
         return None
 
-    for number, line in enumerate(lines, start=1):
-        labelled = _CONSENT_ROW_LABELLED.search(line)
-        if labelled is not None and labelled.group("out").strip():
-            if channel.lower() in labelled.group("approved").lower():
-                who = _APPROVED_BY.search(line)
-                return ModelPostingConsent(
-                    channel=channel,
-                    ledger_path=str(ledger_path),
-                    line=number,
-                    approved_by=who.group("who") if who else "operator",
-                )
-            continue
-
-        ruling = _CONSENT_ROW_RULING.search(line)
-        if ruling is None:
-            continue
-        body = ruling.group("body")
-        who = _APPROVED_BY.search(body)
-        if who is None:
-            continue
-        if channel.lower() not in body.lower():
-            continue
-        if _EXCLUSION.search(body) is None:
-            continue
-        return ModelPostingConsent(
-            channel=channel,
-            ledger_path=str(ledger_path),
-            line=number,
-            approved_by=who.group("who"),
+    channel_name = re.compile(
+        rf"(?<![\w#-]){re.escape(channel)}(?![\w-])", re.IGNORECASE
+    )
+    sources = [ledger_path]
+    try:
+        sources.extend(
+            sorted(
+                (ledger_path.parent / "archive").glob(f"{ledger_path.stem}_*-split.md"),
+                reverse=True,
+            )
         )
+    except OSError:
+        return None
+
+    for source in sources:
+        if source == ledger_path:
+            source_lines = lines
+        else:
+            try:
+                source_lines = source.read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()
+            except OSError:
+                continue
+        for number, line in enumerate(source_lines, start=1):
+            labelled = _CONSENT_ROW_LABELLED.search(line)
+            if labelled is not None:
+                approved = labelled.group("approved")
+                who = _APPROVED_BY.search(line)
+                if (
+                    who is not None
+                    and labelled.group("out").strip()
+                    and channel_name.search(approved) is not None
+                    and _LAB_ALARM_SCOPE.search(approved) is not None
+                ):
+                    return ModelPostingConsent(
+                        channel=channel,
+                        ledger_path=str(source),
+                        line=number,
+                        approved_by=who.group("who"),
+                    )
+                continue
+
+            ruling = _CONSENT_ROW_RULING.search(line)
+            if ruling is None:
+                continue
+            body = ruling.group("body")
+            who = _APPROVED_BY.search(body)
+            if who is None:
+                continue
+            if channel_name.search(body) is None:
+                continue
+            if _LAB_ALARM_SCOPE.search(body) is None:
+                continue
+            if _EXCLUSION.search(body) is None:
+                continue
+            return ModelPostingConsent(
+                channel=channel,
+                ledger_path=str(source),
+                line=number,
+                approved_by=who.group("who"),
+            )
     return None
 
 
@@ -1869,6 +2050,17 @@ def select_new_alarms(
         for alarm in report.alarms:
             if alarm.key in state.active:
                 continue
+            # A census alert_key describes the current finding set. Replace
+            # the previous set so A -> B -> A raises on both changes rather
+            # than suppressing A for the remainder of the episode.
+            if report.condition in _CENSUS_CONDITIONS:
+                previous = [k for k in state.active if k.startswith(prefix)]
+                since = min((state.active[k] for k in previous), default=now)
+                for key in previous:
+                    del state.active[key]
+                state.active[alarm.key] = since
+                fresh.append(alarm)
+                continue
             state.active[alarm.key] = now
             fresh.append(alarm)
     return tuple(fresh)
@@ -2085,16 +2277,7 @@ def expand_env(value: str, *, source: Path) -> str:
 
 @dataclass(frozen=True)
 class ModelAlarmConfig:
-    """Declared subjects and bounds. JSON, not YAML, on purpose.
-
-    This module runs under launchd on the brew interpreter with no virtual
-    environment -- the same reason ``scripts/ci/lab_pass_receipt.py`` is
-    stdlib-only. A YAML config here would put a third-party import on a path
-    that has to run before the alarm can even discover what it is bounded to
-    load. This predates, and is unrelated to, the ``yaml``/``aiokafka``
-    import OMN-19091 added for the consumer-lag identity read -- config
-    PARSING stays JSON; nothing about how the config is spelled changed.
-    """
+    """JSON alarm subjects; restart bounds come from the census lane manifest."""
 
     repo: str
     lane: EnumLabLane
@@ -2124,21 +2307,38 @@ class ModelAlarmConfig:
     chain_canary_workflow: str = "chain-canary.yml"
     chain_canary_branch: str = "dev"
     chain_canary_max_age: timedelta = timedelta(hours=3)
+    census_command: tuple[str, ...] = ()
+    census_max_age: timedelta = timedelta(hours=2)
 
     @classmethod
     def load(cls, path: Path) -> ModelAlarmConfig:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
             raise ValueError(f"{path} is not a JSON object")
-        bounds = payload.get("container_restart_bounds") or {}
-        if not isinstance(bounds, dict):
-            raise ValueError(f"{path}: container_restart_bounds must be an object")
+        manifest_path = Path(expand_env(str(payload["lane_manifest"]), source=path))
+        if not manifest_path.is_absolute():
+            manifest_path = path.resolve().parent / manifest_path
+        bounds = restart_bounds_for_lane(
+            load_manifest(manifest_path), str(payload["census_lane"])
+        )
         groups = payload.get("consumer_groups") or []
         if not isinstance(groups, list):
             raise ValueError(f"{path}: consumer_groups must be a list")
         docker = payload.get("docker_command") or ["docker"]
         if not isinstance(docker, list) or not docker:
             raise ValueError(f"{path}: docker_command must be a non-empty list")
+        census_command = payload["census_command"]
+        if (
+            not isinstance(census_command, list)
+            or not census_command
+            or not all(isinstance(part, str) and part for part in census_command)
+        ):
+            raise ValueError(f"{path}: census_command must be a non-empty string list")
+        census_max_age_minutes = payload["census_max_age_minutes"]
+        if type(census_max_age_minutes) is not int or census_max_age_minutes <= 0:
+            raise ValueError(
+                f"{path}: census_max_age_minutes must be a positive integer"
+            )
         return cls(
             repo=expand_env(str(payload["repo"]), source=path),
             lane=EnumLabLane(str(payload.get("lane", EnumLabLane.COMPOSE_DEV.value))),
@@ -2148,7 +2348,7 @@ class ModelAlarmConfig:
                 str(payload["kafka_bootstrap_servers"]), source=path
             ),
             docker_command=tuple(expand_env(str(p), source=path) for p in docker),
-            container_restart_bounds={str(k): int(v) for k, v in bounds.items()},
+            container_restart_bounds=bounds,
             consumer_groups=tuple(str(g) for g in groups),
             effects_group_prefix=str(payload["effects_group_prefix"]),
             effects_group_suffix=str(payload["effects_group_suffix"]),
@@ -2165,6 +2365,10 @@ class ModelAlarmConfig:
             chain_canary_max_age=timedelta(
                 minutes=int(payload["chain_canary_max_age_minutes"])
             ),
+            census_command=tuple(
+                expand_env(part, source=path) for part in census_command
+            ),
+            census_max_age=timedelta(minutes=census_max_age_minutes),
         )
 
 
@@ -2193,7 +2397,7 @@ def run_once(
     env_file: Path,
     subject_resolver: SubjectResolver | None = None,
 ) -> ModelAlarmRun:
-    """Evaluate all seven conditions, record the run, return it."""
+    """Evaluate every declared condition, record the run, return it."""
     started = _now()
     state = ModelAlarmState.load(state_dir / "state.json")
 
@@ -2227,6 +2431,13 @@ def run_once(
         branch=config.chain_canary_branch,
         max_age=config.chain_canary_max_age,
     )
+    census_reports = evaluate_lane_census(
+        state_dir=state_dir,
+        command=config.census_command,
+        runner=runner,
+        now=started,
+        max_age=config.census_max_age,
+    )
     watched_reports = (
         receipt_report,
         restart_report,
@@ -2234,13 +2445,17 @@ def run_once(
         effects_report,
         work_ledger_report,
         canary_report,
+        *census_reports,
     )
     stale_report = evaluate_stale_indeterminate(watched_reports, state, now=started)
 
     reports = (*watched_reports, stale_report)
+    recoveries = select_census_recoveries(census_reports, state, now=started)
+    if recovery is not None:
+        recoveries = (recovery, *recoveries)
+    previous_active = dict(state.active)
     raised = select_new_alarms(reports, state, now=started)
     state.lag_sample = lag_sample
-    state.save(state_dir / "state.json")
 
     consent = resolve_posting_consent(ledger_path, channel=posting_channel)
     if consent is None:
@@ -2248,7 +2463,7 @@ def run_once(
             f"disabled: no OPERATOR-CONSENT row in {ledger_path} authorizes "
             f"{posting_channel}"
         )
-    elif not raised and recovery is None:
+    elif not raised and not recoveries:
         posting = (
             f"authorized by {consent.citation} (approved_by={consent.approved_by}); "
             "nothing new to deliver this run"
@@ -2268,18 +2483,24 @@ def run_once(
                 )
             except PostingError as exc:
                 failures.append(str(exc))
+                restore_census_episode(alarm.condition, state, previous_active)
         recovered: list[str] = []
-        if recovery is not None:
+        for notice in recoveries:
             try:
                 recovered.append(
-                    f"{recovery.subject}@{post_recovery(recovery, consent=consent, env_file=env_file)}"
+                    f"{notice.subject}@{post_recovery(notice, consent=consent, env_file=env_file)}"
                 )
             except PostingError as exc:
                 failures.append(str(exc))
+                restore_census_episode(notice.condition, state, previous_active)
         posting = (
             f"authorized by {consent.citation} (approved_by={consent.approved_by}); "
             f"delivered {len(delivered)}/{len(raised)} alarms to {consent.channel}"
-            + (f", {len(recovered)}/1 recovery notice" if recovery is not None else "")
+            + (
+                f", {len(recovered)}/{len(recoveries)} recovery notice"
+                if recoveries
+                else ""
+            )
             + (
                 f"; delivery ids {', '.join(delivered + recovered)}"
                 if delivered or recovered
@@ -2288,6 +2509,7 @@ def run_once(
             + (f"; FAILED: {'; '.join(failures)}" if failures else "")
         )
 
+    state.save(state_dir / "state.json")
     run = ModelAlarmRun(
         started_at=started,
         finished_at=_now(),
@@ -2335,7 +2557,7 @@ def exit_code(run: ModelAlarmRun) -> int:
     is exactly how a monitor reports green over an outage. It ranks below
     ALARM only because a known failure is the more actionable of the two.
     """
-    if run.raised:
+    if run.raised or "; FAILED:" in run.posting:
         return EXIT_ALARM
     if any(
         report.outcome is EnumConditionOutcome.INDETERMINATE for report in run.reports

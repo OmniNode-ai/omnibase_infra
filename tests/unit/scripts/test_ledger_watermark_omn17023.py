@@ -30,7 +30,6 @@ pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
 _SCRIPT = _REPO / "scripts" / "ledger_watermark.py"
-_LOCK = _REPO / "scripts" / "ledger_lock.py"
 
 SECTION = "## §5 Action Log (append-only)"
 SOURCE = "rolling_work_ledger"
@@ -43,20 +42,19 @@ EXIT_SCHEMA = 4
 def canonical_parser(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 ) -> Path:
-    """Interim test fixture: the known stdlib parser at its new package boundary.
-
-    Runtime never falls back to this legacy source. The existing parser remains
-    in infra until its separate removal gate, so no private checkout is needed
-    to exercise watermark semantics in the generic infra CI split.
-    """
+    """Copy the canonical parser package into the fixture's registry layout."""
+    internal = Path(
+        os.environ.get(
+            "OMNIBASE_INTERNAL_HOME",
+            str(Path(os.environ["OMNI_HOME"]).parent / "omnibase_internal"),
+        )
+    )
+    source = internal / "src" / "omnibase_internal"
+    assert (source / "ledger" / "lock.py").is_file(), source
     home = tmp_path / "registry"
     home.mkdir()
     package = tmp_path / "omnibase_internal" / "src" / "omnibase_internal"
-    ledger_package = package / "ledger"
-    ledger_package.mkdir(parents=True)
-    (package / "__init__.py").write_text("", encoding="utf-8")
-    (ledger_package / "__init__.py").write_text("", encoding="utf-8")
-    shutil.copyfile(_LOCK, ledger_package / "lock.py")
+    shutil.copytree(source, package, ignore=shutil.ignore_patterns("__pycache__"))
     monkeypatch.setenv("OMNI_HOME", str(home))
     monkeypatch.delenv("OMNIBASE_INTERNAL_HOME", raising=False)
     if request.param:
@@ -65,7 +63,7 @@ def canonical_parser(
         home.rmdir()
         home.symlink_to(physical, target_is_directory=True)
         monkeypatch.setenv("OMNIBASE_INTERNAL_HOME", str(package.parents[1]))
-    return home
+    return internal
 
 
 def test_parser_uses_canonical_package_even_with_a_broken_adjacent_copy(
@@ -311,6 +309,7 @@ def test_advance_does_not_run_when_resolution_failed(tmp_path: Path) -> None:
 
 def test_the_watermark_survives_a_roll_and_names_the_rows_a_line_mark_would_skip(
     tmp_path: Path,
+    canonical_parser: Path,
 ) -> None:
     ledger = _ledger(tmp_path, 12)
     archive_dir = tmp_path / "archive"
@@ -330,8 +329,14 @@ def test_the_watermark_survives_a_roll_and_names_the_rows_a_line_mark_would_skip
     # move to the archive, leaving only the 3 unread ones live
     roll = subprocess.run(
         [
-            sys.executable,
-            str(_LOCK),
+            "env",
+            "-u",
+            "PYTHONPATH",
+            "uv",
+            "run",
+            "--project",
+            str(canonical_parser),
+            "onex-ledger",
             str(ledger),
             "--roll-section",
             "--force-roll",
@@ -350,6 +355,7 @@ def test_the_watermark_survives_a_roll_and_names_the_rows_a_line_mark_would_skip
         text=True,
         timeout=60,
         check=False,
+        env={k: v for k, v in os.environ.items() if k != "UV_PROJECT_ENVIRONMENT"},
     )
     assert roll.returncode == 0, roll.stderr
 
@@ -401,6 +407,7 @@ def test_duplicate_headings_are_disambiguated_by_digest(tmp_path: Path) -> None:
 
 def test_rows_archived_before_they_were_read_are_still_reported_unread(
     tmp_path: Path,
+    canonical_parser: Path,
 ) -> None:
     """A roll archives the OLDEST rows; it does not ask whether they were read.
 
@@ -428,8 +435,14 @@ def test_rows_archived_before_they_were_read_are_still_reported_unread(
     # ... then a roll archives entries 1-4, two of which were never read
     roll = subprocess.run(
         [
-            sys.executable,
-            str(_LOCK),
+            "env",
+            "-u",
+            "PYTHONPATH",
+            "uv",
+            "run",
+            "--project",
+            str(canonical_parser),
+            "onex-ledger",
             str(ledger),
             "--roll-section",
             "--force-roll",
@@ -448,6 +461,7 @@ def test_rows_archived_before_they_were_read_are_still_reported_unread(
         text=True,
         timeout=60,
         check=False,
+        env={k: v for k, v in os.environ.items() if k != "UV_PROJECT_ENVIRONMENT"},
     )
     assert roll.returncode == 0, roll.stderr
 

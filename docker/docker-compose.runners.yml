@@ -945,7 +945,7 @@ services:
   # release-train-lab.yml tag-cut/deploy jobs (cut_release_train_tag.sh,
   # refresh_stability_lane.sh, refresh_dev_lane.sh). These scripts need real
   # host-path git access to OMNI_HOME sibling clones (they `git fetch`/
-  # `checkout --detach`/tag the clones directly and run deploy-runtime.sh's
+  # `checkout --detach`/tag the clones directly and run onex-runtime-deploy's
   # BUILD_SOURCE=workspace path against them) -- the shared 72-runner omnibase-ci
   # fleet above deliberately does NOT have this (docker.sock only, no
   # OMNI_HOME bind mount) so that a compromised/buggy CI job from the general
@@ -1102,7 +1102,7 @@ services:
       RUNNER_GROUP: omnibase-deploy
       ACTIONS_RUNNER_HOOK_JOB_STARTED: /usr/local/bin/runner-job-started.sh
       OMNI_HOME: ${DEPLOY_RUNNER_OMNI_HOME:?DEPLOY_RUNNER_OMNI_HOME must be set (private deploy-runner clone tree, e.g. /data/omninode/runner_omni_home)}
-      # OMN-14958: the runtime_build scripts + deploy-runtime.sh need the
+      # OMN-14958: the runtime_build scripts + onex-runtime-deploy need the
       # operator env (POSTGRES_PASSWORD etc.) for compose interpolation, but
       # this container's $HOME carries no ~/.omnibase/.env -- deploy run
       # 29977968728 crashed on exactly that.

@@ -206,6 +206,9 @@ from omnibase_core.handlers.handler_done_write_receipt_gate import (
 from omnibase_core.handlers.handler_done_write_receipt_gate import (
     live_acceptance_criteria_items as _live_acceptance_criteria_items,
 )
+from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
+    AdapterLinearGraphQLProjectTracker,
+)
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.gate_binding import (
     EnumGateBindingProbe,
@@ -323,7 +326,6 @@ _DOD_VERIFY_NON_PROBATIVE_KEY = "non_probative_count"
 _CONTRACT_FILE_RE = re.compile(r"^contracts/(OMN-\d+)\.yaml$")
 _TITLE_EVIDENCE_RE = re.compile(r"evidence\((OMN-\d+)\)", re.IGNORECASE)
 
-_LINEAR_API_URL = "https://api.linear.app/graphql"  # url-authority-ok: fixed public GraphQL API, no ONEX routing authority
 
 # OMN-17664. THE IDENTITY THE CLOSER WRITES AS.
 #
@@ -660,9 +662,10 @@ _CHECK_STATUS_SUPERSEDED = "superseded"
 #: this fact.
 _CHECK_STATUS_NON_PROBATIVE = "non_probative"
 
-#: This node's own `contract.yaml` `node_version`, part of the gap-comment
+#: This node's `contract.yaml` metadata.gap_comment_fingerprint_version is
+#: part of the gap-comment
 #: fingerprint (see `_gap_fingerprint_parts`). Pinned against the contract by
-#: `test_the_pinned_contract_version_is_the_node_contract_version`, so it
+#: `test_the_gap_fingerprint_version_is_declared_in_the_contract`, so it
 #: cannot drift into describing a rule the closer no longer applies.
 #:
 #: 1.15.0 -> 1.16.0 (OMN-18490) is a deliberate, one-off refresh of every
@@ -1350,6 +1353,7 @@ def _extract_ticket_binding(title: str, files: list[str]) -> tuple[str | None, b
 # Deliberately not scoped to an acceptance-criteria section: an unchecked box
 # is an author's own "not done yet" marker wherever it appears.
 _UNCHECKED_TASK_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[[ \t]\][ \t]*(.*)$", re.MULTILINE)
+_CHECKED_TASK_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[[xX]\][ \t]*(.*)$", re.MULTILINE)
 
 
 # -- the gate probe a ticket names for itself (OMN-16106, OMN-18414) --------
@@ -2045,6 +2049,27 @@ def _live_check_not_executed(verdict: dict[str, object]) -> tuple[str, str]:
     return "", ""
 
 
+def _skipped_verdict_reason(verdict: dict[str, object]) -> str:
+    """Preserve the verifier's reason without judging a skipped run's evidence."""
+    reasons: list[str] = []
+    error = verdict.get("error_message")
+    if isinstance(error, str) and error.strip():
+        reasons.append(error.strip())
+    for check in _check_records(verdict):
+        if _check_status(check) != _CHECK_STATUS_SKIPPED:
+            continue
+        details = [
+            str(check[key]).strip()
+            for key in (_CHECK_UNVERIFIABLE_CAUSE_KEY, "message")
+            if check.get(key) is not None and str(check[key]).strip()
+        ]
+        reasons.append(
+            f"{_check_id(check)}: "
+            + ("; ".join(dict.fromkeys(details)) or "the check did not execute")
+        )
+    return "; ".join(reasons) or "no reason supplied by dod_verify"
+
+
 def _withheld_check_ids(verdict: dict[str, object]) -> tuple[str, ...]:
     """Every check that is standing between this ticket and a Done flip.
 
@@ -2503,18 +2528,13 @@ class _LinearClient:
         auth_header = await self._resolve_auth_header()
         if auth_header is None:
             return None
-        headers = {
-            "Authorization": auth_header,
-            "Content-Type": "application/json",
-        }
-        payload = {"query": query, "variables": variables}
         for attempt_index in range(self._max_attempts):
             retry_after: float | None = None
             try:
-                async with httpx.AsyncClient(timeout=self._timeout) as client:
-                    response = await client.post(
-                        _LINEAR_API_URL, json=payload, headers=headers
-                    )
+                async with AdapterLinearGraphQLProjectTracker.graphql_transport(
+                    api_key=auth_header, timeout_seconds=self._timeout
+                ) as transport:
+                    response = await transport.post_graphql(query, variables)
                 status = response.status_code
                 if status == _HTTP_TOO_MANY_REQUESTS or status >= _HTTP_SERVER_ERROR:
                     self.last_error = f"Linear API returned HTTP {status}."
@@ -2781,6 +2801,7 @@ class HandlerEvidenceAutocloseSweep:
         self._run_dod_verify_command = (
             run_dod_verify_command or self._run_dod_verify_command_real
         )
+        self._run_lab_pass_checks = self._run_lab_pass_checks_real
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -2791,6 +2812,46 @@ class HandlerEvidenceAutocloseSweep:
         return EnumHandlerTypeCategory.EFFECT
 
     # -- subprocess runners (real) -------------------------------------
+
+    async def _run_lab_pass_checks_real(
+        self, repo: str, sha: str, ticket_id: str, cwd: str, timeout: float
+    ) -> list[dict[str, object]]:
+        """Reuse the emitter's artifact reader and validated receipt model.
+
+        Like dod_verify, this runs in the declared product checkout. Keeping
+        the bare-runner model there avoids a second receipt parser in the node.
+        The handler owns the read; no new CLI or standalone reader is added.
+        """
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            "import json,sys; from scripts.ci.lab_pass_receipt import receipt_evidence_for_ticket; "
+            "print(json.dumps(receipt_evidence_for_ticket(*sys.argv[1:])))",
+            repo,
+            sha,
+            ticket_id,
+            cwd=cwd or None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout)
+        except TimeoutError:
+            process.kill()
+            await process.communicate()
+            raise ValueError("lab-pass artifact read timed out") from None
+        if process.returncode:
+            raise ValueError(
+                f"lab-pass artifact read failed: {stderr.decode(errors='replace')[-1000:]}"
+            )
+        records = json.loads(stdout)
+        if not isinstance(records, list) or any(
+            not isinstance(row, dict) for row in records
+        ):
+            raise ValueError(
+                "lab-pass artifact reader returned an unreadable check list"
+            )
+        return records
 
     async def _run_gh_command_real(
         self, args: list[str], timeout: float
@@ -3538,6 +3599,7 @@ class HandlerEvidenceAutocloseSweep:
                 # evidence base, exactly like GAP_AC_COVERAGE beside it, and
                 # not a statement about whether the mechanism may act.
                 EnumEvidenceAutocloseDecision.GAP_AC_UNBOUND,
+                EnumEvidenceAutocloseDecision.GAP_TICKED_OPEN,
             )
         )
         skipped = sum(
@@ -3590,6 +3652,7 @@ class HandlerEvidenceAutocloseSweep:
                 # added without a bucket.
                 EnumEvidenceAutocloseDecision.SKIPPED_LIVE_SURFACE_UNAVAILABLE,
                 EnumEvidenceAutocloseDecision.SKIPPED_LIVE_CHECK_NOT_EXECUTED,
+                EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY,
                 # OMN-16106. A red or unresolvable gate probe is a hold on the
                 # same terms: the run reached no verdict on the ticket's OCC
                 # evidence, it read the surface the ticket named and found it
@@ -3674,6 +3737,10 @@ class HandlerEvidenceAutocloseSweep:
             bindings_extracted=bindings_extracted,
             tickets_flipped=flipped,
             tickets_gap_posted=gap_posted,
+            tickets_ticked_open=sum(
+                o.decision == EnumEvidenceAutocloseDecision.GAP_TICKED_OPEN
+                for o in outcomes
+            ),
             tickets_skipped=skipped,
             tickets_errored=errored,
             tickets_closer_flip_reverted=closer_flips_reverted,
@@ -4341,6 +4408,46 @@ class HandlerEvidenceAutocloseSweep:
                 ),
             )
 
+        # OMN-18490 AC1–AC4. Ticked boxes are an author's assertion, not a
+        # verifier verdict. Name this started candidate before any flip path;
+        # the ordinary exclusions and child gate above still take precedence.
+        description_raw = issue.get("description")
+        description = description_raw if isinstance(description_raw, str) else ""
+        checked = tuple(
+            match.group(1).strip() for match in _CHECKED_TASK_RE.finditer(description)
+        )
+        if (
+            state_type == "started"
+            and checked
+            and _UNCHECKED_TASK_RE.search(description) is None
+        ):
+            reason = (
+                f"{ticket_id} is still started with all {len(checked)} task-list "
+                "checkbox(es) ticked. This is the author's assertion, not "
+                "receipt-proven acceptance. Human closeout review is needed; "
+                "the sweep does not flip Done on this basis."
+            )
+            logger.info("%s %s — %s", "gap_ticked_open", ticket_id, reason)
+            return await self._emit_gap_comment(
+                base=ModelEvidenceAutocloseOutcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    decision=EnumEvidenceAutocloseDecision.GAP_TICKED_OPEN,
+                    reason=reason,
+                ),
+                apply=apply_writes,
+                issue_id=issue_id,
+                marker=_sweep_comment_marker(
+                    EnumEvidenceAutocloseDecision.GAP_TICKED_OPEN, checked
+                ),
+                comment_body=(
+                    "Ticked but still open (OMN-18490 evidence autoclose sweep).\n\n"
+                    f"Merged evidence companion: {companion_pr_url}\n"
+                    f"{reason}"
+                ),
+            )
+
         # OMN-17934 shape 2 + OMN-17658 readback: ONE state-history read serving
         # both. The pre-write head id captured here is what the post-write
         # readback is compared against, so the read has to happen before the
@@ -4381,13 +4488,14 @@ class HandlerEvidenceAutocloseSweep:
         # Fails CLOSED on a fetch failure: "I could not check whether this is a
         # recurring bot PR" must never resolve to "so I will flip it".
         product_ref = _product_pr_ref(companion_title)
+        product_pr: dict[str, object] | None = None
         if product_ref is not None:
             product_repo, product_number = product_ref
-            product_pr, product_error = await self._run_gh_command(
+            product_payload, product_error = await self._run_gh_command(
                 ["gh", "api", f"repos/{product_repo}/pulls/{product_number}"],
                 request.gh_timeout_seconds,
             )
-            if not isinstance(product_pr, dict):
+            if not isinstance(product_payload, dict):
                 return ModelEvidenceAutocloseOutcome(
                     ticket_id=ticket_id,
                     companion_pr_number=companion_pr_number,
@@ -4400,6 +4508,7 @@ class HandlerEvidenceAutocloseSweep:
                         f"{product_error or 'no payload'}"
                     ),
                 )
+            product_pr = product_payload
             if _is_recurring_bot_product_pr(product_pr):
                 return ModelEvidenceAutocloseOutcome(
                     ticket_id=ticket_id,
@@ -4444,6 +4553,51 @@ class HandlerEvidenceAutocloseSweep:
         # "the ticket is not proven". Absent counts still fail closed: nothing
         # is coerced to 0 and nothing unread is ever counted as proof.
         verdict, verdict_refusal = _extract_dod_verify_verdict(dod_result)
+        if verdict is not None and product_ref is not None and product_pr is not None:
+            sha = str(product_pr.get("merge_commit_sha") or "")
+            # A missing identity cannot borrow a receipt from another commit.
+            # Existing verdict evidence still faces its ordinary binding gate.
+            if product_pr.get("merged_at") and re.fullmatch(r"[0-9a-f]{40}", sha):
+                try:
+                    lab_checks = await self._run_lab_pass_checks(
+                        product_ref[0],
+                        sha,
+                        ticket_id,
+                        request.dispatch_cwd,
+                        request.gh_timeout_seconds,
+                    )
+                except (ValueError, OSError) as exc:
+                    return ModelEvidenceAutocloseOutcome(
+                        ticket_id=ticket_id,
+                        companion_pr_number=companion_pr_number,
+                        companion_pr_url=companion_pr_url,
+                        decision=EnumEvidenceAutocloseDecision.ERROR_VERIFY_UNPARSEABLE,
+                        reason=f"Lab-pass evidence gap for {sha}: {exc}",
+                    )
+                if lab_checks:
+                    existing = verdict.get(_DOD_VERIFY_CHECKS_KEY)
+                    if not isinstance(existing, list):
+                        lab_checks = []  # never reconstruct an unreadable verifier verdict
+                    else:
+                        verdict = dict(verdict)
+                        verdict[_DOD_VERIFY_CHECKS_KEY] = [*existing, *lab_checks]
+                        verified_lab = sum(
+                            row.get("status") == "verified" for row in lab_checks
+                        )
+                        failed_lab = len(lab_checks) - verified_lab
+                        for key, increment in (
+                            ("total_checks", len(lab_checks)),
+                            ("verified_count", verified_lab),
+                            ("failed_count", failed_lab),
+                            (_DOD_VERIFY_BEHAVIOR_KEY, verified_lab),
+                        ):
+                            verdict[key] = _as_int(verdict.get(key)) + increment
+                        if failed_lab:
+                            verdict["status"] = (
+                                "failed"
+                                if verdict.get("status") == "verified"
+                                else verdict.get("status")
+                            )
         if verdict is not None:
             # OMN-18490. The ONE site that records the checks, placed the
             # moment the verdict parses and ahead of every branch that reads
@@ -4490,6 +4644,22 @@ class HandlerEvidenceAutocloseSweep:
         # Absent key stays 0 and is handled as ERROR_VERIFY_UNPARSEABLE below
         # (OMN-15911) — this line never infers a value the verifier did not give.
         behavior_proving_count = _as_int(verdict.get(_DOD_VERIFY_BEHAVIOR_KEY))
+
+        # OMN-20520: partial proofs do not turn a skipped verifier run into an
+        # evidence verdict. Report its reason and leave the ticket untouched.
+        if verify_status == _CHECK_STATUS_SKIPPED:
+            return ModelEvidenceAutocloseOutcome(
+                ticket_id=ticket_id,
+                companion_pr_number=companion_pr_number,
+                companion_pr_url=companion_pr_url,
+                decision=EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY,
+                reason=f"dod_verify skipped: {_skipped_verdict_reason(verdict)}",
+                dod_verify_total_checks=total_checks,
+                dod_verify_verified_count=verified_count,
+                dod_verify_failed_count=failed_count,
+                dod_verify_non_probative_count=non_probative_count,
+                dod_verify_behavior_proving_count=behavior_proving_count,
+            )
 
         # Both dod_verify's OWN terminal status and the arithmetic must agree.
         # The arithmetic is the stricter of the two: dod_verify reports VERIFIED

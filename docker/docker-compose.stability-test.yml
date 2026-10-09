@@ -80,8 +80,8 @@ x-stability-test-strict-wiring-env: &stability_test_strict_wiring_env
 # health emitter still publishes this runtime's verdict with no lane, which is
 # OMN-18769 AC6 unchanged. It changes only what may attach here.
 #
-# On the main runtime only, the one that owns the lab projection by profile,
-# mirroring the dev lane. Literal, not interpolated: an exported shell value
+# Main and effects runtimes name their lane for lane-scoped contracts
+# (OMN-19812). Literal, not interpolated: an exported shell value
 # must not be able to rename the lane.
 x-stability-test-lane-identity-env: &stability_test_lane_identity_env
   ONEX_RUNTIME_LANE: "stability-test"
@@ -141,7 +141,7 @@ services:
       # per partition, more headroom per partition than a configuration already
       # proven here. The value is a Compose DEFAULT, so it needs no host env
       # edit, and it takes effect at this lane's next governed recreate of the
-      # broker (deploy-runtime.sh's broker warmup runs `up -d --no-deps redpanda`,
+      # broker (onex-runtime-deploy's broker warmup runs `up -d --no-deps redpanda`,
       # which recreates it when its rendered config changes). Raise it back by
       # setting STABILITY_TEST_REDPANDA_MEMORY.
       - ${STABILITY_TEST_REDPANDA_MEMORY:-12G}
@@ -182,24 +182,10 @@ services:
     image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-stability-test-redpanda-partition-cap
     entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        # OMN-14013: this is the belt that ACTUALLY governs the durable cap for
-        # this lane. warm_broker_topic_provisioning() in deploy-runtime.sh
-        # force-recreates this one-shot service on EVERY redeploy of the lane
-        # (refresh_stability_lane.sh -> deploy-runtime.sh --restart), including
-        # a restart-only deploy that never touches the volume. A raised cap
-        # applied only via a live `rpk cluster config set` (not committed here)
-        # is therefore NOT durable -- the next redeploy silently resets it back
-        # to whatever literal value is hardcoded on this line. Confirmed live
-        # regression: 2026-07-06 raised to 15000 dynamically -> reset to 7000
-        # by a later redeploy -> re-raised to 8000 dynamically on 2026-07-26 as
-        # a stopgap (see OMN-14013 ticket comments). Pin the value HERE so it
-        # survives every redeploy; edit this value (and the --set flag on the
-        # `redpanda` service's command above) together if it must change again.
-        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 15000
-        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
+    # OMN-14013's durable 15000 cap survives the shared-profile fold.
+    environment:
+      REDPANDA_PARTITIONS_PER_SHARD: "15000"
+      REDPANDA_PROFILE_MEMORY: ${STABILITY_TEST_REDPANDA_MEMORY:-12G}
     depends_on:
       redpanda:
         condition: service_healthy
@@ -271,6 +257,7 @@ services:
       # OMN-14551 G6: flip the auto-wired consume boundary's DLQ routing ON
       # for this lane's live-proof, sourced from the ledgered contract value
       # (docker/runtime-policy.env), fail-fast if the policy env is missing.
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: ${STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND}
       ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     ports: !override
       - "${STABILITY_TEST_RUNTIME_MAIN_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_MAIN_PORT}:8085"
@@ -328,6 +315,8 @@ services:
       migration-gate:
         condition: service_healthy
     environment:
+      # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
+      ONEX_RUNTIME_LANE: "stability-test"
       !!merge <<: *stability_test_strict_wiring_env
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST}
@@ -361,6 +350,7 @@ services:
       ONEX_DEAD_LETTER_ARCHIVE_DIR: /app/data/dead-letter-archive
       ONEX_CONSUMER_FLOW_ARCHIVE_DIR: /app/data/consumer-flow-archive
       # OMN-14551 G6: see omninode-runtime's ONEX_BOUNDARY_DLQ_ENABLED comment.
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: ${STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND}
       ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     ports: !override
       - "${STABILITY_TEST_RUNTIME_EFFECTS_PORT:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_PORT}:8085"
@@ -456,6 +446,7 @@ services:
       ONEX_SECRET_RESOLVER_CONFIG_JSON: ${STABILITY_TEST_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON:?runtime policy contract must set STABILITY_TEST_RUNTIME_WORKER_SECRET_RESOLVER_CONFIG_JSON}
       OTEL_SERVICE_NAME: omninode-stability-test-runtime-worker
       # OMN-14551 G6: see omninode-runtime's ONEX_BOUNDARY_DLQ_ENABLED comment.
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: ${STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND}
       ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     volumes: !override
       - worker_logs:/app/logs
@@ -508,7 +499,7 @@ services:
       replicas: ${STABILITY_TEST_WORKER_REPLICAS:?runtime policy contract must set STABILITY_TEST_WORKER_REPLICAS (source docker/runtime-policy.env)}
   # OMN-13815: agent-actions-consumer, skill-lifecycle-consumer, intelligence-api
   # and omninode-contract-resolver are disabled-by-profile for the --profile
-  # runtime cold path, but deploy-runtime.sh's RUNTIME_SERVICES warm-restart path
+  # runtime cold path, but onex-runtime-deploy's RUNTIME_SERVICES warm-restart path
   # starts them explicitly by name (`up -d --no-deps --force-recreate <service>`),
   # which bypasses the profile gate. Without a lane-scoped container_name they
   # inherit the bare base name and collide with the dev lane's bring-up (live
@@ -944,7 +935,7 @@ services:
   # fails if either lane loses it.
   #
   # The lane-scoped container_name is mandatory, not cosmetic: the base declares
-  # `omnimarket-tenant-projection-writer`, and deploy-runtime.sh's warm restart
+  # `omnimarket-tenant-projection-writer`, and onex-runtime-deploy's warm restart
   # path starts lane services explicitly by name, which bypasses the compose
   # profile gate. Without a lane-prefixed name this container would collide with
   # the dev lane's on the same host -- the live OMN-13815 repro.
@@ -976,6 +967,7 @@ services:
       KAFKA_INSTANCE_ID: stability-test-tenant-projection
       OTEL_SERVICE_NAME: omnimarket-stability-test-tenant-projection-writer
       # OMN-14551 G6: see omninode-runtime's ONEX_BOUNDARY_DLQ_ENABLED comment.
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: ${STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set STABILITY_TEST_TRAJECTORY_EVALUATION_BACKEND}
       ONEX_BOUNDARY_DLQ_ENABLED: ${STABILITY_TEST_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set STABILITY_TEST_BOUNDARY_DLQ_ENABLED}
     volumes: !override
       - stability_test_tenant_projection_logs:/app/logs

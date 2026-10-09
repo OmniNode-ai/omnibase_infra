@@ -36,6 +36,10 @@ class EnumLedgerReplayStatus(StrEnum):
     # The chain was assembled but a hop is missing, so there is nothing
     # complete to replay. No gap is ever tolerated silently.
     CHAIN_INCOMPLETE = "chain_incomplete"
+    # The writer labelled this chain from its terminal's source and no parent.
+    # Not a pass (no bus chain replayed) and not a fault: the in-process path
+    # publishes only its terminal by design, operator ruling OMN-17427.
+    IN_PROCESS_TERMINAL_ONLY = "in_process_terminal_only"
     # A complete chain was replayed and the replay was not green.
     REPLAY_FAILED = "replay_failed"
     # The tier-2 verifier ran and returned SKIP. NOT a pass, and never

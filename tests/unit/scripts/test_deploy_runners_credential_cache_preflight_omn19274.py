@@ -262,44 +262,46 @@ def script_text() -> str:
     return DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
 
-def test_roll_one_runner_skips_rather_than_recreates_when_cache_is_not_ready(
+def test_roll_one_runner_refuses_rather_than_recreates_without_a_token(
     script_text: str,
 ) -> None:
-    """The fix's core behaviour change: a runner with no matching cache entry
-    and no migration token must be skipped (rc 3, never force-recreated),
-    not left to force-recreate into the OMN-19206 outage.
+    """OMN-18877: every recreate needs a supplied registration token, so a
+    runner reached with no token is refused (rc 3, never force-recreated),
+    and the cache pre-flight still runs to report a migration.
     """
     start = script_text.index("roll_one_runner() {")
     end = script_text.index("rolling_deploy() {")
     body = script_text[start:end]
     assert "_runner_cache_ready" in body
-    assert "return 3" in body
-    skip_branch = body[body.index('if [[ -z "${TOKEN_FILE}" ]]') :][:400]
-    assert "SKIPPING" in skip_branch
-    assert "return 3" in skip_branch
+    refuse_branch = body[body.index('if [[ -z "${mig_token//[[:space:]]/}" ]]') :][:400]
+    assert "refusing to recreate" in refuse_branch
+    assert "return 3" in refuse_branch
+    assert "export RUNNER_TOKEN=''" not in body
 
 
-def test_the_migration_path_reads_the_token_from_a_file_not_argv_or_env(
+def test_the_recreate_token_crosses_the_ssh_boundary_base64_encoded(
     script_text: str,
 ) -> None:
     assert "--token-file=*) TOKEN_FILE=" in script_text
-    start = script_text.index('mig_token=$(<"${TOKEN_FILE}")')
+    start = script_text.index("roll_one_runner() {")
+    end = script_text.index("rolling_deploy() {")
+    body = script_text[start:end]
+    assert 'mig_token=$(<"${TOKEN_FILE}")' in body
     # The token must never be interpolated bare into a logged/echoed line.
-    surrounding = script_text[start - 200 : start + 400]
-    assert "base64" in surrounding, (
-        "the migration token must be base64-encoded before crossing the ssh "
-        "boundary, matching the existing default-path convention"
-    )
+    assert 'mig_token_b64=$(encode_token "${mig_token}")' in body
+    assert "RUNNER_TOKEN=\\$(echo '${mig_token_b64}' | base64 -d)" in body
 
 
-def test_rolling_deploy_reports_skipped_runners_separately_from_a_halt(
+def test_rolling_deploy_refuses_before_any_remote_action_without_a_token(
     script_text: str,
 ) -> None:
     start = script_text.index("rolling_deploy() {")
     body = script_text[start:]
+    precondition = body.index("--rolling requires DEPLOY_RUNNER_TOKEN or --token-file")
+    assert precondition < body.index("rsync_artifacts")
     assert "skip_migration" in body
     assert "3) skip_migration+=" in body
-    assert "Skipped (no credential-cache entry" in body
+    assert "Skipped (could not validate recreate inputs)" in body
 
 
 def test_build_runner_image_preserves_the_previous_image_before_overwriting_it() -> (

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""deploy-runtime.sh must enforce lane-deploy attribution + the grant interlock (OMN-15218).
+"""onex-runtime-deploy must enforce lane-deploy attribution + the grant interlock (OMN-15218).
 
 Before OMN-15218 the sanctioned deploy path recorded WHAT was deployed
 (registry.json) but nothing recorded WHO deployed it or WHY, and nothing checked
@@ -11,7 +11,7 @@ to replace. Two stability-lane rebuilds in two days (2026-07-26T21:45Z,
 Two kinds of test here:
 
   * wiring assertions over the script text (the repo's existing idiom for
-    deploy-runtime.sh gates), and
+    onex-runtime-deploy gates), and
   * an EXECUTED harness that extracts the guard function and runs it in bash
     against a stub preflight, proving the seam actually hard-fails and actually
     captures the record — not merely that the tokens appear in the file.
@@ -31,10 +31,12 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 REFRESH_SCRIPT = REPO_ROOT / "scripts" / "runtime_build" / "refresh_stability_lane.sh"
 # OMN-16729: resolve_lane_name() moved into the shared compose-file resolver lib
-# that deploy-runtime.sh and both refresh wrappers source, so the wrappers' own
+# that onex-runtime-deploy and both refresh wrappers source, so the wrappers' own
 # compose calls derive the lane the same way this guard does.
 COMPOSE_FILES_SH = (
     Path(__file__).resolve().parents[2]
@@ -51,7 +53,7 @@ def _script_text() -> str:
 
 def _extract_function(text: str, name: str) -> str:
     match = re.search(rf"^{name}\s*\(\)\s*\{{.*?^\}}", text, re.DOTALL | re.MULTILINE)
-    assert match is not None, f"{name}() not found in deploy-runtime.sh"
+    assert match is not None, f"{name}() not found in onex-runtime-deploy"
     return match.group(0)
 
 
@@ -113,7 +115,7 @@ def test_refresh_stability_lane_runs_the_preflight_before_it_mutates_anything() 
     assert "preflight_lane_deploy_attribution.py" in text
     preflight_at = text.index("ATTRIBUTION_PREFLIGHT=")
     # docker tag (rollback anchor) and the ambient-clone checkout are this
-    # script's own mutations; both happen after deploy-runtime.sh is chosen but
+    # script's own mutations; both happen after onex-runtime-deploy is chosen but
     # BEFORE it is invoked, so the preflight has to precede them here too.
     assert preflight_at < text.index('    docker tag "')
     assert preflight_at < text.index("checkout --force --detach")
@@ -126,7 +128,7 @@ def test_refresh_stability_lane_runs_the_preflight_before_it_mutates_anything() 
 def test_lane_derivation_is_shared_not_duplicated() -> None:
     text = _script_text()
     assert "runtime_build/compose_files.sh" in text, (
-        "deploy-runtime.sh must source the shared lane derivation"
+        "onex-runtime-deploy must source the shared lane derivation"
     )
     assert re.search(
         r"^resolve_lane_name\s*\(\)",
@@ -134,7 +136,7 @@ def test_lane_derivation_is_shared_not_duplicated() -> None:
         re.MULTILINE,
     )
     assert not re.search(r"^resolve_lane_name\s*\(\)", text, re.MULTILINE), (
-        "deploy-runtime.sh must not re-declare the shared lane derivation"
+        "onex-runtime-deploy must not re-declare the shared lane derivation"
     )
     hotpatch = _extract_function(text, "guard_hotpatch_ledger")
     assert "resolve_lane_name" in hotpatch, (
@@ -152,7 +154,7 @@ log_info() { printf '[info] %s\\n' "$*" >&2; }
 log_warn() { printf '[warn] %s\\n' "$*" >&2; }
 log_error() { printf '[error] %s\\n' "$*" >&2; }
 log_cmd()  { printf '[cmd] %s\\n' "$*" >&2; }
-SCRIPT_NAME="deploy-runtime.sh"
+SCRIPT_NAME="onex-runtime-deploy"
 DEPLOY_INVOCATION_ARGS=(--execute --restart)
 LANE_ATTRIBUTION_RECORD_JSON=""
 ONEX_DEPLOY_REASON_VAR="ONEX_DEPLOY_REASON"
@@ -171,7 +173,7 @@ sys.exit(1 if os.environ.get("STUB_REFUSE") else 0)
 def _harness(
     tmp_path: Path, *, refuse: bool, drop_preflight: bool = False
 ) -> subprocess.CompletedProcess[str]:
-    """Run the real guard function from deploy-runtime.sh against a stub preflight."""
+    """Run the real guard function from onex-runtime-deploy against a stub preflight."""
     fake_repo = tmp_path / "repo"
     (fake_repo / "scripts").mkdir(parents=True)
     (fake_repo / ".venv" / "bin").mkdir(parents=True)
@@ -237,7 +239,7 @@ def test_guard_captures_the_record_and_passes_lane_identity(tmp_path: Path) -> N
     assert "--compose-project" in argv
     assert argv[argv.index("--compose-project") + 1] == "omnibase-infra-stability-test"
     assert (
-        "--source" in argv and argv[argv.index("--source") + 1] == "deploy-runtime.sh"
+        "--source" in argv and argv[argv.index("--source") + 1] == "onex-runtime-deploy"
     )
     assert "--check-only" not in argv, "execute mode must write the durable record"
 

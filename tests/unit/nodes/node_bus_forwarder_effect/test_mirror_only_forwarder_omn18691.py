@@ -121,6 +121,7 @@ def _ci_bus_lane_mirror() -> ModelGatewayLaneMirrorConfig:
     return ModelGatewayLaneMirrorConfig(
         source_lane="ci-bus",
         mirror_lanes=("dev",),
+        declared_lanes=("ci-bus", "dev"),
         topics=_CI_BUS_TOPICS,
     )
 

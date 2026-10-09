@@ -3,7 +3,7 @@
 """The base compose file publishes the Redpanda Admin API on loopback only (OMN-20260).
 
 The dev lane broker runs with ``admin_api_require_auth`` false, because its
-healthcheck, the deploy-runtime.sh broker probe and the rpk one-shots call the
+healthcheck, the onex-runtime-deploy broker probe and the rpk one-shots call the
 Admin API with no credentials. Published on every host interface, that let any
 LAN or tailnet host create SCRAM users and rewrite cluster config. In-network
 consumers reach ``redpanda:9644`` and never needed the host publish.

@@ -9,7 +9,7 @@ Measured on the ``.201`` compose dev lane on 2026-09-17, in one window.
 **One, the lane lock covers the git phase and nothing else.** ``git_pull`` takes
 the per-compose-project lock (OMN-18124) and releases it on the way out, so the
 build, the ``compose up`` and the verify all run with the lane unlocked. At
-11:20Z a hand ``deploy-runtime.sh`` acquired that lock uncontended while the
+11:20Z a hand ``onex-runtime-deploy`` acquired that lock uncontended while the
 agent was mid-runtime-phase on job ``746a118a``; the lane dropped to ``000`` on
 all three published ports for about six minutes. The agent's own
 ``single_flight_lock`` serializes agent against agent and says nothing about
@@ -291,7 +291,7 @@ async def test_lane_lock_is_held_through_every_mutating_phase(
     ]
     assert unlocked == [], (
         "these phases mutate the lane with its lock released, so a concurrent "
-        f"deploy-runtime.sh acquires it uncontended: {unlocked}"
+        f"onex-runtime-deploy acquires it uncontended: {unlocked}"
     )
 
     # Positive control, after: the lock is released on the way out. A test that

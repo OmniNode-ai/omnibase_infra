@@ -52,7 +52,7 @@ _DOD_VERIFY_STATE_MODEL = (
 
 _UNMET = EnumEvidenceAutocloseDecision.GAP_AC_UNBOUND
 _NO_BEHAVIOR = EnumEvidenceAutocloseDecision.GAP_NO_BEHAVIOR_PROOF
-_LIVE_NOT_RUN = EnumEvidenceAutocloseDecision.SKIPPED_LIVE_CHECK_NOT_EXECUTED
+_LIVE_NOT_RUN = EnumEvidenceAutocloseDecision.SKIPPED_DOD_VERIFY
 
 #: (ticket, expected decision, the criterion the sweep report named as unmet).
 #: The third column is documentation of WHY the ticket is not done, carried here

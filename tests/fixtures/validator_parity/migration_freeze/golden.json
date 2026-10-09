@@ -1,0 +1,964 @@
+{
+ "age_thresholds": {
+  "0": 0,
+  "29": 0,
+  "30": 0,
+  "31": 0,
+  "400": 1,
+  "59": 0,
+  "60": 1,
+  "61": 1
+ },
+ "scenarios": {
+  "absent-add_both": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "absent-add_migration": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "absent-add_non_sql": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "absent-add_outside": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "absent-add_rollback_dir": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "absent-add_two_migrations": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "absent-delete_migration": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "absent-empty": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "absent-modify_migration": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "absent-rename_into": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "absent-rename_within": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "commented_date-add_both": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/102_new.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/102_new.sql"
+    ]
+   }
+  },
+  "commented_date-add_migration": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/101_new.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/101_new.sql"
+    ]
+   }
+  },
+  "commented_date-add_non_sql": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/NOTES.txt"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/NOTES.txt"
+    ]
+   }
+  },
+  "commented_date-add_outside": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "commented_date-add_rollback_dir": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/rollback/101_down.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/rollback/101_down.sql"
+    ]
+   }
+  },
+  "commented_date-add_two_migrations": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/105_a.sql",
+     "docker/migrations/forward/106_b.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/105_a.sql",
+     "docker/migrations/forward/106_b.sql"
+    ]
+   }
+  },
+  "commented_date-delete_migration": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "commented_date-empty": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "commented_date-modify_migration": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "commented_date-rename_into": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/103_moved.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/103_moved.sql"
+    ]
+   }
+  },
+  "commented_date-rename_within": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/104_renamed.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/104_renamed.sql"
+    ]
+   }
+  },
+  "expired-add_both": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/102_new.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/102_new.sql"
+    ]
+   }
+  },
+  "expired-add_migration": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/101_new.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/101_new.sql"
+    ]
+   }
+  },
+  "expired-add_non_sql": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/NOTES.txt"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/NOTES.txt"
+    ]
+   }
+  },
+  "expired-add_outside": {
+   "ci": {
+    "exit": 1,
+    "refused": []
+   },
+   "staged": {
+    "exit": 1,
+    "refused": []
+   }
+  },
+  "expired-add_rollback_dir": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/rollback/101_down.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/rollback/101_down.sql"
+    ]
+   }
+  },
+  "expired-add_two_migrations": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/105_a.sql",
+     "docker/migrations/forward/106_b.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/105_a.sql",
+     "docker/migrations/forward/106_b.sql"
+    ]
+   }
+  },
+  "expired-delete_migration": {
+   "ci": {
+    "exit": 1,
+    "refused": []
+   },
+   "staged": {
+    "exit": 1,
+    "refused": []
+   }
+  },
+  "expired-empty": {
+   "ci": {
+    "exit": 1,
+    "refused": []
+   },
+   "staged": {
+    "exit": 1,
+    "refused": []
+   }
+  },
+  "expired-modify_migration": {
+   "ci": {
+    "exit": 1,
+    "refused": []
+   },
+   "staged": {
+    "exit": 1,
+    "refused": []
+   }
+  },
+  "expired-rename_into": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/103_moved.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/103_moved.sql"
+    ]
+   }
+  },
+  "expired-rename_within": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/104_renamed.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/104_renamed.sql"
+    ]
+   }
+  },
+  "fresh-add_both": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/102_new.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/102_new.sql"
+    ]
+   }
+  },
+  "fresh-add_migration": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/101_new.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/101_new.sql"
+    ]
+   }
+  },
+  "fresh-add_non_sql": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/NOTES.txt"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/NOTES.txt"
+    ]
+   }
+  },
+  "fresh-add_outside": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "fresh-add_rollback_dir": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/rollback/101_down.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/rollback/101_down.sql"
+    ]
+   }
+  },
+  "fresh-add_two_migrations": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/105_a.sql",
+     "docker/migrations/forward/106_b.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/105_a.sql",
+     "docker/migrations/forward/106_b.sql"
+    ]
+   }
+  },
+  "fresh-delete_migration": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "fresh-empty": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "fresh-modify_migration": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "fresh-rename_into": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/103_moved.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/103_moved.sql"
+    ]
+   }
+  },
+  "fresh-rename_within": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/104_renamed.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/104_renamed.sql"
+    ]
+   }
+  },
+  "garbage_date-add_both": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/102_new.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/102_new.sql"
+    ]
+   }
+  },
+  "garbage_date-add_migration": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/101_new.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/101_new.sql"
+    ]
+   }
+  },
+  "garbage_date-add_non_sql": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/NOTES.txt"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/NOTES.txt"
+    ]
+   }
+  },
+  "garbage_date-add_outside": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "garbage_date-add_rollback_dir": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/rollback/101_down.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/rollback/101_down.sql"
+    ]
+   }
+  },
+  "garbage_date-add_two_migrations": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/105_a.sql",
+     "docker/migrations/forward/106_b.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/105_a.sql",
+     "docker/migrations/forward/106_b.sql"
+    ]
+   }
+  },
+  "garbage_date-delete_migration": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "garbage_date-empty": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "garbage_date-modify_migration": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "garbage_date-rename_into": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/103_moved.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/103_moved.sql"
+    ]
+   }
+  },
+  "garbage_date-rename_within": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/104_renamed.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/104_renamed.sql"
+    ]
+   }
+  },
+  "no_date-add_both": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/102_new.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/102_new.sql"
+    ]
+   }
+  },
+  "no_date-add_migration": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/101_new.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/101_new.sql"
+    ]
+   }
+  },
+  "no_date-add_non_sql": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/NOTES.txt"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/NOTES.txt"
+    ]
+   }
+  },
+  "no_date-add_outside": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "no_date-add_rollback_dir": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/rollback/101_down.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/rollback/101_down.sql"
+    ]
+   }
+  },
+  "no_date-add_two_migrations": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/105_a.sql",
+     "docker/migrations/forward/106_b.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/105_a.sql",
+     "docker/migrations/forward/106_b.sql"
+    ]
+   }
+  },
+  "no_date-delete_migration": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "no_date-empty": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "no_date-modify_migration": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "no_date-rename_into": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/103_moved.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/103_moved.sql"
+    ]
+   }
+  },
+  "no_date-rename_within": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/104_renamed.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/104_renamed.sql"
+    ]
+   }
+  },
+  "warn-add_both": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/102_new.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/102_new.sql"
+    ]
+   }
+  },
+  "warn-add_migration": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/101_new.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/101_new.sql"
+    ]
+   }
+  },
+  "warn-add_non_sql": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/NOTES.txt"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/NOTES.txt"
+    ]
+   }
+  },
+  "warn-add_outside": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "warn-add_rollback_dir": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/rollback/101_down.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/rollback/101_down.sql"
+    ]
+   }
+  },
+  "warn-add_two_migrations": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/105_a.sql",
+     "docker/migrations/forward/106_b.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/105_a.sql",
+     "docker/migrations/forward/106_b.sql"
+    ]
+   }
+  },
+  "warn-delete_migration": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "warn-empty": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "warn-modify_migration": {
+   "ci": {
+    "exit": 0,
+    "refused": []
+   },
+   "staged": {
+    "exit": 0,
+    "refused": []
+   }
+  },
+  "warn-rename_into": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/103_moved.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/103_moved.sql"
+    ]
+   }
+  },
+  "warn-rename_within": {
+   "ci": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/104_renamed.sql"
+    ]
+   },
+   "staged": {
+    "exit": 1,
+    "refused": [
+     "docker/migrations/forward/104_renamed.sql"
+    ]
+   }
+  }
+ }
+}

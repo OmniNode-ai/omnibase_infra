@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: MIT
 
 """Static wiring coverage for the OMN-15718 bounded-timeout fix in
-deploy-runtime.sh.
+onex-runtime-deploy.
 
 Live-execution coverage for the shared helpers themselves lives in
 test_compose_wait_timeout.py. This file guards that every `docker compose ...
-up ...` call site in deploy-runtime.sh's deploy/restart/rollback path actually
+up ...` call site in onex-runtime-deploy's deploy/restart/rollback path actually
 routes through compose_up_bounded() (so the bounded deadline cannot silently
 regress out of one call site while staying wired everywhere else), and that
 cleanup_on_exit() reconciles container start state, not just image tags.
@@ -20,7 +20,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 LIB_SCRIPT = REPO_ROOT / "scripts" / "runtime_build" / "compose_wait_timeout.sh"
 
 
@@ -34,14 +36,14 @@ def _function_body(name: str) -> str:
         _text(),
         re.DOTALL | re.MULTILINE,
     )
-    assert match is not None, f"{name}() function not found in deploy-runtime.sh"
+    assert match is not None, f"{name}() function not found in onex-runtime-deploy"
     return match.group("body")
 
 
 @pytest.mark.unit
 def test_shared_lib_exists_and_is_sourced() -> None:
     assert LIB_SCRIPT.is_file(), (
-        "scripts/runtime_build/compose_wait_timeout.sh is missing; deploy-runtime.sh "
+        "scripts/runtime_build/compose_wait_timeout.sh is missing; onex-runtime-deploy "
         "and refresh_stability_lane.sh both depend on it for OMN-15718."
     )
     assert (

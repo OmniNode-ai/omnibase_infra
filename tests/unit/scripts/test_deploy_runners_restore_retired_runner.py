@@ -314,11 +314,11 @@ def test_a_retired_runner_with_a_token_file_is_created_with_the_token(
     assert "AAAFAKETOKEN" not in result.stdout + result.stderr
 
 
-def test_a_present_runner_with_a_ready_cache_still_rolls_without_a_token(
+def test_a_present_runner_with_a_ready_cache_requires_a_token(
     script_text: str, tmp_path: Path
 ) -> None:
-    """Positive control: the steady-state roll is unchanged."""
+    """A cache directory alone cannot prove that registration will restore."""
     result, ssh_calls = _roll_harness(script_text, tmp_path, "running", "")
-    assert "rc=0" in result.stdout, (result.stdout, result.stderr)
-    assert "export RUNNER_TOKEN=''" in ssh_calls
-    assert "up -d --force-recreate --no-deps --no-build omninode-runner-41" in ssh_calls
+    assert "rc=3" in result.stdout, (result.stdout, result.stderr)
+    assert "DEPLOY_RUNNER_TOKEN" in result.stderr
+    assert "up -d" not in ssh_calls

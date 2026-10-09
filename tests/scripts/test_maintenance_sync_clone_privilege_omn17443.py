@@ -67,6 +67,8 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+
 pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -93,7 +95,7 @@ def _git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         env={
-            **os.environ,
+            **scrub_git_location_env(),
             "GIT_CONFIG_GLOBAL": "/dev/null",
             "GIT_CONFIG_SYSTEM": "/dev/null",
         },
@@ -114,6 +116,7 @@ def _object_count(clone: Path) -> int:
 def _origin_dev(clone: Path) -> str:
     result = subprocess.run(
         ["git", "-C", str(clone), "rev-parse", "--verify", "refs/remotes/origin/dev"],
+        env=scrub_git_location_env(),
         capture_output=True,
         text=True,
         check=False,
@@ -509,7 +512,6 @@ def test_the_gate_rejects_the_captured_root_fetching_sync(tmp_path: Path) -> Non
         scripts.mkdir(parents=True)
         shutil.copy2(VENV_RECONCILER, scripts / VENV_RECONCILER.name)
         shutil.copy2(LIB, scripts / LIB.name)
-        shutil.copy2(REPO_ROOT / "scripts" / "reconcile-host.sh", scripts)
         maintenance = where / "deploy" / "maintenance"
         (maintenance / "cron.d").mkdir(parents=True)
         (maintenance / SYNC_SCRIPT.name).write_text(sync_body, encoding="utf-8")

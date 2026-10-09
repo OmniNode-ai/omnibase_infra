@@ -456,12 +456,27 @@ def _git_raw(clone: Path, *args: str) -> tuple[int, str]:
     return proc.returncode, proc.stdout or proc.stderr
 
 
-def append_msg(ledger_lock: Path, ledger: Path, sender: str, to: str, text: str) -> str:
-    """Append one MSG row through ``ledger_lock.py``; returns the row's id.
+def append_msg(ledger: Path, sender: str, to: str, text: str) -> str:
+    """Append one MSG row through ``onex-ledger``; returns the row's id.
 
     The id is ``<timestamp>-<sender>``, so a sender per clone keeps two rows
     written in the same second distinct.
     """
+    raw = os.environ.get("OMNI_HOME")
+    if not raw:
+        raise RuntimeError(
+            "OMNI_HOME is not set; the canonical ledger writer is required"
+        )
+    internal_home = os.environ.get(
+        "OMNIBASE_INTERNAL_HOME", str(Path(raw).parent / "omnibase_internal")
+    )
+    if not internal_home:
+        raise RuntimeError(
+            "OMNIBASE_INTERNAL_HOME is empty; set the canonical clone path"
+        )
+    internal = Path(internal_home)
+    if not (internal / "pyproject.toml").is_file():
+        raise RuntimeError(f"canonical omnibase_internal project missing: {internal}")
     stamp = _utc(time.time())
     msg_id = f"{stamp}-{sender}"
     row = (
@@ -469,7 +484,19 @@ def append_msg(ledger_lock: Path, ledger: Path, sender: str, to: str, text: str)
         f"ticket={MSG_TICKET} | {text}"
     )
     proc = subprocess.run(
-        [sys.executable, str(ledger_lock), str(ledger), "--append", row],
+        [
+            "env",
+            "-u",
+            "PYTHONPATH",
+            "uv",
+            "run",
+            "--project",
+            str(internal),
+            "onex-ledger",
+            str(ledger),
+            "--append",
+            row,
+        ],
         capture_output=True,
         text=True,
         timeout=330,
@@ -576,7 +603,6 @@ def _cmd_clone_refusal(args: argparse.Namespace) -> int:
             more = len(dirty.paths) - 8
             tail = f" (+{more} more)" if more > 0 else ""
             msg_id = append_msg(
-                Path(args.ledger_lock),
                 ledger,
                 f"{MSG_SENDER}-{repo}",
                 to,
@@ -814,7 +840,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--repo", required=True)
     p.add_argument("--state-dir", required=True)
     p.add_argument("--ledger", default=None)
-    p.add_argument("--ledger-lock", default=None)
     p.add_argument("--lock-age-s", type=int, required=True)
     p.add_argument(
         "--record",
