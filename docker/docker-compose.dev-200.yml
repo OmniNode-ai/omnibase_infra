@@ -30,7 +30,7 @@
 #   * the four runtime-kernel services mount this lane's own Bifrost overlay
 #     (docker/lane-overlays/dev-200.bifrost.yaml: cloud locale, no local model
 #     rung) and never the dev lane's, which binds the .201 model server. The
-#     Qwen3.8-27B planner on .200's :8130 is not bound either;
+#     qwen3.6-35b-a3b planner on .200's :8130 is not bound either;
 #   * host credential mounts (Vertex token) are pinned to /dev/null; this lane
 #     carries no operator login.
 #
