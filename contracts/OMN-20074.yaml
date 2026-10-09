@@ -32,6 +32,8 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s6_part1
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
   - id: dod-repo-evidence-s6-part1-ac2
     description: The audit tests prove the single named exception and its fail-closed shape.
     source: manual
@@ -39,3 +41,5 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -k pull_request_target
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
