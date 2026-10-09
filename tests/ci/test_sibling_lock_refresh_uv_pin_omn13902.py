@@ -51,7 +51,7 @@ def _run_refresh(tmp_path: Path, committed: str, produced: str) -> tuple[str, st
     identity = ["-c", "user.name=t", "-c", "user.email=t@example.invalid"]
     for argv in (
         ["init", "-q"],
-        ["add", "uv.lock"],
+        ["add", "-f", "uv.lock"],
         [*identity, "commit", "-q", "-m", "base"],
     ):
         subprocess.run(
