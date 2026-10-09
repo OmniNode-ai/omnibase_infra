@@ -3885,13 +3885,34 @@ readback_one_shot_service() {
     local service="$1"
     local container_id="$2"
 
+    # OMN-17427: a one-shot that is still running (or created / restarting)
+    # has not FAILED yet -- it has not finished. `docker compose up -d` returns
+    # once containers are started, not once one-shots have exited, so a single
+    # sample can land mid-run: measured on the .201 dev lane 2026-10-09T14:03Z,
+    # redpanda-sasl-enable ran 14:03:47Z..14:03:56Z and exited 0, RT-6 sampled
+    # it 'running', refused, and the refresh rolled a healthy deploy back.
+    # Re-read it until it is terminal, for a BOUNDED number of samples. A
+    # one-shot still not terminal when the bound runs out fails exactly as
+    # before; the exit code and finished-at are read only after it settles.
+    local wait_attempts="${RT6_ONE_SHOT_WAIT_ATTEMPTS:-60}"
+    local poll_seconds="${RT6_ONE_SHOT_POLL_SECONDS:-3}"
     local state exit_code finished_at
+    local attempt=1
     state="$(docker inspect -f '{{.State.Status}}' "${container_id}" 2>/dev/null || true)"
+    while [[ "${state}" == "running" || "${state}" == "created" || "${state}" == "restarting" ]] \
+        && (( attempt < wait_attempts )); do
+        if (( attempt == 1 )); then
+            log_info "RT-6: one-shot '${service}' (${container_id:0:12}) is '${state}'; waiting for it to finish (up to ${wait_attempts} samples, ${poll_seconds}s apart)."
+        fi
+        sleep "${poll_seconds}"
+        attempt=$((attempt + 1))
+        state="$(docker inspect -f '{{.State.Status}}' "${container_id}" 2>/dev/null || true)"
+    done
     exit_code="$(docker inspect -f '{{.State.ExitCode}}' "${container_id}" 2>/dev/null || true)"
     finished_at="$(docker inspect -f '{{.State.FinishedAt}}' "${container_id}" 2>/dev/null || true)"
 
     if [[ "${state}" != "exited" ]]; then
-        log_error "Deploy readback FAILED (RT-6): one-shot service '${service}' (container ${container_id:0:12}) is in state '${state}', expected 'exited'."
+        log_error "Deploy readback FAILED (RT-6): one-shot service '${service}' (container ${container_id:0:12}) is in state '${state}', expected 'exited', after ${attempt} sample(s)."
         log_error "  A one-shot that never reached a terminal state has not proven it did its job."
         log_error "Refusing to certify this deploy."
         exit 1
