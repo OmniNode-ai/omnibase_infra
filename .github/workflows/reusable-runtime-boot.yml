@@ -988,7 +988,9 @@ jobs:
       }}
     # Image build (cold) plus a cold runtime boot; the runtime's own
     # start_period is 1800s, so the health wait below is bounded at 30 minutes.
-    timeout-minutes: 60
+    # OMN-17427: +20 for the dev-lane class phase (a warm rebuild of the
+    # omnimarket layer and later, a 900 s health budget and a 120 s hold).
+    timeout-minutes: 80
     env:
       LOCAL_PROJECT: omnibase-infra-local
       DELEGATE_COMMAND_TOPIC: onex.cmd.omnimarket.delegate-skill.v1
@@ -1218,6 +1220,175 @@ jobs:
           docker exec "$broker" rpk group list | grep -i delegate || true
           echo "::error::no live node_delegate_skill_orchestrator consumer group on ${DELEGATE_COMMAND_TOPIC}"
           exit 1
+
+      # =====================================================================
+      # OMN-17427: DEV-LANE CLASS PHASE. The laptop checks above prove the
+      # stack a new engineer gets. The .201 dev lane runs the same kernels in
+      # a different configuration class, and on 2026-10-09 two changes that
+      # passed every CI boot crash-looped it: omnibase_infra#4750 refused to
+      # start whenever INFISICAL_ADDR is set (the laptop render blanks it),
+      # and omnimarket 0.4.308 carried route ids over ModelDispatchRoute's
+      # limit, fatal under the dev lane's ONEX_WIRING_STRICT_MODE=1 and only
+      # quarantined in a non-strict CI boot. This phase recreates both kernels
+      # with the dev lane's bindings, READ from the dev lane's own compose
+      # files so a change cannot pass here by teaching CI a configuration the
+      # lane does not have, on the current omnimarket release, and fails on a
+      # restart. Regression test: tests/ci/test_runtime_boot_dev_lane_class_omn17427.py.
+      # =====================================================================
+      - name: Dev-lane class -- derive the kernel environment from the dev lane's compose files
+        env:
+          DEV_LANE_COMPOSE_FILE: docker/docker-compose.dev-lane.yml
+          INFRA_COMPOSE_FILE: docker/docker-compose.infra.yml
+          # Any non-empty address selects the store, which is the class; the
+          # runner has no secrets store, so the address resolves nowhere. Every
+          # runtime profile declares prefetch_policy=disabled, so no boot path
+          # dials it unless a contract binds a store-carried secret.
+          DEV_LANE_CLASS_STORE_ADDR: http://secrets-store.dev-lane-class.invalid:8080
+        run: |
+          set -euo pipefail
+          : "${DEV_LANE_CLASS_OVERRIDE:=${RUNNER_TEMP}/dev-lane-class.override.yml}"
+          export DEV_LANE_CLASS_OVERRIDE
+          rm -f "$DEV_LANE_CLASS_OVERRIDE"
+          uv run python - <<'PY'
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          import yaml
+
+          # Compose's merge tags (!override, !reset) are not YAML SafeLoader
+          # accepts; they only steer how compose merges files, so drop them.
+          COMPOSE_TAG = re.compile(r"(?<=\s)!(override|reset)(?=\s)")
+
+
+          def load(name):
+              text = Path(os.environ[name]).read_text(encoding="utf-8")
+              return yaml.safe_load(COMPOSE_TAG.sub("", text)) or {}
+
+
+          dev_lane = load("DEV_LANE_COMPOSE_FILE")
+          infra = load("INFRA_COMPOSE_FILE")
+          strict = dev_lane.get("x-dev-lane-strict-wiring-env")
+          if not isinstance(strict, dict) or not strict:
+              sys.exit(
+                  "::error::the dev lane overlay declares no x-dev-lane-strict-wiring-env "
+                  "mapping; the dev-lane class cannot be derived (refusing to default)"
+              )
+          runtime_env = infra.get("x-runtime-env")
+          if not isinstance(runtime_env, dict) or "INFISICAL_ADDR" not in runtime_env:
+              sys.exit(
+                  "::error::docker-compose.infra.yml x-runtime-env no longer binds "
+                  "INFISICAL_ADDR; re-derive the dev-lane class before changing this gate"
+              )
+          env = {str(key): str(value) for key, value in strict.items()}
+          env["INFISICAL_ADDR"] = os.environ["DEV_LANE_CLASS_STORE_ADDR"]
+          override = {
+              "services": {
+                  kernel: {"environment": dict(env)}
+                  for kernel in ("omninode-runtime", "runtime-effects")
+              }
+          }
+          Path(os.environ["DEV_LANE_CLASS_OVERRIDE"]).write_text(
+              yaml.safe_dump(override, sort_keys=True), encoding="utf-8"
+          )
+          print("dev-lane class kernel environment:", sorted(env))
+          PY
+          echo "DEV_LANE_CLASS_OVERRIDE=${DEV_LANE_CLASS_OVERRIDE}" >> "${GITHUB_ENV:-/dev/null}"
+          cat "$DEV_LANE_CLASS_OVERRIDE"
+
+      - name: Dev-lane class -- resolve the current omnimarket release
+        run: |
+          set -euo pipefail
+          tag="$(git ls-remote --tags --refs https://github.com/OmniNode-ai/omnimarket 'v*' \
+            | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+          if [ -z "$tag" ]; then
+            echo "::error::could not resolve an omnimarket release tag"
+            exit 1
+          fi
+          echo "current omnimarket release: ${tag}"
+          echo "OMNIMARKET_RELEASE_REF=${tag}" >> "$GITHUB_ENV"
+
+      - name: Dev-lane class -- rebuild the runtime image on that release
+        run: |
+          set -euo pipefail
+          # Same image name the laptop job built, so this replaces it rather
+          # than adding a per-run image; the job's own teardown removes the
+          # project. Only the omnimarket layer and the layers after it rebuild.
+          sha="$(git rev-parse HEAD)"
+          OMNIMARKET_REF="$OMNIMARKET_RELEASE_REF" docker compose \
+            --env-file "$LOCAL_ENV_FILE" --env-file docker/runtime-policy.env \
+            -f docker/docker-compose.generated.yml -f "$DEV_LANE_CLASS_OVERRIDE" \
+            build --build-arg "GIT_SHA=${sha}" --build-arg "VCS_REF=${sha}" \
+            --build-arg "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            omninode-runtime
+
+      - name: Dev-lane class -- recreate both kernels with that environment
+        run: |
+          set -euo pipefail
+          OMNIMARKET_REF="$OMNIMARKET_RELEASE_REF" docker compose \
+            --env-file "$LOCAL_ENV_FILE" --env-file docker/runtime-policy.env \
+            -f docker/docker-compose.generated.yml -f "$DEV_LANE_CLASS_OVERRIDE" \
+            up -d --no-deps --force-recreate omninode-runtime runtime-effects
+          for kernel in omninode-runtime runtime-effects; do
+            container="${LOCAL_PROJECT}-${kernel}"
+            docker exec "$container" sh -c 'echo "INFISICAL_ADDR set: ${INFISICAL_ADDR:+yes} strict=${ONEX_WIRING_STRICT_MODE:-unset}"'
+            docker exec "$container" /app/.venv/bin/python -c \
+              'import importlib.metadata as m; print("omnimarket", m.version("omnimarket"))'
+          done
+
+      - name: Dev-lane class -- both kernels stay healthy and running with no restart (crash-loop gate)
+        run: |
+          set -euo pipefail
+          # A kernel that fails strict wiring or refuses its configuration
+          # exits, and `restart: unless-stopped` brings it back: a crash loop
+          # reads as a rising RestartCount long before /health could. Budget
+          # 900 s to healthy, then a 120 s hold in which neither kernel may
+          # restart or stop.
+          fail() {
+            echo "::error::$1"
+            for k in omninode-runtime runtime-effects; do
+              echo "::group::${k} logs (tail)"
+              docker logs --tail 80 "${LOCAL_PROJECT}-${k}" 2>&1 || true
+              echo "::endgroup::"
+            done
+            exit 1
+          }
+          check() {
+            local kernel="$1" container="${LOCAL_PROJECT}-$1" restarts state
+            restarts="$(docker inspect --format '{{.RestartCount}}' "$container")"
+            state="$(docker inspect --format '{{.State.Status}}' "$container")"
+            if [ "$restarts" != "0" ]; then
+              fail "dev-lane class: ${kernel} restarted ${restarts} time(s) (crash loop)"
+            fi
+            if [ "$state" != "running" ]; then
+              fail "dev-lane class: ${kernel} is ${state}, not running"
+            fi
+          }
+          deadline=$(( $(date +%s) + 900 ))
+          for kernel in omninode-runtime runtime-effects; do
+            while :; do
+              check "$kernel"
+              body="$(docker exec "${LOCAL_PROJECT}-${kernel}" curl -sS --max-time 10 http://localhost:8085/health 2>&1 || true)"
+              status="$(printf '%s' "$body" | jq -r '.status // empty' 2>/dev/null || true)"
+              running="$(printf '%s' "$body" | jq -r '.details.is_running // empty' 2>/dev/null || true)"
+              echo "${kernel}: status=${status:-none} is_running=${running:-none}"
+              if [ "$status" = "healthy" ] && [ "$running" = "true" ]; then
+                break
+              fi
+              if [ "$(date +%s)" -ge "$deadline" ]; then
+                fail "dev-lane class: ${kernel} did not report healthy and running within 900s (last body: ${body})"
+              fi
+              sleep 15
+            done
+          done
+          for _ in $(seq 1 8); do
+            sleep 15
+            for kernel in omninode-runtime runtime-effects; do
+              check "$kernel"
+            done
+          done
+          echo "dev-lane class: both kernels healthy, running, zero restarts"
 
       - name: Container state and log tail (always)
         if: always()

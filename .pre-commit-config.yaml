@@ -2141,6 +2141,18 @@ repos:
           ^(scripts/ci/check_integration_skips\.py|scripts/ci/runtime_boot_suites_skip_guard\.yaml|tests/ci/test_check_integration_skips\.py|\.github/workflows/reusable-runtime-boot\.yml|tests/integration/test_runtime_consumes_build_loop_terminal_event\.py|tests/integration/registration/e2e/test_runtime_e2e\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-17427: the laptop boot job's dev-lane class phase derives the
+      # kernels' strict-wiring and secrets-store bindings from the dev lane's
+      # compose files and fails on a restart. SYNC with
+      # tests/ci/test_runtime_boot_dev_lane_class_omn17427.py in CI.
+      - id: runtime-boot-dev-lane-class
+        name: Runtime boot dev-lane class phase (OMN-17427)
+        language: system
+        entry: uv run pytest tests/ci/test_runtime_boot_dev_lane_class_omn17427.py -q -p no:randomly
+        files: >-
+          ^(\.github/workflows/(reusable-runtime-boot|ci)\.yml|docker/docker-compose\.(infra|dev-lane)\.yml|tests/ci/test_runtime_boot_dev_lane_class_omn17427\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
   # OMN-13291 (W0): validator-requirements fleet gate. Reports ALL missing
   # required gates for omnibase_infra against omnibase_core's
   # architecture-handshakes/validator-requirements.yaml, ratcheted by this
