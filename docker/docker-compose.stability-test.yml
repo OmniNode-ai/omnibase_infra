@@ -80,8 +80,8 @@ x-stability-test-strict-wiring-env: &stability_test_strict_wiring_env
 # health emitter still publishes this runtime's verdict with no lane, which is
 # OMN-18769 AC6 unchanged. It changes only what may attach here.
 #
-# On the main runtime only, the one that owns the lab projection by profile,
-# mirroring the dev lane. Literal, not interpolated: an exported shell value
+# Main and effects runtimes name their lane for lane-scoped contracts
+# (OMN-19812). Literal, not interpolated: an exported shell value
 # must not be able to rename the lane.
 x-stability-test-lane-identity-env: &stability_test_lane_identity_env
   ONEX_RUNTIME_LANE: "stability-test"
@@ -315,6 +315,8 @@ services:
       migration-gate:
         condition: service_healthy
     environment:
+      # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
+      ONEX_RUNTIME_LANE: "stability-test"
       !!merge <<: *stability_test_strict_wiring_env
       OMNIMEMORY_ENABLED: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED:?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_ENABLED}
       OMNIMEMORY_MEMGRAPH_HOST: ${STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST?runtime policy contract must set STABILITY_TEST_RUNTIME_EFFECTS_OMNIMEMORY_MEMGRAPH_HOST}

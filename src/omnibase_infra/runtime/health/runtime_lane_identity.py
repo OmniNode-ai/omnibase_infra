@@ -21,6 +21,10 @@ kernel refuses to start, naming what is missing. A runtime that cannot name
 its lane never runs DEGRADED with its lane-scoped contracts silently dropped,
 which is what runtimes absent from the compiled lane list did (OMN-19408).
 
+OMN-19812 separates placement from health keying: a runtime may name its lane
+for placement without speaking for the lane's health, using
+``ONEX_RUNTIME_LANE_HEALTH_SPEAKER=false``.
+
 The kernel resolves once and :func:`establish_runtime_lane` holds the result
 for the life of the process; the auto-wiring ownership filter and the health
 monitor read it back through :func:`established_runtime_lane`.
@@ -31,6 +35,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping
+from functools import lru_cache
 from pathlib import Path
 
 from omnibase_core.enums.enum_runtime_lane_role import EnumRuntimeLaneRole
@@ -53,6 +58,9 @@ ENV_RUNTIME_LANE = RUNTIME_LANE_ENV_VAR
 #: The environment variable a deployment sets to name its environment, the
 #: first segment of every overlay scope.
 ENV_RUNTIME_ENVIRONMENT = "ONEX_ENVIRONMENT"
+
+#: Whether this runtime speaks for its lane's health (OMN-19812).
+ENV_RUNTIME_LANE_HEALTH_SPEAKER = "ONEX_RUNTIME_LANE_HEALTH_SPEAKER"
 
 #: The one runtime profile whose health is keyed on its lane (OMN-19144).
 _HEALTH_SPEAKING_PROFILE = "main"
@@ -87,10 +95,32 @@ def clear_established_runtime_lane() -> None:
     _established.clear()
 
 
+@lru_cache(maxsize=1)
+def _note_health_non_speaker() -> None:
+    """Say ONCE per process that this runtime leaves lane health to its speaker."""
+    logger.info(
+        "%s=false — this runtime names its lane for placement only; its "
+        "health events carry no lane (OMN-19812)",
+        ENV_RUNTIME_LANE_HEALTH_SPEAKER,
+    )
+
+
+@lru_cache(maxsize=8)
+def _warn_invalid_health_speaker(value: str) -> None:
+    """Say ONCE per process and value that the health-speaker value is refused."""
+    logger.warning(
+        "%s=%r is invalid; accepted values are absent/blank, 'true', or "
+        "'false' — emitting no health lane (OMN-19812)",
+        ENV_RUNTIME_LANE_HEALTH_SPEAKER,
+        value,
+    )
+
+
 def resolve_runtime_lane(
     declaration: ModelRuntimeLaneDeclaration | None = None,
     *,
     runtime_profile: str | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> str | None:
     """Return the lane a HEALTH fact is keyed on, or ``None``.
 
@@ -103,11 +133,25 @@ def resolve_runtime_lane(
     keyed by lane alone, so only the ``main`` profile keys its health; every
     other profile on the same lane publishes with no lane.
 
+    OMN-19812: ``ONEX_RUNTIME_LANE_HEALTH_SPEAKER=false`` disables health
+    keying while preserving placement. Absent, blank or ``true`` keeps the
+    current behavior; any other value refuses to speak for health.
+
     Args:
         declaration: The lane to judge. Defaults to the established lane.
         runtime_profile: This process's runtime profile, when known. A profile
             other than ``main`` keys no health row.
+        environ: Override for the process environment. Injected by tests; the
+            default reads ``os.environ``.
     """
+    source: Mapping[str, str] = os.environ if environ is None else environ
+    speaker = (source.get(ENV_RUNTIME_LANE_HEALTH_SPEAKER) or "").strip().lower()
+    if speaker == "false":
+        _note_health_non_speaker()
+        return None
+    if speaker not in ("", "true"):
+        _warn_invalid_health_speaker(speaker)
+        return None
     if runtime_profile is not None and runtime_profile != _HEALTH_SPEAKING_PROFILE:
         return None
     if declaration is None:
@@ -123,6 +167,7 @@ def resolve_runtime_lane(
 __all__: list[str] = [
     "ENV_RUNTIME_ENVIRONMENT",
     "ENV_RUNTIME_LANE",
+    "ENV_RUNTIME_LANE_HEALTH_SPEAKER",
     "clear_established_runtime_lane",
     "establish_runtime_lane",
     "established_runtime_lane",

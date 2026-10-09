@@ -36,15 +36,51 @@ rather than skipping there.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 import yaml
 
-from omnibase_core.models.config_overlay import ModelConfigOverlayScope
-from omnibase_infra.runtime.health.runtime_lane_identity import ENV_RUNTIME_LANE
+from omnibase_core.enums.enum_runtime_lane_role import EnumRuntimeLaneRole
+from omnibase_core.models.config_overlay import (
+    ModelConfigOverlayScope,
+    ModelRuntimeLaneDeclaration,
+)
+from omnibase_infra.runtime.health import runtime_lane_identity
+from omnibase_infra.runtime.health.runtime_lane_identity import (
+    ENV_RUNTIME_LANE,
+    ENV_RUNTIME_LANE_HEALTH_SPEAKER,
+    resolve_runtime_lane,
+)
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture
+def fresh_warn_once_state() -> Iterator[None]:
+    """Give each test a process that has not yet logged the speaker notes.
+
+    The health-speaker notes are once per process by design, so their
+    suppression is process state; without this reset a test would observe an
+    earlier test's suppression.
+    """
+    runtime_lane_identity._note_health_non_speaker.cache_clear()
+    runtime_lane_identity._warn_invalid_health_speaker.cache_clear()
+    yield
+    runtime_lane_identity._note_health_non_speaker.cache_clear()
+    runtime_lane_identity._warn_invalid_health_speaker.cache_clear()
+
+
+def _lab_declaration(lane: str) -> ModelRuntimeLaneDeclaration:
+    """A runtime.lane overlay document granting ``lane`` the lab role."""
+    return ModelRuntimeLaneDeclaration(
+        schema_version="runtime_lane.v1",
+        lane_id=lane,
+        roles=(EnumRuntimeLaneRole.LAB,),
+        description=f"{lane} lab lane",
+    )
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -62,16 +98,15 @@ DEV_LANE_VALUE = "compose-dev"
 #: both emit on the health topic -- verified read-only on the lab 2026-09-22,
 #: each logging four monitor lines in the same 40-minute window. Only one of
 #: them may claim the lane. The projection's health arm is an upsert guarded on
-#: ``observed_at``, not a fold across processes, so two services declaring the
+#: ``observed_at``, not a fold across processes, so two health speakers for the
 #: same lane would make the lane's stored verdict whichever process emitted
 #: last rather than a statement about the lane.
 #:
 #: ``omninode-runtime`` is the one that speaks, because it is the lane's health
 #: surface: port 8085 is the endpoint the lane's own acceptance falsifier reads.
-#: ``runtime-effects`` keeps no lane and its health events stay unkeyable and
-#: dropped -- an honest "this process cannot speak for the lane", not an
-#: oversight. A worst-of fold across a lane's runtimes is a different design and
-#: belongs to the parent ticket, not to this repair.
+#: ``runtime-effects`` names its lane for placement but declares
+#: ``ONEX_RUNTIME_LANE_HEALTH_SPEAKER=false`` so its health stays unkeyed
+#: (OMN-19812). A worst-of fold across runtimes belongs to the parent ticket.
 LANE_SPEAKING_SERVICE = "omninode-runtime"
 
 #: Overlays for lanes the lab lane-health vocabulary deliberately excludes
@@ -201,25 +236,35 @@ def test_the_declared_lane_is_a_lane_id_an_overlay_can_declare() -> None:
     assert value == DEV_LANE_VALUE
 
 
-def test_exactly_one_dev_lane_service_speaks_for_the_lane() -> None:
+def test_exactly_one_dev_lane_service_resolves_to_a_health_lane() -> None:
     """Two claimants make the stored verdict a race, not a measurement.
 
     Both ``omninode-runtime`` and ``runtime-effects`` run the health monitor on
     this lane. The projection's health arm is an ``observed_at``-guarded upsert
-    on a row keyed by lane alone, so a second service declaring the same lane
+    on a row keyed by lane alone, so a second service speaking for the same lane
     does not add a fact -- it overwrites the first one whenever it emits later.
     Adding a claimant is therefore a modelling decision (a lane-level fold), not
     a configuration tweak, and it fails here until someone makes it.
     """
-    declared = _lane_declarations(DEV_LANE_OVERLAY)
-
-    assert sorted(declared) == [LANE_SPEAKING_SERVICE], (
-        f"{sorted(declared)} declare {ENV_RUNTIME_LANE} on "
-        f"{DEV_LANE_OVERLAY.name}; exactly one service may speak for a lane "
-        "while the projection stores one row per lane with no cross-process "
-        "fold. Whichever of these emits last silently becomes the lane's "
-        "recorded health."
+    environments = _service_environments(DEV_LANE_OVERLAY)
+    declared = {
+        name: env for name, env in environments.items() if ENV_RUNTIME_LANE in env
+    }
+    assert set(declared) == {LANE_SPEAKING_SERVICE, "runtime-effects"}
+    speakers = {
+        name: lane
+        for name, env in declared.items()
+        if (
+            lane := resolve_runtime_lane(
+                _lab_declaration(env[ENV_RUNTIME_LANE]), environ=env
+            )
+        )
+        is not None
+    }
+    assert speakers == {LANE_SPEAKING_SERVICE: DEV_LANE_VALUE}, (
+        "exactly one service may key health while the projection stores one row per lane"
     )
+    assert declared["runtime-effects"][ENV_RUNTIME_LANE] == DEV_LANE_VALUE
 
 
 @pytest.mark.parametrize(
@@ -261,7 +306,69 @@ def test_the_stability_test_main_runtime_names_its_lane() -> None:
 
     declared = _lane_declarations(overlay)
 
-    assert declared == {LANE_SPEAKING_SERVICE: "stability-test"}, (
-        f"{overlay.name} declares {declared!r}; the main runtime must declare "
-        f"{ENV_RUNTIME_LANE}=stability-test (OMN-19408)"
+    assert declared == {
+        LANE_SPEAKING_SERVICE: "stability-test",
+        "runtime-effects": "stability-test",
+    }, (
+        f"{overlay.name} declares {declared!r}; main and effects must declare "
+        f"{ENV_RUNTIME_LANE}=stability-test (OMN-19408, OMN-19812)"
+    )
+
+
+@pytest.mark.parametrize("speaker", ["false", "False "])
+def test_health_non_speaker_keys_no_health_row(
+    speaker: str,
+    caplog: pytest.LogCaptureFixture,
+    fresh_warn_once_state: None,
+) -> None:
+    environment = {ENV_RUNTIME_LANE_HEALTH_SPEAKER: speaker}
+    with caplog.at_level(logging.INFO):
+        for _ in range(5):
+            assert (
+                resolve_runtime_lane(
+                    _lab_declaration(DEV_LANE_VALUE), environ=environment
+                )
+                is None
+            )
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    notes = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.INFO
+        and ENV_RUNTIME_LANE_HEALTH_SPEAKER in r.getMessage()
+    ]
+    assert len(notes) == 1
+
+
+@pytest.mark.parametrize("speaker", [None, "", "  ", "true", " TRUE "])
+def test_default_and_explicit_health_speaker_keep_current_behavior(
+    speaker: str | None,
+) -> None:
+    environment: dict[str, str] = {}
+    if speaker is not None:
+        environment[ENV_RUNTIME_LANE_HEALTH_SPEAKER] = speaker
+    assert (
+        resolve_runtime_lane(_lab_declaration(DEV_LANE_VALUE), environ=environment)
+        == DEV_LANE_VALUE
+    )
+
+
+def test_invalid_health_speaker_refuses_health_and_warns_once(
+    caplog: pytest.LogCaptureFixture,
+    fresh_warn_once_state: None,
+) -> None:
+    environment = {ENV_RUNTIME_LANE_HEALTH_SPEAKER: "bogus"}
+    with caplog.at_level(logging.WARNING):
+        for _ in range(5):
+            assert (
+                resolve_runtime_lane(
+                    _lab_declaration(DEV_LANE_VALUE), environ=environment
+                )
+                is None
+            )
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert ENV_RUNTIME_LANE_HEALTH_SPEAKER in warnings[0]
+    assert all(
+        value in warnings[0] for value in ("bogus", "absent/blank", "true", "false")
     )

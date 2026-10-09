@@ -102,13 +102,13 @@ make seed-infisical
 # Show running containers
 make status
 
-# Stop the core bundle ONLY (auth/runtime stay running)
+# Stop the last generated compose project (keeps volumes)
 make down
 
-# Stop the auth bundle (keycloak)
+# Same project-wide teardown (the auth argument is ignored; keeps volumes)
 make down-auth
 
-# Stop everything (runtime + auth + core, in safe teardown order)
+# Repeat project-wide teardown for legacy bundle arguments (keeps volumes)
 make down-all
 
 # List all targets
