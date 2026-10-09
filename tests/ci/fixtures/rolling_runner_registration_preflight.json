@@ -1,9 +1,9 @@
 {
   "_provenance": {
     "source": "Unstubbed rolling CLI missing-token preflight, re-run with ssh, scp, rsync, docker, curl and gh shimmed to fail and record any call (none was made); no external API or credential-backed registration performed",
-    "captured_utc": "2026-10-09T19:30:19.533899+00:00",
+    "captured_utc": "2026-10-09T19:43:18.881325+00:00",
     "source_file": "scripts/deploy-runners.sh",
-    "source_sha256": "22c636f80c95e089ddd779dd0903483b96729f5905fa20513abbfcb7834aec7a"
+    "source_sha256": "2c8dc59d5087c70a020325cdec67a0bb69285aa07872086bab0d4fca35f5b09f"
   },
   "responses": {
     "normal": {

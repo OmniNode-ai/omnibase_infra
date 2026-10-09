@@ -444,7 +444,7 @@ def test_deploy_runner_repair_cron_runs_every_ten_minutes() -> None:
 
     assert (
         '"omninode-runner-repair|*:0/10|MONITOR_AUTO_BOUNCE=1 '
-        'OFFLINE_IDLE_RECREATE_AGE_SECONDS=600 |runner-repair.log"'
+        'OFFLINE_IDLE_RECREATE_AGE_SECONDS=600|runner-repair.log"'
     ) in deploy_script
     assert "runner-repair-check" in deploy_script  # the legacy line it retires
     # OMN-18819 moved the logs off /tmp into the fleet state dir; OMN-20805

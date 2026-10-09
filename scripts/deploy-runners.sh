@@ -924,20 +924,29 @@ ENVEOF
     local log_dir="${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs"
     local unit_dir='${HOME}/.config/systemd/user'
 
-    # name | calendar | extra environment on the command | log file
+    # name | calendar | extra environment (KEY=VALUE, space separated) | log file.
+    # The environment is Environment= lines, not an inline prefix on the command,
+    # so a host that tunes the repair pass overrides it with a drop-in rather than
+    # by editing the unit this installer owns.
     local specs=(
         "omninode-runner-monitor|*:0/3||runner-monitor.log"
-        "omninode-runner-repair|*:0/10|MONITOR_AUTO_BOUNCE=1 OFFLINE_IDLE_RECREATE_AGE_SECONDS=600 |runner-repair.log"
+        "omninode-runner-repair|*:0/10|MONITOR_AUTO_BOUNCE=1 OFFLINE_IDLE_RECREATE_AGE_SECONDS=600|runner-repair.log"
     )
-    local spec name calendar extra logfile unit_text timer_text
+    local spec name calendar extra logfile unit_text timer_text env_lines kv
+    local -a kvs
     for spec in "${specs[@]}"; do
         IFS='|' read -r name calendar extra logfile <<<"${spec}"
+        env_lines=""
+        read -r -a kvs <<<"${extra}"
+        for kv in ${kvs[@]+"${kvs[@]}"}; do
+            env_lines+="Environment=${kv}"$'\n'
+        done
         unit_text="[Unit]
 Description=ONEX runner fleet monitor, ${name} (OMN-20805)
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -lc 'set -a; source ${monitor_env}; set +a; ${extra}${monitor_script}'
+${env_lines}ExecStart=/bin/bash -lc 'set -a; source ${monitor_env}; set +a; ${monitor_script}'
 StandardOutput=append:${log_dir}/${logfile}
 StandardError=append:${log_dir}/${logfile}
 SyslogIdentifier=${name}
