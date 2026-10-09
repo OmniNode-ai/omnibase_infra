@@ -61,7 +61,17 @@
 #               fail-loud, NO drift event; deliberately distinct from 30 so a host
 #               we cannot see is never reported as a host that is down. OMN-15466),
 #             5 host undeclared (LANE_CENSUS_HOST, default `hostname`, names no entry
-#               of the manifest's `hosts:` registry — no plan, no event. OMN-19088).
+#               of the manifest's `hosts:` registry — no plan, no event. OMN-19088),
+#             8 drift detected and the drift event was NOT published (no broker
+#               container named, or the produce failed). A drift that reached the
+#               bus is 30; one that did not is 8, so a unit's exit code says
+#               whether the alert was delivered. OMN-20798.
+#
+# THE DRIFT EVENT TAKES THE MEMORY PASS'S TRANSPORT (OMN-20798). Both events are
+# produced inside the broker container named by LANE_MEMORY_BROKER_CONTAINER
+# (`rpk` is not on a lab host's PATH, and a lab broker's external listener
+# requires SASL). The earlier `rpk ... --brokers "$KAFKA_BOOTSTRAP_SERVERS"`
+# branch could not run on any lab host and is gone.
 #
 # Host scoping (OMN-19088): only the lanes the manifest declares for this host
 # are evaluated; the rest are reported in `lanes_not_applicable`, and one of
@@ -110,6 +120,9 @@ EXIT_MEMORY_UNOBSERVABLE=7
 # consecutive passes.
 EXIT_MEMORY_ALERT=31
 MEMORY_RC=0
+# OMN-20798: drift was found and its event did not reach the bus. Distinct from
+# 30 (drift, delivered) and from every memory code.
+EXIT_DRIFT_UNPUBLISHED=8
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -243,6 +256,25 @@ fi
 while IFS= read -r line; do [[ -n "$line" ]] && log "$line"; done <"$SCRATCH/inventory.err"
 
 # ---------------------------------------------------------------------------
+# Produce one document to a topic through the broker container (OMN-19959,
+# OMN-20798). The SASL pair is expanded INSIDE the broker container by `sh -c`;
+# this host passes only the variable names. rpk reads RPK_USER / RPK_PASS /
+# RPK_SASL_MECHANISM from the environment, so no flag carries a credential.
+# Returns 0 on a published document; the caller logs its own context. Requires
+# LANE_MEMORY_BROKER_CONTAINER to be non-empty (callers check and report that).
+# ---------------------------------------------------------------------------
+broker_produce() {
+  local topic="$1" file="$2"
+  local broker="${LANE_MEMORY_BROKER_CONTAINER}"
+  local user_var="${LANE_MEMORY_BROKER_SASL_USER_VAR:-DEV_KAFKA_SASL_USERNAME}"
+  local pass_var="${LANE_MEMORY_BROKER_SASL_PASS_VAR:-DEV_KAFKA_SASL_PASSWORD}"
+  local mechanism="${LANE_MEMORY_BROKER_SASL_MECHANISM:-SCRAM-SHA-256}"
+  docker exec -i "$broker" sh -c \
+      'RPK_USER="${'"$user_var"'}" RPK_PASS="${'"$pass_var"'}" RPK_SASL_MECHANISM="'"$mechanism"'" rpk topic produce "'"$topic"'"' \
+      <"$file" >>"$LOG_FILE" 2>&1
+}
+
+# ---------------------------------------------------------------------------
 # OMN-19959: the lane container memory pass (invoked after the planner, below).
 # Every failure is a distinct exit code carried to the end of the script by
 # finish(); none is a warning.
@@ -282,20 +314,12 @@ memory_pass() {
   fi
 
   local broker="${LANE_MEMORY_BROKER_CONTAINER:-}"
-  local user_var="${LANE_MEMORY_BROKER_SASL_USER_VAR:-DEV_KAFKA_SASL_USERNAME}"
-  local pass_var="${LANE_MEMORY_BROKER_SASL_PASS_VAR:-DEV_KAFKA_SASL_PASSWORD}"
-  local mechanism="${LANE_MEMORY_BROKER_SASL_MECHANISM:-SCRAM-SHA-256}"
   if [[ -z "$broker" ]]; then
     log "MEMORY: LANE_MEMORY_BROKER_CONTAINER is unset — the memory event is NOT published (exit $EXIT_MEMORY_UNPUBLISHED)."
     MEMORY_RC=$EXIT_MEMORY_UNPUBLISHED
     return 0
   fi
-  # The SASL pair is expanded INSIDE the broker container by `sh -c`; this host
-  # passes only the variable names. rpk reads RPK_USER / RPK_PASS /
-  # RPK_SASL_MECHANISM from the environment, so no flag carries a credential.
-  if docker exec -i "$broker" sh -c \
-      'RPK_USER="${'"$user_var"'}" RPK_PASS="${'"$pass_var"'}" RPK_SASL_MECHANISM="'"$mechanism"'" rpk topic produce "'"$MEMORY_TOPIC"'"' \
-      <"$event_file" >>"$LOG_FILE" 2>&1; then
+  if broker_produce "$MEMORY_TOPIC" "$event_file"; then
     mkdir -p "$(dirname "$MEMORY_STATE")"
     mv "$state_out" "$MEMORY_STATE"
     log "MEMORY: published to $MEMORY_TOPIC via broker container $broker; state advanced."
@@ -340,10 +364,15 @@ fi
 # The census's own clean (0) and drift (30) outcomes give way to a memory code,
 # so a memory failure or alert is never masked by a clean fleet. The census's
 # failure codes (2, 3, 4, 5) exit above, before the memory pass, and keep their
-# meaning.
+# meaning. An unpublished drift (8) is a failure of the same standing and keeps
+# its code; the memory code is still logged beside it.
 finish() {
   local rc="$1"
   if [[ $MEMORY_RC -ne 0 ]]; then
+    if [[ $rc -eq $EXIT_DRIFT_UNPUBLISHED ]]; then
+      log "exit $rc (drift unpublished); the memory pass also failed with $MEMORY_RC"
+      exit "$rc"
+    fi
     log "exit $MEMORY_RC (memory pass) in place of census exit $rc"
     exit "$MEMORY_RC"
   fi
@@ -426,22 +455,21 @@ if [[ "$DRY_RUN" == true ]]; then
   finish 30
 fi
 
-# Publish to the bus. The broker address MUST come from KAFKA_BOOTSTRAP_SERVERS —
-# fail-fast, no localhost/default fallback (Rule 8). The systemd unit injects it;
-# an operator running by hand must export it. We never hardcode a broker / LAN IP.
-if [[ -z "${KAFKA_BOOTSTRAP_SERVERS:-}" ]]; then
-  log "KAFKA_BOOTSTRAP_SERVERS unset — cannot publish. Drift event logged above for manual replay."
-  finish 30
+# Publish to the bus through the broker container (OMN-20798). The container is
+# a deployment fact the installer writes into the unit as
+# LANE_MEMORY_BROKER_CONTAINER; there is no default and no host-side `rpk`
+# fallback, so a host that names none fails here instead of logging "for manual
+# replay" and exiting as if the alert had been delivered.
+if [[ -z "${LANE_MEMORY_BROKER_CONTAINER:-}" ]]; then
+  log "DRIFT event NOT published: LANE_MEMORY_BROKER_CONTAINER is unset (exit $EXIT_DRIFT_UNPUBLISHED). Drift event logged above for manual replay."
+  finish "$EXIT_DRIFT_UNPUBLISHED"
 fi
-BOOTSTRAP="$KAFKA_BOOTSTRAP_SERVERS"
-if command -v rpk >/dev/null 2>&1; then
-  if echo "$EVENT_JSON" | rpk topic produce "$DRIFT_TOPIC" --brokers "$BOOTSTRAP" >>"$LOG_FILE" 2>&1; then
-    log "published lane-census-drift event to $DRIFT_TOPIC via rpk"
-  else
-    log "FAILED to publish via rpk (broker=$BOOTSTRAP) — event logged above for manual replay"
-  fi
+printf '%s\n' "$EVENT_JSON" >"$SCRATCH/drift-event.json"
+if broker_produce "$DRIFT_TOPIC" "$SCRATCH/drift-event.json"; then
+  log "published lane-census-drift event to $DRIFT_TOPIC via broker container $LANE_MEMORY_BROKER_CONTAINER"
 else
-  log "rpk not found — event logged above; install rpk or wire a producer to publish"
+  log "DRIFT event NOT published: produce to $DRIFT_TOPIC via broker container $LANE_MEMORY_BROKER_CONTAINER FAILED (exit $EXIT_DRIFT_UNPUBLISHED). Drift event logged above for manual replay."
+  finish "$EXIT_DRIFT_UNPUBLISHED"
 fi
 
 # Fail-fast on drift (gates-block policy, no warn-only mode).

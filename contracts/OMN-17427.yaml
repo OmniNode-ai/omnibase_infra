@@ -35,6 +35,11 @@ requirements:
     acceptance:
       - id: AC7
         statement: 'AC7: runtime-effects renders ONEX_SKILL_OVERLAY_ROOTS with one read-only mount from DEV_LANE_SKILL_OVERLAY_ROOTS_DIR, renders when it is unset, and the four borrower overlays blank it -- falsifier: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k skill_overlay'
+  - id: req-omn17427-dev-lane-class-boot
+    statement: The pre-merge laptop boot ends with a dev-lane class phase that recreates both kernels with the strict-wiring and secrets-store bindings read from the dev lane's compose files, on the current omnimarket release, and fails on any restart.
+    acceptance:
+      - id: AC8
+        statement: 'AC8: the phase derives ONEX_WIRING_STRICT_MODE and a set INFISICAL_ADDR from docker-compose.dev-lane.yml and docker-compose.infra.yml, refuses when either binding is gone, and its gate fails a restarting or exited kernel -- falsifier: uv run pytest tests/ci/test_runtime_boot_dev_lane_class_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -57,6 +62,9 @@ evidence_requirements:
   - kind: tests
     description: The dev lane renders the operator-named skill overlay roots mount for runtime-effects only.
     command: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k skill_overlay
+  - kind: tests
+    description: The laptop boot's dev-lane class phase derives its bindings from the dev lane and fails on a restart.
+    command: uv run pytest tests/ci/test_runtime_boot_dev_lane_class_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -125,3 +133,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC7
+  - id: dod-omn-17427-ac8
+    description: The pre-merge boot recreates both kernels in the dev lane's configuration class and fails on a restart.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runtime_boot_dev_lane_class_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC8

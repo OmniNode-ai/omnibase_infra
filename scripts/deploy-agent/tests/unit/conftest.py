@@ -16,7 +16,12 @@ of truth), and ``test_executor_promotion_lineage.py`` re-stubs
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import io
+import os
+import subprocess
+import tarfile
+import uuid
+from collections.abc import Callable, Iterator
 from concurrent.futures import Executor, Future
 from pathlib import Path
 from typing import Any
@@ -24,6 +29,22 @@ from typing import Any
 import pytest
 from deploy_agent import agent as agent_mod
 from deploy_agent import executor as executor_mod
+
+
+@pytest.fixture(autouse=True)
+def _isolate_unit_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep manifests and lane locks inside this test's temporary directory."""
+    real_home = Path.home
+    ambient_home = os.environ.get("HOME")
+
+    def test_home(cls: type[Path]) -> Path:
+        # Tests that explicitly change HOME are checking that path resolution.
+        if os.environ.get("HOME") != ambient_home:
+            return real_home()
+        return tmp_path
+
+    monkeypatch.setattr(Path, "home", classmethod(test_home))
+    monkeypatch.setenv("ONEX_LANE_LOCK_DIR", str(tmp_path / "lane-locks"))
 
 
 class _NoopPromotionGuard:
@@ -76,6 +97,10 @@ def _declare_agent_instance(monkeypatch: pytest.MonkeyPatch) -> None:
     deletes the variable and so is unaffected by this fixture.
     """
     monkeypatch.setenv("DEPLOY_AGENT_INSTANCE", "dev-201")
+    # Declare a test host as well: the production router refuses excluded hosts
+    # before reading DEPLOY_AGENT_INSTANCE, including the .101 lab test host.
+    # Routing-policy tests supply their own hostname explicitly.
+    monkeypatch.setattr("socket.gethostname", lambda: "deploy-agent-test")
     # OMN-19522: agent construction selects the instance's dev-lane
     # composition process-wide; each test starts on, and is returned to, the
     # .201 one.
@@ -582,3 +607,34 @@ def _no_rollback_capture(monkeypatch: pytest.MonkeyPatch) -> None:
     and exercises the real one against the executor directly.
     """
     monkeypatch.setattr(agent_mod, "capture_rollback_point", lambda *args, **kw: None)
+
+
+@pytest.fixture(scope="session")
+def local_inspect_image() -> Iterator[str]:
+    """Import a disposable scratch image for metadata-only Docker tests.
+
+    Neither image inspect nor container create requires an executable filesystem.
+    Importing an empty tar keeps these real-daemon tests independent of registries.
+    The container tests never start the resulting container.
+    """
+    tag = f"omn15181-inspect-fixture:{uuid.uuid4().hex}"
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w"):
+        pass
+    imported = subprocess.run(
+        ["docker", "import", "-", tag],
+        input=archive.getvalue(),
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+    assert imported.returncode == 0, imported.stderr.decode(errors="replace")
+    try:
+        yield tag
+    finally:
+        subprocess.run(
+            ["docker", "image", "rm", tag],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )

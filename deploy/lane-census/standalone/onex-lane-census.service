@@ -14,9 +14,9 @@
 # which refuses when the base unit is present.
 #
 # No '-' prefix on ExecStart, unlike the drop-in: here the unit is the census
-# alone, so a drift (30), an unpublished memory event (6), an unreadable memory
-# counter (7) or a memory alert (31) marks the unit failed and shows in
-# `systemctl --user --failed`.
+# alone, so a drift (30), a drift whose event reached no broker (8), an
+# unpublished memory event (6), an unreadable memory counter (7) or a memory
+# alert (31) marks the unit failed and shows in `systemctl --user --failed`.
 #
 # The installer rewrites %h/Code/omni_home/omnibase_infra to the clone it runs
 # from and appends LANE_MEMORY_BROKER_CONTAINER.

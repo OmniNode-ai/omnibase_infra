@@ -3362,6 +3362,12 @@ jobs:
   # workflow_dispatch and merge_group. Unrelated pull requests skip it, which
   # the CI Summary sweep accepts; a failure when it does run fails CI Summary.
   # Widening the path set is a one-line change once it has a green record.
+  #
+  # OMN-17427: the job ends with a dev-lane class phase. It recreates both
+  # kernels with the bindings it reads from docker-compose.dev-lane.yml and
+  # docker-compose.infra.yml (strict auto-wiring, a secrets-store address set),
+  # on the current omnimarket release, and fails on any restart. Those two
+  # compose files are in the path set because the phase derives from them.
   # ============================================================================
   laptop-profile-paths:
     name: Laptop profile paths changed (OMN-19498)
@@ -3406,7 +3412,7 @@ jobs:
               ;;
           esac
           changed_files="$(git diff --name-only "$range")"
-          pattern='^(docker/catalog/|docker/Dockerfile\.runtime$|docker/entrypoint-runtime\.sh$|docker/local\.env\.example$|docker/lane-overlays/local\.|docker/runtime-policy\.env$|docker/migrations/|scripts/run-forward-migrations\.sh$|scripts/check_migrations_complete\.sh$|src/omnibase_infra/docker/catalog/|src/omnibase_infra/runtime/service_kernel\.py$|src/omnibase_infra/runtime/auto_wiring/|Makefile$|pyproject\.toml$|uv\.lock$|\.github/workflows/reusable-runtime-boot\.yml$)'
+          pattern='^(docker/catalog/|docker/Dockerfile\.runtime$|docker/entrypoint-runtime\.sh$|docker/local\.env\.example$|docker/lane-overlays/local\.|docker/runtime-policy\.env$|docker/docker-compose\.(infra|dev-lane)\.yml$|docker/migrations/|scripts/run-forward-migrations\.sh$|scripts/check_migrations_complete\.sh$|src/omnibase_infra/docker/catalog/|src/omnibase_infra/runtime/service_kernel\.py$|src/omnibase_infra/runtime/auto_wiring/|Makefile$|pyproject\.toml$|uv\.lock$|\.github/workflows/reusable-runtime-boot\.yml$)'
           matched="$(printf '%s\n' "$changed_files" | grep -E "$pattern" || true)"
           if [ -n "$matched" ]; then
             echo "Laptop profile surfaces changed:"
@@ -4836,7 +4842,7 @@ jobs:
         # tests/integration/customer_path/redpanda_sasl_harness.py -- a
         # floating tag lets two runners resolve two different images.
         # test_omn18012_harness_runner_topology.py asserts the two agree.
-        run: docker pull redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
+        run: docker pull docker.redpanda.com/redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
 
       - name: Run customer-path boundary tests
         env:
@@ -4857,7 +4863,7 @@ jobs:
           # this image's default CMD is `redpanda start --overprovisioned` with
           # `enable_sasl` off (`--set redpanda.enable_sasl=true` is
           # command-line only -- verified by reading /entrypoint.sh out of
-          # redpandadata/redpanda:v24.2.7). A service container would be a
+          # docker.redpanda.com/redpandadata/redpanda:v24.2.7). A service container would be a
           # NO-AUTH broker, which is the exact hole this job exists to close.
           OMN18012_BROKER_BOOTSTRAP: ${{ vars.OMN18012_BROKER_BOOTSTRAP }}
           OMN18012_BROKER_CONTAINER: ${{ vars.OMN18012_BROKER_CONTAINER }}
@@ -4928,7 +4934,7 @@ jobs:
       - name: Pre-pull the harness broker image
         # Identical to REDPANDA_IMAGE in
         # tests/integration/customer_path/redpanda_sasl_harness.py.
-        run: docker pull redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
+        run: docker pull docker.redpanda.com/redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
 
       - name: Run bus ACL boundary tests
         env:
@@ -5827,7 +5833,7 @@ jobs:
     # and this suite builds a plaintext ModelKafkaEventBusConfig. Pointing it at
     # the lane would prove the auth path, not the bus path.
     env:
-      SVC_REDPANDA_IMAGE: redpandadata/redpanda:v24.2.7
+      SVC_REDPANDA_IMAGE: docker.redpanda.com/redpandadata/redpanda:v24.2.7
       SVC_QDRANT_IMAGE: qdrant/qdrant:v1.12.4
       # OMN-18795: Memgraph and Postgres join the job so the six further suites
       # registered with no execution path can execute here too.
