@@ -3711,6 +3711,12 @@ jobs:
   # workflow_dispatch and merge_group. Unrelated pull requests skip it, which
   # the CI Summary sweep accepts; a failure when it does run fails CI Summary.
   # Widening the path set is a one-line change once it has a green record.
+  #
+  # OMN-17427: the job ends with a dev-lane class phase. It recreates both
+  # kernels with the bindings it reads from docker-compose.dev-lane.yml and
+  # docker-compose.infra.yml (strict auto-wiring, a secrets-store address set),
+  # on the current omnimarket release, and fails on any restart. Those two
+  # compose files are in the path set because the phase derives from them.
   # ============================================================================
   laptop-profile-paths:
     name: Laptop profile paths changed (OMN-19498)
@@ -3755,7 +3761,7 @@ jobs:
               ;;
           esac
           changed_files="$(git diff --name-only "$range")"
-          pattern='^(docker/catalog/|docker/Dockerfile\.runtime$|docker/entrypoint-runtime\.sh$|docker/local\.env\.example$|docker/lane-overlays/local\.|docker/runtime-policy\.env$|docker/migrations/|scripts/run-forward-migrations\.sh$|scripts/check_migrations_complete\.sh$|src/omnibase_infra/docker/catalog/|src/omnibase_infra/runtime/service_kernel\.py$|src/omnibase_infra/runtime/auto_wiring/|Makefile$|pyproject\.toml$|uv\.lock$|\.github/workflows/reusable-runtime-boot\.yml$)'
+          pattern='^(docker/catalog/|docker/Dockerfile\.runtime$|docker/entrypoint-runtime\.sh$|docker/local\.env\.example$|docker/lane-overlays/local\.|docker/runtime-policy\.env$|docker/docker-compose\.(infra|dev-lane)\.yml$|docker/migrations/|scripts/run-forward-migrations\.sh$|scripts/check_migrations_complete\.sh$|src/omnibase_infra/docker/catalog/|src/omnibase_infra/runtime/service_kernel\.py$|src/omnibase_infra/runtime/auto_wiring/|Makefile$|pyproject\.toml$|uv\.lock$|\.github/workflows/reusable-runtime-boot\.yml$)'
           matched="$(printf '%s\n' "$changed_files" | grep -E "$pattern" || true)"
           if [ -n "$matched" ]; then
             echo "Laptop profile surfaces changed:"
