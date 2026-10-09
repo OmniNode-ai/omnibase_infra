@@ -633,8 +633,9 @@ def test_boot_has_rpk_group_list_step(workflow: Workflow) -> None:
     assert matched, "rpk group list check missing"
     step_texts = "\n".join(_step_text(s) for s in matched)
     assert "consumer_count" in step_texts
-    assert "local\\.omnibase_infra" in step_texts
-    assert "local\\.runtime_config" in step_texts
+    assert "[.]omnibase_infra[.]" in step_texts
+    assert "[.]runtime_config[.]" in step_texts
+    assert "onex_runtime_seed_environment" in step_texts
     assert "onex-runtime" not in step_texts
 
 
