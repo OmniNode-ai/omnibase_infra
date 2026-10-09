@@ -3257,6 +3257,18 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_runtime_lane_resolution_effect.HandlerRuntimeLaneResolution.runtime_lane_resolve_7bc71266": {
+      "category": "event",
+      "contract_name": "node_runtime_lane_resolution_effect",
+      "event_model_module": null,
+      "event_model_name": null,
+      "handler_id": "dispatcher.auto.node_runtime_lane_resolution_effect.HandlerRuntimeLaneResolution.runtime_lane_resolve_7bc71266",
+      "handler_module": "omnibase_infra.handlers.handler_runtime_lane_resolution",
+      "handler_name": "HandlerRuntimeLaneResolution",
+      "message_types": null,
+      "package": "omnibase_infra",
+      "type_scoped": false
+    },
     "dispatcher.auto.node_runtime_manifest_reducer.HandlerPostgresRuntimeManifestInsert.postgres_insert_runtime_manifest_21269662": {
       "category": "event",
       "contract_name": "node_runtime_manifest_reducer",
@@ -3547,14 +3559,14 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 15,
-        "omnibase_infra": 136,
+        "omnibase_infra": 137,
         "onex-change-control": 4
       },
-      "contracts_discovered": 155,
+      "contracts_discovered": 156,
       "discovery_errors": 0,
       "distinct_subscribe_topics": 93,
       "probe_count": 1068,
-      "registered_dispatchers": 125,
+      "registered_dispatchers": 126,
       "registered_routes": 110,
       "type_scoped_dispatchers": 69
     },
@@ -3596,7 +3608,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-10-08T08:00:42.877105+00:00",
+    "generated_at_utc": "2026-10-09T00:13:47.971999+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.35",
       "omnibase-infra": "0.38.70",
