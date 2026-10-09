@@ -1,0 +1,42 @@
+schema_version: "1.0.0"
+ticket_id: OMN-18595
+title: omnibase-core 0.47.37 is the version the override pin and the lockfile resolve
+summary: Automated dependency bump for the omnibase_core 0.47.37 release. The exact pin in tool.uv override-dependencies and the omnibase-core entry in uv.lock both name 0.47.37, and the published range in project.dependencies admits it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn18595
+    statement: The uv override pin and the lockfile resolve omnibase-core to 0.47.37, and the range in project.dependencies admits that version.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: uv.lock resolves omnibase-core to 0.47.37 -- falsifier: grep -A1 ''name = "omnibase-core"'' uv.lock | grep -F ''version = "0.47.37"'''
+      - id: AC2
+        statement: 'AC2: the override pin in pyproject.toml names 0.47.37 and the range admits it -- falsifier: uv run pytest tests/scripts/test_check_sibling_compatible_range.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The sibling compatible-range check passes against the bumped pin.
+    command: uv run pytest tests/scripts/test_check_sibling_compatible_range.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-18595-ac1
+    description: uv.lock resolves omnibase-core to 0.47.37.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: grep -A1 'name = "omnibase-core"' uv.lock | grep -F 'version = "0.47.37"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-18595-ac2
+    description: The override pin names 0.47.37 and the published range admits it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_check_sibling_compatible_range.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
