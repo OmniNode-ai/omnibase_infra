@@ -156,6 +156,11 @@ def test_cron_entries_have_completion_evidence_root_schedule_is_a_timer(
         "swallows is an exit the journal cannot record"
     )
     assert _directive(service, "SuccessExitStatus") == []
+    assert "HOME=/root" in _directive(service, "Environment"), (
+        "cron gave root jobs HOME=/root; the scripts run under set -u and a system "
+        "service has no HOME unless it sets one (observed on the lab host: "
+        "'HOME: unbound variable' on the first timer run)"
+    )
     assert _directive(service, "User") == [], "the cron lines ran as root"
 
 

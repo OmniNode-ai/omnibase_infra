@@ -12,6 +12,11 @@ Documentation=https://github.com/OmniNode-ai/omnibase_infra
 [Service]
 Type=oneshot
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# cron gave root jobs HOME=/root; a system service has no HOME unless it sets one, and
+# the maintenance scripts run under `set -u` (the first timer run of the alert report
+# died with 'HOME: unbound variable' on the lab host before this line).
+Environment=HOME=/root
+Environment=LOGNAME=root
 ExecStart=/data/maintenance/bin/omninode-system-slack-report.sh --mode digest
 StandardOutput=journal
 StandardError=journal
