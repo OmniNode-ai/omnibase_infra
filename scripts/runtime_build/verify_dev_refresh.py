@@ -27,6 +27,12 @@ Every check is required (fail-closed AND-of-all-checks):
      permissive ``details.healthy`` OR had been copied into both.
   4. **Cluster health** -- ``rpk cluster health`` inside the broker container
      reports healthy.
+  4a. **Effects health** [OMN-17427] -- the runtime-effects ``/health`` (the
+     lane's second runtime, ``DEV_RUNTIME_EFFECTS_PORT``) returns the same
+     strict verdict as the main runtime's, under the same bounded wait. The
+     probe is a required argument: a gate that can be handed no effects URL is
+     a gate that skips it, which is how a crash-looping effects runtime read
+     as ``PASS`` on 2026-10-09 while only ``:8085`` was probed.
   5. **Revision readback** -- the ``org.opencontainers.image.revision``
      label on each core container equals the intended new ref (prefix
      match tolerated).
@@ -61,6 +67,7 @@ from dataclasses import asdict, dataclass, field
 from health_payload import (
     DEFAULT_MAX_VERDICT_AGE,
     HEALTH_POLICY_STATUS_ONLY_STRICT,
+    REASON_STATUS_UNREADABLE,
     HealthDimension,
     HealthVerdict,
     default_max_verdict_age,
@@ -152,6 +159,12 @@ class HealthGateReport:
     manifest_fetch_attempts: list[str] = field(default_factory=list)
     cluster_healthy: bool = False
     cluster_detail: str | None = None
+    # OMN-17427: the lane's second runtime. Its own leg, named in the receipt,
+    # because ``health_ok`` is the main runtime's and says nothing about it.
+    effects_health_ok: bool = False
+    effects_health_detail: str | None = None
+    effects_health_status: str | None = None
+    effects_verdict_wait: str | None = None
     errors: list[str] = field(default_factory=list)
     require_digest_change: bool = True
 
@@ -194,6 +207,7 @@ class HealthGateReport:
             digest_ok
             and self.manifest_ok
             and self.health_ok
+            and self.effects_health_ok
             and self.cluster_healthy
             and self.core_services_running
             and self.revisions_match
@@ -216,6 +230,10 @@ class HealthGateReport:
             "verdict_wait": self.verdict_wait,
             "health_dimensions": self.health_dimensions,
             "manifest_fetch_attempts": self.manifest_fetch_attempts,
+            "effects_health_ok": self.effects_health_ok,
+            "effects_health_detail": self.effects_health_detail,
+            "effects_health_status": self.effects_health_status,
+            "effects_verdict_wait": self.effects_verdict_wait,
             "cluster_healthy": self.cluster_healthy,
             "cluster_detail": self.cluster_detail,
             "revision_readback_ok": self.revisions_match,
@@ -468,6 +486,74 @@ def check_health_with_retry(
     return verdict, described
 
 
+def check_runtime_health_with_retry(
+    health_url: str,
+    *,
+    label: str,
+    opener: object | None = None,
+    require_verdict: bool = True,
+    max_verdict_age_seconds: float | None | object = DEFAULT_MAX_VERDICT_AGE,
+    check_interval_seconds: float = 300.0,
+    boot_grace_seconds: float = 120.0,
+    sleep_fn: Callable[[float], None] | None = None,
+    window_seconds: float = MANIFEST_FETCH_WINDOW_SECONDS,
+    clock_fn: Callable[[], float] = time.monotonic,
+) -> tuple[HealthVerdict, str]:
+    """Probe a runtime's ``/health`` for a bounded window (OMN-17427).
+
+    Used for both runtimes of the lane. A runtime binds its listener late, and
+    a probe against a loaded host times out (measured: a 10s fetch timed out on
+    the main runtime at host load ~30 on 2026-10-09 and the terminal verdict
+    rolled back a lane whose effects runtime was healthy), so an unanswered
+    first probe is a runtime still booting or busy as often as a dead one.
+    The probe is therefore retried while the endpoint does not answer at all
+    (``status_unreadable``: refused, reset, or a non-200 that does not say it is
+    starting), inside ONE monotonic window, and then handed to the same verdict
+    wait the main runtime gets. Expiry fails closed with the last thing seen:
+    a crash-looping runtime never answers, so it never reads healthy.
+    """
+    budget = RetryBudget(
+        total_seconds=window_seconds,
+        interval_seconds=MANIFEST_FETCH_INTERVAL_SECONDS,
+        sleep_fn=sleep_fn or time.sleep,
+        monotonic_fn=clock_fn,
+    )
+    while True:
+        budget.attempts_made += 1
+        verdict, described = check_health_with_retry(
+            health_url,
+            opener=opener,
+            require_verdict=require_verdict,
+            max_verdict_age_seconds=max_verdict_age_seconds,
+            check_interval_seconds=check_interval_seconds,
+            boot_grace_seconds=boot_grace_seconds,
+            sleep_fn=sleep_fn,
+        )
+        if verdict.ok or verdict.reason != REASON_STATUS_UNREADABLE:
+            return (
+                verdict,
+                f"{described}; {label} probe attempts={budget.attempts_made}",
+            )
+        if not budget.sleep_before_retry():
+            detail = (
+                f"{label} {health_url} never answered a readable "
+                f"/health in {budget.attempts_made} attempt(s) over "
+                f"{budget.slept_seconds:.0f}s: {verdict.detail}"
+            )
+            return (
+                HealthVerdict(
+                    ok=False,
+                    policy=verdict.policy,
+                    status=verdict.status,
+                    details_healthy=verdict.details_healthy,
+                    detail=detail,
+                    reason=verdict.reason,
+                ),
+                f"{described}; {label} probe window {window_seconds:.0f}s exhausted "
+                f"after {budget.attempts_made} attempt(s)",
+            )
+
+
 def check_cluster_health(
     broker_container: str,
     broker_address: str = DEFAULT_BROKER_ADDRESS,
@@ -512,6 +598,7 @@ def run_health_gate(
     expected_revision: str,
     manifest_url: str,
     health_url: str,
+    effects_health_url: str,
     broker_container: str,
     min_contracts: int,
     runner: object | None = None,
@@ -524,6 +611,7 @@ def run_health_gate(
     health_boot_grace_seconds: float = 120.0,
     manifest_window_seconds: float = MANIFEST_FETCH_WINDOW_SECONDS,
     manifest_clock_fn: Callable[[], float] = time.monotonic,
+    health_reachability_window_seconds: float = MANIFEST_FETCH_WINDOW_SECONDS,
 ) -> HealthGateReport:
     report = HealthGateReport(
         lane=lane,
@@ -560,14 +648,17 @@ def run_health_gate(
     else:
         report.manifest_ok = count is not None and count >= min_contracts
 
-    health_verdict, verdict_wait = check_health_with_retry(
+    health_verdict, verdict_wait = check_runtime_health_with_retry(
         health_url,
+        label="omninode-runtime",
         opener=opener,
         require_verdict=require_verdict,
         max_verdict_age_seconds=max_verdict_age_seconds,
         check_interval_seconds=health_check_interval_seconds,
         boot_grace_seconds=health_boot_grace_seconds,
         sleep_fn=sleep_fn,
+        window_seconds=health_reachability_window_seconds,
+        clock_fn=manifest_clock_fn,
     )
     report.health_ok = health_verdict.ok
     report.health_detail = health_verdict.detail
@@ -578,6 +669,23 @@ def run_health_gate(
         {"name": d.name, "status": d.status, "detail": d.detail}
         for d in health_verdict.dimensions
     ]
+
+    effects_verdict, effects_wait = check_runtime_health_with_retry(
+        effects_health_url,
+        label="runtime-effects",
+        opener=opener,
+        require_verdict=require_verdict,
+        max_verdict_age_seconds=max_verdict_age_seconds,
+        check_interval_seconds=health_check_interval_seconds,
+        boot_grace_seconds=health_boot_grace_seconds,
+        sleep_fn=sleep_fn,
+        window_seconds=health_reachability_window_seconds,
+        clock_fn=manifest_clock_fn,
+    )
+    report.effects_health_ok = effects_verdict.ok
+    report.effects_health_detail = effects_verdict.detail
+    report.effects_health_status = effects_verdict.status
+    report.effects_verdict_wait = effects_wait
 
     cluster_healthy, cluster_detail = check_cluster_health(
         broker_container, runner=runner
@@ -615,6 +723,11 @@ def main(argv: list[str] | None = None) -> int:
     health_url_default = "http://localhost:8085/health"  # fallback-ok  # url-authority-ok: fixed lane port, no routing authority applies
     parser.add_argument("--manifest-url", default=manifest_url_default)
     parser.add_argument("--health-url", default=health_url_default)
+    # OMN-17427: required, no default. The effects port is a contract-rendered
+    # lane fact (DEV_RUNTIME_EFFECTS_PORT) the caller reads from
+    # docker/runtime-policy.env; a default here would let a caller that forgot
+    # it probe the wrong lane's effects runtime, or none.
+    parser.add_argument("--effects-health-url", required=True)
     parser.add_argument("--broker-container", default="omnibase-infra-redpanda")
     parser.add_argument("--min-contracts", type=int, default=DEFAULT_MIN_CONTRACTS)
     parser.add_argument("--json", action="store_true", dest="json_output")
@@ -645,6 +758,7 @@ def main(argv: list[str] | None = None) -> int:
         expected_revision=args.expected_revision,
         manifest_url=args.manifest_url,
         health_url=args.health_url,
+        effects_health_url=args.effects_health_url,
         broker_container=args.broker_container,
         min_contracts=args.min_contracts,
         require_digest_change=args.require_digest_change,
@@ -663,6 +777,10 @@ def main(argv: list[str] | None = None) -> int:
         for attempt in report.manifest_fetch_attempts:
             print(f"  manifest fetch attempt: {attempt}")
         print(f"  health_ok={report.health_ok} ({report.health_detail})")
+        print(
+            f"  effects_health_ok={report.effects_health_ok}"
+            f" ({report.effects_health_detail})"
+        )
         for dimension in report.health_dimensions:
             print(
                 f"  health dimension {dimension['name']}: {dimension['status']}"
