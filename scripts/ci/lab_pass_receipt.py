@@ -2368,16 +2368,73 @@ class ModelBrokerAccess:
         return [flag for name in self.rpk_env() for flag in ("-e", name)]
 
 
-def read_group_total_lag(
+@dataclass(frozen=True)
+class ModelGroupLagReading:
+    """One ``rpk group describe`` reading of a consumer group.
+
+    ``partitions`` maps ``<topic>/<partition>`` to ``(committed, lag)``; ``committed``
+    is None where rpk prints ``-`` (the group has never committed there). It is None as
+    a whole when the reply carried no partition table, which is a different fact from a
+    group with no partitions, and ``check_consumer_group_lag`` says which it judged.
+    """
+
+    total_lag: int
+    partitions: Mapping[str, tuple[int | None, int]] | None
+
+
+def _offset_cell(raw: str) -> int | None:
+    return None if raw == "-" else int(raw)
+
+
+def parse_partition_offsets(
+    stdout: str,
+) -> dict[str, tuple[int | None, int]] | None:
+    """The per-partition committed offset and lag, matched by column label.
+
+    Labelled for the same reason TOTAL-LAG is: rpk pads the table differently between
+    versions. The columns read here all precede MEMBER-ID, so a row whose member cells
+    are blank still carries them. Returns None when no table header is printed.
+    """
+    lines = stdout.splitlines()
+    for index, line in enumerate(lines):
+        header = line.split()
+        if not header or header[0] != "TOPIC":
+            continue
+        try:
+            columns = [
+                header.index(label)
+                for label in ("TOPIC", "PARTITION", "CURRENT-OFFSET", "LAG")
+            ]
+        except ValueError:
+            continue
+        offsets: dict[str, tuple[int | None, int]] = {}
+        for row in lines[index + 1 :]:
+            cells = row.split()
+            if len(cells) <= max(columns):
+                continue
+            topic, partition, committed, lag = (cells[c] for c in columns)
+            try:
+                offsets[f"{topic}/{int(partition)}"] = (
+                    _offset_cell(committed),
+                    _offset_cell(lag) or 0,
+                )
+            except ValueError as exc:
+                msg = f"partition row for {topic} is not numeric: {row.strip()!r}"
+                raise ValueError(msg) from exc
+        return offsets
+    return None
+
+
+def read_group_lag(
     access: ModelBrokerAccess,
     group: str,
     *,
     runner: CommandRunner | None = None,
     timeout_seconds: float = 60.0,
-) -> int:
-    """Read one consumer group's TOTAL-LAG off ``rpk group describe``.
+) -> ModelGroupLagReading:
+    """Read one consumer group's TOTAL-LAG and partition offsets off ``rpk group describe``.
 
-    The parse mirrors ``scripts/runtime_build/declared_consumer_groups.py``'s
+    The TOTAL-LAG parse mirrors ``scripts/runtime_build/declared_consumer_groups.py``'s
     ``parse_group_describe`` -- a ``TOTAL-LAG <n>`` line, matched on the label
     rather than a column offset, because rpk pads that table differently
     between versions. One parse rule for one output format; two would be two
@@ -2397,16 +2454,38 @@ def read_group_total_lag(
             f"{_truncate((result.stderr or '').strip())}"
         )
         raise ValueError(msg)
-    for line in (result.stdout or "").splitlines():
+    stdout = result.stdout or ""
+    for line in stdout.splitlines():
         fields = line.split()
         if len(fields) >= 2 and fields[0] == "TOTAL-LAG":
             try:
-                return int(fields[1])
+                total = int(fields[1])
             except ValueError as exc:
                 msg = f"TOTAL-LAG for {group} is not an integer: {fields[1]!r}"
                 raise ValueError(msg) from exc
+            return ModelGroupLagReading(
+                total_lag=total, partitions=parse_partition_offsets(stdout)
+            )
     msg = f"rpk group describe {group} printed no TOTAL-LAG line"
     raise ValueError(msg)
+
+
+def stalled_partitions(
+    first: ModelGroupLagReading, second: ModelGroupLagReading
+) -> list[str] | None:
+    """Partitions that had work waiting at the first read and committed none of it.
+
+    None when either reading has no partition table, so the caller can say it judged
+    the total alone rather than imply it read offsets.
+    """
+    if first.partitions is None or second.partitions is None:
+        return None
+    stalled: list[str] = []
+    for key, (committed, lag) in sorted(first.partitions.items()):
+        later = second.partitions.get(key)
+        if lag > 0 and later is not None and later[0] == committed:
+            stalled.append(f"{key} committed {committed} with {lag} waiting")
+    return stalled
 
 
 def check_consumer_group_lag(
@@ -2414,7 +2493,7 @@ def check_consumer_group_lag(
     groups: Sequence[str],
     *,
     max_lag: int,
-    first_sample: Mapping[str, int] | None = None,
+    first_sample: Mapping[str, ModelGroupLagReading] | None = None,
     runner: CommandRunner | None = None,
     timeout_seconds: float = 60.0,
     source_error: str = "",
@@ -2432,6 +2511,15 @@ def check_consumer_group_lag(
     settle wait so the two samples straddle real time rather than being two
     reads a millisecond apart. Absent, the probe reports the bound only and
     says so in its evidence rather than implying it checked growth.
+
+    A rising total is a stall only when some partition had work waiting at the
+    first read and committed none of it by the second (OMN-17427). The two
+    reads can land seconds apart once the lane has already settled: on
+    2026-10-09 they were 5.5 s apart, and one heartbeat between its produce and
+    its commit read 0 -> 1 on a group whose offsets were advancing. A group
+    with nothing waiting at the first read has given no evidence of stopping.
+    When either reading carries no partition table the total alone is judged,
+    as before, and the evidence says so.
     """
     # The source failing to be READ and the lane declaring NOTHING are two
     # different facts, and conflating them is the OMN-18866 production defect:
@@ -2450,11 +2538,11 @@ def check_consumer_group_lag(
             "not a healthy lane, and this is NOT the same as the source being "
             "unreadable, which is reported separately",
         )
-    second: dict[str, int] = {}
+    second: dict[str, ModelGroupLagReading] = {}
     unreadable: list[str] = []
     for group in groups:
         try:
-            second[group] = read_group_total_lag(
+            second[group] = read_group_lag(
                 access, group, runner=runner, timeout_seconds=timeout_seconds
             )
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
@@ -2469,15 +2557,23 @@ def check_consumer_group_lag(
             f"(authenticated={access.authenticated}): {'; '.join(unreadable[:3])}"
             f"{', ...' if len(unreadable) > 3 else ''}",
         )
-    over_bound = sorted(g for g, lag in second.items() if lag > max_lag)
+    over_bound = sorted(g for g, r in second.items() if r.total_lag > max_lag)
     growing: list[str] = []
+    in_flight: list[str] = []
     if first_sample is not None:
-        growing = sorted(
-            g
-            for g, lag in second.items()
-            if g in first_sample and lag > first_sample[g]
-        )
-    worst = max(second.values())
+        for g in sorted(second):
+            earlier = first_sample.get(g)
+            if earlier is None or second[g].total_lag <= earlier.total_lag:
+                continue
+            delta = f"{g} {earlier.total_lag}->{second[g].total_lag}"
+            stalled = stalled_partitions(earlier, second[g])
+            if stalled is None:
+                growing.append(f"{delta} (no partition offsets, total judged alone)")
+            elif stalled:
+                growing.append(f"{delta} ({'; '.join(stalled[:3])})")
+            else:
+                in_flight.append(delta)
+    worst = max(r.total_lag for r in second.values())
     evidence = (
         f"{len(second)} declared group(s) read via {access.container}; "
         f"max TOTAL-LAG {worst} against bound {max_lag}; "
@@ -2491,15 +2587,18 @@ def check_consumer_group_lag(
     problems: list[str] = []
     if over_bound:
         problems.append(
-            f"over bound: {', '.join(f'{g}={second[g]}' for g in over_bound[:5])}"
+            "over bound: "
+            + ", ".join(f"{g}={second[g].total_lag}" for g in over_bound[:5])
         )
     if growing:
         problems.append(
-            "GROWING across two samples: "
-            + ", ".join(
-                f"{g} {first_sample[g]}->{second[g]}"  # type: ignore[index]
-                for g in growing[:5]
-            )
+            "GROWING across two samples with work left uncommitted: "
+            + ", ".join(growing[:5])
+        )
+    if in_flight:
+        evidence += (
+            "; grew with nothing waiting at the first read or every waiting "
+            f"partition committed, so not stopped: {', '.join(in_flight[:5])}"
         )
     if problems:
         return ModelLabPassCheck(
@@ -2570,7 +2669,7 @@ def sample_group_lag(
     *,
     runner: CommandRunner | None = None,
     timeout_seconds: float = 60.0,
-) -> dict[str, int]:
+) -> dict[str, ModelGroupLagReading]:
     """One reading of every declared group's lag, for the EARLIER sample.
 
     A group that cannot be read is OMITTED rather than recorded as zero. The
@@ -2578,10 +2677,10 @@ def sample_group_lag(
     zero would manufacture a baseline that makes any later reading look like
     growth.
     """
-    sample: dict[str, int] = {}
+    sample: dict[str, ModelGroupLagReading] = {}
     for group in groups:
         try:
-            sample[group] = read_group_total_lag(
+            sample[group] = read_group_lag(
                 access, group, runner=runner, timeout_seconds=timeout_seconds
             )
         except (OSError, ValueError, subprocess.SubprocessError):
@@ -2589,14 +2688,39 @@ def sample_group_lag(
     return sample
 
 
-def load_lag_sample(path: Path | None) -> dict[str, int] | None:
+def dump_lag_sample(sample: Mapping[str, ModelGroupLagReading]) -> str:
+    """The sample file ``sample-lag`` writes and ``load_lag_sample`` reads."""
+    return json.dumps(
+        {
+            group: {
+                "total_lag": reading.total_lag,
+                "partitions": None
+                if reading.partitions is None
+                else {
+                    key: {"committed": committed, "lag": lag}
+                    for key, (committed, lag) in reading.partitions.items()
+                },
+            }
+            for group, reading in sample.items()
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _is_offset(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def load_lag_sample(path: Path | None) -> dict[str, ModelGroupLagReading] | None:
     """Read an earlier lag sample, or None when the caller supplied none.
 
     An unreadable or malformed file returns None rather than raising: the
     growth arm is then not measured and ``check_consumer_group_lag`` SAYS it
     was not measured in its own evidence. Silently treating a broken baseline
     as an empty one would let the check claim it checked growth against
-    nothing.
+    nothing. A group entry that is not the shape ``dump_lag_sample`` writes is
+    dropped, so that group has no baseline rather than a made-up one.
     """
     if path is None or not path.exists():
         return None
@@ -2606,11 +2730,29 @@ def load_lag_sample(path: Path | None) -> dict[str, int] | None:
         return None
     if not isinstance(payload, dict):
         return None
-    return {
-        str(key): int(value)
-        for key, value in payload.items()
-        if isinstance(value, int) and not isinstance(value, bool)
-    }
+    sample: dict[str, ModelGroupLagReading] = {}
+    for group, entry in payload.items():
+        if not isinstance(entry, dict) or not _is_offset(entry.get("total_lag")):
+            continue
+        raw_partitions = entry.get("partitions")
+        partitions: dict[str, tuple[int | None, int]] | None = None
+        if isinstance(raw_partitions, dict):
+            partitions = {}
+            for key, cell in raw_partitions.items():
+                if not isinstance(cell, dict) or not _is_offset(cell.get("lag")):
+                    partitions = None
+                    break
+                committed = cell.get("committed")
+                if committed is not None and not _is_offset(committed):
+                    partitions = None
+                    break
+                partitions[str(key)] = (committed, cell["lag"])
+        elif raw_partitions is not None:
+            continue
+        sample[str(group)] = ModelGroupLagReading(
+            total_lag=entry["total_lag"], partitions=partitions
+        )
+    return sample
 
 
 def check_delegation_golden_chain(receipt_path: Path) -> ModelLabPassCheck:
@@ -2976,7 +3118,7 @@ def probe_compose_dev(
     declared_consumer_groups: Sequence[str] | None = None,
     consumer_group_source_error: str = "",
     max_consumer_lag: int = 0,
-    first_lag_sample: Mapping[str, int] | None = None,
+    first_lag_sample: Mapping[str, ModelGroupLagReading] | None = None,
     chain_canary_receipt: Path | None = None,
     runner: CommandRunner | None = None,
 ) -> list[ModelLabPassCheck]:
@@ -6467,7 +6609,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sample_groups = parse_group_list_argument(args.consumer_groups or "")
         readings = sample_group_lag(sample_access, sample_groups)
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(json.dumps(readings, indent=2, sort_keys=True), "utf-8")
+        args.out.write_text(dump_lag_sample(readings), "utf-8")
         print(
             f"lag baseline: {len(readings)} group(s) read, written to {args.out}",
             file=sys.stderr,
@@ -6619,7 +6761,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             checks = [parse_check_argument(raw) for raw in args.check]
             checks.extend(load_checks_json(args.checks_json))
-            ticket_id, criterion_labels = "", ()
+            ticket_id = ""
+            criterion_labels: tuple[str, ...] = ()
             if args.bind_from_commit is not None:
                 checks, ticket_id, criterion_labels = bind_commit_checks(
                     args.sha,

@@ -55,6 +55,7 @@ from scripts.ci.lab_pass_receipt import (
     PROBES_NOT_YET_WIRED,
     GroupSourceError,
     ModelBrokerAccess,
+    ModelGroupLagReading,
     ModelMigrationLedger,
     check_consumer_group_lag,
     check_delegation_golden_chain,
@@ -64,7 +65,7 @@ from scripts.ci.lab_pass_receipt import (
     load_declared_groups,
     load_lag_sample,
     parse_group_list_argument,
-    read_group_total_lag,
+    read_group_lag,
     sample_group_lag,
 )
 
@@ -121,6 +122,11 @@ ACCESS = ModelBrokerAccess(container="broker-x", brokers="redpanda:9092")
 
 def _describe(total_lag: int) -> str:
     return f"GROUP g\nSTATE Stable\nMEMBERS 1\nTOTAL-LAG {total_lag}\n"
+
+
+def _reading(total_lag: int) -> ModelGroupLagReading:
+    """A baseline read from a reply with no partition table, as ``_describe`` prints."""
+    return ModelGroupLagReading(total_lag=total_lag, partitions=None)
 
 
 def _canary_receipt(
@@ -325,7 +331,7 @@ def test_lag_passes_under_the_bound_and_not_growing() -> None:
         ACCESS,
         ["g"],
         max_lag=100,
-        first_sample={"g": 12},
+        first_sample={"g": _reading(12)},
         runner=FakeRunner(stdout=_describe(10)),
     )
     assert check.ok is True
@@ -355,7 +361,7 @@ def test_lag_fails_when_growing_even_inside_a_generous_bound() -> None:
         ACCESS,
         ["g"],
         max_lag=100_000,
-        first_sample={"g": 498},
+        first_sample={"g": _reading(498)},
         runner=FakeRunner(stdout=_describe(601)),
     )
     assert check.ok is False
@@ -373,7 +379,7 @@ def test_lag_does_not_fail_on_high_but_flat_lag() -> None:
         ACCESS,
         ["g"],
         max_lag=100_000,
-        first_sample={"g": 498},
+        first_sample={"g": _reading(498)},
         runner=FakeRunner(stdout=_describe(498)),
     )
     assert check.ok is True
@@ -413,12 +419,13 @@ def test_total_lag_is_matched_by_label_not_column_offset() -> None:
     label for the same reason. One parse rule for one output format.
     """
     padded = "GROUP      g\nSTATE           Stable\nTOTAL-LAG          42\n"
-    assert read_group_total_lag(ACCESS, "g", runner=FakeRunner(stdout=padded)) == 42
+    reading = read_group_lag(ACCESS, "g", runner=FakeRunner(stdout=padded))
+    assert reading.total_lag == 42
 
 
-def test_read_group_total_lag_refuses_output_with_no_total_lag_line() -> None:
+def test_read_group_lag_refuses_output_with_no_total_lag_line() -> None:
     with pytest.raises(ValueError, match="no TOTAL-LAG"):
-        read_group_total_lag(ACCESS, "g", runner=FakeRunner(stdout="STATE Dead\n"))
+        read_group_lag(ACCESS, "g", runner=FakeRunner(stdout="STATE Dead\n"))
 
 
 def test_sasl_is_all_or_nothing() -> None:
@@ -460,7 +467,7 @@ def test_the_credential_rides_the_environment_and_never_argv() -> None:
         sasl_password="probe-secret-value",
     )
     runner = FakeRunner(stdout=_describe(1))
-    read_group_total_lag(access, "g", runner=runner)
+    read_group_lag(access, "g", runner=runner)
     argv = runner.calls[0]
     assert "probe-secret-value" not in " ".join(argv)
     assert "probe-user" not in " ".join(argv)
@@ -479,7 +486,7 @@ def test_the_credential_rides_the_environment_and_never_argv() -> None:
 
 def test_an_anonymous_probe_sends_no_credential_environment() -> None:
     runner = FakeRunner(stdout=_describe(1))
-    read_group_total_lag(ACCESS, "g", runner=runner)
+    read_group_lag(ACCESS, "g", runner=runner)
     assert runner.envs == [{}]
     assert runner.calls[0][:3] == ["docker", "exec", "broker-x"]
 
@@ -487,7 +494,9 @@ def test_an_anonymous_probe_sends_no_credential_environment() -> None:
 def test_a_baseline_omits_groups_it_could_not_read(tmp_path: Path) -> None:
     """A zero baseline would make any later reading look like growth."""
     runner = FakeRunner(per_call=[(0, _describe(7)), (1, "")])
-    assert sample_group_lag(ACCESS, ["good", "bad"], runner=runner) == {"good": 7}
+    assert sample_group_lag(ACCESS, ["good", "bad"], runner=runner) == {
+        "good": _reading(7)
+    }
 
 
 def test_an_unreadable_baseline_file_disables_growth_rather_than_faking_it(
@@ -729,7 +738,7 @@ def test_a_populated_group_file_restores_the_live_reading(tmp_path: Path) -> Non
         ACCESS,
         groups,
         max_lag=10000,
-        first_sample=dict.fromkeys(groups, 0),
+        first_sample=dict.fromkeys(groups, _reading(0)),
         runner=FakeRunner(stdout=_describe(0)),
     )
     assert check.ok is True
