@@ -46,8 +46,6 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k moved_sibling_pin
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC2
   - id: dod-omn-13902-ac3
     description: An unchanged lock reports changed=false.
     source: manual
@@ -55,5 +53,3 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k unchanged_lock
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC3
