@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-13902
+title: the automated sibling lock refresh lands a uv.lock and runner image lock that agree
+summary: The sibling lock refresh rewrites uv.lock; docker/runners/runner-image.lock.json pins a digest of that lockfile, so the refresh regenerates the runner image lock in the same PR and both stay verifiable.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn13902
+    statement: uv.lock is consistent with pyproject.toml and docker/runners/runner-image.lock.json carries the shared_env_digest and identity_digest computed from the refreshed uv.lock.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the runner image lock matches the identity computed from the refreshed uv.lock -- falsifier: uv run python scripts/ci/runner_image_identity.py --mode verify'
+      - id: AC2
+        statement: 'AC2: uv.lock is up to date with pyproject.toml -- falsifier: uv lock --check'
+evidence_requirements:
+  - kind: tests
+    description: The runner image identity verifier accepts the regenerated lock.
+    command: uv run python scripts/ci/runner_image_identity.py --mode verify
+  - kind: tests
+    description: uv reports the lockfile is current.
+    command: uv lock --check
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-13902-ac1
+    description: The runner image identity verifier accepts docker/runners/runner-image.lock.json against the refreshed uv.lock.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run python scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-13902-ac2
+    description: uv.lock is up to date with pyproject.toml.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv lock --check
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
