@@ -1,0 +1,11 @@
+{
+  "_provenance": {
+    "source": "GitHub contents API, OmniNode-ai/onex_change_control uv.lock at 92ddacaf67d4d26d6c85494eff42a0cb6efd4caa",
+    "captured_utc": "2026-10-09T03:46:58.994590+00:00",
+    "source_sha256": "c9fd9aef61ecf0a4ab769ac070393221290871b36dec982d5ff65d6aade35023"
+  },
+  "ref": "92ddacaf67d4d26d6c85494eff42a0cb6efd4caa",
+  "locked_omnibase_core_version": "0.47.35",
+  "stale_main_ref": "a89a6f30fabf74189195f57b57fcc5d4751f4c48",
+  "stale_main_locked_omnibase_core_version": "0.46.7"
+}
