@@ -12,11 +12,11 @@ requirements:
       - id: AC1
         statement: 'AC1: uv.lock resolves omnibase-core to 0.47.37 -- falsifier: grep -A1 ''name = "omnibase-core"'' uv.lock | grep -F ''version = "0.47.37"'''
       - id: AC2
-        statement: 'AC2: the override pin in pyproject.toml names 0.47.37 -- falsifier: uv run pytest tests/integration/infra/test_omn_12765_release_backmerge_identity.py::test_release_backmerge_preserves_proven_runtime_core_pin -q'
+        statement: 'AC2: the override pin in pyproject.toml names 0.47.37 -- falsifier: uv run pytest tests/integration/infra/test_omn_12765_release_backmerge_identity.py -k test_release_backmerge_preserves_proven_runtime_core_pin -q'
 evidence_requirements:
   - kind: tests
     description: The release back-merge pin test asserts the override pin names 0.47.37.
-    command: uv run pytest tests/integration/infra/test_omn_12765_release_backmerge_identity.py::test_release_backmerge_preserves_proven_runtime_core_pin -q
+    command: uv run pytest tests/integration/infra/test_omn_12765_release_backmerge_identity.py -k test_release_backmerge_preserves_proven_runtime_core_pin -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -36,7 +36,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/integration/infra/test_omn_12765_release_backmerge_identity.py::test_release_backmerge_preserves_proven_runtime_core_pin -q
+        check_value: uv run pytest tests/integration/infra/test_omn_12765_release_backmerge_identity.py -k test_release_backmerge_preserves_proven_runtime_core_pin -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
