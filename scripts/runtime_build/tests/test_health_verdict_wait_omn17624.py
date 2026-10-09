@@ -502,6 +502,24 @@ _STARTING_503_BODY: dict[str, object] = {
     },
 }
 
+#: The second startup shape, measured on the same lane at 14:3xZ after the
+#: first fix: ``ServiceHealth.attach_runtime`` runs (service_kernel) well before
+#: ``runtime.start()``, and ``RuntimeHostProcess._is_starting`` is only set
+#: inside ``start()``. Between the two, ``/health`` is a 503 ``unhealthy`` with
+#: ``runtime_attached: true``, ``is_running: false`` and
+#: ``startup_in_progress: false`` -- a runtime that has not started yet.
+_ATTACHED_NOT_YET_RUNNING_503_BODY: dict[str, object] = {
+    "status": "unhealthy",
+    "details": {
+        "healthy": False,
+        "degraded": False,
+        "startup_in_progress": False,
+        "is_running": False,
+        "runtime_attached": True,
+        "runtime_health": None,
+    },
+}
+
 _UNHEALTHY_503_BODY: dict[str, object] = {
     "status": "unhealthy",
     "details": {
@@ -610,3 +628,33 @@ def test_a_503_with_an_unreadable_body_stays_terminal(gate: ModuleType) -> None:
 def test_starting_reason_is_in_the_waitable_vocabulary() -> None:
     assert REASON_RUNTIME_STARTING == "runtime_starting"
     assert HealthVerdictReason(REASON_RUNTIME_STARTING) in _WAITABLE_REASONS
+
+
+@_BOTH_GATES
+def test_an_attached_runtime_that_has_not_started_yet_is_waited_on(
+    gate: ModuleType,
+) -> None:
+    opener, calls = _opener_for_responses(
+        (503, json.dumps(_ATTACHED_NOT_YET_RUNNING_503_BODY).encode()),
+        (503, json.dumps(_STARTING_503_BODY).encode()),
+        (200, json.dumps(_HEALTHY_BODY).encode()),
+    )
+    verdict, described = gate.check_health_with_retry(
+        "http://x/health", opener=opener, sleep_fn=lambda _s: None
+    )
+    assert verdict.ok is True
+    assert calls["n"] == 3
+    assert "satisfied on attempt 3" in described
+
+
+@_BOTH_GATES
+def test_an_error_shaped_503_with_no_details_stays_terminal(gate: ModuleType) -> None:
+    """``_handle_health``'s exception branch: no details, so nothing says
+    "starting" -- terminal, as before."""
+    body = {"status": "unhealthy", "version": "x", "error": "boom"}
+    opener, calls = _opener_for_responses((503, json.dumps(body).encode()))
+    verdict, _described = gate.check_health_with_retry(
+        "http://x/health", opener=opener, sleep_fn=lambda _s: None
+    )
+    assert verdict.reason == REASON_STATUS_UNREADABLE
+    assert calls["n"] == 1

@@ -680,8 +680,17 @@ def evaluate_health_body(
 def _body_says_starting(raw: bytes) -> bool:
     """True only for a ``/health`` body that positively reports startup.
 
+    The runtime's own markers: ``startup_phase`` (no runtime attached yet),
+    ``runtime_attached: false``, ``startup_in_progress: true`` (inside
+    ``start()`` with a live bus), or ``is_running: false`` -- attached but not
+    started, because ``ServiceHealth.attach_runtime`` runs before
+    ``runtime.start()`` and ``_is_starting`` is only set inside ``start()``.
+    A runtime whose start fails exits the process, so the endpoint stops
+    answering and the next probe is terminal; a runtime that never reaches
+    running is reported at the end of the bound.
+
     Fails closed: an undecodable body, a body with no ``details`` mapping, or
-    one carrying none of the runtime's own startup markers is NOT starting.
+    one carrying none of these markers is NOT starting.
     """
     try:
         document = decode_health_body(raw)
@@ -695,6 +704,7 @@ def _body_says_starting(raw: bytes) -> bool:
         (isinstance(phase, str) and bool(phase))
         or details.get("runtime_attached") is False
         or details.get("startup_in_progress") is True
+        or details.get("is_running") is False
     )
 
 
