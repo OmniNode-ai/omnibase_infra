@@ -1147,6 +1147,8 @@ route:
         # branch protection, which is exactly the shape this list records.
         - pypi-pin-resolvability
         - receipt-honesty
+        # OMN-20074: repo-owned verdict enforced by CI Summary on PR runs.
+        - repo-evidence / dod-verify
         - required-check-skip-guard / check-skip-vectors
         - Runner Route (OMN-18031) / route
         # OMN-20562: the runtime_profiles validator, registered STRICT once its
