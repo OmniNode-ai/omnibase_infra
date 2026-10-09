@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20782
+title: omnibase_infra enforces the five hygiene classes on added lines
+summary: .public-repo-hygiene.yaml declares enforce_scope added-lines and the five enforce_classes, the public-repo-hygiene caller moves to an omniclaude revision that supports added-lines enforcement, and a pre-commit hook runs the gate at the same revision over staged added lines. No allowlist entry is added.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20782
+    statement: A pull request or a commit that adds a line in one of the five enforced hygiene classes fails the gate, and a change that touches no enforced class passes.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a pull request adding a lab-config literal fails the gate in CI, at the moved pin -- falsifier: the gate''s run on a scratch branch with one planted literal'
+      - id: AC2
+        statement: 'AC2: the pre-commit hook refuses the same staged literal -- falsifier: `pre-commit run public-repo-hygiene --files the planted file` exits non-zero'
+      - id: AC3
+        statement: 'AC3: a pull request touching no enforced class passes -- falsifier: this task''s own PR runs the gate green'
+evidence_requirements:
+  - kind: tests
+    description: The config enforces the five classes on added lines, the caller is pinned to the added-lines revision, and a recorded run of the real gate at that pin fails a planted lab-config literal.
+    command: uv run pytest tests/ci/test_public_repo_hygiene_enforcement_omn20782.py -q
+  - kind: manual
+    description: The scratch pull request run, the local pre-commit refusal of the planted file and its positive control are quoted in the PR body; AC3 is this pull request's own public-repo-hygiene run.
+    command: pre-commit run public-repo-hygiene --files <planted file>
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20782-ac1
+    description: The config enforces the five classes on added lines, the caller workflow is pinned to the added-lines revision, and the recorded run of the gate at that pin fails a planted lab-config literal.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_repo_hygiene_enforcement_omn20782.py -q -k "config_enforces_the_five_classes or caller_workflow_is_pinned or planted_lab_config_literal"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20782-precommit-and-sweep
+    description: The pre-commit hook runs the gate at the same revision, and a red public-repo-hygiene row fails the CI Summary sweep while a green one passes. The hook's refusal of a staged literal (AC2) is quoted in the PR body.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_repo_hygiene_enforcement_omn20782.py -q -k "precommit_runs_the_gate_hook or ci_summary_sweep"
+        cwd: ${OMNI_HOME}/omnibase_infra
