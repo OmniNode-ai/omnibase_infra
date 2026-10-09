@@ -355,6 +355,13 @@ jobs:
       - name: Runner disk admission self-pause regression (OMN-19070)
         run: uv run --frozen pytest tests/scripts/test_runner_job_started_disk_admission.py -q
 
+      # OMN-18713: same focused suite as contract-discovery-reconciliation in pre-commit.
+      - name: Contract discovery reconciliation (OMN-18713)
+        run: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_discovery.py -q --timeout=60
+
+      - name: Discovery manifest recorded runtime replay (OMN-18713)
+        run: uv run --frozen pytest tests/ci/test_discovery_manifest_live_replay.py -q --timeout=60
+
       # OMN-18364. A hosted-runner step that invokes `uv` before its job
       # installs it exits 127, and where that step's outcome feeds a receipt
       # check the receipt records the missing interpreter as a substantive
