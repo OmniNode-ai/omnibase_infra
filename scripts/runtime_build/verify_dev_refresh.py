@@ -486,9 +486,10 @@ def check_health_with_retry(
     return verdict, described
 
 
-def check_effects_health_with_retry(
-    effects_health_url: str,
+def check_runtime_health_with_retry(
+    health_url: str,
     *,
+    label: str,
     opener: object | None = None,
     require_verdict: bool = True,
     max_verdict_age_seconds: float | None | object = DEFAULT_MAX_VERDICT_AGE,
@@ -498,15 +499,18 @@ def check_effects_health_with_retry(
     window_seconds: float = MANIFEST_FETCH_WINDOW_SECONDS,
     clock_fn: Callable[[], float] = time.monotonic,
 ) -> tuple[HealthVerdict, str]:
-    """Probe the effects runtime's ``/health`` for a bounded window (OMN-17427).
+    """Probe a runtime's ``/health`` for a bounded window (OMN-17427).
 
-    The effects runtime binds its listener after the main runtime does, so an
-    unanswered first probe is a runtime still booting as often as a dead one.
+    Used for both runtimes of the lane. A runtime binds its listener late, and
+    a probe against a loaded host times out (measured: a 10s fetch timed out on
+    the main runtime at host load ~30 on 2026-10-09 and the terminal verdict
+    rolled back a lane whose effects runtime was healthy), so an unanswered
+    first probe is a runtime still booting or busy as often as a dead one.
     The probe is therefore retried while the endpoint does not answer at all
     (``status_unreadable``: refused, reset, or a non-200 that does not say it is
     starting), inside ONE monotonic window, and then handed to the same verdict
     wait the main runtime gets. Expiry fails closed with the last thing seen:
-    a crash-looping effects runtime never answers, so it never reads healthy.
+    a crash-looping runtime never answers, so it never reads healthy.
     """
     budget = RetryBudget(
         total_seconds=window_seconds,
@@ -517,7 +521,7 @@ def check_effects_health_with_retry(
     while True:
         budget.attempts_made += 1
         verdict, described = check_health_with_retry(
-            effects_health_url,
+            health_url,
             opener=opener,
             require_verdict=require_verdict,
             max_verdict_age_seconds=max_verdict_age_seconds,
@@ -528,11 +532,11 @@ def check_effects_health_with_retry(
         if verdict.ok or verdict.reason != REASON_STATUS_UNREADABLE:
             return (
                 verdict,
-                f"{described}; effects probe attempts={budget.attempts_made}",
+                f"{described}; {label} probe attempts={budget.attempts_made}",
             )
         if not budget.sleep_before_retry():
             detail = (
-                f"runtime-effects {effects_health_url} never answered a readable "
+                f"{label} {health_url} never answered a readable "
                 f"/health in {budget.attempts_made} attempt(s) over "
                 f"{budget.slept_seconds:.0f}s: {verdict.detail}"
             )
@@ -545,7 +549,7 @@ def check_effects_health_with_retry(
                     detail=detail,
                     reason=verdict.reason,
                 ),
-                f"{described}; effects probe window {window_seconds:.0f}s exhausted "
+                f"{described}; {label} probe window {window_seconds:.0f}s exhausted "
                 f"after {budget.attempts_made} attempt(s)",
             )
 
@@ -607,7 +611,7 @@ def run_health_gate(
     health_boot_grace_seconds: float = 120.0,
     manifest_window_seconds: float = MANIFEST_FETCH_WINDOW_SECONDS,
     manifest_clock_fn: Callable[[], float] = time.monotonic,
-    effects_window_seconds: float = MANIFEST_FETCH_WINDOW_SECONDS,
+    health_reachability_window_seconds: float = MANIFEST_FETCH_WINDOW_SECONDS,
 ) -> HealthGateReport:
     report = HealthGateReport(
         lane=lane,
@@ -644,14 +648,17 @@ def run_health_gate(
     else:
         report.manifest_ok = count is not None and count >= min_contracts
 
-    health_verdict, verdict_wait = check_health_with_retry(
+    health_verdict, verdict_wait = check_runtime_health_with_retry(
         health_url,
+        label="omninode-runtime",
         opener=opener,
         require_verdict=require_verdict,
         max_verdict_age_seconds=max_verdict_age_seconds,
         check_interval_seconds=health_check_interval_seconds,
         boot_grace_seconds=health_boot_grace_seconds,
         sleep_fn=sleep_fn,
+        window_seconds=health_reachability_window_seconds,
+        clock_fn=manifest_clock_fn,
     )
     report.health_ok = health_verdict.ok
     report.health_detail = health_verdict.detail
@@ -663,15 +670,16 @@ def run_health_gate(
         for d in health_verdict.dimensions
     ]
 
-    effects_verdict, effects_wait = check_effects_health_with_retry(
+    effects_verdict, effects_wait = check_runtime_health_with_retry(
         effects_health_url,
+        label="runtime-effects",
         opener=opener,
         require_verdict=require_verdict,
         max_verdict_age_seconds=max_verdict_age_seconds,
         check_interval_seconds=health_check_interval_seconds,
         boot_grace_seconds=health_boot_grace_seconds,
         sleep_fn=sleep_fn,
-        window_seconds=effects_window_seconds,
+        window_seconds=health_reachability_window_seconds,
         clock_fn=manifest_clock_fn,
     )
     report.effects_health_ok = effects_verdict.ok

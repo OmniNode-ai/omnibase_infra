@@ -144,7 +144,7 @@ def test_the_effects_wait_is_bounded_by_the_window_and_then_fails_closed() -> No
     lane = _Lane([_refused()])
     clock = _Clock()
 
-    _gate(lane, clock, effects_window_seconds=60.0)
+    _gate(lane, clock, health_reachability_window_seconds=60.0)
 
     assert lane.effects_calls > 1, "an effects runtime still binding gets retried"
     assert clock.now() <= 60.0 + 1e-6, "the wait outran its own window"
@@ -268,3 +268,40 @@ def test_the_refresh_script_hands_the_gate_the_effects_url_on_both_runs() -> Non
     )
     assert text.count('--effects-health-url "${EFFECTS_HEALTH_URL}"') == 2
     assert text.count("run_verify \\") == 2
+
+
+@pytest.mark.unit
+def test_a_main_runtime_probe_that_times_out_under_load_is_retried_not_terminal() -> (
+    None
+):
+    """2026-10-09T15:48Z: a 10s fetch of :8085/health timed out on a host at
+    load ~30, the terminal verdict failed the gate, and a lane whose effects
+    runtime was healthy was rolled back. A busy runtime is waited for inside the
+    same bounded window; a runtime that never answers still fails."""
+    calls = {"n": 0}
+
+    def opener(url: str, timeout: float = 10) -> _Resp:
+        if url == _MANIFEST:
+            return _Resp({"contracts": [1, 2, 3]})
+        if url == _EFFECTS_HEALTH:
+            return _Resp(_HEALTHY_BODY)
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise TimeoutError("timed out")
+        return _Resp(_HEALTHY_BODY)
+
+    report = _gate(_Lane([_HEALTHY_BODY]), _Clock(), opener=opener)
+    assert report.health_ok is True
+    assert calls["n"] == 3
+
+    calls["n"] = -10_000  # never reaches 3 inside the window
+    clock = _Clock()
+    dead = _gate(
+        _Lane([_HEALTHY_BODY]),
+        clock,
+        opener=opener,
+        health_reachability_window_seconds=60.0,
+    )
+    assert dead.health_ok is False
+    assert "omninode-runtime" in (dead.health_detail or "")
+    assert clock.now() <= 60.0 + 1e-6
