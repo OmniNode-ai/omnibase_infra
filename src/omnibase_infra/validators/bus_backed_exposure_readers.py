@@ -591,6 +591,7 @@ def _parse_backend_readers(
     errors: list[str] = []
     seen_ids: set[str] = set()
     required_keys = frozenset({"id", "kind", "route", "projection_slot"})
+    optional_keys = frozenset({"read_all_rows"})
 
     for index, entry in enumerate(raw):
         prefix = f"`backend_readers[{index}]`"
@@ -604,7 +605,7 @@ def _parse_backend_readers(
 
         entry_keys = frozenset(entry)
         missing_keys = sorted(required_keys - entry_keys)
-        unknown_keys = sorted(entry_keys - required_keys)
+        unknown_keys = sorted(entry_keys - required_keys - optional_keys)
         if missing_keys:
             errors.append(f"{prefix} is missing {', '.join(missing_keys)}")
         if unknown_keys:
