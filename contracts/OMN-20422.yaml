@@ -24,10 +24,30 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-hostile-review-second-voter
-    description: The PR's focused tests verify the recorded second-voter response and the workflow's endpoint and quorum keys.
+  - id: dod-omn-20422-ac1
+    description: The recorded second-voter response identifies qwen3.6-35b-a3b and a completed reply, distinct from the first voter Qwen3.8-27B.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q
+        check_value: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_second_voter_endpoint_serves_a_different_model_than_the_first
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20422-ac2
+    description: The review and preflight steps read one job-level LLM_GPT_OSS_REVIEW_URL on port 8131.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_review_and_preflight_share_one_second_voter_url_on_port_8131
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-20422-ac3
+    description: qwen3-review and gpt-oss-review remain the quorum keys.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_the_quorum_keys_are_unchanged
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
