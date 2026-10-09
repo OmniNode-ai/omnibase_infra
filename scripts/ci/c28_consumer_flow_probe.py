@@ -163,7 +163,6 @@ KINDS: Final[tuple[tuple[str, str, str, str], ...]] = (
 )
 
 APPLIED_TOPIC: Final[str] = "onex.evt.omnimarket.projection-consumer-flow-applied.v1"
-GENERIC_DLQ: Final[str] = "onex.dlq.omnibase-infra.events.v1"
 SEAM_DLQ: Final[str] = "onex.dlq.omnimarket.consumer-flow-stall-alert-malformed.v1"
 
 RUNTIME_CONTAINERS: Final[tuple[str, ...]] = (
@@ -564,7 +563,7 @@ def grade_boot(rec: Record, boot: dict[str, Any]) -> None:
         "boot",
         "injected_marker_durably_on_the_dlq",
         _is_int(inj.get("dlq_copies")) and inj["dlq_copies"] > 0,
-        f"{GENERIC_DLQ} messages carrying the marker: {inj.get('dlq_copies')}",
+        f"{SEAM_DLQ} messages carrying the marker: {inj.get('dlq_copies')}",
     )
 
 
@@ -943,7 +942,7 @@ def inject(lane: Lane) -> dict[str, Any]:
 
 
 def observe_injection(
-    lane: Lane, inj: dict[str, Any], dlq_before: int, wait_seconds: float
+    lane: Lane, inj: dict[str, Any], seam_dlq_before: int, wait_seconds: float
 ) -> dict[str, Any]:
     deadline = time.monotonic() + wait_seconds
     since = inj["published_at"]
@@ -963,15 +962,15 @@ def observe_injection(
                 if (m := BOUNDARY_RE.search(ln))
                 and m.group("cid") == inj["correlation_id"]
             )
-        dlq_after = lane.high_watermark(GENERIC_DLQ)
+        seam_dlq_after = lane.high_watermark(SEAM_DLQ)
         copies = 0
-        if dlq_after > dlq_before:
+        if seam_dlq_after > seam_dlq_before:
             out = lane.rpk(
                 "topic",
                 "consume",
-                GENERIC_DLQ,
+                SEAM_DLQ,
                 "-o",
-                f"{dlq_before}:{dlq_after}",
+                f"{seam_dlq_before}:{seam_dlq_after}",
                 "-f",
                 "%o\\t%v\\n",
                 timeout=120,
@@ -983,8 +982,8 @@ def observe_injection(
                 "validation_errors_after": errors,
                 "boundary_lines": boundaries,
                 "dlq_copies": copies,
-                "generic_dlq_before": dlq_before,
-                "generic_dlq_after": dlq_after,
+                "seam_dlq_before": seam_dlq_before,
+                "seam_dlq_after": seam_dlq_after,
             }
         time.sleep(10)
 
@@ -1037,9 +1036,8 @@ def observe_lane(
         else None
     )
 
-    dlq_before = lane.high_watermark(GENERIC_DLQ)
     seam_dlq_before = lane.high_watermark(SEAM_DLQ)
-    inj = observe_injection(lane, inject(lane), dlq_before, injection_wait)
+    inj = observe_injection(lane, inject(lane), seam_dlq_before, injection_wait)
     seam_dlq_after = lane.high_watermark(SEAM_DLQ)
 
     ident_after = lane.identity()
