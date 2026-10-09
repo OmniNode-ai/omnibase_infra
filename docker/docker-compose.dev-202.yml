@@ -141,6 +141,8 @@ services:
     container_name: omnibase-infra-dev-202-redpanda-sasl-enable
   redpanda-partition-cap:
     container_name: omnibase-infra-dev-202-redpanda-partition-cap
+    environment:
+      REDPANDA_PROFILE_MEMORY: ${DEV_202_REDPANDA_MEMORY:-4G}
   valkey:
     container_name: omnibase-infra-dev-202-valkey
     ports: !override

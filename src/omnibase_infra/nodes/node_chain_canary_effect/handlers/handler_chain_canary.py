@@ -222,9 +222,10 @@ TypeLedgerDsnLookup = Callable[[str], str]
 # raw facts rather than a verdict so the SKIP != PASS classification lives here
 # — a transport that returned a ready-made status could report SKIP as green
 # and nothing downstream would notice.
+# Transport facts: (hops, replay_green, verifier_verdict, chain_state, error).
 TypeLedgerReplay = Callable[
     [str, str, float],
-    Awaitable[tuple[tuple[str, ...] | None, bool, str, str]],
+    Awaitable[tuple[tuple[str, ...] | None, bool, str, str, str]],
 ]
 
 # OMN-19811: (agent_url, timeout_s, observed_at) -> snapshot. Never raises; an
@@ -270,6 +271,12 @@ def _utc_now() -> datetime:
 # distinction is only enforceable if SKIP survives as itself this far.
 _VERIFIER_SKIP = "skip"
 _VERIFIER_PASS = "pass"
+# OMN-17427: the `ledger_chain.chain_state` token node_delegation_chain_ledger_
+# effect writes for a chain whose only observation is an in-process,
+# parentless terminal. A literal for the same reason the verifier tokens above
+# are: it is a wire token read off the relation, pinned equal to the writer's
+# EnumLedgerChainState by test_handler_chain_canary_in_process_omn17427.py.
+_CHAIN_STATE_IN_PROCESS_TERMINAL_ONLY = "in_process_terminal_only"
 
 # OMN-18389: how often link 5 re-reads `ledger_chain` while it waits for the
 # writer whose output it grades.
@@ -919,14 +926,16 @@ async def _replay_ledger_chain_via_asyncpg(
     source: str,
     correlation_id: str,
     timeout_s: float,
-) -> tuple[tuple[str, ...] | None, bool, str, str]:
+) -> tuple[tuple[str, ...] | None, bool, str, str, str]:
     """Link-5 leg (OMN-16964): assemble, replay and tier-2 verify this chain.
 
-    Returns the hops assembled for the probe's own correlation id, whether the
-    replay was green, and the tier-2 verifier's own word (``pass`` / ``fail``
-    / ``skip``). The verifier's verdict is returned verbatim rather than
-    pre-collapsed into a boolean: OMN-16025 requires SKIP to be distinguishable
-    from PASS, and a boolean cannot carry that distinction.
+    Returns ``(hops, replay_green, verifier_verdict, chain_state, error)`` for
+    the probe's own correlation id. The tier-2 verifier's word (``pass`` /
+    ``fail`` / ``skip``) is returned verbatim rather than pre-collapsed into a
+    boolean: OMN-16025 requires SKIP to be distinguishable from PASS, and a
+    boolean cannot carry that distinction. ``chain_state`` is the writer's own
+    label for the chain (OMN-17427), empty on rows written before migration
+    110 added the column.
 
     ``hops`` is ``None`` when the ledger could not be read at all — a read that
     failed is not a chain that was found to be empty.
@@ -934,7 +943,7 @@ async def _replay_ledger_chain_via_asyncpg(
     try:
         import asyncpg
     except ImportError as exc:  # pragma: no cover - asyncpg is a hard dep
-        return None, False, "", f"asyncpg unavailable: {exc}"
+        return None, False, "", "", f"asyncpg unavailable: {exc}"
 
     # ONE deadline across connect AND query, not timeout_s applied to each.
     # Applied per-call, this leg could hold asyncio.gather() for ~2x the window
@@ -948,22 +957,22 @@ async def _replay_ledger_chain_via_asyncpg(
     connection = None
     try:
         if _remaining() <= 0:
-            return None, False, "", "ledger replay budget exhausted before connect"
+            return None, False, "", "", "ledger replay budget exhausted before connect"
         connection = await asyncio.wait_for(
             asyncpg.connect(source), timeout=_remaining()
         )
         if _remaining() <= 0:
-            return None, False, "", "ledger replay budget exhausted after connect"
+            return None, False, "", "", "ledger replay budget exhausted after connect"
         rows = await asyncio.wait_for(
             connection.fetch(
-                "SELECT hop, replay_green, verifier_verdict FROM ledger_chain "
+                "SELECT hop, replay_green, verifier_verdict, chain_state FROM public.ledger_chain "
                 "WHERE correlation_id = $1 ORDER BY hop_index",
                 correlation_id,
             ),
             timeout=_remaining(),
         )
     except Exception as exc:  # noqa: BLE001 - fails closed, never to a verdict
-        return None, False, "", sanitize_error_message(exc)
+        return None, False, "", "", sanitize_error_message(exc)
     finally:
         # cleanup-resilience-ok: a failure to close must not replace the
         # unreadable-ledger tuple this function returns, nor propagate out of
@@ -982,7 +991,8 @@ async def _replay_ledger_chain_via_asyncpg(
     hops = tuple(str(row["hop"]) for row in rows)
     replay_green = all(bool(row["replay_green"]) for row in rows) if rows else False
     verdict = str(rows[-1]["verifier_verdict"] or "") if rows else ""
-    return hops, replay_green, verdict, ""
+    chain_state = str(rows[-1]["chain_state"] or "") if rows else ""
+    return hops, replay_green, verdict, chain_state, ""
 
 
 def _extract_error(response: dict[str, object]) -> tuple[str, str]:
@@ -1740,7 +1750,7 @@ class HandlerChainCanary:
         while True:
             attempts += 1
             remaining = max(0.0, deadline - time.monotonic())
-            hops, replay_green, verdict, error = await self._ledger_replay(
+            hops, replay_green, verdict, chain_state, error = await self._ledger_replay(
                 source,
                 probe_correlation_id,
                 remaining,
@@ -1751,6 +1761,15 @@ class HandlerChainCanary:
                 # into a vague incompleteness. Report it as itself, once.
                 return EnumLedgerReplayStatus.ERROR, error or "ledger replay failed"
 
+            # OMN-17427: the writer decides from terminal evidence. This path
+            # publishes no upstream hop, so another read would be pure delay.
+            if chain_state == _CHAIN_STATE_IN_PROCESS_TERMINAL_ONLY:
+                return (
+                    EnumLedgerReplayStatus.IN_PROCESS_TERMINAL_ONLY,
+                    f"in-process terminal-only chain; hops read: {', '.join(hops)}; "
+                    "the writer labelled it from terminal source and no parent; "
+                    "no upstream hop will arrive",
+                )
             missing = tuple(h for h in request.expected_ledger_hops if h not in hops)
             if not missing:
                 break
@@ -2127,6 +2146,13 @@ class HandlerChainCanary:
         # that can disprove the run, and it is ranked here for the same reason
         # link 2 sits above the ingress checks: it is evidence about the chain,
         # and the ingress response is only ever a claim about the request path.
+        if ledger_status is EnumLedgerReplayStatus.IN_PROCESS_TERMINAL_ONLY:
+            return (
+                EnumChainCanaryVerdict.LEDGER_CHAIN_IN_PROCESS_TERMINAL_ONLY,
+                "the delegation was served in-process and published only its terminal, "
+                "so the probe did not exercise the bus chain: not a pass, and not "
+                f"a chain fault. {ledger_detail}",
+            )
         if ledger_status is EnumLedgerReplayStatus.CHAIN_INCOMPLETE:
             return (
                 EnumChainCanaryVerdict.LEDGER_CHAIN_INCOMPLETE,
@@ -2340,6 +2366,13 @@ def _link_five(
             EnumChainLinkStatus.PASS,
             "complete ledger chain replayed green and a tier-2 verifier "
             "actually ran and passed for this run's own correlation id",
+        )
+    if ledger_status is EnumLedgerReplayStatus.IN_PROCESS_TERMINAL_ONLY:
+        return (
+            EnumChainLinkStatus.NOT_EVALUATED,
+            "the delegation was served in-process and published only its terminal, "
+            "so the probe did not exercise the bus chain: not a pass, and not "
+            f"a chain fault. {ledger_detail}",
         )
     if ledger_status is EnumLedgerReplayStatus.CHAIN_INCOMPLETE:
         return (

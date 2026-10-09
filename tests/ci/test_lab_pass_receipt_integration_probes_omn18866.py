@@ -50,6 +50,7 @@ from scripts.ci.lab_pass_receipt import (
     COMPOSE_DEV_INTEGRATION_CHECKS,
     CONSUMER_GROUP_LAG_CHECK,
     DELEGATION_GOLDEN_CHAIN_CHECK,
+    LANE_SYNC_CHECK,
     MIGRATIONS_APPLIED_CHECK,
     PROBES_NOT_YET_WIRED,
     GroupSourceError,
@@ -57,6 +58,7 @@ from scripts.ci.lab_pass_receipt import (
     ModelMigrationLedger,
     check_consumer_group_lag,
     check_delegation_golden_chain,
+    check_lane_sync,
     check_migrations_applied,
     declared_forward_migrations,
     load_declared_groups,
@@ -171,6 +173,7 @@ def test_every_wired_name_has_a_callable_probe() -> None:
     """A declared check name with nothing computing it is the rule-24 defect."""
     probes = {
         MIGRATIONS_APPLIED_CHECK: check_migrations_applied,
+        LANE_SYNC_CHECK: check_lane_sync,
         CONSUMER_GROUP_LAG_CHECK: check_consumer_group_lag,
     }
     assert set(COMPOSE_DEV_INTEGRATION_CHECKS) == set(probes)
@@ -587,7 +590,21 @@ def test_delegation_indeterminate_when_the_dispatch_never_ran(
 
 
 def _every_verdict(tmp_path: Path) -> list[object]:
+    clean = {
+        "host": "lab-201",
+        "lanes_checked": ["dev"],
+        "findings": [],
+        "has_drift": False,
+    }
+    bad = {**clean, "findings": [{"kind": "container_unhealthy"}], "has_drift": True}
     return [
+        check_lane_sync(
+            runner=FakeRunner(per_call=[(0, "daemon"), (0, json.dumps(clean))])
+        ),
+        check_lane_sync(
+            runner=FakeRunner(per_call=[(0, "daemon"), (30, json.dumps(bad))])
+        ),
+        check_lane_sync(runner=FakeRunner(returncode=4)),
         check_migrations_applied(
             ["docker/1.sql"], LEDGER, runner=FakeRunner(stdout="docker/1.sql\n")
         ),
@@ -865,3 +882,242 @@ def test_the_prose_check_catches_the_drift_it_exists_for() -> None:
         )
         is None
     )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "undeclared_container",
+        "container_unhealthy",
+        "revision_mismatch",
+        "future_finding",
+    ],
+)
+def test_lane_sync_any_finding_fails_receipt_and_gate(kind, monkeypatch):
+    import io
+
+    from scripts.ci import lab_pass_receipt as lab
+    from tests.scripts.ci._lab_pass_fixtures import REPO, SHA_4ACA, FakeSurface, ts
+
+    probe = getattr(lab, "check_lane_sync", None)
+    assert callable(probe), "the compose-dev receipt has no lane_sync probe"
+    finding = {
+        "lane": "dev",
+        "kind": kind,
+        "container": "unexpected-worker",
+        "detail": "known-bad fixture",
+        "severity": "warning",
+    }
+    plan = {
+        "host": "lab-201",
+        "lanes_checked": ["dev"],
+        "findings": [finding],
+        "has_drift": True,
+    }
+    runner = FakeRunner(
+        per_call=[(0, "omninode-runtime-host\n"), (30, json.dumps(plan))]
+    )
+    check = probe(runner=runner)
+    assert check.name == "lane_sync"
+    assert not check.ok
+    assert kind in check.evidence
+    assert "unexpected-worker" in check.evidence
+    receipt = lab.build_receipt(
+        sha=SHA_4ACA,
+        lane=lab.EnumLabLane.COMPOSE_DEV,
+        agent_command_id=None,
+        started_at=ts("2026-10-08T20:00:00Z"),
+        finished_at=ts("2026-10-08T20:01:00Z"),
+        checks=(check,),
+    )
+    assert receipt.result == "FAIL"
+    surface = FakeSurface()
+    surface.add(receipt)
+    monkeypatch.setattr(lab, "_gh_api", surface)
+    output = io.StringIO()
+    assert lab.evaluate_gate(REPO, SHA_4ACA, [lab.EnumLabLane.COMPOSE_DEV], output) == 1
+
+
+def test_lane_sync_clean_plan_is_positive_control():
+    from scripts.ci import lab_pass_receipt as lab
+
+    probe = getattr(lab, "check_lane_sync", None)
+    assert callable(probe), "the compose-dev receipt has no lane_sync probe"
+    plan = {
+        "host": "lab-201",
+        "lanes_checked": ["dev"],
+        "findings": [],
+        "has_drift": False,
+    }
+    runner = FakeRunner(
+        per_call=[(0, "omninode-runtime-host\n"), (0, json.dumps(plan))]
+    )
+    check = probe(runner=runner)
+    assert check.ok, check.evidence
+    assert "lanes_checked" in check.evidence
+    assert runner.calls[0] == ["docker", "info", "--format", "{{.Name}}"]
+    assert runner.calls[1][-1] == "--json"
+    assert runner.envs[1]["LANE_CENSUS_HOST"] == "omninode-runtime-host"
+    assert runner.envs[1]["KAFKA_BOOTSTRAP_SERVERS"] == ""
+
+
+@pytest.mark.parametrize(
+    ("code", "body"),
+    [
+        (4, "inventory unreadable"),
+        (0, "{}"),
+        (0, "not-json"),
+        (
+            30,
+            '{"host":"lab-201","lanes_checked":["dev"],"findings":[],"has_drift":false}',
+        ),
+    ],
+)
+def test_lane_sync_unreadable_or_inconsistent_never_passes(code, body):
+    from scripts.ci import lab_pass_receipt as lab
+
+    probe = getattr(lab, "check_lane_sync", None)
+    assert callable(probe), "the compose-dev receipt has no lane_sync probe"
+    runner = FakeRunner(per_call=[(0, "omninode-runtime-host\n"), (code, body)])
+    assert not probe(runner=runner).ok
+
+
+@pytest.mark.parametrize("bad", [False, True])
+def test_lane_sync_compose_probe_and_emitter_wiring(bad, monkeypatch, capsys):
+    from types import SimpleNamespace
+
+    from scripts.ci import lab_pass_receipt as lab
+
+    finding = {
+        "kind": "undeclared_container",
+        "lane": "dev",
+        "container": "unexpected-worker",
+    }
+    plan = {
+        "host": "lab-201",
+        "lanes_checked": ["dev"],
+        "findings": [finding] if bad else [],
+        "has_drift": bad,
+    }
+    runner = FakeRunner(per_call=[(0, "daemon"), (30 if bad else 0, json.dumps(plan))])
+
+    def read():
+        return check_lane_sync(runner=runner)
+
+    def passing(name, *args, **kwargs):
+        return lab.ModelLabPassCheck(name=name, ok=True, evidence="healthy fixture")
+
+    monkeypatch.setattr(
+        lab,
+        "wait_for_lane_ready",
+        lambda *args: SimpleNamespace(
+            phrase="ready fixture", granted_seconds=0, waited_seconds=0
+        ),
+    )
+    monkeypatch.setattr(lab, "check_ready", passing)
+    monkeypatch.setattr(
+        lab,
+        "check_health_dimensions_observed",
+        lambda *args: passing("health_dimensions"),
+    )
+    monkeypatch.setattr(
+        lab, "check_projections_ready", lambda *args: passing("projection_ready")
+    )
+    monkeypatch.setattr(lab, "check_lane_sync", read)
+    assert (
+        lab.main(
+            [
+                "probe-lane",
+                "--lane",
+                "compose-dev",
+                "--main-url",
+                "http://main",
+                "--effects-url",
+                "http://effects",
+                "--projection-url",
+                "http://projection",
+                "--settle-timeout-seconds",
+                "0",
+            ]
+        )
+        == 0
+    )
+    checks = json.loads(capsys.readouterr().out)
+    sync = next(check for check in checks if check["name"] == "lane_sync")
+    assert sync["ok"] is not bad
+    assert all(check["ok"] for check in checks if check["name"] != "lane_sync")
+    assert len([check for check in checks if check["name"] == "lane_sync"]) == 1
+
+
+@pytest.mark.parametrize(
+    "failure", [OSError("docker unavailable"), subprocess.TimeoutExpired("census", 120)]
+)
+def test_lane_sync_transport_failure_is_indeterminate(failure):
+    check = check_lane_sync(runner=FakeRunner(raises=failure))
+    assert not check.ok and check.indeterminate
+    assert "census unreadable" in check.evidence
+
+
+@pytest.mark.parametrize("bad", [False, True])
+def test_lane_sync_no_applicable_lane_refuses_and_keeps_off_host_finding(bad):
+    plan = {
+        "host": "lab-202",
+        "lanes_checked": [],
+        "lanes_not_applicable": ["stability-test"],
+        "findings": [
+            {
+                "kind": "lane_on_undeclared_host",
+                "container": "off-host-worker",
+                "lane": "stability-test",
+            }
+        ]
+        if bad
+        else [],
+        "has_drift": bad,
+    }
+    runner = FakeRunner(per_call=[(0, "daemon"), (30 if bad else 0, json.dumps(plan))])
+    check = check_lane_sync(runner=runner)
+    assert not check.ok
+    assert check.indeterminate is not bad
+    if bad:
+        assert "lane_on_undeclared_host" in check.evidence
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/omn19417_h202_lane_sync.json")
+def test_lane_sync_recorded_lab_response_retains_finding_in_failed_receipt(
+    recorded_response,
+):
+    from datetime import datetime
+
+    from scripts.ci import lab_pass_receipt as lab
+
+    responses = iter(recorded_response["responses"])
+
+    def replay(argv, *, timeout, env=None):
+        response = next(responses)
+        return subprocess.CompletedProcess(
+            list(argv),
+            response["returncode"],
+            response["stdout"],
+            response["stderr"],
+        )
+
+    check = check_lane_sync(runner=replay)
+    assert check.to_dict() == recorded_response["check"]
+    assert not check.ok and not check.indeterminate
+    plan = json.loads(recorded_response["responses"][1]["stdout"])
+    assert plan["findings"]
+    assert json.loads(check.evidence) == plan
+    captured = datetime.fromisoformat(recorded_response["_provenance"]["captured_utc"])
+    receipt = lab.build_receipt(
+        sha=recorded_response["_provenance"]["base_sha"],
+        lane=lab.EnumLabLane.COMPOSE_DEV,
+        started_at=captured,
+        finished_at=captured,
+        checks=(check,),
+        agent_command_id=None,
+    )
+    assert receipt.result == "FAIL"
+    emitted = json.loads(receipt.to_json())
+    assert emitted["result"] == "FAIL"
+    assert json.loads(emitted["checks"][0]["evidence"]) == plan

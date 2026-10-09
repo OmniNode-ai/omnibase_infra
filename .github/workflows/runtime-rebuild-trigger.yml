@@ -1235,10 +1235,10 @@ jobs:
   # deliberate design (scripts/ci/lab_pass_receipt.py's header: no new credential,
   # no bucket, no cluster access). One writer of facts, one publisher of receipts.
   #
-  # THE LANE VALUE IS `onex-lab-k3s`, NOT `onex-lab`. `onex-lab` is ALREADY the
-  # ephemeral kind cluster the candidate-boot-gate job creates in
-  # deliver-dev-candidate-to-staging.yml, which emits
-  # lab-pass-receipt-onex-lab-<sha> for the same sha on this same repository.
+  # THE LANE VALUE IS `onex-lab-k3s`. OMN-18276 separates the ephemeral
+  # candidate render/wiring smoke receipt (candidate-boot-receipt-<sha>) from
+  # this persistent lab apply. Only this lane satisfies delivery
+  # for the exact delivered sha; the compose-dev primary remains required too.
   # evaluate_gate reads the NEWEST artifact per name, on the premise that a name
   # has one emitter; a second emitter on that name would silently supersede the
   # boot gate's verdict. They are also different claims -- a throwaway node with
@@ -1467,7 +1467,7 @@ jobs:
   # advisory-ok: OMN-19233 post-merge re-read of a refused delivery; the delivery gate itself blocks
   rerun-refused-deliveries:
     name: Re-run staging deliveries refused while this subject's receipt was pending
-    needs: [trigger-rebuild, verify-lane-converged, reemit-queued-receipts]
+    needs: [trigger-rebuild, verify-lane-converged, reemit-queued-receipts, verify-lab-overlay-converged]
     # OMN-18976: an observation run (nothing published) re-reads only when it
     # answered for something; with no candidate there is no new receipt.
     if: >-
@@ -1506,7 +1506,9 @@ jobs:
           install-args: --frozen
           shared-env-enabled: "true"
 
-      - name: Re-run refused staging deliveries whose subject now has a compose-dev PASS
+      # OMN-18276: wait for the overlay publisher and read its exact-sha PASS
+      # as well as compose-dev before requesting a re-read.
+      - name: Re-run refused staging deliveries whose required receipts now pass
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE_SHA: ${{ needs.trigger-rebuild.outputs.source_sha }}

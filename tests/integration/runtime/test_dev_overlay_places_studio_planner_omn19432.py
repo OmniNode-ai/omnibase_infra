@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-19432: the committed dev overlay places gpt-oss-120b as a local fallback.
+"""OMN-19432: the committed dev overlay places the .200 Studio planner as a spread peer.
+
+The rung was placed for gpt-oss-120b (OMN-19432), served Qwen3.6-35B-A3B from
+OMN-17427 (2026-10-08), and since OMN-20422 (2026-10-09) serves Qwen3.8-27B as
+``Qwen3.8-27B`` on the same endpoint, with the same placement.
 
 The deployed dev lane reads this overlay, not the operator's host overlay: of 447
 delegation runs in the 24 hours to 2026-09-30, 438 ran on the deployed lane and
@@ -97,7 +101,7 @@ def test_the_committed_dev_overlay_renders_the_planner_behind_the_reasoning_rung
     declared = next(b for b in _dev_overlay()["backends"] if b["backend_id"] == _PLACED)
     backend = by_id[_PLACED]
 
-    assert backend["model_name"] == "gpt-oss-120b"
+    assert backend["model_name"] == "Qwen3.8-27B"
     assert backend["endpoint_url"] == declared["endpoint_url"]
     placement = backend["placement"]
     assert placement["tier"] == "local"
@@ -106,12 +110,12 @@ def test_the_committed_dev_overlay_renders_the_planner_behind_the_reasoning_rung
     assert placement["fallback_for"] == [_RUNG]
     assert by_id[_RUNG]["endpoint_url"], f"{_RUNG} is not bound in the render"
     assert placement["max_context_tokens"] <= declared["context_window"]
-    # Its routing window is the rung's own 8192, never the 131072 the server holds:
+    # Its routing window is the rung's own 8192, never the pool the server holds:
     # on 9000 to 15500-token plans it grounded worse than the Qwen rung (unsupported
     # claims in 65 of 177 against 33 of 185, worse on 8 of 10 documents), so it is
     # not a long-context rung. Widening it needs a new measurement.
     assert placement["max_context_tokens"] == 8192
-    assert declared["context_window"] == 131072
+    assert declared["context_window"] == 262144
 
 
 def test_the_planner_is_a_weighted_spread_peer_for_its_measured_classes(

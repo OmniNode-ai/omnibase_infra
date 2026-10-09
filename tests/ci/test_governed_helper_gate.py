@@ -430,9 +430,9 @@ def test_a_baseline_entry_without_a_verdict_reason_is_refused(tmp_path: Path) ->
 
 
 def test_every_shipped_baseline_entry_carries_a_verdict_and_a_reason() -> None:
-    """AC7 on the committed artifact: all 20 baselined sites are judged."""
+    """AC7 on the committed artifact: all 12 remaining baselined sites are judged."""
     baseline = gate.load_baseline(BASELINE_PATH)
-    assert sum(entry.occurrences for entry in baseline.entries) == 20
+    assert sum(entry.occurrences for entry in baseline.entries) == 12
     for entry in baseline.entries:
         assert entry.verdict in gate.VERDICTS, entry
         assert entry.verdict_reason.strip(), entry

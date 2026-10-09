@@ -2522,7 +2522,7 @@ def draft_ready_check_runs(
     runs = {
         _run_int(run, "id"): run
         for run in workflow_runs or []
-        if run.get("event") in {"pull_request", "push"}
+        if run.get("event") in {"pull_request", "pull_request_target", "push"}
         and run.get("head_sha") == head_sha
         and _run_int(run, "workflow_id")
         and _parse_timestamp(str(run.get("created_at") or "")) is not None

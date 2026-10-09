@@ -133,6 +133,7 @@ from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLik
 from omnibase_infra.protocols.protocol_topic_provisioner import (
     ProtocolTopicProvisioner,
 )
+from omnibase_infra.runtime.auto_wiring.discovery import read_contract_yaml
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
 )
@@ -2994,11 +2995,7 @@ def _read_declared_key_grains(contract_path: Path) -> tuple[str, ...]:
     answer and neither is an exemption.
     """
     try:
-        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
-        import yaml  # type: ignore[import-untyped]
-
-        with open(contract_path) as f:
-            raw = yaml.safe_load(f)
+        raw = read_contract_yaml(contract_path)
     except (OSError, Exception):  # noqa: BLE001 -- never fail wiring over this
         return ()
     if not isinstance(raw, dict):
@@ -3054,11 +3051,7 @@ def _read_dlq_topics(contract_path: Path) -> list[str]:
     rather than silently degrading to a no-DLQ projection wiring.
     """
     try:
-        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
-        import yaml  # type: ignore[import-untyped]
-
-        with open(contract_path) as f:
-            raw = yaml.safe_load(f)
+        raw = read_contract_yaml(contract_path)
     except FileNotFoundError:
         return []
     if not isinstance(raw, dict):
@@ -3095,11 +3088,7 @@ def _read_state_io(contract_path: Path) -> dict[str, object]:
     in; it defaults to ``correlation_id`` (the pre-OMN-16924 hardcoded key).
     """
     try:
-        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
-        import yaml  # type: ignore[import-untyped]
-
-        with open(contract_path) as f:
-            raw = yaml.safe_load(f)
+        raw = read_contract_yaml(contract_path)
     except FileNotFoundError:
         return {}
     if not isinstance(raw, dict):
@@ -3122,11 +3111,7 @@ def _read_completion_bound(contract_path: Path) -> ModelCompletionBound | None:
     :mod:`omnibase_infra.runtime.state_io.model_completion_bound`.
     """
     try:
-        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
-        import yaml  # type: ignore[import-untyped]
-
-        with open(contract_path) as f:
-            raw = yaml.safe_load(f)
+        raw = read_contract_yaml(contract_path)
     except FileNotFoundError:
         return None
     if not isinstance(raw, dict):

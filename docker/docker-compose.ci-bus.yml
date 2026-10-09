@@ -180,6 +180,21 @@ services:
       - "com.omninode.layer=infrastructure"
       - "com.omninode.lane=ci-bus"
       - "com.omninode.ticket=OMN-18691"
+  # OMN-19419: import just the shared init service into this standalone graph.
+  redpanda-partition-cap:
+    extends:
+      file: docker-compose.broker-profile.yml
+      service: redpanda-settings
+    container_name: omninode-ci-bus-redpanda-partition-cap
+    environment:
+      REDPANDA_PROFILE_MEMORY: ${CI_BUS_REDPANDA_MEMORY:-1G}
+      RPK_USER: ${CI_BUS_KAFKA_SASL_USERNAME:?CI_BUS_KAFKA_SASL_USERNAME must be set}
+      RPK_PASS: ${CI_BUS_KAFKA_SASL_PASSWORD:?CI_BUS_KAFKA_SASL_PASSWORD must be set}
+    depends_on:
+      ci-bus-sasl-enable:
+        condition: service_completed_successfully
+    networks: !override
+      - ci-bus-network
   # ===========================================================================
   # (2) THE SIXTEEN CI AND LAB TOPICS — explicit, never broker auto-create
   # ===========================================================================
@@ -228,6 +243,9 @@ services:
   # serve` per host in a group <prefix>.<host>), on the same login.
   # OMN-20604 adds the lab job supervisor's submitted command topic
   # (omnimarket node_lab_job_submit_effect), on the same login, for fourteen total.
+  # OMN-20682 adds the operator-host PR watcher's four topics (omnibase_internal
+  # node_pr_watcher_effect: its tick command, tick completed and failed, and
+  # pr-state-observed), on the same login, for eighteen lab topics in total.
   ci-bus-topics:
     image: redpandadata/redpanda:v24.2.7
     container_name: omninode-ci-bus-topics
@@ -251,7 +269,7 @@ services:
         # addition does not hit the Redpanda default of 1000 (OMN-7302).
         /usr/bin/rpk cluster config set topic_partitions_per_shard 7000 $$ADMIN
         CI_TOPICS="onex.cmd.omnimarket.occ-autobind.v1 onex.cmd.omnimarket.occ-companion-effect-requested.v1 onex.evt.github.pr-merged.v1 onex.cmd.omnimarket.redeploy-start.v1 onex.evt.deploy.rebuild-completed.v1"
-        LAB_TOPICS="onex.cmd.omnimarket.lab-work-unit-requested.v1 onex.evt.omnimarket.lab-work-unit-completed.v1 onex.evt.omnimarket.lab-work-unit-failed.v1 onex.evt.omnimarket.lab-host-capacity-advertised.v1 onex.cmd.omnimarket.focused-test-run-requested.v1 onex.evt.omnimarket.focused-test-run-completed.v1 onex.evt.omnimarket.focused-test-run-failed.v1 onex.cmd.omnimarket.push-validation-requested.v1 onex.evt.omnimarket.push-validation-completed.v1 onex.evt.omnimarket.push-validation-failed.v1 onex.dlq.omnimarket.push-validation.v1 onex.evt.omnimarket.repo-merged.v1 onex.evt.omnimarket.canonical-clone-refreshed.v1 onex.cmd.omnimarket.lab-job-submitted.v1"
+        LAB_TOPICS="onex.cmd.omnimarket.lab-work-unit-requested.v1 onex.evt.omnimarket.lab-work-unit-completed.v1 onex.evt.omnimarket.lab-work-unit-failed.v1 onex.evt.omnimarket.lab-host-capacity-advertised.v1 onex.cmd.omnimarket.focused-test-run-requested.v1 onex.evt.omnimarket.focused-test-run-completed.v1 onex.evt.omnimarket.focused-test-run-failed.v1 onex.cmd.omnimarket.push-validation-requested.v1 onex.evt.omnimarket.push-validation-completed.v1 onex.evt.omnimarket.push-validation-failed.v1 onex.dlq.omnimarket.push-validation.v1 onex.evt.omnimarket.repo-merged.v1 onex.evt.omnimarket.canonical-clone-refreshed.v1 onex.cmd.omnimarket.lab-job-submitted.v1 onex.cmd.omnibase_internal.pr-watcher-tick-requested.v1 onex.evt.omnibase_internal.pr-watcher-tick-completed.v1 onex.evt.omnibase_internal.pr-watcher-tick-failed.v1 onex.evt.omnimarket.pr-state-observed.v1"
         TOPICS="$$CI_TOPICS $$LAB_TOPICS"
         for t in $$TOPICS; do
           if /usr/bin/rpk topic list $$BROKER | awk '{print $$1}' | grep -qx "$$t"; then
@@ -270,7 +288,7 @@ services:
         for t in $$TOPICS; do
           /usr/bin/rpk topic list $$BROKER | awk '{print $$1}' | grep -qx "$$t"
         done
-        echo "OMN-18691 + OMN-20213: readback confirms all sixteen topics exist"
+        echo "OMN-18691 + OMN-20213: readback confirms all twenty-three topics exist"
     depends_on:
       redpanda:
         condition: service_healthy
@@ -469,7 +487,7 @@ services:
         fi
         echo "OMN-20213: lab-work principal is not a superuser"
         # Kafka ACL creation is idempotent: an identical binding is a no-op.
-        LAB_TOPICS="onex.cmd.omnimarket.lab-work-unit-requested.v1 onex.evt.omnimarket.lab-work-unit-completed.v1 onex.evt.omnimarket.lab-work-unit-failed.v1 onex.evt.omnimarket.lab-host-capacity-advertised.v1 onex.cmd.omnimarket.focused-test-run-requested.v1 onex.evt.omnimarket.focused-test-run-completed.v1 onex.evt.omnimarket.focused-test-run-failed.v1 onex.cmd.omnimarket.push-validation-requested.v1 onex.evt.omnimarket.push-validation-completed.v1 onex.evt.omnimarket.push-validation-failed.v1 onex.dlq.omnimarket.push-validation.v1 onex.evt.omnimarket.repo-merged.v1 onex.evt.omnimarket.canonical-clone-refreshed.v1 onex.cmd.omnimarket.lab-job-submitted.v1"
+        LAB_TOPICS="onex.cmd.omnimarket.lab-work-unit-requested.v1 onex.evt.omnimarket.lab-work-unit-completed.v1 onex.evt.omnimarket.lab-work-unit-failed.v1 onex.evt.omnimarket.lab-host-capacity-advertised.v1 onex.cmd.omnimarket.focused-test-run-requested.v1 onex.evt.omnimarket.focused-test-run-completed.v1 onex.evt.omnimarket.focused-test-run-failed.v1 onex.cmd.omnimarket.push-validation-requested.v1 onex.evt.omnimarket.push-validation-completed.v1 onex.evt.omnimarket.push-validation-failed.v1 onex.dlq.omnimarket.push-validation.v1 onex.evt.omnimarket.repo-merged.v1 onex.evt.omnimarket.canonical-clone-refreshed.v1 onex.cmd.omnimarket.lab-job-submitted.v1 onex.cmd.omnibase_internal.pr-watcher-tick-requested.v1 onex.evt.omnibase_internal.pr-watcher-tick-completed.v1 onex.evt.omnibase_internal.pr-watcher-tick-failed.v1 onex.evt.omnimarket.pr-state-observed.v1"
         for t in $$LAB_TOPICS; do
           su_rpk security acl create --allow-principal "User:$$CI_BUS_LABWORK_SASL_USERNAME" \
             --resource-pattern-type literal --topic "$$t" \
@@ -480,7 +498,10 @@ services:
         # random suffix, and EventBusKafka appends .__t.<topic>. These must be
         # prefixed grants rather than literal group names.
         # The host drift sync hub reads repo-merged in its own group prefix (OMN-20689).
-        GROUP_PREFIXES="local.omnimarket.node_lab_work_unit_effect.consume.v1. local.omnimarket.lab_work_client.consume.v1. local.omnimarket.node_focused_test_run_effect.consume.v1 local.omnimarket.delegated_test_loop_client.consume.v1. local.omnimarket.node_canonical_clone_refresh_effect.consume.v1. local.omnibase_internal.host_drift_sync.hub."
+        # The PR watcher (omnibase_internal node_pr_watcher_effect) subscribes with its
+        # contract's literal group_id; EventBusKafka appends .__t.<topic> (and .__i.<instance>
+        # when KAFKA_INSTANCE_ID is set), so the prefix ends in a dot (OMN-20682).
+        GROUP_PREFIXES="local.omnimarket.node_lab_work_unit_effect.consume.v1. local.omnimarket.lab_work_client.consume.v1. local.omnimarket.node_focused_test_run_effect.consume.v1 local.omnimarket.delegated_test_loop_client.consume.v1. local.omnimarket.node_canonical_clone_refresh_effect.consume.v1. local.omnibase_internal.host_drift_sync.hub. onex.omnibase_internal.node_pr_watcher_effect."
         for g in $$GROUP_PREFIXES; do
           su_rpk security acl create --allow-principal "User:$$CI_BUS_LABWORK_SASL_USERNAME" \
             --resource-pattern-type prefixed --group "$$g" \
@@ -495,7 +516,7 @@ services:
         for t in $$LAB_TOPICS; do
           printf '%s\n' "$$ACLS" | grep -q "$$t"
         done
-        echo "OMN-20213 + OMN-20496: ACL readback confirms all fourteen lab topics"
+        echo "OMN-20213 + OMN-20496 + OMN-20682: ACL readback confirms all eighteen lab topics"
         # A down broker also hides topics, so the negative alone proves nothing.
         # Capture once as the lab-work login: the positive proves authentication
         # and authorization, and the negative proves a CI topic is invisible.

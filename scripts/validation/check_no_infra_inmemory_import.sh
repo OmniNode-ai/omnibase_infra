@@ -107,6 +107,7 @@ if [[ ${#SCAN_PATHS[@]} -eq 0 ]]; then
     SCAN_PATHS=("src/")
 fi
 
+# OMN-20700: grep -H preserves filename headers for a single staged file operand.
 while IFS= read -r line; do
     file="${line%%:*}"
     # Normalize any doubled slash from grep's "src/" prefix (src//foo -> src/foo).
@@ -116,7 +117,7 @@ while IFS= read -r line; do
     fi
     echo "  $line"
     VIOLATIONS=$((VIOLATIONS + 1))
-done < <(grep -rnE --include="*.py" "$PATTERN" "${SCAN_PATHS[@]}" 2>/dev/null || true)
+done < <(grep -HrnE --include="*.py" "$PATTERN" "${SCAN_PATHS[@]}" 2>/dev/null || true)
 
 if [[ $VIOLATIONS -gt 0 ]]; then
     echo ""

@@ -115,7 +115,7 @@ class _JoinedConsumer:
             self._joined.set()
 
     async def _consume(self) -> None:
-        from aiokafka import AIOKafkaConsumer
+        from aiokafka import AIOKafkaConsumer, TopicPartition
 
         consumer = AIOKafkaConsumer(
             self._topic,
@@ -132,11 +132,17 @@ class _JoinedConsumer:
             # subject of the discriminating control below and let that control
             # pass for the wrong reason.
             deadline = time.monotonic() + _JOIN_TIMEOUT_S
-            while time.monotonic() < deadline:
+            seeded = None
+            while seeded is None and time.monotonic() < deadline:
                 batch = await consumer.getmany(timeout_ms=1000, max_records=1)
-                if any(records for records in batch.values()):
-                    break
-            await consumer.commit()
+                seeded = next(
+                    (records[-1] for records in batch.values() if records), None
+                )
+            if seeded is None:
+                raise AssertionError("the seeded record never arrived")
+            await consumer.commit(
+                {TopicPartition(seeded.topic, seeded.partition): seeded.offset + 1}
+            )
             self._joined.set()
             while not self._stop.is_set():
                 await consumer.getmany(timeout_ms=500, max_records=1)

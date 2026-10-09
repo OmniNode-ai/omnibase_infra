@@ -1,0 +1,235 @@
+TLC2 Version 2026.09.23.154203 (rev: 4260e47)
+Running breadth-first search Model-Checking with fp 120 and seed -5017146846762078793 with 2 workers on 24 cores with 27300MB heap and 64MB offheap memory [pid: 93307] (Mac OS X 26.6.2 aarch64, Homebrew 23.0.2 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file LabReconcile.tla
+Parsing file Naturals.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file Sequences.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file FiniteSets.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file _TLCTrace.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file TLC.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file TLCExt.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file Integers.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Integers
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module LabReconcile
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module LabReconcile
+Starting... (2026-09-24 13:20:48)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-24 13:20:49.
+Error: Invariant AtMostOneReceipt is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ nMerge = 0
+/\ running = [stab |-> 0, dev |-> 0]
+/\ mut = << [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ] >>
+/\ now = 0
+/\ nextId = 1
+/\ desired = [stab |-> 0, dev |-> 0]
+/\ nRel = 0
+/\ pendingStab = 0
+/\ agentQueue = 0
+/\ receipts = <<<<>>, <<>>, <<>>>>
+/\ nHand = [stab |-> 0, dev |-> 0]
+/\ rolledBack = [stab |-> FALSE, dev |-> FALSE]
+
+State 2: <ReleaseEvent line 118, col 5 to line 122, col 95 of module LabReconcile>
+/\ nMerge = 0
+/\ running = [stab |-> 0, dev |-> 0]
+/\ mut = << [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ] >>
+/\ now = 0
+/\ nextId = 1
+/\ desired = [stab |-> 1, dev |-> 0]
+/\ nRel = 1
+/\ pendingStab = 1
+/\ agentQueue = 0
+/\ receipts = <<<<>>, <<>>, <<>>>>
+/\ nHand = [stab |-> 0, dev |-> 0]
+/\ rolledBack = [stab |-> FALSE, dev |-> FALSE]
+
+State 3: <DispatcherGrant line 138, col 5 to line 144, col 97 of module LabReconcile>
+/\ nMerge = 0
+/\ running = [stab |-> 0, dev |-> 0]
+/\ mut = << [ proj |-> "stab",
+     actor |-> "dispatcher",
+     target |-> 1,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 2,
+     status |-> "forward" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ] >>
+/\ now = 0
+/\ nextId = 2
+/\ desired = [stab |-> 1, dev |-> 0]
+/\ nRel = 1
+/\ pendingStab = 0
+/\ agentQueue = 0
+/\ receipts = <<<<>>, <<>>, <<>>>>
+/\ nHand = [stab |-> 0, dev |-> 0]
+/\ rolledBack = [stab |-> FALSE, dev |-> FALSE]
+
+State 4: <ForwardPass(1) line 183, col 5 to line 186, col 57 of module LabReconcile>
+/\ nMerge = 0
+/\ running = [stab |-> 1, dev |-> 0]
+/\ mut = << [ proj |-> "stab",
+     actor |-> "dispatcher",
+     target |-> 1,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 2,
+     status |-> "closing" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ] >>
+/\ now = 0
+/\ nextId = 2
+/\ desired = [stab |-> 1, dev |-> 0]
+/\ nRel = 1
+/\ pendingStab = 0
+/\ agentQueue = 0
+/\ receipts = <<<<"PASS">>, <<>>, <<>>>>
+/\ nHand = [stab |-> 0, dev |-> 0]
+/\ rolledBack = [stab |-> FALSE, dev |-> FALSE]
+
+State 5: <Die(1) line 223, col 5 to line 227, col 49 of module LabReconcile>
+/\ nMerge = 0
+/\ running = [stab |-> 1, dev |-> 0]
+/\ mut = << [ proj |-> "stab",
+     actor |-> "dispatcher",
+     target |-> 1,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 2,
+     status |-> "dead" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ] >>
+/\ now = 0
+/\ nextId = 2
+/\ desired = [stab |-> 1, dev |-> 0]
+/\ nRel = 1
+/\ pendingStab = 0
+/\ agentQueue = 0
+/\ receipts = <<<<"PASS">>, <<>>, <<>>>>
+/\ nHand = [stab |-> 0, dev |-> 0]
+/\ rolledBack = [stab |-> FALSE, dev |-> FALSE]
+
+State 6: <Reap(1) line 236, col 5 to line 240, col 48 of module LabReconcile>
+/\ nMerge = 0
+/\ running = [stab |-> 1, dev |-> 0]
+/\ mut = << [ proj |-> "stab",
+     actor |-> "dispatcher",
+     target |-> 1,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 2,
+     status |-> "reaped" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ] >>
+/\ now = 0
+/\ nextId = 2
+/\ desired = [stab |-> 1, dev |-> 0]
+/\ nRel = 1
+/\ pendingStab = 0
+/\ agentQueue = 0
+/\ receipts = <<<<"PASS", "FAILED_STRANDED">>, <<>>, <<>>>>
+/\ nHand = [stab |-> 0, dev |-> 0]
+/\ rolledBack = [stab |-> FALSE, dev |-> FALSE]
+
+418 states generated, 273 distinct states found, 179 states left on queue.
+The depth of the complete state graph search is 6.
+Finished in 00s at (2026-09-24 13:20:49)
+Trace exploration spec path: ./LabReconcile_TTrace_1790270448.tla
+$J -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -deadlock -workers 2 -config  2.02s user 0.33s system 303% cpu 0.773 total

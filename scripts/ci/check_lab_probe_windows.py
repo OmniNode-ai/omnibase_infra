@@ -27,8 +27,10 @@ WHAT COUNTS AS A PROBE (the unlisted direction)
     A scheduled workflow is a probe when it names the lab lane it reads, in one
     of the ways the probes in this fleet already do: a job named
     ``... (<lane> lane)``, a ``run-name`` carrying ``lane=``, or a job pinned to
-    the customer machine's runner label. The rule is structural and carries no
-    exclusion list. A listed entry need not match the rule (the release train
+    the customer machine's runner label or placed through the fleet's dedicated
+    ``CUSTOMER_MACHINE_RUNS_ON_JSON`` variable. Customer probes remain probes
+    when their resolved runner pool changes. The rule is structural and carries
+    no exclusion list. A listed entry need not match the rule (the release train
     and C17 do not name a lane) but must still agree with its workflow.
 
 A JOB PLACED BY AN EXPRESSION (omninode_infra#1725, omnibase_infra#4233)
@@ -46,7 +48,8 @@ A JOB PLACED BY AN EXPRESSION (omninode_infra#1725, omnibase_infra#4233)
     ``needs.<job>.outputs`` value only the run can decide, a conditional on the
     event) cannot be resolved before the run: a ``runs_on`` entry over it is an
     error naming the job and the expression, never a pass. In the unlisted
-    direction such a job names no customer-machine label, exactly as before.
+    direction such a job names no customer-machine label, unless it uses the
+    dedicated customer-probe variable; an unreadable customer probe is refused.
 
     A variable that places a scheduled job but is not declared for its
     repository in that map is an error naming the job, in both directions,
@@ -112,6 +115,11 @@ NO_LANE = "none"
 # pinned to it is a customer-path probe by construction: the runner group
 # admits only those producers (see omninode_infra c13-customer-local-delegation.yml).
 CUSTOMER_MACHINE_LABELS: frozenset[str] = frozenset({"omnipc2-customer"})
+
+# This variable identifies the fleet's customer probes independently of
+# their current runner labels. C13/C14/C29 moved from the customer-machine
+# label to omnibase-verify; an absent window must still be refused afterwards.
+_CUSTOMER_PLACEMENT_RE = re.compile(r"\bvars\.CUSTOMER_MACHINE_RUNS_ON_JSON\b")
 
 # The committed placement values (OMN-19412 follow-up): the top-level key of
 # the runner routing policy that maps <repo> -> {NAME: value | null}.
@@ -607,16 +615,24 @@ def lane_markers(
     run_lane = run_name_lane(workflow)
     if run_lane is not None:
         markers["run_name"] = {run_lane}
-    # A job whose placement cannot be read names no label here; a runs_on
-    # entry over it is refused in derive_lane instead. A job placed by an
-    # undeclared variable is different: runs_on_labels raises, so the caller
-    # reports the workflow as unclassifiable rather than as no probe.
+    # General jobs whose placement cannot be read name no label here; a
+    # runs_on entry over one is refused in derive_lane instead. Dedicated
+    # probe placements must be readable even when their window is absent.
+    # An undeclared variable raises from runs_on_labels in either direction.
+    placed = runs_on_labels(workflow, repo, variables)
     customer = {
         label
-        for labels in runs_on_labels(workflow, repo, variables).values()
+        for labels in placed.values()
         if isinstance(labels, set)
         for label in labels & CUSTOMER_MACHINE_LABELS
     }
+    for job_id, job in _jobs(workflow).items():
+        runs_on = job.get("runs-on")
+        if isinstance(runs_on, str) and _CUSTOMER_PLACEMENT_RE.search(runs_on):
+            labels = placed[job_id]
+            if isinstance(labels, WorkflowError):
+                raise WorkflowError(f"job {job_id!r}: {labels}")
+            customer.update(labels)
     if customer:
         markers["runs_on"] = customer
     return markers

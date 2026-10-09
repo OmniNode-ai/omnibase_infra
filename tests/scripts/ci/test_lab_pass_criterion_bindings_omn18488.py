@@ -96,7 +96,7 @@ def _bound_receipt(
 
 
 @pytest.mark.parametrize(
-    "lane", [lab.EnumLabLane.COMPOSE_DEV, lab.EnumLabLane.ONEX_LAB]
+    "lane", [lab.EnumLabLane.COMPOSE_DEV, lab.EnumLabLane.ONEX_LAB_K3S]
 )
 def test_both_emitters_copy_authored_bindings_at_the_cited_commit(
     monkeypatch: pytest.MonkeyPatch, lane: lab.EnumLabLane

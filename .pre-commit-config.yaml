@@ -21,6 +21,50 @@
 #   pre-commit install --hook-type pre-push  # Install pre-push hooks
 #   pre-commit run --all-files            # Run all pre-commit hooks
 repos:
+  - repo: local
+    hooks:
+      - id: lab-reconcile-model-evidence
+        name: Reviewed lab reconcile model evidence (OMN-19421)
+        entry: uv run --frozen pytest tests/ci/test_lab_reconcile_model.py -q --no-cov
+        language: system
+        files: ^(formal/lab_reconcile/|tests/ci/test_lab_reconcile_model\.py$|tests/ci/fixtures/lab_reconcile_ticket_omn19421\.json$|\.pre-commit-config\.yaml$|\.github/workflows/ci\.yml$)
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: lane-sync-receipt
+        name: Lane sync refuses every census finding (OMN-19417)
+        entry: uv run --frozen pytest tests/ci/test_lab_pass_receipt_integration_probes_omn18866.py -q
+        language: system
+        pass_filenames: false
+        files: ^(scripts/(ci/lab_pass_receipt\.py|lane-census-check\.sh|lane_census_(inventory|plan)\.py|runtime_build/verify_stability_refresh\.py)|tests/ci/test_lab_pass_receipt_integration_probes_omn18866\.py|\.github/workflows/(ci|runtime-rebuild-trigger-reusable)\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: lane-sync-stability
+        name: Stability refresh retains lane sync failure (OMN-19417)
+        entry: uv run --frozen pytest scripts/runtime_build/tests/test_verify_stability_refresh.py -q
+        language: system
+        pass_filenames: false
+        files: ^(scripts/(ci/lab_pass_receipt\.py|lane-census-check\.sh|runtime_build/(verify_stability_refresh\.py|tests/test_verify_stability_refresh\.py))|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: lane-sync-drift
+        name: Census drift count refuses nonzero (OMN-19417)
+        entry: uv run --frozen pytest tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q
+        language: system
+        pass_filenames: false
+        files: ^(scripts/check_lane_census_drift\.py|tests/unit/scripts/test_check_lane_census_drift_omn18949\.py|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: lab-census-alarm-episodes
+        name: Census alarm episodes and recoveries (OMN-19418)
+        entry: uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k lane_drift -q
+        language: system
+        files: ^(scripts/(lab_alarm|lane_census_event|lane_census_plan)\.py|config/lab_alarm\.json|tests/ci/(test_lab_alarm_omn18867\.py|fixtures/lab_census_snapshot_omn19418\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: linear-transport-consolidation
+        name: Linear GraphQL has one transport owner (OMN-17678)
+        entry: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q
+        language: system
+        files: ^(src/.*\.py|tests/ci/test_linear_transport_consolidation\.py|tests/ci/fixtures/linear_graphql_issue_omn17678\.json|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
   # OMN-20304: canonical-file-shape ratchet (operator ruling 2026-10-01). No
   # new code file outside the canonical contract/node/handler/models/
   # protocols/tests/docs locations, no new imperative lines in a SKILL.md, no
@@ -141,6 +185,14 @@ repos:
         require_serial: true
         files: ^(src/omnibase_infra/(runtime/auto_wiring/|models/model_discovery_skip\.py)|tests/ci/(test_discovery_manifest_live_replay\.py|fixtures/discovery_manifest_live\.json)|\.pre-commit-config\.yaml)$
         stages: [pre-commit]
+      - id: rolling-runner-registration-preflight
+        name: Rolling runner registration preflight (OMN-18877)
+        entry: uv run --frozen pytest tests/ci/test_deploy_runners_registration_preflight.py -q
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(scripts/deploy-runners\.sh|tests/ci/test_deploy_runners_registration_preflight\.py|tests/ci/fixtures/rolling_runner_registration_preflight\.json|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
       # OMN-18786: same blocking scan as the CI Summary context.
       - id: seed-provenance-check
         name: Seed Provenance Check
@@ -167,6 +219,17 @@ repos:
         pass_filenames: false
         require_serial: true
         files: ^(src/omnibase_infra/topology/|docker/catalog/database-topology/|scripts/ci/(detect_test_paths\.py|test_selection_(adjacency\.yaml|loader\.py|models\.py))$|tests/unit/scripts/ci/test_detect_test_paths\.py$|\.github/workflows/ci\.yml$|\.pre-commit-config\.yaml$)
+        stages: [pre-commit]
+  # OMN-18892: same focused principal-confinement proof as the CI gate.
+  - repo: local
+    hooks:
+      - id: slot-migration-principal-confinement
+        name: Slot migrations use confined principals (OMN-18892)
+        entry: uv run --frozen pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q --timeout=60
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(scripts/(run-forward-migrations|run-intelligence-migrations|provision_db_slot)\.sh|docker/docker-compose\.prepr\.yml|tests/unit/infra/test_db_slot_provisioner_omn18892\.py|\.github/workflows/ci\.yml|\.pre-commit-config\.yaml)$
         stages: [pre-commit]
   # Shape-gate independence (OMN-20298): a shape-gate detector job never waits
   # on the change-control preflight and never reads its result. BLOCKING, zero
@@ -670,6 +733,13 @@ repos:
         entry: uv run --frozen pytest tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488.py -q
         language: system
         files: ^(scripts/ci/lab_pass_receipt\.py|src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/.*|tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488\.py|\.github/workflows/(runtime-rebuild-trigger|deliver-dev-candidate-to-staging)\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: persistent-lab-receipt
+        name: Persistent lab apply receipt and candidate smoke isolation (OMN-18276)
+        entry: uv run --frozen pytest tests/scripts/ci/test_persistent_lab_receipt_omn18276.py -q --no-cov
+        language: system
+        files: ^(scripts/ci/(lab_pass_receipt|fetch_lab_overlay_record)\.py|tests/scripts/ci/test_persistent_lab_receipt_omn18276\.py|\.github/workflows/(runtime-rebuild-trigger|deliver-dev-candidate-to-staging|ci)\.yml|\.pre-commit-config\.yaml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: d11-workflow-verdict-regression

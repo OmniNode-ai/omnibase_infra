@@ -58,7 +58,7 @@ from tests.scripts.ci._lab_pass_fixtures import (
 pytestmark = pytest.mark.unit
 
 COMPOSE_DEV = EnumLabLane.COMPOSE_DEV
-ONEX_LAB = EnumLabLane.ONEX_LAB
+PERSISTENT_LAB = EnumLabLane.ONEX_LAB_K3S
 
 
 def _gate(
@@ -105,7 +105,7 @@ class TestRequiredLaneSelection:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         surface = FakeSurface()
-        surface.add(receipt(SHA_4ACA, ONEX_LAB))
+        surface.add(receipt(SHA_4ACA, PERSISTENT_LAB))
         verdict = tmp_path / "verdict.json"
         code, output = _gate(surface, monkeypatch, sha=SHA_4ACA, verdict_path=verdict)
         assert code == 1
@@ -120,7 +120,7 @@ class TestRequiredLaneSelection:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         surface = FakeSurface()
-        surface.add(receipt(SHA_4ACA, ONEX_LAB), receipt(SHA_4ACA, COMPOSE_DEV))
+        surface.add(receipt(SHA_4ACA, PERSISTENT_LAB), receipt(SHA_4ACA, COMPOSE_DEV))
         verdict = tmp_path / "verdict.json"
         code, output = _gate(surface, monkeypatch, sha=SHA_4ACA, verdict_path=verdict)
         assert code == 0, output
@@ -134,7 +134,7 @@ class TestRequiredLaneSelection:
     ) -> None:
         surface = FakeSurface()
         surface.add(
-            receipt(SHA_4ACA, ONEX_LAB),
+            receipt(SHA_4ACA, PERSISTENT_LAB),
             receipt(SHA_4ACA, EnumLabLane.ONEX_LAB_K3S),
             receipt(SHA_4ACA, COMPOSE_DEV, outcome="fail"),
         )
@@ -151,7 +151,7 @@ class TestRequiredLaneSelection:
         refuses, under a token the re-run selector may act on."""
         surface = FakeSurface()
         surface.add(
-            receipt(SHA_4ACA, ONEX_LAB),
+            receipt(SHA_4ACA, PERSISTENT_LAB),
             receipt(SHA_4ACA, COMPOSE_DEV, outcome="indeterminate"),
         )
         verdict = tmp_path / "verdict.json"
@@ -163,7 +163,7 @@ class TestRequiredLaneSelection:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         surface = FakeSurface(fail_paths=("lab-pass-receipt-compose-dev-",))
-        surface.add(receipt(SHA_4ACA, ONEX_LAB))
+        surface.add(receipt(SHA_4ACA, PERSISTENT_LAB))
         verdict = tmp_path / "verdict.json"
         code, _ = _gate(surface, monkeypatch, sha=SHA_4ACA, verdict_path=verdict)
         assert code == 1
@@ -175,7 +175,7 @@ class TestRequiredLaneSelection:
         """S.2: a delivered sha that is not runtime-affecting is judged on its
         PS-1 subject's receipt, and the refusal names the subject."""
         surface = FakeSurface()
-        surface.add(receipt(SHA_DF6F, ONEX_LAB))
+        surface.add(receipt(SHA_DF6F, PERSISTENT_LAB))
         verdict = tmp_path / "verdict.json"
         code, output = _gate(
             surface,
@@ -203,7 +203,7 @@ class TestLateArrivingReceipt:
         and the re-run read passes."""
         first_read = ts("2026-09-22T19:44:29Z")
         surface = FakeSurface()
-        surface.add(receipt(SHA_4ACA, ONEX_LAB))
+        surface.add(receipt(SHA_4ACA, PERSISTENT_LAB))
 
         first = tmp_path / "attempt1.json"
         code, output = _gate(
@@ -244,7 +244,7 @@ class TestLateArrivingReceipt:
         Attempt 2's PASS arrives at 06:13:23Z and the re-run read passes."""
         first_read = ts("2026-09-23T03:40:00Z")
         surface = FakeSurface()
-        surface.add(receipt(SHA_DF6F, ONEX_LAB))
+        surface.add(receipt(SHA_DF6F, PERSISTENT_LAB))
 
         first = tmp_path / "attempt1.json"
         code, _ = _gate(
@@ -278,7 +278,7 @@ class TestLateArrivingReceipt:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         surface = FakeSurface()
-        surface.add(receipt(SHA_4ACA, ONEX_LAB))
+        surface.add(receipt(SHA_4ACA, PERSISTENT_LAB))
         _, pending = _gate(surface, monkeypatch, sha=SHA_4ACA, pending=True)
         _, absent = _gate(surface, monkeypatch, sha=SHA_4ACA, pending=False)
         assert "token=PENDING" in pending
@@ -290,7 +290,7 @@ class TestLateArrivingReceipt:
         """A probe that cannot say whether a rebuild is in flight refuses ABSENT
         with the reason; both are refusals, neither is a pass."""
         surface = FakeSurface()
-        surface.add(receipt(SHA_4ACA, ONEX_LAB))
+        surface.add(receipt(SHA_4ACA, PERSISTENT_LAB))
         monkeypatch.setattr("scripts.ci.lab_pass_receipt._gh_api", surface)
 
         def boom(sha: str) -> bool:
@@ -320,7 +320,7 @@ class TestOverallBound:
 
     def _with_pass(self) -> FakeSurface:
         surface = FakeSurface()
-        surface.add(receipt(SHA_4ACA, ONEX_LAB), receipt(SHA_4ACA, COMPOSE_DEV))
+        surface.add(receipt(SHA_4ACA, PERSISTENT_LAB), receipt(SHA_4ACA, COMPOSE_DEV))
         return surface
 
     def test_timed_out_at_overall_bound_refuses_even_with_a_pass(
@@ -375,7 +375,7 @@ class TestOverallBound:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         surface = FakeSurface()
-        surface.add(receipt(SHA_4ACA, ONEX_LAB))
+        surface.add(receipt(SHA_4ACA, PERSISTENT_LAB))
         verdict = tmp_path / "v.json"
         code, _ = _gate(
             surface,
@@ -457,7 +457,7 @@ class TestFirstGateRead:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         surface = FakeSurface(fail_paths=("/attempts/",))
-        surface.add(receipt(SHA_4ACA, ONEX_LAB), receipt(SHA_4ACA, COMPOSE_DEV))
+        surface.add(receipt(SHA_4ACA, PERSISTENT_LAB), receipt(SHA_4ACA, COMPOSE_DEV))
         monkeypatch.setattr("scripts.ci.lab_pass_receipt._gh_api", surface)
         verdict = tmp_path / "v.json"
         code = main(
