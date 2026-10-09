@@ -49,7 +49,12 @@ WHAT COUNTS AS A READER
    route that page really serves. Both halves are resolved out of the omnimarket
    checkout, never restated here -- a copy of Market's slot names in this file would
    keep passing the first time Market renamed one.
-4. An explicit ``consumers: none`` on the exposure carrying a non-empty
+4. A component of an omnidash local page contract
+   (``src/pages/local/*.contracts.yaml``) whose ``data_bindings[].projection_topic``
+   names the topic (OMN-20830). The local dashboard is a shipped surface: the page
+   loader binds each component to exactly the topic its contract names, with no
+   component registry in between, so the registry alone never sees these readers.
+5. An explicit ``consumers: none`` on the exposure carrying a non-empty
    ``consumers_reason``.
 
 (1) is not a CI-only field. ``dataSources[].topic`` is emitted from the very ``TOPICS``
@@ -100,6 +105,7 @@ USAGE
         [--extra-contracts-dir <dir> ...] \
         --registry <path/to/component-registry.json> \
         --layouts-dir <path/to/omnidash/src/templates> \
+        --local-pages-dir <path/to/omnidash/src/pages/local> \
         --backend-reader-surface <path/to/omnimarket/src/omnimarket/projection>
 
 Exit ``0`` when every served ``bus_backed`` exposure has a reader or a reasoned opt-out;
@@ -237,6 +243,13 @@ class BackendReaderSurface:
     kinds: frozenset[str]
     registrations: frozenset[BackendReaderRegistration]
     routes: frozenset[str]
+    # OMN-20830: the reader model's own fields, so the closed key set of a
+    # declaration is the model's and not a copy here. ``optional_fields`` are those
+    # with a default, mapped to their annotation (``bool`` values are type-checked).
+    required_fields: frozenset[str] = frozenset(
+        {"id", "kind", "route", "projection_slot"}
+    )
+    optional_fields: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -344,6 +357,59 @@ def collect_layout_readers(
 # ---------------------------------------------------------------------------
 # Exposure surface (contracts)
 # ---------------------------------------------------------------------------
+
+
+def collect_local_page_readers(local_pages_dir: Path) -> dict[str, set[str]]:
+    """Map each projection topic to the omnidash local page components bound to it.
+
+    A local page contract (``src/pages/local/<page>.contracts.yaml``) lists the
+    page's components; each ``data_bindings[].projection_topic`` is the topic the
+    local page loader reads for that component (OMN-20830). The reader is named
+    ``local-page:<page>/<component_id>``.
+
+    Fails closed: a missing directory, a directory holding no page contracts, or a
+    contract that does not parse raises :class:`ReaderSurfaceError`.
+    """
+    if not local_pages_dir.is_dir():
+        raise ReaderSurfaceError(
+            f"the omnidash local pages directory {local_pages_dir} does not exist. "
+            "Local page bindings are part of the reader surface; a missing directory "
+            "is an infrastructure failure, not an absence of readers."
+        )
+    contract_files = sorted(local_pages_dir.glob("*.contracts.yaml"))
+    if not contract_files:
+        raise ReaderSurfaceError(
+            f"{local_pages_dir} holds no *.contracts.yaml local page contracts. An "
+            "empty scan is not an absence of readers; refusing to report it as one."
+        )
+    readers: dict[str, set[str]] = {}
+    for contract_file in contract_files:
+        page = contract_file.name.removesuffix(".contracts.yaml")
+        try:
+            raw = yaml.safe_load(contract_file.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as exc:
+            raise ReaderSurfaceError(
+                f"cannot read the local page contract {contract_file}: {exc}"
+            ) from exc
+        components = raw.get("components") if isinstance(raw, dict) else None
+        if not isinstance(components, list):
+            raise ReaderSurfaceError(
+                f"{contract_file} has no `components` list, the shape local page "
+                "readers are resolved from."
+            )
+        for component in components:
+            if not isinstance(component, dict):
+                continue
+            component_id = component.get("component_id")
+            for binding in component.get("data_bindings") or ():
+                if not isinstance(binding, dict):
+                    continue
+                topic = binding.get("projection_topic")
+                if isinstance(topic, str) and topic and isinstance(component_id, str):
+                    readers.setdefault(topic, set()).add(
+                        f"local-page:{page}/{component_id}"
+                    )
+    return readers
 
 
 def _iter_contract_files(dirs: Sequence[Path]) -> Iterator[Path]:
@@ -456,6 +522,41 @@ def _declared_reader_kinds(module: ast.Module, path: Path) -> frozenset[str]:
     )
 
 
+def _declared_reader_fields(
+    module: ast.Module, path: Path
+) -> tuple[frozenset[str], tuple[tuple[str, str], ...]]:
+    """The reader model's fields: (required names, ((optional name, annotation), ...)).
+
+    A field with a default is optional. Resolved from the model's own annotated
+    assignments (OMN-20830), so a field Market adds to the model is accepted here
+    the moment it exists, and a key the model does not declare is still refused.
+    """
+    for node in ast.walk(module):
+        if not isinstance(node, ast.ClassDef) or node.name != _SURFACE_MODEL_CLASS:
+            continue
+        required: set[str] = set()
+        optional: list[tuple[str, str]] = []
+        for statement in node.body:
+            if not isinstance(statement, ast.AnnAssign) or not isinstance(
+                statement.target, ast.Name
+            ):
+                continue
+            name = statement.target.id
+            if name == "model_config":
+                continue
+            if statement.value is None:
+                required.add(name)
+            else:
+                optional.append((name, ast.unparse(statement.annotation)))
+        if required:
+            return frozenset(required), tuple(optional)
+        break
+    raise ReaderSurfaceError(
+        f"{path} declares no fields on `{_SURFACE_MODEL_CLASS}`, so the closed key "
+        "set of a backend reader declaration cannot be resolved."
+    )
+
+
 def _declared_registrations(
     module: ast.Module, path: Path
 ) -> frozenset[BackendReaderRegistration]:
@@ -551,6 +652,9 @@ def collect_backend_reader_surface(surface_dir: Path) -> BackendReaderSurface:
     api = _parse_surface_module(surface_dir, _SURFACE_API_FILE)
 
     kinds = _declared_reader_kinds(model, surface_dir / _SURFACE_MODEL_FILE)
+    required_fields, optional_fields = _declared_reader_fields(
+        model, surface_dir / _SURFACE_MODEL_FILE
+    )
     registrations = _declared_registrations(page, surface_dir / _SURFACE_PAGE_FILE)
     routes = _declared_routes(api, surface_dir / _SURFACE_API_FILE)
 
@@ -568,7 +672,13 @@ def collect_backend_reader_surface(surface_dir: Path) -> BackendReaderSurface:
             f"{surface_dir / _SURFACE_API_FILE} does not serve. The two halves of the "
             "Market surface disagree, so no reader fact can be resolved from it."
         )
-    return BackendReaderSurface(kinds=kinds, registrations=registrations, routes=routes)
+    return BackendReaderSurface(
+        kinds=kinds,
+        registrations=registrations,
+        routes=routes,
+        required_fields=required_fields,
+        optional_fields=optional_fields,
+    )
 
 
 def _parse_backend_readers(
@@ -590,7 +700,9 @@ def _parse_backend_readers(
     readers: list[BackendReader] = []
     errors: list[str] = []
     seen_ids: set[str] = set()
-    required_keys = frozenset({"id", "kind", "route", "projection_slot"})
+    required_keys = surface.required_fields
+    optional_types = dict(surface.optional_fields)
+    allowed_keys = required_keys | frozenset(optional_types)
 
     for index, entry in enumerate(raw):
         prefix = f"`backend_readers[{index}]`"
@@ -604,12 +716,23 @@ def _parse_backend_readers(
 
         entry_keys = frozenset(entry)
         missing_keys = sorted(required_keys - entry_keys)
-        unknown_keys = sorted(entry_keys - required_keys)
+        unknown_keys = sorted(entry_keys - allowed_keys)
         if missing_keys:
             errors.append(f"{prefix} is missing {', '.join(missing_keys)}")
         if unknown_keys:
             errors.append(f"{prefix} has unknown keys {', '.join(unknown_keys)}")
         if missing_keys or unknown_keys:
+            continue
+
+        mistyped = sorted(
+            key
+            for key, annotation in optional_types.items()
+            if key in entry
+            and annotation == "bool"
+            and not isinstance(entry[key], bool)
+        )
+        if mistyped:
+            errors.append(f"{prefix} {', '.join(mistyped)} must be true or false")
             continue
 
         reader_id = entry["id"]
@@ -865,6 +988,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to omnidash src/templates/ (the shipped DASHBOARD_TEMPLATES).",
     )
     parser.add_argument(
+        "--local-pages-dir",
+        required=True,
+        type=Path,
+        help=(
+            "path to omnidash src/pages/local/ -- the local dashboard page contracts, "
+            "whose data_bindings name the topics each local page component reads "
+            "(OMN-20830). Required: a skipped surface would report its readers absent."
+        ),
+    )
+    parser.add_argument(
         "--backend-reader-surface",
         required=True,
         type=Path,
@@ -898,7 +1031,8 @@ def _report(
         stream.write(
             "\n  Fix, in order of preference:\n"
             "    1. Render it. Add an omnidash component whose `dataSources` declares\n"
-            "       the topic, and place it on a shipped dashboard layout.\n"
+            "       the topic, and place it on a shipped dashboard layout, or bind it\n"
+            "       on an omnidash local page contract (data_bindings).\n"
             "    2. For a Market-owned status-page reader, declare a typed\n"
             "       `backend_readers` entry naming a slot the status page really\n"
             "       reads. If the page does not read it yet, make it read it first --\n"
@@ -936,6 +1070,7 @@ def check_exposure_readers(
     registry: Path,
     layouts_dir: Path,
     backend_reader_surface: Path,
+    local_pages_dir: Path,
     stream: IO[str] | None = None,
 ) -> int:
     out = stream if stream is not None else sys.stderr
@@ -947,6 +1082,8 @@ def check_exposure_readers(
         topic: set(names) for topic, names in registry_readers.items()
     }
     for topic, names in layout_readers.items():
+        readers.setdefault(topic, set()).update(names)
+    for topic, names in collect_local_page_readers(local_pages_dir).items():
         readers.setdefault(topic, set()).update(names)
 
     scanned = list(_iter_contract_files(contracts_dirs))
@@ -974,6 +1111,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.registry,
             args.layouts_dir,
             args.backend_reader_surface,
+            args.local_pages_dir,
         )
     except ReaderSurfaceError as exc:
         sys.stderr.write(f"[exposure-reader-coverage] FAIL (fail-closed): {exc}\n")

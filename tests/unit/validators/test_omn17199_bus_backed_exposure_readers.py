@@ -193,6 +193,32 @@ def _write_layout(layouts_dir: Path, name: str, component_names: list[str]) -> P
     return path
 
 
+def _write_local_pages(
+    tmp_path: Path, bindings: dict[str, list[str]] | None = None
+) -> Path:
+    """An omnidash src/pages/local with one page contract (OMN-20830).
+
+    ``bindings`` maps a component id to the topics its data_bindings name; the
+    default page binds nothing, so it adds no reader.
+    """
+    pages = tmp_path / "pages-local"
+    pages.mkdir(parents=True, exist_ok=True)
+    components = [
+        {
+            "component_id": component_id,
+            "data_bindings": [
+                {"binding_id": f"{component_id}-{i}", "projection_topic": topic}
+                for i, topic in enumerate(topics)
+            ],
+        }
+        for component_id, topics in (bindings or {}).items()
+    ]
+    (pages / "overview.contracts.yaml").write_text(
+        json.dumps({"components": components}), encoding="utf-8"
+    )
+    return pages
+
+
 def _readers(registry: Path, layouts_dir: Path) -> dict[str, set[str]]:
     registry_readers = collect_registry_readers(registry)
     layout_readers = collect_layout_readers(layouts_dir, registry_readers)
@@ -258,6 +284,8 @@ def test_ac1_exit_code_is_nonzero_so_the_gate_can_block(tmp_path: Path) -> None:
                 str(registry),
                 "--layouts-dir",
                 str(layouts),
+                "--local-pages-dir",
+                str(_write_local_pages(tmp_path)),
                 "--backend-reader-surface",
                 str(_write_surface(tmp_path)),
             ]
@@ -702,6 +730,8 @@ def test_an_empty_scan_is_not_reported_as_compliance(tmp_path: Path) -> None:
                 str(registry),
                 "--layouts-dir",
                 str(layouts),
+                "--local-pages-dir",
+                str(_write_local_pages(tmp_path)),
                 "--backend-reader-surface",
                 str(_write_surface(tmp_path)),
             ]
@@ -966,6 +996,8 @@ def test_the_pass_line_names_the_backend_reader_not_an_opt_out(
                 str(registry),
                 "--layouts-dir",
                 str(layouts),
+                "--local-pages-dir",
+                str(_write_local_pages(tmp_path)),
                 "--backend-reader-surface",
                 str(_write_surface(tmp_path)),
             ]
