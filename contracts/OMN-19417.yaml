@@ -23,20 +23,12 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-19417-ac1
-    description: Every manifest-declared running service of dev-202 and dev-200 is started by the deps leg or the runtime leg.
+    description: The test module asserts every manifest-declared running service of dev-202 and dev-200 is started by the deps leg or the runtime leg, and the .201 Phoenix stays out of the deps leg.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_instance_lane_starts_declared_services_omn19417.py -q -k test_instance_lane_deploy_starts_every_declared_running_service
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_instance_lane_starts_declared_services_omn19417.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
-  - id: dod-omn-19417-ac2
-    description: The .201 Phoenix stays out of the deps leg.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_instance_lane_starts_declared_services_omn19417.py -q -k test_instance_lane_phoenix_stays_out_of_the_201_deps_leg
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
       - AC2
