@@ -1,0 +1,42 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19417
+title: The instance lanes' deploy starts the Phoenix their census declares
+summary: The dev-202, dev-200 and dev-105 compose overlays give phoenix the core profile so the deploy agent's deps leg starts the Phoenix container that deploy/lane-census/lane-manifest.yaml declares for dev-202 and dev-200.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-instance-lane-starts-declared-phoenix
+    statement: For dev-202 and dev-200, every container the lane manifest declares as a running service belongs to a compose service that the deps leg or the runtime leg of the deploy agent starts, and the .201 Phoenix stays out of the deps leg.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: every manifest-declared running service of dev-202 and dev-200 is started by the deps leg or the runtime leg -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_instance_lane_starts_declared_services_omn19417.py -q -k test_instance_lane_deploy_starts_every_declared_running_service'
+      - id: AC2
+        statement: 'AC2: the .201 Phoenix stays out of the deps leg -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_instance_lane_starts_declared_services_omn19417.py -q -k test_instance_lane_phoenix_stays_out_of_the_201_deps_leg'
+evidence_requirements:
+  - kind: tests
+    description: The new test reads the lane manifest and the compose overlays and runs the deploy agent's leg selection for each instance lane.
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_instance_lane_starts_declared_services_omn19417.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19417-ac1
+    description: Every manifest-declared running service of dev-202 and dev-200 is started by the deps leg or the runtime leg.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_instance_lane_starts_declared_services_omn19417.py -q -k test_instance_lane_deploy_starts_every_declared_running_service
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-19417-ac2
+    description: The .201 Phoenix stays out of the deps leg.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_instance_lane_starts_declared_services_omn19417.py -q -k test_instance_lane_phoenix_stays_out_of_the_201_deps_leg
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
