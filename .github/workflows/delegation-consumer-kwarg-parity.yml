@@ -83,7 +83,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
+          ref: 33e632965c48355fd56254648ce215b519b3db7a # .github/sibling-pins.yaml
           path: .delegation-consumer
           fetch-depth: 1
           persist-credentials: false
