@@ -29,10 +29,10 @@ PINS = yaml.safe_load((REPO_ROOT / ".github" / "sibling-pins.yaml").read_text())
 
 # Deliberately live, not in PINNED_WORKFLOWS (measured red when pinned, PR #4449):
 # ci-bus-overlay-binding.yml binds the overlay to the branch the publisher reads at
-# merge time (its own test requires omnimarket ``dev``), and contract-validation.yml
-# runs onex_change_control's validate-contract composite action, whose inner
-# checkout fails when the action is addressed by a sha. The same holds for the
-# validate-boundaries action ci.yml calls: at a pinned OCC dev sha its inner
+# merge time (its own test requires omnimarket ``dev``). onex_change_control's
+# composite actions fail when addressed by a sha, so contract-validation.yml runs
+# the validate-contract steps inline with a pinned checkout (OMN-19747). The
+# validate-boundaries action ci.yml calls is still a composite: at a pinned OCC dev sha its inner
 # checkout takes ``github.action_ref``, which resolves to ``v6`` inside the
 # composite, and the merge_group Cross-Repo Migration Conflicts job went red
 # (run 36942428614); that one ``uses:`` stays on ``@main``.
@@ -42,6 +42,7 @@ PINNED_WORKFLOWS = (
     "call-occ-autobind.yml",
     "call-occ-companion-effect.yml",
     "contract-topic-graph.yml",
+    "contract-validation.yml",
     "contractor-integration-note.yml",
     "delegation-consumer-kwarg-parity.yml",
     "dispatcher-route-coverage.yml",
