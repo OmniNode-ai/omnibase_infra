@@ -55,11 +55,15 @@ def _run(
     net_file = tmp_path / "networks.txt"
     net_file.write_text(networks)
 
-    # docker shim: ps -a -> rows; network ls -> networks; everything else empty.
+    # docker shim: ps -a -> rows; network ls -> networks; inspect -> one
+    # no-healthcheck, zero-restart reading per name (OMN-19416); else empty.
     docker_body = (
         'case "$*" in\n'
         f'  *"ps -a"*) cat "{ps_file}" ;;\n'
         f'  *"network ls"*) cat "{net_file}" ;;\n'
+        '  "inspect --format "*) shift 3; for n in "$@"; do printf '
+        '\'{"Names":"/%s","State":{"Health":null},'
+        '"Config":{"Healthcheck":null},"RestartCount":0}\\n\' "$n"; done ;;\n'
         "  *) : ;;\n"
         "esac\n"
         "exit 0"
