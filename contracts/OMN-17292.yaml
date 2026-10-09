@@ -1,0 +1,48 @@
+schema_version: "1.0.0"
+ticket_id: OMN-17292
+title: Advance the omnimarket contract pin and retire the supplemental table declarations it makes redundant
+summary: The bot advance of .github/omnimarket-contract-pin.yaml to 0464e8d938d9 moves the pinned omnimarket contracts to declare delegation_routing_feedback and delegation_budget_applied_events, so the interim LEGACY_MIGRATION_TABLE_DECLARATIONS entries for them are deleted in the same change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn17292-pin-advance
+    statement: The omnimarket contract pin and the sibling-pins entry agree on the advanced ref.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the committed pin and the sibling-pins omnimarket entry are consistent -- falsifier: uv run pytest tests/ci/test_omnimarket_contract_pin.py -q'
+  - id: req-omn17292-expiry
+    statement: No interim supplemental table declaration remains that the pinned contracts already declare.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the interim-entry map and the supplemental tuple name no relation the pin declares -- falsifier: uv run pytest tests/ci/test_supplemental_declaration_expiry_omn18863.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The contract pin and the sibling-pins entry agree.
+    command: uv run pytest tests/ci/test_omnimarket_contract_pin.py -q
+  - kind: tests
+    description: The supplemental declaration expiry assertions hold at the advanced pin.
+    command: uv run pytest tests/ci/test_supplemental_declaration_expiry_omn18863.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-17292-ac1
+    description: The committed pin and the sibling-pins omnimarket entry are consistent.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_omnimarket_contract_pin.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-17292-ac2
+    description: No interim supplemental declaration is redundant at the advanced pin.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_supplemental_declaration_expiry_omn18863.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
