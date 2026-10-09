@@ -339,9 +339,17 @@ jobs:
       - name: Unit tests for endpoint guard (OMN-20173)
         run: uv run pytest tests/unit/scripts/test_check_no_coding_plan_endpoint.py -q -p no:cacheprovider
 
+      - name: Rolling runner registration preflight (OMN-18877)
+        run: uv run --frozen pytest tests/ci/test_deploy_runners_registration_preflight.py -q
+
       # OMN-17678: same focused suite as the pre-commit transport gate.
       - name: Linear transport consolidation regression (OMN-17678)
         run: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q
+
+      # OMN-19421: same evidence gate as the pre-commit hook, including the
+      # passing safety/liveness controls and lock-removed counterexample.
+      - name: Reviewed lab reconcile model evidence (OMN-19421)
+        run: uv run --frozen pytest tests/ci/test_lab_reconcile_model.py -q --no-cov
 
       # OMN-19070: same focused suite as the self-pause pre-commit hook.
       - name: Runner disk admission self-pause regression (OMN-19070)
@@ -2620,6 +2628,13 @@ jobs:
           chmod +x "${HOME}/.local/bin/shellcheck"
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
           "${HOME}/.local/bin/shellcheck" --version
+
+      - name: Verify lane-sync receipt refusal and stability refresh (OMN-19417)
+        if: matrix.split == 1
+        run: |
+          uv run --frozen pytest tests/ci/test_lab_pass_receipt_integration_probes_omn18866.py -q
+          uv run --frozen pytest tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q
+          uv run --frozen pytest scripts/runtime_build/tests/test_verify_stability_refresh.py -q
 
       - name: Verify lab-pass criterion bindings and closer pins (OMN-18488)
         run: uv run --frozen pytest tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488.py -q

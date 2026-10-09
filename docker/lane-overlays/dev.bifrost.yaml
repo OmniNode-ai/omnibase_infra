@@ -96,14 +96,16 @@ backends:
         - local-heavy-reasoning
       max_context_tokens: 65536
       mode: spread
-  # OMN-17427: since 2026-10-08 this rung serves Qwen3.6-35B-A3B (Q8_0 GGUF,
-  # ggml-org/Qwen3.6-35B-A3B-GGUF, alias qwen3.6-35b-a3b, 262144-token pool shared
-  # by four slots), replacing gpt-oss-120b under operator RULING
-  # 2026-10-08T17:38:56Z. The swap is the model only: placement, classes, weight
-  # and the 8192-token routing window below are unchanged and stay as measured
-  # for gpt-oss until the new model is measured on the same item sets. Its
-  # request profile is `local-qwen3-6-35b-a3b-vendor-sampling` in omnimarket's
-  # inference_protocols.v1.yaml (the card's non-thinking sampling).
+  # OMN-20422: since 2026-10-09 this rung serves Qwen3.8-27B (Q8_0 GGUF,
+  # Jackrong/Qwen3.8-27B-MTP-GGUF, the repository .202's IQ4_XS comes from, alias
+  # Qwen3.8-27B, 262144-token pool shared by four slots), replacing
+  # Qwen3.6-35B-A3B under RULING 2026-10-08T23:48:01Z (lab models that trail the
+  # judged control are replaced; knowledge-base-internal#1151). The served id is
+  # the one .201 and .202 serve, so it gets the Qwen3.8-27B request profiles in
+  # omnimarket's inference_protocols.v1.yaml. The swap is the model only:
+  # placement, classes, weight and the 8192-token routing window below are
+  # unchanged until a placement change is made on the judged numbers.
+  # OMN-17427 (2026-10-08): Qwen3.6-35B-A3B replaced gpt-oss-120b on this rung.
   # The history below is the placement's, as set for gpt-oss-120b:
   # OMN-19432: gpt-oss-120b on the .200 Mac Studio (llama.cpp, MXFP4 GGUF, keyless,
   # 131072-token context pool shared by four slots). RULING 2026-09-30T15:07:51Z:
@@ -128,8 +130,8 @@ backends:
   # onex-allow-internal-ip OMN-19432 reason="typed dev-lane delegation contract"
   - backend_id: local-studio-planner
     endpoint_url: "http://192.168.86.200:8130/v1/chat/completions"
-    served_model_id: "qwen3.6-35b-a3b"
-    parameter_count: "35B-A3B"
+    served_model_id: "Qwen3.8-27B"
+    parameter_count: "27B"
     context_window: 262144
     max_tokens: 16384
     timeout_ms: 300000
