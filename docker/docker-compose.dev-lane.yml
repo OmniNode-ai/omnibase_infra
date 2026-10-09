@@ -350,13 +350,16 @@ x-dev-lane-consumer-poll-env: &dev_lane_consumer_poll_env
 # whenever it happened to emit later, making the lane's recorded health a race
 # between two processes. `omninode-runtime` speaks for the lane because it is
 # the lane's health surface: port 8085 is what a lane health probe reads.
-# `runtime-effects` keeps no lane and its health events stay unkeyable, which
-# is the honest answer for a process that cannot speak for the lane. A
-# worst-of fold across a lane's runtimes is a different design and belongs to
-# OMN-18769, not to this repair. `tests/unit/scripts/
-# test_omn19144_dev_lane_runtime_lane_identity.py` holds all of this.
+# `runtime-effects` names its lane for PLACEMENT (OMN-19408 lane-scoped
+# contracts, first effects-owned one omnimarket#3547). It declares
+# ONEX_RUNTIME_LANE_HEALTH_SPEAKER=false so its health events stay unkeyed and
+# `omninode-runtime` stays the lane's only health speaker (OMN-19812).
+# `tests/unit/scripts/test_omn19144_dev_lane_runtime_lane_identity.py` holds this.
 x-dev-lane-identity-env: &dev_lane_identity_env
   ONEX_RUNTIME_LANE: "compose-dev"
+x-dev-lane-placement-identity-env: &dev_lane_placement_identity_env
+  ONEX_RUNTIME_LANE: "compose-dev"
+  ONEX_RUNTIME_LANE_HEALTH_SPEAKER: "false"
 services:
   # ===========================================================================
   # (7) DECLARED POSTGRES CAPACITY -- OMN-19415
@@ -854,7 +857,7 @@ services:
       - "com.omninode.version=${RUNTIME_VERSION:-0.1.0}"
   runtime-effects:
     environment:
-      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env]
+      !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_placement_identity_env]
       # OMN-20159: node_projection_read_effect runs here and reads through its
       # own read binding (omnimarket#3364); without it the /skill edge refuses
       # every read with projection_binding_unconfigured. Deliberately NOT the
