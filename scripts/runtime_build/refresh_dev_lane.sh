@@ -267,11 +267,15 @@ readonly ALL_TRACKED_REPOS=("${SIBLING_LANE_REFRESH_REPOS[@]}")
 # from the sourced runtime-policy.env instead; fail fast BY NAME if absent.
 # --manifest-url/--health-url still fully override these defaults.
 require_contract_var DEV_RUNTIME_MAIN_PORT
+# OMN-17427: the effects runtime is the lane's second runtime and the gate
+# probes it too. Its port is contract-rendered like the main one; no literal.
+require_contract_var DEV_RUNTIME_EFFECTS_PORT
 LANE_PROBE_HOST="${LANE_PROBE_HOST:-localhost}" # fallback-ok: localhost IS the lane host in the documented primary context (script runs ON .201); containerized runner overrides via compose env (OMN-14958)
 REF="origin/dev"
 MIN_CONTRACTS=288
 MANIFEST_URL="http://${LANE_PROBE_HOST}:${DEV_RUNTIME_MAIN_PORT}/v1/introspection/manifest"
 HEALTH_URL="http://${LANE_PROBE_HOST}:${DEV_RUNTIME_MAIN_PORT}/health"
+EFFECTS_HEALTH_URL="http://${LANE_PROBE_HOST}:${DEV_RUNTIME_EFFECTS_PORT}/health"
 MODE="plan"
 # OMN-16729: bounded wait for the per-lane host lock, in seconds. 15 minutes by
 # default -- long enough to queue behind a legitimate peer refresh of the same
@@ -299,6 +303,9 @@ while [[ $# -gt 0 ]]; do
         --health-url)
             [[ -n "${2:-}" ]] || { err "--health-url requires a value"; exit 64; }
             HEALTH_URL="$2"; shift 2 ;;
+        --effects-health-url)
+            [[ -n "${2:-}" ]] || { err "--effects-health-url requires a value"; exit 64; }
+            EFFECTS_HEALTH_URL="$2"; shift 2 ;;
         --triggering-tag)
             [[ -n "${2:-}" ]] || { err "--triggering-tag requires a value"; exit 64; }
             TRIGGERING_TAG="$2"; shift 2 ;;
@@ -833,6 +840,7 @@ run_verify \
     --container-ids "${CONTAINER_IDS_JSON}" \
     --manifest-url "${MANIFEST_URL}" \
     --health-url "${HEALTH_URL}" \
+    --effects-health-url "${EFFECTS_HEALTH_URL}" \
     --broker-container "${REDPANDA_CONTAINER}" \
     --min-contracts "${MIN_CONTRACTS}" \
     ${REQUIRE_DIGEST_CHANGE} \
@@ -951,6 +959,7 @@ elif [[ "${DECISION_RESULT}" == "ROLLBACK_REQUIRED" ]]; then
         --container-ids "${ROLLBACK_CONTAINER_IDS_JSON}" \
         --manifest-url "${MANIFEST_URL}" \
         --health-url "${HEALTH_URL}" \
+        --effects-health-url "${EFFECTS_HEALTH_URL}" \
         --broker-container "${REDPANDA_CONTAINER}" \
         --min-contracts "${MIN_CONTRACTS}" \
         --no-require-digest-change \
