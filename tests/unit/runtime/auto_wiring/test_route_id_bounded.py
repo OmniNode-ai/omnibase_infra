@@ -102,6 +102,22 @@ def test_long_ids_sharing_a_prefix_stay_distinct() -> None:
 
 @pytest.mark.unit
 def test_ids_within_the_limit_are_unchanged() -> None:
+    # The bound itself returns an in-limit id as the very same string and bounds
+    # only an id over the limit. Imported here so the test fails (not errors at
+    # collection) against a tree that has no bound.
+    from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+        _bound_dispatch_identifier,
+    )
+
+    in_limit = "route.auto.my_node.my_handler.onex_evt_platform_my_topic_v1"
+    assert _bound_dispatch_identifier(in_limit, _ROUTE_ID_MAX) is in_limit
+    assert _bound_dispatch_identifier("a" * _ROUTE_ID_MAX, _ROUTE_ID_MAX) == (
+        "a" * _ROUTE_ID_MAX
+    )
+    assert len(
+        _bound_dispatch_identifier("a" * (_ROUTE_ID_MAX + 1), _ROUTE_ID_MAX)
+    ) == (_ROUTE_ID_MAX)
+
     assert (
         _derive_route_id("my_node", "my_handler", "onex.evt.platform.my-topic.v1")
         == "route.auto.my_node.my_handler.onex_evt_platform_my_topic_v1"
