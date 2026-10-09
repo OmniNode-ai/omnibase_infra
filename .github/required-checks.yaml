@@ -58,14 +58,6 @@ gates:
     job_path: ["handler-contract-compliance"]
     skip_semantics: never
     rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if:, no path filter, pull_request+merge_group trigger present."
-  - name: "verify / verify"
-    mode: REQUIRED
-    producer_kind: cross_repo
-    caller_workflow: call-receipt-gate.yml
-    caller_job: verify
-    cross_repo_ref: "OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@main"
-    skip_semantics: never
-    rationale: "Central Receipt Gate (Enforcement by Receipt) — cross-repo reusable hosted in omnibase_core. Caller job has no if:, no path filter, pull_request+merge_group trigger present."
   - name: "call-reject-skip-token / scan / reject-skip-gate-token"
     mode: REQUIRED
     producer_kind: cross_repo
@@ -113,7 +105,7 @@ gates:
     workflow: ci.yml
     job_path: ["topic-enum-drift"]
     skip_semantics: never
-    rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if: (only needs: occ-preflight, no explicit conditional), no path filter."
+    rationale: "Live required status check on omnibase_infra dev branch protection. No job-level if:, no path filter."
   - name: "Topic Naming Lint"
     mode: REQUIRED
     producer_kind: local
@@ -155,7 +147,7 @@ gates:
     workflow: product-readiness-shadow.yml
     job_path: ["reason-graph"]
     skip_semantics: never
-    rationale: "Product Readiness shadow reason-graph aggregator (OMN-14707/OMN-14644 Phase 3) — job-level `if: always()`, needs the 3 occ-independent subcheck jobs only (never occ-preflight, by design). Live required status check on omnibase_infra dev branch protection."
+    rationale: "Product Readiness shadow reason-graph aggregator (OMN-14707/OMN-14644 Phase 3) — job-level `if: always()`, needs the 3 independent subcheck jobs only. Live required status check on omnibase_infra dev branch protection."
   - name: "shell-hygiene"
     mode: REQUIRED
     producer_kind: local

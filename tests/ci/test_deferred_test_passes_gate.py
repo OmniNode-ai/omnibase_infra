@@ -266,10 +266,14 @@ def test_deferred_evaluation_passes_when_every_other_check_is_green() -> None:
 
 def test_deferred_evaluation_fails_when_one_check_is_red() -> None:
     """Positive control: the same green set plus one settled red fails."""
-    checks = [_row("Tests Gate", "success"), _row("verify / verify", "failure"), SELF]
+    checks = [
+        _row("Tests Gate", "success"),
+        _row("pr-title / check-title", "failure"),
+        SELF,
+    ]
     code, report = evaluate_checks(checks, now=NOW)
     assert code == EXIT_FAILURE
-    assert "verify / verify" in report
+    assert "pr-title / check-title" in report
 
 
 def test_only_this_repos_actions_check_runs_are_ci() -> None:
@@ -315,13 +319,13 @@ def test_same_named_rows_resolve_latest_wins() -> None:
     """A reusable called from two workflows: the newer row is the verdict."""
     red_then_green = [
         _row(
-            "occ-preflight / eligibility",
+            "deploy-gate / deploy-gate",
             "failure",
             started="2026-09-23T19:00:00Z",
             row_id=1,
         ),
         _row(
-            "occ-preflight / eligibility",
+            "deploy-gate / deploy-gate",
             "success",
             started="2026-09-23T19:30:00Z",
             row_id=2,
@@ -330,13 +334,13 @@ def test_same_named_rows_resolve_latest_wins() -> None:
     assert evaluate_checks(red_then_green, now=NOW)[0] == EXIT_SUCCESS
     green_then_red = [
         _row(
-            "occ-preflight / eligibility",
+            "deploy-gate / deploy-gate",
             "success",
             started="2026-09-23T19:00:00Z",
             row_id=1,
         ),
         _row(
-            "occ-preflight / eligibility",
+            "deploy-gate / deploy-gate",
             "failure",
             started="2026-09-23T19:30:00Z",
             row_id=2,

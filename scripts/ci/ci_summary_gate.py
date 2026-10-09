@@ -110,7 +110,7 @@ import argparse
 import json
 import re
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
@@ -124,7 +124,6 @@ SELF_JOB_NAME = "CI Summary"
 # ci.yml on 2026-07-07).
 STRICT_GATE_JOBS: tuple[str, ...] = (
     "runner-routing-audit / Runner Routing Audit",  # OMN-18780: live + local routing assertions
-    "occ-preflight / eligibility",  # occ-preflight reusable gate
     "CI Tests Gate",  # tests-gate — aggregator over the split matrix
     "Lint",  # lint
     "ONEX Validators",  # onex-validation
@@ -148,7 +147,6 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "No Plugin Daemon Classes Gate (OMN-20298)",  # no-plugin-daemon-classes-gate — detector with no preflight dependency
     "Shape-Gate Independence (OMN-20298)",  # shape-gate-independence — refuses a detector behind the preflight
     "Effect-Assertion Gate (RT-5)",  # OMN-14467 deploy-trigger fails closed on zero output
-    "OCC Companion Merged Gate (OMN-15214)",  # occ-companion-merged — cited OCC evidence must be MERGED before product merge
     # OMN-16774: whole event chains driven through the REAL dispatch seam on the
     # in-memory bus (tests/integration/chains/). THIS LINE IS HALF THE
     # MECHANISM. The default-deny sweep below already fails CI Summary when the
@@ -225,9 +223,8 @@ STRICT_GATE_JOBS: tuple[str, ...] = (
     "Runner Route (OMN-18031) / route",
     # OMN-15378 AC3: scripts/deploy-agent's standalone pytest root. ci.yml's
     # `deploy-agent-tests` job CALLS .github/workflows/deploy-agent-tests.yml,
-    # so the inner job surfaces as "<caller display name> / <inner job name>"
-    # (same shape as "occ-preflight / eligibility"). Registering it here is what
-    # makes those 201 tests GATE merge: while they lived in a separately-
+    # so the inner job surfaces as "<caller display name> / <inner job name>".
+    # Registering it here makes those 201 tests GATE merge: while they lived in a separately-
     # triggered workflow this poller could not observe them at all (different
     # run_id), so a RED run left "CI Summary" — the sole required context on
     # dev — green.
@@ -404,15 +401,11 @@ SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
 # ``tests-gate`` already applies per-upstream (OMN-15315). Every gate outside
 # this tier must still be exactly ``success`` on a docs-only diff, which is what
 # keeps ``Lint``, ``ONEX Validators``, the contract gates, the supply-chain
-# gates and ``OCC Companion Merged Gate`` running — the half of the operator
-# ruling that is not about saving minutes.
+# gates running — the half of the operator ruling that is not about saving minutes.
 #
 # TIER MEMBERSHIP RATIONALE: each entry is a Pydantic-round-trip, DB-schema, or
 # effect-shape proof over ``src/`` + Docker. None can change verdict when only
-# ``docs/**`` and ``*.md`` moved. Deliberately EXCLUDED despite being expensive:
-# ``OCC Companion Merged Gate (OMN-15214)`` (10m) is an evidence-ordering gate,
-# orthogonal to code content — a docs PR still cites OCC evidence that must be
-# merged first.
+# ``docs/**`` and ``*.md`` moved.
 DOCS_ONLY_MARKER_JOB = "Docs-Only Marker (OMN-16661)"
 
 #
@@ -449,8 +442,8 @@ GATE_JOBS: tuple[str, ...] = STRICT_GATE_JOBS + SKIPPABLE_GATE_JOBS
 # when the caller executes (``<caller> / <inner>``). A caller that skips leaves
 # only a bare ``Runtime Boot Smoke (compose)`` row, so this gate reads absent:
 # PENDING, then FAILURE at the poller's deadline, never SUCCESS. On merge_group
-# the caller skips only when ``occ-preflight`` or ``tests-gate`` did not
-# succeed, and both are STRICT, so that run fails on its own first. A runner
+# the caller skips only when ``tests-gate`` did not succeed, and that gate
+# is STRICT, so that run fails on its own first. A runner
 # with no Docker Compose fails the inner job outright (OMN-18811 AC4).
 #
 # On every other event the job keeps its SOFT_ALLOWLIST reading below. That
@@ -539,7 +532,6 @@ SOFT_ALLOWLIST: frozenset[str] = frozenset(
 # unchanged) and folded into the same fixture rows above.
 EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     "deploy-gate / deploy-gate",  # 16/16 present, 15/16 green (#2555 red AT MERGE)
-    "verify / verify",  # Receipt Gate
     "call-reject-skip-token / scan / reject-skip-gate-token",  # CLAUDE.md rule 10 mechanism
     "main-target-guard",
     "non-dev-base-guard",
@@ -977,22 +969,10 @@ MEASURED_NOT_ENFORCED_CONTEXTS: dict[str, str] = {
         "1/16 present — path-filtered; requiring it would wedge every PR that "
         "does not touch its paths (the exact never-reports failure mode)."
     ),
-    "occ-companion-effect / Publish occ-companion-effect command": (
-        "16/16 present but only 10/16 green — a flaky publisher EFFECT, not a "
-        "validator. The substantive requirement it stands in for is already "
-        "enforced in-run by the STRICT gate 'OCC Companion Merged Gate "
-        "(OMN-15214)'."
-    ),
     "Hostile Review Gate": (
         "16/16 present, 14/16 green — an adversarial-judgment gate. A 12.5% red "
         "rate needs per-red root-cause before it may block merges; admitting it "
         "blind would convert review opinion into a merge outage."
-    ),
-    "occ-preflight / eligibility": (
-        "Already a STRICT_GATE_JOBS entry, and the ONE name observed both inside "
-        "and outside this run's check suite (duplicate producers: ci.yml and "
-        "hostile-reviewer.yml). Asserting it on both surfaces would double-count "
-        "an ambiguous name — see OMN-15112."
     ),
 }
 
@@ -1275,9 +1255,9 @@ class SweepExclusion:
 # where the numbers are recorded, not here.
 SWEEP_EXCLUSION_MAX_DAYS: int = 90
 
-# The first TEN ENTRIES, one per name the measurement found non-green on ANY head over
-# the 16-PR window recorded above. OMN-18960 shipped this dict EMPTY beside a
-# weaker conclusion set; OMN-18979 replaced that pairing with the strict bar
+# The remaining live entries cover names the measurement found non-green on
+# ANY head over the 16-PR window recorded above. OMN-18960 shipped this dict EMPTY
+# beside a weaker conclusion set; OMN-18979 replaced that pairing with the strict bar
 # and these entries, so every tolerance is now a named, dated, owned decision
 # rather than a silent one buried in a frozenset.
 #
@@ -1297,46 +1277,6 @@ EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
             "execution without producing a result. Excluding this name prevents the "
             "gate from failing on a check that is logically inapplicable to internal "
             "merges."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    "occ-autobind / outcome": SweepExclusion(
-        reason=(
-            "The check run occ-autobind / outcome was neutral on all sixteen heads "
-            "and never concluded success. This status row is written by a GitHub App "
-            "rather than by GitHub Actions and serves as a placeholder rather than a "
-            "substantive verdict. The context also records that this specific check "
-            "prints an incorrect label on its own success path. Without this "
-            "exclusion the gate would treat the neutral placeholder as a failure and "
-            "block the merge."
-        ),
-        ticket="OMN-18939",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    "occ-autobind-manual-replay": SweepExclusion(
-        reason=(
-            "The check run occ-autobind-manual-replay was skipped on all sixteen "
-            "heads and never concluded success. The job is gated to the manual "
-            "workflow_dispatch event which is not triggered by pull request activity. "
-            "Consequently the job skips when the gate evaluates the pull request "
-            "head. This exclusion allows the gate to ignore a manual re-publish "
-            "entrypoint that does not run in this context."
-        ),
-        ticket="OMN-18979",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    "occ-companion-effect-manual-replay": SweepExclusion(
-        reason=(
-            "The check run occ-companion-effect-manual-replay was skipped on all "
-            "sixteen heads and never concluded success. This job follows the same "
-            "pattern as the previous entry and is restricted to the manual dispatch "
-            "event. It functions as a manual re-publish entrypoint that does not "
-            "execute on pull request triggers. The gate must exclude this name to "
-            "avoid failing on a check that is inactive for the current event type."
         ),
         ticket="OMN-18979",
         added="2026-09-21",
@@ -1381,32 +1321,6 @@ EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
         added="2026-09-21",
         expires="2026-12-20",
     ),
-    "occ-autobind / mint status": SweepExclusion(
-        reason=(
-            "The check run occ-autobind / mint status was neutral on three of the "
-            "sixteen heads and never concluded success. This status row is written by "
-            "a GitHub App and its neutral conclusion acts as a placeholder rather "
-            "than a verdict. The placeholder status does not reflect a failure of the "
-            "head code. Excluding this entry prevents the gate from interpreting the "
-            "neutral placeholder as a blocking condition."
-        ),
-        ticket="OMN-18939",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
-    "occ-companion-effect / mint status": SweepExclusion(
-        reason=(
-            "The check run occ-companion-effect / mint status was neutral on one of "
-            "the sixteen heads and never concluded success. It belongs to the same "
-            "producer family and placeholder mechanism as the autobind mint status. "
-            "The neutral conclusion is a placeholder and not a substantive assessment "
-            "of the pull request. This exclusion allows the gate to ignore the "
-            "placeholder status without blocking the merge."
-        ),
-        ticket="OMN-18939",
-        added="2026-09-21",
-        expires="2026-12-20",
-    ),
     "Hostile Reviewer (adversarial gate)": SweepExclusion(
         reason=(
             "The check run Hostile Reviewer (adversarial gate) succeeded on thirteen "
@@ -1441,50 +1355,10 @@ EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# OMN-19167 — the CONDITIONAL arm of the layer-5 registry.
-#
-# EXTERNAL_SWEEP_EXCLUSIONS above admits a NAME unconditionally: once listed,
-# that row cannot red the umbrella whatever it concluded. That shape is right
-# for a job whose every run on a pull-request head is inapplicable — a
-# fork-only job, a main-branch-only job, a manual-dispatch entrypoint.
-#
-# It is WRONG for `occ-autobind` and `occ-companion-effect`. Those caller jobs
-# run, and matter, on an ordinary ticketed pull request; a skip there means the
-# change-control mint did not happen and is a real refusal. They skip
-# LEGITIMATELY on exactly one shape: a dependency-bot pull request carrying no
-# ticket token, which doctrine's own PR-title rule EXEMPTS from carrying one.
-# Listing the bare names unconditionally would buy six dependency bumps at the
-# price of never again noticing a ticketed PR whose mint silently did not run.
-#
-# So this registry admits a name only when the PRODUCER'S OWN declared
-# eligibility predicate is false for this pull request, evaluated here against
-# the same facts the producer's `if:` reads. Every condition must hold; any one
-# unresolvable admits nothing. A missing --pr-* argument therefore ENFORCES,
-# the same property --pr-author and --workflow-runs-file already have.
-#
-# MEASURED, 2026-09-22, omnibase_infra#3953 head 4af8a2d5b6, job 106734128710:
-#   external sweep failures (red, and named by NOTHING else):
-#     occ-autobind (skipped), occ-companion-effect (skipped)
-# All six of #3953-#3958 were blocked by this, and so was every other
-# ticketless dependency-bot pull request in the repository.
-#
-# NOT PYDANTIC, and deliberately. ci.yml invokes this module as bare
-# `python3 scripts/ci/ci_summary_gate.py` with no dependency install step, so
-# the module is stdlib-only by construction (its import block is argparse,
-# json, re, sys, dataclasses, datetime). A pydantic model here would import-
-# error on the runner and take the repository's sole required context down
-# with it. Frozen dataclasses with explicit types are the typed form available.
-
-
-# The two bot logins the producing workflows name in their own `if:`
-# (call-occ-autobind.yml, call-occ-companion-effect.yml). This set is NOT the
-# title rule's broader "any login ending in the bot suffix" arm: widening it
-# here would admit a skipped mint for any App author, and the narrow
-# intersection is what keeps this from becoming an allowlist by degrees.
+# Shared with Contract Compliance's ticketless dependency-bot exemption.
 DEPENDENCY_BOT_AUTHORS: frozenset[str] = frozenset({"dependabot[bot]", "renovate[bot]"})
 
-# The ticket token both the title rule and the producers' `if:` look for.
+# The ticket token Contract Compliance looks for in a PR title or head ref.
 TICKET_TOKEN_RE = re.compile(r"OMN-\d+")
 
 # A MIRROR, not a second policy. Source of truth, read live on 2026-09-22; the
@@ -1519,6 +1393,8 @@ _BOT_LOGIN_SUFFIX = "[bot]"
 def title_rule_exempts_ticket(*, author: str, title: str) -> bool:
     """Mirror of the pinned PR-title reusable's three exemption arms.
 
+    Shared with Contract Compliance's ticketless dependency-bot exemption.
+
     ``True`` means doctrine does not require this pull request to carry a
     ticket token, so the token's ABSENCE is by design rather than an omission.
     An empty author or title returns ``False``: the upstream refuses an empty
@@ -1535,23 +1411,11 @@ def title_rule_exempts_ticket(*, author: str, title: str) -> bool:
 
 @dataclass(frozen=True)
 class PullRequestContext:
-    """The pull-request facts the conditional registry decides against.
-
-    Every field is supplied by the caller (``--pr-author``, ``--pr-title``,
-    ``--pr-head-ref``, ``--event-actor``), so this carries the SAME honest
-    limit ``--pr-author`` already does and it is stated rather than implied:
-    nothing here proves the values are the head's real ones. What the
-    conditions buy is BLAST RADIUS -- the admission is narrow enough that a
-    forged context could only ever excuse a skipped change-control mint on a
-    pull request already claiming to be an exempt dependency-bot bump, and the
-    mint's own absence is still visible on the head. A caller that supplies
-    nothing gets no admission at all, which is the case that actually recurs.
-    """
+    """PR facts used by Contract Compliance to resolve a ticketless exemption."""
 
     author: str = ""
     title: str = ""
     head_ref: str = ""
-    actor: str = ""
 
     @property
     def is_resolved(self) -> bool:
@@ -1559,162 +1423,18 @@ class PullRequestContext:
 
         ``head_ref`` may legitimately be empty on a payload that omits it, and
         an empty one simply carries no ticket token -- it cannot manufacture
-        an admission, only fail to block one the title already earned. ``actor``
-        likewise: empty is not a bot login, so it reads as the stricter half.
+        an admission, only fail to block one the title already earned.
         """
 
         return bool(self.author and self.title)
 
     @property
     def carries_ticket_token(self) -> bool:
-        """The producers' own test: a token in EITHER the title or head ref."""
+        """Whether a ticket token appears in either the title or head ref."""
 
         return bool(
             TICKET_TOKEN_RE.search(self.title) or TICKET_TOKEN_RE.search(self.head_ref)
         )
-
-
-def occ_caller_job_is_eligible(ctx: PullRequestContext) -> bool:
-    """Mirror of the occ caller jobs' own ``if:`` expression.
-
-    ``.github/workflows/call-occ-autobind.yml`` and
-    ``call-occ-companion-effect.yml`` both gate on::
-
-        github.actor != 'dependabot[bot]' &&
-        github.actor != 'renovate[bot]' &&
-        (contains(title, 'OMN-') || contains(head.ref, 'OMN-'))
-
-    (The companion-effect caller carries one further arm about ``edited``
-    events, which only ever makes it skip MORE often; mirroring the weaker of
-    the two is the conservative direction, because this predicate is used to
-    prove a skip was DECLARED and an over-eager ``True`` here blocks rather
-    than admits.)
-
-    ``False`` means the job was declared ineligible and its ``skipped``
-    check-run is the workflow's own outcome, not a lost run.
-    """
-
-    if ctx.actor in DEPENDENCY_BOT_AUTHORS:
-        return False
-    return ctx.carries_ticket_token
-
-
-@dataclass(frozen=True)
-class ConditionalSweepExclusion:
-    """One dated, ticketed, EXPIRING admission that must ALSO argue its case.
-
-    Carries the same four validated fields as :class:`SweepExclusion` so the
-    two registries are read by one validator and age out on one clock, plus:
-
-    * ``conclusions`` -- the ONLY conclusions this entry may admit. Everything
-      else on the same name still reds. ``skipped`` is not ``failure``, and an
-      entry that admitted both would be the unconditional shape wearing a
-      condition.
-    * ``condition`` -- the name of the predicate that must also hold, resolved
-      through :data:`_SWEEP_CONDITIONS`. An entry naming a predicate that does
-      not exist is MALFORMED and fails the gate, rather than quietly admitting
-      or quietly refusing.
-    """
-
-    reason: str
-    ticket: str
-    added: str
-    expires: str
-    conclusions: frozenset[str]
-    condition: str
-
-
-def _declared_ticketless_dependency_bot_skip(ctx: PullRequestContext) -> bool:
-    """The one condition, and all four parts of it must hold.
-
-    1. The context resolved at all. An absent ``--pr-title`` admits nothing.
-    2. The author is one of the two dependency bots the producers name.
-    3. Doctrine's title rule exempts this pull request from carrying a ticket,
-       under the mirrored predicate -- so the missing token is BY DESIGN.
-    4. The producer's own eligibility predicate is FALSE, so the skip is that
-       predicate's outcome rather than a coincidence.
-
-    Parts 3 and 4 are not redundant. Part 4 alone would admit a skip on a
-    ticketless HUMAN pull request, where the remedy is to add the ticket. Part
-    3 alone would admit a skip on a dependency-bot PR whose job was eligible
-    and skipped for some other, unexplained reason.
-    """
-
-    if not ctx.is_resolved:
-        return False
-    if ctx.author not in DEPENDENCY_BOT_AUTHORS:
-        return False
-    if not title_rule_exempts_ticket(author=ctx.author, title=ctx.title):
-        return False
-    return not occ_caller_job_is_eligible(ctx)
-
-
-_SWEEP_CONDITIONS: dict[str, Callable[[PullRequestContext], bool]] = {
-    "declared_ticketless_dependency_bot_skip": (
-        _declared_ticketless_dependency_bot_skip
-    ),
-}
-
-
-CONDITIONAL_SWEEP_EXCLUSIONS: dict[str, ConditionalSweepExclusion] = {
-    name: ConditionalSweepExclusion(
-        reason=(
-            f"The caller job {name} is declared ineligible, by its own `if:` in "
-            f".github/workflows/call-{name}.yml, on a pull request that carries no "
-            "ticket token -- which doctrine's PR-title rule deliberately EXEMPTS a "
-            "dependency-bump title from carrying. GitHub writes the ineligible job "
-            "as a check-run concluding `skipped`, and the layer-5 strict bar counts "
-            "it red, so every ticketless dependency-bot pull request in this "
-            "repository was blocked by construction (measured on #3953-#3958, "
-            "2026-09-22). This entry admits ONLY the `skipped` conclusion, ONLY "
-            "when the author is one of the two dependency bots those workflows "
-            "name, ONLY when the title rule exempts the pull request from carrying "
-            "a ticket, and ONLY when the producer's own eligibility predicate "
-            "evaluates false. A `failure` on this name, a skip on a ticketed pull "
-            "request, a skip on a human-authored ticketless pull request, and an "
-            "unresolvable pull-request context all still FAIL."
-        ),
-        ticket="OMN-19167",
-        added="2026-09-22",
-        expires="2026-12-20",
-        conclusions=frozenset({"skipped"}),
-        condition="declared_ticketless_dependency_bot_skip",
-    )
-    for name in ("occ-autobind", "occ-companion-effect")
-}
-
-
-def conditional_exclusion_admits(
-    name: str,
-    state: JobState,
-    *,
-    exclusions: dict[str, ConditionalSweepExclusion],
-    context: PullRequestContext | None,
-    now: datetime | None,
-) -> bool:
-    """Whether a conditional entry admits THIS row. Fail-closed throughout.
-
-    Refuses when: the name is unregistered; the entry has expired on the same
-    absolute-date clock the unconditional registry uses; the row is not
-    completed; the conclusion is outside the entry's declared set; no context
-    was supplied; or the named predicate is absent from
-    :data:`_SWEEP_CONDITIONS` (a malformed entry, also reported by the
-    validator, never a silent pass).
-    """
-
-    entry = exclusions.get(name)
-    if entry is None:
-        return False
-    if _exclusion_is_expired(entry.expires, now=now):
-        return False
-    if state.status != "completed" or state.conclusion not in entry.conclusions:
-        return False
-    if context is None:
-        return False
-    predicate = _SWEEP_CONDITIONS.get(entry.condition)
-    if predicate is None:
-        return False
-    return predicate(context)
 
 
 _SWEEP_TICKET_RE = re.compile(r"^OMN-\d+$")
@@ -1961,9 +1681,7 @@ def latest_check_run_by_name(
 
     Known bounded residual: when two workflow files emit the same context name, a
     red from the earlier producer followed by a green from the later one resolves
-    green. That ANY-vs-ALL ambiguity is tracked in OMN-15112 and is why
-    ``occ-preflight / eligibility`` — the one name observed on both sides — is
-    excluded here (see :data:`MEASURED_NOT_ENFORCED_CONTEXTS`).
+    green. That ANY-vs-ALL ambiguity is tracked in OMN-15112.
 
     Resolution runs over the rows that survive
     :func:`drop_superseded_non_verdicts`, so a re-trigger skip or a code-scanning
@@ -2328,16 +2046,9 @@ def validate_sweep_exclusions(
 
 def _validate_exclusion_fields(
     name: str,
-    entry: SweepExclusion | ConditionalSweepExclusion,
+    entry: SweepExclusion,
 ) -> list[str]:
-    """The four field checks BOTH registries are held to.
-
-    Extracted so the conditional registry cannot drift into a weaker bar than
-    the unconditional one by being validated somewhere else. Every tolerance
-    on either list carries a non-empty reason, an OMN ticket that owns removing
-    it, a parseable authoring date and an absolute expiry inside the
-    ninety-day cap -- or it fails the gate.
-    """
+    """Validate the reason, owner and bounded expiry of a sweep exclusion."""
 
     findings: list[str] = []
     if not entry.reason.strip():
@@ -2365,61 +2076,8 @@ def _validate_exclusion_fields(
     return findings
 
 
-def _exclusion_is_expired(expires: str, *, now: datetime | None) -> bool:
-    """One expiry clock for both registries.
-
-    ``now is None`` reads as EXPIRED, which is the enforcing answer: a caller
-    with no clock cannot prove an entry is still live, and the fail-closed
-    response to that is to sweep the row. Mirrors the rule
-    :func:`active_sweep_exclusions` applies to the unconditional registry.
-    """
-
-    if now is None:
-        return True
-    parsed = _parse_exclusion_date(expires)
-    return parsed is None or now.date() >= parsed
-
-
-def validate_conditional_sweep_exclusions(
-    exclusions: dict[str, ConditionalSweepExclusion],
-) -> list[str]:
-    """Refusal reasons for malformed :data:`CONDITIONAL_SWEEP_EXCLUSIONS`.
-
-    Runs the SAME four field checks the unconditional registry gets, plus the
-    two a conditional entry adds:
-
-    * ``conclusions`` must be non-empty and must not contain ``success`` --
-      a success needs no admission, and listing it would make the entry read
-      as covering more than it does.
-    * ``condition`` must resolve in :data:`_SWEEP_CONDITIONS`. An entry naming
-      a predicate that does not exist fails the gate here rather than being
-      silently inert at the call site, which is the failure mode that makes a
-      registry stop meaning anything.
-
-    A non-empty return FAILS the gate, exactly as the sibling validator does.
-    """
-
-    findings: list[str] = []
-    for name, entry in sorted(exclusions.items()):
-        if not isinstance(entry, ConditionalSweepExclusion):
-            findings.append(f"{name}: not a ConditionalSweepExclusion instance")
-            continue
-        findings.extend(_validate_exclusion_fields(name, entry))
-        if not entry.conclusions:
-            findings.append(f"{name}: conclusions is empty")
-        if "success" in entry.conclusions:
-            findings.append(
-                f"{name}: conclusions names 'success', which needs no exclusion"
-            )
-        if entry.condition not in _SWEEP_CONDITIONS:
-            findings.append(
-                f"{name}: condition {entry.condition!r} resolves to no predicate"
-            )
-    return findings
-
-
 def active_sweep_exclusions(
-    exclusions: Mapping[str, SweepExclusion | ConditionalSweepExclusion],
+    exclusions: Mapping[str, SweepExclusion],
     *,
     now: datetime | None,
 ) -> tuple[frozenset[str], tuple[str, ...]]:
@@ -2772,8 +2430,6 @@ def evaluate_external_sweep(
     exclusions: dict[str, SweepExclusion],
     events: dict[int, str],
     now: datetime | None,
-    conditional_exclusions: dict[str, ConditionalSweepExclusion] | None = None,
-    pr_context: PullRequestContext | None = None,
     own_run_ids: frozenset[int] = frozenset(),
     workflow_runs: list[dict[str, object]] | None = None,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str]]:
@@ -2788,11 +2444,7 @@ def evaluate_external_sweep(
     * ``swept`` — every name this layer judged, so a clean run records what it
       looked at instead of printing nothing (rule 16).
     * ``excluded`` — swept-population names an active registry entry admitted,
-      from EITHER registry: the unconditional one, which admits a name whatever
-      it concluded, or the OMN-19167 conditional one, which admits a specific
-      conclusion only while the producer's own declared eligibility predicate
-      is false for this pull request. A conditional entry that does not admit
-      leaves the row in the swept population, so it reds exactly as before.
+      regardless of their conclusion.
     * ``provisional`` — swept names whose replacement is demonstrably due
       inside the re-run grace. These hold the verdict at PENDING; they are
       NOT a quiet pass, and they red as soon as the grace closes.
@@ -2845,27 +2497,6 @@ def evaluate_external_sweep(
             continue
         if state.status == "completed" and state.conclusion in SWEEP_GOOD_CONCLUSIONS:
             continue
-        # OMN-19167 — the conditional arm, consulted only for a row that is
-        # ALREADY about to red. It can never turn a red into a pass for a name
-        # nothing registered, and it is checked AFTER the strict bar so a
-        # `success` never reaches it and never reads as "excluded".
-        conditional = (conditional_exclusions or {}).get(name)
-        if (
-            conditional_exclusion_admits(
-                name,
-                state,
-                exclusions=conditional_exclusions or {},
-                context=pr_context,
-                now=now,
-            )
-            and conditional is not None
-        ):
-            # Reported with its conclusion AND the predicate that admitted it,
-            # so the verdict line says which of the two registries acted and on
-            # what grounds. A reader should never have to open the source to
-            # learn why a red row stopped being red.
-            excluded.append(f"{name} ({state.conclusion}; {conditional.condition})")
-            continue
         if verdict_is_provisional(state, now) or replacement_run_in_flight(
             raw, workflow_runs
         ):
@@ -2910,8 +2541,6 @@ def evaluate(
     now: datetime | None = None,
     sweep_external: bool = True,
     sweep_exclusions: dict[str, SweepExclusion] | None = None,
-    conditional_sweep_exclusions: dict[str, ConditionalSweepExclusion] | None = None,
-    pr_context: PullRequestContext | None = None,
     workflow_runs: list[dict[str, object]] | None = None,
     current_run_id: int | None = None,
     pr_timeline: list[dict[str, object]] | None = None,
@@ -3041,27 +2670,14 @@ def evaluate(
     #     re-judging a job layer 3 already allowlisted.
     if sweep_exclusions is None:
         sweep_exclusions = EXTERNAL_SWEEP_EXCLUSIONS
-    if conditional_sweep_exclusions is None:
-        conditional_sweep_exclusions = CONDITIONAL_SWEEP_EXCLUSIONS
     exclusion_findings = (
-        validate_sweep_exclusions(sweep_exclusions)
-        + validate_conditional_sweep_exclusions(conditional_sweep_exclusions)
-        if sweep_external
-        else []
+        validate_sweep_exclusions(sweep_exclusions) if sweep_external else []
     )
     _active_exclusions, expired_exclusions = (
         active_sweep_exclusions(sweep_exclusions, now=now)
         if sweep_external
         else (frozenset(), ())
     )
-    # OMN-19167: a spent CONDITIONAL entry is reported on the same line as a
-    # spent unconditional one. Both re-arm the sweep by themselves; the report
-    # is how that reaches a person before a pull request discovers it.
-    if sweep_external:
-        _, conditional_expired = active_sweep_exclusions(
-            conditional_sweep_exclusions, now=now
-        )
-        expired_exclusions = tuple(sorted({*expired_exclusions, *conditional_expired}))
     (
         ext_sweep_failures,
         ext_sweep_in_flight,
@@ -3077,8 +2693,6 @@ def evaluate(
             exclusions=sweep_exclusions,
             events=check_run_event_index(workflow_runs),
             now=now,
-            conditional_exclusions=conditional_sweep_exclusions,
-            pr_context=pr_context,
             own_run_ids=own_workflow_run_ids(jobs, current_run_id),
             workflow_runs=workflow_runs,
         )
@@ -3400,37 +3014,12 @@ def main(argv: list[str] | None = None) -> int:
         "set rather than exempting it.",
     )
     parser.add_argument(
-        "--pr-title",
-        default=None,
-        help="Title of the PR under evaluation. Read ONLY by the OMN-19167 "
-        "conditional sweep registry, to decide whether doctrine's PR-title rule "
-        "exempts this PR from carrying a ticket token. Omitted/empty admits "
-        "NOTHING, so a forgotten argument enforces.",
-    )
-    parser.add_argument(
-        "--pr-head-ref",
-        default=None,
-        help="Head branch of the PR under evaluation. Read ONLY by the OMN-19167 "
-        "conditional sweep registry, as the second place the occ callers look "
-        "for a ticket token. Omitted/empty carries no token, which is the "
-        "stricter reading.",
-    )
-    parser.add_argument(
         "--current-run-id",
         type=int,
         default=None,
         help="This workflow run's id (github.run_id). Check-runs this run wrote "
         "are its own jobs, judged from --jobs-file, and the default-deny "
         "external sweep never re-judges them (OMN-17427).",
-    )
-    parser.add_argument(
-        "--event-actor",
-        default=None,
-        help="Login that triggered this run (github.actor), which is NOT always "
-        "the PR author -- an update-branch makes it the pushing user. Read ONLY "
-        "by the OMN-19167 conditional sweep registry, which mirrors the occ "
-        "caller jobs' own actor arm. Omitted/empty is not a bot login, the "
-        "stricter reading.",
     )
     parser.add_argument(
         "--pr-timeline-file",
@@ -3457,16 +3046,6 @@ def main(argv: list[str] | None = None) -> int:
         check_runs=_load_check_runs(args.check_runs_file),
         external_contexts=external_contexts,
         pr_author=args.pr_author,
-        # OMN-19167. Every field defaults to empty, and an empty context
-        # resolves nothing, so the conditional registry admits nothing when
-        # these arguments are forgotten -- the same fail-closed posture
-        # --pr-author and --workflow-runs-file already carry.
-        pr_context=PullRequestContext(
-            author=args.pr_author or "",
-            title=args.pr_title or "",
-            head_ref=args.pr_head_ref or "",
-            actor=args.event_actor or "",
-        ),
         workflow_runs=_load_workflow_runs(args.workflow_runs_file),
         current_run_id=args.current_run_id,
         pr_timeline=_load_workflow_runs(args.pr_timeline_file),

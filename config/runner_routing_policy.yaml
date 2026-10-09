@@ -1138,8 +1138,6 @@ route:
         # gates and therefore belong in this umbrella-enforced snapshot.
         - Noncanonical Class Allowlist One-way (OMN-19677) / anti-growth-baseline
         - non-dev-base-guard
-        - OCC Companion Merged Gate (OMN-15214)
-        - occ-preflight / eligibility
         - Omni Standards Gate
         - ONEX Validators
         - Pin Reachability (OMN-15538)
@@ -1174,7 +1172,6 @@ route:
         - Type Safety Validation
         - URL Authority Gate
         - Validator Requirements Baseline One-way (OMN-19677) / anti-growth-baseline
-        - verify / verify
         - wheel-content-parity
         - Writer-Migration Coupling Check
 # OMN-19412 follow-up, 2026-09-28. THE COMMITTED PLACEMENT OF EVERY SCHEDULED

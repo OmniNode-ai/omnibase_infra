@@ -55,7 +55,7 @@ CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
 # move landed) to omniclaude dev/main's current tip. Confirmed no checkout
 # step was added between the two commits (diff-reviewed): the invariant this
 # constant pins still holds at the new sha.
-OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "2173a846258c05b77858c454176f22ff1e41a3aa"
+OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "4358450ccbba0cee11e390208dd0b8b1728e94ab"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -904,9 +904,7 @@ def test_webhook_workflows_use_ci_python_environment() -> None:
         workflow = _load_yaml(workflow_path)
         for job_name, job in workflow["jobs"].items():
             if "uses" in job:
-                assert job["uses"].endswith(
-                    "occ-preflight.yml@789d175d78a7a802f4f0f4aa2af7083bdfd312c2"
-                )
+                assert "occ-preflight.yml" not in job["uses"]
                 continue
 
             steps = job["steps"]

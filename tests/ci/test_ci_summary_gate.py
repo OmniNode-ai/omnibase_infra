@@ -148,7 +148,7 @@ def _observable_job_names(workflow: dict[str, Any]) -> tuple[set[str], set[str]]
     30506617326: a plain job reports its display name (falling back to its job
     id); a reusable-workflow caller that EXECUTES reports only
     ``"<caller display name> / <inner job name>"`` rows and never a row under
-    its own job id (``occ-preflight / eligibility``, not ``occ-preflight``) — a
+    its own job id (``merge-hold-gate / evaluate``, not ``merge-hold-gate``) — a
     bare caller row appears only when the caller itself skipped (``zone-filter``,
     ``Runtime Boot Smoke (compose)``). Inner jobs of a REMOTE reusable cannot be
     resolved from this repo, so those callers are returned as prefixes.
@@ -504,24 +504,26 @@ class TestCiSummaryGate:
         assert code == EXIT_FAILURE
         assert "Effect-Assertion Gate (RT-5)" in report
 
-    def test_occ_companion_merged_gate_is_strict_and_fails_closed(self) -> None:
-        # OMN-15214: the companion-merged gate makes the 2026-07-26 hygiene-sweep
-        # trigger state (OPEN companion + MERGED product PR) unreachable via the
-        # merge path. It must be STRICT so a red/absent result fails the required
-        # "CI Summary" context — folding into the umbrella instead of adding a
-        # new top-level required context avoids the never-reports wedge.
-        gate = "OCC Companion Merged Gate (OMN-15214)"
-        assert gate in STRICT_GATE_JOBS
-        jobs = [j for j in _all_gates("success") if j["name"] != gate]
-        jobs.append(_job(gate, "failure"))
-        code, report = evaluate(jobs)
-        assert code == EXIT_FAILURE
-        assert gate in report
-        # A skip must also fail closed — the job is unconditional in ci.yml.
-        jobs = [j for j in _all_gates("success") if j["name"] != gate]
-        jobs.append(_job(gate, "skipped"))
-        code, _ = evaluate(jobs)
-        assert code == EXIT_FAILURE
+    def test_retired_occ_contexts_are_absent_from_gate_registries(self) -> None:
+        retired = {
+            "occ-preflight / eligibility",
+            "OCC Companion Merged Gate (OMN-15214)",
+            "verify / verify",
+            "occ-companion-effect / Publish occ-companion-effect command",
+            "occ-autobind / outcome",
+            "occ-autobind / mint status",
+            "occ-companion-effect / mint status",
+            "occ-autobind-manual-replay",
+            "occ-companion-effect-manual-replay",
+        }
+        for registry in (
+            STRICT_GATE_JOBS,
+            SKIPPABLE_GATE_JOBS,
+            EXPECTED_EXTERNAL_CONTEXTS,
+            MEASURED_NOT_ENFORCED_CONTEXTS,
+            EXTERNAL_SWEEP_EXCLUSIONS,
+        ):
+            assert not retired.intersection(registry)
 
     def test_deploy_agent_tests_gate_is_strict_and_fails_closed(self) -> None:
         # OMN-15378 AC3: scripts/deploy-agent/tests/ (201 tests) was wired to RUN
@@ -667,8 +669,7 @@ class TestCiSummaryGate:
             "application-database-domain-enforcement"
         ]
         assert workflow_job["name"] == APPLICATION_DB_GATE
-        # The occ-preflight edge must survive; zone-filter is the added one.
-        assert set(workflow_job["needs"]) == {"occ-preflight", "zone-filter"}
+        assert set(workflow_job["needs"]) == {"zone-filter"}
         if_expr = str(workflow_job["if"])
         # `always()` is load-bearing: with a non-empty `needs:` the IMPLICIT
         # job-level `if:` is `success()` over needs, which would let an upstream
@@ -863,7 +864,7 @@ class TestExternalContextAssertion:
         """`skipped` is not a pass for an external context (OMN-15057 vector)."""
         payload = [dict(row) for row in _external_fixture("2567")]
         for row in payload:
-            if row["name"] == "verify / verify":
+            if row["name"] == "URL Authority Gate":
                 row["conclusion"] = "skipped"
         code, report = evaluate(
             _all_gates("success"),
@@ -871,7 +872,7 @@ class TestExternalContextAssertion:
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
         )
         assert code == EXIT_FAILURE
-        assert "verify / verify" in report
+        assert "URL Authority Gate" in report
 
     def test_no_external_contexts_means_no_assertion(self) -> None:
         """merge_group / workflow_dispatch have no PR-scoped context set."""
@@ -949,9 +950,8 @@ class TestExternalContextAssertion:
     def test_external_contexts_disjoint_from_in_run_gates(self) -> None:
         """No context may be asserted on both surfaces.
 
-        ``occ-preflight / eligibility`` is the one name observed both inside and
-        outside ci.yml's check suite; asserting it twice would double-count an
-        ambiguous name (OMN-15112).
+        Asserting a name twice would double-count an ambiguous producer
+        (OMN-15112).
         """
         overlap = set(EXPECTED_EXTERNAL_CONTEXTS) & {
             *STRICT_GATE_JOBS,
@@ -1844,9 +1844,7 @@ class TestDocsOnlySkipTierOmn16661:
             needs = defn.get("needs")
             needs_list = [needs] if isinstance(needs, str) else list(needs or [])
             assert "zone-filter" in needs_list, f"{key} needs: {needs_list}"
-            assert "occ-preflight" in needs_list, (
-                f"{key} must keep its occ-preflight edge: {needs_list}"
-            )
+            assert "occ-preflight" not in needs_list, needs_list
 
     def test_ci_summary_still_has_no_needs(self) -> None:
         """OMN-14127's load-bearing property must survive this change.
@@ -1868,8 +1866,6 @@ class TestDocsOnlySkipTierOmn16661:
             "ONEX Validators",
             "Contract Compliance",
             "Contract Compliance Check",
-            "OCC Companion Merged Gate (OMN-15214)",
-            "occ-preflight / eligibility",
             "merge-hold-gate / evaluate",
             "Lockfile Registry Allowlist (OMN-16516)",
             "Lockfile CVE Scan (OMN-16228)",
@@ -2558,18 +2554,12 @@ class TestExternalSweepExclusions:
         """Under the strict bar, every by-design non-green name needs an entry.
 
         OMN-18960 shipped this empty beside a weaker conclusion set, which the
-        2026-09-21 ruling identified as a hidden allowlist. The first ten are
-        every name the measurement found non-green on any head; the eleventh
-        (OMN-19218) is path-filtered and appeared on no measured head. Naming
-        them is what makes the tolerance reviewable.
+        2026-09-21 ruling identified as a hidden allowlist. Retired OCC names
+        have been removed; the remaining measured names and the path-filtered
+        OMN-19218 entry still carry a reviewed tolerance.
         """
         assert set(EXTERNAL_SWEEP_EXCLUSIONS) == {
             "verify",
-            "occ-autobind / outcome",
-            "occ-autobind / mint status",
-            "occ-companion-effect / mint status",
-            "occ-autobind-manual-replay",
-            "occ-companion-effect-manual-replay",
             "Docker Integration Tests",
             "Security Scan (Trivy)",
             "Image Size Analysis",
@@ -2731,6 +2721,8 @@ class TestExternalSweepAgainstRealHeads:
     """AC-5 — proven on the real pre-change tree, with the counts recorded."""
 
     PRS = ("3894", "3893", "3892")
+    # Judge terminal refusals after the captured rows' supersession grace.
+    OBSERVED_AT = NOW + timedelta(days=1)
 
     def test_the_fixture_is_the_real_unfiltered_head_state(self) -> None:
         """Positive control for the fixture itself before anything is read off it."""
@@ -2744,13 +2736,14 @@ class TestExternalSweepAgainstRealHeads:
             assert len(head["head_sha"]) == 40
 
     @pytest.mark.parametrize("pr", PRS)
-    def test_merge_time_state_is_clean_and_the_sweep_really_looked(
+    def test_merge_time_state_sweeps_retired_occ_rows_and_really_looked(
         self, pr: str
     ) -> None:
-        """Zero failures AND a non-zero population — rule 16's two halves.
+        """Recorded OCC non-verdicts now fail without their retired exclusions.
 
-        A zero-failure sweep over a zero-row population would be vacuous, so
-        the count is asserted beside the verdict.
+        Keep the capture unchanged and observe it after the supersession grace,
+        while the live exclusions remain unexpired. Assert the stricter verdict
+        alongside the population count. No other recorded row should fail.
         """
         head = _sweep_head(pr)
         failures, _in_flight, swept, _excluded, _prov = evaluate_external_sweep(
@@ -2760,18 +2753,28 @@ class TestExternalSweepAgainstRealHeads:
             self_name="CI Summary",
             exclusions=EXTERNAL_SWEEP_EXCLUSIONS,
             events=check_run_event_index(head["workflow_runs"]),
-            now=NOW,
+            now=self.OBSERVED_AT,
         )
-        assert failures == [], failures
+        expected_failures = [
+            f"{name} ({row['conclusion']})"
+            for name, row in sorted(latest_check_run_rows(_at_merge(head)).items())
+            if name.startswith(("occ-autobind", "occ-companion-effect"))
+            and row["conclusion"] != "success"
+            and resolve_check_run_event(
+                row, check_run_event_index(head["workflow_runs"])
+            )
+            not in SWEEP_NON_PR_EVENTS
+        ]
+        assert expected_failures
+        assert failures == expected_failures, failures
         assert len(swept) >= 30, (pr, len(swept))
 
     @pytest.mark.parametrize("pr", PRS)
-    def test_the_registry_is_load_bearing_on_every_real_head(self, pr: str) -> None:
-        """The falsification control for the zero above.
+    def test_registry_excludes_live_rows_on_every_real_head(self, pr: str) -> None:
+        """Removing the live exclusions adds their rows to the swept population.
 
-        Strip the registry and the same real head must fail. Without this, a
-        clean result could mean the sweep found nothing rather than that the
-        entries did their work.
+        Historical OCC rows fail either way. The remaining registry still acts
+        on live subjects, even where the captured excluded row was successful.
         """
         head = _sweep_head(pr)
         failures, _in_flight, _swept, _excluded, _prov = evaluate_external_sweep(
@@ -2781,15 +2784,26 @@ class TestExternalSweepAgainstRealHeads:
             self_name="CI Summary",
             exclusions={},
             events=check_run_event_index(head["workflow_runs"]),
-            now=NOW,
+            now=self.OBSERVED_AT,
         )
-        assert failures, "stripping the registry changed nothing, so it is inert"
+        with_registry, _, with_swept, excluded, _ = evaluate_external_sweep(
+            _at_merge(head),
+            expected=EXPECTED_EXTERNAL_CONTEXTS,
+            in_run_names=frozenset(head["in_run_job_names"]),
+            self_name="CI Summary",
+            exclusions=EXTERNAL_SWEEP_EXCLUSIONS,
+            events=check_run_event_index(head["workflow_runs"]),
+            now=self.OBSERVED_AT,
+        )
+        assert excluded
+        assert set(_swept) - set(with_swept) == set(excluded)
+        assert set(failures) >= set(with_registry)
 
     @pytest.mark.parametrize("pr", PRS)
     def test_post_merge_state_carries_reds_the_merge_time_state_does_not(
         self, pr: str
     ) -> None:
-        """THE positive control for the zero above (rule 16).
+        """Post-merge rows add real refusals beyond the historical OCC rows.
 
         The full post-merge row set for these same heads carries genuinely red
         rows from `runtime-rebuild-trigger.yml` jobs gated on
@@ -2806,7 +2820,7 @@ class TestExternalSweepAgainstRealHeads:
             self_name="CI Summary",
             exclusions=EXTERNAL_SWEEP_EXCLUSIONS,
             events=check_run_event_index(head["workflow_runs"]),
-            now=NOW,
+            now=self.OBSERVED_AT,
         )
         assert failures, "the positive control found no red — the sweep is vacuous"
         assert any("Verify dev lane applied the redeploy" in f for f in failures), (
@@ -2840,16 +2854,17 @@ class TestExternalSweepAgainstRealHeads:
                 self_name="CI Summary",
                 exclusions=exclusions,
                 events=check_run_event_index(head["workflow_runs"]),
-                now=NOW,
+                now=self.OBSERVED_AT,
             )
             return failures
 
         pre_fix = {k: v for k, v in EXTERNAL_SWEEP_EXCLUSIONS.items() if k != name}
-        assert _run(pre_fix) == [f"{name} (skipped)"]
-        assert _run(EXTERNAL_SWEEP_EXCLUSIONS) == []
+        with_registry = _run(EXTERNAL_SWEEP_EXCLUSIONS)
+        assert f"{name} (skipped)" not in with_registry
+        assert _run(pre_fix) == sorted([*with_registry, f"{name} (skipped)"])
 
     def test_flipping_one_real_row_flips_the_verdict(self) -> None:
-        """A synthetic red on an otherwise-clean REAL payload, and back again."""
+        """Flipping one real row adds exactly its refusal, then restores it."""
         head = _sweep_head("3894")
         rows = _at_merge(head)
         target = "Handler Contract Compliance"
@@ -2863,16 +2878,17 @@ class TestExternalSweepAgainstRealHeads:
                 self_name="CI Summary",
                 exclusions=EXTERNAL_SWEEP_EXCLUSIONS,
                 events=check_run_event_index(head["workflow_runs"]),
-                now=NOW,
+                now=self.OBSERVED_AT,
             )
             return failures
 
-        assert _run(rows) == []
+        original_failures = _run(rows)
+        assert not any(f.startswith(f"{target} (") for f in original_failures)
         flipped = [
             {**r, "conclusion": "failure"} if r["name"] == target else r for r in rows
         ]
-        assert _run(flipped) == [f"{target} (failure)"]
-        assert _run(rows) == []
+        assert _run(flipped) == sorted([*original_failures, f"{target} (failure)"])
+        assert _run(rows) == original_failures
 
     def test_the_real_head_exercises_every_attribution_branch(self) -> None:
         """The event index is not decoration: real heads hit all three arms."""
@@ -2931,6 +2947,8 @@ class TestTheSweepIsWiredIntoTheProductionPoller:
             ]
         )
         assert captured["workflow_runs"] == [{"id": 7, "event": "push"}]
+        assert "pr_context" not in captured
+        assert "conditional_sweep_exclusions" not in captured
 
     def test_an_unreadable_workflow_runs_file_sweeps_rather_than_exempts(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2970,6 +2988,14 @@ class TestTheSweepIsWiredIntoTheProductionPoller:
             "a stale workflow_runs.json from an earlier poll would attribute "
             "rows against the wrong index"
         )
+        for flag in ("--pr-title", "--pr-head-ref", "--event-actor"):
+            assert flag not in step
+        poll_step = next(
+            step
+            for step in _load_workflow(CI_WORKFLOW)["jobs"]["ci-summary"]["steps"]
+            if "ci_summary_gate.py" in str(step.get("run", ""))
+        )
+        assert not {"PR_TITLE", "PR_HEAD_REF", "EVENT_ACTOR"} & set(poll_step["env"])
 
 
 class TestSupersededCancellationOrdering:
