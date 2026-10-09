@@ -20,6 +20,8 @@ from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
     ModelDispatchBusTerminalResult,
 )
 from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
 from omnibase_infra.runtime.service_delegation_dispatch_port import (
     RuntimeDelegationDispatchPort,
@@ -29,6 +31,76 @@ from omnibase_infra.runtime.service_delegation_dispatch_port import (
 from omnibase_infra.runtime.service_pattern_b_broker import TerminalPayload
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.asyncio
+async def test_missing_terminal_is_a_typed_timeout_without_redispatch() -> None:
+    """OMN-19558: the real broker waits once and reports its timeout cause."""
+    route = _route(
+        package_name="omnimarket",
+        terminal_events=(
+            "onex.evt.omnimarket.delegation-completed.v1",
+            "onex.evt.omnimarket.delegation-failed.v1",
+        ),
+    )
+    correlation_id = uuid4()
+    commands: list[dict[str, object]] = []
+    bus = EventBusInmemory(environment="test", group="missing-terminal")
+    await bus.start()
+
+    async def hold_terminal(message: ModelEventMessage) -> None:
+        commands.append(json.loads(message.value))
+        # The command was accepted, but its inference terminal never arrives.
+
+    await bus.subscribe(
+        route.command_topic, group_id="hold-terminal", on_message=hold_terminal
+    )
+    port = RuntimeDelegationDispatchPort(bus, routes={"delegation.orchestrate": route})
+    try:
+        result = await asyncio.wait_for(
+            port.dispatch(
+                prompt="held inference terminal",
+                task_type="reasoning",
+                correlation_id=correlation_id,
+                max_tokens=None,
+                source_file_path=None,
+                source_session_id=None,
+                wait=True,
+                execution_timeout_seconds=1,
+                terminal_delivery_margin_seconds=1,
+            ),
+            timeout=5,
+        )
+    finally:
+        await bus.close()
+
+    assert len(commands) == 1
+    assert commands[0]["correlation_id"] == str(correlation_id)
+    assert result["status"] == "timeout"
+    assert result["terminal_failure_cause"] == "timeout"
+
+
+@pytest.mark.parametrize("status", ["completed", "failed"])
+def test_normalization_does_not_invent_timeout_for_other_statuses(status: str) -> None:
+    result = _normalize_result_payload(status=status, payload={}, error_message=None)
+    assert "terminal_failure_cause" not in result
+
+
+def test_timeout_normalization_preserves_the_recorded_terminal_cause() -> None:
+    result = _normalize_result_payload(
+        status="timeout",
+        payload={"terminal_failure_cause": "quality_gate_refused"},
+        error_message=None,
+    )
+    assert result["terminal_failure_cause"] == "quality_gate_refused"
+
+
+@pytest.mark.parametrize("payload", [{}, {"terminal_failure_cause": None}])
+def test_timeout_without_recorded_cause_is_typed(payload: dict[str, object]) -> None:
+    result = _normalize_result_payload(
+        status="timeout", payload=payload, error_message=None
+    )
+    assert result["terminal_failure_cause"] == "timeout"
 
 
 def _route(
