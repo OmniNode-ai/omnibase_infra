@@ -98,7 +98,7 @@ def _declare_agent_instance(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setenv("DEPLOY_AGENT_INSTANCE", "dev-201")
     # Declare a test host as well: the production router refuses excluded hosts
-    # before reading DEPLOY_AGENT_INSTANCE, including the .101 lab test host.
+    # before reading DEPLOY_AGENT_INSTANCE, including lab test hosts.
     # Routing-policy tests supply their own hostname explicitly.
     monkeypatch.setattr("socket.gethostname", lambda: "deploy-agent-test")
     # OMN-19522: agent construction selects the instance's dev-lane
