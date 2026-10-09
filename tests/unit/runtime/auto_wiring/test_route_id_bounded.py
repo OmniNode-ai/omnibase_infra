@@ -17,6 +17,7 @@ import pytest
 from omnibase_core.enums import EnumMessageCategory
 from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
 from omnibase_infra.runtime.auto_wiring.handler_wiring import (
+    _bound_dispatch_identifier,
     _derive_dispatcher_id,
     _derive_handler_entry_key,
     _derive_route_id,
@@ -102,6 +103,7 @@ def test_long_ids_sharing_a_prefix_stay_distinct() -> None:
 
 @pytest.mark.unit
 def test_ids_within_the_limit_are_unchanged() -> None:
+    assert _bound_dispatch_identifier("short", _ROUTE_ID_MAX) == "short"
     assert (
         _derive_route_id("my_node", "my_handler", "onex.evt.platform.my-topic.v1")
         == "route.auto.my_node.my_handler.onex_evt_platform_my_topic_v1"
