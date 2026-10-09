@@ -483,8 +483,8 @@ services:
       # OMN-19494 (LO4): this runtime names its lane. A lane-scoped node
       # contract fails closed on a main runtime that declares none, and each
       # refusal reads as a DEGRADED discovery_errors dimension. Literal, so an
-      # exported shell value cannot rename the lane; on the main runtime only,
-      # because the other runtimes of this lane own no lane-scoped contract.
+      # exported shell value cannot rename the lane; main and effects runtimes
+      # both own lane-scoped contracts (OMN-19812).
       # `judge` is outside the lab lane-health vocabulary on purpose
       # (OMN-18769 AC6), so no lab-keyed verdict comes from this lane. Held by
       # tests/unit/docker/test_omn19494_compose_runtime_lane.py.
@@ -540,6 +540,8 @@ services:
       redpanda:
         condition: service_healthy
     environment:
+      # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
+      ONEX_RUNTIME_LANE: "judge"
       !!merge <<: *judge-runtime-env
       RUNTIME_PROFILE: effects
       OTEL_SERVICE_NAME: omninode-judge-runtime-effects

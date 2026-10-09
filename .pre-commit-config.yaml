@@ -58,6 +58,27 @@ repos:
         files: ^(scripts/(lab_alarm|lane_census_event|lane_census_plan)\.py|config/lab_alarm\.json|tests/ci/(test_lab_alarm_omn18867\.py|fixtures/lab_census_snapshot_omn19418\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
+      - id: census-container-health
+        name: Census unhealthy and restart bounds (OMN-19416)
+        entry: uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "unhealthy or restart_loop" -q
+        language: system
+        files: ^(scripts/lane_census_plan\.py|deploy/lane-census/lane-manifest\.yaml|tests/unit/scripts/test_lane_census_plan\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: census-health-collector
+        name: Census health inspect transport (OMN-19416)
+        entry: uv run --frozen pytest tests/unit/scripts/test_lane_census_inventory.py -q
+        language: system
+        files: ^(scripts/lane_census_inventory\.py|tests/unit/scripts/(test_lane_census_inventory|fake_docker_engine_omn19959)\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: alarm-manifest-restart-bounds
+        name: Alarm reads census restart bounds (OMN-19416)
+        entry: uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k "restart or shipped_config or manifest" -q
+        language: system
+        files: ^(scripts/(lab_alarm|lane_census_plan)\.py|config/lab_alarm\.json|deploy/lane-census/lane-manifest\.yaml|tests/ci/test_lab_alarm_omn18867\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: linear-transport-consolidation
         name: Linear GraphQL has one transport owner (OMN-17678)
         entry: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q
@@ -1908,6 +1929,14 @@ repos:
         language: system
         files: docker/(docker-compose\.dev-lane\.yml|dev-lane-required-env\.manifest\.txt)
         pass_filenames: false
+      # OMN-15645: cover the explicit tiers pin, including catalog workers.
+      - id: delegation-routing-tiers-binding
+        name: Check delegation routing tiers deployment bindings
+        entry: uv run --frozen pytest tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py -q --no-cov
+        language: system
+        files: ^(docker/(Dockerfile\.runtime|docker-compose\..*\.yml|catalog/.*\.ya?ml)|src/omnibase_infra/docker/catalog/.*\.py|tests/(unit/docker/test_delegation_routing_tiers_path_binding_omn15645\.py|fixtures/omn15645_worker_tiers_live_contact\.json)|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-4857: Block Consul references in source (decommissioned service)
       # Prevents reintroduction of CONSUL_HOST or consul.connect.io references in src/.
       - id: no-consul-references

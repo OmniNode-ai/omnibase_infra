@@ -1057,6 +1057,12 @@ jobs:
       - name: SPDX header check (OMN-19612)
         run: uv run --frozen onex spdx validate src tests scripts
 
+      - name: Census health and shared restart bounds (OMN-19416)
+        run: |
+          uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "unhealthy or restart_loop" -q
+          uv run --frozen pytest tests/unit/scripts/test_lane_census_inventory.py -q
+          uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k "restart or shipped_config or manifest" -q
+
   infra-node-handler-ownership:
     needs: occ-preflight
     name: Infra Node Handler Ownership
@@ -1855,7 +1861,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
+          ref: 33a29cdfba6f14be6f94c3c77a05e29f345c692b # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1944,7 +1950,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
+          ref: 33a29cdfba6f14be6f94c3c77a05e29f345c692b # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -2195,6 +2201,9 @@ jobs:
           echo "compose files must never carry that label."
           echo "================================================================"
           uv run pytest tests/ci/test_compose_proof_teardown_policy.py -v --tb=short
+
+      - name: Check delegation routing tiers deployment bindings (OMN-15645)
+        run: uv run --frozen pytest tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py -q --no-cov
 
   # OMN-18247 (epic OMN-18232 phase 3): CI evidence-artifact honesty.
   #
@@ -5048,7 +5057,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
+          ref: 33a29cdfba6f14be6f94c3c77a05e29f345c692b # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 

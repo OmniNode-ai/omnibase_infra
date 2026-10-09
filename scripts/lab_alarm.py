@@ -138,7 +138,11 @@ from scripts.ci.lab_pass_receipt import (
 )
 from scripts.lane_census_event import _alert_key as census_alert_key
 from scripts.lane_census_event import validate_event as validate_census_event
-from scripts.lane_census_plan import FINDING_KIND_SEVERITY
+from scripts.lane_census_plan import (
+    FINDING_KIND_SEVERITY,
+    load_manifest,
+    restart_bounds_for_lane,
+)
 
 #: OMN-18867/OMN-19091: the consumer-lag condition reads the dev broker
 #: in-process via aiokafka, using the same ~/.onex client store the hook edge
@@ -2273,16 +2277,7 @@ def expand_env(value: str, *, source: Path) -> str:
 
 @dataclass(frozen=True)
 class ModelAlarmConfig:
-    """Declared subjects and bounds. JSON, not YAML, on purpose.
-
-    This module runs under launchd on the brew interpreter with no virtual
-    environment -- the same reason ``scripts/ci/lab_pass_receipt.py`` is
-    stdlib-only. A YAML config here would put a third-party import on a path
-    that has to run before the alarm can even discover what it is bounded to
-    load. This predates, and is unrelated to, the ``yaml``/``aiokafka``
-    import OMN-19091 added for the consumer-lag identity read -- config
-    PARSING stays JSON; nothing about how the config is spelled changed.
-    """
+    """JSON alarm subjects; restart bounds come from the census lane manifest."""
 
     repo: str
     lane: EnumLabLane
@@ -2320,9 +2315,12 @@ class ModelAlarmConfig:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
             raise ValueError(f"{path} is not a JSON object")
-        bounds = payload.get("container_restart_bounds") or {}
-        if not isinstance(bounds, dict):
-            raise ValueError(f"{path}: container_restart_bounds must be an object")
+        manifest_path = Path(expand_env(str(payload["lane_manifest"]), source=path))
+        if not manifest_path.is_absolute():
+            manifest_path = path.resolve().parent / manifest_path
+        bounds = restart_bounds_for_lane(
+            load_manifest(manifest_path), str(payload["census_lane"])
+        )
         groups = payload.get("consumer_groups") or []
         if not isinstance(groups, list):
             raise ValueError(f"{path}: consumer_groups must be a list")
@@ -2350,7 +2348,7 @@ class ModelAlarmConfig:
                 str(payload["kafka_bootstrap_servers"]), source=path
             ),
             docker_command=tuple(expand_env(str(p), source=path) for p in docker),
-            container_restart_bounds={str(k): int(v) for k, v in bounds.items()},
+            container_restart_bounds=bounds,
             consumer_groups=tuple(str(g) for g in groups),
             effects_group_prefix=str(payload["effects_group_prefix"]),
             effects_group_suffix=str(payload["effects_group_suffix"]),

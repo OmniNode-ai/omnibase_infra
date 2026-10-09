@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-17427
+title: C28 counts the injected malformed marker on the seam's contract-declared DLQ
+summary: The C28 consumer-flow probe (node_board_probe_effect consumer_flow handler and scripts/ci/c28_consumer_flow_probe.py) counted the injected marker on the generic onex.dlq.omnibase-infra.events.v1, while omnibase_infra#4720 routes a consume-callback failure to the subscriber contract's declared DLQ; both collectors now count it on onex.dlq.omnimarket.consumer-flow-stall-alert-malformed.v1.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn17427-c28-seam-dlq
+    statement: The C28 node and script collectors count the injected malformed marker on the seam DLQ and ignore unrelated messages on the generic DLQ.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the node collector counts the marker on the seam DLQ when the generic DLQ also advances -- falsifier: uv run pytest tests/unit/nodes/node_board_probe_effect/test_handler_docker_consumer_flow_target.py -q -k seam_dlq'
+      - id: AC2
+        statement: 'AC2: the script collector counts the recorded dev-lane marker on the seam DLQ -- falsifier: uv run pytest tests/ci/test_c28_consumer_flow_probe.py -q -k seam'
+evidence_requirements:
+  - kind: tests
+    description: The node collector reads the marker on the seam DLQ.
+    command: uv run pytest tests/unit/nodes/node_board_probe_effect/test_handler_docker_consumer_flow_target.py -q -k seam_dlq
+  - kind: tests
+    description: The script collector reads the recorded marker on the seam DLQ.
+    command: uv run pytest tests/ci/test_c28_consumer_flow_probe.py -q -k seam
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-17427-ac1
+    description: The node collector counts the marker on the seam DLQ when the generic DLQ also advances.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_board_probe_effect/test_handler_docker_consumer_flow_target.py -q -k seam_dlq
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-17427-ac2
+    description: The script collector counts the recorded dev-lane marker on the seam DLQ.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_c28_consumer_flow_probe.py -q -k seam
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

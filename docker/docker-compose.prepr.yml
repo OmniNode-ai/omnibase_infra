@@ -297,6 +297,8 @@ services:
       # comment-only match still fails it.
       - "${PREPR_RUNTIME_EFFECTS_PORT:?PREPR_RUNTIME_EFFECTS_PORT must be set}:8085"
     environment:
+      # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
+      ONEX_RUNTIME_LANE: "prepr-${ONEX_PREPR_SLOT}"
       !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
       ONEX_GROUP_ID: "prepr-${ONEX_PREPR_SLOT}-runtime-effects"
       # OMN-20533: docker-compose.dev-lane.yml binds runtime-effects to the .201

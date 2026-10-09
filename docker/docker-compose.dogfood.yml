@@ -456,7 +456,7 @@ services:
       !!merge <<: [*dogfood-runtime-env, *dogfood-strict-wiring-env]
       RUNTIME_PROFILE: main
       # OMN-19494 (LO4): this runtime names its lane (see the same block in
-      # docker-compose.judge.yml for why). Literal, main runtime only.
+      # docker-compose.judge.yml for why). Literal, main and effects runtimes.
       # docker-compose.sim-202.yml layers over this file and must override it.
       ONEX_RUNTIME_LANE: "dogfood"
       OTEL_SERVICE_NAME: omninode-dogfood-runtime-main
@@ -511,6 +511,8 @@ services:
       redpanda:
         condition: service_healthy
     environment:
+      # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
+      ONEX_RUNTIME_LANE: "dogfood"
       !!merge <<: [*dogfood-runtime-env, *dogfood-strict-wiring-env]
       RUNTIME_PROFILE: effects
       OTEL_SERVICE_NAME: omninode-dogfood-runtime-effects
