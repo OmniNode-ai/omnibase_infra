@@ -1020,19 +1020,3 @@ def test_unknown_dependency_condition_is_refused(tmp_path: Path) -> None:
     # first and this test passed with the condition check removed).
     with pytest.raises(ValueError, match="'service_happy' is not a valid"):
         resolver.resolve(["probe"])
-
-
-def test_local_runtimes_wait_for_and_mount_the_lane_overlay_seed() -> None:
-    """OMN-19747: a runtime refuses to start without its lane overlay source."""
-    services = _services(_render("local"))
-    seed = services["local-runtime-lane-seed"]
-    assert seed["restart"] == "no"
-    for name in ("omninode-runtime", "runtime-effects"):
-        svc = services[name]
-        assert svc["depends_on"]["local-runtime-lane-seed"] == {
-            "condition": "service_completed_successfully"
-        }
-        assert "runtime_onex_home:/home/omniinfra/.onex:ro" in svc["volumes"]
-        assert (
-            "runtime_lane_config:/home/omniinfra/.omninode/config:ro" in svc["volumes"]
-        )

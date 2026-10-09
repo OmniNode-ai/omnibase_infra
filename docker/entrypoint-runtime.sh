@@ -39,10 +39,7 @@ if [ "$(id -u)" -eq 0 ]; then
   # runtime user's home is root-owned when fresh, and the process below runs as
   # omniinfra, so it could neither read nor create the store until repaired.
   install -d -o omniinfra -g omniinfra /home/omniinfra/.omninode /home/omniinfra/.omninode/delegation
-  # The lane overlay under .omninode/config is a read-only mount the profile's
-  # seed already owns (OMN-19747); chowning it fails on a read-only filesystem.
-  find /home/omniinfra/.omninode -path /home/omniinfra/.omninode/config -prune \
-    -o -exec chown omniinfra:omniinfra {} +
+  chown -R omniinfra:omniinfra /home/omniinfra/.omninode
   exec gosu omniinfra "$0" "$@"
 fi
 

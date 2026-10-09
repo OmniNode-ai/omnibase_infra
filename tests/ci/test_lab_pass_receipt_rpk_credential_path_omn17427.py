@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from scripts.ci.lab_pass_receipt import ModelBrokerAccess, read_group_total_lag
+from scripts.ci.lab_pass_receipt import ModelBrokerAccess, read_group_lag
 
 pytestmark = pytest.mark.unit
 
@@ -46,9 +46,8 @@ def test_the_recorded_broker_reply_parses_and_the_credential_stays_off_argv(
         sasl_password=_SYNTHETIC_PASSWORD,
     )
 
-    assert (
-        read_group_total_lag(access, "agent-observability-postgres", runner=runner) == 0
-    )
+    reading = read_group_lag(access, "agent-observability-postgres", runner=runner)
+    assert reading.total_lag == 0
     assert _SYNTHETIC_PASSWORD not in " ".join(seen["argv"])
     assert "synthetic-user" not in " ".join(seen["argv"])
     assert seen["env"]["RPK_PASS"] == _SYNTHETIC_PASSWORD

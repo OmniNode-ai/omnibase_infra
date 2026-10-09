@@ -1,9 +1,12 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Compose lane names satisfy the declaration schema and ownership filter.
+"""Guard compose runtime-lane declarations against registry drift (OMN-19408).
 
-The deployment overlay establishes identity at startup (OMN-19747). This
-render guard checks the declared slug without requiring a compiled lane set.
+Per-host dev compose files declared lanes absent from the core lane registry.
+The ownership filter consequently treated those runtimes as declaring no lane.
+Every lane-scoped contract then failed closed during discovery, leaving runtime
+health permanently DEGRADED. This test scans all compose YAML, including
+extension blocks and anchors, and proves each declared lane is registered.
 """
 
 from __future__ import annotations
@@ -16,7 +19,6 @@ import pytest
 import yaml
 
 from omnibase_core.constants.constants_runtime_lanes import REGISTERED_RUNTIME_LANES
-from omnibase_core.models.config_overlay import ModelRuntimeLaneDeclaration
 from omnibase_core.models.contracts.subcontracts.model_runtime_lane_scope import (
     ModelRuntimeLaneScope,
 )
@@ -164,20 +166,19 @@ def test_compose_scan_has_positive_controls() -> None:
     DECLARED_RUNTIME_LANES,
     ids=DECLARATION_IDS,
 )
-def test_declared_runtime_lane_is_a_valid_slug(compose_path: str, lane: str) -> None:
+def test_declared_runtime_lane_is_registered(compose_path: str, lane: str) -> None:
     assert "${" not in lane, (
         f"{compose_path} declares {_RUNTIME_LANE_VARIABLE}={lane!r}; "
         "a lane must be a literal so it can be checked"
     )
-    declaration = ModelRuntimeLaneDeclaration.model_validate(
-        {
-            "schema_version": "runtime_lane.v1",
-            "lane_id": lane,
-            "roles": [],
-            "description": "compose declaration under test",
-        }
+    assert lane in REGISTERED_RUNTIME_LANES, (
+        f"{compose_path} declares {_RUNTIME_LANE_VARIABLE}={lane!r}, but the sorted "
+        f"registered set is {sorted(REGISTERED_RUNTIME_LANES)}. Register the lane in "
+        "omnibase_core constants_runtime_lanes.REGISTERED_RUNTIME_LANES (and bump "
+        "this repo's omnibase-core pin) or declare a registered lane; an unregistered "
+        "lane makes every lane-scoped contract fail closed and the runtime read "
+        "DEGRADED (OMN-19408)."
     )
-    assert declaration.lane_id == lane
 
 
 @pytest.mark.parametrize(
@@ -194,14 +195,7 @@ def test_declared_runtime_lane_passes_lane_scope_filter(
     result = filter_manifest_for_runtime_profile(
         manifest,
         "main",
-        lane=ModelRuntimeLaneDeclaration.model_validate(
-            {
-                "schema_version": "runtime_lane.v1",
-                "lane_id": lane,
-                "roles": [],
-                "description": "compose declaration under test",
-            }
-        ),
+        environ={_RUNTIME_LANE_VARIABLE: lane},
     )
 
     assert not result.manifest.errors, (

@@ -39,7 +39,7 @@ from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 from types import MappingProxyType
 from typing import (
@@ -8355,7 +8355,10 @@ def _derive_route_id(
     guaranteeing each entry gets a distinct route ID (OMN-9461 / OMN-10447).
     """
     safe_topic = re.sub(r"[.\-]", "_", topic)
-    return f"route.auto.{contract_name}.{handler_key}.{safe_topic}"
+    return _bound_dispatch_identifier(
+        f"route.auto.{contract_name}.{handler_key}.{safe_topic}",
+        _dispatch_route_field_max_length("route_id"),
+    )
 
 
 def _derive_dispatcher_id(contract_name: str, handler_key: str) -> str:
@@ -8366,8 +8369,59 @@ def _derive_dispatcher_id(contract_name: str, handler_key: str) -> str:
     ``inference.variant_b``), the plain handler name alone produces a
     collision.  The entry key includes the sanitized operation suffix and keeps
     dispatcher IDs distinct (OMN-9461 / OMN-10447).
+
+    The dispatcher ID is the route's ``handler_id``, so it is bounded to that
+    field's limit the same way route IDs are (OMN-20767).
     """
-    return f"dispatcher.auto.{contract_name}.{handler_key}"
+    return _bound_dispatch_identifier(
+        f"dispatcher.auto.{contract_name}.{handler_key}",
+        _dispatch_route_field_max_length("handler_id"),
+    )
+
+
+# Hex characters of the SHA-256 digest that replace the tail of an over-long
+# identifier. 16 hex characters (64 bits) keeps a collision between two
+# distinct over-long ids on one runtime out of reach.
+_BOUNDED_ID_DIGEST_HEX = 16
+
+
+@cache
+def _dispatch_route_field_max_length(field_name: str) -> int:
+    """Return ``ModelDispatchRoute.<field_name>``'s declared ``max_length``.
+
+    Read from the core model so the bound has one source: if core changes the
+    limit, derivation follows it without an infra edit (OMN-20767).
+    """
+    from omnibase_core.models.dispatch.model_dispatch_route import (
+        ModelDispatchRoute,
+    )
+    from omnibase_infra.errors import ProtocolConfigurationError
+
+    for constraint in ModelDispatchRoute.model_fields[field_name].metadata:
+        max_length = getattr(constraint, "max_length", None)
+        if isinstance(max_length, int):
+            return max_length
+    raise ProtocolConfigurationError(
+        f"ModelDispatchRoute.{field_name} declares no max_length; "
+        "auto-wiring cannot bound derived dispatch identifiers"
+    )
+
+
+def _bound_dispatch_identifier(natural_id: str, max_length: int) -> str:
+    """Bound a derived dispatch identifier to ``max_length`` without collisions.
+
+    An identifier within the limit is returned unchanged, so no existing route
+    or dispatcher ID moves. A longer one keeps its leading characters (so logs
+    still name the contract) and ends in ``.`` plus a SHA-256 digest of the
+    FULL natural identifier, so two long names that share a prefix stay
+    distinct and the same inputs derive the same ID on every boot. Truncating
+    without the digest would silently merge distinct routes (OMN-20767).
+    """
+    if len(natural_id) <= max_length:
+        return natural_id
+    digest = hashlib.sha256(natural_id.encode()).hexdigest()[:_BOUNDED_ID_DIGEST_HEX]
+    prefix_length = max_length - len(digest) - 1
+    return f"{natural_id[:prefix_length]}.{digest}"
 
 
 def _derive_handler_entry_key(entry: ModelHandlerRoutingEntry) -> str:
