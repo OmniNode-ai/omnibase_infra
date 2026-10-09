@@ -36,7 +36,16 @@ Ticket: OMN-19572 (the profile); OMN-19565 (the registry it reads)
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
+import shlex
+import tomllib
+from typing import overload
 from urllib.parse import urlsplit
+
+import yaml
+from pydantic import BaseModel, TypeAdapter
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.lab_proof.enum_lab_proof_attribution import (
@@ -54,6 +63,24 @@ from omnibase_infra.lab_proof.model_lab_proof_plan_request import (
 )
 from omnibase_infra.lab_proof.model_lab_proof_retry import ModelLabProofRetry
 from omnibase_infra.lab_proof.model_lab_proof_step import ModelLabProofStep
+from omnibase_infra.nodes.node_lab_proof_plan_compute.models.model_lab_compose_container import (
+    ModelLabComposeContainer,
+)
+from omnibase_infra.nodes.node_lab_proof_plan_compute.models.model_lab_desired_state_render_request import (
+    ModelLabDesiredStateRenderRequest,
+)
+from omnibase_infra.nodes.node_lab_proof_plan_compute.models.model_lab_desired_state_render_result import (
+    ModelLabDesiredStateRenderResult,
+)
+from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
+    ModelRunnerFleetConfig,
+)
+from omnibase_infra.observability.runner_health.model_runner_fleet_host import (
+    ModelRunnerFleetHost,
+)
+from omnibase_infra.observability.runner_health.model_runner_fleet_pool import (
+    ModelRunnerFleetPool,
+)
 
 PLANNED_PROOF_KINDS: frozenset[EnumLabProofKind] = frozenset(
     {EnumLabProofKind.FOUNDATION_OVERRIDE}
@@ -196,6 +223,83 @@ def _is_test_file(path: str) -> bool:
     )
 
 
+def _hashes(text: str) -> dict[str, str]:
+    hashes: dict[str, str] = {}
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split()
+        if len(parts) != 2 or not re.fullmatch(r"[0-9a-f]{64}", parts[1]):
+            raise ValueError("compose config --hash returned an invalid row")
+        if parts[0] in hashes:
+            raise ValueError(f"duplicate compose hash for {parts[0]}")
+        hashes[parts[0]] = parts[1]
+    return hashes
+
+
+def _packages(lock: str) -> dict[str, str]:
+    packages: dict[str, str] = {}
+    for entry in tomllib.loads(lock)["package"]:
+        name, version = entry["name"], entry["version"]
+        if not name.startswith("omnibase-") and name != "omnimarket":
+            continue
+        if name in packages and packages[name] != version:
+            raise ValueError(f"ambiguous lock version for {name}")
+        packages[name] = version
+    if not packages:
+        raise ValueError("empty target uv.lock")
+    return packages
+
+
+def _broker(
+    services: dict[str, ModelLabComposeContainer], profile: str
+) -> dict[str, object]:
+    brokers = [
+        s
+        for s in services.values()
+        if "redpanda" in s.image
+        and re.match(r"^redpanda\s+start\b", " ".join(s.command))
+    ]
+    if len(brokers) != 1:
+        raise ValueError("compose lane must declare exactly one Redpanda broker")
+    service = brokers[0]
+    command = service.command or []
+    args = shlex.split(" ".join(command))
+    memory = None
+    for index, arg in enumerate(args):
+        if arg == "--memory":
+            memory = args[index + 1]
+        elif arg.startswith("--memory="):
+            memory = arg.split("=", 1)[1]
+    if memory is None:
+        raise ValueError("broker command is missing --memory")
+    values = yaml.safe_load(profile)
+    if not isinstance(values, dict):
+        raise ValueError("broker bootstrap profile must be a mapping")
+    values = {
+        k: str(v).lower() if isinstance(v, bool) else str(v) for k, v in values.items()
+    }
+    # These are declarations, never commands executed by this compute handler.
+    declared: dict[str, str] = {}
+    for rendered in services.values():
+        command = rendered.command or []
+        text = "\n".join(command)
+        for key, value in re.findall(
+            r"\bcluster\s+config\s+set\s+([a-z][a-z0-9_]*)\s+([0-9]+)\b", text
+        ):
+            if key in declared and declared[key] != value:
+                raise ValueError(f"conflicting broker declarations for {key}")
+            declared[key] = value
+            values[key] = value
+    if not values:
+        raise ValueError("broker profile has no declared cluster config")
+    return {
+        "service": service.container_name,
+        "memory": memory,
+        "cluster_config": values,
+    }
+
+
 class HandlerLabProofPlan:
     """Pure rendering of one proof run."""
 
@@ -209,8 +313,217 @@ class HandlerLabProofPlan:
         """Behavioral classification: pure compute, no external I/O."""
         return EnumHandlerTypeCategory.COMPUTE
 
-    def handle(self, request: ModelLabProofPlanRequest) -> ModelLabProofPlan:
-        """Render the plan, or raise LabProofPlanError naming why it cannot be."""
+    def _render_desired_state(
+        self, request: ModelLabDesiredStateRenderRequest
+    ) -> ModelLabDesiredStateRenderResult:
+        manifest = yaml.safe_load(request.manifest_yaml)
+        if request.host not in manifest["hosts"]:
+            raise ValueError(f"undeclared host {request.host}")
+        target = request.target_ref.model_dump(mode="json")
+        target["composition"] = sorted(target["composition"], key=lambda r: r["repo"])
+        compose = json.loads(request.compose_json)
+        services = TypeAdapter(dict[str, ModelLabComposeContainer]).validate_python(
+            compose["services"]
+        )
+        hashes = _hashes(request.compose_hashes)
+        containers: list[dict[str, object]] = []
+        document: dict[str, object] = {
+            "schema_version": "lab-desired-state.v1",
+            "target_ref": target,
+            "containers": containers,
+            "broker": None,
+            "runners": None,
+            "allowed_undeclared": [],
+        }
+        if request.surface_kind == "host":
+            project = None
+            suffix = "host"
+            mode = "detect_only"
+            document["allowed_undeclared"] = sorted(
+                manifest.get("allowed_undeclared", []), key=lambda r: r["name"]
+            )
+        elif request.surface_kind == "runner_fleet":
+            project = compose["name"]
+            suffix = "runners"
+            mode = "reconcile"
+            document["runners"] = self._runners(request, services, hashes)
+        else:
+            lane = manifest["lanes"][request.lane]
+            if request.host not in lane["hosts"]:
+                raise ValueError(
+                    f"lane {request.lane} is not declared on {request.host}"
+                )
+            project = lane["compose_project"]
+            if compose.get("name", project) != project:
+                raise ValueError("compose project does not match the manifest")
+            suffix = project
+            mode = (
+                "detect_only" if request.lane in {"judge", "lakshman"} else "reconcile"
+            )
+            packages = _packages(request.lock_toml)
+
+            def revision_for(service: ModelLabComposeContainer) -> str | None:
+                if service.build is None:
+                    return None
+                if service.build.context.rstrip("/").endswith("omnimarket"):
+                    refs = [
+                        r
+                        for r in request.target_ref.composition
+                        if r.repo.endswith("/omnimarket")
+                    ]
+                    if len(refs) != 1:
+                        raise ValueError(
+                            "omnimarket build needs its accepted composition ref"
+                        )
+                    return refs[0].commit
+                return request.target_ref.commit
+
+            built_images: dict[str, str] = {}
+            for service in services.values():
+                revision = revision_for(service)
+                if service.image and revision:
+                    if (
+                        service.image in built_images
+                        and built_images[service.image] != revision
+                    ):
+                        raise ValueError("one image has conflicting build revisions")
+                    built_images[service.image] = revision
+            by_name: dict[str, tuple[str, ModelLabComposeContainer]] = {}
+            for key, service in services.items():
+                name = service.container_name or f"{project}-{key}-1"
+                if name in by_name:
+                    raise ValueError(f"duplicate compose container {name}")
+                by_name[name] = (key, service)
+            for entry in lane["services"]:
+                if entry["kind"] == "profile_gated":
+                    continue  # explicitly absent, so never an expected container
+                name = entry["name"]
+                if name not in by_name:
+                    raise ValueError(f"declared container {name} missing from compose")
+                key, service = by_name[name]
+                if key not in hashes:
+                    raise ValueError(
+                        f"declared service {key} missing from compose hashes"
+                    )
+                revision = revision_for(service) or built_images.get(service.image)
+                health = service.healthcheck
+                containers.append(
+                    {
+                        "name": name,
+                        "revision": revision,
+                        "config_hash": hashes[key],
+                        "packages": packages if revision else {},
+                        "health_required": bool(health.get("test"))
+                        and not health.get("disable", False)
+                        and health.get("test") != ["NONE"],
+                    }
+                )
+            if not containers:
+                raise ValueError("lane declares no expected containers")
+            containers.sort(key=lambda r: str(r["name"]))
+            document["broker"] = _broker(services, request.broker_yaml)
+        document["surface"] = {
+            "id": f"{request.host}/{suffix}",
+            "kind": request.surface_kind,
+            "host": request.host,
+            "compose_project": project,
+            "mode": mode,
+        }
+        body = json.dumps(
+            document, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode()
+        desired_sha = hashlib.sha256(body).hexdigest()
+        document["desired_state_sha256"] = desired_sha
+        return ModelLabDesiredStateRenderResult(
+            document_json=json.dumps(
+                document, sort_keys=True, indent=2, ensure_ascii=False
+            )
+            + "\n",
+            desired_state_sha256=desired_sha,
+        )
+
+    def _runners(
+        self,
+        request: ModelLabDesiredStateRenderRequest,
+        services: dict[str, ModelLabComposeContainer],
+        hashes: dict[str, str],
+    ) -> dict[str, list[dict[str, object]]]:
+        fleet = ModelRunnerFleetConfig.model_validate(
+            yaml.safe_load(request.fleet_yaml)
+        )
+        hosts = [h for h in fleet.hosts if h.host == request.runner_host_address]
+        if len(hosts) != 1 or not request.runner_workdir:
+            raise ValueError(
+                "runner render needs one declared fleet host and its absolute workdir"
+            )
+        host = hosts[0]
+        pools = [
+            ModelRunnerFleetPool(
+                runner_name_prefix=host.runner_name_prefix,
+                expected_count=host.expected_count,
+                classes=host.classes,
+            ),
+            *host.pools,
+        ]
+        output: dict[str, list[dict[str, object]]] = {"pools": [], "containers": []}
+        for pool in pools:
+            prefix = pool.runner_name_prefix
+            members = [
+                (k, s)
+                for k, s in services.items()
+                if re.fullmatch(re.escape(prefix) + r"-[0-9]+", s.container_name or "")
+            ]
+            if len(members) != pool.expected_count:
+                raise ValueError(
+                    f"compose count for {prefix} differs from config/runner_fleet.yaml"
+                )
+            labels: set[str] | None = None
+            for key, service in members:
+                env = service.environment
+                registration = env.get("LABELS", env.get("RUNNER_LABELS"))
+                if not registration:
+                    raise ValueError(f"runner {key} has no registration labels")
+                current = {"self-hosted", *registration.split(",")}
+                if labels is not None and labels != current:
+                    raise ValueError(f"runner labels differ within pool {prefix}")
+                labels = current
+                output["containers"].append(
+                    {
+                        "name": service.container_name,
+                        "pool": prefix,
+                        "config_hash": hashes[key],
+                    }
+                )
+            if not members or labels is None:
+                raise ValueError(
+                    f"pool {prefix} has no compose members to derive labels"
+                )
+            output["pools"].append(
+                {
+                    "name": prefix,
+                    "expected_count": pool.expected_count,
+                    "labels": sorted(labels),
+                    "workdir": request.runner_workdir,
+                }
+            )
+        for value in output.values():
+            value.sort(key=lambda r: str(r["name"]))
+        return output
+
+    @overload
+    def handle(self, request: ModelLabProofPlanRequest) -> ModelLabProofPlan: ...
+
+    @overload
+    def handle(
+        self, request: ModelLabDesiredStateRenderRequest
+    ) -> ModelLabDesiredStateRenderResult: ...
+
+    def handle(self, request: BaseModel) -> BaseModel:
+        """Render a proof plan or its desired-state inputs, with no external I/O."""
+        if isinstance(request, ModelLabDesiredStateRenderRequest):
+            return self._render_desired_state(request)
+        if not isinstance(request, ModelLabProofPlanRequest):
+            raise LabProofPlanError("unsupported lab planning request")
         variant = request.variant
         if variant.execution is not EnumLabProofExecution.NODE:
             raise LabProofPlanError(
