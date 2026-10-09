@@ -35,10 +35,14 @@
 # The job id is the context prefix: repo-evidence / dod-verify carries the
 # verdict, so do not add a job name.
 #
-# S6 part 1 (OMN-20074): shadow is "false" and repo-evidence / dod-verify's
-# verdict is enforced through CI Summary's EXPECTED_EXTERNAL_CONTEXTS in
-# scripts/ci/ci_summary_gate.py, the whole external enforcement surface here.
-# OCC contexts stay enforced until S6 part 2 removes OCC's callers:
+# S6 part 1 (OMN-20074): shadow is "false", so CI Summary's external sweep
+# (ci_summary_gate.py) fails on a red or skipped repo-evidence / dod-verify like
+# any other unregistered check-run. Registering repo-evidence / dod-verify in
+# EXPECTED_EXTERNAL_CONTEXTS, so an absent verdict blocks too, waits for a
+# follow-up: this trigger change cannot run on its own pull request (the
+# pull_request_target run reads dev's caller, the pull_request run reads this
+# file), so the registration lands once pull_request_target runs exist on merged
+# dev heads. OCC contexts stay enforced until S6 part 2 removes OCC's callers:
 # occ-preflight / eligibility and OCC Companion Merged Gate (OMN-15214) in
 # STRICT_GATE_JOBS, and verify / verify in EXPECTED_EXTERNAL_CONTEXTS.
 # compare-with-occ is "false", so the difference step stops waiting for OCC.

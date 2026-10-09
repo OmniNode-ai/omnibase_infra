@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-20073/OMN-20074: repo-owned evidence and S6 part 1 enforcement."""
+"""OMN-20073/OMN-20074: repo-owned evidence caller and its S6 part 1 trigger."""
 
 from __future__ import annotations
 
@@ -14,17 +14,10 @@ import pytest
 import yaml
 
 from scripts.ci.ci_summary_gate import (
-    EXIT_FAILURE,
-    EXIT_PENDING,
-    EXIT_SUCCESS,
     EXPECTED_EXTERNAL_CONTEXTS,
     EXTERNAL_SWEEP_EXCLUSIONS,
-    SKIPPABLE_GATE_JOBS,
-    STRICT_GATE_JOBS,
     SWEEP_NON_PR_EVENTS,
     check_run_event_index,
-    evaluate,
-    evaluate_external_contexts,
     evaluate_external_sweep,
 )
 
@@ -107,7 +100,7 @@ def test_caller_verifier_ships_the_occ_difference_classifier() -> None:
     )
 
 
-def test_caller_enforces_after_the_s6_part1_cutover() -> None:
+def test_caller_pins_the_s6_part1_inputs() -> None:
     job = _job()
     assert job["uses"].endswith("@fb0c6c2117d5868a398b0920cd0048d0824415b1")
     assert job["with"].get("shadow") == "false"
@@ -152,113 +145,85 @@ def _sweep(
     return failures, swept
 
 
-def _ci_summary(
-    rows: list[dict[str, Any]], event: str = "pull_request"
-) -> tuple[int, str]:
-    jobs = [
-        {"name": name, "status": "completed", "conclusion": "success"}
-        for name in (*STRICT_GATE_JOBS, *SKIPPABLE_GATE_JOBS)
-    ]
-    other_contexts = [
-        {"name": name, "status": "completed", "conclusion": "success"}
-        for name in EXPECTED_EXTERNAL_CONTEXTS
-        if name != _DOD_VERIFY
-    ]
-    return evaluate(
-        jobs,
-        check_runs=other_contexts + rows,
-        external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
-        workflow_runs=[{"id": _RUN_ID, "event": event}],
-        now=_NOW,
-    )
-
-
-def test_ci_summary_accepts_the_registered_verdict_beside_occ() -> None:
+def test_ci_summary_sweep_accepts_the_caller_shape() -> None:
     assert {"pull_request", "pull_request_target"}.isdisjoint(SWEEP_NON_PR_EVENTS), (
-        "the sweep must judge the caller's pull_request_target rows"
+        "the sweep judges the caller's pull_request and pull_request_target rows"
     )
-    assert _DOD_VERIFY in EXPECTED_EXTERNAL_CONTEXTS
-    assert _VERIFY not in EXPECTED_EXTERNAL_CONTEXTS
-    assert "verify / verify" in EXPECTED_EXTERNAL_CONTEXTS
-    assert "occ-preflight / eligibility" in STRICT_GATE_JOBS
-    assert "OCC Companion Merged Gate (OMN-15214)" in STRICT_GATE_JOBS
+    assert not {_VERIFY, _DOD_VERIFY} & set(EXPECTED_EXTERNAL_CONTEXTS), (
+        "the caller's checks are not registered as required external contexts yet"
+    )
     assert not {_VERIFY, _DOD_VERIFY} & set(EXTERNAL_SWEEP_EXCLUSIONS), (
-        "caller checks must not be excluded from enforcement"
+        "caller checks must pass the sweep on their own conclusion, not an exclusion"
     )
-    rows = _caller_rows(verify="success", dod_verify="success")
-    assert evaluate_external_contexts(rows, (_DOD_VERIFY,), now=_NOW) == ([], [])
-    failures, swept = _sweep(rows)
+    failures, swept = _sweep(_caller_rows(verify="success", dod_verify="success"))
     assert failures == [], failures
-    assert swept == [_VERIFY], "the registered verdict belongs to layer 4"
-    code, report = _ci_summary(rows)
-    assert code == EXIT_SUCCESS, report
+    assert swept == [_DOD_VERIFY, _VERIFY], "the sweep must have judged both rows"
 
 
 @pytest.mark.parametrize(
-    ("dod_verify", "expected_code"),
+    ("verify", "dod_verify", "refused"),
     [
-        pytest.param("failure", EXIT_FAILURE, id="red-dod-verify"),
-        pytest.param("skipped", EXIT_FAILURE, id="skipped-dod-verify"),
-        pytest.param(None, EXIT_PENDING, id="absent-dod-verify"),
+        pytest.param("success", "success", None, id="green"),
+        pytest.param("skipped", "success", _VERIFY, id="skipped-verify"),
+        pytest.param("success", "failure", _DOD_VERIFY, id="red-dod-verify"),
     ],
 )
-def test_ci_summary_refuses_a_red_or_absent_registered_verdict(
-    dod_verify: str | None, expected_code: int
+def test_ci_summary_sweep_judges_the_base_branch_trigger_rows(
+    verify: str, dod_verify: str, refused: str | None
 ) -> None:
-    assert _DOD_VERIFY in EXPECTED_EXTERNAL_CONTEXTS
-    assert _VERIFY not in EXPECTED_EXTERNAL_CONTEXTS
-    rows = _caller_rows(verify="success", dod_verify=dod_verify)
-    expected_failures = [] if dod_verify is None else [_DOD_VERIFY]
-    expected_unresolved = [_DOD_VERIFY] if dod_verify is None else []
-    assert evaluate_external_contexts(rows, (_DOD_VERIFY,), now=_NOW) == (
-        expected_failures,
-        expected_unresolved,
+    """OMN-20074: the caller's rows carry event pull_request_target."""
+    failures, swept = _sweep(
+        _caller_rows(verify=verify, dod_verify=dod_verify), "pull_request_target"
     )
-    # Layer 5 excludes the registered verdict; layer 4 must be load-bearing.
-    assert _sweep(rows) == ([], [_VERIFY])
-    code, report = _ci_summary(rows)
-    assert code == expected_code, report
-    if dod_verify is None:
-        # Absence holds PENDING, then fails closed at the poller's deadline.
-        assert f"external contexts missing/pending: {_DOD_VERIFY}" in report
+    assert swept == [_DOD_VERIFY, _VERIFY], "the sweep must have judged both rows"
+    if refused is None:
+        assert failures == [], failures
     else:
-        assert f"external-context failures: {_DOD_VERIFY}" in report
+        assert len(failures) == 1, failures
+        assert failures[0].startswith(refused), failures
 
 
 @pytest.mark.parametrize(
-    ("dod_verify", "expected_code"),
+    ("verify", "dod_verify", "refused"),
     [
-        pytest.param("success", EXIT_SUCCESS, id="green"),
-        pytest.param("failure", EXIT_FAILURE, id="red"),
-        pytest.param("skipped", EXIT_FAILURE, id="skipped"),
+        pytest.param("skipped", "success", _VERIFY, id="skipped-verify"),
+        pytest.param("success", "failure", _DOD_VERIFY, id="red-dod-verify"),
     ],
 )
-def test_ci_summary_judges_the_base_branch_trigger_rows(
-    dod_verify: str, expected_code: int
+def test_ci_summary_sweep_refuses_a_skipped_verify_and_a_red_dod_verify(
+    verify: str, dod_verify: str, refused: str
 ) -> None:
-    """The caller's rows carry event pull_request_target after OMN-20074 (the
-    same-repository run attaches to the PR head); the sweep must judge them."""
-    rows = _caller_rows(verify="success", dod_verify=dod_verify)
-    assert _sweep(rows, "pull_request_target") == ([], [_VERIFY])
-    code, report = _ci_summary(rows, "pull_request_target")
-    assert code == expected_code, report
+    failures, _swept = _sweep(_caller_rows(verify=verify, dod_verify=dod_verify))
+    assert len(failures) == 1, failures
+    assert failures[0].startswith(refused), failures
 
 
 @pytest.mark.live_contact("tests/ci/fixtures/omn20074_repo_evidence_check_runs.json")
-def test_ci_summary_registered_name_matches_the_recorded_admission_window(
+def test_ci_summary_sweep_accepts_the_recorded_caller_rows_of_merged_heads(
     recorded_response: dict[str, object],
 ) -> None:
-    """The 16 admission heads' recorded check-runs satisfy the registered context."""
-    registered = tuple(
-        name for name in EXPECTED_EXTERNAL_CONTEXTS if name.startswith("repo-evidence")
-    )
-    assert registered == (_DOD_VERIFY,)
+    """The recorded repo-evidence check-runs of 16 merged dev heads pass the sweep."""
     heads = cast("list[dict[str, Any]]", recorded_response["heads"])
     assert len(heads) == 16
     for head in heads:
-        rows = cast("list[dict[str, object]]", head["check_runs"])
-        assert {row["name"] for row in rows} == {_DOD_VERIFY, _VERIFY}, head["pr"]
-        assert evaluate_external_contexts(rows, registered) == ([], []), head["pr"]
+        rows = cast("list[dict[str, Any]]", head["check_runs"])
+        assert {row["name"] for row in rows} == {_VERIFY, _DOD_VERIFY}, head["pr"]
+        runs = [
+            {"id": int(match.group(1)), "event": "pull_request"}
+            for row in rows
+            if (match := re.search(r"/runs/(\d+)/job/", str(row["html_url"])))
+        ]
+        failures, _in_flight, swept, _excluded, _provisional = evaluate_external_sweep(
+            rows,
+            expected=EXPECTED_EXTERNAL_CONTEXTS,
+            in_run_names=frozenset(),
+            self_name="CI Summary",
+            exclusions=EXTERNAL_SWEEP_EXCLUSIONS,
+            events=check_run_event_index(runs),
+            now=_NOW,
+        )
+        assert failures == [], (head["pr"], failures)
+        assert sorted(swept) == [_DOD_VERIFY, _VERIFY], head["pr"]
 
 
 def test_every_repo_contract_binds_every_criterion() -> None:

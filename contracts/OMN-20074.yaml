@@ -1,27 +1,22 @@
 schema_version: "1.0.0"
 ticket_id: OMN-20074
-title: Enforce omnibase_infra's repo-evidence caller through CI Summary for S6 part 1 of the OCC retirement
-summary: Enforce the repo-owned dod-verify verdict through CI Summary beside the existing OCC contexts, with the caller on the base-branch trigger as the single named exception ruled by the operator (2026-10-08T22:41:24Z). OCC removal belongs to S6 part 2.
+title: Switch omnibase_infra's repo-evidence caller to the base-branch trigger for S6 part 1 of the OCC retirement
+summary: Move the repo-evidence caller to the base-branch trigger as the single named exception to the runner-routing ban, ruled by the operator (2026-10-08T22:41:24Z). Registering repo-evidence / dod-verify in CI Summary waits for a follow-up once base-branch-trigger runs exist on merged dev heads; OCC removal belongs to S6 part 2.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
   - id: req-repo-evidence-s6-part1
-    statement: omnibase_infra must enforce the repo-owned evidence verdict through CI Summary while retaining every existing OCC gate for the S6 part 1 overlap.
+    statement: omnibase_infra must run the repo-owned evidence caller on the base-branch trigger, as the one audited exception, while retaining every existing OCC gate for the S6 part 1 overlap.
     acceptance:
       - id: AC1
         statement: 'AC1: the caller pins receipt-gate.yml at fb0c6c2117d5868a398b0920cd0048d0824415b1 (omnibase_core#1914), sets shadow to "false" and compare-with-occ to "false" -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s6_part1'
       - id: AC2
-        statement: 'AC2: repo-evidence / dod-verify is registered in EXPECTED_EXTERNAL_CONTEXTS and repo-evidence / verify is not; green dod-verify passes and red, skipped or absent dod-verify blocks CI Summary through the registered-context check; verify / verify remains in EXPECTED_EXTERNAL_CONTEXTS and occ-preflight / eligibility and OCC Companion Merged Gate (OMN-15214) remain in STRICT_GATE_JOBS -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k ci_summary'
-      - id: AC3
-        statement: 'AC3: the runner-routing audit admits pull_request_target in exactly one workflow, call-repo-evidence-gate.yml, named in config/runner_routing_policy.yaml with the operator ruling, refuses a pattern or a list in its place and any other workflow using the trigger, and holds that file to a read-only pinned reusable call with no inline steps or secrets -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k pull_request_target'
+        statement: 'AC2: the runner-routing audit admits pull_request_target in exactly one workflow, call-repo-evidence-gate.yml, named in config/runner_routing_policy.yaml with the operator ruling, refuses a pattern or a list in its place and any other workflow using the trigger, and holds that file to a read-only pinned reusable call with no inline steps or secrets -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k pull_request_target'
 evidence_requirements:
   - kind: tests
     description: The caller enforces at the caller-mode success-no-op pin without waiting for OCC comparison.
     command: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s6_part1
-  - kind: tests
-    description: CI Summary enforces dod-verify through registration while retaining all OCC contexts.
-    command: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k ci_summary
   - kind: tests
     description: The runner-routing audit admits the base-branch trigger in the one named caller and nowhere else.
     command: uv run pytest tests/ci/test_runner_routing_audit.py -q -k pull_request_target
@@ -39,17 +34,9 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s6_part1
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-repo-evidence-s6-part1-ac2
-    description: The CI Summary tests prove verdict enforcement and the overlap with OCC.
-    source: manual
-    binds_ac: [AC2]
-    checks:
-      - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k ci_summary
-        cwd: ${OMNI_HOME}/omnibase_infra
-  - id: dod-repo-evidence-s6-part1-ac3
     description: The audit tests prove the single named exception and its fail-closed shape.
     source: manual
-    binds_ac: [AC3]
+    binds_ac: [AC2]
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -k pull_request_target
