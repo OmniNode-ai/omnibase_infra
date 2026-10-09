@@ -19,6 +19,7 @@ class EnumPlatformTopic(str, Enum):
     Members are sorted by (kind, event_name, version).
     """
     CMD_CI_LIVE_CONTACT_CHECK_V1 = "onex.cmd.platform.ci-live-contact-check.v1"  # onex.cmd.platform.ci-live-contact-check.v1
+    CMD_HOTPATCH_LEDGER_RECONCILE_V1 = "onex.cmd.platform.hotpatch-ledger-reconcile.v1"  # onex.cmd.platform.hotpatch-ledger-reconcile.v1
     CMD_LEDGER_APPEND_V1 = "onex.cmd.platform.ledger-append.v1"  # onex.cmd.platform.ledger-append.v1
     CMD_LEDGER_QUERY_V1 = "onex.cmd.platform.ledger-query.v1"  # onex.cmd.platform.ledger-query.v1
     CMD_NODE_REGISTRATION_ACKED_V1 = "onex.cmd.platform.node-registration-acked.v1"  # onex.cmd.platform.node-registration-acked.v1
@@ -28,6 +29,7 @@ class EnumPlatformTopic(str, Enum):
     EVT_CONTRACT_DEREGISTERED_V1 = "onex.evt.platform.contract-deregistered.v1"  # onex.evt.platform.contract-deregistered.v1
     EVT_CONTRACT_REGISTERED_V1 = "onex.evt.platform.contract-registered.v1"  # onex.evt.platform.contract-registered.v1
     EVT_FSM_STATE_TRANSITIONS_V1 = "onex.evt.platform.fsm-state-transitions.v1"  # onex.evt.platform.fsm-state-transitions.v1
+    EVT_HOTPATCH_LEDGER_RECONCILED_V1 = "onex.evt.platform.hotpatch-ledger-reconciled.v1"  # onex.evt.platform.hotpatch-ledger-reconciled.v1
     EVT_LEDGER_APPENDED_V1 = "onex.evt.platform.ledger-appended.v1"  # onex.evt.platform.ledger-appended.v1
     EVT_LEDGER_QUERY_RESULT_V1 = "onex.evt.platform.ledger-query-result.v1"  # onex.evt.platform.ledger-query-result.v1
     EVT_MERGE_GATE_DECISION_V1 = "onex.evt.platform.merge-gate-decision.v1"  # onex.evt.platform.merge-gate-decision.v1
