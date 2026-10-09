@@ -1283,10 +1283,30 @@ jobs:
               )
           env = {str(key): str(value) for key, value in strict.items()}
           env["INFISICAL_ADDR"] = os.environ["DEV_LANE_CLASS_STORE_ADDR"]
+          # runtime-effects wires the gateway handlers only when it is given a
+          # secret-resolver config (service_kernel); under strict wiring the
+          # laptop render, which binds none, fails that wiring fatally. The dev
+          # lane's effects kernel binds the infra base's, so read it from there.
+          effects_env = (
+              (infra.get("services") or {}).get("runtime-effects", {}).get("environment")
+          )
+          resolver_keys = (
+              "ONEX_SECRET_RESOLVER_CONFIG_PATH",
+              "ONEX_SECRET_RESOLVER_CONFIG_JSON",
+          )
+          if not isinstance(effects_env, dict) or any(
+              key not in effects_env for key in resolver_keys
+          ):
+              sys.exit(
+                  "::error::docker-compose.infra.yml runtime-effects no longer binds "
+                  "the secret-resolver config; re-derive the dev-lane class before "
+                  "changing this gate"
+              )
+          effects_only = {key: str(effects_env[key]) for key in resolver_keys}
           override = {
               "services": {
-                  kernel: {"environment": dict(env)}
-                  for kernel in ("omninode-runtime", "runtime-effects")
+                  "omninode-runtime": {"environment": dict(env)},
+                  "runtime-effects": {"environment": {**env, **effects_only}},
               }
           }
           Path(os.environ["DEV_LANE_CLASS_OVERRIDE"]).write_text(

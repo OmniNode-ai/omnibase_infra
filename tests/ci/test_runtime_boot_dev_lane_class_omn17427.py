@@ -184,6 +184,14 @@ def test_the_override_carries_the_dev_lane_bindings_on_both_kernels(
         assert env["INFISICAL_ADDR"].strip(), (
             f"{kernel}: the secrets-store address is unset"
         )
+    effects_env = override["services"]["runtime-effects"]["environment"]
+    infra_effects = _compose(_REPO / "docker" / "docker-compose.infra.yml")["services"][
+        "runtime-effects"
+    ]["environment"]
+    for key in ("ONEX_SECRET_RESOLVER_CONFIG_PATH", "ONEX_SECRET_RESOLVER_CONFIG_JSON"):
+        assert effects_env[key] == str(infra_effects[key]), (
+            f"runtime-effects: {key} differs from the infra base"
+        )
 
 
 def test_a_dev_lane_without_the_strict_binding_refuses_rather_than_defaults(
