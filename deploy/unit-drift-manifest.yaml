@@ -118,6 +118,16 @@ units:
     installed: ~/.config/systemd/user/onex-rung-eval.timer
     hosts:
       - omnipc2
+  - name: onex-shadow-review.service
+    tracked: deploy/shadow-review/onex-shadow-review.service
+    installed: ~/.config/systemd/user/onex-shadow-review.service
+    hosts:
+      - omnipc2
+  - name: onex-shadow-review.timer
+    tracked: deploy/shadow-review/onex-shadow-review.timer
+    installed: ~/.config/systemd/user/onex-shadow-review.timer
+    hosts:
+      - omnipc2
   # Scheduled unit entrypoints must be observed along with their unit files.
   - name: disk-gc.sh
     tracked: scripts/disk-gc.sh
