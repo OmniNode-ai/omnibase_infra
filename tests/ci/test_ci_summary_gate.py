@@ -1865,7 +1865,6 @@ class TestDocsOnlySkipTierOmn16661:
             "Lint",
             "ONEX Validators",
             "Contract Compliance",
-            "Contract Compliance Check",
             "merge-hold-gate / evaluate",
             "Lockfile Registry Allowlist (OMN-16516)",
             "Lockfile CVE Scan (OMN-16228)",

@@ -1085,7 +1085,6 @@ route:
         - ci-bus-overlay-binding
         - CodeQL
         - Contract Compliance
-        - Contract Compliance Check
         - Contract Sync Gate (Wave C) [OMN-8915]
         - contract-validation
         - Customer Path Boundary (OMN-18012)

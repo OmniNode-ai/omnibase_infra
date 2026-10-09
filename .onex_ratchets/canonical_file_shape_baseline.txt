@@ -159,10 +159,7 @@ scripts/ci/check_workflow_uv_available.py
 scripts/ci/ci_cascade_graph.py
 scripts/ci/ci_env_digest.py
 scripts/ci/ci_summary_gate.py
-scripts/ci/classify_contract_compliance_scope.py
 scripts/ci/compute_golden.py
-scripts/ci/defer_test_passes_driver.py
-scripts/ci/deferred_test_passes_gate.py
 scripts/ci/delegation_health_check.py
 scripts/ci/dependabot_lock_refresh.py
 scripts/ci/deploy_lane_verify_route.py
@@ -203,11 +200,8 @@ scripts/ci/reject-node-implementations.sh
 scripts/ci/release_dependency_advance.py
 scripts/ci/release_train.py
 scripts/ci/replay_hook_history.py
-scripts/ci/resolve_contract_compliance_evidence.py
-scripts/ci/resolve_contract_compliance_pr.py
 scripts/ci/resolve_modern_bash.sh
 scripts/ci/run_compliance_sweep.py
-scripts/ci/run_contract_compliance_with_evidence.py
 scripts/ci/run_contract_sweep.py
 scripts/ci/run_duplication_sweep.py
 scripts/ci/run_on_gate_runner.sh

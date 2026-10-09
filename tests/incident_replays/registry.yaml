@@ -836,22 +836,6 @@ cases:
     test: tests/ci/test_incident_replay_omn17374.py::test_replay_rejects_the_real_registry_mirror_bytes
     why: >-
       This guard is newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is complete and it is the FIFTH instance of one class in a fortnight (OMN-15701, OMN-16436, OMN-16993, OMN-17290, OMN-17374). The topology's per-principal TABLE grant blocks are GENERATED from node contract db_io.db_tables by scripts/generate_application_database_table_grants.py, so `omninode_runtime -> public.tenant_registry_mirror` has been the platform's declared intent since #3037 landed. Nothing in the repository ever checked that a migration ISSUES a declared grant, and no existing gate could: the manifest validator only asks whether a declared checksum matches its file, check_migration_append_only.py only asks whether a declared file was edited, and application_database_domain_enforcement asserts against a DECLARED state rather than against what any migration emits. So #3037 merged green with every migration gate passing. The artifact is that merge's own 0000_create_tenant_registry_mirror.sql, captured verbatim via `git cat-file` from 61676f5c5; it CREATEs the relation and grants SELECT to exactly two roles, role_omnidash and app_dashboard, and nothing to the principal both contracts route through. Provenance is un-forgeable rather than reconstructed: the .201 dev lane's platform_catalog.schema_migrations records this artifact's own sha256 (5a5f36011b2d3075b49c94f577b2019e6fbcf28e05137cc8a9941d1d9f5dd1ba) as the applied checksum at 2026-08-31 03:04:20.727769+00, read live 2026-09-01, so these are provably the bytes a real database executed. The consequence, probed in-container on the runtime's own OMNINODE_INTERNAL_DB_URL: `current_user: omninode_runtime` then `permission denied for table tenant_registry_mirror` -- refusing BOTH node_projection_delegation's write-time tenant lookup (OMN-16804's resolver re-raises anything that is not a MISSING RELATION, so it never reaches its own legacy-map fallback and the change is not monotonic, the exact property its docstring claims) AND node_projection_tenant_registry's own INSERT, which is why the mirror held zero rows while its consumer group reported Stable at LAG 0 for eight days. The replay drives the real delivered_grants() over those verbatim bytes and requires the declared pair to be absent, while additionally requiring the two grants the artifact DOES issue to be detected -- a matcher that merely noticed "a GRANT exists here" would pass a blind check and stay blind to which principal was authorized. The accept control in the same module is the fix shipping in this commit: with 0001 present the same pair resolves as delivered, so a guard hard-wired to report a violation fails the control.
-  - id: omn16508-empty-pr-number-vacuously-passed-a-required-gate
-    guard: scripts/ci/resolve_contract_compliance_pr.py
-    incident: OMN-16508
-    regression_class: false_green
-    guard_verdict_on_artifact: reject
-    artifact:
-      fixture: tests/fixtures/omn16508/commit-6d7090da-pulls.gh-api.json.captured
-      sha256: 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
-    capture:
-      method: live-fetch
-      source: "gh-api:repos/OmniNode-ai/omnibase_infra/commits/6d7090daa3c410d9ee51ddc3a0b61a82a8a25662/pulls"
-      captured_at: "2026-08-27T11:50:53Z"
-      captured_by: OMN-16508 fail-closed lane
-    test: tests/ci/test_incident_replay_omn16508.py::test_the_real_no_merged_pr_response_is_rejected_not_vacuously_passed
-    why: >-
-      This resolver is newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green it replaces was total and invisible: ci.yml's contract-compliance step met an empty PR_NUMBER with `exit 0`, and because "Contract Compliance Check" is a GATE_JOBS entry in scripts/ci/ci_summary_gate.py while CI Summary is this repo's ONLY required branch-protection context, the umbrella poller counted a run that executed zero DoD check_values as a provable pass. The job's `if:` admits push and merge_group, neither of which populates github.event.pull_request.number, so every such run reported a working gate while checking nothing -- and unlike omnibase_core's fail-closed equivalent (OMN-16346), a green gate never prompts anyone to look. Scope note against the ticket body, which claimed "every dev push": on.push.branches here is [main], so the live surface is push-to-main plus merge_group, the latter unexercised today (no registry repo has a queue on dev as of 2026-08-24) but a latent bypass of the sole required context the instant a queue returns, with zero further code change. The artifact is what the GitHub API verbatim returns for a commit no merged PR ever produced -- 6d7090da, head of PR #2890, closed without merging -- an empty association list, which is exactly the state the old step converted into green. The replay drives the real resolve_pr_number() over those bytes and requires None (fail closed). Its accept control in the same module, commit-5b904d88-pulls.gh-api.json.captured (21KB, a real main commit whose source PR #2378 merged with merge_commit_sha equal to that SHA, independently sha256-pinned in the test), is what stops a hard-wired `return None` from replaying the incident perfectly while failing every legitimate push-to-main closed.
   - id: omn16755-dead-subscribe-mints-a-permanently-empty-consumer-group
     guard: scripts/check_subscribe_wiring_health.py
     incident: OMN-16755
@@ -1456,40 +1440,6 @@ cases:
     discriminator: tests/ci/test_incident_replay_omn19451.py::test_the_same_check_admits_the_real_green_nightly
     why: >-
       Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green being replaced is an ABSENCE: the delegation regression nightly concluded failure in run 35832924275 (2026-09-23, five hard breaks against the stability-test lane) and nothing slowed runtime merges while it stood red, because auto-merge, the landing lane and humans read no delegation verdict; only staging delivery did (OMN-19311). The artifact is that run exactly as the REST API returned it, and the replay drives the real check over it and requires a refusal naming the run id. THE DISCRIMINATOR IS MANDATORY: the newest green scheduled nightly at capture time, run 36394450393, captured the same way, is admitted by the same code path, so a check that refused everything cannot satisfy this case. NO MODIFICATIONS: both fixtures are the exact bytes the REST API returned; the only e-mail addresses in them are GitHub bot noreply addresses.
-  - id: omn20135-contract-compliance-passed-a-pr-whose-contract-it-never-read
-    guard: scripts/ci/run_contract_compliance_with_evidence.py
-    incident: OMN-20135
-    regression_class: false_green
-    guard_verdict_on_artifact: reject
-    discriminator: tests/ci/test_incident_replay_omn20135.py::test_the_same_guard_runs_the_contract_the_evidence_commit_carries
-    artifact:
-      fixture: tests/fixtures/omn20135/contract-compliance-job-109722692581.log.captured
-      sha256: 43959a0b14035aedddeb3d04ea31b5031cbbb50c8f438865a18cef918a9181c5
-    capture:
-      method: gh-api
-      source: gh-api:repos/OmniNode-ai/omnibase_infra/actions/jobs/109722692581/logs
-      captured_at: '2026-09-30T06:05:00Z'
-      captured_by: lane infra-compliance-failopen-0525 (OMN-20135)
-    test: tests/ci/test_incident_replay_omn20135.py::test_the_real_guard_refuses_the_pr_the_pinned_checkout_passed
-    why: >-
-      Newly wired enforcement, so default-deny demands a real regression case rather than a baseline exemption. The false_green is A COMPLIANCE CHECK THAT PASSED A PR WHOSE CONTRACT IT NEVER READ. On 2026-09-30 the Contract Compliance Check on omnibase_infra#4325 (job 109722692581) resolved OMN-17427, looked for its contract in the change-control checkout pinned at 7352cb2d (2026-07-12), found none because the contract is newer than the pin, logged that the PR was not blocked and passed with nothing executed; every ticket created after the pin passed the same way. THE ARTIFACT IS that job's log as the jobs API serves it, committed unmodified, 49722 bytes; the test reads the ticket and the contract path from it. THE DISCRIMINATOR IS LOAD-BEARING: a guard that refused every PR would replay this perfectly, so the same guard is handed the contract as the PR's evidence commit carries it (contracts/OMN-17427.yaml at change-control 67e79ddf, fixture OMN-17427.yaml.captured, sha256 75b09826) and must go on to run the checks.
-  - id: omn20135-evidence-reference-to-a-closed-companion
-    guard: scripts/ci/resolve_contract_compliance_evidence.py
-    incident: OMN-15214
-    regression_class: false_green
-    guard_verdict_on_artifact: reject
-    discriminator: tests/ci/test_incident_replay_omn20135.py::test_the_same_resolver_resolves_a_merged_companion_to_its_merge_commit
-    artifact:
-      fixture: tests/fixtures/omn20135/onex_change_control-pulls-5012.json.captured
-      sha256: 5fc6d1f1e2fbc56221ed9668c61b8bf6323d511878d8e0a66a10ea912a27ac4a
-    capture:
-      method: gh-api
-      source: gh-api:repos/OmniNode-ai/onex_change_control/pulls/5012
-      captured_at: '2026-09-30T06:05:00Z'
-      captured_by: lane infra-compliance-failopen-0525 (OMN-20135)
-    test: tests/ci/test_incident_replay_omn20135.py::test_the_real_resolver_refuses_the_closed_companion_a_merged_pr_cited
-    why: >-
-      Newly wired enforcement (OMN-20135 ports it into this repo's Contract Compliance Check), so default-deny demands a real case. The false_green is A PR MERGED ON EVIDENCE THAT WAS NEVER MERGED. On 2026-07-26 a change-control hygiene sweep closed five companion PRs whose product PRs had already merged (OMN-15214); omniintelligence#817 merged citing OCC#5012, which is closed and unmerged, and a compliance check that read contracts from a fixed pin could not see it. THE ARTIFACTS ARE both PRs as the REST API serves them, committed unmodified (the product PR is fixture omniintelligence-pulls-817.json.captured, sha256 9d61f37e, from gh-api:repos/OmniNode-ai/omniintelligence/pulls/817); the test derives the evidence reference from the product body and the companion state from the companion document. THE DISCRIMINATOR IS LOAD-BEARING: a resolver that refused every reference would replay this, so omnibase_infra#4325 and its merged companion OCC#11857 (fixtures omnibase_infra-pulls-4325 and onex_change_control-pulls-11857) must resolve to the merge commit 67e79ddf.
   - id: omn20173-compose-default-addressed-the-glm-coding-plan-endpoint
     guard: scripts/check_no_coding_plan_endpoint.py
     incident: OMN-20173

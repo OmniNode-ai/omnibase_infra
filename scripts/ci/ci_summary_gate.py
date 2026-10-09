@@ -356,7 +356,6 @@ SKIPPABLE_GATE_JOBS: tuple[str, ...] = (
     "Migration Integration Test",  # migration-integration (skips on docs-only)
     "Integration Silent-Skip Guard (OMN-14172)",  # integration-guard (skips on docs-only)
     "Contract Compliance",  # compliance
-    "Contract Compliance Check",  # contract-compliance
     "Contract Sync Gate (Wave C) [OMN-8915]",  # contract-sync-gate (skips on push)
 )
 
@@ -1372,88 +1371,6 @@ EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
         expires="2026-12-20",
     ),
 }
-
-
-# Shared with Contract Compliance's ticketless dependency-bot exemption.
-DEPENDENCY_BOT_AUTHORS: frozenset[str] = frozenset({"dependabot[bot]", "renovate[bot]"})
-
-# The ticket token Contract Compliance looks for in a PR title or head ref.
-TICKET_TOKEN_RE = re.compile(r"OMN-\d+")
-
-# A MIRROR, not a second policy. Source of truth, read live on 2026-09-22; the
-# reusable was re-read byte-identical at ebe30bc on 2026-09-29 and at 326ebee
-# on 2026-10-06:
-#   OmniNode-ai/onex_change_control
-#   .github/workflows/pr-title-check-reusable.yml
-#   @326ebee0561ab42b3d970e533ae9f447abed2292
-# which is the exact ref .github/workflows/pr-title-check.yml in THIS repo
-# pins, so the mirror and the enforcer cannot be reading different revisions
-# without that pin moving. Its shell tests, in order, are:
-#   1. PR_AUTHOR ends with the bot suffix                 -> exempt
-#   2. lowercased title starts chore(deps | build(deps | "bump "  -> exempt
-#   3. lowercased title starts "chore: release" | chore(release) | release:
-#   4. title matches OMN-[0-9]+                            -> satisfied
-# Arms 1-3 are the EXEMPTIONS; arm 4 is compliance, not exemption, so it is
-# not mirrored here. tests/ci/test_ci_summary_gate_bot_skip_omn19167.py pins
-# the pin, the arm order and a title table against this comment; an upstream
-# edit is a red test rather than silent drift.
-_TITLE_EXEMPT_PREFIXES: tuple[str, ...] = (
-    "chore(deps",
-    "build(deps",
-    "bump ",
-    "chore: release",
-    "chore(release)",
-    "release:",
-)
-
-_BOT_LOGIN_SUFFIX = "[bot]"
-
-
-def title_rule_exempts_ticket(*, author: str, title: str) -> bool:
-    """Mirror of the pinned PR-title reusable's three exemption arms.
-
-    Shared with Contract Compliance's ticketless dependency-bot exemption.
-
-    ``True`` means doctrine does not require this pull request to carry a
-    ticket token, so the token's ABSENCE is by design rather than an omission.
-    An empty author or title returns ``False``: the upstream refuses an empty
-    title outright, and an unresolvable fact admits nothing here.
-    """
-
-    if not author or not title:
-        return False
-    if author.endswith(_BOT_LOGIN_SUFFIX):
-        return True
-    lowered = title.lower()
-    return lowered.startswith(_TITLE_EXEMPT_PREFIXES)
-
-
-@dataclass(frozen=True)
-class PullRequestContext:
-    """PR facts used by Contract Compliance to resolve a ticketless exemption."""
-
-    author: str = ""
-    title: str = ""
-    head_ref: str = ""
-
-    @property
-    def is_resolved(self) -> bool:
-        """Whether enough is known to judge. Author and title are required.
-
-        ``head_ref`` may legitimately be empty on a payload that omits it, and
-        an empty one simply carries no ticket token -- it cannot manufacture
-        an admission, only fail to block one the title already earned.
-        """
-
-        return bool(self.author and self.title)
-
-    @property
-    def carries_ticket_token(self) -> bool:
-        """Whether a ticket token appears in either the title or head ref."""
-
-        return bool(
-            TICKET_TOKEN_RE.search(self.title) or TICKET_TOKEN_RE.search(self.head_ref)
-        )
 
 
 _SWEEP_TICKET_RE = re.compile(r"^OMN-\d+$")

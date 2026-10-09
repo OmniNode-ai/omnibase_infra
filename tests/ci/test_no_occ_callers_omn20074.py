@@ -143,6 +143,25 @@ def test_no_occ_callers_workflow_runs_the_companion_gate_or_heals() -> None:
     ]
 
 
+def test_no_occ_callers_ci_resolves_no_evidence_source() -> None:
+    """No ci.yml job resolves a PR's companion or checks out OCC evidence data."""
+    ci_jobs = _workflows()["ci.yml"]["jobs"]
+    assert "contract-compliance" not in ci_jobs
+    assert "Contract Compliance Check" not in gate.GATE_JOBS
+    offenders = []
+    for job_id, job in ci_jobs.items():
+        for step in job.get("steps") or []:
+            repository = (step.get("with") or {}).get("repository")
+            run = str(step.get("run", ""))
+            if repository == "OmniNode-ai/onex_change_control" and "steps." in str(
+                (step.get("with") or {}).get("ref", "")
+            ):
+                offenders.append(f"{job_id}: {step.get('name')}")
+            if "resolve_contract_compliance_evidence" in run:
+                offenders.append(f"{job_id}: {step.get('name')}")
+    assert not offenders, offenders
+
+
 def test_no_occ_callers_ci_summary_expects_no_occ_context() -> None:
     expected = set(gate.EXPECTED_EXTERNAL_CONTEXTS)
     strict = set(gate.STRICT_GATE_JOBS) | set(gate.GATE_JOBS)
