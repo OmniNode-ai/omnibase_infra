@@ -18,10 +18,11 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,8 @@ from scripts.lab_alarm import (
     GroupLagReader,
     GroupNeverCommittedError,
     LaneCredentialError,
+    LedgerAppender,
+    LedgerAppendError,
     ModelAlarm,
     ModelAlarmConfig,
     ModelAlarmRun,
@@ -61,6 +64,7 @@ from scripts.lab_alarm import (
     evaluate_stale_indeterminate,
     evaluate_work_ledger_projection_stale,
     expand_env,
+    make_ledger_appender,
     make_runner,
     read_chain_canary_verdict,
     read_ledger_newest_canonical_row,
@@ -674,6 +678,8 @@ def _run(
     lag: int,
     ledger: Path,
     canary: tuple[int, str] = (0, CANARY_GREEN),
+    appender: LedgerAppender | None = None,
+    clock: Callable[[], str] | None = None,
 ) -> ModelAlarmRun:
     config = ModelAlarmConfig(
         repo="o/r",
@@ -689,6 +695,8 @@ def _run(
         work_ledger_db_container="pg",
         work_ledger_database="analytics",
         work_ledger_max_lag=timedelta(minutes=30),
+        ledger_row_ticket="OMN-20769",
+        ledger_dedupe_window=timedelta(hours=6),
     )
     # The work-ledger condition reads --ledger too: give it one canonical row,
     # appended below any consent row so cited line numbers do not move, and a
@@ -721,7 +729,18 @@ def _run(
         canary_reader=lambda repo, workflow, branch, max_age_hours: canary,
         posting_channel=CHANNEL,
         env_file=tmp_path / "absent.env",
+        ledger_appender=appender if appender is not None else _recording_appender([]),
+        **({} if clock is None else {"clock": clock}),
     )
+
+
+def _recording_appender(rows: list[str]) -> LedgerAppender:
+    """A LedgerAppender that records each row instead of writing a ledger."""
+
+    def append(row: str) -> None:
+        rows.append(row)
+
+    return append
 
 
 def _lane_drift_fixture(tmp_path: Path, *kinds: str) -> None:
@@ -1287,6 +1306,7 @@ def test_a_run_that_skipped_a_condition_cannot_be_constructed() -> None:
             ),
             raised=(),
             posting="disabled",
+            ledger="none",
         )
 
 
@@ -2278,6 +2298,424 @@ def test_a_repeat_of_the_same_condition_delivers_nothing(
         ledger=ledger,
     )
     assert posts.count(SHA) == 1
+
+
+# ---------------------------------------------------------------------------
+# A raised alarm reaches the ledger (OMN-20794)
+# ---------------------------------------------------------------------------
+#
+# MEASURED 2026-10-09: the lab alarm raised container_restarts for
+# omninode-runtime-effects at 10:25:05Z and delivered it to Slack only. The
+# rolling ledger held no lab-alarm row, so the orchestrator learned of the
+# crash 15 minutes later from a stale projection. A raised alarm now appends
+# ONE FRICTION row through the ledger's own append, independent of whether the
+# Slack channel is consented, configured or reachable.
+
+#: The ISO form ``_now`` produces, so a replayed clock is indistinguishable from
+#: the real one.
+_T0 = datetime(2026, 10, 9, 9, 25, 5, tzinfo=UTC)
+
+
+def _at(moment: datetime) -> Callable[[], str]:
+    return lambda: moment.isoformat(timespec="seconds")
+
+
+def _ledger_cells(row: str) -> dict[str, str]:
+    """Every ``key=value`` pipe cell of a ledger row."""
+    cells: dict[str, str] = {}
+    for cell in row.split(" | ")[2:]:
+        key, sep, value = cell.partition("=")
+        if sep:
+            cells[key.strip()] = value.strip()
+    return cells
+
+
+def _assert_row_satisfies_the_friction_guard(row: str) -> None:
+    """The obligations omnibase_internal's friction guard enforces, spelled here.
+
+    The guard lives in another repository, so a test that imported it would
+    skip wherever that clone is absent (the skip-count ratchet refuses that).
+    These are its three obligations for a FRICTION row, stated locally.
+    """
+    assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \| FRICTION \| ", row)
+    cells = _ledger_cells(row)
+    assert cells["lane"] == "lab-alarm"
+    assert re.search(r"\bOMN-\d+\b", cells["existing"])
+    assert re.search(r"\d", cells["cost"])
+    assert "\n" not in row
+
+
+@pytest.mark.unit
+def test_lab_alarm_appends_ledger_row_once_per_raise(tmp_path: Path) -> None:
+    """AC1: one row for a raise, none for a re-raise inside the dedupe window."""
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("| none |\n", encoding="utf-8")
+    rows: list[str] = []
+    appender = _recording_appender(rows)
+
+    first = _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=appender,
+        clock=_at(_T0),
+    )
+    assert [alarm.subject for alarm in first.raised] == ["savings-writer"]
+    assert len(rows) == 1, rows
+    _assert_row_satisfies_the_friction_guard(rows[0])
+    cells = _ledger_cells(rows[0])
+    assert cells["condition"] == "container_restarts"
+    assert cells["subject"] == "savings-writer"
+    assert "restarted 9 times" in cells["detail"]
+    assert "restart counts read: savings-writer=9/2 restarting" in cells["evidence"]
+    assert first.ledger.startswith("appended 1/1")
+
+    # Still bad on the next tick: edge-triggering raises nothing, so no row.
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=appender,
+        clock=_at(_T0 + timedelta(hours=1)),
+    )
+    assert len(rows) == 1
+
+    # Recovers, then re-raises one hour later: a NEW raise, inside the window.
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+        appender=appender,
+        clock=_at(_T0 + timedelta(hours=2)),
+    )
+    reraised = _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=appender,
+        clock=_at(_T0 + timedelta(hours=3)),
+    )
+    assert [alarm.subject for alarm in reraised.raised] == ["savings-writer"]
+    assert len(rows) == 1, "a re-raise inside the dedupe window appended a row"
+    assert "dedupe" in reraised.ledger
+
+    # Recovers and re-raises after the window has passed: a new row.
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+        appender=appender,
+        clock=_at(_T0 + timedelta(hours=4)),
+    )
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=appender,
+        clock=_at(_T0 + timedelta(hours=10)),
+    )
+    assert len(rows) == 2
+
+
+@pytest.mark.unit
+def test_lab_alarm_appends_ledger_row_without_a_consented_channel(
+    tmp_path: Path,
+) -> None:
+    """The ledger row does not wait on Slack consent, which is absent here."""
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("| no consent row |\n", encoding="utf-8")
+    rows: list[str] = []
+    run = _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=_recording_appender(rows),
+    )
+    assert run.posting.startswith("disabled")
+    assert len(rows) == 1
+
+
+@pytest.mark.unit
+def test_lab_alarm_appends_ledger_row_one_per_alarm_not_per_run(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("| none |\n", encoding="utf-8")
+    rows: list[str] = []
+    run = _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=_recording_appender(rows),
+    )
+    assert len(run.raised) == 2
+    assert sorted(_ledger_cells(row)["condition"] for row in rows) == [
+        "container_restarts",
+        "lab_pass_receipt",
+    ]
+
+
+@pytest.mark.unit
+def test_lab_alarm_ledger_row_cells_cannot_break_the_row(tmp_path: Path) -> None:
+    """A pipe or newline in a detail would split the row into other cells."""
+    from scripts.lab_alarm import render_ledger_row
+
+    alarm = ModelAlarm(
+        condition=EnumAlarmCondition.CONTAINER_RESTARTS,
+        subject="a|b",
+        detail="line one\nline two | TERMINAL | lane=other",
+    )
+    row = render_ledger_row(
+        alarm,
+        evidence="e | f",
+        stamp="2026-10-09T10:25:05Z",
+        raised_at="2026-10-09T10:25:05+00:00",
+        ticket="OMN-20769",
+    )
+    assert "\n" not in row
+    assert row.count(" | ") == len(_ledger_cells(row)) + 1 + 1  # stamp, type, cells
+    assert _ledger_cells(row)["lane"] == "lab-alarm"
+
+
+@pytest.mark.unit
+def test_lab_alarm_failed_ledger_append_is_loud_and_retried(tmp_path: Path) -> None:
+    """An alarm that believes it recorded and did not is this ticket's defect."""
+    from scripts.lab_alarm import EXIT_ALARM, exit_code
+
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("| none |\n", encoding="utf-8")
+    rows: list[str] = []
+
+    def broken(row: str) -> None:
+        raise LedgerAppendError("onex-ledger exited 75: lock timeout")
+
+    failed = _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=broken,
+        clock=_at(_T0),
+    )
+    assert "FAILED" in failed.ledger and "lock timeout" in failed.ledger
+    assert exit_code(failed) == EXIT_ALARM
+    assert rows == []
+
+    # The alarm is still active, so edge-triggering raises nothing new, yet the
+    # unwritten row is retried on the next tick and written exactly once.
+    healed = _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=_recording_appender(rows),
+        clock=_at(_T0 + timedelta(hours=1)),
+    )
+    assert healed.raised == ()
+    assert len(rows) == 1
+    assert _ledger_cells(rows[0])["raised_at"] == _T0.isoformat(timespec="seconds")
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=_recording_appender(rows),
+        clock=_at(_T0 + timedelta(hours=2)),
+    )
+    assert len(rows) == 1
+
+
+@pytest.mark.unit
+def test_lab_alarm_ledger_appender_runs_the_ledger_tool_without_a_shell(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[list[str], float]] = []
+
+    def runner(
+        argv: Sequence[str], *, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append((list(argv), timeout))
+        return _completed("")
+
+    append = make_ledger_appender(
+        ("onex-ledger-bin", "--flag"), tmp_path / "ledger.md", runner=runner
+    )
+    append("2026-10-09T10:25:05Z | FRICTION | lane=lab-alarm")
+    assert calls[0][0] == [
+        "onex-ledger-bin",
+        "--flag",
+        str(tmp_path / "ledger.md"),
+        "--timeout",
+        "60s",
+        "--append",
+        "2026-10-09T10:25:05Z | FRICTION | lane=lab-alarm",
+    ]
+
+    def refusing(
+        argv: Sequence[str], *, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        return _completed("", 2, "refused: FRICTION row carries no cost")
+
+    with pytest.raises(LedgerAppendError, match=r"exited 2.*no cost"):
+        make_ledger_appender(("x",), tmp_path / "ledger.md", runner=refusing)("row")
+
+    def hung(
+        argv: Sequence[str], *, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(list(argv), timeout)
+
+    with pytest.raises(LedgerAppendError, match="timed out"):
+        make_ledger_appender(("x",), tmp_path / "ledger.md", runner=hung)("row")
+
+
+@pytest.mark.unit
+def test_lab_alarm_shipped_config_declares_the_ledger_append(tmp_path: Path) -> None:
+    payload = json.loads(CONFIG.read_text(encoding="utf-8"))
+    command = payload["ledger_append_command"]
+    assert isinstance(command, list) and command[-1] == "onex-ledger"
+    assert re.fullmatch(r"OMN-\d+", payload["ledger_row_ticket"])
+    assert int(payload["ledger_dedupe_window_minutes"]) > 0
+
+
+#: The crash window of 2026-10-09, replayed. The hourly timer fires at :25, so
+#: three ticks bracket it: one before the crash loop began (~10:16Z), the one
+#: that raised it live (10:25:05Z), and the next. The restart counts are
+#: reconstructions of a loop that restarts every few minutes against the
+#: manifest's bound of 5: the facts established by the incident are the tick
+#: time, the container and that Slack was the only record.
+_CRASH_WINDOW_TICKS: tuple[tuple[str, str], ...] = (
+    ("2026-10-09T09:25:05+00:00", "0 running"),
+    ("2026-10-09T10:25:05+00:00", "7 restarting"),
+    ("2026-10-09T11:25:05+00:00", "19 restarting"),
+)
+
+
+@pytest.mark.unit
+def test_crash_loop_reaches_ledger_replay(tmp_path: Path) -> None:
+    """AC2: replaying 10:16Z to 10:40Z puts the crash loop in the ledger before 10:30Z."""
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("| none |\n", encoding="utf-8")
+    rows: list[str] = []
+    appender = _recording_appender(rows)
+    config_bounds = {"omninode-runtime-effects": 5, "omninode-runtime": 5}
+
+    for tick, status in _CRASH_WINDOW_TICKS:
+        container_table = {
+            name: _completed(
+                status if name == "omninode-runtime-effects" else "0 running"
+            )
+            for name in config_bounds
+        }
+        _replay_tick(
+            tmp_path,
+            ledger=ledger,
+            bounds=config_bounds,
+            table=container_table,
+            tick=tick,
+            appender=appender,
+        )
+
+    window_start = datetime(2026, 10, 9, 10, 16, tzinfo=UTC)
+    window_end = datetime(2026, 10, 9, 10, 40, tzinfo=UTC)
+    in_window = [
+        row
+        for row in rows
+        if window_start
+        <= datetime.strptime(row.split(" | ", 1)[0], "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=UTC
+        )
+        <= window_end
+    ]
+    assert len(rows) == 1, "exactly one row for the one raise across the whole replay"
+    assert in_window == rows
+    stamp = rows[0].split(" | ", 1)[0]
+    assert stamp < "2026-10-09T10:30:00Z", stamp
+    _assert_row_satisfies_the_friction_guard(rows[0])
+    cells = _ledger_cells(rows[0])
+    assert cells["condition"] == "container_restarts"
+    assert cells["subject"] == "omninode-runtime-effects"
+    assert "restarted 7 times" in cells["detail"]
+    assert "omninode-runtime-effects=7/5 restarting" in cells["evidence"]
+
+
+def _replay_tick(
+    tmp_path: Path,
+    *,
+    ledger: Path,
+    bounds: dict[str, int],
+    table: dict[str, subprocess.CompletedProcess[str]],
+    tick: str,
+    appender: LedgerAppender,
+) -> ModelAlarmRun:
+    """One real ``run_once`` tick over recorded docker readings at *tick*."""
+    config = ModelAlarmConfig(
+        repo="o/r",
+        lane=EnumLabLane.COMPOSE_DEV,
+        ready_url="http://lane/ready",
+        agent_url="http://lane:8098",
+        kafka_bootstrap_servers="lab-host:19092",
+        docker_command=("docker",),
+        container_restart_bounds=bounds,
+        consumer_groups=("savings",),
+        effects_group_prefix="group-",
+        effects_group_suffix="",
+        work_ledger_db_container="pg",
+        work_ledger_database="analytics",
+        work_ledger_max_lag=timedelta(minutes=30),
+        ledger_row_ticket="OMN-20769",
+        ledger_dedupe_window=timedelta(hours=6),
+    )
+    docker = _docker_runner(table)
+
+    def runner(
+        argv: Sequence[str], *, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        if "psql" in argv:
+            return _completed("2026-10-01 03:00:00+00\n")
+        return docker(argv, timeout=timeout)
+
+    fresh_row = "2026-10-01T03:00:00Z | STATUS | lane=fixture | projection fresh"
+    if fresh_row not in ledger.read_text(encoding="utf-8"):
+        with ledger.open("a", encoding="utf-8") as handle:
+            handle.write(fresh_row + "\n")
+    if not (tmp_path / "lane-census.json").exists():
+        _lane_drift_fixture(tmp_path)
+    return run_once(
+        config,
+        state_dir=tmp_path,
+        ledger_path=ledger,
+        sha=SHA,
+        receipt_reader=lambda repo, lane, sha: _receipt(
+            EnumLabPassResult.PASS, ok=True
+        ),
+        runner=runner,
+        lag_reader=_lag_reader({"savings": 1}),
+        effects_reader=_effects_reader(),
+        canary_reader=lambda repo, workflow, branch, max_age_hours: (0, CANARY_GREEN),
+        posting_channel=CHANNEL,
+        env_file=tmp_path / "absent.env",
+        ledger_appender=appender,
+        clock=lambda: tick,
+    )
 
 
 @pytest.mark.unit
