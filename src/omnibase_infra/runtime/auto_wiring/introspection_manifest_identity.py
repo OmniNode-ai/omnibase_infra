@@ -51,13 +51,13 @@ def bind_introspection_manifest_identity(
 ) -> ModelAutoWiringManifest:
     """Return a copy of ``manifest`` with build identity bound (OMN-10856).
 
-    Reuses ``manifest.contracts`` / ``manifest.errors`` verbatim — topology
+    Reuses ``manifest.contracts`` / ``manifest.errors`` / ``manifest.skips`` verbatim — topology
     is never re-derived here, only the identity fields are added — so this
     stays the single source for what auto-discovery found.
 
     Args:
         manifest: The (filtered or discovery-only) auto-wiring manifest to
-            enrich. Its ``contracts``/``errors`` are carried through
+            enrich. Its ``contracts``/``errors``/``skips`` are carried through
             unchanged.
         runtime_profile: The resolved ``RUNTIME_PROFILE`` identity (e.g.
             from ``load_runtime_profile().name``).
@@ -73,6 +73,7 @@ def bind_introspection_manifest_identity(
     return ModelAutoWiringManifest(
         contracts=manifest.contracts,
         errors=manifest.errors,
+        skips=manifest.skips,
         runtime_profile=runtime_profile,
         image_sha=image_sha,
         deployment_sha=deployment_sha,
