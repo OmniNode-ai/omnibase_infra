@@ -1,0 +1,53 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20794
+title: Lab alarm raises reach the ledger; failure-rate alerter covers three more repositories
+summary: scripts/lab_alarm.py appends one FRICTION row per newly raised alarm through onex-ledger, and omnibase_internal, omniclaude-internal and omnicursor join fleet_repos and scheduled_actions_repos so the GitHub-hosted zombie detector evaluates them.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-lab-alarm-ledger-row
+    statement: A raised lab alarm reaches the ledger once per raise and the three added repositories are evaluated by the GitHub-hosted share.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a raised lab alarm appends exactly one ledger row and a re-raise inside the dedupe window appends none -- falsifier: uv run pytest tests -q -k lab_alarm_appends_ledger_row'
+      - id: AC2
+        statement: 'AC2: replaying 2026-10-09 10:16Z to 10:40Z raises the crash-loop alarm into the ledger before 10:30Z -- falsifier: uv run pytest tests -q -k crash_loop_reaches_ledger_replay'
+      - id: AC3
+        statement: 'AC3: the three added repositories are in the GitHub-hosted share and the evaluator selects their scheduled runs there, not on h201 -- falsifier: uv run pytest tests/ci -q -k fleet_repos_include_internal'
+evidence_requirements:
+  - kind: tests
+    description: The lab alarm and fleet-repos tests pin the ledger append, the dedupe window, the crash-loop replay and the added repositories.
+    command: uv run pytest tests/ci/test_lab_alarm_omn18867.py tests/ci/test_fleet_repos_include_internal_omn20794.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20794-ac1
+    description: A raised alarm appends one ledger row and a re-raise inside the dedupe window appends none.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q -k lab_alarm_appends_ledger_row
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20794-ac2
+    description: The replay of the 2026-10-09 crash window appends the crash-loop row before 10:30Z.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q -k crash_loop_reaches_ledger_replay
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-20794-ac3
+    description: The three added repositories are in the GitHub-hosted share and are selected by the zombie detector there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_fleet_repos_include_internal_omn20794.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

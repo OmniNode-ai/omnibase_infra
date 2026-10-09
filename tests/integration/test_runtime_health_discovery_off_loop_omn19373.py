@@ -42,6 +42,7 @@ a memo validation.
 from __future__ import annotations
 
 import asyncio
+import gc
 import threading
 import time
 
@@ -125,6 +126,15 @@ async def test_the_real_contract_scan_does_not_hold_the_event_loop() -> None:
             gaps.append(now - last)
             last = now
 
+    # The heap the earlier tests in this xdist worker left behind is not part
+    # of the measurement (OMN-13902). Mid-split a worker holds millions of
+    # objects, and a full collection that the scan's allocations happen to
+    # trigger runs on the scan's thread holding the GIL: ~0.8s per pass at
+    # 16M objects, which stalled the loop for 1.265s of a 1.564s scan in
+    # merge group pr-4770-b333f365. Freezing what already exists keeps the
+    # collector to the objects this test allocates.
+    gc.collect()
+    gc.freeze()
     # Only the timing wrapper is substituted. The scan underneath is the real
     # one, including the entry-point walk and every contract.yaml read.
     monitor_module._discover_contracts = timed_discover  # type: ignore[assignment]
@@ -137,6 +147,7 @@ async def test_the_real_contract_scan_does_not_hold_the_event_loop() -> None:
             await task
     finally:
         monitor_module._discover_contracts = real_discover  # type: ignore[assignment]
+        gc.unfreeze()
 
     assert event is not None
     assert gaps, "the ticker never ran at all -- the loop was held throughout"

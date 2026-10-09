@@ -421,6 +421,7 @@ def test_gate_passes_when_every_core_service_is_running() -> None:
     ]
     report.manifest_ok = True
     report.health_ok = True
+    report.effects_health_ok = True
     report.cluster_healthy = True
 
     assert report.core_services_running is True

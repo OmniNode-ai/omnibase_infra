@@ -903,9 +903,28 @@ services:
       INFISICAL_CLIENT_ID: ${RUNTIME_EFFECTS_INFISICAL_CLIENT_ID:-}
       INFISICAL_CLIENT_SECRET: ${RUNTIME_EFFECTS_INFISICAL_CLIENT_SECRET:-}
       INFISICAL_ENVIRONMENT_SLUG: "dev"
+      #
+      # -- Deployment overlays for omnimarket's morning nodes (OMN-17427) ------
+      # node_morning_ground_state_orchestrator and
+      # node_morning_friction_sweep_orchestrator carry no deployment facts of
+      # their own: their briefs, report locations and defaults arrive in an
+      # overlay.yaml under <root>/<node name>/. That content is private, so this
+      # file declares only the mount and the variable that names it. The host
+      # directory is the operator env's DEV_LANE_SKILL_OVERLAY_ROOTS_DIR (on .201
+      # the private clone's config/onex/overlays), never a path in this repo.
+      #
+      # The default is an empty directory, not `:?`: the dev-105, dev-200, dev-202
+      # and pre-PR overlays layer this file and compose interpolates each file
+      # before merging. Unset, a morning run is refused with a typed error naming
+      # this variable, and the runtime boots with every other node wired. On
+      # 2026-10-09 the same absence crash-looped runtime-effects (14 restarts)
+      # because the node read its overlay while the runtime was wiring it.
+      ONEX_SKILL_OVERLAY_ROOTS: /etc/onex/skill-overlays
     volumes:
       # Read-only; names OMNIDASH_ANALYTICS_DB_URL, rendered above as role_omnidash.
       - ./projection-runtime-binding/runtime-read.yaml:/etc/onex/projection-read-binding.yaml:ro
+      # Read-only: the container reads overlays and can never rewrite one.
+      - ${DEV_LANE_SKILL_OVERLAY_ROOTS_DIR:-./skill-overlay-roots}:/etc/onex/skill-overlays:ro
     healthcheck:
       test:
         - CMD
