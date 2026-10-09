@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19747
+title: Resolve the runtime lane from the scope-keyed local-home overlay at startup and refuse a runtime with no declared lane
+summary: The kernel resolves the runtime.lane overlay immediately after the runtime profile, before discovery or runtime-host construction. A shared infra EFFECT handler owns selection, reads and validation; a missing, malformed or mismatched lane refuses with a named ProtocolConfigurationError, and role requirements are all-of.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-startup-lane-resolution
+    statement: The runtime kernel must resolve its lane from the runtime.lane overlay at startup, refuse to start when the lane is undeclared, and key health only on the main profile with a lab role.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the kernel refuses with a named ProtocolConfigurationError before discovery for a missing lane, missing document, malformed document or lane-id mismatch, and the startup contract wires through wire_from_manifest with its real handler -- falsifier: uv run pytest tests/unit/runtime/test_startup_lane_resolution.py -q'
+      - id: AC2
+        statement: 'AC2: runtime lane roles are all-of requirements and excluded contracts carry zero new discovery errors -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_roles.py -q'
+evidence_requirements:
+  - kind: tests
+    description: Startup lane resolution refusals and provenance logging are proven against the real kernel.
+    command: uv run pytest tests/unit/runtime/test_startup_lane_resolution.py -q
+  - kind: tests
+    description: Role requirements are all-of in auto-wiring.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_roles.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-startup-lane-ac1
+    description: The startup lane resolution tests pass.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_startup_lane_resolution.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-startup-lane-ac2
+    description: The runtime lane role tests pass.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_roles.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

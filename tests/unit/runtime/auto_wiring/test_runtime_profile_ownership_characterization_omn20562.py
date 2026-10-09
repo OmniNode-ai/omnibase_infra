@@ -10,8 +10,7 @@ declaration that keeps runtime behaviour identical is the one the default
 already produced.
 
 This test pins the observable fact the burn-down must not change: for every
-registered runtime profile, on every registered runtime lane and on a runtime
-that declares no lane, the contract is owned by ``main`` and by nothing else.
+registered runtime profile, with any deployment lane declaration, the contract is owned by ``main`` and by nothing else.
 It was committed and run green against the unchanged contracts first, and it
 must pass unchanged after them; that is the idempotency proof for the edit.
 """
@@ -27,6 +26,7 @@ from omnibase_core.constants.constants_runtime_lanes import REGISTERED_RUNTIME_L
 from omnibase_core.constants.constants_runtime_profiles import (
     REGISTERED_RUNTIME_PROFILES,
 )
+from omnibase_core.models.config_overlay import ModelRuntimeLaneDeclaration
 from omnibase_infra.runtime.auto_wiring.profile_ownership import (
     runtime_profile_owns_contract,
 )
@@ -49,11 +49,6 @@ FORMERLY_ALLOWLISTED_NODES: tuple[str, ...] = (
     "node_vector_store_effect",
 )
 
-_LANE_ENVIRONMENTS: tuple[dict[str, str], ...] = (
-    {},
-    *({ENV_RUNTIME_LANE: lane} for lane in sorted(REGISTERED_RUNTIME_LANES)),
-)
-
 
 def _raw_contract(node: str) -> dict[str, object]:
     loaded = yaml.safe_load((NODES_ROOT / node / "contract.yaml").read_text())
@@ -62,18 +57,32 @@ def _raw_contract(node: str) -> dict[str, object]:
 
 
 @pytest.mark.parametrize("node", FORMERLY_ALLOWLISTED_NODES)
-def test_contract_is_owned_by_main_and_only_main(node: str) -> None:
+@pytest.mark.parametrize(
+    "lane",
+    [
+        None,
+        ModelRuntimeLaneDeclaration.model_validate(
+            {
+                "schema_version": "runtime_lane.v1",
+                "lane_id": "customer-edge",
+                "roles": ["lab"],
+                "description": "customer deployment",
+            }
+        ),
+    ],
+)
+def test_contract_is_owned_by_main_and_only_main(
+    node: str, lane: ModelRuntimeLaneDeclaration | None
+) -> None:
     raw = _raw_contract(node)
-    for environ in _LANE_ENVIRONMENTS:
-        owners = sorted(
-            profile
-            for profile in REGISTERED_RUNTIME_PROFILES
-            if runtime_profile_owns_contract(raw, profile, environ=environ)
-        )
-        assert owners == ["main"], (
-            f"{node} on lane {environ or '<undeclared>'} is owned by {owners}; "
-            "the burn-down must leave it owned by main alone"
-        )
+    owners = sorted(
+        profile
+        for profile in REGISTERED_RUNTIME_PROFILES
+        if runtime_profile_owns_contract(raw, profile, lane=lane)
+    )
+    assert owners == ["main"], (
+        f"{node} is owned by {owners}; the burn-down must leave it owned by main alone"
+    )
 
 
 @pytest.mark.parametrize("node", FORMERLY_ALLOWLISTED_NODES)

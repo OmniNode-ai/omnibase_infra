@@ -27,13 +27,23 @@ Tier-2 regression (OMN-9252) can safely call it via `workflow_call`. Asserts:
 
 from __future__ import annotations
 
+import hashlib
+import os
 import re
+import shutil
+import stat
+import subprocess
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
+
+from omnibase_infra.handlers.handler_runtime_lane_resolution import (
+    HandlerRuntimeLaneResolution,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -410,6 +420,109 @@ def test_compose_runtime_boot_has_no_skip_path(
     assert "skip_reason" not in artifact_text
 
 
+def test_compose_launches_seed_and_name_the_runtime_lane(workflow: Workflow) -> None:
+    """OMN-19747: the kernel refuses to start without a runtime.lane overlay.
+
+    Compose mode seeds a run-scoped local-home source (mode 0600) and launches
+    both runtimes with that HOME, ONEX_ENVIRONMENT and ONEX_RUNTIME_LANE.
+    """
+    steps = _boot_steps(workflow)
+    names = [str(step.get("name", "")) for step in steps]
+    seed_name = "Seed the runtime lane overlay (compose mode)"
+    assert seed_name in names
+    seed_text = str(steps[names.index(seed_name)]["run"])
+    assert "umask 077" in seed_text
+    assert "config_source: local-home" in seed_text
+    assert "runtime.lane.json" in seed_text
+    assert '"schema_version": "runtime_lane.v1"' in seed_text
+    for launch_name in (
+        "Launch runtime (compose mode)",
+        "Launch runtime-effects (compose mode)",
+    ):
+        assert names.index(seed_name) < names.index(launch_name)
+        launch_text = str(steps[names.index(launch_name)]["run"])
+        assert 'HOME="$ONEX_RUNTIME_SEED_HOME"' in launch_text
+        assert 'ONEX_ENVIRONMENT="$ONEX_RUNTIME_SEED_ENVIRONMENT"' in launch_text
+        assert 'ONEX_RUNTIME_LANE="$ONEX_RUNTIME_SEED_LANE"' in launch_text
+
+
+@pytest.mark.live_contact(
+    "tests/fixtures/omn19747/compose-runtime-boot-lane-contact.json"
+)
+def test_compose_lane_seed_matches_the_lab_boot_that_went_healthy(
+    workflow: Workflow, tmp_path: Path, recorded_response: dict[str, object]
+) -> None:
+    """OMN-19747: the seed step's document is the one a real compose boot ran on.
+
+    The recording is a lab compose boot of both runtimes with this seed: both
+    resolved their lane from it and both /health bodies pass the hard gate.
+    Running the step here must write byte-identical, owner-only overlay files
+    the kernel's resolver accepts.
+    """
+    seeded = recorded_response["seeded_runtime_lane_document"]
+    assert isinstance(seeded, dict)
+    for key in ("runtime_health", "runtime_effects_health"):
+        body = recorded_response[key]
+        assert isinstance(body, dict)
+        assert body["status"] == "healthy"
+        assert body["details"]["is_running"] is True
+    lane_log = recorded_response["runtime_lane_resolved_log"]
+    assert isinstance(lane_log, dict)
+    for line in lane_log.values():
+        assert f"sha256={seeded['sha256']}" in line
+        assert "lane=ci-compose-boot" in line
+        assert "source=local-home" in line
+
+    steps = _boot_steps(workflow)
+    seed = next(
+        s
+        for s in steps
+        if s.get("name") == "Seed the runtime lane overlay (compose mode)"
+    )
+    run_id = f"pytest-{uuid.uuid4().hex}"
+    github_env = tmp_path / "github_env"
+    runtime_home: Path | None = None
+    try:
+        subprocess.run(
+            ["bash", "-c", str(seed["run"])],
+            check=True,
+            env={
+                **os.environ,
+                "GITHUB_RUN_ID": run_id,
+                "GITHUB_RUN_ATTEMPT": "1",
+                "GITHUB_ENV": str(github_env),
+            },
+        )
+        exported = dict(
+            line.split("=", 1) for line in github_env.read_text().splitlines()
+        )
+        runtime_home = Path(exported["ONEX_RUNTIME_SEED_HOME"])
+        assert runtime_home.name == f"onex-runtime-home-{run_id}-1"
+        document = (
+            runtime_home
+            / ".omninode"
+            / "config"
+            / exported["ONEX_RUNTIME_SEED_ENVIRONMENT"]
+            / exported["ONEX_RUNTIME_SEED_LANE"]
+            / "runtime.lane.json"
+        )
+        assert hashlib.sha256(document.read_bytes()).hexdigest() == seeded["sha256"]
+        for path in (document, runtime_home / ".onex" / "config.yaml"):
+            assert f"{stat.S_IMODE(path.stat().st_mode):o}" == seeded["mode"]
+        resolution = HandlerRuntimeLaneResolution().resolve(
+            environ={
+                "ONEX_ENVIRONMENT": exported["ONEX_RUNTIME_SEED_ENVIRONMENT"],
+                "ONEX_RUNTIME_LANE": exported["ONEX_RUNTIME_SEED_LANE"],
+            },
+            home=runtime_home,
+        )
+        assert resolution.sha256 == seeded["sha256"]
+        assert resolution.declaration.lane_id == "ci-compose-boot"
+    finally:
+        if runtime_home is not None:
+            shutil.rmtree(runtime_home, ignore_errors=True)
+
+
 def test_boot_health_wait_uses_jq_hard_gate(workflow: Workflow) -> None:
     """Health-wait step must assert the actual shape from health_checker.py:
     top-level `.status == "healthy"` AND `.details.is_running == true`, AND
@@ -520,8 +633,9 @@ def test_boot_has_rpk_group_list_step(workflow: Workflow) -> None:
     assert matched, "rpk group list check missing"
     step_texts = "\n".join(_step_text(s) for s in matched)
     assert "consumer_count" in step_texts
-    assert "local\\.omnibase_infra" in step_texts
-    assert "local\\.runtime_config" in step_texts
+    assert "[.]omnibase_infra[.]" in step_texts
+    assert "[.]runtime_config[.]" in step_texts
+    assert "onex_runtime_seed_environment" in step_texts
     assert "onex-runtime" not in step_texts
 
 

@@ -15,6 +15,7 @@ that would have got this muted, and muting is how the nine-day freeze
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import stat
@@ -2346,7 +2347,10 @@ def test_the_shipped_config_hardcodes_no_machine_address() -> None:
     assert "${ONEX_INFRA_HOST}" in payload["ready_url"]
     # The container that crash-looped unobserved for nine days carries the
     # tightest bound, so the alarm is actually armed against its own case.
-    bounds = payload["container_restart_bounds"]
+    assert "container_restart_bounds" not in payload
+    from scripts.lane_census_plan import load_manifest, restart_bounds_for_lane
+
+    bounds = restart_bounds_for_lane(load_manifest(), payload["census_lane"])
     assert (
         bounds["omnimarket-projection-savings-writer"]
         < bounds["omnibase-infra-redpanda"]
@@ -2380,6 +2384,54 @@ def test_the_shipped_config_loads_and_declares_every_condition_a_subject(
         / "actions"
         / "deploy-gate"
         / "validate_pr_deploy_required.py"
+    )
+
+
+@pytest.mark.unit
+def test_alarm_and_detector_read_changed_manifest_restart_bound(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import yaml
+
+    from scripts.lane_census_plan import build_plan, load_manifest
+
+    monkeypatch.setenv("ONEX_INFRA_HOST", "lab.invalid")
+    monkeypatch.setenv("ONEX_RUNTIME_SSH_HOST", "user@lab.invalid")
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path))
+    manifest = load_manifest()
+    for service in manifest["lanes"]["dev"]["services"]:
+        if service["name"] == "omnimarket-projection-savings-writer":
+            service["restart_bound"] = 1
+    manifest_path = tmp_path / "manifest.yaml"
+    manifest_path.write_text(yaml.safe_dump(manifest))
+    payload = json.loads(CONFIG.read_text())
+    payload["lane_manifest"] = str(manifest_path)
+    config_path = tmp_path / "alarm.json"
+    config_path.write_text(json.dumps(payload))
+    config = ModelAlarmConfig.load(config_path)
+    assert config.container_restart_bounds["omnimarket-projection-savings-writer"] == 1
+    report = evaluate_container_restarts(
+        {
+            "omnimarket-projection-savings-writer": config.container_restart_bounds[
+                "omnimarket-projection-savings-writer"
+            ]
+        },
+        runner=_docker_runner(
+            {"omnimarket-projection-savings-writer": _completed("2 running")}
+        ),
+    )
+    assert report.outcome is EnumConditionOutcome.ALARM
+    fixture = json.loads(
+        (REPO_ROOT / "tests/fixtures/lab_sync/inventory_clean.json").read_text()
+    )
+    for row in fixture["envelope"]["containers"]:
+        if row["Names"] == "omnimarket-projection-savings-writer":
+            row["RestartCount"] = 2
+    findings = build_plan(fixture["envelope"], load_manifest(manifest_path))["findings"]
+    assert any(
+        f["kind"] == "container_restart_loop"
+        and f["container"] == "omnimarket-projection-savings-writer"
+        for f in findings
     )
 
 
@@ -2832,3 +2884,39 @@ def test_the_shipped_config_declares_the_protected_lanes_chain_canary(
         "chain_canary_max_age_minutes",
     ):
         assert any(k.startswith("_comment_") and key in v for k, v in payload.items())
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/lane_census_health_recording.json")
+def test_recorded_manifest_unhealthy_runtime_readings_replay_census_threshold(
+    recorded_response: dict[str, Any],
+) -> None:
+    """Replay the captured healthy runtime, then vary only its health readings."""
+    from scripts.lane_census_plan import build_plan, load_manifest
+
+    manifest = load_manifest(REPO_ROOT / "deploy/lane-census/lane-manifest.yaml")
+    envelope = copy.deepcopy(recorded_response["response"])
+    runtime = envelope["containers"][0]
+    assert runtime["Health"] == {"Status": "healthy", "FailingStreak": 0}
+    assert runtime["HealthcheckIntervalSeconds"] == 30.0
+    assert runtime["RestartCount"] == 0
+    assert not any(
+        finding["kind"] == "container_unhealthy"
+        for finding in build_plan(envelope, manifest)["findings"]
+    )
+
+    # This is a synthetic control over recorded input, not a runtime mutation.
+    runtime["Health"] = {"Status": "unhealthy", "FailingStreak": 59}
+    assert not any(
+        finding["kind"] == "container_unhealthy"
+        for finding in build_plan(envelope, manifest)["findings"]
+    )
+    runtime["Health"]["FailingStreak"] = 60
+    unhealthy = [
+        finding
+        for finding in build_plan(envelope, manifest)["findings"]
+        if finding["kind"] == "container_unhealthy"
+    ]
+    assert len(unhealthy) == 1
+    assert unhealthy[0]["container"] == runtime["Names"]
+    assert unhealthy[0]["severity"] == "critical"
+    assert "1800s" in unhealthy[0]["detail"]

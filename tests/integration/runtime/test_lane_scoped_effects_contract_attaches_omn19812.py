@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_core.enums.enum_runtime_lane_role import EnumRuntimeLaneRole
+from omnibase_core.models.config_overlay import ModelRuntimeLaneDeclaration
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts_from_paths
 from omnibase_infra.runtime.auto_wiring.profile_ownership import (
     filter_manifest_for_runtime_profile,
@@ -30,6 +32,16 @@ runtime_lanes: [compose-dev, onex-lab, onex-lab-k3s]
 descriptor:
   runtime_profiles: [effects]
 """
+
+
+def _lane_declaration(lane: str) -> ModelRuntimeLaneDeclaration:
+    """The runtime.lane overlay document the deployment supplies for ``lane``."""
+    return ModelRuntimeLaneDeclaration(
+        schema_version="runtime_lane.v1",
+        lane_id=lane,
+        roles=(EnumRuntimeLaneRole.LAB,) if lane in LAB_SCOPE else (),
+        description=f"{lane} runtime lane",
+    )
 
 
 def _render_environments(files: tuple[str, ...]) -> dict[str, dict[str, str]]:
@@ -99,7 +111,9 @@ def test_lane_scoped_effects_contract_uses_rendered_placement(
         profile = environment["RUNTIME_PROFILE"]
         assert profile == expected_profile
         ownership = filter_manifest_for_runtime_profile(
-            manifest, profile, environ=environment
+            manifest,
+            profile,
+            lane=_lane_declaration(environment["ONEX_RUNTIME_LANE"]),
         )
         lane_errors = [
             error
@@ -108,9 +122,9 @@ def test_lane_scoped_effects_contract_uses_rendered_placement(
         ]
         assert not lane_errors, lane_errors
         assert environment["ONEX_RUNTIME_LANE"] == lane
-        assert ownership.runtime_lane == lane
         owned = {contract.name for contract in ownership.manifest.contracts}
         if profile == "effects":
+            assert ownership.runtime_lane == lane
             assert (CONTRACT_NAME in owned) is attaches
             assert (CONTRACT_NAME in ownership.lane_excluded_contracts) is not attaches
             assert CONTRACT_NAME not in ownership.skipped_contracts

@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19416
+title: Lane census grades container health and shares restart bounds with the lab alarm
+summary: The lane census planner reports container_unhealthy when an unhealthy streak times the healthcheck interval reaches the declared bound and container_restart_loop above the declared restart bound, and the lab alarm restart bounds move into the lane manifest.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19416
+    statement: A container whose unhealthy streak times healthcheck interval reaches 1800 seconds produces a container_unhealthy finding, and restart bounds are declared once in the lane manifest.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: Unhealthy streak times interval at or above the bound gives a container_unhealthy finding and healthy or starting states give none -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_plan.py -q -k unhealthy'
+      - id: AC2
+        statement: 'AC2: The lab alarm reads its container restart bounds from the lane manifest and config/lab_alarm.json carries none -- falsifier: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q'
+evidence_requirements:
+  - kind: tests
+    description: Planner unit tests cover the unhealthy threshold at 1770 and 1800 seconds and the healthy and starting states.
+    command: uv run pytest tests/unit/scripts/test_lane_census_plan.py -q -k unhealthy
+  - kind: tests
+    description: Alarm and manifest tests show the moved restart bounds equal the original values and the old config key is absent.
+    command: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19416-ac1
+    description: Planner unit tests cover the unhealthy threshold at 1770 and 1800 seconds and the healthy and starting states.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_lane_census_plan.py -q -k unhealthy
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-19416-ac2
+    description: Alarm and manifest tests show the moved restart bounds equal the original values and the old config key is absent.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_alarm_omn18867.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

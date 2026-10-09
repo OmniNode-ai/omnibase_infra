@@ -50,8 +50,9 @@ def test_entrypoint_hands_the_secret_store_volume_to_the_runtime_user() -> None:
     entrypoint = (DOCKER_DIR / "entrypoint-runtime.sh").read_text()
 
     repair_pos = entrypoint.index(
-        "chown -R omniinfra:omniinfra /home/omniinfra/.omninode"
+        "find /home/omniinfra/.omninode -path /home/omniinfra/.omninode/config -prune"
     )
+    assert "-o -exec chown omniinfra:omniinfra {} +" in entrypoint
     drop_pos = entrypoint.index('exec gosu omniinfra "$0" "$@"')
     assert repair_pos < drop_pos
     assert (

@@ -45,8 +45,9 @@ Drift kinds (named exactly so the auto-ticket says precisely what is wrong):
 
 Every kind, with its one severity, is declared in ``CENSUS_FINDING_KINDS``; the
 eleven lab-sync kinds that compare the inventory with the generated desired
-state are declared in ``LAB_SYNC_FINDING_KINDS`` (OMN-19411) and are not yet
-evaluated here (OMN-19414, OMN-19416).
+state are declared in ``LAB_SYNC_FINDING_KINDS`` (OMN-19411). OMN-19416 wires
+unhealthy and declared restart-loop evaluation. The remaining desired-state
+comparisons are not yet evaluated here.
 
 Host scoping (OMN-19088): every lane declares the host(s) it runs on
 (`hosts:`, naming entries of the top-level `hosts:` registry). The census
@@ -98,6 +99,7 @@ produced no findings. It exists so a consumer can tell that silence apart from
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import socket
@@ -108,6 +110,7 @@ from typing import Any, NamedTuple
 import yaml
 
 SCHEMA_VERSION = "1.1.0"
+DEFAULT_UNHEALTHY_AFTER_SECONDS = 1800
 
 # Names that identify no single host and so may never be a host alias. Every
 # Docker Desktop host reports the daemon name `docker-desktop` (measured on the
@@ -173,8 +176,8 @@ CENSUS_FINDING_KINDS: tuple[FindingKindSpec, ...] = (
 
 #: OMN-19411 (lab release sync plan, T0.2, section 4 B): the eleven kinds that
 #: compare the inventory with the generated desired state (``lab-desired-state.v1``,
-#: OMN-19410). DECLARED ONLY: nothing in this module evaluates them yet. T1.2
-#: (OMN-19414) and T1.3 (OMN-19416) add the evaluation, against the fixtures in
+#: OMN-19410). OMN-19416 evaluates health and declared restart bounds. The remaining
+#: comparisons await evaluation, against the fixtures in
 #: ``tests/fixtures/lab_sync/``, one per kind.
 #:
 #: Container-row fields beyond ``docker ps``: ``Health`` (``{"Status",
@@ -259,7 +262,100 @@ def load_manifest(path: Path | None = None) -> dict[str, Any]:
         data = yaml.safe_load(fh)
     if not isinstance(data, dict) or "lanes" not in data:
         raise ValueError(f"lane manifest missing 'lanes': {manifest_path}")
+    validate_service_bounds(data)
     return data
+
+
+def validate_service_bounds(manifest: dict[str, Any]) -> None:
+    """OMN-19416: health may alarm sooner; a declaration cannot defer it."""
+    for lane, spec in manifest["lanes"].items():
+        for service in spec.get("services", []):
+            threshold = service.get(
+                "unhealthy_after_seconds", DEFAULT_UNHEALTHY_AFTER_SECONDS
+            )
+            if (
+                type(threshold) is not int
+                or not 0 < threshold <= DEFAULT_UNHEALTHY_AFTER_SECONDS
+            ):
+                raise ValueError(
+                    f"{lane}/{service['name']}: unhealthy_after_seconds must be "
+                    f"an integer in 1..{DEFAULT_UNHEALTHY_AFTER_SECONDS}"
+                )
+            if "restart_bound" in service:
+                bound = service["restart_bound"]
+                if type(bound) is not int or bound < 0:
+                    raise ValueError(
+                        f"{lane}/{service['name']}: restart_bound must be a non-negative integer"
+                    )
+
+
+def restart_bounds_for_lane(manifest: dict[str, Any], lane: str) -> dict[str, int]:
+    """The alarm and detector share the per-service manifest declarations."""
+    validate_service_bounds(manifest)
+    if lane not in manifest["lanes"]:
+        raise ValueError(f"unknown census lane {lane!r}")
+    bounds = {
+        svc["name"]: svc["restart_bound"]
+        for svc in manifest["lanes"][lane].get("services", [])
+        if "restart_bound" in svc
+    }
+    if not bounds:
+        raise ValueError(f"census lane {lane!r} declares no restart_bound")
+    return bounds
+
+
+def _container_health_findings(
+    lane: str, service: dict[str, Any], actual: dict[str, Any]
+) -> list[dict[str, str]]:
+    """Grade declared containers using inspect readings, never the uptime string."""
+    findings: list[dict[str, str]] = []
+    name = service["name"]
+    bound = service.get("restart_bound")
+    if bound is not None:
+        count = actual.get("RestartCount")
+        if type(count) is not int or count < 0:
+            raise ValueError(f"{name}: RestartCount is missing or invalid")
+        if count > bound:
+            findings.append(
+                _finding(
+                    lane,
+                    "container_restart_loop",
+                    name,
+                    f"container {name!r} has restarted {count} times, past its declared bound of {bound}",
+                )
+            )
+    health = actual.get("Health")
+    if not _running(actual.get("State", ""), actual.get("Status", "")):
+        return findings
+    if not isinstance(health, dict) or health.get("Status") != "unhealthy":
+        return findings
+    streak = health.get("FailingStreak")
+    interval = actual.get("HealthcheckIntervalSeconds")
+    if (
+        type(streak) is not int
+        or streak < 0
+        or not isinstance(interval, (int, float))
+        or isinstance(interval, bool)
+        or not math.isfinite(interval)
+        or interval <= 0
+    ):
+        raise ValueError(
+            f"{name}: unhealthy Health.FailingStreak or HealthcheckIntervalSeconds is missing or invalid"
+        )
+    elapsed = streak * interval
+    threshold = service.get("unhealthy_after_seconds", DEFAULT_UNHEALTHY_AFTER_SECONDS)
+    if elapsed >= threshold:
+        findings.append(
+            _finding(
+                lane,
+                "container_unhealthy",
+                name,
+                f"container {name!r} is unhealthy for {elapsed:g}s "
+                f"(FailingStreak={streak} x interval={interval:g}s), "
+                f"at or above its {threshold}s bound",
+            )
+        )
+    return findings
 
 
 def _normalize_host(name: str) -> str:
@@ -516,6 +612,9 @@ def reconcile_lane(
             )
             continue
 
+        if actual is not None:
+            findings.extend(_container_health_findings(lane_name, svc, actual))
+
         if kind in ("oneshot", "keepalive"):
             # Run-to-completion container. Absence (compose removed it) is fine.
             if actual is None:
@@ -625,6 +724,7 @@ def _labels_to_dict(labels: Any) -> dict[str, str]:
 
 def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
     """Build the deterministic drift plan from the desired manifest + actual state."""
+    validate_service_bounds(manifest)
     requested_lane = envelope.get("lane")
     containers = envelope.get("containers", [])
     networks = set(envelope.get("networks", []))

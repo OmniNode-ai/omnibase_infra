@@ -19,7 +19,7 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_consta
     APPLIED_TOPIC,
     BROKER_CONTAINER,
     BROKER_INTERNAL_ADDRESS,
-    GENERIC_DLQ,
+    SEAM_DLQ,
 )
 from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane import (
     ConsumerFlowLane,
@@ -93,7 +93,7 @@ class _RecordedLane:
         elif "consume" in argv:
             out = (
                 json.dumps(self.envelope)
-                if GENERIC_DLQ in argv
+                if SEAM_DLQ in argv
                 else json.dumps({"value": json.dumps({"payload": {}}), "offset": 10})
             )
         else:
@@ -121,7 +121,7 @@ def test_c28_collection_pins_internal_broker_on_every_rpk_call() -> None:
     rpk_calls = [argv for argv in recorded.calls if "rpk" in argv]
     assert rpk_calls, "C28 collection must execute rpk through Docker"
     assert any(
-        "consume" in argv and GENERIC_DLQ in argv and ":" in argv[argv.index("-o") + 1]
+        "consume" in argv and SEAM_DLQ in argv and ":" in argv[argv.index("-o") + 1]
         for argv in rpk_calls
     ), "C28 collection must exercise the offset-range DLQ consume"
     for argv in rpk_calls:

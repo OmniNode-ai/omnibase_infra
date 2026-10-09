@@ -109,6 +109,10 @@ FORBIDDEN_SERVICE_FRAGMENTS = ("keycloak", "infisical")
 
 #: The .201 dev lane's declared service -> its dev-105 name. AC1.
 DEV_TO_DEV_105 = {
+    "omnibase-infra-postgres": "omnibase-infra-dev-105-postgres",
+    "omnibase-infra-redpanda": "omnibase-infra-dev-105-redpanda",
+    "omnibase-infra-valkey": "omnibase-infra-dev-105-valkey",
+    "omnimarket-projection-api": "omnimarket-dev-105-projection-api",
     "omninode-runtime": "omninode-dev-105-runtime",
     "omninode-runtime-effects": "omninode-dev-105-runtime-effects",
     "omnimarket-projection-tenant-registry-writer": "omnimarket-dev-105-projection-tenant-registry-writer",
