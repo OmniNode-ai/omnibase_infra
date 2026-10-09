@@ -2393,7 +2393,8 @@ def parse_partition_offsets(
 
     Labelled for the same reason TOTAL-LAG is: rpk pads the table differently between
     versions. The columns read here all precede MEMBER-ID, so a row whose member cells
-    are blank still carries them. Returns None when no table header is printed.
+    are blank still carries them. Returns None when no table header is printed or a
+    row's offsets are not numbers.
     """
     lines = stdout.splitlines()
     for index, line in enumerate(lines):
@@ -2418,9 +2419,11 @@ def parse_partition_offsets(
                     _offset_cell(committed),
                     _offset_cell(lag) or 0,
                 )
-            except ValueError as exc:
-                msg = f"partition row for {topic} is not numeric: {row.strip()!r}"
-                raise ValueError(msg) from exc
+            except ValueError:
+                # A row this parse cannot read makes the table unreadable as a
+                # whole, so the check judges the total alone, as it did before
+                # partitions were read, rather than refusing the group.
+                return None
         return offsets
     return None
 

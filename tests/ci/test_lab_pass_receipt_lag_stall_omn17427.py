@@ -21,6 +21,7 @@ import json
 import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -198,3 +199,55 @@ def test_the_recorded_broker_reply_parses_into_partition_offsets() -> None:
     assert reading.partitions["onex.evt.omniclaude.agent-actions.v1/0"] == (19861, 0)
     assert reading.partitions["onex.evt.omniclaude.agent-status.v1/0"] == (None, 0)
     assert len(reading.partitions) == 7
+
+
+def test_an_unparseable_partition_row_falls_back_to_the_total() -> None:
+    """A row the parse cannot read never turns a readable group into an unreadable one."""
+    reply = (
+        f"GROUP {GROUP}\nTOTAL-LAG 3\n\nTOPIC PARTITION CURRENT-OFFSET LAG\nt x 1 3\n"
+    )
+    reading = read_group_lag(ACCESS, GROUP, runner=_Runner(reply))
+    assert reading.total_lag == 3
+    assert reading.partitions is None
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/omn17427_rpk_live_events_writer_describe.json"
+)
+def test_two_live_reads_of_the_failing_group_replay_through_the_probe(
+    recorded_response: dict[str, Any],
+) -> None:
+    """The 10:02Z capture, 5 s apart, and the same second read with one heartbeat in flight."""
+    first_reply = recorded_response["response"]["stdout"]
+    second_reply = recorded_response["second_response"]["stdout"]
+    sample = sample_group_lag(ACCESS, [GROUP], runner=_Runner(first_reply))
+    assert sample[GROUP].partitions is not None
+    assert len(sample[GROUP].partitions) == 23
+
+    live = check_consumer_group_lag(
+        ACCESS,
+        [GROUP],
+        max_lag=10_000,
+        first_sample=sample,
+        runner=_Runner(second_reply),
+    )
+    assert live.ok is True, live.evidence
+
+    committed, _ = read_group_lag(
+        ACCESS, GROUP, runner=_Runner(second_reply)
+    ).partitions[f"{HEARTBEAT}/0"]
+    row = next(line for line in second_reply.splitlines() if line.startswith(HEARTBEAT))
+    cells = row.split()
+    # TOPIC PARTITION CURRENT-OFFSET LOG-START-OFFSET LOG-END-OFFSET LAG ...: the
+    # commit stays where it was, one more message lands, lag 1.
+    assert int(cells[2]) == committed
+    cells[4], cells[5] = str(committed + 1), "1"
+    in_flight_row = "  ".join(cells)
+    in_flight = second_reply.replace(row, in_flight_row).replace(
+        "TOTAL-LAG    0", "TOTAL-LAG    1"
+    )
+    replay = check_consumer_group_lag(
+        ACCESS, [GROUP], max_lag=10_000, first_sample=sample, runner=_Runner(in_flight)
+    )
+    assert "max TOTAL-LAG 1" in replay.evidence
+    assert replay.ok is True, replay.evidence
