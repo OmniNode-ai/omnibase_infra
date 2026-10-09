@@ -42,6 +42,8 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/runtime/auto_wiring/test_discovery.py -q -k test_skip_and_parse_rows_reconcile_paths
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
   - id: dod-discovery-skip-ac2
     description: Every real contract.yaml under src/omnibase_infra/nodes has exactly one discovery outcome (discovered, error or typed skip).
     source: manual
@@ -49,6 +51,8 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/runtime/test_discovery_skip_reconciliation_omn18713.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
   - id: dod-discovery-skip-ac3
     description: Skip rows survive profile filtering and introspection identity binding.
     source: manual
@@ -56,6 +60,8 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/runtime/auto_wiring/test_discovery.py -q -k test_skip_rows_survive_boot_manifest_transformations
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
   - id: dod-discovery-skip-ac4
     description: A recorded deployed manifest without skip rows still validates against the additive schema.
     source: manual
@@ -63,3 +69,5 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_discovery_manifest_live_replay.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
