@@ -11,8 +11,8 @@
 # doc-comment, which named a since-deleted HandlerLlmCliSubprocess class that
 # omniintelligence.review_pairing.cli_review never actually imported) with
 # two DIFFERENT lab models (OMN-17492, operator rulings 2026-09-25):
-# qwen3-review (Qwen3.8-27B on .201:8000) and gpt-oss-review (gpt-oss-120b
-# on the .200 Mac Studio, :8130). Private diffs go only to lab models, so
+# qwen3-review (Qwen3.8-27B on .201:8000) and gpt-oss-review (Qwen3.6-35B-A3B
+# on the .200 Mac Studio, :8131 via LLM_GPT_OSS_REVIEW_URL, OMN-20422). Private diffs go only to lab models, so
 # glm-review (a third-party cloud model) is removed, with its credential
 # and cloud-host allowlist (OPERATOR-CONSENT, rolling ledger row 4842).
 # qwen3-review-b is no longer a voter: it resolves to the same .201:8000
@@ -136,6 +136,18 @@ jobs:
       }}
     timeout-minutes: 35
 
+    # Lab-endpoint environment, job-level so the preflight and the review step
+    # read the SAME values (the preflight resolves URLs exactly as the reviewer
+    # does: os.environ.get(config.env_var, config.default_url)).
+    # LLM_ENDPOINT_CIDR_ALLOWLIST: the transport fail-closes if it is unset (there
+    # is no code default). It moved here from the two step-level env blocks
+    # (OMN-20422) so the job carries one annotated line per address, not two.
+    # LLM_GPT_OSS_REVIEW_URL: OMN-20422, RULING 2026-10-09T04:15:56Z. The
+    # gpt-oss-review key now names the Studio's Qwen3.6-35B-A3B on :8131; the
+    # registry default :8130 stays Qwen3.8-27B for delegation.
+    env:
+      LLM_ENDPOINT_CIDR_ALLOWLIST: "192.168.86.0/24"  # onex-allow-internal-ip OMN-8468 reason="LAN subnet allowlist for the review LLM endpoint hosts 192.168.86.201 and .200"
+      LLM_GPT_OSS_REVIEW_URL: "http://192.168.86.200:8131"  # onex-allow-internal-ip OMN-20422 reason="gpt-oss-review resolves its URL from this env var: the second voter is Qwen3.6-35B-A3B on the Studio's :8131"
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v7
@@ -214,7 +226,6 @@ jobs:
           # transport HMAC-signs every call with LOCAL_LLM_SHARED_SECRET and
           # fail-closes if it is absent.
           LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
-          LLM_ENDPOINT_CIDR_ALLOWLIST: "192.168.86.0/24"  # onex-allow-internal-ip OMN-8468 reason="LAN subnet allowlist for the review LLM endpoint hosts 192.168.86.201 and .200"
         run: |
           # -e is intentionally OMITTED: this probe must NEVER fail the job. Every
           # uncertain/ambiguous outcome FAILS OPEN to the full install + review.
@@ -363,14 +374,13 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
-          LLM_ENDPOINT_CIDR_ALLOWLIST: "192.168.86.0/24"  # onex-allow-internal-ip OMN-8468 reason="LAN subnet allowlist for the review LLM endpoint hosts 192.168.86.201 and .200; transport fail-closes if unset"
           REVIEW_JSON_PATH: ${{ github.workspace }}/hostile-review-result.json
         working-directory: ../omniintelligence
         run: |
           set -euo pipefail
 
           # Two different lab models (OMN-17492): qwen3-review (Qwen3.8-27B,
-          # .201) + gpt-oss-review (gpt-oss-120b, .200 Mac Studio). No
+          # .201) + gpt-oss-review (Qwen3.6-35B-A3B, .200 Mac Studio :8131). No
           # cloud reviewer: private diffs stay on the lab. Both must answer
           # for a verdict; a reviewer the reachability probe drops is
           # recorded in the result as failed with an "unreachable" error,
@@ -553,7 +563,7 @@ jobs:
               '| `Hostile Review Thread Gate` | Deterministic: unresolved hostile-reviewer threads exist | Fails until resolved (not yet a required context) |',
               '| `degraded` verdict | Fewer than 2 models succeeded (infra) | Fails this job with a named reason |',
               '',
-              '_Powered by [omniintelligence.review_pairing.cli_review](https://github.com/OmniNode-ai/omniintelligence) — multi-model adversarial review: qwen3-review (Qwen3.8-27B), gpt-oss-review (gpt-oss-120b) (OMN-8468/OMN-8524/OMN-17492)_',
+              '_Powered by [omniintelligence.review_pairing.cli_review](https://github.com/OmniNode-ai/omniintelligence) — multi-model adversarial review: qwen3-review (Qwen3.8-27B), gpt-oss-review (Qwen3.6-35B-A3B) (OMN-8468/OMN-8524/OMN-17492)_',
             ].join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({
