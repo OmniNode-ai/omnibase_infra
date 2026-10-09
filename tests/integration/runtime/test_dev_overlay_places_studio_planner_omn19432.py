@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: MIT
 """OMN-19432: the committed dev overlay places the .200 Studio planner as a spread peer.
 
-The rung was placed for gpt-oss-120b (OMN-19432) and since OMN-17427 (2026-10-08)
-serves Qwen3.6-35B-A3B as ``qwen3.6-35b-a3b`` on the same endpoint, with the same
-placement.
+The rung was placed for gpt-oss-120b (OMN-19432), served Qwen3.6-35B-A3B from
+OMN-17427 (2026-10-08), and since OMN-20422 (2026-10-09) serves Qwen3.8-27B as
+``Qwen3.8-27B`` on the same endpoint, with the same placement.
 
 The deployed dev lane reads this overlay, not the operator's host overlay: of 447
 delegation runs in the 24 hours to 2026-09-30, 438 ran on the deployed lane and
@@ -101,7 +101,7 @@ def test_the_committed_dev_overlay_renders_the_planner_behind_the_reasoning_rung
     declared = next(b for b in _dev_overlay()["backends"] if b["backend_id"] == _PLACED)
     backend = by_id[_PLACED]
 
-    assert backend["model_name"] == "qwen3.6-35b-a3b"
+    assert backend["model_name"] == "Qwen3.8-27B"
     assert backend["endpoint_url"] == declared["endpoint_url"]
     placement = backend["placement"]
     assert placement["tier"] == "local"
