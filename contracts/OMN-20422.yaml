@@ -20,10 +20,18 @@ requirements:
     acceptance:
       - id: AC4
         statement: 'AC4: sibling-pins.yaml and the hostile-reviewer clone name omniintelligence 33a29cdfba6f14be6f94c3c77a05e29f345c692b, and the retired gpt-oss-review key and its URL env var are gone -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_pin_omn20422.py -q'
+  - id: req-omn20422-shadow-timer
+    statement: The shadow reviewer tick runs from a lab-host user timer, never from a CI runner, and a stale or missing PR watcher state fails the tick visibly instead of reading as a quiet day.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: the timer and service run node_shadow_review_effect on a 15-minute UTC schedule, the freshness gate exits 3 on a missing or stale watcher state and 0 on a fresh one, and the env template sets nothing -- falsifier: uv run pytest tests/unit/scripts/test_shadow_review_timer_units.py -q'
 evidence_requirements:
   - kind: tests
     description: Recorded live-contact evidence and workflow checks cover the second voter's model, shared endpoint and quorum keys.
     command: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q
+  - kind: tests
+    description: The unit tests read the timer, service, env template and drift manifest, and run the service's own freshness gate on a missing, a stale and a fresh watcher state.
+    command: uv run pytest tests/unit/scripts/test_shadow_review_timer_units.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -65,3 +73,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
+  - id: dod-omn-20422-shadow-timer-ac5
+    description: The shadow-review timer unit tests pass at the head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_shadow_review_timer_units.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
