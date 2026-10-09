@@ -1,0 +1,51 @@
+schema_version: "1.0.0"
+ticket_id: OMN-13902
+title: the sibling lock refresh opens a PR only when a sibling pin moved, not when uv raised the lockfile format revision
+summary: The sibling lock refresh runs the latest uv against a lock an older uv wrote, and the newer uv raises the revision header and nothing else (revision 3 became 5 under uv 0.12.24), so the job opened a refresh PR with no sibling delta. The refresh step now restores the committed lock and reports no change when only the revision header differs.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn13902
+    statement: The sibling lock refresh opens a PR when a line of uv.lock other than its revision header changed, and opens none when only the revision header changed.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: A lock rewritten only in its revision header leaves the tree at the committed lock and reports changed=false; it reports changed=true today -- falsifier: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k revision_only'
+evidence_requirements:
+  - kind: tests
+    description: The refresh step's own shell runs against a throwaway git repository with a stub uv that rewrites only the revision header, and the step reports no change.
+    command: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k revision_only
+  - kind: tests
+    description: A stub uv that also moves a sibling pin still produces changed=true.
+    command: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k moved_sibling_pin
+  - kind: tests
+    description: A stub uv that writes the committed lock back produces changed=false.
+    command: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k unchanged_lock
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-13902-ac1
+    description: A lock rewritten only in its revision header leaves the tree at the committed lock and reports changed=false.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k revision_only
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-13902-ac2
+    description: A lock whose sibling pin moved still reports changed=true and keeps the new lock.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k moved_sibling_pin
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-13902-ac3
+    description: An unchanged lock reports changed=false.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_sibling_lock_refresh_uv_pin_omn13902.py -q -k unchanged_lock
+        cwd: ${OMNI_HOME}/omnibase_infra

@@ -132,9 +132,18 @@ jobs:
             echo "::error::uv.lock still contains the internal Tailscale-only mirror host (tail75df5e.ts.net) after the UV_DEFAULT_INDEX/UV_INDEX_URL/PIP_INDEX_URL override — refusing to open a non-portable PR. See OMN-16433." >&2
             exit 1
           fi
-          if git diff --quiet -- uv.lock; then
+          # OMN-13902: a uv newer than the one that wrote the committed lock
+          # raises the `revision =` header and nothing else (3 -> 5 under uv
+          # 0.12.24 on 2026-10-09). The core/spi/compat pins are exact in
+          # [tool.uv] override-dependencies, so that header was the whole
+          # "refresh" and opened a PR with no sibling delta. A format revision
+          # is not a sibling pin moving: restore the committed lock and report
+          # no change unless some other line differs.
+          if diff -q <(git show HEAD:uv.lock | grep -v '^revision = ') \
+                     <(grep -v '^revision = ' uv.lock) > /dev/null; then
+            git checkout -- uv.lock
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "uv.lock unchanged — all sibling pins already fresh."
+            echo "uv.lock unchanged apart from its format revision — all sibling pins already fresh."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "Sibling lock delta:"

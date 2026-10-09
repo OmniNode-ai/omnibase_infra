@@ -258,6 +258,7 @@ class TestReceiptKeepsTheDimensions:
             )
         else:
             kwargs["container_ids"] = {}
+            kwargs["effects_health_url"] = "http://x/effects/health"
         report = module.run_health_gate(**kwargs)
         rendered = report.to_dict()
         assert rendered["health_dimensions"], (
