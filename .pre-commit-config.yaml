@@ -2445,6 +2445,16 @@ repos:
         name: Skip count baseline can only shrink (OMN-19677)
         args: [--baseline, config/skip_count_baseline.yaml, --parser, 'yaml-counted-list-map:suites', --base-ref, origin/dev]
         files: ^config/skip_count_baseline\.yaml$
+  # OMN-20782: the public-repo hygiene gate over the lines a commit adds, at the
+  # same omniclaude revision as .github/workflows/public-repo-hygiene.yml, so the
+  # local verdict and the CI verdict cannot diverge. The hook reads the private
+  # denylist from the file named by OMNI_HYGIENE_VOCAB_PATH, with the lab
+  # vocabulary beside it, and fails closed without them.
+  - repo: https://github.com/OmniNode-ai/omniclaude
+    rev: 6e47aa311ac5d177d116d9597b07966a233d2463
+    hooks:
+      - id: public-repo-hygiene
+        require_serial: true
   # OMN-19666: VCS-backed additional_dependencies can inherit GIT_INDEX_FILE
   # during a cold-cache commit and overwrite the committing worktree index.
   - repo: local

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 import yaml
@@ -132,3 +133,23 @@ def _sweep(conclusion: str) -> list[str]:
 def test_a_red_hygiene_gate_fails_the_ci_summary_sweep_and_green_passes() -> None:
     assert _sweep("failure") == [f"{HYGIENE_CONTEXT} (failure)"]
     assert _sweep("success") == []
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/public_repo_hygiene_added_lines_omn20782.json"
+)
+def test_gate_at_the_pin_fails_a_planted_lab_config_literal(
+    recorded_response: dict[str, object],
+) -> None:
+    """The recorded run of the real gate, at the revision both callers use."""
+    recording = cast("dict[str, object]", recorded_response["response"])
+    assert recording["gate_rev"] == GATE_REV
+    assert recording["exit_code"] == 1
+    assert "1 enforced finding(s) on lines this change adds" in cast(
+        "str", recording["enforce_scope_line"]
+    )
+    assert [
+        f.rsplit(": ", 1)[-1] for f in cast("list[str]", recording["added_findings"])
+    ] == ["lab-config"]
+    assert recording["gate_rev"] in WORKFLOW.read_text()
+    assert recording["gate_rev"] in PRECOMMIT.read_text()
