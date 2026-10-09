@@ -102,13 +102,68 @@ class FakeIO:
             self.envelope = json.loads(kwargs["input"])
             out = "Produced to partition 0 at offset 42"
         elif "consume" in argv:
-            if script.GENERIC_DLQ in argv:
+            if script.SEAM_DLQ in argv:
                 out = json.dumps(self.envelope)
             else:
                 out = json.dumps({"value": json.dumps({"payload": {}}), "offset": 10})
         else:
             raise AssertionError(argv)
         return subprocess.CompletedProcess(argv, 0, out, "")
+
+
+@pytest.mark.parametrize("collector", ["node", "script"])
+def test_marker_count_uses_seam_dlq_when_generic_dlq_also_advances(
+    collector: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_collection import (
+        observe_lane,
+    )
+    from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane import (
+        ConsumerFlowLane,
+    )
+
+    # OMN-17427: the subscriber's declared DLQ owns the malformed marker.
+    monkeypatch.setattr(script.time, "sleep", lambda _: None)
+    fake = FakeIO()
+    generic_dlq = "onex.dlq.omnibase-infra.events.v1"
+    watermarks = {script.SEAM_DLQ: 6, generic_dlq: 100}
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        proc = fake.run(argv, **kwargs)
+        if "produce" in argv:
+            watermarks[script.SEAM_DLQ] += 1
+            watermarks[generic_dlq] += 2
+        elif "describe" in argv and argv[-1] in watermarks:
+            proc.stdout = f"PARTITION HIGH-WATERMARK\n0 {watermarks[argv[-1]]}\n"
+        elif "consume" in argv and generic_dlq in argv:
+            proc.stdout = '100\t{"unrelated": 1}\n101\t{"unrelated": 2}\n'
+        return proc
+
+    lane = ConsumerFlowLane(
+        docker="fake-docker",
+        base_url="http://projection.test",
+        runner=run,
+        urlopen=fake.http,
+        sleep=lambda _: None,
+    )
+    collect = observe_lane if collector == "node" else script.observe_lane
+    observed = collect(lane, samples=2, interval=0, settle_seconds=0, injection_wait=0)
+
+    injection = observed["boot"]["injection"]
+    assert watermarks[generic_dlq] == 102
+    assert injection["dlq_copies"] == 1
+    assert injection["seam_dlq_before"] == 6
+    assert injection["seam_dlq_after"] == 7
+    assert observed["boot"]["seam_dlq_hwm"] == [6, 7]
+    consumes = [argv for argv, _ in fake.calls if "consume" in argv]
+    marker_consumes = [argv for argv in consumes if script.SEAM_DLQ in argv]
+    assert len(marker_consumes) == 1
+    assert marker_consumes[0][marker_consumes[0].index("-o") + 1] == "6:7"
+    assert all(generic_dlq not in argv for argv in consumes)
+    assert (
+        sum("describe" in argv and script.SEAM_DLQ in argv for argv, _ in fake.calls)
+        == 3
+    )
 
 
 def test_full_collection_uses_bounded_io_and_restores_mutations(tmp_path: Path) -> None:

@@ -25,7 +25,6 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_consta
     BOUNDARY_RE,
     BRANCHES,
     CURSOR_FIELD,
-    GENERIC_DLQ,
     KINDS,
     NEGATIVE_TESTS,
     PAIRING_LOOKAHEAD,
@@ -320,7 +319,7 @@ def inject(lane: ConsumerFlowLane) -> TypedDictConsumerFlowInjection:
 def observe_injection(
     lane: ConsumerFlowLane,
     inj: TypedDictConsumerFlowInjection,
-    dlq_before: int,
+    seam_dlq_before: int,
     wait_seconds: float,
 ) -> TypedDictConsumerFlowInjection:
     deadline = lane.monotonic() + wait_seconds
@@ -341,15 +340,15 @@ def observe_injection(
                 if (m := BOUNDARY_RE.search(ln))
                 and m.group("cid") == inj["correlation_id"]
             )
-        dlq_after = lane.high_watermark(GENERIC_DLQ)
+        seam_dlq_after = lane.high_watermark(SEAM_DLQ)
         copies = 0
-        if dlq_after > dlq_before:
+        if seam_dlq_after > seam_dlq_before:
             out = lane.rpk(
                 "topic",
                 "consume",
-                GENERIC_DLQ,
+                SEAM_DLQ,
                 "-o",
-                f"{dlq_before}:{dlq_after}",
+                f"{seam_dlq_before}:{seam_dlq_after}",
                 "-f",
                 "%o\\t%v\\n",
                 timeout=120,
@@ -361,8 +360,8 @@ def observe_injection(
                 "validation_errors_after": errors,
                 "boundary_lines": boundaries,
                 "dlq_copies": copies,
-                "generic_dlq_before": dlq_before,
-                "generic_dlq_after": dlq_after,
+                "seam_dlq_before": seam_dlq_before,
+                "seam_dlq_after": seam_dlq_after,
             }
         lane.sleep(10)
 
@@ -470,9 +469,8 @@ def _observe_settled(
         else None
     )
 
-    dlq_before = lane.high_watermark(GENERIC_DLQ)
     seam_dlq_before = lane.high_watermark(SEAM_DLQ)
-    inj = observe_injection(lane, inject(lane), dlq_before, injection_wait)
+    inj = observe_injection(lane, inject(lane), seam_dlq_before, injection_wait)
     seam_dlq_after = lane.high_watermark(SEAM_DLQ)
 
     changed = _changed_boot_containers(ident_before, lane.identity())
