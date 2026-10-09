@@ -28,7 +28,6 @@ dod_evidence:
   - id: dod-repo-evidence-s6-part1-ac1
     description: The focused cutover test proves the full-SHA pin and enforcing caller inputs.
     source: manual
-    binds_ac: [AC1]
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s6_part1
@@ -36,7 +35,6 @@ dod_evidence:
   - id: dod-repo-evidence-s6-part1-ac2
     description: The audit tests prove the single named exception and its fail-closed shape.
     source: manual
-    binds_ac: [AC2]
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -k pull_request_target
