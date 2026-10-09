@@ -163,6 +163,11 @@ services:
     container_name: omnibase-infra-dev-200-autoheal
   phoenix:
     container_name: omnibase-infra-dev-200-phoenix
+    # OMN-19417: the census declares this container running and the lane_sync
+    # check fails the lab-pass receipt while it is absent. The agent's deps leg
+    # (`--profile core up -d`, no service list) is the only leg that starts a
+    # service outside its runtime list, so Phoenix joins `core` on this lane.
+    profiles: !override ["core", "runtime", "full"]
     ports: !override
       - "127.0.0.1:42006:6006"
   omninode-runtime:
