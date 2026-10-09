@@ -41,6 +41,8 @@ def test_second_voter_endpoint_serves_a_different_model_than_the_first(
     assert served == ["qwen3.6-35b-a3b"]
     assert FIRST_VOTER_MODEL not in served
     assert recording["completion"]["finish_reason"] == "stop"
+    # The recording was taken on port 8131; the workflow must send the voter there.
+    assert urlparse(_job_env()["LLM_LOCAL_STUDIO_PLANNER_URL"]).port == 8131
 
 
 def test_review_and_preflight_share_one_second_voter_url_on_port_8131() -> None:
