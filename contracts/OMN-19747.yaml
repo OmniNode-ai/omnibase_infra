@@ -1,0 +1,42 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19747
+title: Revert the unresolved-lane refusal so the runtime boots on the compose dev lane
+summary: Reverts #4750, which made the runtime refuse to start whenever INFISICAL_ADDR is set and no store config overlay was built, and restores the lane identity and profile ownership behaviour that preceded it.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-restore-lane-identity-behaviour
+    statement: The runtime lane identity and profile ownership modules behave as they did before #4750, with no lane-resolution node, handler or discovery gating on roles.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: profile ownership scopes declared runtime lanes as before -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_scope_omn19408.py -q'
+      - id: AC2
+        statement: 'AC2: the dev lane runtime lane identity resolves as before -- falsifier: uv run pytest tests/unit/scripts/test_omn19144_dev_lane_runtime_lane_identity.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The restored lane scope and lane identity tests pass at this head.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_scope_omn19408.py tests/unit/scripts/test_omn19144_dev_lane_runtime_lane_identity.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19747-ac1
+    description: Profile ownership scopes declared runtime lanes as before #4750.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_scope_omn19408.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-19747-ac2
+    description: The dev lane runtime lane identity resolves as before #4750.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_omn19144_dev_lane_runtime_lane_identity.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
