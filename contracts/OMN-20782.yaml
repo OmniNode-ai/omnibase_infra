@@ -37,9 +37,12 @@ dod_evidence:
     binds_ac:
       - AC1
   - id: dod-omn-20782-precommit-and-sweep
-    description: The pre-commit hook runs the gate at the same revision, and a red public-repo-hygiene row fails the CI Summary sweep while a green one passes. The hook's refusal of a staged literal (AC2) is quoted in the PR body.
+    description: The pre-commit hook runs the gate at the same revision, the recorded `pre-commit run public-repo-hygiene` over a staged planted literal exits 1 (AC2), and a red public-repo-hygiene row fails the CI Summary sweep while a green one passes (AC3).
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_public_repo_hygiene_enforcement_omn20782.py -q -k "precommit_runs_the_gate_hook or ci_summary_sweep"
+        check_value: uv run pytest tests/ci/test_public_repo_hygiene_enforcement_omn20782.py -q -k "precommit_runs_the_gate_hook or planted_lab_config_literal or ci_summary_sweep"
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+      - AC3
