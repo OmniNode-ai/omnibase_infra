@@ -18,6 +18,11 @@ requirements:
     acceptance:
       - id: AC3
         statement: 'AC3: repo-evidence / dod-verify is a member of EXPECTED_EXTERNAL_CONTEXTS, a pull_request check-run set without it fails the expected-context evaluation naming it, and a green pull_request_target row satisfies it -- falsifier: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q fails at the merge base'
+  - id: req-scratch-always-pass
+    statement: Scratch control. A criterion bound to a test that already passes at the merge base proves nothing about this change.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: scratch control bound to a test that passes at the merge base -- falsifier: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q'
 evidence_requirements:
   - kind: tests
     description: The caller enforces at the caller-mode success-no-op pin without waiting for OCC comparison.
@@ -60,3 +65,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-scratch-always-pass-ac4
+    description: Scratch control bound to a test that passes at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
