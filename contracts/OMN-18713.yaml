@@ -1,0 +1,65 @@
+schema_version: "1.0.0"
+ticket_id: OMN-18713
+title: Typed manifest.skips for contract discovery
+summary: Path-based contract discovery reports policy skips as typed manifest.skips rows, separate from errors, so a caller can tell a skip from a clean run.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-discovery-skip-rows
+    statement: Discovery must account for every input contract path exactly once as discovered, an error row or a typed skip row.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: Skip and parse-error rows carry contract path, reason and message and reconcile every input path exactly once. -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_discovery.py -q -k test_skip_and_parse_rows_reconcile_paths'
+      - id: AC2
+        statement: 'AC2: Every real contract.yaml under src/omnibase_infra/nodes has exactly one discovery outcome (discovered, error or typed skip). -- falsifier: uv run pytest tests/integration/runtime/test_discovery_skip_reconciliation_omn18713.py -q'
+      - id: AC3
+        statement: 'AC3: Skip rows survive profile filtering and introspection identity binding. -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_discovery.py -q -k test_skip_rows_survive_boot_manifest_transformations'
+      - id: AC4
+        statement: 'AC4: A recorded deployed manifest without skip rows still validates against the additive schema. -- falsifier: uv run pytest tests/ci/test_discovery_manifest_live_replay.py -q'
+evidence_requirements:
+  - kind: tests
+    description: Skip and parse-error rows carry contract path, reason and message and reconcile every input path exactly once.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_discovery.py -q -k test_skip_and_parse_rows_reconcile_paths
+  - kind: tests
+    description: Every real contract.yaml under src/omnibase_infra/nodes has exactly one discovery outcome (discovered, error or typed skip).
+    command: uv run pytest tests/integration/runtime/test_discovery_skip_reconciliation_omn18713.py -q
+  - kind: tests
+    description: Skip rows survive profile filtering and introspection identity binding.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_discovery.py -q -k test_skip_rows_survive_boot_manifest_transformations
+  - kind: tests
+    description: A recorded deployed manifest without skip rows still validates against the additive schema.
+    command: uv run pytest tests/ci/test_discovery_manifest_live_replay.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-discovery-skip-ac1
+    description: Skip and parse-error rows carry contract path, reason and message and reconcile every input path exactly once.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_discovery.py -q -k test_skip_and_parse_rows_reconcile_paths
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-discovery-skip-ac2
+    description: Every real contract.yaml under src/omnibase_infra/nodes has exactly one discovery outcome (discovered, error or typed skip).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_discovery_skip_reconciliation_omn18713.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-discovery-skip-ac3
+    description: Skip rows survive profile filtering and introspection identity binding.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_discovery.py -q -k test_skip_rows_survive_boot_manifest_transformations
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-discovery-skip-ac4
+    description: A recorded deployed manifest without skip rows still validates against the additive schema.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_discovery_manifest_live_replay.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
