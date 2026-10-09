@@ -288,8 +288,15 @@ def test_a_bus_backed_exposure_with_a_registry_reader_passes(tmp_path: Path) -> 
     )
 
 
+@pytest.mark.parametrize(
+    "reader",
+    [
+        pytest.param(_backend_reader(), id="required-keys-only"),
+        pytest.param(_backend_reader(read_all_rows=True), id="read-all-rows"),
+    ],
+)
 def test_a_bus_backed_exposure_with_a_typed_backend_reader_passes(
-    tmp_path: Path,
+    tmp_path: Path, reader: dict[str, object]
 ) -> None:
     contracts = tmp_path / "contracts"
     _write_contract(
@@ -299,7 +306,7 @@ def test_a_bus_backed_exposure_with_a_typed_backend_reader_passes(
             "expose": True,
             "topic": "onex.snapshot.projection.prod-promotion-gate.v1",
             "bus_backed": True,
-            "backend_readers": [_backend_reader()],
+            "backend_readers": [reader],
         },
     )
     registry = _write_registry(tmp_path / "registry.json", {"w": [REGISTRATION_TOPIC]})
@@ -331,6 +338,10 @@ def test_a_bus_backed_exposure_with_a_typed_backend_reader_passes(
             [_backend_reader(projection_slot="other_panel")], id="unknown-slot"
         ),
         pytest.param([_backend_reader(id="other_status_page")], id="unknown-reader-id"),
+        pytest.param(
+            [_backend_reader(read_all_rows="yes")], id="read-all-rows-not-bool"
+        ),
+        pytest.param([_backend_reader(read_every_row=True)], id="unknown-key"),
         pytest.param(
             [_backend_reader(), _backend_reader(projection_slot="secondary_gate")],
             id="duplicate-id",
