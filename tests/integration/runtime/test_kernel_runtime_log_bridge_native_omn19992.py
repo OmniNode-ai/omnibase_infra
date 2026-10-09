@@ -82,7 +82,6 @@ async def test_native_kernel_publishes_runtime_error_event(
     wire_infrastructure_mock: MagicMock,
 ) -> None:
     runtime_conftest.force_inmemory_runtime_config(monkeypatch, tmp_path)
-    runtime_conftest.declare_runtime_lane_for_bootstrap(monkeypatch)
     monkeypatch.delenv("OMNIBASE_INFRA_DB_URL", raising=False)
     monkeypatch.setenv("ENABLE_RUNTIME_LOG_BRIDGE", "true")
     topic = ServiceTopicRegistry.from_defaults().resolve(topic_keys.RUNTIME_ERROR)
