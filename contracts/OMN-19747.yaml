@@ -32,6 +32,8 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/runtime/test_startup_lane_resolution.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
   - id: dod-startup-lane-ac2
     description: The runtime lane role tests pass.
     source: manual
@@ -39,3 +41,5 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/runtime/auto_wiring/test_runtime_lane_roles.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
