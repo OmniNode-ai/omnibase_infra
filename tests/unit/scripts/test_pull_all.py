@@ -17,11 +17,15 @@ from pathlib import Path
 import pytest
 
 from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
+    load_runner_fleet_config,
+)
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
 PULL_ALL = SCRIPTS_DIR / "pull-all.sh"
 PLIST = SCRIPTS_DIR / "ai.omninode.bare-clone-sync.plist"
 INSTALL_SCRIPT = SCRIPTS_DIR / "install-bare-clone-sync.sh"
+RUNNER_FLEET = SCRIPTS_DIR.parent / "config" / "runner_fleet.yaml"
 
 # OMN-15590: the caller-checkable terminal completion signal. A caller must be
 # able to distinguish {clean, drift-timeout, drift-fail} runs from ONE
@@ -2208,7 +2212,13 @@ class TestKnowledgeBaseClonesInRegistry:
         body = PULL_ALL.read_text()
         repos_block = body.split("REPOS=(", 1)[1].split(")", 1)[0]
         listed = repos_block.split()
-        for name in ("knowledge_base", "knowledge-base-internal"):
+        fleet = load_runner_fleet_config(RUNNER_FLEET)
+        assert fleet.git_mirror is not None
+        knowledge_bases = [
+            r for r in fleet.git_mirror.repos if r.startswith("knowledge")
+        ]
+        assert len(knowledge_bases) == 2, knowledge_bases
+        for name in knowledge_bases:
             assert name in listed, (
                 f"{name} is a canonical clone under $OMNI_HOME that lanes read, "
                 f"but a bare pull-all.sh never syncs it; REPOS={listed}"

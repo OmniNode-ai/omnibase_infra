@@ -348,7 +348,9 @@ def test_runner_fleet_config_tool_cache_durability_is_recorded() -> None:
 
     procedure = config.tool_cache.recreate_procedure
     kb, _, kb_path = procedure.partition(":")
-    assert kb in {"knowledge_base", "knowledge-base-internal"}, procedure
+    assert config.git_mirror is not None
+    knowledge_bases = {r for r in config.git_mirror.repos if r.startswith("knowledge")}
+    assert kb in knowledge_bases, procedure
     assert kb_path.endswith(".md"), procedure
     assert not kb_path.startswith("/"), procedure
     assert len(Path(kb_path).parts) >= 2, procedure
