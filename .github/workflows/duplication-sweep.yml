@@ -78,7 +78,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnidash
-          ref: cc628179717f4830bdd6c5a5e1b8d0c7bc4042ff # .github/sibling-pins.yaml
+          ref: 25838155efe1a8ebae874c76f8f404302ac18096 # .github/sibling-pins.yaml
           path: sweep-home/omnidash
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           sparse-checkout: |

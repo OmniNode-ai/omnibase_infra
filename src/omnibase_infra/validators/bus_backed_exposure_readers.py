@@ -41,7 +41,11 @@ WHAT COUNTS AS A READER
    (``src/templates/*.ts`` -- ``DASHBOARD_TEMPLATES``, NOT the gitignored
    ``dashboard-layouts/``). Strictly stronger than (1); either satisfies the gate, and
    the report says which.
-3. A typed ``backend_readers`` declaration on the Market-owned exposure, naming a
+3. A shipped local page (``src/pages/local/*.page.yaml``) placing a component
+   whose paired ``*.contracts.yaml`` binds the topic through
+   ``data_bindings[].projection_topic``. These are the declarations the local
+   page loader uses to read snapshots, including the Credentials page.
+4. A typed ``backend_readers`` declaration on the Market-owned exposure, naming a
    status-page slot the Market surface is measured to actually read. The declaration
    is checked twice: its shape must be closed (known keys, known kind, lower_snake id
    and slot, absolute route, no duplicates), and its ``(id, route, projection_slot)``
@@ -49,7 +53,7 @@ WHAT COUNTS AS A READER
    route that page really serves. Both halves are resolved out of the omnimarket
    checkout, never restated here -- a copy of Market's slot names in this file would
    keep passing the first time Market renamed one.
-4. An explicit ``consumers: none`` on the exposure carrying a non-empty
+5. An explicit ``consumers: none`` on the exposure carrying a non-empty
    ``consumers_reason``.
 
 (1) is not a CI-only field. ``dataSources[].topic`` is emitted from the very ``TOPICS``
@@ -100,6 +104,7 @@ USAGE
         [--extra-contracts-dir <dir> ...] \
         --registry <path/to/component-registry.json> \
         --layouts-dir <path/to/omnidash/src/templates> \
+        --local-pages-dir <path/to/omnidash/src/pages/local> \
         --backend-reader-surface <path/to/omnimarket/src/omnimarket/projection>
 
 Exit ``0`` when every served ``bus_backed`` exposure has a reader or a reasoned opt-out;
@@ -338,6 +343,80 @@ def collect_layout_readers(
         for component_name in _RE_LAYOUT_COMPONENT.findall(text):
             for topic in component_to_topics.get(component_name, ()):
                 readers.setdefault(topic, set()).add(layout_file.name)
+    return readers
+
+
+def collect_local_page_readers(pages_dir: Path) -> dict[str, set[str]]:
+    """Resolve bindings placed on shipped local pages through their contracts.
+
+    local-page-loader.ts loads these paired JSON-compatible YAML files and reads
+    data_bindings[].projection_topic. A component only counts when a page widget
+    names it as its data_source; an unplaced declaration is not a rendered reader.
+    """
+    if not pages_dir.is_dir():
+        raise ReaderSurfaceError(
+            f"the omnidash local-pages directory is missing: {pages_dir}"
+        )
+    pages = sorted(pages_dir.glob("*.page.yaml"))
+    if not pages:
+        raise ReaderSurfaceError(f"no shipped local pages found in {pages_dir}")
+    readers: dict[str, set[str]] = {}
+    for page_path in pages:
+        contracts_path = page_path.with_name(
+            page_path.name.removesuffix(".page.yaml") + ".contracts.yaml"
+        )
+        try:
+            page = json.loads(page_path.read_text(encoding="utf-8"))
+            contracts = json.loads(contracts_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ReaderSurfaceError(
+                f"cannot read local page {page_path}: {exc}"
+            ) from exc
+        if (
+            not isinstance(page, dict)
+            or not isinstance(page.get("widgets"), list)
+            or not isinstance(contracts, dict)
+            or not isinstance(contracts.get("components"), list)
+        ):
+            raise ReaderSurfaceError(
+                f"invalid local page or component contracts: {page_path}"
+            )
+        components: dict[str, list[object]] = {}
+        for component in contracts["components"]:
+            if (
+                not isinstance(component, dict)
+                or not isinstance(component.get("component_id"), str)
+                or not isinstance(component.get("data_bindings"), list)
+            ):
+                raise ReaderSurfaceError(
+                    f"invalid component contract in {contracts_path}"
+                )
+            component_id = component["component_id"]
+            if component_id in components:
+                raise ReaderSurfaceError(
+                    f"duplicate component identity in {contracts_path}"
+                )
+            components[component_id] = component["data_bindings"]
+        for widget in page["widgets"]:
+            if not isinstance(widget, dict) or not isinstance(
+                widget.get("data_source"), str
+            ):
+                raise ReaderSurfaceError(f"invalid widget in {page_path}")
+            bindings = components.get(widget["data_source"])
+            if bindings is None:
+                raise ReaderSurfaceError(f"unbound widget data_source in {page_path}")
+            for binding in bindings:
+                if (
+                    not isinstance(binding, dict)
+                    or not isinstance(binding.get("projection_topic"), str)
+                    or not binding["projection_topic"]
+                ):
+                    raise ReaderSurfaceError(
+                        f"invalid projection binding in {contracts_path}"
+                    )
+                readers.setdefault(binding["projection_topic"], set()).add(
+                    page_path.name
+                )
     return readers
 
 
@@ -604,12 +683,15 @@ def _parse_backend_readers(
 
         entry_keys = frozenset(entry)
         missing_keys = sorted(required_keys - entry_keys)
-        unknown_keys = sorted(entry_keys - required_keys)
+        unknown_keys = sorted(entry_keys - required_keys - {"read_all_rows"})
         if missing_keys:
             errors.append(f"{prefix} is missing {', '.join(missing_keys)}")
         if unknown_keys:
             errors.append(f"{prefix} has unknown keys {', '.join(unknown_keys)}")
         if missing_keys or unknown_keys:
+            continue
+        if "read_all_rows" in entry and not isinstance(entry["read_all_rows"], bool):
+            errors.append(f"{prefix}.read_all_rows must be a boolean")
             continue
 
         reader_id = entry["id"]
@@ -865,6 +947,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to omnidash src/templates/ (the shipped DASHBOARD_TEMPLATES).",
     )
     parser.add_argument(
+        "--local-pages-dir",
+        type=Path,
+        help="path to omnidash src/pages/local/ (paired shipped pages and bindings).",
+    )
+    parser.add_argument(
         "--backend-reader-surface",
         required=True,
         type=Path,
@@ -937,6 +1024,8 @@ def check_exposure_readers(
     layouts_dir: Path,
     backend_reader_surface: Path,
     stream: IO[str] | None = None,
+    *,
+    local_pages_dir: Path | None = None,
 ) -> int:
     out = stream if stream is not None else sys.stderr
 
@@ -948,6 +1037,9 @@ def check_exposure_readers(
     }
     for topic, names in layout_readers.items():
         readers.setdefault(topic, set()).update(names)
+    if local_pages_dir is not None:
+        for topic, names in collect_local_page_readers(local_pages_dir).items():
+            readers.setdefault(topic, set()).update(names)
 
     scanned = list(_iter_contract_files(contracts_dirs))
     if not scanned:
@@ -974,6 +1066,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.registry,
             args.layouts_dir,
             args.backend_reader_surface,
+            local_pages_dir=args.local_pages_dir,
         )
     except ReaderSurfaceError as exc:
         sys.stderr.write(f"[exposure-reader-coverage] FAIL (fail-closed): {exc}\n")

@@ -29,6 +29,7 @@ from omnibase_infra.validators.bus_backed_exposure_readers import (
     collect_backend_reader_surface,
     collect_bus_backed_exposures,
     collect_layout_readers,
+    collect_local_page_readers,
     collect_registry_readers,
     evaluate,
     main,
@@ -40,6 +41,119 @@ CONSUMER_FLOW_TOPIC = "onex.snapshot.projection.consumer-flow.v1"
 TENANT_CREDENTIALS_TOPIC = "onex.snapshot.projection.tenant-credentials.v1"
 REGISTRATION_TOPIC = "onex.snapshot.projection.registration.v1"
 LIVE_EVENTS_TOPIC = "onex.snapshot.projection.live-events.v1"
+
+
+@pytest.mark.parametrize("placed", [True, False])
+def test_local_page_bindings_count_only_when_placed(
+    tmp_path: Path, placed: bool
+) -> None:
+    (tmp_path / "credentials.page.yaml").write_text(
+        json.dumps(
+            {
+                "widgets": [{"data_source": "credentials"}] if placed else [],
+            }
+        )
+    )
+    (tmp_path / "credentials.contracts.yaml").write_text(
+        json.dumps(
+            {
+                "components": [
+                    {
+                        "component_id": "credentials",
+                        "data_bindings": [
+                            {"projection_topic": TENANT_CREDENTIALS_TOPIC},
+                        ],
+                    }
+                ],
+            }
+        )
+    )
+    readers = collect_local_page_readers(tmp_path)
+    assert readers == (
+        {TENANT_CREDENTIALS_TOPIC: {"credentials.page.yaml"}} if placed else {}
+    )
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        "missing-directory",
+        "empty",
+        "missing-contract",
+        "unbound",
+        "bad-binding",
+        "bad-json",
+    ],
+)
+def test_local_page_reader_surface_fails_closed(tmp_path: Path, broken: str) -> None:
+    if broken == "missing-directory":
+        tmp_path = tmp_path / "missing"
+    elif broken != "empty":
+        (tmp_path / "credentials.page.yaml").write_text(
+            json.dumps(
+                {
+                    "widgets": [{"data_source": "credentials"}],
+                }
+            )
+        )
+        if broken != "missing-contract":
+            (tmp_path / "credentials.contracts.yaml").write_text(
+                "broken JSON"
+                if broken == "bad-json"
+                else json.dumps(
+                    {
+                        "components": []
+                        if broken == "unbound"
+                        else [
+                            {
+                                "component_id": "credentials",
+                                "data_bindings": [
+                                    {
+                                        "projection_topic": None
+                                        if broken == "bad-binding"
+                                        else TENANT_CREDENTIALS_TOPIC,
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                )
+            )
+    with pytest.raises(ReaderSurfaceError):
+        collect_local_page_readers(tmp_path)
+
+
+@pytest.mark.parametrize("read_all_rows", [True, False, "true", 1, None])
+def test_backend_reader_pagination_is_typed_and_keeps_identity_checks(
+    tmp_path: Path,
+    read_all_rows: object,
+) -> None:
+    _write_contract(
+        tmp_path,
+        "node_projection",
+        {
+            "expose": True,
+            "topic": LIVE_EVENTS_TOPIC,
+            "bus_backed": True,
+            "backend_readers": [_backend_reader(read_all_rows=read_all_rows)],
+        },
+    )
+    exposures = collect_bus_backed_exposures([tmp_path], _SURFACE)
+    findings = evaluate(exposures, {})
+    assert bool(findings) is (not isinstance(read_all_rows, bool))
+    _write_contract(
+        tmp_path,
+        "node_projection",
+        {
+            "expose": True,
+            "topic": LIVE_EVENTS_TOPIC,
+            "bus_backed": True,
+            "backend_readers": [
+                _backend_reader(read_all_rows=True, projection_slot="not_read")
+            ],
+        },
+    )
+    assert evaluate(collect_bus_backed_exposures([tmp_path], _SURFACE), {})
 
 
 # ---------------------------------------------------------------------------

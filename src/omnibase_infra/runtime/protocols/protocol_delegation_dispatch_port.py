@@ -85,6 +85,7 @@ class ProtocolDelegationDispatchPort(Protocol):
         # here before omnimarket passes it, through a TypedDict-typed helper
         # splat and only when named, so a released consumer keeps working.
         attribution: Mapping[str, str] | None = None,
+        model: str | None = None,
     ) -> dict[str, object]: ...
 
 

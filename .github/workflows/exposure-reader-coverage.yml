@@ -114,7 +114,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnidash
-          ref: cc628179717f4830bdd6c5a5e1b8d0c7bc4042ff # .github/sibling-pins.yaml
+          ref: 25838155efe1a8ebae874c76f8f404302ac18096 # .github/sibling-pins.yaml
           path: omnidash
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           persist-credentials: false
@@ -126,6 +126,7 @@ jobs:
           sparse-checkout: |
             src/registry/component-registry.json
             src/templates
+            src/pages/local
           sparse-checkout-cone-mode: false
 
       # The validator is a module under `src/omnibase_infra/validators/`, not a
@@ -154,6 +155,8 @@ jobs:
             || { echo "::error::omnidash component registry missing from the sibling checkout"; exit 1; }
           test -d omnidash/src/templates \
             || { echo "::error::omnidash src/templates missing from the sibling checkout"; exit 1; }
+          test -d omnidash/src/pages/local \
+            || { echo "::error::omnidash src/pages/local missing from the sibling checkout"; exit 1; }
           test -d omnimarket/src/omnimarket/nodes \
             || { echo "::error::omnimarket contract tree missing from the sibling checkout"; exit 1; }
           # OMN-18999: a typed `backend_readers` declaration is resolved against the
@@ -172,4 +175,5 @@ jobs:
             --extra-contracts-dir omnimarket/src/omnimarket/nodes \
             --registry omnidash/src/registry/component-registry.json \
             --layouts-dir omnidash/src/templates \
+            --local-pages-dir omnidash/src/pages/local \
             --backend-reader-surface omnimarket/src/omnimarket/projection
