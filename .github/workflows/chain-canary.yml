@@ -380,6 +380,13 @@ jobs:
           echo "lane ${LANE_NAME} deploy agent: ${LANE_DEPLOY_AGENT_URL}"
           echo "DEPLOY_AGENT_URL=${LANE_DEPLOY_AGENT_URL}" >> "${GITHUB_ENV}"
 
+      # OMN-18866: when the delegation this run fires began, for the receipt
+      # the emit step below writes. Taken here, after the lane is resolved and
+      # before anything is published, so the interval it records is the one
+      # the delegation actually spent.
+      - name: Mark when the delegation began
+        run: echo "CHAIN_RECEIPT_STARTED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "${GITHUB_ENV}"
+
       - name: Fire one live delegation through the dev-lane ingress
         env:
           # The resolved lane's declared addresses (LANE_INGRESS_URL and
@@ -710,6 +717,73 @@ jobs:
               f"{'complete' if chain_proved else 'INCOMPLETE'}: {detail}"
           )
           PY
+
+      # OMN-18866. The canary's own sha-keyed receipt: the half of the ticket's
+      # NEXT STEP that lets a delivery gate ask "was this sha's delegation
+      # exercised" without dispatching a canary of its own. The delegation
+      # check is graded by lab_pass_receipt.py's check_delegation_golden_chain
+      # off the receipt the dispatch step wrote, so this job stays the only
+      # dispatcher, and the receipt is keyed on the revision the lane reports
+      # it loaded, not on this workflow's checkout.
+      #
+      # EMIT-ONLY, ON PURPOSE. Nothing reads this artifact yet, and this step
+      # can never change the run's conclusion: the C15 step of
+      # deliver-dev-candidate-to-staging.yml reads that conclusion, so a failure
+      # to RECORD must not be able to look like a failure to DELEGATE. A step
+      # that cannot write a receipt says so as a warning and exits 0. The gate
+      # that reads the artifact will treat an absent one as a refusal, which is
+      # where that fail-closed behaviour belongs.
+      #
+      # Scheduled runs only. A manual dispatch can aim the probe at another
+      # URL, and a receipt for it would be a verdict about a lane this step
+      # never looked up.
+      - name: Emit the chain canary's own sha-keyed receipt (OMN-18866)
+        id: chain-receipt
+        if: always() && github.event_name == 'schedule'
+        env:
+          CHAIN_RECEIPT_DIR: ${{ runner.temp }}/chain-verdict-receipt
+        run: |
+          set -uo pipefail
+          mkdir -p "${CHAIN_RECEIPT_DIR}"
+          SHA=$(uv run python scripts/ci/lab_pass_receipt.py lane-revision \
+            --agent-url "${DEPLOY_AGENT_URL:-}")
+          if [ -z "${SHA}" ]; then
+            echo "::warning::no chain-lane receipt: the lane reported no loaded code sha, so there is nothing to key it on"
+            exit 0
+          fi
+          # Exit 1 means the receipt FAILED, not that it was not written: a
+          # failed delegation is recorded exactly like a passing one. What
+          # decides whether there is something to upload is the `artifact`
+          # output, which emit writes only once the receipt exists. The
+          # canary receipt selects the lane, so this file never spells it.
+          uv run python scripts/ci/lab_pass_receipt.py emit \
+            --sha "${SHA}" \
+            --started-at "${CHAIN_RECEIPT_STARTED_AT}" \
+            --finished-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --chain-canary-receipt chain-canary-receipt.json \
+            --out "${CHAIN_RECEIPT_DIR}/receipt.json" \
+            --github-output "${GITHUB_OUTPUT}"
+          if [ ! -s "${CHAIN_RECEIPT_DIR}/receipt.json" ]; then
+            echo "::warning::the chain verdict receipt for ${SHA} was not written"
+          fi
+          exit 0
+
+      - name: Upload the chain canary's receipt (OMN-18866)
+        if: always() && steps.chain-receipt.outputs.artifact != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # The name emit computed with artifact_name() in
+          # scripts/ci/lab_pass_receipt.py: the key the gate will query by.
+          name: ${{ steps.chain-receipt.outputs.artifact }}
+          path: ${{ runner.temp }}/chain-verdict-receipt
+          retention-days: 90
+          # `warn`, not `error`, and deliberately: `error` is an uploader
+          # declaring absence FATAL, which config/ci_evidence_policy.yaml
+          # turns into an asserting step that fails the job. This record is
+          # emit-only and its absence must not redden the canary's run, which
+          # C15 reads. The step is guarded on the `artifact` output, so it
+          # runs only once emit has written the file.
+          if-no-files-found: warn
 
       # OMN-20594. The h201 dev lane is the protected delegation lane (see the
       # dev entry of deploy/lane-census/lane-manifest.yaml): the Tech Week demo
