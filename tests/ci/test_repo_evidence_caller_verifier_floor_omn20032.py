@@ -24,6 +24,10 @@ _FLOOR_REUSABLE_SHA = "4e4f5e0404d364e296c5d37db6aa3ab9e07f8ffa"
 # a contract that leaves an acceptance criterion unbound.
 _VERIFIER_FLOOR = (0, 4, 303)
 
+# The verifier floor each pinned receipt-gate reusable enforces; a pin absent here
+# enforces none, so the caller's verifier-version is not held to a floor.
+_REUSABLE_VERIFIER_FLOORS = {_FLOOR_REUSABLE_SHA: _VERIFIER_FLOOR}
+
 
 def _version(text: str) -> tuple[int, ...]:
     return tuple(int(part) for part in text.split("."))
@@ -55,8 +59,14 @@ def test_required_checks_manifest_names_the_same_reusable_pin() -> None:
 
 
 def test_caller_verifier_version_is_at_or_above_the_floor() -> None:
-    assert _version(_job()["with"]["verifier-version"]) >= _VERIFIER_FLOOR, (
-        "verifier-version must be at or above the reusable's VERIFIER_FLOOR 0.4.303"
+    job = _job()
+    pinned_sha = job["uses"].rsplit("@", 1)[1]
+    floor = _REUSABLE_VERIFIER_FLOORS.get(pinned_sha)
+    assert floor is not None, (
+        f"the pinned receipt-gate reusable {pinned_sha} enforces no verifier floor"
+    )
+    assert _version(job["with"]["verifier-version"]) >= floor, (
+        "verifier-version must be at or above the pinned reusable's VERIFIER_FLOOR"
     )
 
 
