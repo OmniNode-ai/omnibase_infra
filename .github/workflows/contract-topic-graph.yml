@@ -89,7 +89,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 33a29cdfba6f14be6f94c3c77a05e29f345c692b # .github/sibling-pins.yaml
+          ref: 30f37eca07b692d7889692edfe99686c87612315 # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.CROSS_REPO_PAT }}
       - uses: actions/checkout@v4

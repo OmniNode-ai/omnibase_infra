@@ -20,6 +20,8 @@ from omnibase_core.models.dispatch.model_dispatch_bus_terminal_result import (
     ModelDispatchBusTerminalResult,
 )
 from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.event_bus.event_bus_inmemory import EventBusInmemory
+from omnibase_infra.event_bus.models.model_event_message import ModelEventMessage
 from omnibase_infra.runtime.runtime_local_ingress import ModelRuntimeLocalIngressRoute
 from omnibase_infra.runtime.service_delegation_dispatch_port import (
     RuntimeDelegationDispatchPort,
@@ -29,6 +31,29 @@ from omnibase_infra.runtime.service_delegation_dispatch_port import (
 from omnibase_infra.runtime.service_pattern_b_broker import TerminalPayload
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize("status", ["completed", "failed"])
+def test_normalization_does_not_invent_timeout_for_other_statuses(status: str) -> None:
+    result = _normalize_result_payload(status=status, payload={}, error_message=None)
+    assert "terminal_failure_cause" not in result
+
+
+def test_timeout_normalization_preserves_the_recorded_terminal_cause() -> None:
+    result = _normalize_result_payload(
+        status="timeout",
+        payload={"terminal_failure_cause": "quality_gate_refused"},
+        error_message=None,
+    )
+    assert result["terminal_failure_cause"] == "quality_gate_refused"
+
+
+@pytest.mark.parametrize("payload", [{}, {"terminal_failure_cause": None}])
+def test_timeout_without_recorded_cause_is_typed(payload: dict[str, object]) -> None:
+    result = _normalize_result_payload(
+        status="timeout", payload=payload, error_message=None
+    )
+    assert result["terminal_failure_cause"] == "timeout"
 
 
 def _route(

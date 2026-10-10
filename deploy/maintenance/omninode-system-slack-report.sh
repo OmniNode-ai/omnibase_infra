@@ -8,12 +8,13 @@
 #   This is the producer behind the Slack messages "*OmniNode system alert*",
 #   "*OmniNode morning system digest*" and "*[OmniNode alert resolved]*".
 #   It is executed as root on the `.201` host (omninode-pc) by
-#   /etc/cron.d/omninode-system-slack-report:
-#       5 8  * * *  root  <this script> --mode digest
-#       */15 * * * * root <this script> --mode alert
+#   the omninode-system-slack-report-digest and -alert systemd timers (OMN-20805
+#   replaced the /etc/cron.d line, which recorded a start and no end):
+#       08:05 daily       <this script> --mode digest
+#       every 15 minutes  <this script> --mode alert
 #   The deployed copy lives at /data/maintenance/bin/omninode-system-slack-report.sh.
-#   `deploy/maintenance/cron.d/omninode-system-slack-report` in this repo is the
-#   as-deployed cron unit.
+#   `deploy/maintenance/systemd/omninode-system-slack-report-*.{service,timer}` in
+#   this repo are the as-deployed units.
 #
 # WHY IT IS IN THIS REPO NOW (OMN-15509)
 #   Until 2026-07-30 this script existed ONLY on the host, untracked by any

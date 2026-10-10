@@ -267,6 +267,7 @@ def test_add_does_not_reinstall_the_fleet_crons(stub_bin: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert "prune cron" not in result.stdout
     assert "monitor cron" not in result.stdout
+    assert "monitor timers" not in result.stdout
 
 
 def test_add_exports_the_deploy_runner_registration_variable() -> None:

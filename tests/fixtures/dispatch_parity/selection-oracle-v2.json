@@ -765,6 +765,22 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
+    "dispatcher.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6": {
+      "category": "command",
+      "contract_name": "node_hotpatch_ledger_reconcile_effect",
+      "event_model_module": "omnibase_infra.models.model_hotpatch_ledger_reconcile_request",
+      "event_model_name": "ModelHotpatchLedgerReconcileRequest",
+      "handler_id": "dispatcher.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6",
+      "handler_module": "omnibase_infra.handlers.handler_hotpatch_ledger_reconcile",
+      "handler_name": "HandlerHotpatchLedgerReconcile",
+      "message_types": [
+        "ModelHotpatchLedgerReconcileRequest",
+        "onex.cmd.platform.hotpatch-ledger-reconcile.v1",
+        "platform.hotpatch-ledger-reconcile"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
     "dispatcher.auto.node_impact_analyzer_compute.HandlerImpactAnalysis.artifact_analyze_impact_97dcac7f": {
       "category": "event",
       "contract_name": "node_impact_analyzer_compute",
@@ -3547,16 +3563,16 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 15,
-        "omnibase_infra": 136,
+        "omnibase_infra": 137,
         "onex-change-control": 4
       },
-      "contracts_discovered": 155,
+      "contracts_discovered": 156,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 93,
-      "probe_count": 1068,
-      "registered_dispatchers": 125,
-      "registered_routes": 110,
-      "type_scoped_dispatchers": 69
+      "distinct_subscribe_topics": 94,
+      "probe_count": 1071,
+      "registered_dispatchers": 126,
+      "registered_routes": 111,
+      "type_scoped_dispatchers": 70
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3596,7 +3612,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-10-08T08:00:42.877105+00:00",
+    "generated_at_utc": "2026-10-09T14:47:00.059441+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.35",
       "omnibase-infra": "0.38.70",
@@ -4184,6 +4200,21 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.platform.ci-live-contact-check.v1"
+    },
+    "P1a::onex.cmd.platform.hotpatch-ledger-reconcile.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.hotpatch-ledger-reconcile",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "command",
+        "message_type": "platform.hotpatch-ledger-reconcile",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.platform.hotpatch-ledger-reconcile.v1"
     },
     "P1a::onex.cmd.platform.ledger-append.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -5609,6 +5640,21 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.platform.ci-live-contact-check.v1"
+    },
+    "P1b::onex.cmd.platform.hotpatch-ledger-reconcile.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
+        "message_category": "command",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.cmd.platform.hotpatch-ledger-reconcile.v1"
     },
     "P1b::onex.cmd.platform.ledger-append.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -7059,6 +7105,26 @@
         "status": "success"
       },
       "topic": "onex.cmd.github.webhook-delivery.v1"
+    },
+    "P4::dispatcher.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6::onex.cmd.platform.hotpatch-ledger-reconcile.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6",
+      "event_model": "omnibase_infra.models.model_hotpatch_ledger_reconcile_request.ModelHotpatchLedgerReconcileRequest",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.hotpatch-ledger-reconcile",
+        "payload": "ModelHotpatchLedgerReconcileRequest"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6"
+        ],
+        "dlq_topic": null,
+        "message_category": "command",
+        "message_type": "platform.hotpatch-ledger-reconcile",
+        "status": "success"
+      },
+      "topic": "onex.cmd.platform.hotpatch-ledger-reconcile.v1"
     },
     "P4::dispatcher.auto.node_ledger_projection_compute.HandlerLedgerProjection.ledger_project_09114b86::onex.cmd.omnibase-infra.build-loop-append.v1": {
       "construct_only": true,
@@ -24488,6 +24554,16 @@
       "route_id": "route.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5.onex_cmd_github_webhook_delivery_v1",
       "topic": "onex.cmd.github.webhook-delivery.v1",
       "topic_pattern": "*.cmd.github.webhook-delivery.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_hotpatch_ledger_reconcile_effect",
+      "dispatcher_id": "dispatcher.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6",
+      "handler_id": "dispatcher.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6",
+      "message_category": "command",
+      "route_id": "route.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6.onex_cmd_platform_hotpatch_ledger_reconcile_v1",
+      "topic": "onex.cmd.platform.hotpatch-ledger-reconcile.v1",
+      "topic_pattern": "*.cmd.platform.hotpatch-ledger-reconcile.*",
       "type_scoped": true
     },
     {

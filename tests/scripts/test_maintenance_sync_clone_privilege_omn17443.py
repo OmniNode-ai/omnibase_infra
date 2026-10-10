@@ -61,6 +61,7 @@ is what keeps it true.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -491,9 +492,9 @@ def test_the_gate_rejects_the_captured_root_fetching_sync(tmp_path: Path) -> Non
     nothing. So this case drives the shipped gate over
     ``omninode-host-maintenance-sync.root-fetch.sh.captured``: the file as it
     stood on dev at ``eddf4a9d``, which is what root ran at ``:37``, alongside
-    the real, unmodified cron unit that runs it. The cron unit is copied from
-    the working tree rather than captured because this fix does not touch it --
-    those are the same bytes either way.
+    the real, unmodified service unit that now runs it. Copying that unit from
+    the working tree proves the gate still reaches the captured defect through
+    the current scheduler wiring after the move from cron to systemd timers.
 
     The accept control at the end is load-bearing. Without it a gate that
     refused every scheduled host script would satisfy the reject half and look
@@ -513,15 +514,15 @@ def test_the_gate_rejects_the_captured_root_fetching_sync(tmp_path: Path) -> Non
         shutil.copy2(VENV_RECONCILER, scripts / VENV_RECONCILER.name)
         shutil.copy2(LIB, scripts / LIB.name)
         maintenance = where / "deploy" / "maintenance"
-        (maintenance / "cron.d").mkdir(parents=True)
+        (maintenance / "systemd").mkdir(parents=True)
         (maintenance / SYNC_SCRIPT.name).write_text(sync_body, encoding="utf-8")
         shutil.copy2(
             REPO_ROOT
             / "deploy"
             / "maintenance"
-            / "cron.d"
-            / "omninode-host-maintenance-sync",
-            maintenance / "cron.d" / "omninode-host-maintenance-sync",
+            / "systemd"
+            / "omninode-host-maintenance-sync.service",
+            maintenance / "systemd" / "omninode-host-maintenance-sync.service",
         )
         return where
 
@@ -546,11 +547,11 @@ def test_the_gate_rejects_the_captured_root_fetching_sync(tmp_path: Path) -> Non
     )
 
 
-def test_the_real_cron_units_are_all_covered_by_discovery() -> None:
+def test_the_real_service_units_are_all_covered_by_discovery() -> None:
     """Every scheduled command this repo ships must be a file the gate opens.
 
     Asserted against the real tree rather than a fixture, because the property
-    that matters is about THIS repo's cron units -- a new one added without a
+    that matters is about THIS repo's service units -- a new one added without a
     manifest entry is the OMN-15525 condition, and the point of AC3 is that it
     can no longer be introduced quietly.
     """
@@ -559,6 +560,7 @@ def test_the_real_cron_units_are_all_covered_by_discovery() -> None:
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
     from check_reconciler_privilege import (
         discover_scheduled_host_scripts,
+        host_artifact_map,
     )
 
     scripts, failures = discover_scheduled_host_scripts(REPO_ROOT)
@@ -569,3 +571,65 @@ def test_the_real_cron_units_are_all_covered_by_discovery() -> None:
     )
     assert "omninode-workspace-reconcile.sh" in names, sorted(names)
     assert "omninode-system-slack-report.sh" in names, sorted(names)
+    assert "omninode-runner-tree-converge.sh" in names, sorted(names)
+
+    mapping = host_artifact_map(REPO_ROOT)
+    units = sorted((REPO_ROOT / "deploy" / "maintenance" / "systemd").glob("*.service"))
+    assert units, "no maintenance service units were checked"
+    for unit in units:
+        commands = re.findall(
+            r"^\s*ExecStart\s*=(.*)$", unit.read_text(encoding="utf-8"), re.MULTILINE
+        )
+        assert commands, unit.name
+        for scheduled in commands:
+            command = scheduled.split()[0]
+            if not command.startswith("/data/maintenance/"):
+                continue  # a system tool, not a repo script the gate could open
+            assert command in mapping, (unit.name, command)
+            assert REPO_ROOT / mapping[command] in scripts, (
+                f"{unit.name} invokes {command}, but discovery never opens it"
+            )
+
+
+def _service_tree(tmp_path: Path, exec_start: str) -> Path:
+    """A repo shape with one maintenance service unit and an empty manifest."""
+    maintenance = tmp_path / "deploy" / "maintenance"
+    (maintenance / "systemd").mkdir(parents=True)
+    (maintenance / SYNC_SCRIPT.name).write_text("MANIFEST=(\n)\n", encoding="utf-8")
+    (maintenance / "systemd" / "omninode-planted.service").write_text(
+        f"[Service]\nType=oneshot\nExecStart={exec_start}\n", encoding="utf-8"
+    )
+    return tmp_path
+
+
+def test_a_service_unit_running_an_unlisted_host_script_is_a_failure(
+    tmp_path: Path,
+) -> None:
+    """OMN-20805. Moving the schedules from cron.d to timers must not reopen the
+    OMN-17443 hole: an unlisted script scheduled by a service unit is a FAILURE,
+    exactly as it was when a cron line ran it."""
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from check_reconciler_privilege import discover_scheduled_host_scripts
+
+    repo = _service_tree(tmp_path, "/data/maintenance/bin/unlisted.sh --go")
+    _, failures = discover_scheduled_host_scripts(repo)
+    assert len(failures) == 1, failures
+    assert "unlisted.sh" in failures[0]
+
+
+def test_a_service_unit_running_a_system_tool_is_not_a_failure(
+    tmp_path: Path,
+) -> None:
+    """The accept control: a system binary has no repo file to open, so a gate
+    that refused it would be satisfied by refusing everything."""
+    import sys
+
+    sys.path.insert(0, str(REPO_ROOT / "scripts"))
+    from check_reconciler_privilege import discover_scheduled_host_scripts
+
+    repo = _service_tree(tmp_path, "/usr/bin/find /data/inference/logs -delete")
+    scripts, failures = discover_scheduled_host_scripts(repo)
+    assert failures == []
+    assert scripts == []

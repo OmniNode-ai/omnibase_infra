@@ -29,3 +29,6 @@ topics:
   # the contract's first subscribe_topic before waiting for its terminal event.
   # Exercised through the real bus in tests/ci/test_ci_live_contact.py.
   - onex.cmd.platform.ci-live-contact-check.v1
+  # OMN-17427: cli_node publishes the reconcile command before waiting for its
+  # terminal event, exactly as for the CI live-contact node above.
+  - onex.cmd.platform.hotpatch-ledger-reconcile.v1

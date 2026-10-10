@@ -3,8 +3,8 @@
 """OMN-18567 -- the deploy runner's private clone tree must be converged on a schedule.
 
 WHAT IS UNDER TEST
-    ``deploy/maintenance/omninode-runner-tree-converge.sh`` and the cron unit
-    that invokes it. These tests drive the artifact that actually runs on the
+    ``deploy/maintenance/omninode-runner-tree-converge.sh`` and the systemd units
+    that invoke it. These tests drive the artifact that actually runs on the
     host, not a re-implementation (memory ``feedback_test_the_artifact_that_runs``).
 
 WHY IT EXISTS
@@ -25,7 +25,7 @@ THE THREE ACCEPTANCE CRITERIA, AND WHERE EACH IS PINNED
     AC1 (it converges, on a schedule, as the owning uid)
         ``test_idle_tick_converges_every_clone``,
         ``test_second_tick_on_a_converged_tree_reports_in_sync``,
-        ``test_cron_unit_schedules_the_converge_verb`` and the manifest tests.
+        ``test_service_unit_schedules_the_converge_verb`` and the manifest tests.
     AC2 (never concurrent with a deploy job on the tree)
         the five refusal tests. Each one asserts the clone did NOT move, not
         merely that the word REFUSED was printed -- a guard that prints a
@@ -39,7 +39,7 @@ THE THREE ACCEPTANCE CRITERIA, AND WHERE EACH IS PINNED
 HERMETICITY
     Every test builds a throwaway tree of real git clones under ``tmp_path``
     and drives the script against it. Nothing reads or writes
-    ``/data/omninode``, ``/data/maintenance`` or ``/etc/cron.d``. The two
+    ``/data/omninode``, ``/data/maintenance`` or ``/etc/systemd/system``. The two
     host-only probes -- the runner's worker process list and the procfs scan
     for a process sitting in the tree -- are reached through declared command
     seams, so the refusal LOGIC is tested here while the default probe strings
@@ -65,7 +65,9 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MAINTENANCE = REPO_ROOT / "deploy" / "maintenance"
 TICK = MAINTENANCE / "omninode-runner-tree-converge.sh"
-CRON_UNIT = MAINTENANCE / "cron.d" / "omninode-runner-tree-converge"
+SYSTEMD_DIR = MAINTENANCE / "systemd"
+SERVICE_UNIT = SYSTEMD_DIR / "omninode-runner-tree-converge.service"
+TIMER_UNIT = SYSTEMD_DIR / "omninode-runner-tree-converge.timer"
 SYNC_SCRIPT = MAINTENANCE / "omninode-host-maintenance-sync.sh"
 REPORTER = MAINTENANCE / "omninode-system-slack-report.sh"
 
@@ -562,18 +564,22 @@ def test_default_probes_are_host_local_and_named() -> None:
             "/data/maintenance/bin/omninode-runner-tree-converge.sh",
         ),
         (
-            "deploy/maintenance/cron.d/omninode-runner-tree-converge",
-            "/etc/cron.d/omninode-runner-tree-converge",
+            "deploy/maintenance/systemd/omninode-runner-tree-converge.service",
+            "/etc/systemd/system/omninode-runner-tree-converge.service",
+        ),
+        (
+            "deploy/maintenance/systemd/omninode-runner-tree-converge.timer",
+            "/etc/systemd/system/omninode-runner-tree-converge.timer",
         ),
     ],
 )
-def test_both_host_artifacts_are_in_the_maintenance_manifest(
+def test_all_host_artifacts_are_in_the_maintenance_manifest(
     repo_path: str, host_path: str
 ) -> None:
-    """The manifest IS the install path -- no crontab is ever edited by hand.
+    """The manifest IS the install path for the script and both systemd units.
 
     The hourly `:37` `--converge` writes every manifest entry that differs from
-    `origin/dev` and reads it back. Adding these two rows is therefore the whole
+    `origin/dev` and reads it back. Adding these rows is therefore the whole
     installation: merge to `dev`, and the next tick installs them.
     """
     manifest = SYNC_SCRIPT.read_text(encoding="utf-8")
@@ -583,39 +589,61 @@ def test_both_host_artifacts_are_in_the_maintenance_manifest(
     )
 
 
-def test_cron_unit_schedules_the_converge_verb() -> None:
+def test_service_unit_schedules_the_converge_verb() -> None:
     """`--check` on a timer is a detector wired to no repair (OMN-17898)."""
-    unit = CRON_UNIT.read_text(encoding="utf-8")
-    commands = [
-        line
-        for line in unit.splitlines()
-        if line.strip() and not line.startswith("#") and "=" not in line.split()[0]
-    ]
+    unit = SERVICE_UNIT.read_text(encoding="utf-8")
+    commands = re.findall(r"^\s*ExecStart\s*=(.*)$", unit, re.MULTILINE)
     assert len(commands) == 1, f"expected exactly one scheduled command, got {commands}"
     assert "--converge" in commands[0]
     assert "--check" not in commands[0]
     assert "/data/maintenance/bin/omninode-runner-tree-converge.sh" in commands[0]
+    timer = TIMER_UNIT.read_text(encoding="utf-8")
+    assert re.findall(r"^\s*Unit\s*=(.*)$", timer, re.MULTILINE) == [SERVICE_UNIT.name]
 
 
-def test_cron_minute_collides_with_no_other_root_job() -> None:
-    """Four root jobs on one host must not contend on the same minute.
+def _calendar_minute_fields(unit: Path) -> list[str]:
+    calendars = re.findall(
+        r"^\s*OnCalendar\s*=(.*)$", unit.read_text(encoding="utf-8"), re.MULTILINE
+    )
+    assert calendars, f"no calendar schedule in {unit.name}"
+    fields = []
+    for calendar in calendars:
+        matched = re.fullmatch(r"\*-\*-\*\s+[^:\s]+:([^:\s]+):[^:\s]+", calendar)
+        assert matched, f"unparseable OnCalendar in {unit.name}: {calendar}"
+        fields.append(matched.group(1))
+    return fields
+
+
+def _expand_minutes(field: str) -> set[int]:
+    if "/" in field:
+        start, step = field.split("/")
+        return set(range(0 if start == "*" else int(start), 60, int(step)))
+    if field == "*":
+        return set(range(60))
+    return {int(part) for part in field.split(",")}
+
+
+def test_timer_minute_collides_with_no_other_root_job() -> None:
+    """Root jobs on one host must not contend on the same minute.
 
     :00/:15/:30/:45 is the system report, :19 the workspace reconcile, :37 the
     maintenance sync. This assertion is here rather than in a comment because a
     comment does not survive the next edit.
     """
     taken = {0, 15, 30, 45, 19, 37}
-    line = next(
-        line
-        for line in CRON_UNIT.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.startswith("#") and "=" not in line.split()[0]
-    )
-    minute_field = line.split()[0]
+    for unit in sorted(SYSTEMD_DIR.glob("*.timer")):
+        if unit != TIMER_UNIT:
+            for field in _calendar_minute_fields(unit):
+                taken.update(_expand_minutes(field))
+    ours = _calendar_minute_fields(TIMER_UNIT)
+    assert len(ours) == 1, "expected exactly one runner-tree schedule"
+    minute_field = ours[0]
     assert not minute_field.startswith("*"), (
         "a wildcard or stepped minute overlaps every other root job on this host"
     )
-    minutes = {int(part) for part in minute_field.split(",")}
-    assert minutes, "no minute could be read from the cron line"
+    assert "/" not in minute_field, "a stepped minute is not a single chosen slot"
+    minutes = _expand_minutes(minute_field)
+    assert minutes, "no minute could be read from OnCalendar"
     assert not minutes & taken, (
         f"minute(s) {sorted(minutes & taken)} already carry a root job on `.201`"
     )
@@ -629,8 +657,8 @@ def test_the_slack_reporter_reads_the_verdict_file() -> None:
 
     Folding this into the existing reporter rather than building a second
     alerter is the net-negative-surface rule: it inherits that script's Slack
-    poster, its state-change de-duplication and its */15 cron. No new cron unit,
-    no second Slack integration.
+    poster, its state-change de-duplication and its 15-minute timer. No new
+    report timer, no second Slack integration.
     """
     reporter = REPORTER.read_text(encoding="utf-8")
     assert "check_runner_tree_converge" in reporter, (

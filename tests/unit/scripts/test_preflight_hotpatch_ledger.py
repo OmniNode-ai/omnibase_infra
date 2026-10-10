@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import shlex
 import stat
 import subprocess
 from pathlib import Path
@@ -13,6 +15,8 @@ from types import ModuleType
 
 import pytest
 import yaml
+
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
 
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[3] / "scripts" / "preflight_hotpatch_ledger.py"
@@ -39,7 +43,7 @@ def _git(repo: Path, *args: str) -> str:
         text=True,
         check=True,
         env={
-            **os.environ,
+            **scrub_git_location_env(os.environ),
             "GIT_AUTHOR_NAME": "t",
             "GIT_AUTHOR_EMAIL": "t@t",
             "GIT_COMMITTER_NAME": "t",
@@ -894,3 +898,186 @@ class TestReconciledRowStatus:
         got_active, got_reconciled = MODULE.partition_by_status([active, reconciled])
         assert got_active == [active]
         assert got_reconciled == [reconciled]
+
+
+RECONCILE_NODE = "node_hotpatch_ledger_reconcile_effect"
+
+
+def _null_row(container: str, repo: str, pr: int, file: str) -> dict[str, object]:
+    row = _row(container, repo, "unused", file=file, prepatch=f"{file}.prepatch")
+    row["source_pr"] = f"OmniNode-ai/{repo}#{pr}"
+    row["merge_commit"] = None
+    row["merged"] = False
+    return row
+
+
+def _reconcile_commands(stderr: str) -> list[list[str]]:
+    """Every reconcile command the preflight printed, shell-split."""
+    prefix = "HOTPATCH-PREFLIGHT RECONCILE: "
+    return [
+        shlex.split(line.removeprefix(prefix))
+        for line in stderr.splitlines()
+        if line.startswith(prefix)
+    ]
+
+
+def _payload(command: list[str]) -> dict[str, str]:
+    """The JSON the command writes to its ``--input`` file."""
+    payload = json.loads(command[command.index("printf") + 2])
+    assert isinstance(payload, dict)
+    return payload
+
+
+class TestRefusalNamesTheReconcileCommand:
+    """A refusal that a reconcile can clear prints the exact command (OMN-17427).
+
+    Two ``merge_commit: null`` rows once blocked every dev redeploy for hours
+    while the refusal said only that the field had the wrong type."""
+
+    def _run(self, tmp_path: Path, rows: list[dict[str, object]], repo: Path) -> int:
+        ledger = _write_ledger(tmp_path / "ledger.yaml", rows)
+        return int(
+            MODULE.main(
+                [
+                    "--container",
+                    "c1",
+                    "--clones-root",
+                    str(tmp_path),
+                    "--ledger",
+                    str(ledger),
+                    "--build-ref",
+                    f"omnimarket={_git(repo, 'rev-parse', 'HEAD')}",
+                    "--skip-tripwire",
+                ]
+            )
+        )
+
+    def test_null_merge_commit_prints_runnable_command(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        repo = _make_repo(tmp_path, "omnimarket")
+        head = _git(repo, "rev-parse", "HEAD")
+        rc = self._run(tmp_path, [_null_row("c1", "omnimarket", 7, "/app/x.py")], repo)
+
+        assert rc == 2
+        (command,) = _reconcile_commands(capsys.readouterr().err)
+        assert command[command.index("uv") :][:4] == [
+            "uv",
+            "run",
+            "--frozen",
+            "--project",
+        ]
+        assert command[command.index("--project") + 1] == str(
+            Path(MODULE.__file__).resolve().parents[1]
+        )
+        tail = command[command.index("onex") :]
+        assert tail[:3] == ["onex", "node", RECONCILE_NODE]
+        assert tail[tail.index("--backend") + 1] == "event_bus=inmemory"
+        input_file = tail[tail.index("--input") + 1]
+        assert command[command.index(">") + 1] == input_file
+        assert _payload(command) == {
+            "ledger_path": str(tmp_path / "ledger.yaml"),
+            "clones_root": str(tmp_path),
+            "container": "c1",
+            "file": "/app/x.py",
+            "merge_commit": "<FIX_MERGE_SHA>",
+            "deployed_ref": head,
+        }
+
+    def test_every_invalid_row_gets_its_own_command(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        repo = _make_repo(tmp_path, "omnimarket")
+        rc = self._run(
+            tmp_path,
+            [
+                _null_row("c1", "omnimarket", 7, "/app/x.py"),
+                _null_row("c1", "omnimarket", 8, "/app/y.py"),
+            ],
+            repo,
+        )
+
+        assert rc == 2
+        commands = _reconcile_commands(capsys.readouterr().err)
+        assert [_payload(c)["file"] for c in commands] == ["/app/x.py", "/app/y.py"]
+
+    def test_merge_commit_is_suggested_from_the_source_pr(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        repo = _make_repo(tmp_path, "omnimarket")
+        (repo / "f.txt").write_text("fix\n")
+        _git(repo, "add", "f.txt")
+        _git(repo, "commit", "-m", "fix the thing (#7)")
+        fix = _git(repo, "rev-parse", "HEAD")
+        self._run(tmp_path, [_null_row("c1", "omnimarket", 7, "/app/x.py")], repo)
+
+        (command,) = _reconcile_commands(capsys.readouterr().err)
+        assert _payload(command)["merge_commit"] == fix
+
+    def test_printed_command_input_reconciles_the_row_end_to_end(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        import asyncio
+
+        from omnibase_infra.handlers.handler_hotpatch_ledger_reconcile import (
+            HandlerHotpatchLedgerReconcile,
+        )
+        from omnibase_infra.models.model_hotpatch_ledger_reconcile_request import (
+            ModelHotpatchLedgerReconcileRequest,
+        )
+
+        repo = _make_repo(tmp_path, "omnimarket")
+        (repo / "f.txt").write_text("fix\n")
+        _git(repo, "add", "f.txt")
+        _git(repo, "commit", "-m", "fix the thing (#7)")
+        assert (
+            self._run(tmp_path, [_null_row("c1", "omnimarket", 7, "/app/x.py")], repo)
+            == 2
+        )
+        (command,) = _reconcile_commands(capsys.readouterr().err)
+        docker = _fake_docker(tmp_path, [])
+
+        result = asyncio.run(
+            HandlerHotpatchLedgerReconcile().handle(
+                ModelHotpatchLedgerReconcileRequest(
+                    **_payload(command), docker_cmd=docker
+                )
+            )
+        )
+
+        assert result.success, result
+        assert (
+            self._run(
+                tmp_path,
+                [yaml.safe_load((tmp_path / "ledger.yaml").read_text())["rows"][0]],
+                repo,
+            )
+            == 0
+        )
+
+    def test_unmerged_patch_refusal_names_no_reconcile_command(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Reconcile refuses an unmerged fix, so the preflight must not offer it."""
+        repo = _make_repo(tmp_path, "omnimarket")
+        base = _git(repo, "rev-parse", "HEAD")
+        unmerged = _commit(repo, "two")
+        ledger = _write_ledger(
+            tmp_path / "ledger.yaml", [_row("c1", "omnimarket", unmerged)]
+        )
+        rc = MODULE.main(
+            [
+                "--container",
+                "c1",
+                "--clones-root",
+                str(tmp_path),
+                "--ledger",
+                str(ledger),
+                "--build-ref",
+                f"omnimarket={base}",
+                "--skip-tripwire",
+            ]
+        )
+
+        assert rc == 1
+        assert "RECONCILE" not in capsys.readouterr().err

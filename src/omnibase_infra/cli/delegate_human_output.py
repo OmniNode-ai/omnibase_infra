@@ -102,6 +102,15 @@ def _failure_text(
             reason = one_line(
                 " ".join(a.error_message for a in terminal.attempts if a.error_message)
             )
+        refusal = terminal.budget_refusal
+        if refusal is not None:
+            reason = (f"{reason}; " if reason else "") + (
+                f"`--timeout` {refusal.requested_timeout_seconds} "
+                "(`requested_timeout_seconds`) exceeds the "
+                f"{refusal.task_class_timeout_ceiling_seconds}s ceiling for task "
+                f"type `{refusal.task_type}`; pass a `--timeout` of "
+                f"{refusal.task_class_timeout_ceiling_seconds} or less, or omit it"
+            )
         if cause and reason:
             return f"{cause}: {reason}"
         if cause or reason:
