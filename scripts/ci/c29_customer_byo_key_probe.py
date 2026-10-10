@@ -141,11 +141,21 @@ class ProviderSpec:
     #: The reference ``onex secret set`` is told to store the key under -- the
     #: form the CLI's docstring and the resolver's remediation both print.
     registration_ref: str
+    #: OMN-20844: the customer names the model their key runs for this provider
+    #: (omnimarket refuses the registration with BYOK_MODEL_NOT_CHOSEN without
+    #: one), so a graded run must record the model chosen and the receipt must
+    #: name it.
+    customer_chooses_model: bool = False
 
 
 PROVIDERS: Final[Mapping[str, ProviderSpec]] = {
     "glm": ProviderSpec("glm", "api.z.ai", "llm.glm.api_key"),
-    "openrouter": ProviderSpec("openrouter", "openrouter.ai", "llm.openrouter.api_key"),
+    "openrouter": ProviderSpec(
+        "openrouter",
+        "openrouter.ai",
+        "llm.openrouter.api_key",
+        customer_chooses_model=True,
+    ),
     "gemini": ProviderSpec(
         "gemini", "generativelanguage.googleapis.com", "llm.gemini.api_key"
     ),
@@ -643,8 +653,10 @@ def grade_names_provider(
     backend_id = receipt.get("backend_id")
     endpoint = receipt.get("endpoint")
     model = receipt.get("model")
+    chosen = obs.get("model")
     clause.evidence.update(
         {
+            "chosen_model": chosen,
             "receipt_status": receipt.get("status"),
             "receipt_backend_id": backend_id,
             "receipt_endpoint": endpoint,
@@ -674,6 +686,17 @@ def grade_names_provider(
         )
     if not model:
         clause.reasons.append("receipt names no model")
+    # OMN-20844: the customer chose the model at registration, so the receipt
+    # must name that model and no other.
+    if spec.customer_chooses_model and not chosen:
+        clause.reasons.append(
+            f"no chosen model recorded: a {spec.slug} customer names the model "
+            "their key runs (run --model)"
+        )
+    if chosen and model and model != chosen:
+        clause.reasons.append(
+            f"receipt model {model!r} is not the chosen model {chosen!r}"
+        )
     attempts = result.get("attempts") or []
     clause.evidence["attempts"] = [
         {k: a.get(k) for k in ("tier", "backend_id", "model_id", "acceptance_decision")}
@@ -1052,9 +1075,11 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     runs_root = delegate_runs_root(customer_env)
     if runs_root.exists():
         runs_root.rename(runs_root.with_name("runs.keyless"))
+    # OMN-20844: the customer names the model their key runs when they register
+    # it; the key itself still arrives only on stdin.
     steps["secret_set"] = run(
         "secret_set",
-        [str(onex), "secret", "set", spec.registration_ref],
+        [str(onex), "secret", "set", spec.registration_ref, "--model", args.model],
         stdin_text=key,
     )
     steps["keyed"] = run("keyed", [str(onex), "delegate", args.prompt, "--json"])
@@ -1115,6 +1140,7 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     observations: dict[str, Any] = {
         "as_of": datetime.datetime.now(datetime.UTC).isoformat(),
         "provider": spec.slug,
+        "model": args.model,
         "prompt": args.prompt,
         "customer_env_keys": sorted(customer_env),
         "nameservers": read_nameservers(),
@@ -1191,6 +1217,14 @@ def main(argv: list[str] | None = None) -> int:
 
     run = sub.add_parser("run", help="drive a live customer session and grade it")
     run.add_argument("--provider", required=True, choices=sorted(PROVIDERS))
+    run.add_argument(
+        "--model",
+        required=True,
+        help=(
+            "the model the customer chooses for their key (OMN-20844), passed on "
+            "the registration; the receipt must name it"
+        ),
+    )
     run.add_argument(
         "--key-env", required=True, help="NAME of the variable holding the key"
     )

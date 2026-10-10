@@ -707,6 +707,7 @@ def _backend_pin_receipt_block(
     result: ModelDelegateTerminal | None,
     *,
     requested_backend_id: str | None,
+    requested_model: str | None = None,
 ) -> dict[str, object]:
     """Record WHETHER the rung was chosen by the caller or walked to.
 
@@ -735,6 +736,18 @@ def _backend_pin_receipt_block(
             "cheapest_first" if requested_backend_id is None else "pinned"
         ),
         "backend_pin_honoured": honoured,
+        # OMN-20844: record the caller's model choice and whether the accepted
+        # attempt ran it, using only the attempt's declared model identity.
+        "requested_model": requested_model,
+        "model_choice_honoured": (
+            None
+            if requested_model is None
+            else (
+                result is not None
+                and result.accepted_attempt is not None
+                and result.accepted_attempt.model_id == requested_model
+            )
+        ),
     }
 
 
@@ -797,6 +810,7 @@ def _delegate_receipt_evidence_error(
     require_budget_evidence: bool = False,
     require_contract_evidence: bool = False,
     requested_backend_id: str | None = None,
+    requested_model: str | None = None,
     contract_path: Path | None = None,
     payload_path: Path | None = None,
     state_root: Path | None = None,
@@ -843,7 +857,25 @@ def _delegate_receipt_evidence_error(
     # the run-file writer BEFORE anything is written, so a refusal raised
     # there would suppress the very receipt that proves which rung answered.
     # Refusing on the validator exits non-zero AND leaves the evidence.
-    return _backend_pin_defect(result, requested_backend_id=requested_backend_id)
+    backend_defect = _backend_pin_defect(
+        result, requested_backend_id=requested_backend_id
+    )
+    if backend_defect is not None:
+        return backend_defect
+    # OMN-20844: MODEL-OR-REFUSE follows the backend check, and leaves a run
+    # without an accepted answer to report its own terminal failure cause.
+    accepted = result.accepted_attempt
+    if (
+        requested_model is not None
+        and result.status == "completed"
+        and accepted is not None
+        and accepted.model_id != requested_model
+    ):
+        return (
+            f"delegation was asked to run model {requested_model!r} but the "
+            f"accepted answer came from model {accepted.model_id!r}"
+        )
+    return None
 
 
 def _write_unattributed_run_files(
@@ -858,6 +890,7 @@ def _write_unattributed_run_files(
     drift_guard: ProtocolDriftGuardVerdict | None = None,
     config_overrides: tuple[ModelDelegateEnvConfigOverride, ...] = (),
     requested_backend_id: str | None = None,
+    requested_model: str | None = None,
     phase_durations: ModelDelegatePhaseDurations | None = None,
 ) -> None:
     """Persist a terminally-failed delegation that attributed no route.
@@ -906,7 +939,9 @@ def _write_unattributed_run_files(
                 # construction -- there is no attributed route to honour --
                 # which is what distinguishes it from a violated pin.
                 **_backend_pin_receipt_block(
-                    result, requested_backend_id=requested_backend_id
+                    result,
+                    requested_backend_id=requested_backend_id,
+                    requested_model=requested_model,
                 ),
                 # OMN-18810: where a failed run RAN is the first question
                 # asked about it, and route attribution being fail-closed is
@@ -1450,6 +1485,7 @@ def _write_local_run_files(
     require_contract_evidence: bool = False,
     artifacts_to_stdout: bool = False,
     requested_backend_id: str | None = None,
+    requested_model: str | None = None,
     broker: str = "",
     command_topic: str = "",
     contract_path: Path | None = None,
@@ -1601,6 +1637,7 @@ def _write_local_run_files(
             drift_guard=drift_guard,
             config_overrides=config_overrides,
             requested_backend_id=requested_backend_id,
+            requested_model=requested_model,
             phase_durations=phase_durations,
         )
         return
@@ -1650,7 +1687,9 @@ def _write_local_run_files(
                 # escalated there, so no stored run can falsify "the pin
                 # worked".
                 **_backend_pin_receipt_block(
-                    result, requested_backend_id=requested_backend_id
+                    result,
+                    requested_backend_id=requested_backend_id,
+                    requested_model=requested_model,
                 ),
                 # OMN-18810: the rung that answered is not the machine that
                 # ran it. Both files carry the same four addressing keys so
@@ -1983,6 +2022,20 @@ def _validate_backend_pin(backend_id: str | None) -> str | None:
             "cheapest-first tier_order walk."
         )
     return pinned
+
+
+def _validate_model_choice(model: str | None) -> str | None:
+    """Normalise ``--model`` and refuse an empty choice (OMN-20844)."""
+    if model is None:
+        return None
+    chosen = model.strip()
+    if not chosen:
+        raise ValueError(
+            "--model was given an empty value. Pass a model id for the "
+            "customer's own provider key, or omit the flag to use the model "
+            "stored with the key."
+        )
+    return chosen
 
 
 #: The request ``metadata`` key that names the ticket a delegation works
@@ -2335,6 +2388,7 @@ def _request_payload(
     system_prompt: str | None = None,
     requested_timeout_seconds: int | None = None,
     backend_id: str | None = None,
+    model: str | None = None,
     ticket_id: str | None = None,
     caller: ModelDelegateCaller | None = None,
     tenant_id: str | None = None,
@@ -2366,6 +2420,12 @@ def _request_payload(
     # existing caller's payload.
     if backend_id is not None:
         payload["backend_id"] = backend_id
+    # OMN-20844: the model the customer's own provider key runs for this call,
+    # written under the optional field the node contract declares. Omitted
+    # entirely when unset, never null, because ``ModelDelegateSkillRequest``
+    # declares ``extra="forbid"`` and existing callers keep their payload shape.
+    if model is not None:
+        payload["model"] = model
     # OMN-19514: the ticket this delegation works, in the request's metadata
     # map, which every released request consumer already accepts. Omitted
     # entirely when no ticket was named.
@@ -2409,6 +2469,7 @@ def _write_payload(
     system_prompt: str | None = None,
     requested_timeout_seconds: int | None = None,
     backend_id: str | None = None,
+    model: str | None = None,
     ticket_id: str | None = None,
     caller: ModelDelegateCaller | None = None,
     tenant_id: str | None = None,
@@ -2465,6 +2526,7 @@ def _write_payload(
         system_prompt=system_prompt,
         requested_timeout_seconds=requested_timeout_seconds,
         backend_id=backend_id,
+        model=model,
         ticket_id=ticket_id,
         caller=caller,
         tenant_id=tenant_id,
@@ -3080,6 +3142,20 @@ class DelegateCommand(click.Command):
     ),
 )
 @click.option(
+    "--model",
+    "model",
+    type=str,
+    default=None,
+    help=(
+        "The model the customer's own provider key runs for this call "
+        "(for example an OpenRouter model id), written to the delegate "
+        "request's optional 'model' field (OMN-20844). Omit it and the model "
+        "stored with the key runs. MODEL-OR-REFUSE: a completed run whose "
+        "accepted answer ran another model exits non-zero naming both, and "
+        "the receipt records the model asked for and whether it was honoured."
+    ),
+)
+@click.option(
     "--criteria",
     "criteria",
     type=str,
@@ -3374,6 +3450,7 @@ def delegate_command(
     task_type: str | None,
     task_class_alias: str | None,
     backend_id: str | None,
+    model: str | None,
     criteria: tuple[str, ...],
     criteria_mode: str | None,
     response_contract: str | None,
@@ -3480,6 +3557,7 @@ def delegate_command(
             prompt=prompt,
             task_type=_resolve_task_class_flag(task_type, task_class_alias),
             backend_id=_validate_backend_pin(backend_id),
+            model=_validate_model_choice(model),
             acceptance_criteria=acceptance_criteria,
             criteria_mode=criteria_mode,
             response_contract=declared_contract,
@@ -3514,6 +3592,7 @@ def run_delegate(
     prompt: str,
     task_type: str | None,
     backend_id: str | None = None,
+    model: str | None = None,
     acceptance_criteria: tuple[str, ...] = (),
     criteria_mode: str | None = None,
     response_contract: dict[str, object] | None = None,
@@ -3648,6 +3727,7 @@ def run_delegate(
                 system_prompt=system_prompt,
                 requested_timeout_seconds=timeout,
                 backend_id=backend_id,
+                model=model,
                 max_tokens=max_tokens,
                 correlation_id=uuid.uuid4(),
             )
@@ -3852,6 +3932,7 @@ def run_delegate(
             system_prompt=system_prompt,
             requested_timeout_seconds=timeout,
             backend_id=backend_id,
+            model=model,
             max_tokens=max_tokens,
             state_root=state_root,
             run_id=run_id,
@@ -4087,6 +4168,7 @@ def run_delegate(
                         # request value the payload was built from, so the
                         # two cannot disagree about what was asked for.
                         requested_backend_id=backend_id,
+                        requested_model=model,
                         # OMN-19131: what a pre-publish failure needs to name
                         # the refused field, the model and the capture log.
                         contract_path=contract_path,
@@ -4117,6 +4199,7 @@ def run_delegate(
                         # request value, so the receipt can never say the
                         # pin held while the exit code says it did not.
                         requested_backend_id=backend_id,
+                        requested_model=model,
                         # OMN-18925: the two facts a transport refusal needs
                         # that addressing does not carry separately. Taken
                         # from the decision that was PROVEN viable, so a

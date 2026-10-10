@@ -85,6 +85,11 @@ class ProtocolDelegationDispatchPort(Protocol):
         # here before omnimarket passes it, through a TypedDict-typed helper
         # splat and only when named, so a released consumer keeps working.
         attribution: Mapping[str, str] | None = None,
+        # OMN-20844: the model the customer's own provider key runs for this
+        # call. The OmniMarket consumer protocol declares it (omnimarket#3676);
+        # defaulted, per the note above, so a consumer that never passes it
+        # keeps working.
+        model: str | None = None,
     ) -> dict[str, object]: ...
 
 
