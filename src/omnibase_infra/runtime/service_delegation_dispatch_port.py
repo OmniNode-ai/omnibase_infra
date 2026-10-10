@@ -296,6 +296,7 @@ class RuntimeDelegationDispatchPort:
         temperature: float | None = None,
         response_format: dict[str, object] | None = None,
         attribution: Mapping[str, str] | None = None,
+        model: str | None = None,
     ) -> dict[str, object]:
         """Dispatch a request; guard OMN-18931 faults, pass OMN-19124 routing pins.
 
@@ -314,6 +315,7 @@ class RuntimeDelegationDispatchPort:
         # fields yet, so None preserves the existing route while explicit requests
         # fail closed instead of being silently dropped at this boundary.
         for feature_name, feature_value in (
+            ("model", model),
             ("system_prompt", system_prompt),
             ("temperature", temperature),
             ("response_format", response_format),
