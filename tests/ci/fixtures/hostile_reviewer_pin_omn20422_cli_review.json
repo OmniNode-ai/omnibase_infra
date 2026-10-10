@@ -1,0 +1,56 @@
+{
+  "_provenance": {
+    "source": "Real cli_review run on lab host h101 against the two review LLM endpoints (qwen3-review on 192.168.86.201:8000, local-studio-planner on 192.168.86.200:8131), run from an omniintelligence checkout at the pinned sha; reduced to verdict fields, finding text omitted; not a hosted-runner capture",
+    "captured_utc": "2026-10-09T18:10:02Z",
+    "source_sha256": "88cca412ae43fc478704730797cac850703eb644957642f3e4a3b860b6bc5252",
+    "ticket": "OMN-20422",
+    "command": "cli_review --file <staged diff of the pin edits> --model qwen3-review --model local-studio-planner"
+  },
+  "response": {
+    "omniintelligence_sha": "30f37eca07b692d7889692edfe99686c87612315",
+    "models_attempted": [
+      "qwen3-review",
+      "local-studio-planner"
+    ],
+    "models_succeeded": [
+      "qwen3-review",
+      "local-studio-planner"
+    ],
+    "models_failed": [],
+    "total_dropped": 0,
+    "voters": [
+      {
+        "model": "qwen3-review",
+        "prompt_version": "1.3.0",
+        "success": true,
+        "parse_failed": false,
+        "reviewer_identity": "http://192.168.86.201:8000#served",
+        "findings": 4,
+        "dropped_findings": 0
+      },
+      {
+        "model": "local-studio-planner",
+        "prompt_version": "1.3.0",
+        "success": true,
+        "parse_failed": false,
+        "reviewer_identity": "http://192.168.86.200:8131#served",
+        "findings": 4,
+        "dropped_findings": 0
+      }
+    ],
+    "quorum": {
+      "verdict": "passed",
+      "quorum_threshold": 2,
+      "models_succeeded": [
+        "qwen3-review",
+        "local-studio-planner"
+      ],
+      "distinct_reviewers_succeeded": [
+        "http://192.168.86.201:8000#served",
+        "http://192.168.86.200:8131#served"
+      ],
+      "quorum_met": true,
+      "blocking_count": 0
+    }
+  }
+}

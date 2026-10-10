@@ -107,17 +107,11 @@ def _assert_bare_sha256_pull_rejected(
 
 @requires_docker
 class TestPullPinnedImageRealDockerSemantics:
-    def test_docker_image_inspect_succeeds_for_a_present_local_image(self) -> None:
-        pull = subprocess.run(
-            ["docker", "pull", "busybox:latest"],
-            capture_output=True,
-            text=True,
-            timeout=90,
-            check=False,
-        )
-        assert pull.returncode == 0, pull.stderr
+    def test_docker_image_inspect_succeeds_for_a_present_local_image(
+        self, local_inspect_image: str
+    ) -> None:
         id_result = subprocess.run(
-            ["docker", "image", "inspect", "--format", "{{.Id}}", "busybox:latest"],
+            ["docker", "image", "inspect", "--format", "{{.Id}}", local_inspect_image],
             capture_output=True,
             text=True,
             timeout=10,

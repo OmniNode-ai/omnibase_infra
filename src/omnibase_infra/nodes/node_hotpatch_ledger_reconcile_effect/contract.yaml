@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_hotpatch_ledger_reconcile_effect
+contract_name: node_hotpatch_ledger_reconcile_effect
+node_name: node_hotpatch_ledger_reconcile_effect
+node_type: EFFECT_GENERIC
+runtime_profiles: [main]
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+description: "OMN-17427: retire one hot-patch ledger row once its fix commit is an ancestor of the deployed ref and its container carries no .prepatch; refuse otherwise."
+input_model:
+  name: ModelHotpatchLedgerReconcileRequest
+  module: omnibase_infra.models.model_hotpatch_ledger_reconcile_request
+  description: "Ledger path, source clones root, and the container and file that identify the row; the ledger path is a host fact supplied by the caller."
+output_model:
+  name: ModelHotpatchLedgerReconcileResult
+  module: omnibase_infra.models.model_hotpatch_ledger_reconcile_result
+  description: "Retired or refused, with the reason and the backup path of the pre-change ledger."
+event_bus:
+  subscribe_topics: ["onex.cmd.platform.hotpatch-ledger-reconcile.v1"]
+  publish_topics: ["onex.evt.platform.hotpatch-ledger-reconciled.v1"]
+terminal_event: "onex.evt.platform.hotpatch-ledger-reconciled.v1"
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: hotpatch_ledger.reconcile
+      handler:
+        name: HandlerHotpatchLedgerReconcile
+        module: omnibase_infra.handlers.handler_hotpatch_ledger_reconcile
+      event_model:
+        name: ModelHotpatchLedgerReconcileRequest
+        module: omnibase_infra.models.model_hotpatch_ledger_reconcile_request
+      output_events: [ModelHotpatchLedgerReconcileResult]
+capabilities:
+  - name: hotpatch_ledger.reconcile
+    description: "Retire a hot-patch ledger row on verified ancestry and a prepatch-free container."
+metadata:
+  ticket: OMN-17427
+  author: OmniNode Team
+  description: "Evidence-checked retirement of hot-patch ledger rows, replacing the hand YAML edit."
+  tags: [effect, hotpatch, ledger]

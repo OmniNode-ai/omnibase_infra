@@ -124,10 +124,8 @@ def test_pre_setup_steps_run_on_stdlib_only() -> None:
     ``python3 scripts/resolve_omnimarket_contract_pin.py`` (which imported
     ``yaml``) and ``uv run python .../check_omnimarket_contract_pin_advance.py``
     roughly seventy lines *above* this job's ``Setup Python and uv`` step. The
-    runners' ambient ``python3`` has no PyYAML -- this same workflow's
-    contract-compliance job carries an explicit
-    ``python3 -m pip install --quiet --user pyyaml`` step precisely because of
-    that -- and ``uv`` is not on PATH until the setup step runs. Either would
+    runners' ambient ``python3`` cannot be assumed to have PyYAML, and ``uv``
+    is not on PATH until the setup step runs. Either would
     have ``ImportError``/``command not found`` on **every** PR and taken the
     required check down repo-wide: the exact org-wide red this ticket removes,
     self-inflicted.

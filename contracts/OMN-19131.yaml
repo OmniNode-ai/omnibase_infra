@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19131
+title: Name the timeout flag and ceiling in delegation refusal output
+summary: A typed budget refusal names the requested timeout, task type and execution ceiling in the human failure line, with guidance to lower or omit the flag.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-timeout-refusal-guidance
+    statement: An operator receiving a typed execution ceiling refusal can read which CLI flag supplied the timeout and what value is accepted.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a runtime refusal names --timeout, requested_timeout_seconds, the document task ceiling and the lower-or-omit guidance in human and JSON modes -- falsifier: uv run pytest tests/integration/cli/test_delegate_ceiling_guidance_omn19131.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The real click command, RuntimeLocal and in-memory bus carry a ceiling-checking fixture handler's refusal into stderr and the persisted receipt; the ceiling value itself completes as a positive control.
+    command: uv run pytest tests/integration/cli/test_delegate_ceiling_guidance_omn19131.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19131-timeout-refusal-guidance
+    description: The runtime refusal names the flag, request field, task ceiling and accepted value in both output modes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_delegate_ceiling_guidance_omn19131.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

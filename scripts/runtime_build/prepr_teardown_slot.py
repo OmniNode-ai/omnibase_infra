@@ -210,6 +210,7 @@ class _Teardown:
         self.run = runner
         self.env = dict(base_env)
         self.errors: list[str] = []
+        self.tenant_authentication: dict[str, Any] | None = None
 
     # -- helpers ----------------------------------------------------------
     def _exec(self, container: str, names: tuple[str, ...], *cmd: str) -> list[str]:
@@ -371,6 +372,10 @@ class _Teardown:
         }
 
     def destroy(self, planned: dict[str, Any], staging_root: Path) -> None:
+        # Offboard while the gateway and database can still demonstrate a
+        # working credential followed by an authentication refusal.
+        if not self.revoke_tenant(staging_root):
+            return
         # Containers first: a live consumer keeps its group from being deleted
         # and its pool keeps sessions open on the slot's databases.
         if planned["containers"]:
@@ -413,6 +418,51 @@ class _Teardown:
             self._checked(["docker", "rmi", "-f", *planned["images"]], "remove images")
         if staging_root.exists():
             shutil.rmtree(staging_root, ignore_errors=False)
+
+    def revoke_tenant(self, staging_root: Path) -> bool:
+        credential = staging_root / "tenant-state" / "credential.env"
+        if not credential.exists():
+            # A slot without a gateway, or a bring-up that failed before mint.
+            return True
+        env = dict(self.env)
+        env["COMPOSE_PROJECT"] = self.sel.compose_project
+        env["LAB_TENANT_SLUG"] = f"onex-{self.sel.db_slot}"
+        before = len(self.errors)
+        output = self._checked(
+            [
+                "bash",
+                str(REPO_ROOT / "scripts" / "smoke" / "smoke_delegation.sh"),
+                "--target",
+                "compose",
+                "--tenant-lifecycle",
+                "revoke",
+            ],
+            "revoke slot tenant and prove authentication refusal",
+            env=env,
+        )
+        if len(self.errors) != before:
+            return False
+        try:
+            proofs = [
+                json.loads(line) for line in output.splitlines() if line.startswith("{")
+            ]
+        except json.JSONDecodeError:
+            self.errors.append(
+                "slot tenant offboard returned malformed authentication proof"
+            )
+            return False
+        if not proofs or not (
+            proofs[-1].get("revoked") is True
+            and proofs[-1].get("auth_before") == 200
+            and proofs[-1].get("auth_after") in (401, 403)
+        ):
+            self.errors.append("slot tenant offboard returned no authentication proof")
+            return False
+        self.tenant_authentication = {
+            key: proofs[-1][key]
+            for key in ("tenant_id", "revoked", "auth_before", "auth_after")
+        }
+        return True
 
     def readback(self, staging_root: Path) -> tuple[dict[str, int], dict[str, int]]:
         topics = self.topics()
@@ -481,6 +531,8 @@ def run_teardown(
             else policy.EXIT_TEARDOWN_INCOMPLETE
         )
     report["errors"] = td.errors
+    if td.tenant_authentication is not None:
+        report["tenant_authentication"] = td.tenant_authentication
     text = json.dumps(report, indent=2, sort_keys=True)
     if report_path is not None:
         report_path.write_text(text + "\n", encoding="utf-8")

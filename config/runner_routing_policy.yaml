@@ -964,7 +964,7 @@ route:
     # Measured 2026-09-20: omnibase_infra 32, omninode_infra 14, omniclaude 7,
     # omnimarket 5, omnibase_core 4, omniweb 4, omni_home 3,
     # onex_change_control 3, omnibase_compat 2, omniintelligence 2,
-    # omnimemory 2, omnibase_spi 1, omnidash 1. `knowledge-base` declares none
+    # omnimemory 2, omnibase_spi 1, omnidash 1. `knowledge_base` declares none
     # and is therefore absent -- absent because it has nothing to watch, not
     # because anybody decided not to watch it.
     #
@@ -1101,7 +1101,6 @@ route:
         - ci-bus-overlay-binding
         - CodeQL
         - Contract Compliance
-        - Contract Compliance Check
         - Contract Sync Gate (Wave C) [OMN-8915]
         - contract-validation
         - Customer Path Boundary (OMN-18012)
@@ -1154,8 +1153,6 @@ route:
         # gates and therefore belong in this umbrella-enforced snapshot.
         - Noncanonical Class Allowlist One-way (OMN-19677) / anti-growth-baseline
         - non-dev-base-guard
-        - OCC Companion Merged Gate (OMN-15214)
-        - occ-preflight / eligibility
         - Omni Standards Gate
         - ONEX Validators
         - Pin Reachability (OMN-15538)
@@ -1192,7 +1189,6 @@ route:
         - Type Safety Validation
         - URL Authority Gate
         - Validator Requirements Baseline One-way (OMN-19677) / anti-growth-baseline
-        - verify / verify
         - wheel-content-parity
         - Writer-Migration Coupling Check
 # OMN-19412 follow-up, 2026-09-28. THE COMMITTED PLACEMENT OF EVERY SCHEDULED

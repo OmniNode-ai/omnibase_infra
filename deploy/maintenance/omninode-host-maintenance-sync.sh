@@ -132,9 +132,7 @@ MANIFEST=(
   # condition (merged, never deployed, nothing alarms) that this manifest
   # exists to make impossible.
   "scripts/omninode-ci-required-context-probe.py|/data/maintenance/bin/omninode-ci-required-context-probe.py|0755"
-  "deploy/maintenance/cron.d/omninode-system-slack-report|/etc/cron.d/omninode-system-slack-report|0644"
   "deploy/maintenance/omninode-host-maintenance-sync.sh|/data/maintenance/bin/omninode-host-maintenance-sync.sh|0755"
-  "deploy/maintenance/cron.d/omninode-host-maintenance-sync|/etc/cron.d/omninode-host-maintenance-sync|0644"
   # OMN-17311. The workspace reconciler's scheduler adapter and its cron unit.
   # These are in the manifest for the reason the manifest exists: an artifact
   # that is merged but never installed, with nothing alarming, is the OMN-15525
@@ -146,8 +144,24 @@ MANIFEST=(
   # deploy-source clone (${OMNI_HOME}/omnibase_infra/scripts/reconcile-host.sh)
   # so its collaborators resolve, and it is kept current by the reconcile it
   # performs. Only the two host-resident files need this guard.
+  # OMN-20805. Every root schedule is a systemd timer, not an /etc/cron.d line: a cron
+  # line records a start and no end, a oneshot service under a timer records the
+  # start, the end and the exit status of every run in the journal. Listing the
+  # units here IS their installation; the enable and the retirement of the legacy
+  # cron files happen after the loop (see ACTIVATION below).
+  "deploy/maintenance/systemd/omninode-host-maintenance-sync.service|/etc/systemd/system/omninode-host-maintenance-sync.service|0644"
+  "deploy/maintenance/systemd/omninode-host-maintenance-sync.timer|/etc/systemd/system/omninode-host-maintenance-sync.timer|0644"
+  "deploy/maintenance/systemd/omninode-runner-tree-converge.service|/etc/systemd/system/omninode-runner-tree-converge.service|0644"
+  "deploy/maintenance/systemd/omninode-runner-tree-converge.timer|/etc/systemd/system/omninode-runner-tree-converge.timer|0644"
+  "deploy/maintenance/systemd/omninode-workspace-reconcile.service|/etc/systemd/system/omninode-workspace-reconcile.service|0644"
+  "deploy/maintenance/systemd/omninode-workspace-reconcile.timer|/etc/systemd/system/omninode-workspace-reconcile.timer|0644"
+  "deploy/maintenance/systemd/omninode-system-slack-report-alert.service|/etc/systemd/system/omninode-system-slack-report-alert.service|0644"
+  "deploy/maintenance/systemd/omninode-system-slack-report-alert.timer|/etc/systemd/system/omninode-system-slack-report-alert.timer|0644"
+  "deploy/maintenance/systemd/omninode-system-slack-report-digest.service|/etc/systemd/system/omninode-system-slack-report-digest.service|0644"
+  "deploy/maintenance/systemd/omninode-system-slack-report-digest.timer|/etc/systemd/system/omninode-system-slack-report-digest.timer|0644"
+  "deploy/maintenance/systemd/omninode-inference-log-retention.service|/etc/systemd/system/omninode-inference-log-retention.service|0644"
+  "deploy/maintenance/systemd/omninode-inference-log-retention.timer|/etc/systemd/system/omninode-inference-log-retention.timer|0644"
   "deploy/maintenance/omninode-workspace-reconcile.sh|/data/maintenance/bin/omninode-workspace-reconcile.sh|0755"
-  "deploy/maintenance/cron.d/omninode-workspace-reconcile|/etc/cron.d/omninode-workspace-reconcile|0644"
   # OMN-18567. The deploy runner's private clone tree converger and its cron
   # unit. Listing them here IS the installation: the hourly --converge writes
   # every entry that differs from origin/dev and reads it back, so the tick
@@ -157,7 +171,6 @@ MANIFEST=(
   # reconciler proper, which is executed from the clone so its collaborators
   # resolve and is therefore deliberately absent.
   "deploy/maintenance/omninode-runner-tree-converge.sh|/data/maintenance/bin/omninode-runner-tree-converge.sh|0755"
-  "deploy/maintenance/cron.d/omninode-runner-tree-converge|/etc/cron.d/omninode-runner-tree-converge|0644"
   # OMN-18942. The fleet failure probe and the three artifacts it reads. NO new
   # cron unit appears here, deliberately: the probe is called from the system
   # reporter's own `collect()` and rides its */15 tick, so the reason these are
@@ -310,6 +323,7 @@ missing_count=0
 converged_count=0
 failed_count=0
 in_sync_count=0
+units_written=0
 report_lines=()
 
 for entry in "${MANIFEST[@]}"; do
@@ -350,6 +364,7 @@ for entry in "${MANIFEST[@]}"; do
       if [[ "$after" == "$want" ]]; then
         report_lines+=("CONVERGED|$hostpath|before=${before} after=${after:0:12} matches ${SYNC_REF}")
         converged_count=$((converged_count + 1))
+        if [[ "$hostpath" == */systemd/system/* ]]; then units_written=1; fi
       else
         if [[ -n "$after" ]]; then after_short="${after:0:12}"; else after_short="unreadable"; fi
         report_lines+=("CRITICAL|$hostpath|CONVERGE FAILED before=${before} after=${after_short} want=${want:0:12} (readback does not match ${SYNC_REF})")
@@ -372,6 +387,7 @@ for entry in "${MANIFEST[@]}"; do
     # half-written script.
     mv -f "${hostpath}.omn-sync.tmp" "$hostpath" || die "cannot replace $hostpath"
     rm -f "$tmp"
+    if [[ "$hostpath" == */systemd/system/* ]]; then units_written=1; fi
   fi
 
   if ! have=$(installed_sha "$hostpath"); then
@@ -388,6 +404,100 @@ for entry in "${MANIFEST[@]}"; do
     drift_count=$((drift_count + 1))
   fi
 done
+
+# ACTIVATION (OMN-20805)
+#   A unit file on disk schedules nothing. Every root schedule is a systemd timer
+#   whose service the journal records run by run (start, end, exit status), where
+#   the /etc/cron.d line it replaces recorded a start and nothing else. The timers
+#   are the manifest rows that install into /etc/systemd/system, so there is no
+#   second list to drift from the manifest.
+#
+#   ORDER IS THE SAFETY: a legacy cron file is retired only after every timer is
+#   enabled AND active, so a failed enable leaves the old schedule running rather
+#   than leaving the host with no schedule at all. A retired file is moved aside
+#   (never deleted) into an onex-retired directory beside it, which cron ignores.
+#
+#   --check never writes: a timer that is not active, or a legacy cron file that
+#   is still live, is reported as drift and reddens the run.
+SYSTEMCTL=${OMNINODE_MAINTENANCE_SYNC_SYSTEMCTL:-systemctl}
+RETIRED_CRON_FILES=(
+  /etc/cron.d/omninode-host-maintenance-sync
+  /etc/cron.d/omninode-runner-tree-converge
+  /etc/cron.d/omninode-workspace-reconcile
+  /etc/cron.d/omninode-system-slack-report
+  /etc/cron.d/omninode-inference-log-retention
+)
+# Test seam, like OMNINODE_MAINTENANCE_SYNC_MANIFEST: a colon-separated override
+# so the activation can be exercised without touching the live /etc/cron.d.
+if [[ -n "${OMNINODE_MAINTENANCE_SYNC_RETIRED_CRON:-}" ]]; then
+  IFS=: read -r -a RETIRED_CRON_FILES <<<"$OMNINODE_MAINTENANCE_SYNC_RETIRED_CRON"
+fi
+
+timer_units=()
+for entry in "${MANIFEST[@]}"; do
+  IFS='|' read -r _relpath hostpath _mode <<<"$entry"
+  case "$hostpath" in
+    */systemd/system/*.timer) timer_units+=("$(basename "$hostpath")") ;;
+  esac
+done
+
+activation_bad=0
+if (( ${#timer_units[@]} > 0 )); then
+  if [[ "$MODE" == "check" ]]; then
+    for timer in "${timer_units[@]}"; do
+      if "$SYSTEMCTL" is-active --quiet "$timer" 2>/dev/null; then
+        report_lines+=("OK|$timer|timer active")
+      else
+        report_lines+=("CRITICAL|$timer|timer is not active; the schedule it carries is not running")
+        activation_bad=$((activation_bad + 1))
+      fi
+    done
+    for legacy in "${RETIRED_CRON_FILES[@]}"; do
+      if [[ -e "$legacy" ]]; then
+        report_lines+=("CRITICAL|$legacy|legacy cron file is still live beside its timer; the job would run twice")
+        activation_bad=$((activation_bad + 1))
+      fi
+    done
+  else
+    all_active=1
+    if (( units_written == 1 )); then
+      if ! "$SYSTEMCTL" daemon-reload; then
+        report_lines+=("CRITICAL|systemd|daemon-reload failed after writing unit files")
+        activation_bad=$((activation_bad + 1))
+        all_active=0
+      fi
+    fi
+    for timer in "${timer_units[@]}"; do
+      if "$SYSTEMCTL" enable --now "$timer" >/dev/null 2>&1 \
+        && "$SYSTEMCTL" is-active --quiet "$timer"; then
+        report_lines+=("OK|$timer|timer enabled and active")
+      else
+        report_lines+=("CRITICAL|$timer|ENABLE FAILED; the legacy cron files are left in place")
+        activation_bad=$((activation_bad + 1))
+        all_active=0
+      fi
+    done
+    if (( all_active == 1 )); then
+      stamp=$(date -u +%Y%m%dT%H%M%SZ)
+      for legacy in "${RETIRED_CRON_FILES[@]}"; do
+        [[ -e "$legacy" ]] || continue
+        retired_dir="$(dirname "$legacy")/onex-retired"
+        if mkdir -p "$retired_dir" \
+          && mv "$legacy" "$retired_dir/$(basename "$legacy").retired-$stamp"; then
+          report_lines+=("RETIRED|$legacy|moved to $retired_dir; its timer is active")
+        else
+          report_lines+=("CRITICAL|$legacy|could not retire the legacy cron file; the job would run twice")
+          activation_bad=$((activation_bad + 1))
+        fi
+      done
+    fi
+  fi
+  if [[ "$MODE" == "converge" ]]; then
+    failed_count=$((failed_count + activation_bad))
+  else
+    drift_count=$((drift_count + activation_bad))
+  fi
+fi
 
 echo "omninode host maintenance sync — mode=$MODE ref=$SYNC_REF (${REF_SHA:0:12}) repo=$INFRA_REPO_ROOT"
 printf '%s\n' "${report_lines[@]}"

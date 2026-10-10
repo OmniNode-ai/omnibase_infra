@@ -76,7 +76,7 @@ Why a GitHub Actions ``services:`` container is NOT the hosted-runner path:
 ``ENABLE_DEFAULT_LISTENERS``/``RP_BOOTSTRAP_USER`` shape listeners and seed a
 superuser but cannot turn SASL on -- ``--set redpanda.enable_sasl=true`` is
 command-line only (verified 2026-09-07 by reading ``/entrypoint.sh`` out of
-``redpandadata/redpanda:v24.2.7``). A service container would therefore be a
+``docker.redpanda.com/redpandadata/redpanda:v24.2.7``). A service container would therefore be a
 NO-AUTH broker, i.e. exactly the hole this gate exists to close.
 
 Every credential in this module is a synthetic test constant. No real
@@ -97,11 +97,11 @@ from dataclasses import dataclass, field
 
 # Pinned by digest, not by a floating tag: the same job on two runners must
 # resolve the same image. This is the multi-arch manifest-list digest of
-# redpandadata/redpanda:v24.2.7 -- `.github/workflows/ci.yml` pre-pulls this
+# docker.redpanda.com/redpandadata/redpanda:v24.2.7 -- `.github/workflows/ci.yml` pre-pulls this
 # exact reference and tests/unit/docker/test_omn18012_harness_runner_topology.py
 # asserts the two never drift apart.
 REDPANDA_IMAGE = (
-    "redpandadata/redpanda:v24.2.7@sha256:"
+    "docker.redpanda.com/redpandadata/redpanda:v24.2.7@sha256:"
     "82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48"
 )
 
