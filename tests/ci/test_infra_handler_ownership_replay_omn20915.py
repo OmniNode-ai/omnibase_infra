@@ -7,6 +7,11 @@ that deleted the moved and dead GitHub source-control nodes: it named sixteen
 allowlist entries as stale. This test replays that recording against the
 committed allowlist, so the entries named by the real gate cannot come back, and
 adds the general rule the gate enforces: every allowlisted path exists.
+
+The parity-red-on-base baseline entry and the hand-flip proof of the deleted
+node_pr_state_projection_compute stay: the flip-bundle gate refuses a baseline
+entry removed by deleting its proof (shrink-only), so only the allowlist and the
+shape baseline lose their entries here.
 """
 
 from __future__ import annotations

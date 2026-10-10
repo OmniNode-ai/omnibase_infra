@@ -1,0 +1,24 @@
+{
+  "branch_coverage_pct": 42.97,
+  "candidate_count": 4,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_pr_state_projection_compute.handlers.handler_pr_state_projection",
+  "handler_module_sha256": "sha256:b8db75a87a04ec30f5c85a49e4da7c3d140b10ebae2b9cef1b263ccf8b83473e",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_pr_state_projection_compute",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-07-20T04:38:36.760175+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 4,
+  "selected_input_hashes": [
+    "sha256:bff10b433bd7533e7484c3a420e179150dab28bd664b60ac3e48ad9c1a5aeecc",
+    "sha256:78119b5e415f4162cc3d53d857385f3dd385c987c527167a95a372c57b1dd83b",
+    "sha256:293eeb7252e36d9587052a6c7d77e2145e24209f130f77b43975677449749242",
+    "sha256:c2e30324c59f9d35089e77927aaeb568f506ad540d28d1fab5d508ecb6dc7912"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-14826 hand-flips node_pr_state_projection_compute to canonical def-B via the OMN-14781 path (mirrors OMN-14821 for the sibling node_build_loop_projection_compute): the entrypoint param is retyped object->ModelEventMessage and the dead legacy execute()/_safe_correlation_id ProtocolHandler path is removed, while the projection business logic (project/_extract_payload/_require_str/_require_int/_first_str/_extract_timestamp/_extract_correlation_id/_coerce_event_message) is preserved byte-identical base_ref<->HEAD and re-derived from git by the ratchet. Equivalence is proven by that git-verbatim preservation plus the green runtime-dispatch parity tests over the selected corpus, not by a broad branch-coverage claim; the JSON-decode/non-object/missing-identity error branches are covered by the existing patched unit suite (test_project_raises_*) and are not re-driven through the deterministic SUCCESS-only dispatch corpus.",
+    "uncovered_branch_count": 7
+  },
+  "volatile_mask": []
+}
