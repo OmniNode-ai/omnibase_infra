@@ -1,0 +1,34 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20867
+title: The dev lane's main runtime publishes the runtime tick
+summary: The dev lane compose overlay sets ONEX_RUNTIME_SCHEDULER_ENABLED to true on omninode-runtime only, so the tick producer starts on that lane; the wiring test now covers the dev lane overlay.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20867-dev-lane-tick
+    statement: The dev lane's main runtime opts in to the runtime scheduler and no secondary role on that lane carries the switch.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the dev lane overlay sets the flag on omninode-runtime only and joins the opted-in overlay set -- falsifier: uv run pytest tests/unit/runtime/test_runtime_scheduler_wiring.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The scheduler wiring test covers the dev lane overlay.
+    command: uv run pytest tests/unit/runtime/test_runtime_scheduler_wiring.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20867-ac1
+    description: The dev lane overlay sets ONEX_RUNTIME_SCHEDULER_ENABLED on omninode-runtime only.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_runtime_scheduler_wiring.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -q 'ONEX_RUNTIME_SCHEDULER_ENABLED.*true' docker/docker-compose.dev-lane.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
