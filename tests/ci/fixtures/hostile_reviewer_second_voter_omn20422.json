@@ -1,8 +1,8 @@
 {
   "_provenance": {
-    "source": "Real HTTP responses from the llama-server on the .200 Mac Studio, port 8131 (launchd ai.omninode.reviewer-studio, Qwen3.6-35B-A3B Q8_0), captured over loopback on that host; not a hosted-runner capture",
-    "captured_utc": "2026-10-09T04:42:15.849615+00:00",
-    "source_sha256": "789ba647f970564354d352683a1c3930e95145ee1d8e19b55c9b2f6fe56f5c82",
+    "source": "Real HTTP responses from the llama-server on the Mac Studio, port 8130 (launchd ai.omninode.planner-studio, Qwen3.8-27B MTP Q8_0), captured over loopback on that host after the second Studio reviewer seat was retired (RULING 2026-10-10T16:28:58Z); not a hosted-runner capture",
+    "captured_utc": "2026-10-10T16:31:55+00:00",
+    "source_sha256": "1afe38d9fb54746ef557309a933387c5e00e4e9e5349d98e14c143f62e0de813",
     "ticket": "OMN-20422",
     "command": "GET /v1/models; POST /v1/chat/completions"
   },
@@ -10,15 +10,15 @@
     "models": {
       "data": [
         {
-          "id": "qwen3.6-35b-a3b",
+          "id": "Qwen3.8-27B",
           "n_ctx_train": 262144,
-          "n_params": 34660610688,
+          "n_params": 27320697856,
           "ftype": "Q8_0"
         }
       ]
     },
     "completion": {
-      "model": "qwen3.6-35b-a3b",
+      "model": "Qwen3.8-27B",
       "content": "ready",
       "finish_reason": "stop",
       "usage": {
