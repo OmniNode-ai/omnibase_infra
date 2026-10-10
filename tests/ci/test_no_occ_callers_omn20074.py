@@ -36,6 +36,16 @@ _PREFLIGHT_WAIT = re.compile(r"occ-preflight")
 _SKIP_TOKEN_REUSABLE = "reject-deploy-gate-skip.yml"
 _PREFLIGHT_FREE_SKIP_TOKEN_SHA = "4358450ccbba0cee11e390208dd0b8b1728e94ab"
 
+# The deploy-gate reusable reads the caller's own contracts/OMN-<n>.yaml at the
+# pull request head when the caller passes contract-source: caller. The pin is
+# the omniclaude commit that taught the reusable that input (omniclaude#2650);
+# the pin before it read onex_change_control only.
+_DEPLOY_GATE_REUSABLE = (
+    "OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml"
+)
+_CALLER_CONTRACT_SOURCE_SHA = "<omniclaude#2650 squash sha on dev>"
+_OCC_ONLY_DEPLOY_GATE_SHA = "0c0d91e5e10904db67d43ad537fdf6e65e219f21"
+
 _OCC_CONTEXTS = frozenset(
     {
         "occ-preflight / eligibility",
@@ -175,3 +185,23 @@ def test_no_occ_callers_required_checks_manifest_names_no_occ_context() -> None:
     manifest = yaml.safe_load(REQUIRED_CHECKS.read_text(encoding="utf-8"))
     names = {row["name"] for row in manifest["gates"] if isinstance(row, dict)}
     assert not _OCC_CONTEXTS & names
+
+
+def test_no_occ_callers_deploy_gate_reads_caller_contracts() -> None:
+    """The deploy gate reads this repository's contracts, not change control."""
+    calls = [
+        (name, job_id, job)
+        for name, job_id, job in _jobs()
+        if isinstance(job.get("uses"), str)
+        and job["uses"].split("@", 1)[0] == _DEPLOY_GATE_REUSABLE
+    ]
+    assert [(name, job_id) for name, job_id, _ in calls] == [
+        ("deploy-gate.yml", "deploy-gate")
+    ]
+    job = calls[0][2]
+    pin = job["uses"].split("@", 1)[1].split()[0]
+    assert pin != _OCC_ONLY_DEPLOY_GATE_SHA
+    assert pin == _CALLER_CONTRACT_SOURCE_SHA
+    options = job.get("with") or {}
+    assert options.get("contract-source") == "caller", options
+    assert "contracts-dir" not in options, "deprecated input; the source decides"

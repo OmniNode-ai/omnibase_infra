@@ -23,6 +23,11 @@ requirements:
     acceptance:
       - id: AC4
         statement: 'AC4: no omnibase_infra workflow calls or waits on an OCC path, and neither CI Summary nor the required-checks manifest expects an OCC companion context -- falsifier: uv run pytest tests/ci/test_no_occ_callers_omn20074.py -q -k no_occ_callers'
+  - id: req-deploy-gate-reads-caller-contracts
+    statement: omnibase_infra's deploy gate must read the cited ticket's deploy evidence from this repository's contracts/OMN-<n>.yaml at the pull request head, through the omniclaude reusable's caller contract source.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: deploy-gate.yml calls the omniclaude deploy-gate reusable at the commit that adds contract-source, with contract-source caller and no contracts-dir -- falsifier: uv run pytest tests/ci/test_no_occ_callers_omn20074.py -q -k deploy_gate_reads_caller_contracts fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: No workflow calls an OCC reusable workflow, waits on occ-preflight or requires an OCC companion context.
@@ -77,3 +82,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
+  - id: dod-deploy-gate-caller-contracts-ac5
+    description: The repository test proves the deploy gate calls the reusable with the caller contract source at the pin that carries it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_no_occ_callers_omn20074.py -q -k deploy_gate_reads_caller_contracts
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
