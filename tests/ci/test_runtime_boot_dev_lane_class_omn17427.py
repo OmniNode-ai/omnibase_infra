@@ -184,6 +184,11 @@ def test_the_override_carries_the_dev_lane_bindings_on_both_kernels(
         assert env["INFISICAL_ADDR"].strip(), (
             f"{kernel}: the secrets-store address is unset"
         )
+        # omnimarket 0.4.309's node_handshake_policy_gate_effect resolves
+        # GH_TOKEN at construction; the lane binds it, the laptop render
+        # blanks it, so an unset token crash-looped only this phase.
+        for key in ("GITHUB_TOKEN", "GH_TOKEN"):
+            assert env[key].strip(), f"{kernel}: {key} is unset"
     effects_env = override["services"]["runtime-effects"]["environment"]
     infra_effects = _compose(_REPO / "docker" / "docker-compose.infra.yml")["services"][
         "runtime-effects"
@@ -217,6 +222,20 @@ def test_an_infra_base_without_the_store_binding_refuses_rather_than_defaults(
     proc = _derive(tmp_path, _REPO / "docker" / "docker-compose.dev-lane.yml", mutated)
     assert proc.returncode != 0
     assert "INFISICAL_ADDR" in proc.stdout + proc.stderr
+    assert not (tmp_path / "override.yml").exists()
+
+
+def test_an_infra_base_without_the_github_token_refuses_rather_than_defaults(
+    tmp_path: Path,
+) -> None:
+    infra = _compose(_REPO / "docker" / "docker-compose.infra.yml")
+    for key in ("GITHUB_TOKEN", "GH_TOKEN"):
+        infra["x-runtime-env"].pop(key)
+    mutated = tmp_path / "infra.yml"
+    mutated.write_text(yaml.safe_dump(infra), encoding="utf-8")
+    proc = _derive(tmp_path, _REPO / "docker" / "docker-compose.dev-lane.yml", mutated)
+    assert proc.returncode != 0
+    assert "GITHUB_TOKEN" in proc.stdout + proc.stderr
     assert not (tmp_path / "override.yml").exists()
 
 
