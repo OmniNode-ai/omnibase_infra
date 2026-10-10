@@ -126,7 +126,7 @@ jobs:
       vocabulary_ref: {INCIDENT_A_DEAD_SHA}
       context_name: merge-hold-gate / evaluate
   dynamic-caller:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@dev
+    uses: OmniNode-ai/omnibase_core/.github/workflows/pr-title-check.yml@dev
     with:
       core-ref: ${{{{ github.sha }}}}
   step-user:

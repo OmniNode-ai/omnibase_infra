@@ -32,25 +32,13 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
-    # OMN-16171: `edited` is NOT in this list, and must not be re-added. The
-    # OMN-14241 self-heal it used to provide now lives in
-    # .github/workflows/occ-preflight-heal.yml.
-    #
-    # OMN-14241 was right about the defect: a PR-body-only edit stamping
-    # `Evidence-Source: OCC#<n>` has to re-validate, or the pre-stamp
-    # `occ-preflight / eligibility` FAILURE stands forever and CI Summary
-    # fails closed on it (live cases: #2696, #2694). But paying for it with a
-    # trigger type meant a brand-new run of this entire ~48-job matrix on
-    # every body edit -- and because the concurrency group below cancels in
-    # progress, each edit also killed whatever matrix was mid-flight and
-    # restarted it from zero. Measured on #2784, one unchanged head SHA
-    # 7993b115: waves at 13:28:50Z (42 workflows), 13:50:09Z (10) and
+    # OMN-16171: `edited` is NOT in this list, and must not be re-added. A
+    # trigger type for a PR-body edit means a brand-new run of this entire
+    # ~48-job matrix on every body edit -- and because the concurrency group
+    # below cancels in progress, each edit also kills whatever matrix was
+    # mid-flight and restarts it from zero. Measured on #2784, one unchanged
+    # head SHA 7993b115: waves at 13:28:50Z (42 workflows), 13:50:09Z (10) and
     # 13:51:33Z (8), while the org-wide backlog stood at 247 queued jobs.
-    #
-    # The heal workflow re-runs only the FAILED JOBS of this run, in place,
-    # keeping the run id -- which is what CI Summary needs, since it polls its
-    # own run's job list. Two jobs move instead of forty-eight, and nothing
-    # in-flight is cancelled.
     #
     # Skipping the heavy jobs on an edited run was NOT an option: a job
     # skipped by an `if:` still publishes a `skipped` check run, which branch
@@ -194,19 +182,6 @@ jobs:
       RUNNER_FLEET_STATUS_TOKEN: ${{ secrets.RUNNER_FLEET_STATUS_TOKEN }}
       CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
 
-  # OCC preflight is the first non-OCC CI dependency. If central OCC
-  # evidence is missing or red, no runner-heavy validation jobs fan out.
-  occ-preflight:
-    # self-gating-ok: target is in omnibase_core, not a required check on omnibase_infra main
-    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@52851458622f368c3b596c82bf810bc6acce1d5e
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      contracts-dir: contracts
-      receipts-dir: drift/dod_receipts
-      core-ref: f43f97629182f463d233b564b19a2b27d4fc4888 # .github/sibling-pins.yaml
-
   # =============================================================================
   # Phase 0 - Zone filter (OMN-10475)
   # =============================================================================
@@ -215,7 +190,6 @@ jobs:
   # .evidence/), heavy jobs (test-parallel, migration-integration) skip, while
   # lint, validators, contract gates, and receipt-gate callers still run.
   zone-filter:
-    needs: occ-preflight
     uses: OmniNode-ai/omnibase_core/.github/workflows/zone-filter.yml@13ceae69c246a33c9fc8fc4b33f83fb66b89edc6
     with:
       python-version: "3.12"
@@ -249,7 +223,7 @@ jobs:
   # gates exist to reject. The L3 default-deny sweep still catches it if it were
   # ever to conclude `failure`/`cancelled`.
   docs-only-marker:
-    needs: [occ-preflight, zone-filter]
+    needs: [zone-filter]
     if: always() && needs.zone-filter.outputs.docs_only == 'true'
     name: Docs-Only Marker (OMN-16661)
     runs-on: ubuntu-latest
@@ -304,7 +278,7 @@ jobs:
   # a failure; and the route job is fail-closed, so a probe fault yields hosted
   # labels rather than a red gate.
   lint:
-    needs: [occ-preflight, route]
+    needs: [route]
     name: Lint
     # OMNI_RUNNER_SELECTOR_V2 — placement comes from the route job's decision.
     runs-on: ${{ fromJSON(needs.route.outputs.labels) }}
@@ -625,15 +599,14 @@ jobs:
         run: uv run mypy src/omnibase_infra scripts/deploy-agent/deploy_agent
 
   # ===========================================================================
-  # Shape-gate detectors that run on every PR, whatever the preflight says
-  # (OMN-20298). Each job below has no `needs:` and no `if:`: the change-control
-  # preflight failing, or a skipped dependency, can never stop a detector from
-  # running. Every shape-gate failure in the 30 days before 2026-10-01 was the
-  # preflight failing first, so no detector produced a detection. These jobs
-  # were steps of `lint`, which waits on `occ-preflight`. Each is a STRICT
-  # CI Summary gate (scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS). The
-  # `shape-gate-independence` job refuses any detector job that comes back
-  # behind the preflight. No baseline, allowlist or suppression exists for it.
+  # Shape-gate detectors that run on every PR (OMN-20298). Each job below has
+  # no `needs:` and no `if:`: a failing or skipped dependency can never stop a
+  # detector from running. Every shape-gate failure in the 30 days before
+  # 2026-10-01 was the change-control preflight failing first, so no detector
+  # produced a detection. Each is a STRICT CI Summary gate
+  # (scripts/ci/ci_summary_gate.py STRICT_GATE_JOBS). The
+  # `shape-gate-independence` job refuses any detector job that carries a
+  # `needs:` or `if:`. No baseline, allowlist or suppression exists for it.
   # ===========================================================================
   canonical-handler-shape-gate:
     name: Canonical Handler-Shape Gate (OMN-20298)
@@ -785,7 +758,7 @@ jobs:
   # anchor; the expensive setup+pytest runs only when the guarded files change
   # (or on non-PR events), keeping the everyday-PR cost near zero.
   effect-assertion-gate:
-    needs: [occ-preflight, zone-filter]
+    needs: [zone-filter]
     # OMN-16661 docs-only skip tier: this job is a code-only proof over `src/`
     # + Docker and cannot change verdict when only `docs/**` / `*.md` moved.
     # Measured on the docs-only PR #2906 (head 0c86fd00) the five tier jobs
@@ -850,7 +823,6 @@ jobs:
 
   # ONEX validation - Infrastructure-specific validators
   onex-validation:
-    needs: occ-preflight
     name: ONEX Validators
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -1064,7 +1036,6 @@ jobs:
           uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k "restart or shipped_config or manifest" -q
 
   infra-node-handler-ownership:
-    needs: occ-preflight
     name: Infra Node Handler Ownership
     # OMNI_RUNNER_SELECTOR_V1 — only public-fork PRs use hosted compute.
     runs-on: >-
@@ -1086,7 +1057,6 @@ jobs:
   # Fingerprint drift detection -- CI twins for runtime assertions B2 and B3
   # Prevents stale fingerprint artifacts from being merged (OMN-2149)
   fingerprint-check:
-    needs: occ-preflight
     name: Fingerprint Check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -1119,7 +1089,7 @@ jobs:
   # Demo loop assertion gate -- validates canonical event pipeline (OMN-2297)
   # Runs in CI mode (skips live infra checks) as pre-deploy validation
   demo-loop-gate:
-    needs: [occ-preflight, zone-filter]
+    needs: [zone-filter]
     # OMN-16661 docs-only skip tier: this job is a code-only proof over `src/`
     # + Docker and cannot change verdict when only `docs/**` / `*.md` moved.
     # Measured on the docs-only PR #2906 (head 0c86fd00) the five tier jobs
@@ -1169,7 +1139,6 @@ jobs:
   # Migration freeze enforcement - blocks new migrations when .migration_freeze exists
   # Part of DB-per-repo refactor (OMN-2055), tracking: OMN-2071
   migration-freeze:
-    needs: occ-preflight
     name: Migration Freeze Check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -1213,7 +1182,6 @@ jobs:
   # Topic enum drift check -- CI gate for contract-driven topic enum pipeline (OMN-3187)
   # Ensures generated enum files stay in sync with contract.yaml definitions
   topic-enum-drift:
-    needs: occ-preflight
     if: always()
     name: Topic Enum Drift Check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
@@ -1260,7 +1228,6 @@ jobs:
   # Topic naming lint -- CI gate for ONEX topic naming convention (OMN-3188)
   # Validates onex.{kind}.{producer}.{event}.v{n} format in all contract.yaml files
   topic-naming-lint:
-    needs: occ-preflight
     if: always()
     name: Topic Naming Lint
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
@@ -1322,7 +1289,6 @@ jobs:
   # without the registration, removing this job would silently restore the
   # unenforced state that produced the recurrence.
   exposed-identifier-gate:
-    needs: occ-preflight
     if: always()
     name: Exposed Identifier Gate (OMN-17320)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
@@ -1368,7 +1334,6 @@ jobs:
   # pre-existing validators check hex SHAPE (`[0-9a-f]{40}`) and conclude
   # "immutable, therefore safe". Immutable is not reachable.
   pin-reachability:
-    needs: occ-preflight
     if: always()
     name: Pin Reachability (OMN-15538)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
@@ -1447,7 +1412,6 @@ jobs:
   # tiny and the check is dependency-free stdlib Python, so there is no cost
   # to running it on every PR regardless of what changed.
   trivyignore-expiry-check:
-    needs: occ-preflight
     name: Trivyignore Expiry Check (OMN-16229)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -1492,7 +1456,6 @@ jobs:
   # scripts/ci/check_lockfile_cve.py's module docstring for the full
   # severity-classification + fix-availability + blocking-decision design.
   lockfile-cve-scan:
-    needs: occ-preflight
     name: Lockfile CVE Scan (OMN-16228)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -1625,7 +1588,6 @@ jobs:
   # and correctly fails closed, same STRICT_GATE_JOBS shape as
   # "Pin Reachability (OMN-15538)" and "Lockfile CVE Scan (OMN-16228)" above.
   lockfile-registry-allowlist:
-    needs: occ-preflight
     if: always()
     name: Lockfile Registry Allowlist (OMN-16516)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
@@ -1678,7 +1640,6 @@ jobs:
   # continue-on-error: a token mint or checkout that fails fails the job, since
   # a check that could not read a repository has proven nothing about it.
   lab-probe-windows:
-    needs: occ-preflight
     name: Lab Probe Windows (OMN-19412)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -1776,7 +1737,6 @@ jobs:
   # rule's historical report-rate measurement, which a brand-new context
   # cannot satisfy on day one.
   dep-provenance-lineage-gate:
-    needs: occ-preflight
     if: always()
     name: Dep Provenance Lineage Gate (OMN-15604)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
@@ -1836,7 +1796,6 @@ jobs:
   # Ensures static topic constants stay in sync with contract.yaml topic declarations.
   # Cross-repo scanning (OMN-5258): checks out sibling repos to resolve topic references.
   topic-drift-check:
-    needs: occ-preflight
     if: always()
     name: Topic Drift Check
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
@@ -1911,7 +1870,7 @@ jobs:
   # Uses --changed-only in CI: only checks pairs whose models were touched by the PR.
   # Requires sibling repos omniintelligence + omnimemory to be checked out.
   schema-handshake:
-    needs: [occ-preflight, zone-filter]
+    needs: [zone-filter]
     # OMN-16661 docs-only skip tier: this job is a code-only proof over `src/`
     # + Docker and cannot change verdict when only `docs/**` / `*.md` moved.
     # Measured on the docs-only PR #2906 (head 0c86fd00) the five tier jobs
@@ -2053,7 +2012,6 @@ jobs:
   # Scans src/**/*.py for onex.(evt|cmd).* string literals outside canonical
   # topic definition files. Pre-existing violations are suppressed via baseline.
   arch-invariants:
-    needs: occ-preflight
     name: Arch Invariants (OMN-3343)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -2089,7 +2047,6 @@ jobs:
         run: uv run --frozen pytest tests/ci/test_operator_script_topic_namespace_omn18913.py -q
 
   plugin-env-service-completeness:
-    needs: occ-preflight
     name: "Plugin ENV->Service Completeness (OMN-4313)"
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -2121,45 +2078,7 @@ jobs:
           echo "================================================================"
           uv run pytest tests/ci/test_plugin_env_service_completeness.py -v
 
-  occ-born-path-trigger-coverage:
-    needs: occ-preflight
-    name: "OCC Born-Path Trigger Coverage (OMN-14987)"
-    # OMNI_RUNNER_SELECTOR_V1 -- trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-      }}
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - name: Setup Python and uv
-        uses: ./.github/actions/setup-python-uv
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          uv-version: ${{ env.UV_VERSION }}
-          cache-version: ${{ env.CACHE_VERSION }}
-          cache-enabled: "false"
-
-      - name: OCC born-path trigger coverage check
-        run: |
-          echo "================================================================"
-          echo "Guardrail (OMN-14987): call-occ-autobind.yml and"
-          echo "call-occ-companion-effect.yml must listen for the full set of"
-          echo "PR events that can make a PR mint-eligible (opened, synchronize,"
-          echo "reopened, ready_for_review). A missing trigger type is silent --"
-          echo "no run fires, nothing goes red -- so this is a structural gate,"
-          echo "not a behavioral one."
-          echo "================================================================"
-          uv run pytest tests/ci/test_occ_born_path_trigger_coverage.py -v
-
   compose-required-env-coverage:
-    needs: occ-preflight
     name: "Compose Required-Env Coverage (OMN-5439)"
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -2310,7 +2229,6 @@ jobs:
 
   # Contract path pre-flight: verify all referenced module paths exist before expensive test splits (F8/OMN-6478)
   contract-path-preflight:
-    needs: occ-preflight
     timeout-minutes: 30
     name: Contract Path Pre-Flight
     runs-on: >-
@@ -2358,7 +2276,6 @@ jobs:
           fi
 
   contract-sync-gate:
-    needs: occ-preflight
     timeout-minutes: 30
     name: Contract Sync Gate (Wave C) [OMN-8915]
     runs-on: >-
@@ -2386,7 +2303,6 @@ jobs:
     # SKIPPABLE_GATE_JOBS with the comment "skips on push" -- but SKIPPABLE
     # governs how the POLLER reads the job, and it cannot undo a `needs:`
     # cascade, which GitHub evaluates before the poller ever sees the run.
-    if: needs.occ-preflight.result == 'success'
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -2417,7 +2333,7 @@ jobs:
   detect-changes:
     timeout-minutes: 30
     name: Detect Changes
-    needs: [occ-preflight, lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate]
+    needs: [lint, onex-validation, infra-node-handler-ownership, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate]
     # OMN-19927: on a push or a dispatch this job must run even when the
     # docs-only tier skipped its lint-class needs, because the provenance
     # step below decides whether that push may skip tests at all. On every
@@ -2562,7 +2478,7 @@ jobs:
   # -n 2 rather than -n auto, after repeated xdist OOM crashes on shard 3.
   test-parallel:
     name: Tests (Split ${{ matrix.split }}/${{ needs.detect-changes.outputs.split_count }})
-    needs: [occ-preflight, zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate, detect-changes]
+    needs: [zone-filter, lint, onex-validation, migration-freeze, fingerprint-check, demo-loop-gate, topic-enum-drift, topic-naming-lint, topic-drift-check, arch-invariants, schema-handshake, plugin-env-service-completeness, compose-required-env-coverage, contract-path-preflight, contract-sync-gate, detect-changes]
     # OMN-16216: draft-state CI admission gate (mirrors onex_change_control
     # PR #6686 / OMN-15731). The heavy split-matrix test run only dispatches
     # once the PR is out of draft; `contains(...'ci:ready')` is retained as a
@@ -2580,7 +2496,7 @@ jobs:
     # implicit success() made explicit; the second admits a forced
     # `unvalidated_push` selection even when the docs-only tier skipped the
     # lint-class needs.
-    if: needs.occ-preflight.result == 'success' && ((success() && needs.zone-filter.outputs.docs_only != 'true') || (!cancelled() && !failure() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.full_suite_reason == 'unvalidated_push')) && (github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready'))
+    if: ((success() && needs.zone-filter.outputs.docs_only != 'true') || (!cancelled() && !failure() && needs.detect-changes.result == 'success' && needs.detect-changes.outputs.full_suite_reason == 'unvalidated_push')) && (github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready'))
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
       ${{
@@ -2782,7 +2698,6 @@ jobs:
   # version matrix defined in omni_home/standards/version-matrix.yaml.
   # Depends on OMN-4803 (check_version_pins.py must exist in omni_home main).
   version-pin-check:
-    needs: occ-preflight
     name: Version Pin Compliance
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -2867,7 +2782,6 @@ jobs:
   # Conditional: only runs if the `onex compliance` command is available.
   # ============================================================================
   compliance:
-    needs: occ-preflight
     name: Contract Compliance
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
     runs-on: >-
@@ -3075,8 +2989,8 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [occ-preflight, zone-filter, test-parallel, detect-changes]
-    if:  needs.occ-preflight.result == 'success' && (always())
+    needs: [zone-filter, test-parallel, detect-changes]
+    if:  (always())
     steps:
       # OMN-16216: `test-parallel` now legitimately skips for TWO different
       # reasons -- a docs-only diff (pre-existing exemption) or a draft PR
@@ -3123,7 +3037,6 @@ jobs:
   # ============================================================================
 
   migration-conflict-check:
-    needs: occ-preflight
     timeout-minutes: 30
     name: Cross-Repo Migration Conflicts
     runs-on: >-
@@ -3166,267 +3079,6 @@ jobs:
           warn-only: "false"
 
 
-  contract-compliance:
-    needs: occ-preflight
-    name: Contract Compliance Check
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-      }}
-    timeout-minutes: 20
-    if: needs.occ-preflight.result == 'success' && (github.event_name == 'pull_request' || github.event_name == 'merge_group' || github.event_name == 'push')
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      # OMN-20135: the one declared case in which this job evaluates nothing.
-      # A ticketless dependency-bot bump carries no ticket by doctrine's
-      # PR-title rule, so it has no contract and no evidence reference. The
-      # predicate is ci_summary_gate's own (OMN-19167), composed from the same
-      # helpers; everything else is evaluated and fails closed. Pinned by
-      # tests/ci/test_run_contract_compliance_with_evidence.py.
-      - name: Classify the declared ticketless dependency-bot exemption (OMN-20135)
-        id: dep-scope
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 -m scripts.ci.classify_contract_compliance_scope \
-            --event-name "${EVENT_NAME}" \
-            --repo "${{ github.repository }}" \
-            --merge-group-head-ref "${MERGE_GROUP_HEAD_REF:-}" \
-            --pr-author "${PR_AUTHOR:-}" \
-            --pr-title "${PR_TITLE:-}" \
-            --pr-head-ref "${PR_HEAD_REF:-}" \
-            --github-output "$GITHUB_OUTPUT"
-      # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
-      # onexbot-occ-writer App installation token, scoped to the one
-      # sibling repo this job reads.
-      #
-      # OMN-16414: continue-on-error is REQUIRED here, not optional polish.
-      # Fork-triggered pull_request runs receive no org secrets (app-id/
-      # private-key resolve empty), and create-github-app-token hard-fails
-      # the step ("Input required and not supplied: app-id") when that
-      # happens. Without this guard the job died right here even though the
-      # checkout steps below already had a `|| github.token` fallback -- dead
-      # code until this line let the step fail soft. onex_change_control is
-      # PUBLIC (verified via `gh api repos/OmniNode-ai/onex_change_control
-      # --jq .private`), so github.token is sufficient to read it.
-      - name: Mint onexbot-occ-writer app token
-        id: app-token
-        if: steps.dep-scope.outputs.exempt != 'true'
-        # advisory-ok: OMN-16414 token mint fails soft on fork PRs (no org secrets); both checkouts fall back to github.token, and the gate verdict is the run step below
-        continue-on-error: true
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
-          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
-          owner: OmniNode-ai
-          repositories: onex_change_control
-          permission-contents: write
-      # OMN-20135: TWO change-control checkouts, never one.
-      #
-      # The CHECKER (runner code) stays at an immutable pin -- OMN-14436's
-      # reason still holds: an unpinned checker makes this gate a function of
-      # whatever change-control's dev happens to be. The pin is 91f5b691, the
-      # one omnibase_core's job has run on since 2026-07-24 (OMN-14887); it is
-      # the first that ships the importable contract_compliance_check module
-      # the wrapper and the driver below load.
-      #
-      # The CONTRACTS are read from a second checkout at the commit the PR's
-      # evidence reference resolves to. Reading them from the checker pin was
-      # the defect: the old pin (7352cb2d, 2026-07-12) predates every contract
-      # created after it, so the pinned runner's missing-contract branch passed
-      # every such PR with nothing executed (omnibase_infra#4325, job
-      # 109722692581).
-      - name: Checkout onex_change_control checker (pinned code)
-        if: steps.dep-scope.outputs.exempt != 'true'
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: OmniNode-ai/onex_change_control
-          ref: 91f5b69104366c2d86e4bb21de67c3c497702111
-          path: onex_change_control_checker
-          token: ${{ steps.app-token.outputs.token || github.token }}
-
-      - uses: astral-sh/setup-uv@v7
-        if: steps.dep-scope.outputs.exempt != 'true'
-        with:
-          enable-cache: false
-
-      - name: Install onex_change_control checker
-        if: steps.dep-scope.outputs.exempt != 'true'
-        working-directory: onex_change_control_checker
-        run: |
-          set -euo pipefail
-          export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
-          attempt=1
-          max_attempts=3
-          delay=10
-          until uv sync --no-cache --all-extras; do
-            status=$?
-            if [[ "$attempt" -ge "$max_attempts" ]]; then
-              echo "::error::uv sync onex_change_control failed after ${attempt} attempt(s)"
-              exit "$status"
-            fi
-            echo "::warning::uv sync onex_change_control attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"
-            sleep "$delay"
-            attempt=$((attempt + 1))
-          done
-
-      # OMN-14436: EXECUTE the DoD check_values against the PRODUCT tree.
-      #
-      # What was here before -- `uv run validate-yaml $CONTRACTS` -- never ran a single
-      # check_value. It only parsed OCC's YAML, so a green "Contract Compliance Check"
-      # meant exactly "OCC's 6,900 files are valid YAML" and nothing about this PR.
-      # The DoD gate has been dead platform-wide for ~3 months behind that green check.
-      #
-      # --workspace is the load-bearing argument. It must be the PRODUCT checkout
-      # ($GITHUB_WORKSPACE), not the OCC clone. Pointing it at OCC is the original
-      # defect: a check_value's cwd became the receipt store, so the only file an author
-      # could reach was their own receipt -- which is why ~32% of the corpus greps itself.
-      #
-      # OMN-16508: the empty-PR_NUMBER branch below used to `exit 0` -- a VACUOUS
-      # PASS. This job's `if:` admits push and merge_group, neither of which
-      # populates `github.event.pull_request.number`, so on those events the step
-      # reported success having evaluated zero check_values. That was not
-      # cosmetic: "Contract Compliance Check" is a GATE_JOBS entry in
-      # scripts/ci/ci_summary_gate.py, and CI Summary is this repo's sole required
-      # branch-protection context, so the umbrella poller counted the vacuous run
-      # as a PROVABLE pass. A green gate that checked nothing never prompts
-      # investigation the way a red one does.
-      #
-      # The fix is RESOLUTION, not narrowing. Excluding push/merge_group with a
-      # job-level `if:` would publish a `skipped` check run, which branch
-      # protection counts as passing -- the same skip-vector class the
-      # `reject-required-check-skip-vector` hook (OMN-14863) rejects, and which
-      # ci_summary_gate's external-context assertion treats as a hard failure.
-      # So the job keeps running on all three events and resolves WHICH PR's
-      # check_values apply: the event's own number on pull_request (no API call,
-      # behaviourally identical to pre-fix), the `pr-<n>-` segment of the
-      # gh-readonly-queue ref on merge_group (no API call), or the merged source
-      # PR of the pushed commit via `gh api repos/{repo}/commits/{sha}/pulls`.
-      # Unresolved -- including a transient gh failure -- exits 1. Pinned by
-      # tests/ci/test_resolve_contract_compliance_pr.py.
-      - name: Resolve the PR whose DoD check_values govern this run (OMN-16508)
-        id: dod-pr
-        run: |
-          set -euo pipefail
-          RESOLVED_PR="$(python3 scripts/ci/resolve_contract_compliance_pr.py \
-            --repo "${{ github.repository }}" \
-            --pr-number "${PR_NUMBER:-}" \
-            --merge-group-ref "${MERGE_GROUP_REF:-}" \
-            --sha "${{ github.sha }}" \
-            --event-name "${{ github.event_name }}")"
-          echo "pr_number=${RESOLVED_PR}" >> "$GITHUB_OUTPUT"
-          echo "Contract-compliance DoD scope resolved to PR #${RESOLVED_PR}." >> "$GITHUB_STEP_SUMMARY"
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          MERGE_GROUP_REF: ${{ github.event.merge_group.head_ref }}
-
-      # OMN-20135 (mirrors omnibase_core OMN-18157): resolve the exact
-      # change-control commit the resolved PR's evidence reference names -- an
-      # OPEN companion's head, a MERGED companion's merge commit, or a durable
-      # commit sha. A missing, malformed or closed-unmerged reference exits 1.
-      # There is no fallback to the checker pin or to a default branch.
-      - name: Resolve contract-compliance evidence data (OMN-20135)
-        id: resolve_contract_compliance_evidence
-        if: steps.dep-scope.outputs.exempt != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ steps.dod-pr.outputs.pr_number }}
-          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
-        run: |
-          set -euo pipefail
-          python3 scripts/ci/resolve_contract_compliance_evidence.py \
-            --repo "${{ github.repository }}" \
-            --event-name "${{ github.event_name }}" \
-            --commit-sha "${{ github.sha }}" \
-            --pr-number "${PR_NUMBER}" \
-            --merge-group-head-ref "${MERGE_GROUP_HEAD_REF:-}" \
-            --github-output "$GITHUB_OUTPUT"
-
-      - name: Checkout onex_change_control evidence data (OMN-20135)
-        if: steps.dep-scope.outputs.exempt != 'true'
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: OmniNode-ai/onex_change_control
-          ref: ${{ steps.resolve_contract_compliance_evidence.outputs.occ_sha }}
-          path: onex_change_control_evidence
-          token: ${{ steps.app-token.outputs.token || github.token }}
-
-      # OMN-20135: the producer of the deferral record on both branches.
-      #
-      # Exempt (the declared dependency-bot case above): no contract applies,
-      # so an empty record is written and nothing is run.
-      #
-      # Evaluated: run_contract_compliance_with_evidence.py resolves the ticket
-      # with the pinned runner's own precedence and FAILS CLOSED when it cannot,
-      # or when the evidence checkout has no contracts/<ticket>.yaml -- the
-      # pinned runner's own missing-contract branch (a warning and exit 0) is
-      # therefore unreachable. It then runs the pinned runner through
-      # defer_test_passes_driver.py, which (a) executes only this PR's items and
-      # items bound to no PR, reporting an item bound to another PR as WARN
-      # without running it (OMN-20130), and (b) records each test_passes item
-      # for CI Summary instead of judging it here, where the check set always
-      # contains this job, still running (OMN-18157). Both scripts are ports of
-      # omnibase_core's, run in the pinned checker's environment.
-      - name: Run DoD contract compliance against the product tree (OMN-20135)
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EXEMPT: ${{ steps.dep-scope.outputs.exempt }}
-          PR_NUMBER: ${{ steps.resolve_contract_compliance_evidence.outputs.pr_number }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$GITHUB_WORKSPACE/contract-compliance-deferred"
-          if [ "${EXEMPT}" = "true" ]; then
-            echo "Declared ticketless dependency-bot bump: no ticket contract applies, no DoD item was run." >> "$GITHUB_STEP_SUMMARY"
-            printf '%s\n' '{"schema": 1, "deferred": []}' > "$GITHUB_WORKSPACE/contract-compliance-deferred/record.json"
-          else
-            if [ -z "${PR_NUMBER:-}" ]; then
-              # Unreachable via the two resolver steps above, which exit 1 on
-              # an unresolvable scope. Kept as a fail-closed floor (OMN-16508).
-              echo "::error::No PR number resolved (event=${{ github.event_name }}); DoD check_values are PR-scoped. Failing closed."
-              exit 1
-            fi
-            cd "$GITHUB_WORKSPACE/onex_change_control_checker"
-            uv run python "$GITHUB_WORKSPACE/scripts/ci/run_contract_compliance_with_evidence.py" \
-              --pr "${PR_NUMBER}" \
-              --repo "${{ github.repository }}" \
-              --checker-dir "$GITHUB_WORKSPACE/onex_change_control_checker" \
-              --evidence-contracts-dir "$GITHUB_WORKSPACE/onex_change_control_evidence/contracts" \
-              --workspace "$GITHUB_WORKSPACE" \
-              --legacy-allowlist "$GITHUB_WORKSPACE/onex_change_control_checker/scripts/ci/dod_runner_legacy_allowlist.txt" \
-              --deferred-record "$GITHUB_WORKSPACE/contract-compliance-deferred/record.json"
-          fi
-
-      # OMN-20135: the record is a declared evidence artifact
-      # (config/ci_evidence_policy.yaml, id contract-compliance-deferred). CI
-      # Summary's deferred step reads it; a success of this job with no record
-      # fails CI Summary.
-      - name: Assert the deferral record is present and non-empty
-        if: always()
-        run: |
-          set -euo pipefail
-          python3 scripts/ci/assert_evidence_artifact.py \
-            --artifact contract-compliance-deferred \
-            --require contract-compliance-deferred/record.json
-
-      - name: Upload deferred test_passes record (OMN-20135)
-        uses: actions/upload-artifact@v7
-        with:
-          name: contract-compliance-deferred
-          path: contract-compliance-deferred/record.json
-          if-no-files-found: error
-          overwrite: true
-          retention-days: 7
-
   # ============================================================================
   # Test-Failure Ratchet Gate (OMN-13027, retro A-8)
   #
@@ -3452,10 +3104,10 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [occ-preflight, test-parallel, detect-changes]
+    needs: [test-parallel, detect-changes]
     # Run on PRs and merge_group events whenever there were actual test runs.
     # Also run when docs-only so we detect ratchet-baseline staleness.
-    if:  needs.occ-preflight.result == 'success' && (always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group'))
+    if:  (always() && (github.event_name == 'pull_request' || github.event_name == 'merge_group'))
     timeout-minutes: 15
 
     steps:
@@ -3684,12 +3336,11 @@ jobs:
   # scripts/ci/ci_summary_gate.py). On every other event it stays advisory.
   runtime-boot-smoke:
     name: Runtime Boot Smoke (compose)
-    needs: [occ-preflight, tests-gate]
+    needs: [tests-gate]
     if: >-
       (github.event_name == 'merge_group'
        || github.event_name == 'workflow_dispatch'
        || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
-      && needs.occ-preflight.result == 'success'
       && needs.tests-gate.result == 'success'
     uses: ./.github/workflows/reusable-runtime-boot.yml
     with:
@@ -3991,54 +3642,6 @@ jobs:
             --allowlist .onex_ratchets/noncanonical_class_allowlist.yaml \
             src/omnibase_infra
 
-  occ-companion-merged:
-    name: OCC Companion Merged Gate (OMN-15214)
-    # OMN-15214: makes the 2026-07-26 OCC hygiene-sweep trigger state — an OPEN
-    # onex_change_control evidence companion whose product PR already MERGED —
-    # unreachable via the merge path on this repo. The sweep closed five open
-    # companions (OCC#5012–#5016) whose product PRs had merged, destroying three
-    # evidence chains; the durable fix is ordering: the companion must MERGE
-    # BEFORE the product PR can. This job polls the PR's live Evidence-Source
-    # (live body, not event payload — occ-autobind PATCHes it in after open) and
-    # greens ONLY when the cited OCC companion PR is MERGED or the cited OCC
-    # commit SHA is an ancestor of onex_change_control dev/main. A companion
-    # CLOSED without merging fails immediately (that IS the incident state).
-    #
-    # STRICT CI Summary gate (registered in scripts/ci/ci_summary_gate.py
-    # STRICT_GATE_JOBS) — deliberately NOT a new top-level required context: a
-    # context that does not report on every PR shape wedges merges indefinitely
-    # under branch protection, and occ-autobind itself is network-flaky
-    # (omninode_infra#679, 2026-07-26). Unconditional (no needs/if) so CI
-    # Summary always WAITS for it and a skip fails closed; internal event
-    # scoping no-ops on push/workflow_dispatch (mirrors occ-preflight).
-    # The poller is read-only, but must follow the fork-safe selector used by
-    # the rest of CI rather than pinning all internal PRs to hosted compute.
-    runs-on: >-
-      ${{
-        (github.event_name == 'pull_request' &&
-         github.event.pull_request.head.repo.full_name != github.repository)
-        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
-        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
-      }}
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      pull-requests: read
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-      PR_NUMBER: ${{ github.event.pull_request.number }}
-      MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
-      # Poll window (seconds) — bounded well under ci-summary's 90m deadline so
-      # this gate reaches a terminal state first; PENDING converts to FAIL.
-      DEADLINE_SECONDS: "1500"
-      POLL_INTERVAL_SECONDS: "30"
-    steps:
-      - name: Checkout (gate script)
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Require cited OCC evidence to be merged/durable before product merge
-        run: python3 scripts/ci/check_occ_companion_merged.py
-
   # OMN-15378 AC3: scripts/deploy-agent's own pytest root (201 tests) ran in a
   # SEPARATELY-TRIGGERED workflow, so the CI Summary poller — which reads
   # `actions/runs/${RUN_ID}/jobs` for its own run only — structurally could not
@@ -4160,7 +3763,7 @@ jobs:
   # this job performs no live database, secret, grant, deploy, or runtime action.
   application-database-domain-enforcement:
     name: Application Database Domain Enforcement (OMN-15361)
-    needs: [occ-preflight, zone-filter]
+    needs: [zone-filter]
     # OMN-16661 docs-only skip tier: this job is a code-only proof over `src/`
     # + Docker and cannot change verdict when only `docs/**` / `*.md` moved.
     # Measured on the docs-only PR #2906 (head 0c86fd00) the five tier jobs
@@ -4320,8 +3923,7 @@ jobs:
         #
         # Everything here is bare `python3` + stdlib on purpose: this step sits
         # ~50 lines BEFORE the job's `Setup Python and uv`, so neither `uv` nor
-        # PyYAML exists yet (this workflow's contract-compliance job installs
-        # pyyaml explicitly for that same reason). Reading the base revision's
+        # PyYAML exists yet. Reading the base revision's
         # pin goes through the same validated resolver as the head side rather
         # than an inline parser, so a malformed pin fails identically on both.
         if: >-
@@ -4779,16 +4381,13 @@ jobs:
       # OMN-15496: the poll step reads commits/<head>/check-runs to enforce the
       # cross-workflow contexts included in the fail-closed verdict.
       checks: read
-      # OMN-20135: the deferred test_passes evaluation reads the recorded PR's
-      # head on push runs.
+      # OMN-19379: the poll step reads the PR timeline to classify draft-era runs.
       pull-requests: read
     # Hard backstop above the internal poll deadline (DEADLINE_MINUTES below).
     # Kept under any run-cancellation window so the required context ALWAYS posts
     # a terminal state first, and comfortably above the tests-gate 30m budget plus
     # self-hosted queueing so a slow-but-valid matrix is not failed prematurely.
-    # OMN-20135: 100 -> 145 for the deferred test_passes step (up to its 40m
-    # deadline) after the 90m poll.
-    timeout-minutes: 145
+    timeout-minutes: 100
     steps:
       - name: Checkout (gate script)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4815,22 +4414,6 @@ jobs:
           # nothing.
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          # OMN-19167 — the three facts the CONDITIONAL sweep registry decides
-          # against. `occ-autobind` and `occ-companion-effect` skip by their own
-          # `if:` on a pull request with no ticket token, which doctrine's
-          # PR-title rule deliberately EXEMPTS a dependency bump from carrying;
-          # the strict layer-5 bar counted that declared skip as red and blocked
-          # every ticketless dependency-bot PR in the repo (#3953-#3958,
-          # 2026-09-22). Passed as ENV rather than interpolated into the script,
-          # so a title is data and never shell. Each is empty on a non-PR event,
-          # which admits NOTHING: the registry fails closed on an unresolved
-          # context, exactly as PR_AUTHOR above does.
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          # NOT the same as PR_AUTHOR: an update-branch makes the actor the
-          # pushing user while the author stays the bot. The producers' `if:`
-          # reads the ACTOR, so the mirror has to as well.
-          EVENT_ACTOR: ${{ github.actor }}
           HEAD_SHA: >-
             ${{ github.event.pull_request.head.sha
               || github.event.merge_group.head_sha
@@ -4907,10 +4490,7 @@ jobs:
               --workflow-runs-file workflow_runs.json \
               --pr-timeline-file pr_timeline.json --head-sha "${HEAD_SHA}" \
               --current-run-id "${RUN_ID}" \
-              --pr-author "${PR_AUTHOR:-}" \
-              --pr-title "${PR_TITLE:-}" \
-              --pr-head-ref "${PR_HEAD_REF:-}" \
-              --event-actor "${EVENT_ACTOR:-}"
+              --pr-author "${PR_AUTHOR:-}"
             rc=$?
             case "${rc}" in
               0) echo "::notice::CI Summary = SUCCESS (all gating jobs and asserted external contexts provably passed)"; exit 0 ;;
@@ -4920,40 +4500,6 @@ jobs:
             esac
             sleep "${POLL_INTERVAL_SECONDS}"
           done
-
-      # OMN-20135 (port of omnibase_core OMN-18157): Contract Compliance Check
-      # records each test_passes DoD item instead of judging it in-job, where
-      # the check set always contains that job itself, still running, so such
-      # an item could never pass there. They are judged here, once the CI
-      # Summary verdict above is SUCCESS: every Actions check-run on the head
-      # (CI Summary excluded) must be success, skipped or neutral, the pinned
-      # runner's own pass set. No `if:`: this step runs only when the poll step
-      # succeeded. A pending check is polled up to the 40m deadline, then fails
-      # closed. On push the recorded PR's head is judged.
-      - name: Evaluate deferred test_passes DoD items (OMN-20135)
-        working-directory: ${{ github.workspace }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          rm -rf deferred-record
-          # A missing artifact is not an error here: the gate decides from the
-          # Contract Compliance Check conclusion whether a record is required.
-          if ! gh run download "${RUN_ID}" --repo "${GH_REPO}" --name contract-compliance-deferred --dir deferred-record; then
-            echo "::notice::no contract-compliance-deferred artifact in run ${RUN_ID}"
-          fi
-          python3 -m scripts.ci.deferred_test_passes_gate \
-            --jobs-file jobs.json \
-            --run-attempt "${RUN_ATTEMPT}" \
-            --record deferred-record/record.json \
-            --head-sha "${HEAD_SHA}" \
-            --current-run-id "${RUN_ID}" \
-            --deadline-seconds 2400 \
-            --poll-interval-seconds 60
 
   ci-cascade-reason-graph:
     name: CI cascade reason-graph (report-only)
@@ -4981,9 +4527,9 @@ jobs:
       # It now runs as its own job after the CI Summary verdict, so it cannot
       # touch the required context. It collapses the head SHA's full cross-
       # workflow check-run list into ONE typed root + BLOCKED_UPSTREAM dependents
-      # so a single upstream defect (e.g. a missing Evidence-Source making
-      # occ-preflight red) is presented as ONE rerunnable root instead of the
-      # ~37 independently-rerunnable red checks that provoke the rerun reflex.
+      # so a single upstream defect (e.g. a failed test matrix) is presented as
+      # ONE rerunnable root instead of the ~37 independently-rerunnable red
+      # checks that provoke the rerun reflex.
       # Every command remains non-fatal, and the step writes only to
       # $GITHUB_STEP_SUMMARY.
       - name: CI cascade reason-graph (report-only, counts roots not checks)
@@ -5025,7 +4571,7 @@ jobs:
   # Pairs with known drift are marked xfail — they pass as XFAIL until the
   # upstream fix (e.g. OMN-3248) lands, at which point xfail is removed.
   kafka-boundary-compat:
-    needs: [occ-preflight, zone-filter]
+    needs: [zone-filter]
     name: Kafka Boundary Compat (OMN-3256)
     # OMN-16661 docs-only skip tier: this job is a code-only proof over `src/`
     # + Docker and cannot change verdict when only `docs/**` / `*.md` moved.
@@ -5296,7 +4842,7 @@ jobs:
         # tests/integration/customer_path/redpanda_sasl_harness.py -- a
         # floating tag lets two runners resolve two different images.
         # test_omn18012_harness_runner_topology.py asserts the two agree.
-        run: docker pull redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
+        run: docker pull docker.redpanda.com/redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
 
       - name: Run customer-path boundary tests
         env:
@@ -5317,7 +4863,7 @@ jobs:
           # this image's default CMD is `redpanda start --overprovisioned` with
           # `enable_sasl` off (`--set redpanda.enable_sasl=true` is
           # command-line only -- verified by reading /entrypoint.sh out of
-          # redpandadata/redpanda:v24.2.7). A service container would be a
+          # docker.redpanda.com/redpandadata/redpanda:v24.2.7). A service container would be a
           # NO-AUTH broker, which is the exact hole this job exists to close.
           OMN18012_BROKER_BOOTSTRAP: ${{ vars.OMN18012_BROKER_BOOTSTRAP }}
           OMN18012_BROKER_CONTAINER: ${{ vars.OMN18012_BROKER_CONTAINER }}
@@ -5388,7 +4934,7 @@ jobs:
       - name: Pre-pull the harness broker image
         # Identical to REDPANDA_IMAGE in
         # tests/integration/customer_path/redpanda_sasl_harness.py.
-        run: docker pull redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
+        run: docker pull docker.redpanda.com/redpandadata/redpanda:v24.2.7@sha256:82a69763bef8d8b55ea5a520fa1b38f993908ef68946819ca1aed43541824c48
 
       - name: Run bus ACL boundary tests
         env:
@@ -5470,7 +5016,6 @@ jobs:
   # Writer-migration coupling check -- ensures any PR touching writer_postgres.py
   # or handler_*_postgres.py includes a migration file or explicit bypass comment (OMN-3530)
   migration-required-check:
-    needs: occ-preflight
     timeout-minutes: 30
     name: Writer-Migration Coupling Check
     runs-on: >-
@@ -5510,7 +5055,6 @@ jobs:
   # pre-existing, unwired validator would have caught it; it only failed
   # closed at a live bootstrap.sql deploy, weeks after merge.
   node-migration-declaration-check:
-    needs: occ-preflight
     timeout-minutes: 30
     name: Node Migration Declaration Check
     runs-on: >-
@@ -5610,8 +5154,8 @@ jobs:
   # and asserts every manifest table exists (OMN-3529)
   migration-integration:
     name: Migration Integration Test
-    needs: [occ-preflight, zone-filter]
-    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true')
+    needs: [zone-filter]
+    if: (needs.zone-filter.outputs.docs_only != 'true')
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
@@ -6002,8 +5546,8 @@ jobs:
   # ============================================================================
   integration-guard:
     name: Integration Silent-Skip Guard (OMN-14172)
-    needs: [occ-preflight, zone-filter]
-    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true')
+    needs: [zone-filter]
+    if: (needs.zone-filter.outputs.docs_only != 'true')
     # OMN-18205: this job executes docker, so its placement is governed by
     # OMNI_DOCKER_CI_RUNS_ON_JSON before the general trusted seam -- the same
     # precedence chain the seven docker-executing jobs in docker-build.yml,
@@ -6253,8 +5797,8 @@ jobs:
 
   service-integration-suites:
     name: Service-Backed Integration Suites (OMN-18781)
-    needs: [occ-preflight, zone-filter]
-    if: needs.occ-preflight.result == 'success' && (needs.zone-filter.outputs.docs_only != 'true')
+    needs: [zone-filter]
+    if: (needs.zone-filter.outputs.docs_only != 'true')
     # OMN-18781: this job exists because two integration suites were collected on
     # every pull request, skipped in full on an opt-in env var NO workflow set,
     # and reported green. One of them is the event bus's own integration proof.
@@ -6289,7 +5833,7 @@ jobs:
     # and this suite builds a plaintext ModelKafkaEventBusConfig. Pointing it at
     # the lane would prove the auth path, not the bus path.
     env:
-      SVC_REDPANDA_IMAGE: redpandadata/redpanda:v24.2.7
+      SVC_REDPANDA_IMAGE: docker.redpanda.com/redpandadata/redpanda:v24.2.7
       SVC_QDRANT_IMAGE: qdrant/qdrant:v1.12.4
       # OMN-18795: Memgraph and Postgres join the job so the six further suites
       # registered with no execution path can execute here too.
@@ -6617,7 +6161,6 @@ jobs:
           docker rm --force "${SVC_POSTGRES_CONTAINER}" >/dev/null 2>&1 || true
 
   ai-slop-check:
-    needs: occ-preflight
     timeout-minutes: 30
     name: AI-Slop Pattern Check (strict, PR diff)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest

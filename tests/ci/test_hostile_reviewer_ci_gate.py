@@ -6,8 +6,8 @@
 Proves ``hostile-reviewer.yml`` exists, is wired to run on every PR into
 ``dev``/``main``, and that its terminal ``hostile-review-gate`` job fails
 closed (non-zero exit) whenever the adversarial review job reports a
-blocking (``failure``) result or the OCC preflight predecessor did not
-succeed. This is the static-config half of the DoD; the runtime half
+blocking (``failure``) result. This is the static-config half of the DoD;
+the runtime half
 (the merge actually being blocked) is proven by registering
 "Hostile Review Gate" as a required status check in live branch
 protection -- see PR body for the ``gh api`` readback.
@@ -55,23 +55,25 @@ def test_hostile_reviewer_triggers_on_dev_and_main_prs() -> None:
     assert "synchronize" in pr_trigger["types"]
 
 
-def test_hostile_reviewer_gate_job_requires_both_predecessors() -> None:
-    """The terminal gate job must depend on occ-preflight AND hostile-review.
+def test_hostile_reviewer_gate_job_requires_review() -> None:
+    """The terminal gate job must depend on hostile-review.
 
-    A PR that never runs (or fails) either predecessor must not be able to
+    A PR that never runs (or fails) the review predecessor must not be able to
     report a PASSED "Hostile Review Gate" -- this is the mechanism the
     required-status-check registration in branch protection relies on.
     """
     workflow = _load_yaml(HOSTILE_REVIEWER_WORKFLOW)
     jobs = workflow["jobs"]
-    assert "occ-preflight" in jobs
+    assert "occ-preflight" not in jobs
     assert "hostile-review" in jobs
     assert "hostile-review-gate" in jobs
 
     gate_job = jobs["hostile-review-gate"]
     assert gate_job["name"] == "Hostile Review Gate"
     needs = gate_job["needs"]
-    assert set(needs) == {"occ-preflight", "hostile-review"}
+    if isinstance(needs, str):
+        needs = [needs]
+    assert set(needs) == {"hostile-review"}
     # The property this pins: a FAILED or SKIPPED predecessor must still
     # evaluate the gate, because a *skipped* check does not block merge the
     # way a *failed* one does.
@@ -91,9 +93,9 @@ def test_hostile_reviewer_gate_job_requires_both_predecessors() -> None:
     assert "always()" not in condition
 
 
-def test_hostile_reviewer_gate_blocks_on_failed_review_or_missing_preflight() -> None:
+def test_hostile_reviewer_gate_blocks_on_failed_review() -> None:
     """RED-to-GREEN target: the gate's own evaluation step must exit non-zero
-    when hostile-review reported 'failure' or occ-preflight did not succeed.
+    when hostile-review reported 'failure'.
 
     Before this PR, no hostile-reviewer.yml existed in this repo at all, so
     this assertion was unreachable (RED: FileNotFoundError via the fixture
@@ -106,14 +108,12 @@ def test_hostile_reviewer_gate_blocks_on_failed_review_or_missing_preflight() ->
     evaluate_step = next(s for s in steps if s.get("name") == "Evaluate gate")
     script = evaluate_step["run"]
 
-    assert 'PREFLIGHT="${{ needs.occ-preflight.result }}"' in script
+    assert "needs.occ-preflight.result" not in script
     assert 'RESULT="${{ needs.hostile-review.result }}"' in script
-    # Preflight not succeeding is a hard fail.
-    assert '[ "$PREFLIGHT" != "success" ]' in script
     # A blocked (failure) adversarial review is a hard fail.
     assert '[ "$RESULT" = "failure" ]' in script
-    # Both failure branches must actually exit non-zero.
-    assert script.count("exit 1") >= 2
+    # The failure branch must actually exit non-zero.
+    assert "exit 1" in script
 
 
 def test_hostile_review_job_uses_live_local_models() -> None:
