@@ -32,6 +32,9 @@ _PAGE_SERVICES = (
     "projection-api",
     "omnimarket-projection-llm-cost",
     "consumer-health-projection",
+    # OMN-19972 (T3.6): the usage-by-model writer's carrier (RUNTIME_PROFILE
+    # tenant-projection); the page's usage rows come from it.
+    "tenant-projection-writer",
 )
 
 

@@ -36,6 +36,8 @@ _ADDED = (
     "projection-api",
     "omnimarket-projection-llm-cost",
     "consumer-health-projection",
+    # OMN-19972 (T3.6): the tenant-projection kernel carries the usage writer.
+    "tenant-projection-writer",
 )
 
 _DOCKER_STUB = """#!/usr/bin/env bash
@@ -185,7 +187,7 @@ case "$verb" in
   stop)
     echo exited > "$state/$container.run"
     if [ "${STUB_STOPPED_KEEPS_HEALTHY:-0}" = 1 ]; then echo healthy > "$state/$container.health";
-    else echo unhealthy > "$state/$container.health"; fi
+    else echo "${STUB_STOPPED_HEALTH:-unhealthy}" > "$state/$container.health"; fi
     # a different service going red at the same moment: the step then fails, but
     # not because of the service that was stopped
     if [ -n "${STUB_STOP_BREAKS_OTHER:-}" ]; then
@@ -356,3 +358,34 @@ def test_negative_control_goes_red_when_the_health_step_cannot_be_read(
     )
     assert result.returncode != 0, _show(result)
     assert "expected exactly one step named" in (result.stderr + result.stdout)
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/stopped_tenant_projection_carrier_omn19972.json"
+)
+def test_negative_control_holds_on_a_real_engine_answer_for_the_stopped_carrier(
+    recorded_response: dict[str, Any], tmp_path: Path
+) -> None:
+    """The control rests on what an engine reports for a stopped container.
+
+    The recording is the tenant-projection carrier on a real engine: its health
+    before ``docker stop`` and the step's own ``docker inspect`` format after
+    it. A stopped carrier that still read healthy would let the health step
+    pass with it down; replaying the engine's answer through the step must
+    instead make the health step fail naming the carrier, then restore.
+    """
+    assert recorded_response["container"].endswith("-tenant-projection-writer")
+    assert recorded_response["before_stop"] == "healthy"
+    status, _, health = str(recorded_response["after_stop"]).partition(" health=")
+    assert status == "exited"
+    assert health and health != "healthy", recorded_response["after_stop"]
+
+    result, log = _run_negative_control(tmp_path, STUB_STOPPED_HEALTH=health)
+
+    assert result.returncode == 0, _show(result)
+    container = f"{_PROJECT}-tenant-projection-writer"
+    assert f"stop {container}" in log
+    assert f"start {container}" in log
+    assert f"tenant-projection-writer after stop: exited health={health}" in (
+        result.stdout
+    )

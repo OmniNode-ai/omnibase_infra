@@ -1,0 +1,34 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19972
+title: The laptop bundle runs the tenant-projection carrier, which carries the usage-by-model writer
+summary: The usage-by-model-day writer (T3.6) and the other omnimarket contracts pinned to runtime_profiles [tenant-projection] are dropped from main and effects, so on the laptop they were discovered and consumed by nothing. The local bundle now lists the existing tenant-projection-writer carrier, and the laptop boot's stopped-service control stops and restores it. AC1 to AC9 shipped in earlier changes and are not claimed here; this change carries AC10. Its lab readback (carrier healthy, the usage-by-model-day consumer group Stable) is quoted in the PR body.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19972-ac10
+    statement: The laptop bundle runs the T3.6 usage-by-model writer, through the runtime kernel that owns the tenant-projection profile, under its own identity, and the laptop boot's health step and stopped-service control cover it.
+    acceptance:
+      - id: AC10
+        statement: 'AC10: the local bundle runs the T3.6 usage-by-model writer through tenant-projection-writer, and the render test, the CI health step and the stopped-service control cover it -- falsifier: remove tenant-projection-writer from the local bundle and the render and boot-step tests fail'
+evidence_requirements:
+  - kind: tests
+    description: The local render carries the carrier under its own profile, group id and capabilities with the tenant principal; the CLI render writes it; the boot job's health step and stopped-service control include it, and the control holds on a recorded real engine answer for the stopped carrier.
+    command: uv run pytest tests/unit/infra/test_catalog_local_profile.py tests/ci/test_runtime_boot_catalog_local_health_omn19972.py tests/integration/test_catalog_local_render_page_services_omn19972.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19972-ac10-carrier-in-local-bundle
+    description: The carrier render tests and the boot-step tests pass at this head and fail with the carrier removed from the local bundle. The lab readback (healthy in 204 s, the projection_usage_by_model_day consumer group Stable) is quoted in the PR body.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_catalog_local_profile.py -q -k "tenant_projection_carrier or runs_both_runtime_kernels"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runtime_boot_catalog_local_health_omn19972.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC10
