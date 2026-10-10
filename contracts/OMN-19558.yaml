@@ -36,3 +36,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn-19558-ac1-consume-deadline
+    description: AC1 shipped in omnibase_infra#4289. For every catalog bundle, including the laptop profile, the Kafka config gives effective_dispatch_deadline_seconds of at least the 240-second handler budget plus its terminal delivery margin for the delegate-skill command.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_omn19558_consume_deadline_covers_delegate_skill_budget.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-19558-ac2-replay-message-id
+    description: AC2 shipped in omnibase_infra#4289. A record replayed by node_dlq_replay_effect carries the message_id recorded on the DLQ row, so the delegate-skill claim sees the replay as the same delivery.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_dlq_replay_effect/test_omn19558_replay_keeps_message_id.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
