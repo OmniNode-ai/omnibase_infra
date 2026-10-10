@@ -1,13 +1,11 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""OMN-20161 - every core reusable-gate caller pin must carry the writer-app exemption.
+"""OMN-20161: the remaining core receipt-gate pin carries the writer exemption.
 
-omnibase_core#1820 exempts the OCC writer app from ``occ-preflight`` and the
-Receipt Gate, but only when the pin-only probe proves the producer's outcome.
-Callers here pin those reusables by sha, so the exemption reaches this repo only
-once every pin has moved. The two ``occ-preflight`` callers must move together.
-This test follows the chain: caller pin, then the workflow text at that pin.
+OMN-20074 retired both OCC preflight callers. The caller-mode receipt gate
+still delegates to core, so keep its pin coverage and assert that no preflight
+caller remains in the live workflow inventory.
 """
 
 from __future__ import annotations
@@ -23,8 +21,6 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 CORE = "OmniNode-ai/omnibase_core"
-EXPECTED_PIN = "52851458622f368c3b596c82bf810bc6acce1d5e"  # pragma: allowlist secret
-GATES = ("occ-preflight", "receipt-gate")
 USES = re.compile(
     rf"^\s*uses:\s*{re.escape(CORE)}/\.github/workflows/"
     r"(?P<gate>occ-preflight|receipt-gate)\.yml@(?P<ref>\S+)",
@@ -60,28 +56,14 @@ def _fetch_core_file(ref: str, path: str) -> str:
     return done.stdout
 
 
-def test_both_gates_have_callers() -> None:
+def test_only_receipt_gate_has_a_caller() -> None:
     """Positive control: the scan finds the callers it is meant to police."""
-    assert {gate for _, gate, _ in _callers()} == set(GATES)
+    assert {gate for _, gate, _ in _callers()} == {"receipt-gate"}
 
 
-def test_occ_preflight_callers_are_all_present() -> None:
+def test_occ_preflight_callers_are_absent() -> None:
     files = {name for name, gate, _ in _callers() if gate == "occ-preflight"}
-    assert files == {"ci.yml", "hostile-reviewer.yml"}
-
-
-@pytest.mark.parametrize(
-    ("name", "gate", "ref"),
-    [c for c in _callers() if c[1] == "occ-preflight"],
-)
-def test_occ_preflight_pin_is_the_writer_exemption_sha(
-    name: str, gate: str, ref: str
-) -> None:
-    assert ref == EXPECTED_PIN, (
-        f"{name} pins {gate}.yml at {ref}; advance it to {EXPECTED_PIN} so the OCC "
-        "writer app exemption (omnibase_core#1820) applies. occ-preflight callers "
-        "must move together."
-    )
+    assert files == set()
 
 
 @pytest.mark.parametrize(
@@ -92,11 +74,5 @@ def test_receipt_gate_pin_carries_writer_app_exemption(name: str, ref: str) -> N
     """The receipt-gate caller advances past #1820 (OMN-20375), so read its own pin."""
     assert re.fullmatch(r"[0-9a-f]{40}", ref), f"{name} pins receipt-gate.yml at {ref}"
     text = _fetch_core_file(ref, ".github/workflows/receipt-gate.yml")
-    assert WRITER_APP in text
-    assert PIN_PROBE_FLAG in text
-
-
-def test_occ_preflight_pinned_workflow_carries_writer_app_exemption() -> None:
-    text = _fetch_core_file(EXPECTED_PIN, ".github/workflows/occ-preflight.yml")
     assert WRITER_APP in text
     assert PIN_PROBE_FLAG in text

@@ -99,6 +99,24 @@ channel's deduplication: a condition that stays bad posts once, not once an
 hour. A failed send is recorded as a failure rather than swallowed, because an
 alarm that believes it delivered and did not is this ticket's own defect in a
 new place.
+
+EVERY RAISED ALARM ALSO REACHES THE LEDGER (OMN-20794)
+
+On 2026-10-09 this alarm raised ``container_restarts`` for
+``omninode-runtime-effects`` at 10:25:05Z and delivered it to Slack only. The
+rolling ledger carried no ``lab-alarm`` row, so the orchestrator learned of the
+crash fifteen minutes later from a stale projection. Each newly raised alarm now
+appends ONE FRICTION row through the ledger's own append
+(:func:`make_ledger_appender`), naming the condition, the subject and the
+evidence the condition read. It does not wait on Slack: a channel with no
+consent row, no token or no route still leaves the ledger row. No new ssh or
+HTTP read is made for it.
+
+A row that could not be written is kept in the state file and retried on every
+tick until it lands, and the run exits as an alarm meanwhile: an alarm that
+believes it recorded and did not is the defect again. A subject that clears and
+re-raises inside ``ledger_dedupe_window`` appends no second row, so a flapping
+condition leaves one row, not one per flap.
 """
 
 from __future__ import annotations
@@ -113,7 +131,7 @@ import shlex
 import stat
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -351,6 +369,7 @@ class ModelAlarmRun:
     reports: tuple[ModelConditionReport, ...]
     raised: tuple[ModelAlarm, ...]
     posting: str
+    ledger: str
     run_version: str = RUN_RECORD_VERSION
 
     def __post_init__(self) -> None:
@@ -373,6 +392,7 @@ class ModelAlarmRun:
             "reports": [report.to_json() for report in self.reports],
             "raised": [alarm.to_json() for alarm in self.raised],
             "posting": self.posting,
+            "ledger": self.ledger,
         }
 
 
@@ -1955,6 +1975,192 @@ def post_recovery(
 
 
 # ---------------------------------------------------------------------------
+# The ledger row for a raised alarm (OMN-20794)
+# ---------------------------------------------------------------------------
+
+#: The lane the rows are written under, so ``onex_ledger.py query --lane
+#: lab-alarm`` answers "what has the lab alarm raised".
+LEDGER_LANE = "lab-alarm"
+
+#: A FRICTION row must carry a cost with a digit (the ledger's friction guard,
+#: OMN-18274). An alarm cannot know the cost of the condition it detects, so it
+#: states the only honest figure: nothing had accrued when it was raised.
+_LEDGER_COST = "~0 lane-minutes at raise (accrues until the alarm clears)"
+
+#: Longest evidence a row quotes. A census finding set can run long, and the
+#: full reading is in the run record the row points at.
+_LEDGER_EVIDENCE_LIMIT = 600
+
+
+class LedgerAppendError(RuntimeError):
+    """The ledger's own append refused or could not be reached."""
+
+
+class LedgerAppender(Protocol):
+    def __call__(self, row: str) -> None:
+        """Append one row, or raise :class:`LedgerAppendError`."""
+
+
+def make_ledger_appender(
+    command: Sequence[str],
+    ledger_path: Path,
+    *,
+    runner: CommandRunner = _run_read_only,
+    timeout_seconds: float = 120.0,
+) -> LedgerAppender:
+    """Bind the ledger's own append to *ledger_path*.
+
+    ``command`` is the ledger tool's argv prefix (``... onex-ledger``); the
+    ledger path and ``--append <row>`` are added here, as fixed argv with no
+    shell, so a row can carry any text without being interpreted. The write
+    itself is the tool's locked, grammar-checked append, so a row the ledger
+    refuses (a missing cost, a bad ticket) is a failure here and not a
+    swallowed one. ``runner`` is the same fixed-argv seam the conditions are
+    tested through; the default runs the command and the append happens inside
+    the tool.
+    """
+    prefix = list(command)
+    if not prefix:
+        raise ValueError("ledger append command is empty")
+
+    def append(row: str) -> None:
+        argv = [*prefix, str(ledger_path), "--timeout", "60s", "--append", row]
+        try:
+            result = runner(argv, timeout=timeout_seconds)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise LedgerAppendError(
+                f"ledger append {type(exc).__name__}: timed out or could not start "
+                f"{prefix[0]}"
+            ) from exc
+        if result.returncode != 0:
+            raise LedgerAppendError(
+                f"onex-ledger exited {result.returncode}: "
+                f"{(result.stderr or result.stdout or '').strip()[:300]}"
+            )
+
+    return append
+
+
+def _ledger_cell(value: str, *, limit: int | None = None) -> str:
+    """One cell's text: no pipe, no newline, so it cannot become another cell."""
+    flattened = " ".join(value.replace("|", "/").split())
+    if limit is not None and len(flattened) > limit:
+        return flattened[: limit - 1] + "…"
+    return flattened
+
+
+def _ledger_stamp(iso: str) -> str:
+    return datetime.fromisoformat(iso).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def render_ledger_row(
+    alarm: ModelAlarm,
+    *,
+    evidence: str,
+    stamp: str,
+    raised_at: str,
+    ticket: str,
+) -> str:
+    """One FRICTION row naming the condition, the subject and the evidence."""
+    cells = [
+        stamp,
+        "FRICTION",
+        f"lane={LEDGER_LANE}",
+        f"existing={ticket}",
+        f"cost={_LEDGER_COST}",
+        f"condition={alarm.condition.value}",
+        f"subject={_ledger_cell(alarm.subject)}",
+        f"raised_at={raised_at}",
+        f"detail={_ledger_cell(alarm.detail)}",
+        f"evidence={_ledger_cell(evidence, limit=_LEDGER_EVIDENCE_LIMIT)}",
+        f"lab alarm raised {alarm.condition.value} on {_ledger_cell(alarm.subject)}; "
+        "the detail and evidence cells carry what it read",
+    ]
+    return " | ".join(cells)
+
+
+def record_alarms_in_ledger(
+    raised: Sequence[ModelAlarm],
+    reports: Sequence[ModelConditionReport],
+    state: ModelAlarmState,
+    *,
+    appender: LedgerAppender,
+    ticket: str,
+    window: timedelta,
+    now: str,
+) -> str:
+    """Append one ledger row per newly raised alarm; return the run's summary.
+
+    Three sets are worked in order: rows an earlier tick could not write
+    (retried, whatever the window says, because nothing landed), the alarms
+    raised this tick, and the ones among those that re-raise inside *window*
+    of a row already written (counted and skipped). A write that fails stays in
+    ``state.ledger_pending`` and is named in the summary, which ``exit_code``
+    reads as an alarm.
+    """
+    evidence_for = {report.condition: report.evidence for report in reports}
+    now_dt = datetime.fromisoformat(now)
+    state.ledger_last_row = {
+        key: stamped
+        for key, stamped in state.ledger_last_row.items()
+        if now_dt - datetime.fromisoformat(stamped) < window
+    }
+
+    work: dict[str, dict[str, str]] = dict(state.ledger_pending)
+    retried = len(work)
+    suppressed: list[str] = []
+    for alarm in raised:
+        if alarm.key in work:
+            continue
+        if alarm.key in state.ledger_last_row:
+            suppressed.append(alarm.key)
+            continue
+        work[alarm.key] = {
+            **alarm.to_json(),
+            "evidence": evidence_for.get(alarm.condition, ""),
+            "raised_at": now,
+        }
+
+    written = 0
+    failures: list[str] = []
+    for key, entry in work.items():
+        alarm = ModelAlarm(
+            condition=EnumAlarmCondition(entry["condition"]),
+            subject=entry["subject"],
+            detail=entry["detail"],
+        )
+        row = render_ledger_row(
+            alarm,
+            evidence=entry["evidence"] or "no evidence recorded",
+            stamp=_ledger_stamp(now),
+            raised_at=entry["raised_at"],
+            ticket=ticket,
+        )
+        try:
+            appender(row)
+        except LedgerAppendError as exc:
+            state.ledger_pending[key] = entry
+            failures.append(f"{key}: {exc}")
+            continue
+        state.ledger_pending.pop(key, None)
+        state.ledger_last_row[key] = now
+        written += 1
+
+    summary = f"appended {written}/{len(work)} lane={LEDGER_LANE} rows"
+    if retried:
+        summary += f" ({retried} retried from an earlier tick)"
+    if suppressed:
+        summary += (
+            f"; dedupe: {len(suppressed)} re-raise inside "
+            f"{int(window.total_seconds() // 60)} minutes of a row already written "
+            f"({', '.join(suppressed)})"
+        )
+    if failures:
+        summary += f"; FAILED: {'; '.join(failures)}"
+    return summary
+
+
+# ---------------------------------------------------------------------------
 # State: edge-triggering and the previous lag sample
 # ---------------------------------------------------------------------------
 
@@ -1974,6 +2180,11 @@ class ModelAlarmState:
     #: the moment a live member is read again -- see
     #: evaluate_effects_held_behind_runtime.
     effects_held_since: dict[str, str] = field(default_factory=dict)
+    #: OMN-20794: alarm key -> when its ledger row was last written, for the
+    #: dedupe window; and alarm key -> the alarm a failed append left unwritten,
+    #: retried on every tick until it lands.
+    ledger_last_row: dict[str, str] = field(default_factory=dict)
+    ledger_pending: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> ModelAlarmState:
@@ -1993,6 +2204,8 @@ class ModelAlarmState:
         sample = payload.get("lag_sample")
         since = payload.get("indeterminate_since")
         held_since = payload.get("effects_held_since")
+        last_row = payload.get("ledger_last_row")
+        pending = payload.get("ledger_pending")
         return cls(
             active={
                 str(k): str(v) for k, v in active.items() if isinstance(active, dict)
@@ -2008,6 +2221,16 @@ class ModelAlarmState:
             effects_held_since={str(k): str(v) for k, v in held_since.items()}
             if isinstance(held_since, dict)
             else {},
+            ledger_last_row={str(k): str(v) for k, v in last_row.items()}
+            if isinstance(last_row, dict)
+            else {},
+            ledger_pending={
+                str(k): {str(f): str(x) for f, x in v.items()}
+                for k, v in pending.items()
+                if isinstance(v, dict)
+            }
+            if isinstance(pending, dict)
+            else {},
         )
 
     def save(self, path: Path) -> None:
@@ -2019,6 +2242,8 @@ class ModelAlarmState:
                     "lag_sample": self.lag_sample,
                     "indeterminate_since": self.indeterminate_since,
                     "effects_held_since": self.effects_held_since,
+                    "ledger_last_row": self.ledger_last_row,
+                    "ledger_pending": self.ledger_pending,
                 },
                 indent=2,
             ),
@@ -2298,6 +2523,11 @@ class ModelAlarmConfig:
     work_ledger_db_container: str
     work_ledger_database: str
     work_ledger_max_lag: timedelta
+    #: OMN-20794: the ticket every ledger row cites as ``existing=`` (the
+    #: friction guard demands an OMN id), and how long after a row a re-raise of
+    #: the same subject appends no second one.
+    ledger_row_ticket: str
+    ledger_dedupe_window: timedelta
     #: OMN-18867: omniclaude's deploy-gate path validator, the runtime-change
     #: classifier's path rule. Empty disables the nearest-runtime-affecting
     #: ancestor rule and asks the delivered sha itself.
@@ -2309,6 +2539,9 @@ class ModelAlarmConfig:
     chain_canary_max_age: timedelta = timedelta(hours=3)
     census_command: tuple[str, ...] = ()
     census_max_age: timedelta = timedelta(hours=2)
+    #: OMN-20794: the ledger tool's argv prefix, ledger path and ``--append``
+    #: excluded. Empty only for a caller that injects its own appender.
+    ledger_append_command: tuple[str, ...] = ()
 
     @classmethod
     def load(cls, path: Path) -> ModelAlarmConfig:
@@ -2339,6 +2572,23 @@ class ModelAlarmConfig:
             raise ValueError(
                 f"{path}: census_max_age_minutes must be a positive integer"
             )
+        ledger_command = payload["ledger_append_command"]
+        if (
+            not isinstance(ledger_command, list)
+            or not ledger_command
+            or not all(isinstance(part, str) and part for part in ledger_command)
+        ):
+            raise ValueError(
+                f"{path}: ledger_append_command must be a non-empty string list"
+            )
+        ledger_ticket = str(payload["ledger_row_ticket"])
+        if not re.fullmatch(r"OMN-\d+", ledger_ticket):
+            raise ValueError(f"{path}: ledger_row_ticket must be an OMN id")
+        ledger_window_minutes = payload["ledger_dedupe_window_minutes"]
+        if type(ledger_window_minutes) is not int or ledger_window_minutes <= 0:
+            raise ValueError(
+                f"{path}: ledger_dedupe_window_minutes must be a positive integer"
+            )
         return cls(
             repo=expand_env(str(payload["repo"]), source=path),
             lane=EnumLabLane(str(payload.get("lane", EnumLabLane.COMPOSE_DEV.value))),
@@ -2356,6 +2606,11 @@ class ModelAlarmConfig:
             work_ledger_database=str(payload["work_ledger_database"]),
             work_ledger_max_lag=timedelta(
                 minutes=int(payload["work_ledger_max_lag_minutes"])
+            ),
+            ledger_row_ticket=ledger_ticket,
+            ledger_dedupe_window=timedelta(minutes=ledger_window_minutes),
+            ledger_append_command=tuple(
+                expand_env(part, source=path) for part in ledger_command
             ),
             runtime_path_validator=expand_env(
                 str(payload.get("runtime_path_validator", "")), source=path
@@ -2395,10 +2650,16 @@ def run_once(
     canary_reader: CanaryVerdictReader,
     posting_channel: str,
     env_file: Path,
+    ledger_appender: LedgerAppender,
     subject_resolver: SubjectResolver | None = None,
+    clock: Callable[[], str] = _now,
 ) -> ModelAlarmRun:
-    """Evaluate every declared condition, record the run, return it."""
-    started = _now()
+    """Evaluate every declared condition, record the run, return it.
+
+    ``clock`` is the seam a replay of a past window runs through; it returns
+    the ISO form :func:`_now` does.
+    """
+    started = clock()
     state = ModelAlarmState.load(state_dir / "state.json")
 
     receipt_report = evaluate_lab_pass_receipt(
@@ -2457,6 +2718,18 @@ def run_once(
     raised = select_new_alarms(reports, state, now=started)
     state.lag_sample = lag_sample
 
+    # The ledger row comes first and never waits on the channel: a raise with
+    # no Slack consent, token or route still leaves its record (OMN-20794).
+    ledger_summary = record_alarms_in_ledger(
+        raised,
+        reports,
+        state,
+        appender=ledger_appender,
+        ticket=config.ledger_row_ticket,
+        window=config.ledger_dedupe_window,
+        now=started,
+    )
+
     consent = resolve_posting_consent(ledger_path, channel=posting_channel)
     if consent is None:
         posting = (
@@ -2512,10 +2785,11 @@ def run_once(
     state.save(state_dir / "state.json")
     run = ModelAlarmRun(
         started_at=started,
-        finished_at=_now(),
+        finished_at=clock(),
         reports=reports,
         raised=raised,
         posting=posting,
+        ledger=ledger_summary,
     )
     _append_jsonl(state_dir / "alarm-runs.jsonl", run.to_json())
     for alarm in raised:
@@ -2536,6 +2810,7 @@ def render(run: ModelAlarmRun) -> str:
     else:
         lines.append("  raised nothing new this run")
     lines.append(f"  posting: {run.posting}")
+    lines.append(f"  ledger: {run.ledger}")
     return "\n".join(lines)
 
 
@@ -2557,7 +2832,7 @@ def exit_code(run: ModelAlarmRun) -> int:
     is exactly how a monitor reports green over an outage. It ranks below
     ALARM only because a known failure is the more actionable of the two.
     """
-    if run.raised or "; FAILED:" in run.posting:
+    if run.raised or "; FAILED:" in run.posting or "; FAILED:" in run.ledger:
         return EXIT_ALARM
     if any(
         report.outcome is EnumConditionOutcome.INDETERMINATE for report in run.reports
@@ -2710,6 +2985,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         canary_reader=read_chain_canary_verdict,
         posting_channel=args.posting_channel,
         env_file=args.env_file,
+        ledger_appender=make_ledger_appender(config.ledger_append_command, args.ledger),
         subject_resolver=make_clone_subject_resolver(
             clone=_REPO_ROOT,
             runtime_path_validator=config.runtime_path_validator,

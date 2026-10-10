@@ -18,6 +18,7 @@ from scripts.ci.ci_summary_gate import (
     EXTERNAL_SWEEP_EXCLUSIONS,
     SWEEP_NON_PR_EVENTS,
     check_run_event_index,
+    evaluate_external_contexts,
     evaluate_external_sweep,
 )
 
@@ -132,32 +133,49 @@ def _caller_rows(*, verify: str | None, dod_verify: str | None) -> list[dict[str
 
 def _sweep(
     rows: list[dict[str, Any]], event: str = "pull_request"
-) -> tuple[list[str], list[str]]:
+) -> tuple[list[str], list[str], list[str]]:
+    """Combine the sweep for verify with the registered dod-verify evaluation."""
+    runs = [
+        {"id": int(match.group(1)), "event": event}
+        for row in rows
+        if (match := re.search(r"/runs/(\d+)/job/", str(row["html_url"])))
+    ]
     failures, _in_flight, swept, _excluded, _provisional = evaluate_external_sweep(
         rows,
         expected=EXPECTED_EXTERNAL_CONTEXTS,
         in_run_names=frozenset(),
         self_name="CI Summary",
         exclusions=EXTERNAL_SWEEP_EXCLUSIONS,
-        events=check_run_event_index([{"id": _RUN_ID, "event": event}]),
+        events=check_run_event_index(runs),
         now=_NOW,
     )
-    return failures, swept
+    # OMN-20074 registers dod-verify, so CI Summary's expected-context layer
+    # judges its presence/conclusion and the external sweep only judges verify.
+    expected = (_DOD_VERIFY,)
+    expected_failures, unresolved = evaluate_external_contexts(
+        rows, expected=expected, now=_NOW
+    )
+    assert unresolved == [], "the caller fixtures must have decided expected contexts"
+    judged = [name for name in expected if name not in unresolved]
+    return failures + expected_failures, swept, judged
 
 
 def test_ci_summary_sweep_accepts_the_caller_shape() -> None:
+    """Green caller rows pass both layers now that dod-verify is registered."""
     assert {"pull_request", "pull_request_target"}.isdisjoint(SWEEP_NON_PR_EVENTS), (
         "the sweep judges the caller's pull_request and pull_request_target rows"
     )
-    assert not {_VERIFY, _DOD_VERIFY} & set(EXPECTED_EXTERNAL_CONTEXTS), (
-        "the caller's checks are not registered as required external contexts yet"
-    )
+    assert _DOD_VERIFY in EXPECTED_EXTERNAL_CONTEXTS
+    assert _VERIFY not in EXPECTED_EXTERNAL_CONTEXTS
     assert not {_VERIFY, _DOD_VERIFY} & set(EXTERNAL_SWEEP_EXCLUSIONS), (
-        "caller checks must pass the sweep on their own conclusion, not an exclusion"
+        "caller checks must pass their evaluation on their own conclusion"
     )
-    failures, swept = _sweep(_caller_rows(verify="success", dod_verify="success"))
+    failures, swept, expected_judged = _sweep(
+        _caller_rows(verify="success", dod_verify="success")
+    )
     assert failures == [], failures
-    assert swept == [_DOD_VERIFY, _VERIFY], "the sweep must have judged both rows"
+    assert swept == [_VERIFY], "only the unregistered verify row is swept"
+    assert expected_judged == [_DOD_VERIFY]
 
 
 @pytest.mark.parametrize(
@@ -171,11 +189,12 @@ def test_ci_summary_sweep_accepts_the_caller_shape() -> None:
 def test_ci_summary_sweep_judges_the_base_branch_trigger_rows(
     verify: str, dod_verify: str, refused: str | None
 ) -> None:
-    """OMN-20074: the caller's rows carry event pull_request_target."""
-    failures, swept = _sweep(
+    """Base-branch rows use the sweep for verify and expected contexts for dod-verify."""
+    failures, swept, expected_judged = _sweep(
         _caller_rows(verify=verify, dod_verify=dod_verify), "pull_request_target"
     )
-    assert swept == [_DOD_VERIFY, _VERIFY], "the sweep must have judged both rows"
+    assert swept == [_VERIFY], "only the unregistered verify row is swept"
+    assert expected_judged == [_DOD_VERIFY]
     if refused is None:
         assert failures == [], failures
     else:
@@ -193,7 +212,12 @@ def test_ci_summary_sweep_judges_the_base_branch_trigger_rows(
 def test_ci_summary_sweep_refuses_a_skipped_verify_and_a_red_dod_verify(
     verify: str, dod_verify: str, refused: str
 ) -> None:
-    failures, _swept = _sweep(_caller_rows(verify=verify, dod_verify=dod_verify))
+    """The sweep refuses skipped verify; expected contexts refuse red dod-verify."""
+    failures, swept, expected_judged = _sweep(
+        _caller_rows(verify=verify, dod_verify=dod_verify)
+    )
+    assert swept == [_VERIFY]
+    assert expected_judged == [_DOD_VERIFY]
     assert len(failures) == 1, failures
     assert failures[0].startswith(refused), failures
 
@@ -202,28 +226,24 @@ def test_ci_summary_sweep_refuses_a_skipped_verify_and_a_red_dod_verify(
 def test_ci_summary_sweep_accepts_the_recorded_caller_rows_of_merged_heads(
     recorded_response: dict[str, object],
 ) -> None:
-    """The recorded repo-evidence check-runs of 16 merged dev heads pass the sweep."""
+    """All 16 merged heads pass the sweep plus registered dod-verify evaluation."""
     heads = cast("list[dict[str, Any]]", recorded_response["heads"])
     assert len(heads) == 16
     for head in heads:
         rows = cast("list[dict[str, Any]]", head["check_runs"])
         assert {row["name"] for row in rows} == {_VERIFY, _DOD_VERIFY}, head["pr"]
-        runs = [
-            {"id": int(match.group(1)), "event": "pull_request"}
-            for row in rows
-            if (match := re.search(r"/runs/(\d+)/job/", str(row["html_url"])))
-        ]
-        failures, _in_flight, swept, _excluded, _provisional = evaluate_external_sweep(
-            rows,
-            expected=EXPECTED_EXTERNAL_CONTEXTS,
-            in_run_names=frozenset(),
-            self_name="CI Summary",
-            exclusions=EXTERNAL_SWEEP_EXCLUSIONS,
-            events=check_run_event_index(runs),
-            now=_NOW,
-        )
+        failures, swept, expected_judged = _sweep(rows)
         assert failures == [], (head["pr"], failures)
-        assert sorted(swept) == [_DOD_VERIFY, _VERIFY], head["pr"]
+        assert swept == [_VERIFY], head["pr"]
+        assert expected_judged == [_DOD_VERIFY], head["pr"]
+
+
+def test_repo_evidence_replaces_the_companion_contract_compliance_job() -> None:
+    """OMN-20074: the DoD check runs from this repository's contracts only."""
+    from scripts.ci.ci_summary_gate import GATE_JOBS
+
+    assert "Contract Compliance Check" not in GATE_JOBS
+    assert _DOD_VERIFY in set(EXPECTED_EXTERNAL_CONTEXTS)
 
 
 def test_every_repo_contract_binds_every_criterion() -> None:

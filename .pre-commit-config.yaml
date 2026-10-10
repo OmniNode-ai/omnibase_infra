@@ -2141,6 +2141,18 @@ repos:
           ^(scripts/ci/check_integration_skips\.py|scripts/ci/runtime_boot_suites_skip_guard\.yaml|tests/ci/test_check_integration_skips\.py|\.github/workflows/reusable-runtime-boot\.yml|tests/integration/test_runtime_consumes_build_loop_terminal_event\.py|tests/integration/registration/e2e/test_runtime_e2e\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-17427: the laptop boot job's dev-lane class phase derives the
+      # kernels' strict-wiring and secrets-store bindings from the dev lane's
+      # compose files and fails on a restart. SYNC with
+      # tests/ci/test_runtime_boot_dev_lane_class_omn17427.py in CI.
+      - id: runtime-boot-dev-lane-class
+        name: Runtime boot dev-lane class phase (OMN-17427)
+        language: system
+        entry: uv run pytest tests/ci/test_runtime_boot_dev_lane_class_omn17427.py -q -p no:randomly
+        files: >-
+          ^(\.github/workflows/(reusable-runtime-boot|ci)\.yml|docker/docker-compose\.(infra|dev-lane)\.yml|tests/ci/test_runtime_boot_dev_lane_class_omn17427\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
   # OMN-13291 (W0): validator-requirements fleet gate. Reports ALL missing
   # required gates for omnibase_infra against omnibase_core's
   # architecture-handshakes/validator-requirements.yaml, ratcheted by this
@@ -2445,6 +2457,16 @@ repos:
         name: Skip count baseline can only shrink (OMN-19677)
         args: [--baseline, config/skip_count_baseline.yaml, --parser, 'yaml-counted-list-map:suites', --base-ref, origin/dev]
         files: ^config/skip_count_baseline\.yaml$
+  # OMN-20782: the public-repo hygiene gate over the lines a commit adds, at the
+  # same omniclaude revision as .github/workflows/public-repo-hygiene.yml, so the
+  # local verdict and the CI verdict cannot diverge. The hook reads the private
+  # denylist from the file named by OMNI_HYGIENE_VOCAB_PATH, with the lab
+  # vocabulary beside it, and fails closed without them.
+  - repo: https://github.com/OmniNode-ai/omniclaude
+    rev: 6e47aa311ac5d177d116d9597b07966a233d2463
+    hooks:
+      - id: public-repo-hygiene
+        require_serial: true
   # OMN-19666: VCS-backed additional_dependencies can inherit GIT_INDEX_FILE
   # during a cold-cache commit and overwrite the committing worktree index.
   - repo: local
