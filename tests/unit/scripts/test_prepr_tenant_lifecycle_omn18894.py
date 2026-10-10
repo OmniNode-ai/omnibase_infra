@@ -25,8 +25,19 @@ ROOT = Path(__file__).resolve().parents[3]
 SMOKE = ROOT / "scripts/smoke/smoke_delegation.sh"
 VERIFY = ROOT / "scripts/runtime_build/prepr_verify_lane.sh"
 TEARDOWN = ROOT / "scripts/runtime_build/prepr_teardown_slot.py"
+SLOT_POLICY = ROOT / "scripts/runtime_build/prepr_slot_policy.py"
 
 pytestmark = pytest.mark.unit
+
+
+def slot_one_project() -> str:
+    spec = importlib.util.spec_from_file_location("prepr_slot_policy", SLOT_POLICY)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    project: str = module.resolve_slot(1).compose_project
+    return project
 
 
 class GatewayResponse(io.BytesIO):
@@ -179,7 +190,7 @@ def test_teardown_adapter_preserves_resources_when_offboard_fails(
         commands.append(argv)
         is_revoke = "revoke" in argv
         if is_revoke:
-            assert env and env["COMPOSE_PROJECT"] == "omnibase-infra-prepr-1"
+            assert env and env["COMPOSE_PROJECT"] == slot_one_project()
         proof = (
             json.dumps(
                 {
@@ -260,7 +271,7 @@ else:
     env = dict(
         os.environ,
         PATH=str(tmp_path) + os.pathsep + os.environ["PATH"],
-        COMPOSE_PROJECT="omnibase-infra-prepr-1",
+        COMPOSE_PROJECT=slot_one_project(),
         TENANT_STATE_FILE=str(credential),
         TEST_DOCKER_LOG=str(log),
         TEST_CONTROL_COUNTER=str(tmp_path / "control"),
