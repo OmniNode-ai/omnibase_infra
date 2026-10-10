@@ -16,7 +16,7 @@ evidence_requirements:
     description: The checkout ref in the handshake workflow equals the bumped commit.
     command: 'grep -qE "^\s+ref:\s+16ee7c5585523d8f9e26285a5e6b4ee8cb5c0bab$" .github/workflows/check-handshake.yml'
   - kind: tests
-    description: The handshake pin test fails on the superseded efba6fb107f4 ref and passes on the bumped one.
+    description: The handshake pin test fails on the superseded 2f90bd814b14 ref and passes on the bumped one.
     command: uv run pytest tests/ci/test_check_handshake_core_pin_omn9050.py -q
 emergency_bypass:
   enabled: false
