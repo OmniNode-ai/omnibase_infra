@@ -1,0 +1,38 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19558
+title: A delegate-skill command whose terminal never arrives is not dead-lettered and replayed as a new command
+summary: The delegation dispatch port supplies the typed timeout cause when the Pattern B broker reports a timeout without one, so the consumer converts it into one typed timeout terminal instead of a provider_error. Supplied causes and other statuses are unchanged. AC1 and AC2 shipped earlier; this change carries the in-process part of AC3, and AC3's live held-model exercise is pending.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19558
+    statement: A delegate-skill command that waits past its budget yields one typed timeout terminal, and a dead-lettered replay is the same delivery rather than a new command.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the consume deadline for onex.cmd.omnimarket.delegate-skill.v1 is never shorter than the handler budget plus its terminal delivery margin on any bundle, including the laptop profile -- falsifier: a pytest that builds the Kafka config for each catalog bundle and asserts effective_dispatch_deadline_seconds >= 300 for a node declaring max_handler_duration_seconds 240'
+      - id: AC2
+        statement: 'AC2: a record replayed by node_dlq_replay_effect carries the original message_id, so the delegate-skill claim sees a replay as the same delivery and serves the recorded terminal -- falsifier: a red-first pytest in omnibase_infra that replays a captured DLQ row and asserts the replayed record headers include the original message_id'
+      - id: AC3
+        statement: 'AC3: a delegate-skill command whose terminal never arrives yields exactly one typed timeout terminal and no replayed re-dispatch -- falsifier: onex delegate against a lab stack with the model endpoint held open past the budget, then count delegate-skill-failed and delegation-request records for the correlation with rpk topic consume'
+evidence_requirements:
+  - kind: tests
+    description: The real Pattern B broker over an in-memory bus, with no terminal reply, publishes one command and returns one timeout result carrying the typed timeout cause; the port types a timeout that has no recorded cause.
+    command: uv run pytest tests/integration/delegation/test_omn19558_broker_timeout_cause.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19558-ac3-typed-timeout
+    description: In-process evidence for AC3. With no terminal reply the real broker publishes one command and returns one timeout result whose terminal_failure_cause is timeout, and the port supplies that cause only when the result has none. The live held-model rpk count named in AC3's falsifier is pending and not claimed here.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/delegation/test_omn19558_broker_timeout_cause.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_service_delegation_dispatch_port.py -q -k timeout_without_recorded_cause_is_typed
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
