@@ -144,7 +144,6 @@ scripts/ci/check_lane_sibling_revision.py
 scripts/ci/check_lockfile_cve.py
 scripts/ci/check_lockfile_registry_allowlist.py
 scripts/ci/check_no_credential_in_log.py
-scripts/ci/check_occ_companion_merged.py
 scripts/ci/check_omnimarket_contract_pin_advance.py
 scripts/ci/check_pin_reachability.py
 scripts/ci/check_probe_placement_drift.py
@@ -160,10 +159,7 @@ scripts/ci/check_workflow_uv_available.py
 scripts/ci/ci_cascade_graph.py
 scripts/ci/ci_env_digest.py
 scripts/ci/ci_summary_gate.py
-scripts/ci/classify_contract_compliance_scope.py
 scripts/ci/compute_golden.py
-scripts/ci/defer_test_passes_driver.py
-scripts/ci/deferred_test_passes_gate.py
 scripts/ci/delegation_health_check.py
 scripts/ci/dependabot_lock_refresh.py
 scripts/ci/deploy_lane_verify_route.py
@@ -183,9 +179,6 @@ scripts/ci/merge_queue_janitor.py
 scripts/ci/model_review_capability_canary.py
 scripts/ci/nonrequired_check_failure_rate.py
 scripts/ci/normalize_product_clone.sh
-scripts/ci/occ_companion_merge_heal.py
-scripts/ci/occ_manual_replay_precheck.py
-scripts/ci/occ_preflight_heal.py
 scripts/ci/parity_red_on_base_baseline.py
 scripts/ci/post_hostile_review_threads.py
 scripts/ci/post_release_dev_bump.py
@@ -207,11 +200,8 @@ scripts/ci/reject-node-implementations.sh
 scripts/ci/release_dependency_advance.py
 scripts/ci/release_train.py
 scripts/ci/replay_hook_history.py
-scripts/ci/resolve_contract_compliance_evidence.py
-scripts/ci/resolve_contract_compliance_pr.py
 scripts/ci/resolve_modern_bash.sh
 scripts/ci/run_compliance_sweep.py
-scripts/ci/run_contract_compliance_with_evidence.py
 scripts/ci/run_contract_sweep.py
 scripts/ci/run_duplication_sweep.py
 scripts/ci/run_on_gate_runner.sh

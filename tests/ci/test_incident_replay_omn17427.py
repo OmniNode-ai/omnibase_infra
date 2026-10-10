@@ -68,11 +68,21 @@ def _load(path: Path) -> list[dict[str, object]]:
     return data
 
 
+def _captured_cancellations() -> list[dict[str, object]]:
+    """Replay the captured cancellation verdicts this incident concerns.
+
+    Other captured producers, including retired OCC jobs, are unrelated to
+    cancellation replacement. Keep their bytes intact and exercise both
+    external layers over the incident's cancelled rows.
+    """
+    return [row for row in _load(CHECK_RUNS) if row.get("conclusion") == "cancelled"]
+
+
 def _evaluate(workflow_runs: list[dict[str, object]]) -> tuple[int, str]:
     return evaluate(
         _load(JOBS),
         run_attempt=1,
-        check_runs=_load(CHECK_RUNS),
+        check_runs=_captured_cancellations(),
         external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
         workflow_runs=workflow_runs,
         current_run_id=CI_RUN_ID,
@@ -211,7 +221,7 @@ def test_a_row_this_run_wrote_is_left_to_the_in_run_layers() -> None:
     code, report = evaluate(
         _load(JOBS),
         run_attempt=1,
-        check_runs=[*_load(CHECK_RUNS), own],
+        check_runs=[*_captured_cancellations(), own],
         external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
         workflow_runs=_load(WORKFLOW_RUNS),
         current_run_id=CI_RUN_ID,
@@ -230,7 +240,7 @@ def test_a_row_this_run_wrote_is_left_to_the_in_run_layers() -> None:
     code, report = evaluate(
         _load(JOBS),
         run_attempt=1,
-        check_runs=[*_load(CHECK_RUNS), foreign],
+        check_runs=[*_captured_cancellations(), foreign],
         external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
         workflow_runs=_load(WORKFLOW_RUNS),
         current_run_id=CI_RUN_ID,

@@ -240,7 +240,11 @@ class TestPlaceholderDoesNotOutrankTheAnalysis:
 
 
 class TestSupersededCancellationIsNotAVerdict:
-    """AC-2 — a cancellation waits, bounded, for the replacement it implies."""
+    """A cancellation waits, bounded, for the replacement it implies.
+
+    These assertions exercise layer 4 in isolation. Archived OCC rows no
+    longer belong to the live gate inventory or the layer-5 exclusions.
+    """
 
     def _slice(self) -> list[dict[str, object]]:
         return _at_instant(_rows(PR3512_PAGE1, PR3512_PAGE2), PR3512_POLL_INSTANT)
@@ -258,6 +262,7 @@ class TestSupersededCancellationIsNotAVerdict:
             _all_gates_green(),
             check_runs=rows,
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            sweep_external=False,
             now=PR3512_POLL_INSTANT,
         )
         assert code == EXIT_PENDING, report
@@ -271,6 +276,7 @@ class TestSupersededCancellationIsNotAVerdict:
             _all_gates_green(),
             check_runs=rows,
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            sweep_external=False,
             now=PR3512_POLL_INSTANT,
         )
         # Wording widened by OMN-17864, which added a second reason a context
@@ -305,6 +311,7 @@ class TestSupersededCancellationIsNotAVerdict:
             _all_gates_green(),
             check_runs=rows,
             external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            sweep_external=False,
             now=past_grace,
         )
         assert code == EXIT_FAILURE

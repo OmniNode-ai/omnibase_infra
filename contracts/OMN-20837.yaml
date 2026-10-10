@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20837
+title: "omnibase_infra names the renamed public repository knowledge_base"
+summary: Live references in README, config, scripts, docker and src name OmniNode-ai/knowledge_base, and the test scans those surfaces and .github for the old slug. Dated fixtures and test data keep the old name.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20837
+    statement: Live repository references in omnibase_infra name the renamed public repository knowledge_base.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: no live config, script or workflow in omnibase_infra resolves the repo by the old slug -- falsifier: uv run pytest tests/integration/ci/test_knowledge_base_slug_omn20837.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The filesystem scan finds no old public repository slug in live surfaces, and the lab proof profiles and runner fleet config name knowledge_base.
+    command: uv run pytest tests/integration/ci/test_knowledge_base_slug_omn20837.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20837-ac2
+    description: Live surfaces contain no old public repository slug and the selected configs name the renamed repository.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/ci/test_knowledge_base_slug_omn20837.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]

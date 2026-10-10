@@ -39,9 +39,8 @@
 # registered in CI Summary's EXPECTED_EXTERNAL_CONTEXTS (ci_summary_gate.py),
 # so an absent verdict blocks too, alongside a red or skipped verdict.
 # Registration follows pull_request_target runs on merged dev heads.
-# OCC contexts stay enforced until S6 part 2 removes OCC's callers:
-# occ-preflight / eligibility and OCC Companion Merged Gate (OMN-15214) in
-# STRICT_GATE_JOBS, and verify / verify in EXPECTED_EXTERNAL_CONTEXTS.
+# S6 part 2 (OMN-20074) removed every OCC caller from this repository, so no
+# OCC context is enforced beside it.
 # compare-with-occ is "false", so the difference step stops waiting for OCC.
 # verifier-version 0.4.305 ships the occ-difference classifier and omnimarket#3563,
 # so a rollback turns comparison back on with one input. The full-SHA pin is the

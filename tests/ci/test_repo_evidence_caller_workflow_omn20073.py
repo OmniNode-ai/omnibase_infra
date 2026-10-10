@@ -238,6 +238,14 @@ def test_ci_summary_sweep_accepts_the_recorded_caller_rows_of_merged_heads(
         assert expected_judged == [_DOD_VERIFY], head["pr"]
 
 
+def test_repo_evidence_replaces_the_companion_contract_compliance_job() -> None:
+    """OMN-20074: the DoD check runs from this repository's contracts only."""
+    from scripts.ci.ci_summary_gate import GATE_JOBS
+
+    assert "Contract Compliance Check" not in GATE_JOBS
+    assert _DOD_VERIFY in set(EXPECTED_EXTERNAL_CONTEXTS)
+
+
 def test_every_repo_contract_binds_every_criterion() -> None:
     assert CALLER_PATH.is_file(), "repo-owned evidence requires the caller workflow"
     contract_paths = sorted((REPO_ROOT / "contracts").glob("OMN-*.yaml"))
