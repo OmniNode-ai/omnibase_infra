@@ -1,0 +1,47 @@
+# OMN-20915 contract file for omnibase_infra (the deletion half; the receiving half is omnimarket's contracts/OMN-20915.yaml).
+schema_version: "1.0.0"
+ticket_id: OMN-20915
+title: "GitHub source-control nodes live in omnimarket only: omnibase_infra drops the moved and the dead ones"
+summary: "node_github_pr_poller_effect and node_github_webhook_ingress_effect moved to omnimarket; the PR-state projection pair, the five merge-sweep nodes and the model-only directories were deleted as dead; the GitHub HTTP adapter, whose only source caller was the poller, is deleted. The kernel keeps the webhook secret's logical name so it still builds the resolver the omnimarket handler uses."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20915-infra-removal
+    statement: "No moved or dead GitHub source-control node, and no GitHub HTTP adapter, remains in omnibase_infra's source tree or entry points."
+    acceptance:
+      - id: AC2
+        statement: "AC2 (omnibase_infra half): the pr_state projection pair, the five merge-sweep nodes and the model-only directories are deleted, with their contracts, entry points, topic declarations and tests -- falsifier: uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q fails at the merge base"
+      - id: AC3
+        statement: "AC3 (omnibase_infra half): the GitHub HTTP adapter is deleted and no source file imports it -- falsifier: uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q fails at the merge base"
+# The criterion text above is the lane brief's wording; the ticket itself was not
+# readable from this lane (the tracker connector needs an interactive
+# authorization), so these lines are not copies of the ticket's. AC1 (the node
+# move) is bound by the omnimarket pull request that receives the nodes.
+evidence_requirements:
+  - kind: tests
+    description: "The moved and deleted node directories, their entry points, the GitHub adapter and every import of them are absent; the kernel owns the webhook secret logical name."
+    command: "uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q -p no:randomly"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn-20915-ac2-nodes-removed
+    description: "AC2: the dead PR-state, merge-sweep and model-only node directories are gone from omnibase_infra."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q -p no:randomly"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-20915-ac3-adapter-removed
+    description: "AC3: the GitHub HTTP adapter is gone and nothing in omnibase_infra's source imports it."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q -p no:randomly"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
