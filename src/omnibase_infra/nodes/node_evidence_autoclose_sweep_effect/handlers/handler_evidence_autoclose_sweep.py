@@ -2216,7 +2216,8 @@ class _LinearClient:
     """Minimal Linear GraphQL client scoped to this sweep's needs.
 
     Reads ``LINEAR_API_KEY`` from the environment when not passed
-    explicitly.
+    explicitly (mirrors ``GitHubTransport.__init__``'s ``GH_PAT`` fallback
+    in ``omnibase_infra.adapters.github.adapter_github_client``).
 
     TRANSIENT-FAILURE RETRY (OMN-16106)
     -----------------------------------
@@ -2780,8 +2781,8 @@ class HandlerEvidenceAutocloseSweep:
         run_gh_command: TypeRunGhCommand | None = None,
         run_dod_verify_command: TypeRunDodVerifyCommand | None = None,
     ) -> None:
-        # ``autoclose_disabled`` is read at construction time from the
-        # environment, with an injectable override
+        # ``autoclose_disabled`` mirrors GitHubTransport's env-fallback-in-
+        # __init__ precedent: read at construction time, override injectable
         # for tests. Re-checked defensively at the top of handle() too so a
         # zero-arg contract-driven construction can never silently skip it.
         #

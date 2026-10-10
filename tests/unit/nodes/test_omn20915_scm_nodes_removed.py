@@ -12,6 +12,7 @@ logical name, owned here.
 from __future__ import annotations
 
 import importlib.util
+import re
 import tomllib
 from pathlib import Path
 
@@ -63,15 +64,29 @@ def test_the_merge_sweep_workflow_definition_is_gone() -> None:
 
 
 def test_no_source_file_imports_a_removed_node_or_the_github_adapter() -> None:
-    needles = tuple(
+    modules = tuple(
         f"omnibase_infra.nodes.{node}" for node in MOVED_TO_OMNIMARKET + DELETED
     ) + ("omnibase_infra.adapters.github",)
+    import_line = re.compile(
+        r"^\s*(?:from|import)\s+(?:" + "|".join(map(re.escape, modules)) + r")\b",
+        re.MULTILINE,
+    )
     offenders = [
         str(path.relative_to(_ROOT))
         for path in _SRC.rglob("*.py")
-        if any(needle in path.read_text(encoding="utf-8") for needle in needles)
+        if import_line.search(path.read_text(encoding="utf-8"))
     ]
     assert offenders == []
+
+
+def test_the_import_scan_sees_an_import_of_a_removed_module() -> None:
+    modules = ("omnibase_infra.adapters.github",)
+    import_line = re.compile(
+        r"^\s*(?:from|import)\s+(?:" + "|".join(map(re.escape, modules)) + r")\b",
+        re.MULTILINE,
+    )
+    assert import_line.search("from omnibase_infra.adapters.github import x\n")
+    assert not import_line.search("# mirrors omnibase_infra.adapters.github docs\n")
 
 
 def test_the_kernel_owns_the_webhook_secret_logical_name() -> None:

@@ -34,8 +34,8 @@ dod_evidence:
         check_value: "uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q -p no:randomly"
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
-        check_value: "uv run pytest tests/unit/nodes/node_projection_pr_state -q -p no:randomly"
-        cwd: ${OMNI_HOME}/omnimarket
+        check_value: "uv run pytest tests/integration/test_omn20915_github_scm_nodes_absent_from_discovery.py -q -p no:randomly"
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
   - id: dod-omn-20915-ac3-adapter-removed
