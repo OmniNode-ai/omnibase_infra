@@ -169,10 +169,10 @@ jobs:
           repositories: ${{ steps.ci-overlay.outputs.name }}
           permission-contents: read
 
-      # reusable-checkout-ref-ok: hostile-reviewer OMN-20923 the CI overlay is
-      # DATA (the voter roster), read unpinned from its default branch so a voter
-      # change needs no pull request here, and validated by omniintelligence's
-      # resolver on every run; nothing from it is executed.
+      # The CI overlay is DATA (the voter roster), read unpinned from its
+      # default branch so a voter change needs no pull request here, and
+      # validated by omniintelligence's resolver on every run; nothing from it
+      # is executed (OMN-20923).
       - name: Fetch the CI overlay
         if: steps.ci-overlay.outputs.configured == 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

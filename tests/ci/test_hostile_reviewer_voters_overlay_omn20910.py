@@ -274,6 +274,9 @@ def test_every_overlay_voter_resolved_to_a_live_single_model_endpoint(
     Deliberately not bound to the overlay's current contents: changing a voter
     is an overlay-only edit and must not require a new recording.
     """
+    provenance = cast("dict[str, str]", recorded_response["_provenance"])
+    # The recording was taken from the overlay path this workflow reads.
+    assert OVERLAY_SUFFIX in provenance["source"]
     voters = cast("list[dict[str, object]]", recorded_response["voters"])
     required = [v for v in voters if v["required"] is True]
     assert len(required) >= 2
