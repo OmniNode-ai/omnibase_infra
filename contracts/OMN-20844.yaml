@@ -5,8 +5,7 @@ summary: "onex delegate takes --model, writes it to the delegate request's optio
 is_seam_ticket: false
 interface_change: true
 interfaces_touched:
-  - "onex delegate --model"
-  - "scripts/ci/c29_customer_byo_key_probe.py run --model"
+  - "public_api"
 requirements:
   - id: "req-delegate-model-and-c29-probe"
     statement: |-
@@ -21,7 +20,7 @@ requirements:
 evidence_requirements:
   - kind: "tests"
     description: "The delegate CLI model option and the C29 probe's chosen-model grading, with the delegation and the customer machine faked."
-    command: "uv run pytest tests/unit/cli/test_delegate_model_choice_omn20844.py tests/ci/test_c29_probe_model_choice_omn20844.py -q -p no:randomly"
+    command: "uv run pytest tests/unit/cli/test_delegate_model_choice_omn20844.py tests/integration/cli/test_delegate_model_choice_cli_omn20844.py tests/ci/test_c29_probe_model_choice_omn20844.py -q -p no:randomly"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -32,6 +31,6 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest tests/unit/cli/test_delegate_model_choice_omn20844.py tests/ci/test_c29_probe_model_choice_omn20844.py -q -p no:randomly"
+        check_value: "uv run pytest tests/unit/cli/test_delegate_model_choice_omn20844.py tests/integration/cli/test_delegate_model_choice_cli_omn20844.py tests/ci/test_c29_probe_model_choice_omn20844.py -q -p no:randomly"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC2", "AC6"]
