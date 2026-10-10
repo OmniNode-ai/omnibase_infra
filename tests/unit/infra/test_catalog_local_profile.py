@@ -116,6 +116,7 @@ def test_local_bundle_runs_both_runtime_kernels_the_writer_and_the_migration_gat
         "omninode-runtime",
         "projection-api",
         "runtime-effects",
+        "tenant-projection-writer",
     ]
 
 
@@ -248,6 +249,42 @@ def test_local_tenant_credentials_projection_runs_with_its_own_healthcheck() -> 
         "ONEX_TENANT_DB_URL",
         "OMNINODE_INTERNAL_DB_URL",
     }
+
+
+def test_local_bundle_runs_the_tenant_projection_carrier_under_its_own_identity() -> (
+    None
+):
+    """OMN-19972 (T3.6): the usage-by-model writer runs in this kernel.
+
+    ``node_projection_usage_by_model_day`` and the other contracts pinned to
+    ``runtime_profiles: [tenant-projection]`` are dropped from ``main`` and
+    ``effects``; without this process the laptop consumes them with nothing. It
+    must be its own claimant: main's group id or capabilities would put a
+    second owner on main's topics.
+    """
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    services = generate_compose(resolved)["services"]
+    assert isinstance(services, dict)
+    carrier = services["tenant-projection-writer"]
+    env = carrier["environment"]
+    assert carrier["image"] == f"{_PROJECT}-runtime:latest"
+    assert env["RUNTIME_PROFILE"] == "tenant-projection"
+    kernels = ("omninode-runtime", "runtime-effects")
+    assert env["ONEX_GROUP_ID"] not in {
+        services[k]["environment"]["ONEX_GROUP_ID"] for k in kernels
+    }
+    assert env["ONEX_RUNTIME_CAPABILITIES"] not in {
+        services[k]["environment"]["ONEX_RUNTIME_CAPABILITIES"] for k in kernels
+    }
+    # The binding the process exists for, as the laptop's own principal.
+    assert env["ONEX_TENANT_DB_URL"].startswith(
+        "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?"
+    )
+    assert env["ONEX_DATABASE_TOPOLOGY_PROFILE"] == "local"
+    # Lab and ops integrations stay off, as on the other two kernels.
+    assert env["KEYCLOAK_ADMIN_URL"] == ""
+    assert "healthcheck" in carrier
+    assert carrier["depends_on"]["migration-gate"] == {"condition": "service_healthy"}
 
 
 def test_the_runtime_family_that_resolves_a_tenant_key_shares_one_credentials_store() -> (

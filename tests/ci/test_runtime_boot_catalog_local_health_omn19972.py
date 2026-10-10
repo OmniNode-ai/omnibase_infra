@@ -36,6 +36,8 @@ _ADDED = (
     "projection-api",
     "omnimarket-projection-llm-cost",
     "consumer-health-projection",
+    # OMN-19972 (T3.6): the tenant-projection kernel carries the usage writer.
+    "tenant-projection-writer",
 )
 
 _DOCKER_STUB = """#!/usr/bin/env bash
