@@ -86,6 +86,9 @@ databases:
           - object_type: TABLE
             objects:
               - alert_channel_liveness_verdicts
+              - automation_alarm_episodes
+              - automation_liveness_state
+              - automation_run_history
               - board_probe_results
               - ci_attempt_outcome
               - claude_agent_spans

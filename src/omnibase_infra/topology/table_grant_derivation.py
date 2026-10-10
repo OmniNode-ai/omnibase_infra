@@ -414,6 +414,67 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="budget_applied_events",
         ),
     ),
+    # OMN-20802: the automation-liveness projection's three relations are
+    # vendored here first. The source contract
+    # (node_projection_automation_liveness) declares each omninode_internal,
+    # access read_write, with the role named after the relation; 0001 grants
+    # omninode_runtime SELECT, INSERT, UPDATE on all three. Retired by the
+    # omnimarket OMN-20802 pull request merging and the pin advancing past it;
+    # the expiry module names all three.
+    ContractTableDeclaration(
+        node="legacy_migration:automation_liveness_state",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_automation_liveness/"
+            "0000_create_automation_liveness.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="automation_liveness_state",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_automation_liveness/"
+                "0000_create_automation_liveness.sql"
+            ),
+            access="read_write",
+            role="automation_liveness_state",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:automation_run_history",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_automation_liveness/"
+            "0000_create_automation_liveness.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="automation_run_history",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_automation_liveness/"
+                "0000_create_automation_liveness.sql"
+            ),
+            access="read_write",
+            role="automation_run_history",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:automation_alarm_episodes",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_automation_liveness/"
+            "0000_create_automation_liveness.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="automation_alarm_episodes",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_automation_liveness/"
+                "0000_create_automation_liveness.sql"
+            ),
+            access="read_write",
+            role="automation_alarm_episodes",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426

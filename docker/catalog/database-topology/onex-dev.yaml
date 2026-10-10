@@ -76,6 +76,9 @@ databases:
           - object_type: TABLE
             objects:
               - alert_channel_liveness_verdicts
+              - automation_alarm_episodes
+              - automation_liveness_state
+              - automation_run_history
               - board_probe_results
               - ci_attempt_outcome
               - claude_agent_spans
@@ -385,5 +388,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 76650cd13e92cbdb3becfbe10fa9087af18a0549ac93ceae270527296d2fd689
+  sha256: d480713f617cc295e7ea60d143e35cbb1df3878230963c5eb451bf564b90ebef
 topology_instance: onex-dev
