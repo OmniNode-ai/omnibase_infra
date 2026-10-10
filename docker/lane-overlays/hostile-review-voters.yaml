@@ -52,7 +52,7 @@ voters:
   # plus LLM_LOCAL_STUDIO_PLANNER_URL (an Actions variable per repository) and a
   # retired Studio port written into three workflow files.
   - voter_id: security-contracts
-    backend_id: local-studio-planner
+    backend_id: local-omnipc2-chat
     model_id_source: served
     required: true
     timeout_seconds: 300
