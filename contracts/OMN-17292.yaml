@@ -1,0 +1,59 @@
+schema_version: "1.0.0"
+ticket_id: OMN-17292
+title: Advance the omnimarket contract pin and retire its supplemental bridges
+summary: PR 4800 advances the omnimarket contract and sibling pins to 917f721fcdfb30339cfb4532257d0d2e7a4cb4d4, retires the delegation_routing_feedback and delegation_budget_applied_events bridges, and aligns shipped reader discovery and runtime dispatch with the pinned contracts.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-pin-handover
+    statement: The pinned contract handover preserves runtime grants, admits shipped local-page readers and accepts the dispatch handler's default model argument.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the contract and sibling pins name the handover commit, its two redundant bridges are absent and runtime write grants resolve on every profile -- falsifier: uv run pytest tests/ci/test_contract_pin_handover_omn17292.py -q'
+      - id: AC2
+        statement: 'AC2: shipped Credentials bindings and typed read_all_rows declarations pass reader discovery while missing backend identities are refused -- falsifier: uv run pytest tests/ci/test_pinned_local_page_readers.py tests/unit/validators/test_omn17199_bus_backed_exposure_readers.py -q'
+      - id: AC3
+        statement: 'AC3: runtime dispatch accepts model=None and refuses an unsupported model override -- falsifier: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The pin handover and runtime grants are checked without a foreign checkout.
+    command: uv run pytest tests/ci/test_contract_pin_handover_omn17292.py -q
+  - kind: tests
+    description: Reader discovery replays the captured Credentials page and checks typed declarations.
+    command: uv run pytest tests/ci/test_pinned_local_page_readers.py tests/unit/validators/test_omn17199_bus_backed_exposure_readers.py -q
+  - kind: tests
+    description: Dispatch is called with the handler's keyword arguments.
+    command: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-17292-ac1
+    description: The handover commit replaces the two supplemental bridges while shipped write grants resolve on every profile.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_pin_handover_omn17292.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-17292-ac2
+    description: Shipped local-page bindings and typed read_all_rows declarations are admitted with their backend identity checks.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_pinned_local_page_readers.py tests/unit/validators/test_omn17199_bus_backed_exposure_readers.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-17292-ac3
+    description: Dispatch accepts the default model argument and refuses unsupported overrides.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
