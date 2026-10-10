@@ -840,6 +840,14 @@ services:
   omninode-runtime:
     environment:
       !!merge <<: [*dev_lane_analytics_env, *dev_lane_strict_wiring_env, *dev_lane_broker_auth_env, *dev_lane_consumer_poll_env, *dev_lane_identity_env]
+      # OMN-20867: this lane's main runtime publishes the runtime tick
+      # (onex.intent.platform.runtime-tick.v1), so every tick-subscribing
+      # contract deployed here runs on its contract interval. Opt-in per lane
+      # (OMN-20590). The prunes resolve their archive at the due effect boundary
+      # and refuse, typed, when it is unbound (OMN-20591), which is this lane's
+      # state: no prune overlay and no archive directory. DLQ replay replays one
+      # source record once (OMN-20589). Only the main role carries the switch.
+      ONEX_RUNTIME_SCHEDULER_ENABLED: "true"
     healthcheck:
       test:
         - CMD
