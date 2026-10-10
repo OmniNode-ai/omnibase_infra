@@ -1,12 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-20422: the Hostile Reviewer's second voter is a different lab model.
+"""OMN-20422: the Hostile Reviewer's second voter is the Studio's one served model.
 
-RULING 2026-10-09T04:15:56Z keeps Codex out of CI. The recording below is the
-Studio's :8131 server as it stood on 2026-10-09. Since OMN-20910 the workflow
-names no voter URL: the voters, and which endpoint each reads, are declared in
+RULING 2026-10-09T04:15:56Z keeps Codex out of CI. RULING 2026-10-10T16:28:58Z puts one
+model on the Mac Studio; the recording below is its port 8130 serving Qwen3.8-27B, the
+same model the first voter serves on its own host. Since OMN-20910 the workflow names no
+voter URL or model: the voters, and which endpoint each reads, are declared in
 docker/lane-overlays/hostile-review-voters.yaml (see
-test_hostile_reviewer_voters_overlay_omn20910.py).
+test_hostile_reviewer_voters_overlay_omn20910.py), and a distinct second voter
+(OMN-20889) is an edit to that overlay.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ FIRST_VOTER_MODEL = "Qwen3.8-27B"
 @pytest.mark.live_contact(
     "tests/ci/fixtures/hostile_reviewer_second_voter_omn20422.json"
 )
-def test_second_voter_endpoint_serves_a_different_model_than_the_first(
+def test_second_voter_endpoint_is_the_studio_single_served_model(
     recorded_response: dict[str, object],
 ) -> None:
     recording = cast("dict[str, dict[str, object]]", recorded_response["response"])
@@ -33,8 +35,8 @@ def test_second_voter_endpoint_serves_a_different_model_than_the_first(
         cast("str", entry["id"])
         for entry in cast("list[dict[str, object]]", recording["models"]["data"])
     ]
-    assert served == ["qwen3.6-35b-a3b"]
-    assert FIRST_VOTER_MODEL not in served
+    # One model on the Studio, and it is the first voter's model on another host.
+    assert served == [FIRST_VOTER_MODEL]
     assert recording["completion"]["finish_reason"] == "stop"
 
 
