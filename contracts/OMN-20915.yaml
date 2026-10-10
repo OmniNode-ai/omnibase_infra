@@ -11,13 +11,12 @@ requirements:
     statement: "No moved or dead GitHub source-control node, and no GitHub HTTP adapter, remains in omnibase_infra's source tree or entry points."
     acceptance:
       - id: AC2
-        statement: "AC2 (omnibase_infra half): the pr_state projection pair, the five merge-sweep nodes and the model-only directories are deleted, with their contracts, entry points, topic declarations and tests -- falsifier: uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q fails at the merge base"
+        statement: "AC2: the omnibase_infra pr_state projection pair, the five node_merge_sweep_* nodes and the model-only directories are deleted, leaving node_projection_pr_state as the one pr_state writer -- falsifier: find over omnibase_infra src nodes returns none of them, and uv run pytest tests/nodes/node_projection_pr_state in omnimarket passes"
       - id: AC3
-        statement: "AC3 (omnibase_infra half): the GitHub HTTP adapter is deleted and no source file imports it -- falsifier: uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q fails at the merge base"
-# The criterion text above is the lane brief's wording; the ticket itself was not
-# readable from this lane (the tracker connector needs an interactive
-# authorization), so these lines are not copies of the ticket's. AC1 (the node
-# move) is bound by the omnimarket pull request that receives the nodes.
+        statement: "AC3: omnibase_infra adapters/github folds into the omnimarket GitHub transport so one GitHub I/O path remains (OMN-14306) -- falsifier: a grep for api.github.com and subprocess gh across omnibase_infra src finds no source-control caller"
+# AC1 (the node move) is bound by the omnimarket pull request that receives the
+# nodes; this pull request carries the omnibase_infra half of AC1 (neither
+# directory remains) in the same test.
 evidence_requirements:
   - kind: tests
     description: "The moved and deleted node directories, their entry points, the GitHub adapter and every import of them are absent; the kernel owns the webhook secret logical name."
@@ -34,6 +33,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q -p no:randomly"
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/node_projection_pr_state -q -p no:randomly"
+        cwd: ${OMNI_HOME}/omnimarket
     binds_ac:
       - AC2
   - id: dod-omn-20915-ac3-adapter-removed
