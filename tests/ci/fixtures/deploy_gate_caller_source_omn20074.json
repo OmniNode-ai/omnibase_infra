@@ -1,0 +1,39 @@
+{
+  "_provenance": {
+    "source": "validate_pr_deploy_required.py run with --contract-source caller from omniclaude 0790179fc52759bd7354984fae45bb0e0486ef8a (omniclaude#2650 squash), against real omnibase_infra pull requests with contracts taken from each squash commit",
+    "captured_utc": "2026-10-10T12:35:37Z",
+    "validator_sha256_prefix": "3dd77f9eb969a47b",
+    "elided": "the Runtime paths list in each output line, which names files the verdict does not depend on"
+  },
+  "omniclaude_sha": "0790179fc52759bd7354984fae45bb0e0486ef8a",
+  "response": {
+    "admit": {
+      "pull_request": "omnibase_infra#1531",
+      "cited_ticket": "OMN-10207",
+      "contracts_dir": "squash_commit_contracts",
+      "exit_code": 0,
+      "output_first_line": "::notice::DEPLOY GATE PASSED: OMN-10207 has deploy evidence."
+    },
+    "refuse_no_contracts": {
+      "pull_request": "omnibase_infra#1531",
+      "cited_ticket": "OMN-10207",
+      "contracts_dir": "empty",
+      "exit_code": 1,
+      "output_first_line": "::error::DEPLOY GATE FAILED: PR touches runtime paths but no cited ticket has deploy DoD evidence. Tickets with no contract file in this repository's contracts/ at the pull request head: ['OMN-10207', 'OMN-10207']. Add contracts/OMN-10207.yaml, contracts/OMN-10207.yaml to this pull request; a change control companion is not read. Add a dod_evidence item to contracts/OMN-XXXX.yaml in this reposi"
+    },
+    "refuse_no_repo_contract": {
+      "pull_request": "omnibase_infra#4722",
+      "cited_ticket": "OMN-18389",
+      "contracts_dir": "squash_commit_contracts",
+      "exit_code": 1,
+      "output_first_line": "::error::DEPLOY GATE FAILED: PR touches runtime paths but no cited ticket has deploy DoD evidence. Tickets with no contract file in this repository's contracts/ at the pull request head: ['OMN-18389']. Add contracts/OMN-18389.yaml to this pull request; a change control companion is not read. Add a dod_evidence item to contracts/OMN-XXXX.yaml in this repository whose check_value is a FALSIFIABLE deploy probe: it must execute a command against a live surface (docker/kubectl/rpk/psql/curl/ssh/onex/gh) so that its exit status depends on the state of the deployed system. It must NOT read back the receipt or contract your"
+    },
+    "refuse_no_falsifiable_probe": {
+      "pull_request": "omnibase_infra#4789",
+      "cited_ticket": "OMN-19558",
+      "contracts_dir": "squash_commit_contracts",
+      "exit_code": 1,
+      "output_first_line": "::error::DEPLOY GATE FAILED: PR touches runtime paths but no cited ticket has deploy DoD evidence. Tickets found but declaring no falsifiable deploy probe: ['OMN-19558']. Add a dod_evidence item to contracts/OMN-XXXX.yaml in this repository whose check_value is a FALSIFIABLE deploy probe: it must execute a command against a live surface (docker/kubectl/rpk/psql/curl/ssh/onex/gh) so that its exit status depends on the state of the deployed system. It must NOT read back the receipt or contract your own PR authors (drift/dod_receipts/..., $CONTRACT_REPO_DIR) \u2014 such a check greps text you wrote and can never go RE"
+    }
+  }
+}
