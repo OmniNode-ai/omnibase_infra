@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -43,7 +43,7 @@ _PREFLIGHT_FREE_SKIP_TOKEN_SHA = "4358450ccbba0cee11e390208dd0b8b1728e94ab"
 _DEPLOY_GATE_REUSABLE = (
     "OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml"
 )
-_CALLER_CONTRACT_SOURCE_SHA = "<omniclaude#2650 squash sha on dev>"
+_CALLER_CONTRACT_SOURCE_SHA = "0790179fc52759bd7354984fae45bb0e0486ef8a"
 _OCC_ONLY_DEPLOY_GATE_SHA = "0c0d91e5e10904db67d43ad537fdf6e65e219f21"
 
 _OCC_CONTEXTS = frozenset(
@@ -205,3 +205,29 @@ def test_no_occ_callers_deploy_gate_reads_caller_contracts() -> None:
     options = job.get("with") or {}
     assert options.get("contract-source") == "caller", options
     assert "contracts-dir" not in options, "deprecated input; the source decides"
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/deploy_gate_caller_source_omn20074.json")
+def test_no_occ_callers_deploy_gate_reads_caller_contracts_recorded_verdicts(
+    recorded_response: dict[str, object],
+) -> None:
+    """The pinned validator, run on real PRs, still refuses what lacks evidence."""
+    assert recorded_response["omniclaude_sha"] == _CALLER_CONTRACT_SOURCE_SHA
+    runs = cast("dict[str, dict[str, Any]]", recorded_response["response"])
+    assert runs["admit"]["exit_code"] == 0
+    assert "DEPLOY GATE PASSED" in runs["admit"]["output_first_line"]
+    for name in (
+        "refuse_no_contracts",
+        "refuse_no_repo_contract",
+        "refuse_no_falsifiable_probe",
+    ):
+        assert runs[name]["exit_code"] == 1, name
+        assert "DEPLOY GATE FAILED" in runs[name]["output_first_line"], name
+    assert (
+        "no contract file in this repository's contracts/"
+        in runs["refuse_no_contracts"]["output_first_line"]
+    )
+    assert (
+        "declaring no falsifiable deploy probe"
+        in runs["refuse_no_falsifiable_probe"]["output_first_line"]
+    )

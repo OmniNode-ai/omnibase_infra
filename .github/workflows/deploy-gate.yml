@@ -34,7 +34,9 @@ jobs:
     # (github.event_name != 'pull_request' short-circuits). Main-boundary
     # carve-out unchanged: any PR targeting main always runs this job.
     if: github.event_name != 'pull_request' || github.base_ref != 'dev' || !github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'ci:ready')
-    uses: OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@0c0d91e5e10904db67d43ad537fdf6e65e219f21
+    uses: OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml@0790179fc52759bd7354984fae45bb0e0486ef8a
     secrets: inherit
     with:
-      contracts-dir: contracts
+      # OMN-20074: read the cited ticket's contract from this repository's
+      # contracts/OMN-<n>.yaml at the pull request head, not onex_change_control.
+      contract-source: caller
