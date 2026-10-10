@@ -181,6 +181,11 @@ services:
     container_name: omnibase-infra-dev-202-autoheal
   phoenix:
     container_name: omnibase-infra-dev-202-phoenix
+    # OMN-19417: the census declares this container running and the lane_sync
+    # check fails the lab-pass receipt while it is absent. The agent's deps leg
+    # (`--profile core up -d`, no service list) is the only leg that starts a
+    # service outside its runtime list, so Phoenix joins `core` on this lane.
+    profiles: !override ["core", "runtime", "full"]
     ports: !override
       - "127.0.0.1:61006:6006"
   omninode-runtime:
@@ -237,6 +242,10 @@ services:
       # refusing projection_binding_unconfigured instead of failing to load a file
       # this lane never mounts (projection_binding_invalid).
       OMNIMARKET_PROJECTION_READ_BINDING_OVERLAY: ""
+      # OMN-17427: docker-compose.dev-lane.yml also names the skill overlay roots
+      # mount, which this lane's volume override drops. Blank is no overlay, so a
+      # morning run here is refused by name; the runtime boots either way.
+      ONEX_SKILL_OVERLAY_ROOTS: ""
     ports: !override
       - "127.0.0.1:61086:8085"
       - "172.17.0.1:61086:8085"

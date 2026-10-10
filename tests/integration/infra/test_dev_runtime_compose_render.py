@@ -1201,3 +1201,110 @@ def test_trajectory_backend_is_isolated_to_dev(overlay: str | None) -> None:
     if overlay is None:
         for key in ("DHARMA_API_KEY", "DHARMA_ORG_ID"):
             assert services["runtime-effects"]["environment"][key] == ""
+
+
+# OMN-17427. omnimarket's morning nodes read a deployment overlay named by
+# ONEX_SKILL_OVERLAY_ROOTS. The overlay is private deployment content, so the
+# compose file carries only the mount and the variable that names it; the host
+# directory comes from the operator env (DEV_LANE_SKILL_OVERLAY_ROOTS_DIR) and is
+# never packaged here. With no overlay the node refuses a RUN, and the runtime
+# still boots (omnimarket handlers read the overlay on first use).
+_SKILL_OVERLAY_ROOTS_ENV = "ONEX_SKILL_OVERLAY_ROOTS"
+_SKILL_OVERLAY_ROOTS_TARGET = "/etc/onex/skill-overlays"
+_SKILL_OVERLAY_ROOTS_HOST_VAR = "DEV_LANE_SKILL_OVERLAY_ROOTS_DIR"
+
+
+@pytest.mark.integration
+def test_dev_lane_runtime_effects_mounts_the_operator_named_skill_overlay_roots() -> (
+    None
+):
+    """The host directory is whatever the operator env names, read-only."""
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
+        **{_SKILL_OVERLAY_ROOTS_HOST_VAR: "/srv/operator/skill-overlays"},
+    )
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    effects = yaml.safe_load(result.stdout)["services"]["runtime-effects"]
+
+    assert (
+        effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV)
+        == _SKILL_OVERLAY_ROOTS_TARGET
+    )
+    mounts = _mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET)
+    assert len(mounts) == 1, f"expected one overlay-roots mount, got {mounts!r}"
+    (mount,) = mounts
+    assert mount.get("type") == "bind"
+    assert mount.get("read_only") is True
+    assert mount["source"] == "/srv/operator/skill-overlays"
+
+
+@pytest.mark.integration
+def test_dev_lane_skill_overlay_roots_render_without_the_operator_variable() -> None:
+    """Unset, the lane still renders and mounts an empty default: no overlay, so
+    a morning run is refused, and every other node's runtime is untouched. A `:?`
+    here would also break every lane that layers this file."""
+    services = _render_dev_lane_services()
+    effects = services["runtime-effects"]
+    assert (
+        effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV)
+        == _SKILL_OVERLAY_ROOTS_TARGET
+    )
+    assert len(_mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET)) == 1
+
+
+@pytest.mark.integration
+def test_only_runtime_effects_carries_the_skill_overlay_roots() -> None:
+    """The morning nodes run in runtime-effects; nothing else gets the mount."""
+    services = _render_dev_lane_services()
+    carriers = {
+        name
+        for name, service in services.items()
+        if _SKILL_OVERLAY_ROOTS_ENV in (service.get("environment") or {})
+        or _mounts_at(service, _SKILL_OVERLAY_ROOTS_TARGET)
+    }
+    assert carriers == {"runtime-effects"}
+
+
+@pytest.mark.integration
+def test_no_private_overlay_content_is_packaged_in_the_compose_tree() -> None:
+    """The overlay's content never lives in this repo, only the mount does."""
+    docker_dir = REPO_ROOT / "docker"
+    offenders = sorted(
+        str(path.relative_to(REPO_ROOT))
+        for path in docker_dir.rglob("*")
+        if path.is_file()
+        and path.parent.name
+        in {
+            "node_morning_ground_state_orchestrator",
+            "node_morning_friction_sweep_orchestrator",
+        }
+    )
+    assert offenders == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("overlay", sorted(_BORROWER_OVERLAYS))
+def test_lanes_layering_the_dev_overlay_carry_no_skill_overlay_roots(
+    overlay: str,
+) -> None:
+    """These lanes replace runtime-effects' volumes, so the mount the variable
+    names is gone. Each blanks the variable instead of naming a directory that
+    does not exist in its container."""
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST, **_PREPR_SLOT_RENDER_ENV
+    )
+    result = _run_compose_config(
+        env,
+        profile=_BORROWER_OVERLAYS[overlay],
+        with_dev_lane_overlay=True,
+        borrower_overlay=REPO_ROOT / "docker" / overlay,
+    )
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    effects = yaml.safe_load(result.stdout)["services"]["runtime-effects"]
+
+    # Positive control: the dev-lane overlay really was layered.
+    assert effects["environment"].get("KAFKA_SASL_MECHANISM") == "SCRAM-SHA-256"
+
+    assert str(effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV, "")).strip() == ""
+    assert _mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET) == []

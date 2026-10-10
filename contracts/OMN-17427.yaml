@@ -18,6 +18,28 @@ requirements:
     acceptance:
       - id: AC3
         statement: 'AC3: a caught-up group with a heartbeat in flight passes and a frozen partition fails -- falsifier: uv run pytest tests/ci/test_lab_pass_receipt_lag_stall_omn17427.py -q'
+  - id: req-omn17427-refresh-gate-waits
+    statement: The dev refresh gates wait for a running one-shot and for a runtime that has not finished starting instead of rolling back.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: RT-6 waits for a one-shot that is mid-run and accepts it when it exits 0, and rejects one still running at the bound or exiting non-zero -- falsifier: uv run pytest tests/scripts/test_deploy_runtime_rt6_one_shot_omn16729.py -q'
+      - id: AC5
+        statement: 'AC5: the health verdict wait treats a startup-pending 503 as waitable until the runtime is healthy or the bound is reached, and keeps any other 503 terminal -- falsifier: uv run pytest scripts/runtime_build/tests -q -k omn17624'
+  - id: req-omn17427-dev-effects-health
+    statement: The dev refresh gate probes the runtime-effects /health under a bounded wait, and a lane whose effects runtime never answers does not pass.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: a healthy :8085 beside an unanswering :8086 fails the gate, a late-binding :8086 passes after a bounded wait, the effects URL is a required argument, and the rollback decision counts a dead effects runtime as not serving -- falsifier: uv run pytest scripts/runtime_build/tests/test_dev_effects_health_omn17427.py -q'
+  - id: req-omn17427-dev-lane-skill-overlay
+    statement: The dev lane's runtime-effects names its private skill overlay roots by an operator-supplied mount, and no lane layering the dev-lane file inherits a variable for a mount it drops.
+    acceptance:
+      - id: AC7
+        statement: 'AC7: runtime-effects renders ONEX_SKILL_OVERLAY_ROOTS with one read-only mount from DEV_LANE_SKILL_OVERLAY_ROOTS_DIR, renders when it is unset, and the four borrower overlays blank it -- falsifier: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k skill_overlay'
+  - id: req-omn17427-dev-lane-class-boot
+    statement: The pre-merge laptop boot ends with a dev-lane class phase that recreates both kernels with the strict-wiring and secrets-store bindings read from the dev lane's compose files, on the current omnimarket release, and fails on any restart.
+    acceptance:
+      - id: AC8
+        statement: 'AC8: the phase derives ONEX_WIRING_STRICT_MODE and a set INFISICAL_ADDR from docker-compose.dev-lane.yml and docker-compose.infra.yml, refuses when either binding is gone, and its gate fails a restarting or exited kernel -- falsifier: uv run pytest tests/ci/test_runtime_boot_dev_lane_class_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -28,6 +50,21 @@ evidence_requirements:
   - kind: tests
     description: The consumer_group_lag check judges a grown lag per partition.
     command: uv run pytest tests/ci/test_lab_pass_receipt_lag_stall_omn17427.py -q
+  - kind: tests
+    description: RT-6 reads a mid-run one-shot again until it settles.
+    command: uv run pytest tests/scripts/test_deploy_runtime_rt6_one_shot_omn16729.py -q
+  - kind: tests
+    description: The health verdict wait waits on a starting runtime and keeps other 503s terminal.
+    command: uv run pytest scripts/runtime_build/tests -q -k omn17624
+  - kind: tests
+    description: The dev gate probes the effects runtime and fails closed when it never answers.
+    command: uv run pytest scripts/runtime_build/tests/test_dev_effects_health_omn17427.py -q
+  - kind: tests
+    description: The dev lane renders the operator-named skill overlay roots mount for runtime-effects only.
+    command: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k skill_overlay
+  - kind: tests
+    description: The laptop boot's dev-lane class phase derives its bindings from the dev lane and fails on a restart.
+    command: uv run pytest tests/ci/test_runtime_boot_dev_lane_class_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -60,3 +97,48 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-omn-17427-ac4
+    description: RT-6 waits for a one-shot that is mid-run and rejects one that never settles or exits non-zero.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_deploy_runtime_rt6_one_shot_omn16729.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn-17427-ac5
+    description: The health verdict wait treats a startup-pending 503 as waitable and every other 503 as terminal.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/runtime_build/tests -q -k omn17624
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
+  - id: dod-omn-17427-ac6
+    description: The dev gate fails a lane whose effects runtime never answers /health and waits a bounded time for one that binds late.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/runtime_build/tests/test_dev_effects_health_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6
+  - id: dod-omn-17427-ac7
+    description: runtime-effects mounts the operator-named skill overlay roots read-only and the borrower lanes blank the variable.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/infra/test_dev_runtime_compose_render.py -q -k skill_overlay
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
+  - id: dod-omn-17427-ac8
+    description: The pre-merge boot recreates both kernels in the dev lane's configuration class and fails on a restart.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runtime_boot_dev_lane_class_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC8

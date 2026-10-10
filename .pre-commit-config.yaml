@@ -189,6 +189,23 @@ repos:
         files: ^src/omnibase_infra/.*\.py$
   - repo: local
     hooks:
+      # OMN-18713: CI's required Lint job runs the same discovery reconciliation gate.
+      - id: contract-discovery-reconciliation
+        name: Contract discovery reports every path outcome (OMN-18713)
+        entry: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_discovery.py -q --timeout=60
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(src/omnibase_infra/(runtime/auto_wiring/|models/model_discovery_skip\.py)|tests/unit/runtime/auto_wiring/test_discovery\.py|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
+      - id: discovery-manifest-live-replay
+        name: Discovery manifest accepts recorded runtime responses (OMN-18713)
+        entry: uv run --frozen pytest tests/ci/test_discovery_manifest_live_replay.py -q --timeout=60
+        language: system
+        pass_filenames: false
+        require_serial: true
+        files: ^(src/omnibase_infra/(runtime/auto_wiring/|models/model_discovery_skip\.py)|tests/ci/(test_discovery_manifest_live_replay\.py|fixtures/discovery_manifest_live\.json)|\.pre-commit-config\.yaml)$
+        stages: [pre-commit]
       - id: rolling-runner-registration-preflight
         name: Rolling runner registration preflight (OMN-18877)
         entry: uv run --frozen pytest tests/ci/test_deploy_runners_registration_preflight.py -q
@@ -2122,6 +2139,18 @@ repos:
         entry: uv run python scripts/ci/check_integration_skips.py --selftest --config scripts/ci/runtime_boot_suites_skip_guard.yaml
         files: >-
           ^(scripts/ci/check_integration_skips\.py|scripts/ci/runtime_boot_suites_skip_guard\.yaml|tests/ci/test_check_integration_skips\.py|\.github/workflows/reusable-runtime-boot\.yml|tests/integration/test_runtime_consumes_build_loop_terminal_event\.py|tests/integration/registration/e2e/test_runtime_e2e\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-17427: the laptop boot job's dev-lane class phase derives the
+      # kernels' strict-wiring and secrets-store bindings from the dev lane's
+      # compose files and fails on a restart. SYNC with
+      # tests/ci/test_runtime_boot_dev_lane_class_omn17427.py in CI.
+      - id: runtime-boot-dev-lane-class
+        name: Runtime boot dev-lane class phase (OMN-17427)
+        language: system
+        entry: uv run pytest tests/ci/test_runtime_boot_dev_lane_class_omn17427.py -q -p no:randomly
+        files: >-
+          ^(\.github/workflows/(reusable-runtime-boot|ci)\.yml|docker/docker-compose\.(infra|dev-lane)\.yml|tests/ci/test_runtime_boot_dev_lane_class_omn17427\.py)$
         pass_filenames: false
         stages: [pre-commit]
   # OMN-13291 (W0): validator-requirements fleet gate. Reports ALL missing

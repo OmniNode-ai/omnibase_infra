@@ -985,6 +985,9 @@ route:
       - omninode_infra
       - omniweb
       - onex_change_control
+      - omnibase_internal
+      - omniclaude-internal
+      - omnicursor
     # WHICH CALLER EVALUATES EACH FLEET REPOSITORY'S SCHEDULED RUNS (OMN-18942).
     #
     # The scheduled sweep has two callers, and every fleet repository belongs to
@@ -1007,8 +1010,21 @@ route:
     #
     # A repository moves back to the host by deleting it here and removing its
     # `--scheduled-repo` line; the tests refuse a mismatch between the two.
+    # WHY omnibase_internal, omniclaude-internal AND omnicursor ARE HERE
+    # (OMN-20794). Measured 2026-10-09: the fleet list named thirteen
+    # repositories and none of these three, so a scheduled workflow failing in
+    # any of them raised nothing anywhere. They are evaluated by the
+    # `nonrequired-check-failure-rate` job, which runs on a GitHub-hosted
+    # runner (`ubuntu-latest`) under the onexbot App token, so the dead-man's
+    # own workflow and these three repositories never depend on the `.201`
+    # host reporter being alive. Nothing is created, widened or rotated: the
+    # installation's selection is `all`, and the mint step requests three more
+    # repositories out of it.
     scheduled_actions_repos:
       - omni_home
+      - omnibase_internal
+      - omniclaude-internal
+      - omnicursor
     # ALERT DEDUP WINDOW (OMN-18942), in hours.
     #
     # Measured 2026-09-23: with the channel secrets set at 10:43Z, every
@@ -1149,6 +1165,8 @@ route:
         # branch protection, which is exactly the shape this list records.
         - pypi-pin-resolvability
         - receipt-honesty
+        # OMN-20074: repo-owned verdict enforced by CI Summary on PR runs.
+        - repo-evidence / dod-verify
         - required-check-skip-guard / check-skip-vectors
         - Runner Route (OMN-18031) / route
         # OMN-20562: the runtime_profiles validator, registered STRICT once its
