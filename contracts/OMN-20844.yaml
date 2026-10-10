@@ -1,0 +1,37 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20844"
+title: "Customers choose their own OpenRouter model when they add their key"
+summary: "onex delegate takes --model, writes it to the delegate request's optional model field and refuses a completed run on another model; the C29 probe registers the model the customer chooses and fails unless the receipt names it."
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - "onex delegate --model"
+  - "scripts/ci/c29_customer_byo_key_probe.py run --model"
+requirements:
+  - id: "req-delegate-model-and-c29-probe"
+    statement: |-
+      onex delegate names the customer's model per call, and the C29 probe grades the model the customer chose.
+    acceptance:
+      - id: "AC2"
+        statement: |-
+          AC2: onex delegate --model writes the delegate request's optional model field, omitted when unset; an empty value is a usage error; a completed run whose accepted attempt ran another model exits non-zero naming both; the receipt records requested_model and model_choice_honoured.
+      - id: "AC6"
+        statement: |-
+          AC6: the C29 probe requires --model, passes it on onex secret set with the key on stdin, records it, and names_provider fails unless the receipt model is the chosen model.
+evidence_requirements:
+  - kind: "tests"
+    description: "The delegate CLI model option and the C29 probe's chosen-model grading, with the delegation and the customer machine faked."
+    command: "uv run pytest tests/unit/cli/test_delegate_model_choice_omn20844.py tests/ci/test_c29_probe_model_choice_omn20844.py -q -p no:randomly"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20844-delegate-model-and-c29-probe"
+    description: "onex delegate --model reaches the request and is refused when another model answers; the C29 probe registers and asserts the chosen model."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/cli/test_delegate_model_choice_omn20844.py tests/ci/test_c29_probe_model_choice_omn20844.py -q -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2", "AC6"]
