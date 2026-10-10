@@ -11,10 +11,18 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: the dev lane overlay sets the flag on omninode-runtime only and joins the opted-in overlay set -- falsifier: uv run pytest tests/unit/runtime/test_runtime_scheduler_wiring.py -q'
+  - id: req-omn20867-tick-slot
+    statement: Each runtime tick carries the epoch-aligned slot it was due on as scheduled_at, and consecutive ticks tile the clock even when a publish runs late or fails.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the tick loop stamps scheduled_at with the slot it was due on and schedules the next tick for the first slot after this tick''s now, so no schedule window is lost to a late tick -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/runtime/test_runtime_scheduler.py tests/integration/runtime/test_runtime_tick_slot_alignment_omn20867.py -q'
 evidence_requirements:
   - kind: tests
     description: The scheduler wiring test covers the dev lane overlay.
     command: uv run pytest tests/unit/runtime/test_runtime_scheduler_wiring.py -q
+  - kind: tests
+    description: The scheduler tests and the lane producer integration test prove each tick carries its slot and the ticks tile the clock under a slow or failed publish.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/unit/runtime/test_runtime_scheduler.py tests/integration/runtime/test_runtime_tick_slot_alignment_omn20867.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -32,3 +40,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn-20867-ac2-tick-slot
+    description: The runtime tick carries the slot it was due on; ticks tile the clock when a publish runs late or fails (omnibase_infra#4815).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/runtime/test_runtime_scheduler.py tests/integration/runtime/test_runtime_tick_slot_alignment_omn20867.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
