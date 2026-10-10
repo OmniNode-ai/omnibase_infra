@@ -425,13 +425,17 @@ def test_deploy_runner_monitor_cron_uses_bash_for_source() -> None:
 
     assert "/bin/bash -lc" in deploy_script
     assert "source ${monitor_env}" in deploy_script
-    # OMN-18819 moved the cron logs off /tmp into the fleet state dir.
-    assert (
-        ">> ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-monitor.log 2>&1"
-        in deploy_script
+    # OMN-18819 moved the logs off /tmp into the fleet state dir; OMN-20805
+    # moved the schedule from a crontab line to a user timer whose service
+    # appends to the same file.
+    assert 'local log_dir="${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs"' in (
+        deploy_script
     )
+    assert '"omninode-runner-monitor|*:0/3||runner-monitor.log"' in deploy_script
+    assert "StandardOutput=append:${log_dir}/${logfile}" in deploy_script
+    assert "StandardError=append:${log_dir}/${logfile}" in deploy_script
     assert "/tmp/runner-monitor.log" not in deploy_script  # noqa: S108
-    assert 'local cron_line="*/3 * * * * set -a && source' not in deploy_script
+    assert 'local monitor_cron_line="*/3 * * * *' not in deploy_script
 
 
 def test_deploy_runner_repair_cron_runs_every_ten_minutes() -> None:
@@ -440,15 +444,14 @@ def test_deploy_runner_repair_cron_runs_every_ten_minutes() -> None:
         encoding="utf-8"
     )
 
-    assert "*/10 * * * *" in deploy_script
-    assert "runner-repair-check" in deploy_script
-    assert "MONITOR_AUTO_BOUNCE=1" in deploy_script
-    assert "OFFLINE_IDLE_RECREATE_AGE_SECONDS=600" in deploy_script
-    # OMN-18819 moved the cron logs off /tmp into the fleet state dir.
     assert (
-        ">> ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-repair.log 2>&1"
-        in deploy_script
-    )
+        '"omninode-runner-repair|*:0/10|MONITOR_AUTO_BOUNCE=1 '
+        'OFFLINE_IDLE_RECREATE_AGE_SECONDS=600|runner-repair.log"'
+    ) in deploy_script
+    assert "runner-repair-check" in deploy_script  # the legacy line it retires
+    # OMN-18819 moved the logs off /tmp into the fleet state dir; OMN-20805
+    # moved the schedule to a user timer whose service appends to the same file.
+    assert "StandardOutput=append:${log_dir}/${logfile}" in deploy_script
     assert "/tmp/runner-repair.log" not in deploy_script  # noqa: S108
     assert "grep -Ev 'runner-monitor|runner-repair-check'" in deploy_script
 

@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20805: this schedule ran from /etc/cron.d, which records a start and no end.
+# As a oneshot service under a timer, the journal records every run's start, end and
+# exit status. Installed and enabled by deploy/maintenance/omninode-host-maintenance-sync.sh.
+# Every 15 minutes (:00 :15 :30 :45), the slot the cron unit held.
+
+[Unit]
+Description=Schedule: State-change alerts for disk pressure, container health and runtime endpoint health
+
+[Timer]
+OnCalendar=*-*-* *:00/15:00
+AccuracySec=1s
+Unit=omninode-system-slack-report-alert.service
+
+[Install]
+WantedBy=timers.target

@@ -6,7 +6,7 @@
 # workspace reconciler (OMN-17311).
 #
 # WHAT THIS IS
-#   The thin host-side wrapper that /etc/cron.d/omninode-workspace-reconcile
+#   The thin host-side wrapper that omninode-workspace-reconcile.timer (via its service)
 #   invokes as root. It does three things and nothing else: load the alert
 #   credentials, point OMNI_HOME at the deploy-source tree, and exec
 #   `onex-host-reconcile` from that tree.
@@ -14,7 +14,7 @@
 #   Arguments are FORWARDED to the reconciler (OMN-17336), so the modes an
 #   operator is told to reach for actually work through this entry point:
 #
-#     omninode-workspace-reconcile.sh              # what cron runs: full repair
+#     omninode-workspace-reconcile.sh              # what the timer runs: full repair
 #     omninode-workspace-reconcile.sh --check      # observe only, mutate nothing
 #     omninode-workspace-reconcile.sh --verbose
 #

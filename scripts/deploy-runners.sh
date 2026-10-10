@@ -40,7 +40,7 @@
 #   4. Build the versioned runner image via scripts/ci/build_runner_image.sh
 #   5. Deploy via SSH: docker compose up -d --force-recreate --remove-orphans
 #   6. Install docker prune cron idempotently (build cache + untagged images, tee)
-#   7. Install runner health monitor cron (Slack alerts on state transitions)
+#   7. Install runner health monitor timers (Slack alerts on state transitions)
 #   8. Poll GitHub API until the configured runner fleet is online
 #      (max 5 min, 15s interval)
 #   9. Retry once with fresh token if poll times out
@@ -853,13 +853,13 @@ install_prune_cron() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 6: Install runner health monitor cron
+# Step 6: Install runner health monitor timers
 # ---------------------------------------------------------------------------
-# Deploys the runner-monitor.sh script with a cron that runs every 3 minutes.
+# Deploys the runner-monitor.sh script with a user timer that runs every 3 minutes.
 # Fires Slack alerts on state transitions (healthy→unhealthy, recovery).
 # Requires SLACK_BOT_TOKEN and SLACK_CHANNEL_ID in ~/.omnibase/.env.
 
-install_monitor_cron() {
+install_monitor_timers() {
     log "Installing runner health monitor on ${RUNNER_HOST}..."
 
     # Source local .env to get Slack credentials
@@ -880,7 +880,7 @@ install_monitor_cron() {
 
     if [[ -z "${slack_bot_token}" ]] || [[ -z "${slack_channel_id}" ]]; then
         warn "SLACK_BOT_TOKEN or SLACK_CHANNEL_ID not set in ~/.omnibase/.env"
-        warn "Skipping monitor cron install. Monitor script is deployed but cron won't work without credentials."
+        warn "Skipping monitor timer install. Monitor script is deployed but the timers won't work without credentials."
         return 0
     fi
     if [[ -z "${runner_github_token}" ]]; then
@@ -888,7 +888,7 @@ install_monitor_cron() {
     fi
     if [[ -z "${runner_github_token}" ]]; then
         warn "RUNNER_GITHUB_TOKEN/GH_PAT/GITHUB_TOKEN not set and gh auth token unavailable"
-        warn "Skipping monitor cron install. GitHub-aware monitor requires org runner API access."
+        warn "Skipping monitor timer install. GitHub-aware monitor requires org runner API access."
         return 0
     fi
 
@@ -909,25 +909,81 @@ ENVEOF
         ssh "${RUNNER_HOST}" "chmod 600 ${RUNNER_HOST_DIR}/.monitor-env"
     fi
 
-    # Install cron idempotently: replace any existing runner monitor/repair line
+    # OMN-20805: systemd USER timers, not crontab lines. A cron line records a
+    # start and no end; a oneshot service under a timer leaves the start, the end
+    # and the exit status of every run in the journal, which is the completion
+    # record the automation monitor reads. The commands, the calendar slots
+    # (every 3 and every 10 minutes) and the log files are the cron lines'.
+    #
+    # Force bash (-l, as the cron lines did): the monitor sources ${monitor_env}
+    # with `source`, which a POSIX sh does not have, and setup failures must land
+    # in the fleet's own log directory, which OMN-18819 moved off /tmp so it
+    # survives a reboot.
     local monitor_script="${RUNNER_HOST_DIR}/docker/runners/runner-monitor.sh"
     local monitor_env="${RUNNER_HOST_DIR}/.monitor-env"
-    # Cron uses /bin/sh by default on the runner host; bare `source` fails there
-    # before credentials load, silently disabling Slack alerts when no MTA exists.
-    # Force bash and redirect the whole monitor invocation so setup failures are
-    # visible in the fleet's own log directory, which OMN-18819 moved off /tmp
-    # so it survives a reboot:
-    # ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-monitor.log.
-    local monitor_cron_line="*/3 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; ${monitor_script}' >> ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-monitor.log 2>&1 # runner-monitor-alert"
-    local repair_cron_line="*/10 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; MONITOR_AUTO_BOUNCE=1 OFFLINE_IDLE_RECREATE_AGE_SECONDS=600 ${monitor_script}' >> ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-repair.log 2>&1 # runner-repair-check"
+    local log_dir="${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs"
+    local unit_dir='${HOME}/.config/systemd/user'
 
+    # name | calendar | extra environment (KEY=VALUE, space separated) | log file.
+    # The environment is Environment= lines, not an inline prefix on the command,
+    # so a host that tunes the repair pass overrides it with a drop-in rather than
+    # by editing the unit this installer owns.
+    local specs=(
+        "omninode-runner-monitor|*:0/3||runner-monitor.log"
+        "omninode-runner-repair|*:0/10|MONITOR_AUTO_BOUNCE=1 OFFLINE_IDLE_RECREATE_AGE_SECONDS=600|runner-repair.log"
+    )
+    local spec name calendar extra logfile unit_text timer_text env_lines kv
+    local -a kvs
+    for spec in "${specs[@]}"; do
+        IFS='|' read -r name calendar extra logfile <<<"${spec}"
+        env_lines=""
+        read -r -a kvs <<<"${extra}"
+        for kv in ${kvs[@]+"${kvs[@]}"}; do
+            env_lines+="Environment=${kv}"$'\n'
+        done
+        unit_text="[Unit]
+Description=ONEX runner fleet monitor, ${name} (OMN-20805)
+
+[Service]
+Type=oneshot
+${env_lines}ExecStart=/bin/bash -lc 'set -a; source ${monitor_env}; set +a; ${monitor_script}'
+StandardOutput=append:${log_dir}/${logfile}
+StandardError=append:${log_dir}/${logfile}
+SyslogIdentifier=${name}
+"
+        timer_text="[Unit]
+Description=Schedule ${name} (OMN-20805)
+
+[Timer]
+OnCalendar=${calendar}
+AccuracySec=1s
+Unit=${name}.service
+
+[Install]
+WantedBy=timers.target
+"
+        if "${DRY_RUN}"; then
+            log "[DRY RUN] Would install user timer ${name}.timer (OnCalendar=${calendar})"
+        else
+            ssh "${RUNNER_HOST}" "mkdir -p ${log_dir} ${unit_dir} && cat > ${unit_dir}/${name}.service" <<<"${unit_text}"
+            ssh "${RUNNER_HOST}" "cat > ${unit_dir}/${name}.timer" <<<"${timer_text}"
+        fi
+    done
+
+    # Enable the timers BEFORE the legacy lines are removed, and remove the
+    # lines only when both timers are active: a failed enable must leave the old
+    # schedule running, not the host with none.
     run_ssh "
-        mkdir -p ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs
+        set -e
+        systemctl --user daemon-reload
+        systemctl --user enable --now omninode-runner-monitor.timer omninode-runner-repair.timer
+        systemctl --user is-active --quiet omninode-runner-monitor.timer
+        systemctl --user is-active --quiet omninode-runner-repair.timer
         EXISTING=\$(crontab -l 2>/dev/null || true)
-        echo \"\${EXISTING}\" | grep -Ev 'runner-monitor|runner-repair-check' | { cat; echo '${monitor_cron_line}'; echo '${repair_cron_line}'; } | crontab -
+        echo \"\${EXISTING}\" | grep -Ev 'runner-monitor|runner-repair-check' | crontab -
     "
 
-    log "Runner health monitor cron installed (alerts every 3 minutes, repair every 10 minutes)."
+    log "Runner health monitor timers installed (alerts every 3 minutes, repair every 10 minutes)."
 }
 
 # ---------------------------------------------------------------------------
@@ -1033,7 +1089,7 @@ deploy_with_retry() {
         install_runner_slice
         deploy_runners "${token_b64}"
         install_prune_cron
-        install_monitor_cron
+        install_monitor_timers
         install_health_cron
         install_network_janitor_cron
         install_host_artifact_freshness_cron
