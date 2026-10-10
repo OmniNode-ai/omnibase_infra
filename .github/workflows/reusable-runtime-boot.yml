@@ -1283,6 +1283,18 @@ jobs:
               )
           env = {str(key): str(value) for key, value in strict.items()}
           env["INFISICAL_ADDR"] = os.environ["DEV_LANE_CLASS_STORE_ADDR"]
+          # The laptop render blanks GitHub credentials. Strict dev-lane
+          # wiring constructs handlers that require them (including the
+          # handshake policy gate), so preserve the infra base's bindings.
+          # Keep interpolation references here, never credential values: the
+          # compose steps supply the workflow identity when resolving them.
+          for key in ("GITHUB_TOKEN", "GH_TOKEN"):
+              if key not in runtime_env or not str(runtime_env[key]).strip():
+                  sys.exit(
+                      f"::error::docker-compose.infra.yml x-runtime-env no longer binds "
+                      f"{key}; re-derive the dev-lane class before changing this gate"
+                  )
+              env[key] = str(runtime_env[key])
           # runtime-effects wires the gateway handlers only when it is given a
           # secret-resolver config (service_kernel); under strict wiring the
           # laptop render, which binds none, fails that wiring fatally. The dev
@@ -1330,6 +1342,8 @@ jobs:
           echo "OMNIMARKET_RELEASE_REF=${tag}" >> "$GITHUB_ENV"
 
       - name: Dev-lane class -- rebuild the runtime image on that release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # Same image name the laptop job built, so this replaces it rather
@@ -1344,6 +1358,8 @@ jobs:
             omninode-runtime
 
       - name: Dev-lane class -- recreate both kernels with that environment
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           OMNIMARKET_REF="$OMNIMARKET_RELEASE_REF" docker compose \

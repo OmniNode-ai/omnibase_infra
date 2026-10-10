@@ -23,6 +23,16 @@ requirements:
     acceptance:
       - id: AC4
         statement: 'AC4: no omnibase_infra workflow calls or waits on an OCC path, and neither CI Summary nor the required-checks manifest expects an OCC companion context -- falsifier: uv run pytest tests/ci/test_no_occ_callers_omn20074.py -q -k no_occ_callers'
+  - id: req-deploy-gate-reads-caller-contracts
+    statement: omnibase_infra's deploy gate must read the cited ticket's deploy evidence from this repository's contracts/OMN-<n>.yaml at the pull request head, through the omniclaude reusable's caller contract source.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: deploy-gate.yml calls the omniclaude deploy-gate reusable at the commit that adds contract-source, with contract-source caller and no contracts-dir -- falsifier: uv run pytest tests/ci/test_no_occ_callers_omn20074.py -q -k deploy_gate_reads_caller_contracts fails at the merge base'
+  - id: req-precommit-hooks-from-core-s8
+    statement: omnibase_infra must consume the no-hardcoded-topics pre-commit hook from omnibase_core, where it moved from onex_change_control under the same hook id, so the hook no longer pins onex_change_control.
+    acceptance:
+      - id: AC-S8H1
+        statement: 'AC-S8H1: no-hardcoded-topics is listed in .pre-commit-config.yaml only under the omnibase_core repo block, pinned to a full commit sha, with require_serial and its exclude carried over -- falsifier: uv run pytest tests/ci/test_precommit_hooks_core_omn20074.py -q fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: No workflow calls an OCC reusable workflow, waits on occ-preflight or requires an OCC companion context.
@@ -36,6 +46,9 @@ evidence_requirements:
   - kind: tests
     description: CI Summary requires the repo-owned verdict, refuses its absence or failure, and accepts a green base-branch-trigger row.
     command: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q
+  - kind: tests
+    description: no-hardcoded-topics is consumed from the omnibase_core hook block, pinned to a full sha.
+    command: uv run pytest tests/ci/test_precommit_hooks_core_omn20074.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -77,3 +90,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
+  - id: dod-deploy-gate-caller-contracts-ac5
+    description: The repository test proves the deploy gate calls the reusable with the caller contract source at the pin that carries it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_no_occ_callers_omn20074.py -q -k deploy_gate_reads_caller_contracts
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
+  - id: dod-precommit-hooks-from-core-s8-ac-s8h1
+    description: The repository test proves no-hardcoded-topics is taken from the omnibase_core block at a full sha and no longer from onex_change_control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_precommit_hooks_core_omn20074.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC-S8H1

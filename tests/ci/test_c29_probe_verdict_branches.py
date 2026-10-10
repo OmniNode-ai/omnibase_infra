@@ -273,6 +273,8 @@ def _run_args(tmp_path: Path) -> list[str]:
         "run",
         "--provider",
         "glm",
+        "--model",
+        "google/gemini-2.5-flash-lite",
         "--key-env",
         "C29_FAKE_KEY",
         "--customer-home",
