@@ -75,6 +75,7 @@ def test_runtime_port_exposes_consumer_handler_optional_parameters() -> None:
         assert parameters["system_prompt"].default is None
         assert parameters["temperature"].default is None
         assert parameters["response_format"].default is None
+        assert parameters["model"].default is None
         # OMN-18321: added by OMN-18172 on the consumer side (omnimarket#2494,
         # squash 849fdae6) and not here, which took every dev-lane delegation to
         # a failed terminal with no FSM row for a day. The name is asserted
@@ -476,6 +477,7 @@ async def _dispatch_through_real_broker(
             system_prompt=None,
             temperature=None,
             response_format=None,
+            model=None,
         )
     finally:
         await unsubscribe()
@@ -541,8 +543,50 @@ async def test_no_contract_request_stays_accepted_through_real_broker() -> None:
 
     assert result["status"] == "completed"
     assert "response_contract" not in json.loads(published_bytes[0])["payload"]
+    assert "model" not in json.loads(published_bytes[0])["payload"]
     (consumer_request,) = decoded
     assert consumer_request.response_contract is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["requested-model", ""], ids=["named", "empty"])
+async def test_model_override_is_refused_before_runtime_bus_publication(
+    model: str,
+) -> None:
+    """OMN-17292: an explicit model must not disappear into a default dispatch."""
+    route = _delegation_route()
+    bus = EventBusInmemory(environment="test", group="model-override-refusal")
+    await bus.start()
+    published: list[bytes] = []
+
+    async def consumer(message: ModelEventMessage) -> None:
+        published.append(message.value)
+
+    unsubscribe = await bus.subscribe(
+        route.command_topic, group_id="model-override-consumer", on_message=consumer
+    )
+    port = RuntimeDelegationDispatchPort(
+        event_bus=bus,
+        routes={"delegation.orchestrate": route},
+    )
+    try:
+        with pytest.raises(NotImplementedError, match="model is not yet supported"):
+            await port.dispatch(
+                prompt="Classify the changelog entry.",
+                task_type="summarization",
+                correlation_id=uuid4(),
+                max_tokens=None,
+                source_file_path=None,
+                source_session_id=None,
+                wait=True,
+                execution_timeout_seconds=1,
+                terminal_delivery_margin_seconds=1,
+                model=model,
+            )
+        assert published == []
+    finally:
+        await unsubscribe()
+        await bus.close()
 
 
 @pytest.mark.asyncio
