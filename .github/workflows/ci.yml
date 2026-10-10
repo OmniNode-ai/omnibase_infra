@@ -2120,6 +2120,8 @@ jobs:
           echo "compose files must never carry that label."
           echo "================================================================"
           uv run pytest tests/ci/test_compose_proof_teardown_policy.py -v --tb=short
+      - name: Verify pre-PR tenant lifecycle (OMN-18894)
+        run: uv run --frozen pytest tests/unit/scripts/test_prepr_tenant_lifecycle_omn18894.py -q --timeout=60
 
       - name: Check delegation routing tiers deployment bindings (OMN-15645)
         run: uv run --frozen pytest tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py -q --no-cov

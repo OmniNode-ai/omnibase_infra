@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-18894
+title: Tenant mint at claim, revoke at teardown, and the slot's own gateway API
+summary: Slot bring-up mints its tenant through the existing bootstrap adapter after the slot gateway is ready, teardown calls the existing offboard endpoint and requires an authenticated request followed by HTTP 401/403 before it removes containers or drops the slot database, and the smoke adapter reads the slot analytics database and leaves the dev tenant table unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn18894
+    statement: A pre-PR slot mints its tenant at bring-up and revokes it at teardown before any resource is removed, and an unproven revoke preserves the gateway and credential for retry.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: bring-up mints through the existing adapter after gateway readiness -- falsifier: test_bringup_mints_through_existing_adapter_after_gateway_readiness'
+      - id: AC2
+        statement: 'AC2: teardown revokes before container and database removal, and a failed offboard preserves resources -- falsifier: test_revocation_precedes_container_and_database_removal and test_teardown_adapter_preserves_resources_when_offboard_fails'
+      - id: AC3
+        statement: 'AC3: a revoke retry uses the bound proof and still requires a live refusal -- falsifier: test_revoke_retry_uses_bound_proof_and_still_requires_live_refusal'
+evidence_requirements:
+  - kind: tests
+    description: The lifecycle tests exercise bring-up mint ordering, teardown revoke ordering, offboard-failure preservation and revoke retry against the slot's gateway adapter.
+    command: uv run pytest tests/unit/scripts/test_prepr_tenant_lifecycle_omn18894.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-18894-mint-and-revoke-order
+    description: Bring-up mints after gateway readiness, and teardown revokes before removing containers or dropping the database, preserving resources when the offboard fails.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_tenant_lifecycle_omn18894.py -q -k "bringup_mints or revocation_precedes or preserves_resources_when_offboard_fails"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
+  - id: dod-omn-18894-lifecycle-suite
+    description: The full lifecycle test file passes, including the bound-proof revoke retry that still requires a live refusal.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_tenant_lifecycle_omn18894.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
