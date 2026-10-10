@@ -8,13 +8,20 @@
 # Invokes omniintelligence.review_pairing.cli_review directly (a standalone
 # module calling model endpoints over HTTP; it does not import or route
 # through any omnibase_infra handler -- OMN-15959) with the voters declared in
-# the review voters contract overlay, docker/lane-overlays/
-# hostile-review-voters.yaml in THIS repository (OMN-20910, operator RULING
-# 2026-10-10T18:17:37Z: review-voter models are declared in a contract overlay,
-# never in repository variables or workflow files). THIS FILE NAMES NO VOTER,
-# ENDPOINT OR MODEL. Here the overlay is read from the pull request's own
-# checkout, so a pull request that changes a voter is reviewed by the voters it
-# declares; omnimarket and omniclaude read it from this repository's `dev`.
+# a review voters overlay (review_voters_overlay.v1, OMN-20910) that THIS
+# REPOSITORY DOES NOT CARRY. Operator RULING 2026-10-10T21:57:38Z (OMN-20923),
+# re-affirming 2026-09-26 and 2026-09-30: no lab or deployment configuration
+# lives in a shipped repository, and CI is configured by an overlay supplied by
+# whoever runs it. The org Actions variable OMNI_CI_OVERLAY_REPO names a private
+# repository of that owner; its node overlay for omniintelligence's
+# node_review_voters_overlay_compute (config/onex/overlays/
+# node_review_voters_overlay_compute/overlay.yaml) is fetched at run time and
+# validated by that node's resolver. With the
+# variable unset (a fork, a customer, any deployment that has not configured
+# voters) the neutral default applies: no voter is configured, and the gate
+# fails closed saying so and naming how to supply an overlay. THIS FILE NAMES NO
+# VOTER, ENDPOINT, MODEL OR NETWORK: the transport's CIDR allowlist is derived
+# from the resolved voters' hosts, never written here.
 # Private diffs go only to lab models (OPERATOR-CONSENT, rolling ledger row
 # 4842). A required voter that is unreachable or fails is named, one voter is
 # no quorum, and the job fails closed (omnibase_infra#4119). Codex is not a
@@ -110,12 +117,12 @@ jobs:
     timeout-minutes: 35
 
     # Job-level so the preflight and the review step read the SAME values.
-    # LLM_ENDPOINT_CIDR_ALLOWLIST is the transport's trust boundary (it
-    # fail-closes if unset); it names a subnet, not a voter. The voters come
-    # only from REVIEW_VOTERS_OVERLAY (OMN-20910).
+    # The voters come only from REVIEW_VOTERS_OVERLAY (OMN-20910), a file of the
+    # private CI overlay (OMN-20923) and never of this repository. The
+    # transport's trust boundary, LLM_ENDPOINT_CIDR_ALLOWLIST (it fail-closes if
+    # unset), is set by the preflight from the resolved voters' hosts.
     env:
-      LLM_ENDPOINT_CIDR_ALLOWLIST: "192.168.86.0/24"  # onex-allow-internal-ip OMN-8468 reason="LAN subnet allowlist for the review LLM endpoint hosts 192.168.86.201 and .200"
-      REVIEW_VOTERS_OVERLAY: ${{ github.workspace }}/docker/lane-overlays/hostile-review-voters.yaml
+      REVIEW_VOTERS_OVERLAY: ${{ github.workspace }}/../ci-overlay/config/onex/overlays/node_review_voters_overlay_compute/overlay.yaml
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v7
@@ -124,7 +131,71 @@ jobs:
 
       - name: Clean stale dependency clones
         working-directory: ${{ github.workspace }}
-        run: rm -rf ../omniintelligence ../omnibase_core_dep ../omnibase_compat
+        run: rm -rf ../omniintelligence ../omnibase_core_dep ../omnibase_compat ../ci-overlay
+
+      # OMN-20923: the review voters are a deployment fact, supplied by an
+      # overlay this repository does not carry. OMNI_CI_OVERLAY_REPO (an org
+      # Actions variable, a bare repository name under this owner) names it.
+      # Unset: the neutral default, no voters configured; the preflight fails
+      # the gate closed with that reason. Set but unreadable: this step fails,
+      # because a configured deployment that silently fell back to "no voters"
+      # would report the wrong cause.
+      - name: Resolve the CI overlay
+        id: ci-overlay
+        env:
+          CI_OVERLAY_REPO: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CI_OVERLAY_REPO}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::error::no review voters configured: OMNI_CI_OVERLAY_REPO is unset, so no CI overlay supplies config/onex/overlays/node_review_voters_overlay_compute/overlay.yaml (review_voters_overlay.v1). The gate fails closed. To run it, put your voters in a repository of your own and set OMNI_CI_OVERLAY_REPO to its name."
+            exit 0
+          fi
+          if [[ ! "${CI_OVERLAY_REPO}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::OMNI_CI_OVERLAY_REPO must be a bare repository name, got '${CI_OVERLAY_REPO}'"
+            exit 1
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+          echo "name=${CI_OVERLAY_REPO}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint a read-only CI overlay token
+        if: steps.ci-overlay.outputs.configured == 'true'
+        id: ci-overlay-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.ci-overlay.outputs.name }}
+          permission-contents: read
+
+      # reusable-checkout-ref-ok: hostile-reviewer OMN-20923 the CI overlay is
+      # DATA (the voter roster), read unpinned from its default branch so a voter
+      # change needs no pull request here, and validated by omniintelligence's
+      # resolver on every run; nothing from it is executed.
+      - name: Fetch the CI overlay
+        if: steps.ci-overlay.outputs.configured == 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ github.repository_owner }}/${{ steps.ci-overlay.outputs.name }}
+          token: ${{ steps.ci-overlay-token.outputs.token }}
+          path: .ci-overlay-checkout
+          persist-credentials: false
+          sparse-checkout: |
+            config/onex/overlays/node_review_voters_overlay_compute
+          sparse-checkout-cone-mode: false
+
+      - name: Place the CI overlay outside the workspace
+        if: steps.ci-overlay.outputs.configured == 'true'
+        run: |
+          set -euo pipefail
+          rm -rf ../ci-overlay
+          mv .ci-overlay-checkout ../ci-overlay
+          echo "CI overlay read from ${{ github.repository_owner }}/${{ steps.ci-overlay.outputs.name }} at $(git -C ../ci-overlay rev-parse HEAD)"
+          if [ ! -s "$REVIEW_VOTERS_OVERLAY" ]; then
+            echo "::error::the CI overlay carries no config/onex/overlays/node_review_voters_overlay_compute/overlay.yaml; no voter can be resolved"
+            exit 1
+          fi
 
       - name: Clone omniintelligence
         working-directory: ${{ github.workspace }}
@@ -218,6 +289,7 @@ jobs:
           # HMAC-signs every call with LOCAL_LLM_SHARED_SECRET and fail-closes if it
           # is absent.
           LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
+          CI_OVERLAY_CONFIGURED: ${{ steps.ci-overlay.outputs.configured }}
         run: |
           # -e is intentionally OMITTED: an unreachable endpoint must never fail
           # this step; it records a DEGRADED verdict and the enforce step fails
@@ -227,6 +299,22 @@ jobs:
           # the reader unimportable, is DEGRADED with the reason; an overlay
           # refusal names the voter.
           set -o pipefail
+
+          # OMN-20923 neutral default: no CI overlay, no voters. Fail closed
+          # with that reason rather than a missing-file message.
+          if [ "${CI_OVERLAY_CONFIGURED}" != "true" ]; then
+            REASON="no review voters configured (OMNI_CI_OVERLAY_REPO is unset; supply a review_voters_overlay.v1 file through a CI overlay)"
+            echo "::error::${REASON}"
+            {
+              echo "reachable=false"
+              echo "verdict=degraded"
+              echo "blocking_count=0"
+              echo "total_findings=0"
+              echo "models_succeeded="
+              echo "error=${REASON}"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           PROBE_TARGETS="$(uv run --no-sync python -I - "$REVIEW_VOTERS_OVERLAY" <<'PYEOF'
           import sys
@@ -262,6 +350,22 @@ jobs:
               echo "error=review voters overlay refused: ${REASON}"
             } >> "$GITHUB_OUTPUT"
             exit 0
+          fi
+
+          # OMN-20923: the transport's trust boundary is the resolved voters'
+          # hosts, one /32 each, so no network is written in this file. The
+          # roster comes from the private CI overlay at its default branch,
+          # never from this pull request's checkout.
+          ALLOWLIST=""
+          while IFS='|' read -r _tag _voter HOST _port _url; do
+            [ "$_tag" = "TARGET" ] || continue
+            ADDR="$(python3 -c 'import socket, sys; print(socket.gethostbyname(sys.argv[1]))' "$HOST" 2>/dev/null || true)"
+            if [ -n "$ADDR" ]; then
+              ALLOWLIST="${ALLOWLIST:+${ALLOWLIST},}${ADDR}/32"
+            fi
+          done < <(printf '%s\n' "$TARGETS")
+          if [ -n "$ALLOWLIST" ]; then
+            echo "LLM_ENDPOINT_CIDR_ALLOWLIST=${ALLOWLIST}" >> "$GITHUB_ENV"
           fi
 
           # TCP-connect probe, 3 attempts per voter, the same tolerance as the
@@ -497,7 +601,7 @@ jobs:
               '| `Hostile Review Thread Gate` | Deterministic: unresolved hostile-reviewer threads exist | Fails until resolved (not yet a required context) |',
               '| `degraded` verdict | Fewer than 2 models succeeded (infra) | Fails this job with a named reason |',
               '',
-              '_Powered by [omniintelligence.review_pairing.cli_review](https://github.com/OmniNode-ai/omniintelligence) — multi-model adversarial review; voters from docker/lane-overlays/hostile-review-voters.yaml (OMN-8468/OMN-17492/OMN-20910)_',
+              '_Powered by [omniintelligence.review_pairing.cli_review](https://github.com/OmniNode-ai/omniintelligence) — multi-model adversarial review; voters from the private CI overlay (OMN-8468/OMN-17492/OMN-20910/OMN-20923)_',
             ].join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({
