@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-20805
 title: Every h201 cron entry records each run's completion
-summary: The maintenance installer ships no /etc/cron.d unit; each former root schedule becomes a oneshot service with a timer on the same calendar whose exit reaches systemd, and the runner monitor and push-lane detector installers write user timers instead of crontab lines, so the journal records each run's start, end and exit. AC2's live timer and journal readback on the host is not bound here.
+summary: The maintenance installer ships no /etc/cron.d unit; each former root schedule becomes a oneshot service with a timer on the same calendar whose exit reaches systemd, and the runner monitor and push-lane detector installers write user timers instead of crontab lines, so the journal records each run's start, end and exit. AC2's live timer and journal readback on the host is quoted in the PR body; the bound check is the activation test that drives the real sync.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -31,3 +31,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn-20805-ac2
+    description: The real maintenance sync, driven against a stub systemctl, enables each timer and confirms it active before it moves the legacy cron file aside, a failed enable leaves the cron file live and fails the run, and --check reddens on an inactive timer. The live h201 list-timers and journal readback is quoted in the PR body.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_maintenance_sync_timer_activation_omn20805.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

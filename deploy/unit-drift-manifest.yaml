@@ -164,13 +164,3 @@ units:
     installed: ~/.omnibase/infra/deployed/0.34.1/scripts/monitor_logs.py
     hosts:
       - omninode-pc
-  - name: onex-foreign-prepush-detect.service
-    tracked: deploy/push-lanes/onex-foreign-prepush-detect.service
-    installed: ~/.config/systemd/user/onex-foreign-prepush-detect.service
-    hosts:
-      - omninode-pc
-  - name: onex-foreign-prepush-detect.timer
-    tracked: deploy/push-lanes/onex-foreign-prepush-detect.timer
-    installed: ~/.config/systemd/user/onex-foreign-prepush-detect.timer
-    hosts:
-      - omninode-pc

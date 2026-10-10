@@ -33,8 +33,8 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SYNC_SCRIPT = REPO_ROOT / "deploy" / "maintenance" / "omninode-host-maintenance-sync.sh"
 
-SERVICE_REL = "deploy/maintenance/systemd/omninode-demo.service"
-TIMER_REL = "deploy/maintenance/systemd/omninode-demo.timer"
+SERVICE_REL = "deploy/maintenance/systemd/onex-sample.service"
+TIMER_REL = "deploy/maintenance/systemd/onex-sample.timer"
 SERVICE_BODY = "[Service]\nType=oneshot\nExecStart=/bin/true\n"
 TIMER_BODY = "[Timer]\nOnCalendar=*:0/5\n"
 
@@ -79,7 +79,7 @@ class Host:
         self.unit_dir.mkdir(parents=True)
         self.cron_dir = tmp_path / "etc" / "cron.d"
         self.cron_dir.mkdir(parents=True)
-        self.legacy = self.cron_dir / "omninode-demo"
+        self.legacy = self.cron_dir / "onex-sample"
         self.legacy.write_text("*/5 * * * * root /bin/true\n")
         self.calls = tmp_path / "systemctl.calls"
         self.active = tmp_path / "active"
@@ -99,8 +99,8 @@ class Host:
         self.stub.chmod(0o755)
         self.manifest = tmp_path / "manifest.txt"
         self.manifest.write_text(
-            f"{SERVICE_REL}|{self.unit_dir}/omninode-demo.service|0644\n"
-            f"{TIMER_REL}|{self.unit_dir}/omninode-demo.timer|0644\n"
+            f"{SERVICE_REL}|{self.unit_dir}/onex-sample.service|0644\n"
+            f"{TIMER_REL}|{self.unit_dir}/onex-sample.timer|0644\n"
         )
 
     def systemctl_calls(self) -> list[str]:
@@ -144,14 +144,14 @@ def test_converge_installs_units_enables_timer_then_retires_legacy_cron(
     proc = _run(fake_clone, host, tmp_path, "--converge")
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert (host.unit_dir / "omninode-demo.timer").read_text() == TIMER_BODY
-    assert (host.unit_dir / "omninode-demo.service").read_text() == SERVICE_BODY
+    assert (host.unit_dir / "onex-sample.timer").read_text() == TIMER_BODY
+    assert (host.unit_dir / "onex-sample.service").read_text() == SERVICE_BODY
     calls = host.systemctl_calls()
     assert calls[0] == "daemon-reload"
     assert calls.count("daemon-reload") == 1
-    assert "enable --now omninode-demo.timer" in calls
+    assert "enable --now onex-sample.timer" in calls
     assert not host.legacy.exists(), "the legacy cron file is still live"
-    retired = list((host.cron_dir / "onex-retired").glob("omninode-demo.retired-*"))
+    retired = list((host.cron_dir / "onex-retired").glob("onex-sample.retired-*"))
     assert len(retired) == 1, "the legacy cron file must be moved aside, not deleted"
     assert "RETIRED|" in proc.stdout
 
