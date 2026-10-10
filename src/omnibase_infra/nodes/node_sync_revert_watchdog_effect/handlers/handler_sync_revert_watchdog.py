@@ -256,8 +256,7 @@ class _LinearClient:
 
     Reads ``LINEAR_API_KEY`` from the environment when not passed
     explicitly (mirrors ``node_evidence_autoclose_sweep_effect``'s
-    ``_LinearClient``, itself mirroring ``GitHubTransport.__init__``'s
-    ``GH_PAT`` fallback in ``omnibase_infra.adapters.github``).
+    ``_LinearClient``).
     """
 
     # OMN-14951 gap 2: self-declared secret-ish env-var names read by this

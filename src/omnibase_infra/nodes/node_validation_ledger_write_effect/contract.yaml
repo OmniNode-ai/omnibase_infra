@@ -37,8 +37,8 @@ node_version:
 # Node type
 node_type: "EFFECT_GENERIC"
 # Runtime lane (OMN-12957): "effects" is the consumer-attached profile that
-# drains EFFECT subscriptions -- mirrors node_pr_state_write_effect (the most
-# recent intent-routed write-effect node built on this same pattern).
+# drains EFFECT subscriptions -- mirrors node_gateway_link_health_write_effect (an
+# intent-routed write-effect node built on this same pattern).
 runtime_profiles:
   - effects
 # Description

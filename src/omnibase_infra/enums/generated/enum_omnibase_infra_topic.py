@@ -38,7 +38,6 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_LLM_INFERENCE_REQUEST_V1 = "onex.cmd.omnibase-infra.llm-inference-request.v1"  # onex.cmd.omnibase-infra.llm-inference-request.v1
     CMD_ONBOARDING_START_V1 = "onex.cmd.omnibase-infra.onboarding-start.v1"  # onex.cmd.omnibase-infra.onboarding-start.v1
     CMD_PATTERN_B_DISPATCH_V1 = "onex.cmd.omnibase-infra.pattern-b-dispatch.v1"  # onex.cmd.omnibase-infra.pattern-b-dispatch.v1
-    CMD_PR_STATE_UPSERT_V1 = "onex.cmd.omnibase-infra.pr-state-upsert.v1"  # onex.cmd.omnibase-infra.pr-state-upsert.v1
     CMD_REMOTE_AGENT_INVOKE_V1 = "onex.cmd.omnibase-infra.remote-agent-invoke.v1"  # onex.cmd.omnibase-infra.remote-agent-invoke.v1
     CMD_RUNNER_FLEET_HEALTH_EVALUATE_V1 = "onex.cmd.omnibase-infra.runner-fleet-health-evaluate.v1"  # onex.cmd.omnibase-infra.runner-fleet-health-evaluate.v1
     CMD_RUNNER_FLEET_MAINTAIN_START_V1 = "onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1"  # onex.cmd.omnibase-infra.runner-fleet-maintain-start.v1

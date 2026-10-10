@@ -8,8 +8,8 @@
 # COMPUTE node that subscribes to the gateway heartbeat event topic
 # (produced by node_bus_forwarder_effect / ServiceGatewayForwarder) and
 # emits ModelIntent payloads for the EFFECT layer to persist into
-# gateway_link_health. Mirrors the canonical node_pr_state_projection_compute
-# pattern.
+# gateway_link_health. Mirrors node_ledger_projection_compute's
+# projection pattern.
 #
 # Related Tickets:
 #   - OMN-15570: Gateway lift Phase 0, item G3 (link-health projection).
@@ -73,7 +73,7 @@ handler_routing:
 # result applier from this table -- it names the effect node whose canonical
 # handle() persists the intent (node_gateway_link_health_write_effect ->
 # HandlerGatewayLinkHealthUpsert, keyed by the write-effect's
-# `gateway_link_health.upsert` operation). Mirrors node_pr_state_projection_compute's
+# `gateway_link_health.upsert` operation). Mirrors node_ledger_projection_compute's
 # intent_consumption table (OMN-14516).
 intent_consumption:
   intent_routing_table:

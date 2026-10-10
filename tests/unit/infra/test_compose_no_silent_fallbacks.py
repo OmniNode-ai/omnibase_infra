@@ -109,7 +109,7 @@ ALLOWED_EMPTY_DEFAULTS = {
     # on the identical contract as the OnexBot App identity above -- minted
     # onto a specific runtime host by the operator, so every other lane must
     # render and run without it. Empty is NOT "silently disabled": the
-    # consumer, node_github_webhook_ingress_effect's handler, resolves it
+    # consumer, omnimarket's node_github_webhook_ingress_effect handler, resolves it
     # through SecretResolver.get_secret_async(required=False) and treats an
     # absent or empty value as "no webhook secret configured", refusing
     # (dead-lettering) every delivery rather than substituting a default. A

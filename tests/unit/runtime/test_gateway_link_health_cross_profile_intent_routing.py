@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 """Cross-profile intent-routing regression for cold boot (OMN-14517).
 
-``node_pr_state_projection_compute`` (no ``runtime_profiles`` declared, so it
+``node_gateway_link_health_projection_compute`` (no ``runtime_profiles`` declared, so it
 defaults to ``main`` ownership per ``filter_manifest_for_runtime_profile``)
 declares an ``intent_consumption.intent_routing_table`` naming
-``node_pr_state_write_effect`` as its effect target. That effect node
+``node_gateway_link_health_write_effect`` as its effect target. That effect node
 correctly declares ``runtime_profiles: [effects]`` (it is a real,
 independently-consuming EFFECT node in the ``effects`` runtime lane).
 
@@ -51,15 +51,19 @@ from omnibase_infra.runtime.service_intent_routing_loader import (
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _NODES_ROOT = _REPO_ROOT / "src" / "omnibase_infra" / "nodes"
 
-COMPUTE_CONTRACT = _NODES_ROOT / "node_pr_state_projection_compute" / "contract.yaml"
-EFFECT_NODE_NAME = "node_pr_state_write_effect"
+COMPUTE_CONTRACT = (
+    _NODES_ROOT / "node_gateway_link_health_projection_compute" / "contract.yaml"
+)
+EFFECT_NODE_NAME = "node_gateway_link_health_write_effect"
 MAIN_RUNTIME_PROFILE = "main"
 
 
 def _resolve_effect_node(contracts_by_name: Mapping[str, object]) -> tuple[type, ...]:
     """Mirror the kernel's routing-table -> handler-class resolution."""
     routing = load_intent_routing_table(COMPUTE_CONTRACT)
-    assert routing, "node_pr_state_projection_compute must declare a routing table"
+    assert routing, (
+        "node_gateway_link_health_projection_compute must declare a routing table"
+    )
     resolved: list[type] = []
     for intent_type, effect_node in routing.items():
         effect_contract = contracts_by_name.get(effect_node)
@@ -88,18 +92,18 @@ def _resolve_effect_node(contracts_by_name: Mapping[str, object]) -> tuple[type,
     return tuple(resolved)
 
 
-def test_pr_state_write_effect_declares_a_different_profile_than_the_compute_node() -> (
+def test_gateway_link_health_write_effect_declares_a_different_profile_than_the_compute_node() -> (
     None
 ):
     """Ground truth: the compute/effect pair span two different runtime profiles.
 
-    node_pr_state_projection_compute declares no runtime_profiles (defaults to
-    "main"); node_pr_state_write_effect declares runtime_profiles: [effects].
+    node_gateway_link_health_projection_compute declares no runtime_profiles (defaults to
+    "main"); node_gateway_link_health_write_effect declares runtime_profiles: [effects].
     This is exactly the shape that broke the profile-filtered lookup.
     """
     manifest = discover_contracts()
     contracts_by_name = {c.name: c for c in manifest.contracts}
-    compute_contract = contracts_by_name["node_pr_state_projection_compute"]
+    compute_contract = contracts_by_name["node_gateway_link_health_projection_compute"]
     effect_contract = contracts_by_name[EFFECT_NODE_NAME]
 
     assert not compute_contract.runtime_profiles
@@ -112,7 +116,7 @@ def test_main_profile_filtered_manifest_excludes_the_effect_node() -> None:
 
     This is the root cause: a lookup keyed off the profile-filtered manifest
     (what the kernel used before the OMN-14517 fix) cannot find
-    node_pr_state_write_effect from the main container, so it looks "absent
+    node_gateway_link_health_write_effect from the main container, so it looks "absent
     from the manifest" even though the contract is perfectly valid.
     """
     manifest = discover_contracts()
@@ -121,7 +125,7 @@ def test_main_profile_filtered_manifest_excludes_the_effect_node() -> None:
     )
     main_filtered_names = {c.name for c in ownership.manifest.contracts}
 
-    assert "node_pr_state_projection_compute" in main_filtered_names
+    assert "node_gateway_link_health_projection_compute" in main_filtered_names
     assert EFFECT_NODE_NAME not in main_filtered_names, (
         f"{EFFECT_NODE_NAME} unexpectedly present in the main-profile-filtered "
         "manifest -- if this now passes, the contract's runtime_profiles "
@@ -132,14 +136,16 @@ def test_main_profile_filtered_manifest_excludes_the_effect_node() -> None:
         _resolve_effect_node({c.name: c for c in ownership.manifest.contracts})
 
 
-def test_pr_state_routing_resolves_from_the_full_discovery_manifest() -> None:
+def test_gateway_link_health_routing_resolves_from_the_full_discovery_manifest() -> (
+    None
+):
     """GREEN-on-fix proof: resolving from the FULL (unfiltered) manifest works.
 
     This is the fix the kernel now applies: `_contracts_by_name` for
     effect-node resolution must be built from the full discovery manifest
     (`auto_wiring_manifest_discovered` in service_kernel.py), not the
     runtime-profile-filtered one. Confirms the cross-profile route resolves
-    to a real, importable HandlerPrStateUpsert.
+    to a real, importable HandlerGatewayLinkHealthUpsert.
     """
     manifest = discover_contracts()
     contracts_by_name = {c.name: c for c in manifest.contracts}
@@ -147,4 +153,4 @@ def test_pr_state_routing_resolves_from_the_full_discovery_manifest() -> None:
     resolved = _resolve_effect_node(contracts_by_name)
 
     assert len(resolved) == 1
-    assert resolved[0].__name__ == "HandlerPrStateUpsert"
+    assert resolved[0].__name__ == "HandlerGatewayLinkHealthUpsert"

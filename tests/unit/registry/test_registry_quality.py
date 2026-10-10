@@ -54,7 +54,7 @@ UNRELATED_FILES = [
 REAL_CONTRACT_PATHS = [
     "src/omnibase_infra/nodes/node_session_lifecycle_reducer/contract.yaml",
     "src/omnibase_infra/nodes/node_validation_orchestrator/contract.yaml",
-    "src/omnibase_infra/nodes/node_github_pr_poller_effect/contract.yaml",
+    "src/omnibase_infra/nodes/node_gateway_link_health_write_effect/contract.yaml",
     "src/omnibase_infra/nodes/node_llm_embedding_effect/contract.yaml",
     "src/omnibase_infra/nodes/node_registration_reducer/contract.yaml",
 ]

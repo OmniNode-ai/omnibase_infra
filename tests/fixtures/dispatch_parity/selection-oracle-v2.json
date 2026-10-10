@@ -721,38 +721,6 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
-    "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a": {
-      "category": "intent",
-      "contract_name": "node_github_pr_poller_effect",
-      "event_model_module": "omnibase_infra.runtime.models.model_runtime_tick",
-      "event_model_name": "ModelRuntimeTick",
-      "handler_id": "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
-      "handler_module": "omnibase_infra.nodes.node_github_pr_poller_effect.handlers.handler_github_api_poll",
-      "handler_name": "HandlerGitHubApiPoll",
-      "message_types": [
-        "ModelRuntimeTick",
-        "onex.intent.platform.runtime-tick.v1",
-        "platform.runtime-tick"
-      ],
-      "package": "omnibase_infra",
-      "type_scoped": true
-    },
-    "dispatcher.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5": {
-      "category": "command",
-      "contract_name": "node_github_webhook_ingress_effect",
-      "event_model_module": "omnibase_infra.nodes.node_github_webhook_ingress_effect.models",
-      "event_model_name": "ModelGitHubWebhookDelivery",
-      "handler_id": "dispatcher.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5",
-      "handler_module": "omnibase_infra.nodes.node_github_webhook_ingress_effect.handlers.handler_github_webhook_ingress",
-      "handler_name": "HandlerGitHubWebhookIngress",
-      "message_types": [
-        "ModelGitHubWebhookDelivery",
-        "github.webhook-delivery",
-        "onex.cmd.github.webhook-delivery.v1"
-      ],
-      "package": "omnibase_infra",
-      "type_scoped": true
-    },
     "dispatcher.auto.node_gmail_intent_poller_effect.HandlerGmailIntentPoll.gmail_poll_inbox_b096b6d9": {
       "category": "event",
       "contract_name": "node_gmail_intent_poller_effect",
@@ -2878,22 +2846,6 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
-    "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerMergeSweepInitiate": {
-      "category": "command",
-      "contract_name": "node_merge_sweep_workflow_orchestrator",
-      "event_model_module": "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.models.model_merge_sweep_command",
-      "event_model_name": "ModelMergeSweepCommand",
-      "handler_id": "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerMergeSweepInitiate",
-      "handler_module": "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.handlers.handler_merge_sweep_initiate",
-      "handler_name": "HandlerMergeSweepInitiate",
-      "message_types": [
-        "ModelMergeSweepCommand",
-        "onex.cmd.skill.merge-sweep.v1",
-        "skill.merge-sweep"
-      ],
-      "package": "omnibase_infra",
-      "type_scoped": true
-    },
     "dispatcher.auto.node_onboarding_orchestrator.HandlerOnboarding": {
       "category": "command",
       "contract_name": "node_onboarding_orchestrator",
@@ -2919,36 +2871,6 @@
       "handler_module": "omnibase_infra.nodes.node_pattern_lifecycle_effect.handlers.handler_lifecycle_update",
       "handler_name": "HandlerLifecycleUpdate",
       "message_types": null,
-      "package": "omnibase_infra",
-      "type_scoped": false
-    },
-    "dispatcher.auto.node_pr_state_projection_compute.HandlerPrStateProjection.pr_state_project_f0c95a9a": {
-      "category": "event",
-      "contract_name": "node_pr_state_projection_compute",
-      "event_model_module": null,
-      "event_model_name": null,
-      "handler_id": "dispatcher.auto.node_pr_state_projection_compute.HandlerPrStateProjection.pr_state_project_f0c95a9a",
-      "handler_module": "omnibase_infra.nodes.node_pr_state_projection_compute.handlers.handler_pr_state_projection",
-      "handler_name": "HandlerPrStateProjection",
-      "message_types": [
-        "github.pr-status",
-        "onex.evt.github.pr-status.v1"
-      ],
-      "package": "omnibase_infra",
-      "type_scoped": false
-    },
-    "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_451d3913": {
-      "category": "command",
-      "contract_name": "node_pr_state_write_effect",
-      "event_model_module": null,
-      "event_model_name": null,
-      "handler_id": "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_451d3913",
-      "handler_module": "omnibase_infra.nodes.node_pr_state_write_effect.handlers.handler_pr_state_upsert",
-      "handler_name": "HandlerPrStateUpsert",
-      "message_types": [
-        "omnibase-infra.pr-state-upsert",
-        "onex.cmd.omnibase-infra.pr-state-upsert.v1"
-      ],
       "package": "omnibase_infra",
       "type_scoped": false
     },
@@ -3563,16 +3485,16 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 15,
-        "omnibase_infra": 137,
+        "omnibase_infra": 128,
         "onex-change-control": 4
       },
-      "contracts_discovered": 156,
+      "contracts_discovered": 147,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 94,
-      "probe_count": 1071,
-      "registered_dispatchers": 126,
-      "registered_routes": 111,
-      "type_scoped_dispatchers": 70
+      "distinct_subscribe_topics": 90,
+      "probe_count": 1060,
+      "registered_dispatchers": 121,
+      "registered_routes": 106,
+      "type_scoped_dispatchers": 67
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3612,7 +3534,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-10-09T14:47:00.059441+00:00",
+    "generated_at_utc": "2026-10-10T19:32:01.633764+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.35",
       "omnibase-infra": "0.38.70",
@@ -3629,7 +3551,6 @@
         "date": "2026-07-02",
         "declared_dlq_topics": {
           "node_chain_orchestrator": "onex.dlq.omnibase-infra.omnibase-infra.v1",
-          "node_merge_sweep_workflow_orchestrator": "onex.dlq.omnibase-infra.skill.v1",
           "node_registration_orchestrator": "onex.dlq.omnibase-infra.platform.v1",
           "node_routing_orchestrator": "onex.dlq.omnibase-infra.router.v1",
           "node_rsd_orchestrator": "onex.dlq.omnibase-infra.rsd.v1",
@@ -3642,7 +3563,6 @@
         "now_routing_orchestrators": [
           "node_rsd_orchestrator",
           "node_routing_orchestrator",
-          "node_merge_sweep_workflow_orchestrator",
           "node_scope_workflow_orchestrator",
           "node_chain_orchestrator",
           "node_registration_orchestrator"
@@ -3699,21 +3619,6 @@
         "status": "success"
       },
       "topic": "onex.cmd.core.compliance-scan-requested.v1"
-    },
-    "P1a::onex.cmd.github.webhook-delivery.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": "github.webhook-delivery",
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.github.v1",
-        "message_category": "command",
-        "message_type": "github.webhook-delivery",
-        "status": "no_dispatcher"
-      },
-      "topic": "onex.cmd.github.webhook-delivery.v1"
     },
     "P1a::onex.cmd.omnibase-infra.baselines-batch-compute.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -4008,23 +3913,6 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.omnibase-infra.onboarding-start.v1"
-    },
-    "P1a::onex.cmd.omnibase-infra.pr-state-upsert.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": "omnibase-infra.pr-state-upsert",
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_451d3913"
-        ],
-        "dlq_topic": null,
-        "message_category": "command",
-        "message_type": "omnibase-infra.pr-state-upsert",
-        "status": "success"
-      },
-      "topic": "onex.cmd.omnibase-infra.pr-state-upsert.v1"
     },
     "P1a::onex.cmd.omnibase-infra.remote-agent-invoke.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -4325,21 +4213,6 @@
       },
       "topic": "onex.cmd.rsd.score.v1"
     },
-    "P1a::onex.cmd.skill.merge-sweep.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": "skill.merge-sweep",
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.skill.v1",
-        "message_category": "command",
-        "message_type": "skill.merge-sweep",
-        "status": "no_dispatcher"
-      },
-      "topic": "onex.cmd.skill.merge-sweep.v1"
-    },
     "P1a::onex.cmd.skill.scope-check.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -4450,23 +4323,6 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.evt.artifact.update-plan-created.v1"
-    },
-    "P1a::onex.evt.github.pr-status.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": "github.pr-status",
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_pr_state_projection_compute.HandlerPrStateProjection.pr_state_project_f0c95a9a"
-        ],
-        "dlq_topic": null,
-        "message_category": "event",
-        "message_type": "github.pr-status",
-        "status": "success"
-      },
-      "topic": "onex.evt.github.pr-status.v1"
     },
     "P1a::onex.evt.github.pr-webhook.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -5176,21 +5032,6 @@
       },
       "topic": "onex.cmd.core.compliance-scan-requested.v1"
     },
-    "P1b::onex.cmd.github.webhook-delivery.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": null,
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
-        "message_category": "command",
-        "message_type": "_DictPayload",
-        "status": "no_dispatcher"
-      },
-      "topic": "onex.cmd.github.webhook-delivery.v1"
-    },
     "P1b::onex.cmd.omnibase-infra.baselines-batch-compute.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -5460,21 +5301,6 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.omnibase-infra.onboarding-start.v1"
-    },
-    "P1b::onex.cmd.omnibase-infra.pr-state-upsert.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": null,
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
-        "message_category": "command",
-        "message_type": "_DictPayload",
-        "status": "no_dispatcher"
-      },
-      "topic": "onex.cmd.omnibase-infra.pr-state-upsert.v1"
     },
     "P1b::onex.cmd.omnibase-infra.remote-agent-invoke.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -5761,21 +5587,6 @@
       },
       "topic": "onex.cmd.rsd.score.v1"
     },
-    "P1b::onex.cmd.skill.merge-sweep.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": null,
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
-        "message_category": "command",
-        "message_type": "_DictPayload",
-        "status": "no_dispatcher"
-      },
-      "topic": "onex.cmd.skill.merge-sweep.v1"
-    },
     "P1b::onex.cmd.skill.scope-check.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -5880,21 +5691,6 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.evt.artifact.update-plan-created.v1"
-    },
-    "P1b::onex.evt.github.pr-status.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": null,
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
-        "message_category": "event",
-        "message_type": "_DictPayload",
-        "status": "no_dispatcher"
-      },
-      "topic": "onex.evt.github.pr-status.v1"
     },
     "P1b::onex.evt.github.pr-webhook.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -7064,47 +6860,6 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
-    },
-    "P4::dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a::onex.intent.platform.runtime-tick.v1": {
-      "construct_only": true,
-      "dispatcher_id": "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
-      "event_model": "omnibase_infra.runtime.models.model_runtime_tick.ModelRuntimeTick",
-      "family": "P4_payload_type_scoping",
-      "input": {
-        "event_type": "platform.runtime-tick",
-        "payload": "ModelRuntimeTick"
-      },
-      "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
-          "dispatcher.auto.node_registration_orchestrator.HandlerRuntimeTick"
-        ],
-        "dlq_topic": null,
-        "message_category": "intent",
-        "message_type": "platform.runtime-tick",
-        "status": "success"
-      },
-      "topic": "onex.intent.platform.runtime-tick.v1"
-    },
-    "P4::dispatcher.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5::onex.cmd.github.webhook-delivery.v1": {
-      "construct_only": true,
-      "dispatcher_id": "dispatcher.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5",
-      "event_model": "omnibase_infra.nodes.node_github_webhook_ingress_effect.models.ModelGitHubWebhookDelivery",
-      "family": "P4_payload_type_scoping",
-      "input": {
-        "event_type": "github.webhook-delivery",
-        "payload": "ModelGitHubWebhookDelivery"
-      },
-      "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5"
-        ],
-        "dlq_topic": null,
-        "message_category": "command",
-        "message_type": "github.webhook-delivery",
-        "status": "success"
-      },
-      "topic": "onex.cmd.github.webhook-delivery.v1"
     },
     "P4::dispatcher.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6::onex.cmd.platform.hotpatch-ledger-reconcile.v1": {
       "construct_only": true,
@@ -22911,26 +22666,6 @@
       },
       "topic": "onex.cmd.omnibase-infra.llm-inference-request.v1"
     },
-    "P4::dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerMergeSweepInitiate::onex.cmd.skill.merge-sweep.v1": {
-      "construct_only": true,
-      "dispatcher_id": "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerMergeSweepInitiate",
-      "event_model": "omnibase_infra.nodes.node_merge_sweep_workflow_orchestrator.models.model_merge_sweep_command.ModelMergeSweepCommand",
-      "family": "P4_payload_type_scoping",
-      "input": {
-        "event_type": "skill.merge-sweep",
-        "payload": "ModelMergeSweepCommand"
-      },
-      "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerMergeSweepInitiate"
-        ],
-        "dlq_topic": null,
-        "message_category": "command",
-        "message_type": "skill.merge-sweep",
-        "status": "success"
-      },
-      "topic": "onex.cmd.skill.merge-sweep.v1"
-    },
     "P4::dispatcher.auto.node_onboarding_orchestrator.HandlerOnboarding::onex.cmd.omnibase-infra.onboarding-start.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_onboarding_orchestrator.HandlerOnboarding",
@@ -23492,7 +23227,6 @@
       },
       "selection": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
           "dispatcher.auto.node_registration_orchestrator.HandlerRuntimeTick"
         ],
         "dlq_topic": null,
@@ -24537,26 +24271,6 @@
       "type_scoped": false
     },
     {
-      "contract_name": "node_github_pr_poller_effect",
-      "dispatcher_id": "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
-      "handler_id": "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
-      "message_category": "intent",
-      "route_id": "route.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a.onex_intent_platform_runtime_tick_v1",
-      "topic": "onex.intent.platform.runtime-tick.v1",
-      "topic_pattern": "*.intent.platform.runtime-tick.*",
-      "type_scoped": true
-    },
-    {
-      "contract_name": "node_github_webhook_ingress_effect",
-      "dispatcher_id": "dispatcher.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5",
-      "handler_id": "dispatcher.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5",
-      "message_category": "command",
-      "route_id": "route.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5.onex_cmd_github_webhook_delivery_v1",
-      "topic": "onex.cmd.github.webhook-delivery.v1",
-      "topic_pattern": "*.cmd.github.webhook-delivery.*",
-      "type_scoped": true
-    },
-    {
       "contract_name": "node_hotpatch_ledger_reconcile_effect",
       "dispatcher_id": "dispatcher.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6",
       "handler_id": "dispatcher.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6",
@@ -24927,16 +24641,6 @@
       "type_scoped": false
     },
     {
-      "contract_name": "node_merge_sweep_workflow_orchestrator",
-      "dispatcher_id": "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerMergeSweepInitiate",
-      "handler_id": "dispatcher.auto.node_merge_sweep_workflow_orchestrator.HandlerMergeSweepInitiate",
-      "message_category": "command",
-      "route_id": "route.auto.node_merge_sweep_workflow_orchestrator.HandlerMergeSweepInitiate.onex_cmd_skill_merge_sweep_v1",
-      "topic": "onex.cmd.skill.merge-sweep.v1",
-      "topic_pattern": "*.cmd.skill.merge-sweep.*",
-      "type_scoped": true
-    },
-    {
       "contract_name": "node_onboarding_orchestrator",
       "dispatcher_id": "dispatcher.auto.node_onboarding_orchestrator.HandlerOnboarding",
       "handler_id": "dispatcher.auto.node_onboarding_orchestrator.HandlerOnboarding",
@@ -24945,26 +24649,6 @@
       "topic": "onex.cmd.omnibase-infra.onboarding-start.v1",
       "topic_pattern": "*.cmd.omnibase-infra.onboarding-start.*",
       "type_scoped": true
-    },
-    {
-      "contract_name": "node_pr_state_projection_compute",
-      "dispatcher_id": "dispatcher.auto.node_pr_state_projection_compute.HandlerPrStateProjection.pr_state_project_f0c95a9a",
-      "handler_id": "dispatcher.auto.node_pr_state_projection_compute.HandlerPrStateProjection.pr_state_project_f0c95a9a",
-      "message_category": "event",
-      "route_id": "route.auto.node_pr_state_projection_compute.HandlerPrStateProjection.pr_state_project_f0c95a9a.onex_evt_github_pr_status_v1",
-      "topic": "onex.evt.github.pr-status.v1",
-      "topic_pattern": "*.evt.github.pr-status.*",
-      "type_scoped": false
-    },
-    {
-      "contract_name": "node_pr_state_write_effect",
-      "dispatcher_id": "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_451d3913",
-      "handler_id": "dispatcher.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_451d3913",
-      "message_category": "command",
-      "route_id": "route.auto.node_pr_state_write_effect.HandlerPrStateUpsert.pr_state_upsert_451d3913.onex_cmd_omnibase_infra_pr_state_upsert_v1",
-      "topic": "onex.cmd.omnibase-infra.pr-state-upsert.v1",
-      "topic_pattern": "*.cmd.omnibase-infra.pr-state-upsert.*",
-      "type_scoped": false
     },
     {
       "contract_name": "node_registration_orchestrator",

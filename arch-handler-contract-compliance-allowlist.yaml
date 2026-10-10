@@ -24,11 +24,6 @@ allowlisted_handlers:
     violations:
       - missing_handler_routing
     ticket: '# migration pending'
-  - path: omnibase_infra/nodes/node_github_pr_poller_effect/handlers/handler_github_api_poll.py
-    violations:
-      - hardcoded_topic
-      - undeclared_transport
-    ticket: '# migration pending'
   - path: omnibase_infra/nodes/node_gmail_archive_cleanup_effect/handlers/handler_gmail_archive_cleanup.py
     violations:
       - hardcoded_topic

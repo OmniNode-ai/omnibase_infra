@@ -140,7 +140,6 @@ P0_OUTCOMES: dict[str, Any] = {
         "now_routing_orchestrators": [
             "node_rsd_orchestrator",
             "node_routing_orchestrator",
-            "node_merge_sweep_workflow_orchestrator",
             "node_scope_workflow_orchestrator",
             "node_chain_orchestrator",
             "node_registration_orchestrator",
@@ -148,7 +147,6 @@ P0_OUTCOMES: dict[str, Any] = {
         "declared_dlq_topics": {
             "node_rsd_orchestrator": "onex.dlq.omnibase-infra.rsd.v1",
             "node_routing_orchestrator": "onex.dlq.omnibase-infra.router.v1",
-            "node_merge_sweep_workflow_orchestrator": "onex.dlq.omnibase-infra.skill.v1",
             "node_scope_workflow_orchestrator": "onex.dlq.omnibase-infra.skill.v1",
             "node_chain_orchestrator": "onex.dlq.omnibase-infra.omnibase-infra.v1",
             "node_registration_orchestrator": "onex.dlq.omnibase-infra.platform.v1",

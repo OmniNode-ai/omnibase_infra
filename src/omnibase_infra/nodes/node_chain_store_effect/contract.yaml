@@ -34,7 +34,7 @@ event_bus:
   # the intended producer, declares no event_bus; grep of every omni_home clone,
   # 2026-10-01), so the subscription only minted a permanently empty consumer
   # group (OMN-16795). The node keeps its unscoped operation_match entry, the
-  # same in-process shape as node_merge_sweep_pr_list_effect. Re-add the
+  # same in-process shape the other unscoped effect nodes use. Re-add the
   # subscription with its publisher, in one diff (OMN-7897).
   publish_topics:
     - "onex.evt.omnibase-infra.chain-stored.v1"
