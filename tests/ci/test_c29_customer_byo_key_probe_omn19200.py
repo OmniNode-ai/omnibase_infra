@@ -307,6 +307,8 @@ def test_a_run_with_no_key_supplied_is_an_input_failure_not_a_verdict(
             "run",
             "--provider",
             "glm",
+            "--model",
+            "google/gemini-2.5-flash-lite",
             "--key-env",
             "C29_TEST_KEY",
             "--customer-home",
@@ -384,6 +386,7 @@ def test_the_run_files_are_read_from_the_state_root_the_cli_resolves(
     args = argparse.Namespace(
         key_env="C29_TEST_KEY",
         provider="openrouter",
+        model="google/gemini-2.5-flash-lite",
         customer_home=str(home),
         customer_bin=str(bin_dir),
         workdir=str(work),
@@ -418,6 +421,7 @@ def test_every_delegate_step_asks_for_the_json_receipt_omn20124(
     args = argparse.Namespace(
         key_env="C29_TEST_KEY",
         provider="openrouter",
+        model="google/gemini-2.5-flash-lite",
         customer_home=str(home),
         customer_bin=str(bin_dir),
         workdir=str(work),

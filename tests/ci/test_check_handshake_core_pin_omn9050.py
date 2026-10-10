@@ -1,12 +1,11 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""The handshake workflow's omnibase_core pin moved off efba6fb107f4 (OMN-9050).
+"""The handshake workflow's omnibase_core pin moved to 2ca615af292a (OMN-9050).
 
 The automated pin bump moves the omnibase_core checkout ref in
 check-handshake.yml. The ref must be a full commit sha, the auto-bump comment
-above it must name the same commit, and it must no longer be the superseded
-efba6fb107f4 pin, so a revert of the bump fails here.
+above it must name the same commit, and it must be the bumped 2ca615af292a pin, so a revert of the bump fails here.
 """
 
 from __future__ import annotations
@@ -21,7 +20,8 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "check-handshake.yml"
-SUPERSEDED_REF = "efba6fb107f49c67e01f244c1830d55d0fffed29"
+SUPERSEDED_REF = "16ee7c558552"
+BUMPED_REF = "2ca615af292a52898359d23538299f3bc0880f07"
 
 
 def _core_checkout_ref() -> str:
@@ -50,4 +50,8 @@ def test_core_pin_matches_auto_bump_comment() -> None:
 
 
 def test_core_pin_moved_off_superseded_ref() -> None:
-    assert _core_checkout_ref() != SUPERSEDED_REF
+    assert not _core_checkout_ref().startswith(SUPERSEDED_REF)
+
+
+def test_core_pin_is_bumped_ref() -> None:
+    assert _core_checkout_ref() == BUMPED_REF
