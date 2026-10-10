@@ -28,6 +28,9 @@ topics:
   - onex.dlq.omnibase-infra.commands.v1
   # --- GitHub PR merged event (OMN-6726) ---
   - onex.evt.github.pr-merged.v1
+  # --- GitHub PR triage status (OMN-2656): produced by omnimarket's PR poller,
+  # read by the TUI status consumer (OMN-20915 moved the producer out) ---
+  - onex.evt.github.pr-status.v1
   # --- Post-merge check chain result (OMN-6727) ---
   - onex.evt.github.post-merge-result.v1
   # --- A/B eval completed event (OMN-6779) ---
