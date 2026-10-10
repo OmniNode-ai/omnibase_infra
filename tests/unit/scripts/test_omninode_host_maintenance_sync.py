@@ -4,7 +4,7 @@
 
 WHAT IS UNDER TEST
     ``deploy/maintenance/omninode-host-maintenance-sync.sh`` -- the artifact
-    root runs hourly from ``/etc/cron.d/omninode-host-maintenance-sync`` on
+    root runs hourly via ``omninode-host-maintenance-sync.service`` on
     ``.201``. These tests drive that file itself, not a re-implementation
     (memory ``feedback_test_the_artifact_that_runs``).
 
@@ -19,7 +19,7 @@ WHY IT EXISTS
 HERMETICITY
     Each test builds a throwaway git repo as the "infra clone" and points the
     manifest at temp paths via ``OMNINODE_MAINTENANCE_SYNC_MANIFEST``, so no
-    test ever reads or writes a real ``/data/maintenance`` or ``/etc/cron.d``
+    test ever reads or writes a real ``/data/maintenance`` or ``/etc/systemd/system``
     path. ``OMNINODE_MAINTENANCE_SYNC_SKIP_FETCH=1`` keeps the network out.
 """
 
@@ -180,15 +180,19 @@ def test_live_report_script_is_governed_by_the_manifest() -> None:
     source = SYNC_SCRIPT.read_text()
     for hostpath in (
         "/data/maintenance/bin/omninode-system-slack-report.sh",
-        "/etc/cron.d/omninode-system-slack-report",
+        "/etc/systemd/system/omninode-system-slack-report-alert.service",
+        "/etc/systemd/system/omninode-system-slack-report-alert.timer",
+        "/etc/systemd/system/omninode-system-slack-report-digest.service",
+        "/etc/systemd/system/omninode-system-slack-report-digest.timer",
         # The detector must govern itself, or it can silently rot too.
         "/data/maintenance/bin/omninode-host-maintenance-sync.sh",
-        "/etc/cron.d/omninode-host-maintenance-sync",
+        "/etc/systemd/system/omninode-host-maintenance-sync.service",
+        "/etc/systemd/system/omninode-host-maintenance-sync.timer",
     ):
         assert hostpath in source, f"{hostpath} is not governed by the sync manifest"
 
 
-# The cron unit's contract moved to
+# The scheduled unit's contract moved to
 # `tests/unit/scripts/test_maintenance_sync_converge_omn17898.py` when OMN-17898
 # changed the scheduled invocation from `--check --slack` to `--converge
 # --slack`. The assertion that used to live here still holds in its important

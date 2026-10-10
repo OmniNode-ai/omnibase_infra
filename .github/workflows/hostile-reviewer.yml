@@ -61,16 +61,11 @@ name: Hostile Reviewer
 on:
   pull_request:
     branches: [main, dev]
-    # OMN-14241: `edited` added so a PR-body-only edit (e.g. stamping
-    # `Evidence-Source: OCC#<n>`) retriggers this workflow's own
-    # `occ-preflight` job -- see ci.yml's identical trigger for the full
-    # rationale. Without it, `occ-preflight / eligibility` (workflowName
-    # "Hostile Reviewer") sits at a stale pre-stamp FAILURE forever.
-    #
     # OMN-16216: labeled/unlabeled/ready_for_review so applying/removing
     # ci:ready or a draft->ready flip retriggers this workflow's evaluation
-    # of the hostile-review job's if:.
-    types: [opened, edited, synchronize, reopened, labeled, unlabeled, ready_for_review]
+    # of the hostile-review job's if:. `edited` is absent: no job here reads
+    # the pull request's title or body.
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
 
 permissions:
   pull-requests: write
@@ -81,24 +76,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  occ-preflight:
-    # self-gating-ok: centralized OCC preflight reusable is the canonical cross-repo gate for non-OCC repositories.
-    # omnibase_infra has no local occ-preflight.yml (unlike omnibase_core, which
-    # hosts the reusable) -- reference it remotely, matching the pinned SHA used
-    # by this repo's only other caller of it, ci.yml. Those two are the complete
-    # set of callers in this repository, and they must move together or the same
-    # merge path ends up gated by two different revisions of the reusable.
-    uses: OmniNode-ai/omnibase_core/.github/workflows/occ-preflight.yml@52851458622f368c3b596c82bf810bc6acce1d5e
-    permissions:
-      contents: read
-      pull-requests: read
-    with:
-      contracts-dir: contracts
-      receipts-dir: drift/dod_receipts
-      core-ref: f43f97629182f463d233b564b19a2b27d4fc4888 # .github/sibling-pins.yaml
-
   hostile-review:
-    needs: occ-preflight
     # OMN-16216 draft-state CI admission gate (mirrors onex_change_control
     # PR #6686 / OMN-15731): "Hostile Review Gate" does not gate merge today
     # (absent from STRICT_GATE_JOBS/SKIPPABLE_GATE_JOBS/
@@ -165,7 +143,7 @@ jobs:
             rm -rf ../omniintelligence
             if git clone --filter=blob:none --no-checkout \
               https://github.com/OmniNode-ai/omniintelligence.git ../omniintelligence \
-              && git -C ../omniintelligence checkout --quiet 33a29cdfba6f14be6f94c3c77a05e29f345c692b; then # .github/sibling-pins.yaml
+              && git -C ../omniintelligence checkout --quiet 30f37eca07b692d7889692edfe99686c87612315; then # .github/sibling-pins.yaml
               exit 0
             fi
             sleep $((attempt * 10))
@@ -620,14 +598,14 @@ jobs:
         && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
         || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
       }}
-    needs: [occ-preflight, hostile-review]
+    needs: hostile-review
     # OMN-18793: `!cancelled()`, never bare `always()`. This workflow declares
     # `concurrency.cancel-in-progress: true`, so every re-push cancels the run
     # already in flight. `always()` is TRUE on a cancelled run, so the gate
-    # executed there too, read `needs.occ-preflight.result == 'cancelled'`, and
-    # posted a hard `failure` against the pull-request head for a run that was
-    # never allowed to produce a verdict -- 9 of the 10 most recent heads when
-    # the OMN-18254 failure-rate alert first fired (run 35412814968).
+    # executed there too, read a `cancelled` upstream result, and posted a hard
+    # `failure` against the pull-request head for a run that was never allowed
+    # to produce a verdict -- 9 of the 10 most recent heads when the OMN-18254
+    # failure-rate alert first fired (run 35412814968).
     #
     # `!cancelled()` changes WHEN this job runs, never WHAT it refuses: a
     # skipped or failed upstream still evaluates here (a draft/bot-skipped
@@ -640,15 +618,9 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           echo "=== Hostile Review Gate ==="
-          PREFLIGHT="${{ needs.occ-preflight.result }}"
           RESULT="${{ needs.hostile-review.result }}"
-          echo "occ-preflight: $PREFLIGHT"
           echo "hostile-review: $RESULT"
 
-          if [ "$PREFLIGHT" != "success" ]; then
-            echo "::error::OCC preflight failed or did not complete (result: $PREFLIGHT)."
-            exit 1
-          fi
           if [ "$RESULT" = "failure" ]; then
             # OMN-17492: hostile-review no longer exits nonzero on findings
             # (finder-never-gate) — a failure here is a pipeline/infra error

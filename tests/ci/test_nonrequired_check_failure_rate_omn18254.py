@@ -131,15 +131,21 @@ def test_an_umbrella_enforced_context_is_treated_as_required() -> None:
     """The naive reading -- absent from branch protection means unwatched -- would
     report dozens of omnibase_infra checks that do block a merge.
 
-    The Receipt Gate is the sharpest example: it surfaces as `verify / verify`,
-    it is nowhere in branch protection, and it blocks every merge.
+    The route gate is absent from branch protection and still blocks merges
+    through CI Summary. Retired OCC contexts must no longer be declared here.
     """
     module = _module()
     declared = module.load_policy(POLICY)["umbrella_enforced_contexts"][
         "omnibase_infra"
     ]
-    for enforced in ("CI Summary", "verify / verify", "occ-preflight / eligibility"):
+    for enforced in ("CI Summary", "Runner Route (OMN-18031) / route"):
         assert enforced in declared, f"{enforced} would be reported as unwatched"
+    for retired in (
+        "verify / verify",
+        "occ-preflight / eligibility",
+        "OCC Companion Merged Gate (OMN-15214)",
+    ):
+        assert retired not in declared
 
 
 def test_a_rerun_storm_on_one_head_cannot_reach_the_threshold() -> None:

@@ -44,7 +44,9 @@ def test_documentation_price_is_not_presented_as_measured() -> None:
     raw = yaml.safe_load(_DEFAULT_MANIFEST_PATH.read_text(encoding="utf-8"))
     entry = raw["models"][_MODEL]
     assert entry["confidence"] == "LOW_CONFIDENCE"
-    assert entry["source"] == "FALLBACK_PROVIDER_DOCUMENTATION"
+    assert (
+        entry["source"] == "PROVIDER_PUBLISHED_PRICING"
+    )  # OMN-20387: cited provider page
     assert entry["sample_count"] == 0
     assert entry["evidence"]["authoritative"] is False
     assert entry["effective_date"]

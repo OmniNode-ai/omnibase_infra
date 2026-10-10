@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-20074
 title: Switch omnibase_infra's repo-evidence caller to the base-branch trigger for S6 part 1 of the OCC retirement
-summary: Move the repo-evidence caller to the base-branch trigger as the single named exception to the runner-routing ban, ruled by the operator (2026-10-08T22:41:24Z). Registering repo-evidence / dod-verify in CI Summary waits for a follow-up once base-branch-trigger runs exist on merged dev heads; OCC removal belongs to S6 part 2.
+summary: Move the repo-evidence caller to the base-branch trigger as the single named exception to the runner-routing ban, ruled by the operator (2026-10-08T22:41:24Z), and register repo-evidence / dod-verify in CI Summary. S6 part 2 then removes every OCC caller, namely the occ-preflight wait in ci.yml, the autobind, companion-effect, companion-merge-heal and preflight-heal workflows, the receipt-gate caller and the OCC companion gate in CI Summary.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -14,11 +14,19 @@ requirements:
       - id: AC2
         statement: 'AC2: the runner-routing audit admits pull_request_target in exactly one workflow, call-repo-evidence-gate.yml, named in config/runner_routing_policy.yaml with the operator ruling, refuses a pattern or a list in its place and any other workflow using the trigger, and holds that file to a read-only pinned reusable call with no inline steps or secrets -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k pull_request_target'
   - id: req-repo-evidence-required-ci-summary
-    statement: omnibase_infra's CI Summary must expect repo-evidence / dod-verify on every pull_request run, so an absent repo-owned evidence verdict fails the only required context on dev, while every OCC context stays enforced until S6 part 2.
+    statement: omnibase_infra's CI Summary must expect repo-evidence / dod-verify on every pull_request run, so an absent repo-owned evidence verdict fails the only required context on dev.
     acceptance:
       - id: AC3
         statement: 'AC3: repo-evidence / dod-verify is a member of EXPECTED_EXTERNAL_CONTEXTS, a pull_request check-run set without it fails the expected-context evaluation naming it, and a green pull_request_target row satisfies it -- falsifier: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q fails at the merge base'
+  - id: req-no-occ-callers-s6-part2
+    statement: omnibase_infra must have no workflow that calls an OCC reusable workflow, waits on occ-preflight or requires an OCC companion context, so pull-request admission needs repo-owned evidence only.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: no omnibase_infra workflow calls or waits on an OCC path, and neither CI Summary nor the required-checks manifest expects an OCC companion context -- falsifier: uv run pytest tests/ci/test_no_occ_callers_omn20074.py -q -k no_occ_callers'
 evidence_requirements:
+  - kind: tests
+    description: No workflow calls an OCC reusable workflow, waits on occ-preflight or requires an OCC companion context.
+    command: uv run pytest tests/ci/test_no_occ_callers_omn20074.py -q -k no_occ_callers
   - kind: tests
     description: The caller enforces at the caller-mode success-no-op pin without waiting for OCC comparison.
     command: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s6_part1
@@ -60,3 +68,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
+  - id: dod-no-occ-callers-ac4
+    description: The repository test proves no workflow calls or waits on an OCC path and CI Summary expects no OCC companion context.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_no_occ_callers_omn20074.py -q -k no_occ_callers
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4

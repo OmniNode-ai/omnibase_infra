@@ -19,7 +19,7 @@ requirements:
     statement: The Hostile Reviewer clones omniintelligence at the dev tip that carries the failed-vote parse fix and the registry key rename, and every roster site names the renamed second voter.
     acceptance:
       - id: AC4
-        statement: 'AC4: sibling-pins.yaml and the hostile-reviewer clone name omniintelligence 33a29cdfba6f14be6f94c3c77a05e29f345c692b, and the retired gpt-oss-review key and its URL env var are gone -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_pin_omn20422.py -q'
+        statement: 'AC4: sibling-pins.yaml and the hostile-reviewer clone name omniintelligence 30f37eca07b692d7889692edfe99686c87612315, and the retired gpt-oss-review key and its URL env var are gone -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_pin_omn20422.py -q'
   - id: req-omn20422-shadow-timer
     statement: The shadow reviewer tick runs from a lab-host user timer, never from a CI runner, and a stale or missing PR watcher state fails the tick visibly instead of reading as a quiet day.
     acceptance:
@@ -65,7 +65,7 @@ dod_evidence:
     binds_ac:
       - AC3
   - id: dod-omn-20422-ac4
-    description: The omniintelligence pin is the parse-fix sha and the renamed second voter is requested at every roster site.
+    description: The omniintelligence pin is 30f37eca07b692d7889692edfe99686c87612315 (carries omniintelligence#1020), the renamed second voter is requested at every roster site, and both voters answer and parse on the pinned build per the recorded cli_review run.
     source: manual
     checks:
       - check_type: test_passes

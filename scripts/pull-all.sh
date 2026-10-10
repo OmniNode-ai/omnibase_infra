@@ -12,7 +12,7 @@ set -euo pipefail
 OMNI_HOME="${OMNI_HOME:?set OMNI_HOME to the omni_home registry path}"
 
 REPOS=(
-  knowledge-base
+  knowledge_base
   knowledge-base-internal
   omniclaude
   omnibase_compat

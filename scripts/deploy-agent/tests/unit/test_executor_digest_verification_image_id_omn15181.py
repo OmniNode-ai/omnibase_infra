@@ -27,7 +27,7 @@ second implementation.
 Class ``TestRepoDigestsOnContainerIsRealDockerFailureMode`` executes the
 actual docker CLI against a real, disposable container to pin the underlying
 docker semantic (skipped when no real docker daemon is reachable, or when
-that daemon cannot produce the base container within budget -- runs on
+that daemon cannot create the disposable container within budget -- runs on
 self-hosted CI / omninode-pc, per feedback_test_the_artifact_that_runs). The
 mock-based classes below assert the real command/format-string shape emitted
 by our source, not just that some digest was returned.
@@ -75,20 +75,8 @@ requires_docker = pytest.mark.skipif(
 )
 
 
-_PULL_TIMEOUT_SECONDS = 90
 _CREATE_TIMEOUT_SECONDS = 90
 _REMOVE_TIMEOUT_SECONDS = 60
-
-# Substrings that identify a `docker create` refusal caused by the base image
-# never becoming available locally (registry unreachable / pull timed out),
-# as opposed to a genuine docker semantic this fixture should surface.
-_IMAGE_UNAVAILABLE_MARKERS = (
-    "no such image",
-    "not found",
-    "manifest unknown",
-    "pull access denied",
-    "error response from daemon: pull",
-)
 
 
 def _docker(args: list[str], timeout: int) -> subprocess.CompletedProcess[str] | None:
@@ -115,15 +103,19 @@ def _docker(args: list[str], timeout: int) -> subprocess.CompletedProcess[str] |
 
 
 @pytest.fixture
-def real_container():
+def real_container(local_inspect_image: str):
     """A real, disposable container -- exercises actual docker inspect semantics."""
     name = f"omn15181-digest-fixture-{uuid.uuid4().hex[:12]}"
-    # Best-effort warm-up: a timeout here is not fatal, the image is often
-    # already cached on the runner and `docker create` is the real gate.
-    _docker(["docker", "pull", "busybox:latest"], _PULL_TIMEOUT_SECONDS)
-
     create = _docker(
-        ["docker", "create", "--name", name, "busybox:latest"],
+        [
+            "docker",
+            "create",
+            "--pull=never",
+            "--name",
+            name,
+            local_inspect_image,
+            "/unused",
+        ],
         _CREATE_TIMEOUT_SECONDS,
     )
     if create is None:
@@ -133,13 +125,6 @@ def real_container():
             "statement about docker inspect semantics (OMN-15749)"
         )
     if create.returncode != 0:
-        stderr = create.stderr.lower()
-        if any(marker in stderr for marker in _IMAGE_UNAVAILABLE_MARKERS):
-            pytest.skip(
-                "busybox:latest never became available locally: "
-                f"{create.stderr.strip()} (OMN-15749)"
-            )
-        # Any other non-zero exit is a real docker semantic -- surface it.
         raise AssertionError(create.stderr)
     try:
         yield name

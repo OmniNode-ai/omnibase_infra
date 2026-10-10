@@ -29,7 +29,11 @@ Row lifecycle (OMN-16803 AC5): a row carries an optional ``status`` of
 whose content has been durably superseded — rebuilt from merged source, its
 ``.prepatch`` sibling gone — is retired by setting ``status: reconciled``
 together with ``reconciled_utc`` and ``reconciliation_note``; the preflight
-then skips the row with a printed notice instead of gating on it. Retiring a
+then skips the row with a printed notice instead of gating on it. The retiring
+is done by ``node_hotpatch_ledger_reconcile_effect`` (OMN-17427), never by a
+hand edit: it checks the fix commit is an ancestor of the deployed ref and the
+container carries no ``.prepatch``, backs the ledger up, and refuses otherwise.
+A refusal over an unusable ``merge_commit`` prints the exact command. Retiring a
 row by DELETING it is wrong: the ledger is the forensic record of what was
 ever patched, and deletion destroys exactly the history it exists to hold.
 Retirement is not an allowlist — a reconciled row's ``.prepatch`` path leaves
@@ -49,8 +53,10 @@ configuration error (missing ledger, unknown commit, malformed bypass).
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -80,6 +86,13 @@ VALID_ROW_STATUSES = (ROW_STATUS_ACTIVE, ROW_STATUS_RECONCILED)
 # mandatory on a reconciled row so the ledger always answers "when, and on
 # what evidence" for every row that stopped being gated.
 RECONCILED_REQUIRED_FIELDS = ("reconciled_utc", "reconciliation_note")
+
+# OMN-17427: retirement is the node's job, not a hand edit. The refusal below
+# prints the exact command; the node re-verifies everything it is told.
+RECONCILE_NODE = "node_hotpatch_ledger_reconcile_effect"
+RECONCILE_PLACEHOLDER_COMMIT = "<FIX_MERGE_SHA>"
+RECONCILE_LINE_PREFIX = "HOTPATCH-PREFLIGHT RECONCILE: "
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ContainerAbsentError(ValueError):
@@ -257,6 +270,127 @@ def candidate_commits(value: Any) -> list[str]:
     )
 
 
+def suggest_fix_commit(clone: Path, source_pr: str, build_ref: str) -> str | None:
+    """Return the one commit on *build_ref* whose message cites ``(#N)`` of the
+    row's source PR, or None when zero or several match.
+
+    Only a suggestion for the printed command: the reconcile node verifies
+    ancestry and the container itself before it writes anything.
+    """
+    match = re.search(r"#(\d+)$", source_pr)
+    if match is None:
+        return None
+    result = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(clone),
+            "log",
+            "--format=%H",
+            "-n",
+            "2",
+            "--fixed-strings",
+            f"--grep=(#{match.group(1)})",
+            build_ref,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    commits = result.stdout.split()
+    if result.returncode != 0 or len(commits) != 1:
+        return None
+    return commits[0]
+
+
+def reconcile_command(
+    row: dict[str, Any],
+    *,
+    ledger_path: Path,
+    clones_root: Path,
+    docker_cmd: str,
+    build_ref: str | None,
+    fix_commit: str | None,
+) -> str:
+    """The exact shell command that retires *row* through the reconcile node."""
+    payload = {
+        "ledger_path": str(Path(ledger_path).resolve()),
+        "clones_root": str(Path(clones_root).resolve()),
+        "container": str(row.get("container")),
+        "file": str(row.get("file")),
+        "merge_commit": fix_commit or RECONCILE_PLACEHOLDER_COMMIT,
+    }
+    if build_ref is not None:
+        payload["deployed_ref"] = build_ref
+    if docker_cmd != "docker":
+        payload["docker_cmd"] = docker_cmd
+    state_root = REPO_ROOT / ".onex_state" / "hotpatch-reconcile"
+    stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", f"{payload['container']}{payload['file']}")
+    input_file = state_root / f"{stem}.json"
+    return (
+        f"mkdir -p {shlex.quote(str(state_root))}"
+        f" && printf '%s' {shlex.quote(json.dumps(payload))} > {shlex.quote(str(input_file))}"
+        f" && uv run --frozen --project {shlex.quote(str(REPO_ROOT))}"
+        f" onex node {RECONCILE_NODE} --input {shlex.quote(str(input_file))}"
+        f" --backend event_bus=inmemory --state-root {shlex.quote(str(state_root))}"
+    )
+
+
+def report_unusable_merge_commits(
+    unusable: list[tuple[dict[str, Any], ValueError]],
+    args: argparse.Namespace,
+    explicit_refs: dict[str, str],
+) -> int:
+    """Refuse every row whose ``merge_commit`` is unusable, each with the
+    command that retires it (OMN-17427). Reporting all of them in one run
+    keeps an operator from discovering a second stale row only after fixing
+    the first."""
+    clones_root = Path(args.clones_root)
+    for row, exc in unusable:
+        repo = row.get("source_repo")
+        build_ref: str | None = None
+        fix_commit: str | None = None
+        if isinstance(repo, str):
+            try:
+                build_ref = resolve_build_ref(repo, explicit_refs, clones_root)
+            except ValueError:
+                build_ref = None
+            if build_ref is not None:
+                fix_commit = suggest_fix_commit(
+                    clones_root / repo, str(row.get("source_pr")), build_ref
+                )
+        advice = (
+            f"Replace {RECONCILE_PLACEHOLDER_COMMIT} in the command with the "
+            f"merge commit of {row.get('source_pr')} first."
+            if fix_commit is None
+            else f"Merge commit {fix_commit[:12]} was found on the build ref "
+            "from the PR number."
+        )
+        fail(
+            f"ledger row {row.get('file')!r} in {row.get('container')!r} "
+            f"({row.get('source_pr')}) has no usable merge_commit: {exc}. "
+            "If its fix is merged into the build ref and the container no "
+            "longer carries the .prepatch, retire the row with the command "
+            "below. It re-checks both, refuses otherwise (the reason is in "
+            "handler_result of workflow_result.json under its --state-root), "
+            "and writes a timestamped backup beside the ledger. " + advice,
+            code=2,
+        )
+        print(
+            RECONCILE_LINE_PREFIX
+            + reconcile_command(
+                row,
+                ledger_path=Path(args.ledger),
+                clones_root=clones_root,
+                docker_cmd=args.docker_cmd,
+                build_ref=build_ref,
+                fix_commit=fix_commit,
+            ),
+            file=sys.stderr,
+        )
+    return 2
+
+
 def tripwire_prepatch_files(container: str, docker_cmd: str) -> list[str]:
     """Return every ``.prepatch`` path found inside the running container.
 
@@ -361,12 +495,18 @@ def run_preflight(args: argparse.Namespace) -> int:
     clones_root = Path(args.clones_root)
     resolved_refs: dict[str, str] = {}
 
+    usable: list[tuple[dict[str, Any], list[str]]] = []
+    unusable: list[tuple[dict[str, Any], ValueError]] = []
     for row in rows:
-        repo = row["source_repo"]
         try:
-            candidates = candidate_commits(row["merge_commit"])
+            usable.append((row, candidate_commits(row.get("merge_commit"))))
         except ValueError as exc:
-            return fail(str(exc), code=2)
+            unusable.append((row, exc))
+    if unusable:
+        return report_unusable_merge_commits(unusable, args, explicit_refs)
+
+    for row, candidates in usable:
+        repo = row["source_repo"]
         clone = clones_root / repo
         if repo not in resolved_refs:
             try:

@@ -5,9 +5,9 @@
 WHAT IS UNDER TEST
     ``deploy/maintenance/omninode-system-slack-report.sh`` -- the real bash
     artifact that root runs on ``.201`` via
-    ``/etc/cron.d/omninode-system-slack-report``. Every test here drives that
-    file itself, not a Python re-implementation of it: a surrogate would prove
-    nothing about the thing that actually alarms (memory
+    the ``omninode-system-slack-report-{alert,digest}.service`` units. Every test
+    here drives that file itself, not a Python re-implementation of it: a
+    surrogate would prove nothing about the thing that actually alarms (memory
     ``feedback_test_the_artifact_that_runs``).
 
 THE RED-BEFORE IS REAL, NOT ASSERTED
@@ -58,9 +58,7 @@ AS_DEPLOYED_SCRIPT = (
 # The `.captured` suffix keeps the SPDX-header hook off the file for the same
 # reason -- a stamped header would no longer be the artifact that ran.
 AS_DEPLOYED_SHA256 = "5fe6e5a61d6074922142006f5fc905e146bc4a1dcc18dbe4e0da99ddaec209da"
-CRON_UNIT = (
-    REPO_ROOT / "deploy" / "maintenance" / "cron.d" / "omninode-system-slack-report"
-)
+SYSTEMD_DIR = REPO_ROOT / "deploy" / "maintenance" / "systemd"
 RUNTIME_POLICY_ENV = REPO_ROOT / "docker" / "runtime-policy.env"
 
 # Lane -> the runtime-policy.env key that carries its MAIN runtime port.
@@ -780,10 +778,13 @@ def test_lane_specs_carry_no_hardcoded_fallback_ports() -> None:
             assert not re.fullmatch(r"\d+", fields[1]), entry
 
 
-def test_cron_unit_points_at_the_versioned_script_name() -> None:
-    unit = CRON_UNIT.read_text()
-    assert "omninode-system-slack-report.sh" in unit
-    assert "--mode alert" in unit and "--mode digest" in unit
+@pytest.mark.parametrize("mode", ["alert", "digest"])
+def test_service_unit_points_at_the_versioned_script_name(mode: str) -> None:
+    unit = (SYSTEMD_DIR / f"omninode-system-slack-report-{mode}.service").read_text()
+    commands = re.findall(r"^\s*ExecStart\s*=(.*)$", unit, re.MULTILINE)
+    assert commands == [
+        f"/data/maintenance/bin/omninode-system-slack-report.sh --mode {mode}"
+    ]
 
 
 # --------------------------------------------------------------------------

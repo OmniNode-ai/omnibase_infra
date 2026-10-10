@@ -50,6 +50,13 @@ def test_review_and_preflight_share_one_second_voter_url_on_port_8131() -> None:
     assert urlparse(url).port == 8131
 
 
+def test_the_review_gate_waits_on_the_review_alone() -> None:
+    """OMN-20074: no change-control preflight job sits in front of the review."""
+    jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    assert "needs" not in jobs["hostile-review"]
+    assert jobs["hostile-review-gate"]["needs"] == "hostile-review"
+
+
 def test_the_quorum_keys_are_unchanged() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "--model qwen3-review" in text

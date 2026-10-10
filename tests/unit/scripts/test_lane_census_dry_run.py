@@ -5,9 +5,10 @@
 
 Properties proven here:
   1. --dry-run NEVER publishes to the bus (no `rpk produce`).
-  2. On drift, the script exits 30 (fail-fast, no warn-only mode).
-  3. With no broker configured, a live run does NOT publish (fail-fast, no
-     localhost default) — it logs for manual replay and still exits 30 on drift.
+  2. On drift that reaches the bus, the script exits 30 (fail-fast, no
+     warn-only mode).
+  3. With no broker container configured, a live run does NOT publish
+     (fail-fast, no localhost default) and exits 8, not 30 (OMN-20798).
   4. A clean lane (no drift) exits 0.
 
 We shim `docker`, `rpk`, and `hostname` on PATH with a recorder so the test is
@@ -79,9 +80,9 @@ def _run(
     # fallback against the shim, hermetically and on any host.
     env["LANE_CENSUS_DOCKER_SOCKET"] = "/nonexistent/lane-census-test.sock"
     env["HOME"] = str(tmp_path)  # log dir under tmp, never ~
-    env.pop("KAFKA_BOOTSTRAP_SERVERS", None)
+    env.pop("LANE_MEMORY_BROKER_CONTAINER", None)
     if broker:
-        env["KAFKA_BOOTSTRAP_SERVERS"] = broker
+        env["LANE_MEMORY_BROKER_CONTAINER"] = broker
 
     proc = subprocess.run(
         ["bash", str(_SCRIPT), *args],
@@ -124,7 +125,7 @@ def test_dry_run_does_not_publish(tmp_path: Path) -> None:
         tmp_path,
         ps_rows=_LANE_OUTAGE_PS,
         networks=_NO_NETWORKS,
-        broker="redpanda:9092",
+        broker="redpanda",
     )
     assert proc.returncode == 30, proc.stderr
     assert "produce" not in calls, f"dry-run published to bus:\n{calls}"
@@ -136,13 +137,13 @@ def test_drift_exits_30(tmp_path: Path) -> None:
         tmp_path,
         ps_rows=_LANE_OUTAGE_PS,
         networks=_NO_NETWORKS,
-        broker="redpanda:9092",
+        broker="redpanda",
     )
     assert proc.returncode == 30, proc.stderr
 
 
 def test_live_without_broker_does_not_publish(tmp_path: Path) -> None:
-    """No KAFKA_BOOTSTRAP_SERVERS => no publish (fail-fast, no localhost default)."""
+    """No broker container => no publish (fail-fast, no default), exit 8."""
     proc, calls = _run(
         ["--lane", _LANE],
         tmp_path,
@@ -151,7 +152,7 @@ def test_live_without_broker_does_not_publish(tmp_path: Path) -> None:
         broker=None,
     )
     assert "produce" not in calls, f"published with no broker configured:\n{calls}"
-    assert proc.returncode == 30
+    assert proc.returncode == 8
 
 
 def test_clean_lane_exits_zero(tmp_path: Path) -> None:
@@ -184,7 +185,7 @@ def test_clean_lane_exits_zero(tmp_path: Path) -> None:
         tmp_path,
         ps_rows=ps,
         networks=networks,
-        broker="redpanda:9092",
+        broker="redpanda",
     )
     assert proc.returncode == 0, proc.stderr
     assert "produce" not in calls, "clean lane must not publish"

@@ -181,8 +181,6 @@ services:
   # the suffixed names.
   migration-gate: *prepr_fenced
   intelligence-api: *prepr_fenced
-  cloud-migration: *prepr_fenced
-  cloud-migration-files: *prepr_fenced
   # Auxiliary consumers. Out of the slot's declared twelve (OMN-18890), so they
   # are fenced rather than namespaced: a service the lane manifest does not
   # declare must not be running in a slot, or the census cannot reconcile it.
@@ -242,6 +240,29 @@ services:
       POSTGRES_USER: "role_omniintelligence_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}"
       POSTGRES_PASSWORD: "${ROLE_OMNIINTELLIGENCE_PASSWORD:?ROLE_OMNIINTELLIGENCE_PASSWORD must be set}"
   # =========================================================================
+  # The gateway's existing corpus and runner, scoped to the slot. The corpus
+  # volume must also be private: its copier deletes the previous contents.
+  cloud-migration-files:
+    profiles: !override ["prepr-migrate"]
+    container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-cloud-migration-files"
+    depends_on: !override []
+    volumes: !override
+      - prepr_cloud_migrations:/work
+    labels: !override
+      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
+  cloud-migration:
+    profiles: !override ["prepr-migrate"]
+    container_name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-cloud-migration"
+    depends_on: !override []
+    volumes: !override
+      - prepr_cloud_migrations:/work
+      - ../docker/migrations/cloud/run-cloud-migrations.sh:/run-cloud-migrations.sh:ro
+    environment:
+      DB_NAME: "omninode_cloud_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}"
+      DB_USER: "role_omninode_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}"
+      PGPASSWORD: "${ROLE_OMNINODE_PASSWORD:?ROLE_OMNINODE_PASSWORD must be set}"
+    labels: !override
+      - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
   # THE SLOT'S TWELVE. Names, ports, volumes and namespace only -- every other
   # property is inherited, which is the whole reason this is an overlay.
   #
@@ -466,9 +487,8 @@ services:
   # -------------------------------------------------------------------------
   # The slot's own gateway API.
   #
-  # It carries its own profile, `prepr-gateway`, which the entrypoint enables
-  # only under `--with-gateway`, and that default is OFF for a reason that is
-  # not caution.
+  # It carries its own profile, `prepr-gateway`, enabled by the entrypoint
+  # alongside the runtime family. Every claimed slot mints its own tenant.
   #
   # onex-api is IMAGE-REFERENCED (${ONEX_API_IMAGE}), not lane-built: it is a
   # self-contained application in the omninode_infra clone with no omnibase
@@ -480,11 +500,10 @@ services:
   # so the container would publish UNPREFIXED into the dev lane's topics
   # through exactly the path the isolation exists to protect.
   #
-  # Pinning and rebuilding that image is Task 5 (OMN-18894), which is also the
-  # task that mints the slot's tenant and submits the chain canary through
-  # this port. Until then the honest state is: declared, namespaced, and not
-  # started. The slot descriptor records `gateway_started` either way, so a
-  # receipt can never imply a gateway proof that did not run.
+  # The entrypoint pins the local image digest and checks the running
+  # gateway's namespace transform before minting the slot tenant (OMN-18894).
+  # The descriptor records `gateway_started` so an omitted gateway never
+  # implies a gateway proof.
   # -------------------------------------------------------------------------
   onex-api:
     profiles: !override ["prepr-gateway"]
@@ -530,6 +549,8 @@ networks:
 # would have mounted one is fenced.
 # ---------------------------------------------------------------------------
 volumes:
+  prepr_cloud_migrations:
+    name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-cloud-migrations"
   prepr_runtime_logs:
     name: "omninode-prepr-${ONEX_PREPR_SLOT:?ONEX_PREPR_SLOT must be set}-runtime-logs"
   prepr_runtime_data:
