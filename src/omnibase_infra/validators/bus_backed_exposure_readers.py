@@ -237,6 +237,17 @@ class BackendReaderSurface:
     kinds: frozenset[str]
     registrations: frozenset[BackendReaderRegistration]
     routes: frozenset[str]
+    optional_fields: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
+class ReaderSurfacePaths:
+    """The sibling source paths used to resolve the reader surface."""
+
+    registry: Path
+    layouts_dir: Path
+    backend_reader_surface: Path
+    local_pages_dir: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -338,6 +349,40 @@ def collect_layout_readers(
         for component_name in _RE_LAYOUT_COMPONENT.findall(text):
             for topic in component_to_topics.get(component_name, ()):
                 readers.setdefault(topic, set()).add(layout_file.name)
+    return readers
+
+
+def collect_local_page_readers(pages_dir: Path) -> dict[str, set[str]]:
+    """Resolve placed widgets through the component bindings shipped with each page."""
+    if not pages_dir.is_dir():
+        raise ReaderSurfaceError(f"local page directory {pages_dir} does not exist")
+    pages = sorted(pages_dir.glob("*.page.yaml"))
+    if not pages:
+        raise ReaderSurfaceError(f"{pages_dir} contains no shipped local pages")
+    readers: dict[str, set[str]] = {}
+    for page in pages:
+        contracts = page.with_name(page.name.replace(".page.yaml", ".contracts.yaml"))
+        try:
+            # The Vite local-page loader uses JSON.parse on these YAML files.
+            dashboard = json.loads(page.read_text(encoding="utf-8"))
+            document = json.loads(contracts.read_text(encoding="utf-8"))
+            widgets = dashboard["widgets"]
+            components = document["components"]
+            if not isinstance(widgets, list) or not isinstance(components, list):
+                raise ValueError("widgets and components must be lists")
+            placed = {widget["data_source"] for widget in widgets}
+            for component in components:
+                if component["component_id"] not in placed:
+                    continue
+                for binding in component["data_bindings"]:
+                    topic = binding["projection_topic"]
+                    if not isinstance(topic, str) or not topic:
+                        raise ValueError("projection_topic must be a non-empty string")
+                    readers.setdefault(topic, set()).add(f"local-page:{page.name}")
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise ReaderSurfaceError(
+                f"cannot resolve local page {page}: {exc}"
+            ) from exc
     return readers
 
 
@@ -568,7 +613,25 @@ def collect_backend_reader_surface(surface_dir: Path) -> BackendReaderSurface:
             f"{surface_dir / _SURFACE_API_FILE} does not serve. The two halves of the "
             "Market surface disagree, so no reader fact can be resolved from it."
         )
-    return BackendReaderSurface(kinds=kinds, registrations=registrations, routes=routes)
+    optional_fields = frozenset(
+        statement.target.id
+        for node in model.body
+        if isinstance(node, ast.ClassDef) and node.name == _SURFACE_MODEL_CLASS
+        for statement in node.body
+        if isinstance(statement, ast.AnnAssign)
+        and isinstance(statement.target, ast.Name)
+        and statement.target.id == "read_all_rows"
+        and isinstance(statement.annotation, ast.Name)
+        and statement.annotation.id == "bool"
+        and isinstance(statement.value, ast.Constant)
+        and statement.value.value is False
+    )
+    return BackendReaderSurface(
+        kinds=kinds,
+        registrations=registrations,
+        routes=routes,
+        optional_fields=optional_fields,
+    )
 
 
 def _parse_backend_readers(
@@ -604,12 +667,15 @@ def _parse_backend_readers(
 
         entry_keys = frozenset(entry)
         missing_keys = sorted(required_keys - entry_keys)
-        unknown_keys = sorted(entry_keys - required_keys)
+        unknown_keys = sorted(entry_keys - required_keys - surface.optional_fields)
         if missing_keys:
             errors.append(f"{prefix} is missing {', '.join(missing_keys)}")
         if unknown_keys:
             errors.append(f"{prefix} has unknown keys {', '.join(unknown_keys)}")
         if missing_keys or unknown_keys:
+            continue
+        if "read_all_rows" in entry and not isinstance(entry["read_all_rows"], bool):
+            errors.append(f"{prefix}.read_all_rows must be a boolean")
             continue
 
         reader_id = entry["id"]
@@ -865,6 +931,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="path to omnidash src/templates/ (the shipped DASHBOARD_TEMPLATES).",
     )
     parser.add_argument(
+        "--local-pages-dir",
+        type=Path,
+        help="path to omnidash src/pages/local/ (paired page and binding documents).",
+    )
+    parser.add_argument(
         "--backend-reader-surface",
         required=True,
         type=Path,
@@ -933,21 +1004,22 @@ def _report(
 
 def check_exposure_readers(
     contracts_dirs: Sequence[Path],
-    registry: Path,
-    layouts_dir: Path,
-    backend_reader_surface: Path,
+    paths: ReaderSurfacePaths,
     stream: IO[str] | None = None,
 ) -> int:
     out = stream if stream is not None else sys.stderr
 
-    surface = collect_backend_reader_surface(backend_reader_surface)
-    registry_readers = collect_registry_readers(registry)
-    layout_readers = collect_layout_readers(layouts_dir, registry_readers)
+    surface = collect_backend_reader_surface(paths.backend_reader_surface)
+    registry_readers = collect_registry_readers(paths.registry)
+    layout_readers = collect_layout_readers(paths.layouts_dir, registry_readers)
     readers: dict[str, set[str]] = {
         topic: set(names) for topic, names in registry_readers.items()
     }
     for topic, names in layout_readers.items():
         readers.setdefault(topic, set()).update(names)
+    if paths.local_pages_dir is not None:
+        for topic, names in collect_local_page_readers(paths.local_pages_dir).items():
+            readers.setdefault(topic, set()).update(names)
 
     scanned = list(_iter_contract_files(contracts_dirs))
     if not scanned:
@@ -971,9 +1043,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return check_exposure_readers(
             dirs,
-            args.registry,
-            args.layouts_dir,
-            args.backend_reader_surface,
+            ReaderSurfacePaths(
+                registry=args.registry,
+                layouts_dir=args.layouts_dir,
+                backend_reader_surface=args.backend_reader_surface,
+                local_pages_dir=args.local_pages_dir,
+            ),
         )
     except ReaderSurfaceError as exc:
         sys.stderr.write(f"[exposure-reader-coverage] FAIL (fail-closed): {exc}\n")

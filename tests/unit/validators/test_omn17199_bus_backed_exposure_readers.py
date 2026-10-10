@@ -29,6 +29,7 @@ from omnibase_infra.validators.bus_backed_exposure_readers import (
     collect_backend_reader_surface,
     collect_bus_backed_exposures,
     collect_layout_readers,
+    collect_local_page_readers,
     collect_registry_readers,
     evaluate,
     main,
@@ -976,3 +977,102 @@ def test_the_pass_line_names_the_backend_reader_not_an_opt_out(
     report = capsys.readouterr().err
     assert "backend:onex_status_page" in report
     assert "opted out" not in report
+
+
+@pytest.mark.parametrize("read_all_rows", [True, False, "true", 1, None])
+def test_read_all_rows_matches_the_pinned_reader_model(
+    tmp_path: Path, read_all_rows: object
+) -> None:
+    surface_dir = _write_surface(tmp_path)
+    model = surface_dir / "models.py"
+    model.write_text(model.read_text() + "    read_all_rows: bool = False\n")
+    surface = collect_backend_reader_surface(surface_dir)
+    contracts = tmp_path / "contracts"
+    _write_contract(
+        contracts,
+        "node_projection_promotion_gate",
+        {
+            "expose": True,
+            "topic": "onex.snapshot.projection.prod-promotion-gate.v1",
+            "bus_backed": True,
+            "backend_readers": [_backend_reader(read_all_rows=read_all_rows)],
+        },
+    )
+    findings = evaluate(collect_bus_backed_exposures([contracts], surface), {})
+    if isinstance(read_all_rows, bool):
+        assert findings == []
+    else:
+        assert [finding.code for finding in findings] == ["invalid_backend_reader"]
+        assert "read_all_rows must be a boolean" in findings[0].reason
+
+
+def test_read_all_rows_is_refused_when_the_model_does_not_declare_it(
+    tmp_path: Path,
+) -> None:
+    surface = collect_backend_reader_surface(_write_surface(tmp_path))
+    contracts = tmp_path / "contracts"
+    _write_contract(
+        contracts,
+        "node_projection_promotion_gate",
+        {
+            "expose": True,
+            "topic": "onex.snapshot.projection.prod-promotion-gate.v1",
+            "bus_backed": True,
+            "backend_readers": [_backend_reader(read_all_rows=True)],
+        },
+    )
+    findings = evaluate(collect_bus_backed_exposures([contracts], surface), {})
+    assert [finding.code for finding in findings] == ["invalid_backend_reader"]
+    assert "unknown keys read_all_rows" in findings[0].reason
+
+
+@pytest.mark.parametrize("placed", [True, False])
+def test_local_pages_count_only_placed_component_bindings(
+    tmp_path: Path, placed: bool
+) -> None:
+    pages = tmp_path / "local"
+    pages.mkdir()
+    (pages / "credentials.page.yaml").write_text(
+        json.dumps(
+            {
+                "widgets": [{"data_source": "credentials-keys"}] if placed else [],
+            }
+        )
+    )
+    (pages / "credentials.contracts.yaml").write_text(
+        json.dumps(
+            {
+                "components": [
+                    {
+                        "component_id": "credentials-keys",
+                        "data_bindings": [
+                            {"projection_topic": TENANT_CREDENTIALS_TOPIC}
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+    readers = collect_local_page_readers(pages)
+    assert readers == (
+        {TENANT_CREDENTIALS_TOPIC: {"local-page:credentials.page.yaml"}}
+        if placed
+        else {}
+    )
+
+
+@pytest.mark.parametrize(
+    "failure", ["missing-directory", "empty", "missing-contract", "invalid-json"]
+)
+def test_local_pages_fail_closed_on_unreadable_surface(
+    tmp_path: Path, failure: str
+) -> None:
+    pages = tmp_path / "local"
+    if failure != "missing-directory":
+        pages.mkdir()
+    if failure in {"missing-contract", "invalid-json"}:
+        (pages / "credentials.page.yaml").write_text('{"widgets": []}')
+    if failure == "invalid-json":
+        (pages / "credentials.contracts.yaml").write_text("not JSON")
+    with pytest.raises(ReaderSurfaceError):
+        collect_local_page_readers(pages)

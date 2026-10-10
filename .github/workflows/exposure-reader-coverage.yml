@@ -101,7 +101,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
+          ref: e286bd296e373e8e17e11c735393613a227f7972 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           persist-credentials: false
@@ -114,7 +114,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnidash
-          ref: cc628179717f4830bdd6c5a5e1b8d0c7bc4042ff # .github/sibling-pins.yaml
+          ref: e0dadfc6eadef5f5151f24f7f13bdc3628011c66 # .github/sibling-pins.yaml
           path: omnidash
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           persist-credentials: false
@@ -126,6 +126,7 @@ jobs:
           sparse-checkout: |
             src/registry/component-registry.json
             src/templates
+            src/pages/local
           sparse-checkout-cone-mode: false
 
       # The validator is a module under `src/omnibase_infra/validators/`, not a
@@ -172,4 +173,5 @@ jobs:
             --extra-contracts-dir omnimarket/src/omnimarket/nodes \
             --registry omnidash/src/registry/component-registry.json \
             --layouts-dir omnidash/src/templates \
+            --local-pages-dir omnidash/src/pages/local \
             --backend-reader-surface omnimarket/src/omnimarket/projection

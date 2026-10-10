@@ -367,6 +367,7 @@ async def test_runtime_delegation_dispatch_port_accepts_absent_optional_bus_feat
     _, payloads, _, _ = await _dispatch_with_fake_broker(
         monkeypatch,
         backend_id=None,
+        model=None,
         response_contract=None,
         system_prompt=None,
         temperature=None,
@@ -374,6 +375,7 @@ async def test_runtime_delegation_dispatch_port_accepts_absent_optional_bus_feat
     )
 
     assert "backend_id" not in payloads[0]
+    assert "model" not in payloads[0]
     assert "response_contract" not in payloads[0]
     assert "system_prompt" not in payloads[0]
     assert "temperature" not in payloads[0]
@@ -442,6 +444,7 @@ async def test_runtime_delegation_dispatch_port_forwards_response_contract(
 @pytest.mark.parametrize(
     ("dispatch_kwargs", "unsupported_feature"),
     [
+        ({"model": "requested-model"}, "model"),
         ({"system_prompt": "Answer tersely."}, "system_prompt"),
         ({"temperature": 0.2}, "temperature"),
         (
