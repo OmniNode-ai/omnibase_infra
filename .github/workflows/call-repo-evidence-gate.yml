@@ -43,8 +43,11 @@
 # OCC context is enforced beside it.
 # compare-with-occ is "false", so the difference step stops waiting for OCC.
 # verifier-version 0.4.305 ships the occ-difference classifier and omnimarket#3563,
-# so a rollback turns comparison back on with one input. The full-SHA pin is the
-# squash commit of omnibase_core#1914 on dev; caller-mode verify reports a success
+# so a rollback turns comparison back on with one input. The pinned reusable
+# refuses a verifier-version below 0.4.303 before installing it (VERIFIER_FLOOR,
+# omnibase_core#1932; OMN-20032), the first release that refuses a contract leaving
+# a criterion unbound. The full-SHA pin is the squash commit of omnibase_core#1932
+# on dev, a descendant of #1914; caller-mode verify reports a success
 # no-op, leaving only dod-verify to carry the verdict, a writer-app
 # dependency-pin-only head is exempt by a verdict derived in the job
 # (omnibase_core#1911), and so is the writer app's release cut that adds only a
@@ -69,7 +72,7 @@ permissions:
 
 jobs:
   repo-evidence:
-    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@fb0c6c2117d5868a398b0920cd0048d0824415b1 # OMN-20074: the squash commit of omnibase_core#1914 on dev; carries omnibase_core#1912 (caller-mode verify success no-op, the pin-only exemption derived in the job) and the writer app's release-cut exemption
+    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@4e4f5e0404d364e296c5d37db6aa3ab9e07f8ffa # OMN-20032: the squash commit of omnibase_core#1932 on dev; descends from #1914 (carries omnibase_core#1912's caller-mode verify success no-op and the pin-only exemption derived in the job, and the writer app's release-cut exemption), adds the VERIFIER_FLOOR 0.4.303 refusal to the verifier install step, and carries the writer app's workflow-pin (#1927) and plugin version bump (#1931) classification (the plugin one needs a verifier release newer than 0.4.309)
     with:
       evidence-source: caller
       verifier-version: 0.4.305
