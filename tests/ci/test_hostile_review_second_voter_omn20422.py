@@ -43,6 +43,10 @@ def test_second_voter_endpoint_is_the_studio_single_served_model(
     # One model on the Studio, and it is the first voter's model on another host.
     assert served == [FIRST_VOTER_MODEL]
     assert recording["completion"]["finish_reason"] == "stop"
+    # The review comment the workflow posts names the model the recording shows.
+    workflow_text = WORKFLOW.read_text(encoding="utf-8")
+    assert f"local-studio-planner ({served[0]})" in workflow_text
+    assert "Qwen3.6-35B-A3B" not in workflow_text
 
 
 def test_review_and_preflight_share_one_second_voter_url_from_a_variable() -> None:

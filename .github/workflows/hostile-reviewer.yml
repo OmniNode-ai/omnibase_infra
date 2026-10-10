@@ -548,7 +548,7 @@ jobs:
               '| `Hostile Review Thread Gate` | Deterministic: unresolved hostile-reviewer threads exist | Fails until resolved (not yet a required context) |',
               '| `degraded` verdict | Fewer than 2 models succeeded (infra) | Fails this job with a named reason |',
               '',
-              '_Powered by [omniintelligence.review_pairing.cli_review](https://github.com/OmniNode-ai/omniintelligence) — multi-model adversarial review: qwen3-review (Qwen3.8-27B), local-studio-planner (Qwen3.6-35B-A3B) (OMN-8468/OMN-8524/OMN-17492)_',
+              '_Powered by [omniintelligence.review_pairing.cli_review](https://github.com/OmniNode-ai/omniintelligence) — multi-model adversarial review: qwen3-review (Qwen3.8-27B), local-studio-planner (Qwen3.8-27B) (OMN-8468/OMN-8524/OMN-17492/OMN-20422)_',
             ].join('\n');
 
             const { data: comments } = await github.rest.issues.listComments({
