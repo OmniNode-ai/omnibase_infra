@@ -49,7 +49,6 @@ PARITY_RED_ON_BASE_DEBT: tuple[str, ...] = (
     "omnibase_infra.nodes.node_ledger_projection_compute",
     "omnibase_infra.nodes.node_ledger_projection_compute.handlers",
     "omnibase_infra.nodes.node_model_router_compute",
-    "omnibase_infra.nodes.node_pr_state_projection_compute",
     "omnibase_infra.nodes.node_rsd_score_compute",
     "omnibase_infra.nodes.node_runner_fleet_health_compute",
     "omnibase_infra.nodes.node_runtime_source_attestor_effect",

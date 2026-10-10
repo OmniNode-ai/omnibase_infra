@@ -1,0 +1,29 @@
+{
+  "_provenance": {
+    "source": "GitHub Actions job log of OmniNode-ai/omnibase_infra job 114324475730 (Infra Node Handler Ownership), pull request 4822, step `bash scripts/ci/reject-node-implementations.sh --all`, read through the gh cached read gateway",
+    "captured_utc": "2026-10-10T22:05:04Z"
+  },
+  "response": {
+    "exit_code": 1,
+    "stderr_lines": [
+      "ERROR: stale infra node handler allowlist entry/entries:",
+      "  - src/omnibase_infra/nodes/node_github_pr_poller_effect/handlers/__init__.py",
+      "  - src/omnibase_infra/nodes/node_github_pr_poller_effect/handlers/handler_github_api_poll.py",
+      "  - src/omnibase_infra/nodes/node_github_webhook_ingress_effect/handlers/__init__.py",
+      "  - src/omnibase_infra/nodes/node_github_webhook_ingress_effect/handlers/handler_github_webhook_ingress.py",
+      "  - src/omnibase_infra/nodes/node_merge_sweep_auto_merge_effect/handlers/__init__.py",
+      "  - src/omnibase_infra/nodes/node_merge_sweep_auto_merge_effect/handlers/handler_auto_merge.py",
+      "  - src/omnibase_infra/nodes/node_merge_sweep_classify_compute/handlers/__init__.py",
+      "  - src/omnibase_infra/nodes/node_merge_sweep_classify_compute/handlers/handler_classify_prs.py",
+      "  - src/omnibase_infra/nodes/node_merge_sweep_pr_list_effect/handlers/__init__.py",
+      "  - src/omnibase_infra/nodes/node_merge_sweep_pr_list_effect/handlers/handler_pr_list.py",
+      "  - src/omnibase_infra/nodes/node_merge_sweep_workflow_orchestrator/handlers/__init__.py",
+      "  - src/omnibase_infra/nodes/node_merge_sweep_workflow_orchestrator/handlers/handler_merge_sweep_initiate.py",
+      "  - src/omnibase_infra/nodes/node_pr_state_projection_compute/handlers/__init__.py",
+      "  - src/omnibase_infra/nodes/node_pr_state_projection_compute/handlers/handler_pr_state_projection.py",
+      "  - src/omnibase_infra/nodes/node_pr_state_write_effect/handlers/__init__.py",
+      "  - src/omnibase_infra/nodes/node_pr_state_write_effect/handlers/handler_pr_state_upsert.py",
+      "Remove stale entries from scripts/ci/infra-node-allowlist.txt."
+    ]
+  }
+}
