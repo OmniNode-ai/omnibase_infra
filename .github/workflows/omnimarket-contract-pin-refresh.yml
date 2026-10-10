@@ -259,6 +259,8 @@ jobs:
             printf '\n'
             printf '%s\n' "The advance was proven forward-only against real omnimarket history (\`scripts/ci/check_omnimarket_contract_pin_advance.py\`), so it cannot silently revert grants the way the stale pin in OMN-15701 did, and the regenerated output already passes \`--check --prove\` locally in the bot run."
             printf '\n'
+            printf '%s\n' "Live-contact exception: the only CI-tooling change is the sibling sha in workflow ref lines, so every workflow step runs unchanged against a new pinned checkout and no tooling behavior is added."
+            printf '\n'
             printf '%s\n' "Evidence-Ticket: OMN-17292"
           } > /tmp/pin-pr-body.md
           gh pr create \

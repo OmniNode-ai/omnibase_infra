@@ -1,0 +1,114 @@
+{
+  "_provenance": {
+    "source": "Real run of python -m omnibase_infra.validators.bus_backed_exposure_readers (the exposure-reader-coverage gate command) over a git archive of omnimarket src/omnimarket/nodes and src/omnimarket/projection at the pinned omnimarket sha and a git archive of omnidash src/registry/component-registry.json and src/templates at the pinned omnidash sha; reduced to the exit code, the summary line and each exposure's readers; not a hosted-runner capture",
+    "captured_utc": "2026-10-10T20:09:05Z",
+    "source_sha256": "77a4522353b1afa4157839176470d69564939baf92b3250a5bb7c446e7e17016",
+    "ticket": "OMN-17292",
+    "command": "uv run python -m omnibase_infra.validators.bus_backed_exposure_readers src/omnibase_infra/nodes --extra-contracts-dir <omnimarket>/src/omnimarket/nodes --registry <omnidash>/src/registry/component-registry.json --layouts-dir <omnidash>/src/templates --backend-reader-surface <omnimarket>/src/omnimarket/projection"
+  },
+  "response": {
+    "omnimarket_sha": "b7c20160d72c8431c1ec0b8615531717009eb57d",
+    "omnidash_sha": "e0dadfc6eadef5f5151f24f7f13bdc3628011c66",
+    "exit_code": 0,
+    "summary": "[exposure-reader-coverage] OK: 23 served `bus_backed` exposure(s), 0 without a reader.",
+    "readers": {
+      "onex.snapshot.projection.board-probe-results.v1": [
+        "opted out with a stated reason"
+      ],
+      "onex.snapshot.projection.consumer-flow.v1": [
+        "consumer-flow",
+        "errors",
+        "sea-demo.ts",
+        "templates.test.ts"
+      ],
+      "onex.snapshot.projection.cost.savings-overview.v1": [
+        "cost-savings-overview"
+      ],
+      "onex.snapshot.projection.delegation.acceptance-eval.v1": [
+        "opted out with a stated reason"
+      ],
+      "onex.snapshot.projection.delegation.correlation-trace.v1": [
+        "delegation-control-plane",
+        "delegation-evidence.ts"
+      ],
+      "onex.snapshot.projection.delegation.decisions.v1": [
+        "cost-delegation.ts",
+        "delegation-control-plane",
+        "delegation-evidence.ts",
+        "routing-decision-table",
+        "trace-explorer"
+      ],
+      "onex.snapshot.projection.delegation.model-routing.v1": [
+        "delegation-control-plane",
+        "delegation-evidence.ts",
+        "delegation-model-routing"
+      ],
+      "onex.snapshot.projection.delegation.quality-gate.v1": [
+        "delegation-control-plane",
+        "delegation-evidence.ts",
+        "delegation-quality-gate"
+      ],
+      "onex.snapshot.projection.delegation.savings.v1": [
+        "delegation-control-plane",
+        "delegation-cost-comparison",
+        "delegation-evidence.ts"
+      ],
+      "onex.snapshot.projection.delegation.summary.v1": [
+        "cost-delegation.ts",
+        "delegation-control-plane",
+        "delegation-evidence.ts",
+        "delegation-metrics"
+      ],
+      "onex.snapshot.projection.delegation.token-usage.v1": [
+        "delegation-control-plane",
+        "delegation-evidence.ts",
+        "delegation-token-usage",
+        "sea-demo.ts",
+        "templates.test.ts"
+      ],
+      "onex.snapshot.projection.lab.lane-health.v1": [
+        "opted out with a stated reason"
+      ],
+      "onex.snapshot.projection.live-events.v1": [
+        "errors",
+        "live-event-stream",
+        "sea-demo.ts",
+        "templates.test.ts",
+        "trace-explorer"
+      ],
+      "onex.snapshot.projection.metering-summary.v1": [
+        "usage-savings-series"
+      ],
+      "onex.snapshot.projection.prod-promotion-gate.v1": [
+        "backend:onex_status_page"
+      ],
+      "onex.snapshot.projection.registration.v1": [
+        "event-stream",
+        "platform-health.ts"
+      ],
+      "onex.snapshot.projection.runner-fleet.v1": [
+        "lab-runners"
+      ],
+      "onex.snapshot.projection.runtime-error-fingerprints.v1": [
+        "errors"
+      ],
+      "onex.snapshot.projection.session.replay.v1": [
+        "session-replay"
+      ],
+      "onex.snapshot.projection.tenant-credentials.v1": [
+        "opted out with a stated reason"
+      ],
+      "onex.snapshot.projection.topic-activity.v1": [
+        "backend:onex_status_page",
+        "topic-activity"
+      ],
+      "onex.snapshot.projection.usage-by-model-day.v1": [
+        "usage-by-model-day"
+      ],
+      "onex.snapshot.projection.work.events.v1": [
+        "trace-explorer",
+        "work-events"
+      ]
+    }
+  }
+}

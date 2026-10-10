@@ -463,6 +463,57 @@ def test_refresh_bot_enforces_forward_only_advance() -> None:
     )
 
 
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/exposure_reader_gate_omn17292_pinned_trees.json"
+)
+def test_the_exposure_reader_gate_passes_on_the_pinned_trees(
+    recorded_response: dict[str, object],
+) -> None:
+    """The recorded gate run was taken on the shas the workflows now check out."""
+    recording = recorded_response["response"]
+    assert isinstance(recording, dict)
+    pins = yaml.safe_load(
+        (_ROOT / ".github" / "sibling-pins.yaml").read_text(encoding="utf-8")
+    )["pins"]
+    assert recording["omnimarket_sha"] == pins["omnimarket"]
+    assert recording["omnidash_sha"] == pins["omnidash"]
+    assert recording["exit_code"] == 0
+    assert str(recording["summary"]).endswith("0 without a reader.")
+    readers = recording["readers"]
+    assert isinstance(readers, dict)
+    # Each exposure that was readerless at the previous pin has a reader here.
+    for topic in (
+        "onex.snapshot.projection.delegation.correlation-trace.v1",
+        "onex.snapshot.projection.metering-summary.v1",
+        "onex.snapshot.projection.usage-by-model-day.v1",
+    ):
+        assert readers[topic], topic
+    # topic-activity declares read_all_rows on its typed backend reader.
+    assert (
+        "backend:onex_status_page"
+        in readers["onex.snapshot.projection.topic-activity.v1"]
+    )
+
+
+def test_refresh_bot_pr_body_declares_the_live_contact_exception() -> None:
+    """The bot's PR edits workflow ref lines, so CI Live Contact reads its body.
+
+    The admission gate (OMN-18648) fails any diff that touches
+    ``.github/workflows/`` unless a changed test consumes recorded live contact
+    or the PR body carries one ``Live-contact exception:`` line of at least
+    eight words. A pin advance only moves sibling shas in ref lines, so the
+    bot states the exception itself; without it every pin PR opened red.
+    """
+    from omnibase_infra.handlers.handler_ci_live_contact import _EXCEPTION
+
+    text = _REFRESH_WORKFLOW.read_text(encoding="utf-8")
+    emitted = re.findall(r"printf '%s\\n' \"((?:[^\"\\\\]|\\\\.)*)\"", text)
+    body = "\n\n".join(emitted)
+    match = _EXCEPTION.search(body)
+    assert match is not None, "the bot's PR body has no Live-contact exception line"
+    assert len(match.group(1).split()) >= 8
+
+
 def _git(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     """Run one git command against ``cwd`` and nothing else (OMN-14891).
 

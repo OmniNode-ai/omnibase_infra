@@ -1,0 +1,73 @@
+schema_version: "1.0.0"
+ticket_id: OMN-17292
+title: omnibase_infra advances its pinned omnimarket contract set without a red gate
+summary: The omnibase_infra half of the omnimarket contract-pin advance. The criteria below are the pin-advance behavior this repository asserts in its own tests (the rationale in .github/omnimarket-contract-pin.yaml and the pin-refresh workflow), not a transcription of the Linear ticket text, which was not readable when this file was written. A pin advance retires the supplemental table declarations the pinned contracts now cover, the exposure reader gate accepts every key the pinned Market reader model declares, and the bot's pull request body states the live-contact exception its workflow edits need.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn17292-pin-advance
+    statement: Advancing the pinned omnimarket contract set leaves every omnibase_infra gate green because the pull request carries the retirements, validator shape and body line the new pin needs.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a supplemental legacy-migration table declaration is deleted in the same change that advances the pin to a contract set declaring the relation, and the shipped topology instances still declare it -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_delegation_bridges_retired_omn17292.py -q fails'
+      - id: AC2
+        statement: 'AC2: the bus-backed exposure reader gate accepts a typed backend reader that declares read_all_rows and still refuses a non-boolean value -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/validators/test_omn17199_bus_backed_exposure_readers.py -q fails'
+      - id: AC3
+        statement: 'AC3: the pull request body the pin-refresh bot writes carries a Live-contact exception line the admission gate accepts -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -k live_contact_exception fails'
+      - id: AC4
+        statement: 'AC4: the exposure reader gate exits 0 over the omnimarket and omnidash shas the workflows check out, recorded from a real run -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -k exposure_reader_gate_passes fails'
+evidence_requirements:
+  - kind: tests
+    description: The delegation_routing_feedback and delegation_budget_applied_events bridges are gone, their migrations stay vendored, and the shipped instances declare both relations.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_delegation_bridges_retired_omn17292.py -q
+  - kind: tests
+    description: The exposure reader gate accepts read_all_rows on a typed backend reader and refuses a non-boolean value or an unknown extra key.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/unit/validators/test_omn17199_bus_backed_exposure_readers.py -q
+  - kind: tests
+    description: The pin-refresh workflow writes a Live-contact exception line of at least eight words into the pull request body.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -k live_contact_exception
+  - kind: tests
+    description: The recorded exposure reader gate run names the omnimarket and omnidash shas in .github/sibling-pins.yaml, exits 0, and shows a reader for each exposure that was readerless at the previous pin.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -k exposure_reader_gate_passes
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn17292-bridges-retired-ac1
+    description: Both supplemental bridges are absent from LEGACY_MIGRATION_TABLE_DECLARATIONS, the vendored migrations remain in the tree, and every shipped topology instance still declares both relations.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_delegation_bridges_retired_omn17292.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn17292-read-all-rows-ac2
+    description: A typed backend reader declaring read_all_rows passes the gate, and a non-boolean read_all_rows or an unknown extra key is refused as an invalid backend reader.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/validators/test_omn17199_bus_backed_exposure_readers.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn17292-live-contact-exception-ac3
+    description: The statements the pin-refresh workflow prints into its pull request body include one Live-contact exception line that the admission gate's own grammar accepts at eight words or more.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -k live_contact_exception
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn17292-exposure-gate-passes-ac4
+    description: The recording of the real gate run carries the pinned omnimarket and omnidash shas, exit code 0 and a reader for correlation-trace, metering-summary, usage-by-model-day and the typed topic-activity backend reader.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin.py -q -k exposure_reader_gate_passes
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4

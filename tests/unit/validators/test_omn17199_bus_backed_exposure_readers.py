@@ -315,6 +315,35 @@ def test_a_bus_backed_exposure_with_a_typed_backend_reader_passes(
     )
 
 
+def test_a_typed_backend_reader_may_declare_read_all_rows(tmp_path: Path) -> None:
+    # Market's ModelProjectionBackendReader declares `read_all_rows: bool = False`
+    # beside the four identity keys (OMN-17292: topic-activity declares it true);
+    # the closed shape here must accept the same key or a pin advance past that
+    # contract turns this gate red with an unknown-key finding.
+    contracts = tmp_path / "contracts"
+    _write_contract(
+        contracts,
+        "node_projection_promotion_gate",
+        {
+            "expose": True,
+            "topic": "onex.snapshot.projection.prod-promotion-gate.v1",
+            "bus_backed": True,
+            "backend_readers": [_backend_reader(read_all_rows=True)],
+        },
+    )
+    registry = _write_registry(tmp_path / "registry.json", {"w": [REGISTRATION_TOPIC]})
+    layouts = tmp_path / "layouts"
+    _write_layout(layouts, "default", ["w"])
+
+    assert (
+        evaluate(
+            collect_bus_backed_exposures([contracts], _SURFACE),
+            _readers(registry, layouts),
+        )
+        == []
+    )
+
+
 @pytest.mark.parametrize(
     "backend_readers",
     [
@@ -331,6 +360,10 @@ def test_a_bus_backed_exposure_with_a_typed_backend_reader_passes(
             [_backend_reader(projection_slot="other_panel")], id="unknown-slot"
         ),
         pytest.param([_backend_reader(id="other_status_page")], id="unknown-reader-id"),
+        pytest.param(
+            [_backend_reader(read_all_rows="yes")], id="read-all-rows-not-bool"
+        ),
+        pytest.param([_backend_reader(read_every_row=True)], id="unknown-extra-key"),
         pytest.param(
             [_backend_reader(), _backend_reader(projection_slot="secondary_gate")],
             id="duplicate-id",
