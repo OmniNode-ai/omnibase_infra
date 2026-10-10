@@ -1518,6 +1518,13 @@ COMPOSE_DEV_INTEGRATION_CHECKS = (
 #: set are DELIBERATELY RETAINED below, unused by the emitting job, so that
 #: design is a wiring change and not a rewrite.
 #:
+#: FIRST HALF OF THAT DESIGN (OMN-18866): `chain-canary.yml` now emits its own
+#: sha-keyed chain verdict receipt (`EnumLabLane.COMPOSE_DEV_CHAIN`), graded by
+#: that retained probe off the receipt its own dispatch wrote. It is emit-only:
+#: no gate reads it yet, so it cannot stop a delivery. The name stays in this
+#: tuple because it describes the primary lab-pass receipt, which still does
+#: not carry the check.
+#:
 #: The tuple is kept rather than deleted for the same reason it always was: an
 #: absent list is how a gap stops being visible.
 PROBES_NOT_YET_WIRED: tuple[str, ...] = (DELEGATION_GOLDEN_CHAIN_CHECK,)
@@ -3725,6 +3732,49 @@ def read_ready_revision(ready_url: str, timeout_seconds: float = 10.0) -> str:
         if isinstance(value, str) and _SHA_RE.match(value):
             return value
     return ""
+
+
+def resolve_lane_revision(agent_url: str, ready_url: str) -> str:
+    """The code sha a deployed lane reports for itself, or empty.
+
+    OMN-18866. The key of the canary's own chain verdict receipt: the
+    canary grades whatever the lane is running when it fires, so the receipt
+    is keyed on what the lane says it loaded and never on the sha of the
+    workflow that happened to run the probe (a scheduled run's checkout is the
+    default branch head, which the lane may not have reached yet). The deploy
+    agent's record is read first because it is an actual commit; ``/ready`` is
+    the fallback and answers only when the runtime carries an explicit one.
+    """
+    return read_agent_loaded_code_sha(agent_url) or read_ready_revision(ready_url)
+
+
+def chain_lane_checks(
+    lane: EnumLabLane, chain_canary_receipt: Path | None
+) -> list[ModelLabPassCheck]:
+    """The checks a chain verdict receipt carries, graded off the canary.
+
+    OMN-18866. The pairing is enforced in BOTH directions. A chain-lane receipt
+    with no canary receipt behind it would be a verdict about a delegation
+    nobody fired, and a canary receipt offered to any other lane would put the
+    delegation check on a receipt the release train reads -- the OMN-18872
+    revert shape, in which a separately owned surface stopped delivery.
+    """
+    is_chain_lane = lane is EnumLabLane.COMPOSE_DEV_CHAIN
+    if is_chain_lane and chain_canary_receipt is None:
+        msg = (
+            f"--lane {lane.value} requires --chain-canary-receipt: its only "
+            "check is graded from the canary's receipt"
+        )
+        raise ValueError(msg)
+    if chain_canary_receipt is not None and not is_chain_lane:
+        msg = (
+            f"--chain-canary-receipt belongs to --lane "
+            f"{EnumLabLane.COMPOSE_DEV_CHAIN.value}, not --lane {lane.value}"
+        )
+        raise ValueError(msg)
+    if chain_canary_receipt is None:
+        return []
+    return [check_delegation_golden_chain(chain_canary_receipt)]
 
 
 def reemit_receipt(
@@ -6051,7 +6101,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="repository checkout containing the cited commit and its authored criterion bindings",
     )
-    emit.add_argument("--lane", required=True, choices=[e.value for e in EnumLabLane])
+    emit.add_argument(
+        "--lane",
+        default=None,
+        choices=[e.value for e in EnumLabLane],
+        help=(
+            "the receipt's lane. Required, except that --chain-canary-receipt "
+            "names its own lane and refuses a different one"
+        ),
+    )
     emit.add_argument("--started-at", required=True)
     emit.add_argument("--finished-at", required=True)
     emit.add_argument(
@@ -6101,6 +6159,28 @@ def build_parser() -> argparse.ArgumentParser:
             "containing --sha, which a containing revision is."
         ),
     )
+    emit.add_argument(
+        "--chain-canary-receipt",
+        type=Path,
+        default=None,
+        help=(
+            "OMN-18866. The receipt written by `onex skill chain_canary`. It "
+            "selects the chain verdict lane, which is the only lane that takes "
+            f"it: the {DELEGATION_GOLDEN_CHAIN_CHECK} check is graded from it, "
+            "so the canary stays the only dispatcher and this receipt is its "
+            "own sha-keyed verdict. The primary lab-pass receipt never takes it."
+        ),
+    )
+    emit.add_argument(
+        "--github-output",
+        type=Path,
+        default=None,
+        help=(
+            "append `sha` and `artifact` (the name the upload step must use, "
+            "from artifact_name) to this GitHub Actions output file once the "
+            "receipt is written, so a workflow never spells the lane's name"
+        ),
+    )
     emit.add_argument("--out", required=True, type=Path)
     emit.add_argument(
         "--event-out",
@@ -6113,6 +6193,21 @@ def build_parser() -> argparse.ArgumentParser:
             "emitting jobs differ in whether they can reach one and a "
             "publish failure must never fail a lab pass that genuinely ran."
         ),
+    )
+
+    revision = sub.add_parser(
+        "lane-revision",
+        help="print the code sha a deployed lane reports having loaded",
+    )
+    revision.add_argument(
+        "--agent-url",
+        default="",
+        help="the lane's deploy agent base URL; its /health carries loaded_code_sha",
+    )
+    revision.add_argument(
+        "--ready-url",
+        default="",
+        help="the lane runtime's /ready URL, read only when the agent is silent",
     )
 
     reemit = sub.add_parser(
@@ -6753,29 +6848,54 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps([c.to_dict() for c in checks], indent=2))
         return 0
 
+    if args.command == "lane-revision":
+        revision_sha = resolve_lane_revision(args.agent_url, args.ready_url)
+        if not revision_sha:
+            print(
+                "::error::the lane reported no code sha on its deploy agent or "
+                "its /ready, so a receipt cannot be keyed on what it runs",
+                file=sys.stderr,
+            )
+            return 1
+        print(revision_sha)
+        return 0
+
     if args.command == "emit":
-        if not args.check and args.checks_json is None:
+        if (
+            not args.check
+            and args.checks_json is None
+            and args.chain_canary_receipt is None
+        ):
             print(
                 "::error::emit requires at least one --check. A receipt with no "
                 "checks asserts that nothing was verified.",
                 file=sys.stderr,
             )
             return 1
+        if args.lane is None and args.chain_canary_receipt is None:
+            print("::error::emit requires --lane", file=sys.stderr)
+            return 1
+        emit_lane = (
+            EnumLabLane.COMPOSE_DEV_CHAIN
+            if args.lane is None
+            else EnumLabLane(args.lane)
+        )
         try:
             checks = [parse_check_argument(raw) for raw in args.check]
             checks.extend(load_checks_json(args.checks_json))
+            checks.extend(chain_lane_checks(emit_lane, args.chain_canary_receipt))
             ticket_id = ""
             criterion_labels: tuple[str, ...] = ()
             if args.bind_from_commit is not None:
                 checks, ticket_id, criterion_labels = bind_commit_checks(
                     args.sha,
-                    EnumLabLane(args.lane),
+                    emit_lane,
                     checks,
                     args.bind_from_commit,
                 )
             receipt = build_receipt(
                 sha=args.sha,
-                lane=EnumLabLane(args.lane),
+                lane=emit_lane,
                 started_at=_parse_ts(args.started_at),
                 finished_at=_parse_ts(args.finished_at),
                 checks=checks,
@@ -6801,6 +6921,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             print(f"wrote lab-pass bus event -> {args.event_out}")
         print(f"wrote {artifact_name(receipt.lane, receipt.sha)} -> {args.out}")
+        if args.github_output is not None:
+            with args.github_output.open("a", encoding="utf-8") as handle:
+                handle.write(f"sha={receipt.sha}\n")
+                handle.write(f"artifact={artifact_name(receipt.lane, receipt.sha)}\n")
         print(render_receipt(receipt))
         # A FAIL receipt is still EMITTED — the record of a failed lab pass is
         # exactly as valuable as the record of a passing one — but the emitting
