@@ -250,19 +250,57 @@ jobs:
         run: |
           set -euo pipefail
           cp "$CANDIDATE" deploy/lane-census/census-snapshot.json
+          EMITTED="$(uv run python -c 'import json,sys;print(json.load(open(sys.argv[1]))["emitted_at"])' "$CANDIDATE")"
+          # The Repo Evidence Gate reads contracts/OMN-18606.yaml at this head (OMN-20074),
+          # refuses a contract carried unchanged from the merge base, and runs its check
+          # at the merge base, where it must fail: bind the value this refresh moved.
+          PATTERN="${EMITTED}"
+          grep -qF -- "$PATTERN" deploy/lane-census/census-snapshot.json
+          CHECK="grep -qF -- '$PATTERN' deploy/lane-census/census-snapshot.json"
+          cat > contracts/OMN-18606.yaml <<EOF_CONTRACT
+          schema_version: "1.0.0"
+          ticket_id: OMN-18606
+          title: "The lane census snapshot is refreshed to emitted_at ${EMITTED}"
+          summary: The automated refresh moves deploy/lane-census/census-snapshot.json to a value the merge base does not carry.
+          is_seam_ticket: false
+          interface_change: false
+          interfaces_touched: []
+          requirements:
+            - id: req-omn18606
+              statement: deploy/lane-census/census-snapshot.json carries the value this refresh produced.
+              acceptance:
+                - id: AC1
+                  statement: "AC1: deploy/lane-census/census-snapshot.json carries the refreshed value -- falsifier: $CHECK"
+          evidence_requirements:
+            - kind: command
+              description: deploy/lane-census/census-snapshot.json carries the refreshed value.
+              command: "$CHECK"
+          emergency_bypass:
+            enabled: false
+            justification: ''
+            follow_up_ticket_id: ''
+          dod_evidence:
+            - id: dod-omn-18606-ac1
+              description: deploy/lane-census/census-snapshot.json carries the refreshed value.
+              source: manual
+              checks:
+                - check_type: command
+                  check_value: "$CHECK"
+                  cwd: \${OMNI_HOME}/omnibase_infra
+              binds_ac: [AC1]
+          EOF_CONTRACT
 
           BRANCH="bot/lane-census-refresh-$(date -u +%Y%m%d%H%M%S)"
           # OMN-18273: commit as the App this job already authenticates as.
           git config user.name "onexbot-occ-writer[bot]"
           git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add deploy/lane-census/census-snapshot.json
+          git add deploy/lane-census/census-snapshot.json contracts/OMN-18606.yaml
           git commit -m "chore(deps, OMN-18606): refresh the lane census snapshot [bot]" \
             --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
             --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           git push origin "$BRANCH"
 
-          EMITTED="$(uv run python -c 'import json,sys;print(json.load(open(sys.argv[1]))["emitted_at"])' "$CANDIDATE")"
           DRIFT="$(uv run python -c 'import json,sys;print(json.load(open(sys.argv[1]))["drift_count"])' "$CANDIDATE")"
 
           {
