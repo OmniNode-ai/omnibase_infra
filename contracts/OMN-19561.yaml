@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19561
+title: Start the completion-bound sweeper during runtime wiring
+summary: A stateful callback built in a running event loop starts its completion-bound sweeper during wiring, so an abandoned in-flight row can terminalise without another dispatch. Synchronous construction retains the first-dispatch fallback.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-restart-completion-bound
+    statement: A restarted runtime must enforce the declared completion bound even when no new dispatch arrives.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: Wiring in a running loop publishes the failure terminal and closes an abandoned persisted row without a dispatch -- falsifier: uv run pytest tests/integration/migrations/test_completion_bound_restart_omn19561.py -q --no-cov'
+evidence_requirements:
+  - kind: tests
+    description: The real StateStoreAdapter selects an expired row from throwaway Postgres and CAS-finalizes it after the runtime callback publishes its failure terminal without dispatch traffic.
+    command: uv run pytest tests/integration/migrations/test_completion_bound_restart_omn19561.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-19561-restart-without-dispatch
+    description: Boot-time wiring emits the terminal and the Postgres readback is FAILED, not in flight, at version 5 with no pending emissions.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/migrations/test_completion_bound_restart_omn19561.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

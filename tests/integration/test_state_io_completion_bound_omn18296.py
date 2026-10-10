@@ -457,6 +457,66 @@ def test_the_bound_is_swept_without_any_further_dispatch_traffic(
 
 
 @pytest.mark.unit
+def test_the_bound_is_swept_after_a_restart_with_no_dispatch_ever(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-19561 AC2: ``on_runtime_restart`` is enforced by a freshly booted process.
+
+    The contract promises ``terminalise_failed`` when the runtime restarts under
+    an in-flight workflow. A restarted process has served no dispatch yet, and
+    the lane that lost the workflow may never send another, so a sweeper that
+    starts on the first dispatch keeps that promise only if traffic returns.
+    The callback is built inside a running loop, as ``wire_from_manifest`` does
+    at boot, and NO dispatch follows: the abandoned row must still terminalise.
+    """
+    _fast_sweeps(monkeypatch)
+    adapter = _FakeStateStoreAdapter(_abandoned_row(time.time() - 1000))
+    bus = _RecordingBus()
+
+    async def _drive() -> None:
+        _callback(adapter, bus, completion_bound=BOUND)
+        await asyncio.sleep(0.4)
+
+    asyncio.run(_drive())
+
+    terminals = [
+        env for _t, env in bus.published if str(env.correlation_id) == CID_LIVE
+    ]
+    assert terminals, (
+        "the runtime booted over an abandoned in-flight row and never "
+        "terminalised it: the bound sweeper waits for a first dispatch that "
+        "an idle lane never sends, so on_runtime_restart is declared and not kept"
+    )
+    assert adapter.rows[CID_LIVE]["state"] == "FAILED"
+
+
+@pytest.mark.unit
+def test_a_callback_built_outside_a_loop_still_starts_the_sweeper_on_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Positive control: sync construction (no running loop) keeps the lazy start.
+
+    Wiring that happens with no loop running cannot attach a task, so the first
+    dispatch remains the fallback. Without this, the boot-time start above could
+    be the only path and a regression in the fallback would go unseen.
+    """
+    _fast_sweeps(monkeypatch)
+    rows = _abandoned_row(time.time())
+    adapter = _FakeStateStoreAdapter(rows)
+    bus = _RecordingBus()
+    callback = _callback(adapter, bus, completion_bound=BOUND)
+
+    async def _drive() -> None:
+        await callback(_dispatch_envelope())
+        rows[CID_LIVE]["updated_at"] = time.time() - 1000
+        await asyncio.sleep(0.4)
+
+    asyncio.run(_drive())
+
+    assert [env for _t, env in bus.published if str(env.correlation_id) == CID_LIVE]
+
+
+@pytest.mark.unit
 def test_a_contract_with_no_bound_keeps_the_pre_existing_behaviour() -> None:
     """Additive: a contract that declares no bound publishes no terminal."""
     adapter = _FakeStateStoreAdapter(_abandoned_row(time.time() - 1000))
