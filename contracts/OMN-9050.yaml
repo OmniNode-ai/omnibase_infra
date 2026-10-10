@@ -15,6 +15,9 @@ evidence_requirements:
   - kind: command
     description: The checkout ref in the handshake workflow equals the bumped commit.
     command: 'grep -qE "^\s+ref:\s+2f90bd814b140ed8f8dad74cc499b0976807e47d$" .github/workflows/check-handshake.yml'
+  - kind: tests
+    description: The handshake pin test fails on the superseded efba6fb107f4 ref and passes on the bumped one.
+    command: uv run pytest tests/ci/test_check_handshake_core_pin_omn9050.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -26,5 +29,8 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: 'grep -qE "^\s+ref:\s+2f90bd814b140ed8f8dad74cc499b0976807e47d$" .github/workflows/check-handshake.yml'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_check_handshake_core_pin_omn9050.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
