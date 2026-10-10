@@ -51,6 +51,7 @@ TARGET="${SMOKE_TARGET:-}"
 ATTRIBUTION="tenant"   # tenant | house
 TERMINAL_TIMEOUT="${TERMINAL_TIMEOUT:-180}"
 PROJECTION_SETTLE="${PROJECTION_SETTLE:-20}"
+TENANT_LIFECYCLE=""
 
 usage() {
   cat >&2 <<'USAGE'
@@ -61,6 +62,9 @@ usage: smoke_delegation.sh --target compose|k8s [--attribution tenant|house]
   --attribution      tenant (default) submits as the lane's own minted tenant;
                      house submits the platform-ladder run, which is what a
                      lane with no per-tenant credential can still execute.
+  --tenant-lifecycle mint|revoke
+                     slot-only bootstrap or offboard through the slot gateway;
+                     revoke proves a working key is refused before removal.
 USAGE
 }
 
@@ -68,6 +72,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --target) TARGET="${2:-}"; shift 2 ;;
     --attribution) ATTRIBUTION="${2:-}"; shift 2 ;;
+    --tenant-lifecycle) TENANT_LIFECYCLE="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage; exit 2 ;;
   esac
@@ -93,6 +98,22 @@ ANALYTICS_DB="${ANALYTICS_DB:-omnidash_analytics}"
 TENANT_STATE_FILE="${TENANT_STATE_FILE:-/var/lib/onex-lab-tenant/credential.env}"
 LAB_TENANT_SLUG="${LAB_TENANT_SLUG:-onex-lab-house}"
 LAB_API_KEY_NAME="${LAB_API_KEY_NAME:-onex-lab-verification}"
+DB_COMPOSE_PROJECT="$COMPOSE_PROJECT"
+if [[ "$COMPOSE_PROJECT" == omnibase-infra-prepr-* ]]; then
+  SLOT_JSON="$(python3 "$(dirname "$0")/../runtime_build/prepr_slot_policy.py" --assert-pool-slot "$COMPOSE_PROJECT")"
+  SLOT_DB="$(printf '%s' "$SLOT_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["db_slot"])')"
+  DB_COMPOSE_PROJECT="omnibase-infra"
+  ANALYTICS_DB="omnidash_analytics_${SLOT_DB}"
+  LAB_TENANT_SLUG="onex-${SLOT_DB}"
+fi
+case "$TENANT_LIFECYCLE" in
+  "") ;;
+  mint|revoke)
+    [[ "$TARGET" == compose && "$DB_COMPOSE_PROJECT" != "$COMPOSE_PROJECT" ]] || {
+      echo "FATAL: tenant lifecycle requires a policy-derived compose pool slot" >&2; exit 2;
+    } ;;
+  *) echo "FATAL: tenant lifecycle must be mint or revoke" >&2; exit 2 ;;
+esac
 
 compose_container() {
   # By compose label, not by container_name: a container_name is a convention
@@ -105,10 +126,12 @@ compose_container() {
 
 if [ "$TARGET" = compose ]; then
   API_UNIT="$(compose_container onex-api)"
-  DB_UNIT="$(compose_container postgres)"
+  DB_UNIT="$(docker ps --filter "label=com.docker.compose.project=${DB_COMPOSE_PROJECT}" \
+                      --filter "label=com.docker.compose.service=postgres" \
+                      --filter "status=running" --format '{{.Names}}' | head -1)"
   WRITER_UNIT="$(compose_container projection-delegation-writer)"
   [ -n "$API_UNIT" ] || { echo "FATAL: no running onex-api container in compose project ${COMPOSE_PROJECT}" >&2; exit 1; }
-  [ -n "$DB_UNIT" ]  || { echo "FATAL: no running postgres container in compose project ${COMPOSE_PROJECT}" >&2; exit 1; }
+  [ -n "$DB_UNIT" ]  || { echo "FATAL: no running postgres container in compose project ${DB_COMPOSE_PROJECT}" >&2; exit 1; }
 
   # api_python_env NAME... -- run the python program on STDIN inside the API
   # container, forwarding the NAMED variables from this process's environment.
@@ -150,6 +173,78 @@ fi
 
 echo "== target: ${TARGET} (api unit ${API_UNIT}, db unit ${DB_UNIT})"
 
+# Read the shared-server control around slot work; never print tenant rows.
+dev_tenants_control() {
+  docker exec "$DB_UNIT" psql -U postgres -d omninode_cloud -tAc \
+    "SELECT count(*)::text || ':' || md5(coalesce(jsonb_agg(to_jsonb(t) ORDER BY tenant_id)::text, '[]')) FROM tenants t"
+}
+check_dev_tenants_control() {
+  if [[ "$DB_COMPOSE_PROJECT" != "$COMPOSE_PROJECT" ]]; then
+    [[ "$(dev_tenants_control)" == "$DEV_TENANTS_BEFORE" ]] || {
+      echo "FATAL: dev tenant table changed during slot verification" >&2; return 1;
+    }
+    echo "== dev tenant table unchanged beside non-zero control =="
+  fi
+}
+if [[ "$DB_COMPOSE_PROJECT" != "$COMPOSE_PROJECT" ]]; then
+  DEV_TENANTS_BEFORE="$(dev_tenants_control)"
+  [[ "$DEV_TENANTS_BEFORE" =~ ^[1-9][0-9]*:[0-9a-f]{32}$ ]] || {
+    echo "FATAL: dev tenant table positive control is empty or unreadable" >&2; exit 1;
+  }
+fi
+
+if [[ "$TENANT_LIFECYCLE" == revoke ]]; then
+  export SMOKE_TENANT_STATE_FILE="$TENANT_STATE_FILE"
+  export SMOKE_TENANT_SLUG="$LAB_TENANT_SLUG"
+  api_python_env SMOKE_TENANT_STATE_FILE SMOKE_TENANT_SLUG <<'PYREVOKE'
+import hashlib, json, os, pathlib, sys, urllib.error, urllib.request, uuid
+
+state = dict(line.split("=", 1) for line in open(os.environ["SMOKE_TENANT_STATE_FILE"]).read().splitlines() if "=" in line)
+tenant_id = str(uuid.UUID(state["TENANT_ID"]))
+if state.get("TENANT_SLUG") != os.environ["SMOKE_TENANT_SLUG"]:
+    sys.exit("FATAL: credential does not belong to this slot's tenant")
+key = state["ONEX_API_KEY"]
+admin = os.environ.get("TENANT_OFFBOARD_ADMIN_SECRET", "")
+if not key or not admin:
+    sys.exit("FATAL: missing slot key or offboard admin sentinel")
+base = "http://127.0.0.1:8000"
+probe = "/v1/tenants/me/delegations?limit=1"
+
+def call(path, *, method="GET", headers=None):
+    req = urllib.request.Request(base + path, method=method, headers=headers or {})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            return response.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+
+before = call(probe, headers={"X-API-Key": key})
+proof_path = pathlib.Path(os.environ["SMOKE_TENANT_STATE_FILE"] + ".revoked.json")
+key_digest = hashlib.sha256(key.encode()).hexdigest()
+if proof_path.exists():
+    proof = json.loads(proof_path.read_text())
+    if (proof.get("tenant_id") == tenant_id and proof.get("key_sha256") == key_digest
+            and proof.get("auth_before") == 200 and proof.get("auth_after") in (401, 403)
+            and before in (401, 403)):
+        print(json.dumps({"tenant_id": tenant_id, "revoked": True, "auth_before": 200, "auth_after": before}))
+        raise SystemExit(0)
+    sys.exit("FATAL: prior offboard proof does not match this slot credential")
+if before != 200:
+    sys.exit("FATAL: slot credential positive control did not authenticate")
+revoked = call("/admin/tenants/" + tenant_id + "/revoke", method="POST", headers={"X-Admin-Secret": admin})
+if revoked != 200:
+    sys.exit("FATAL: slot offboard endpoint refused the revoke")
+after = call(probe, headers={"X-API-Key": key})
+if after not in (401, 403):
+    sys.exit("FATAL: revoked slot credential did not receive an authentication refusal")
+with os.fdopen(os.open(proof_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as stream:
+    json.dump({"tenant_id": tenant_id, "key_sha256": key_digest, "auth_before": before, "auth_after": after}, stream)
+print(json.dumps({"tenant_id": tenant_id, "revoked": True, "auth_before": before, "auth_after": after}))
+PYREVOKE
+  check_dev_tenants_control
+  exit 0
+fi
+
 # ===========================================================================
 # CREDENTIAL: resolve the lane's own tenant, minting it on first use.
 # ===========================================================================
@@ -190,6 +285,16 @@ if os.path.exists(STATE):
         for line in open(STATE).read().splitlines()
         if "=" in line and not line.startswith("#")
     )
+    if values.get("TENANT_SLUG") != SLUG or not values.get("ONEX_API_KEY"):
+        sys.exit("FATAL: cached tenant credential does not belong to the requested tenant")
+    uuid.UUID(values["TENANT_ID"])
+    req = urllib.request.Request(BASE + "/v1/tenants/me/delegations?limit=1", headers={"X-API-Key": values["ONEX_API_KEY"]})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as response:
+            if response.status != 200:
+                sys.exit("FATAL: cached tenant credential did not authenticate")
+    except urllib.error.HTTPError:
+        sys.exit("FATAL: cached tenant credential did not authenticate")
     print(json.dumps({
         "minted": False,
         "tenant_id": values.get("TENANT_ID", ""),
@@ -281,6 +386,10 @@ PY
   ONEX_API_KEY=""
 fi
 echo "== lane tenant: ${TENANT_ID} (${TENANT_SLUG})"
+if [[ "$TENANT_LIFECYCLE" == mint ]]; then
+  check_dev_tenants_control
+  exit 0
+fi
 
 # ===========================================================================
 # SUBMIT. One delegation, waited to a terminal status.
@@ -352,6 +461,12 @@ print(json.dumps({
 PY
 )" || true
 echo "${SUBMIT_OUT}"
+if [[ "$DB_COMPOSE_PROJECT" != "$COMPOSE_PROJECT" ]]; then
+  printf '%s' "$SUBMIT_OUT" | python3 -c 'import json,sys
+result=json.loads(sys.stdin.read().strip().splitlines()[-1])
+if result.get("final_status") != "completed" or not result.get("reached_terminal"):
+    sys.exit("FATAL: slot delegation canary did not complete")'
+fi
 
 CORRELATION_ID="$(printf '%s' "${SUBMIT_OUT}" | python3 -c 'import json,sys
 try: print(json.loads(sys.stdin.read().strip().splitlines()[-1]).get("correlation_id") or "")
@@ -413,8 +528,10 @@ db_query "SELECT correlation_id, tenant_id, timestamp IS NOT NULL AS timestamp_p
 
 echo "== SEAM 7: reader -- GET /v1/tenants/me/delegations as the lane tenant =="
 export SMOKE_CORRELATION_ID="$CORRELATION_ID"
-api_python_env ONEX_API_KEY SMOKE_CORRELATION_ID SMOKE_TENANT_STATE_FILE <<'PY'
-import json, os, urllib.error, urllib.request
+export SMOKE_REQUIRE_SLOT_PROOF=0
+[[ "$DB_COMPOSE_PROJECT" == "$COMPOSE_PROJECT" ]] || export SMOKE_REQUIRE_SLOT_PROOF=1
+api_python_env ONEX_API_KEY SMOKE_CORRELATION_ID SMOKE_TENANT_STATE_FILE SMOKE_REQUIRE_SLOT_PROOF <<'PY'
+import json, os, sys, urllib.error, urllib.request
 
 KEY = os.environ.get("ONEX_API_KEY") or ""
 if not KEY:
@@ -433,11 +550,14 @@ except urllib.error.HTTPError as exc:
 
 wanted = os.environ["SMOKE_CORRELATION_ID"]
 runs = body.get("delegations") or body.get("runs") or []
+correlated = any(isinstance(r, dict) and r.get("correlation_id") == wanted for r in runs) if isinstance(runs, list) else False
 print(json.dumps({
     "reader_status": status,
     "reader_rows": len(runs) if isinstance(runs, list) else None,
-    "reader_returns_correlated_row": any(wanted in json.dumps(r) for r in runs) if isinstance(runs, list) else False,
+    "reader_returns_correlated_row": correlated,
 }))
+if os.environ.get("SMOKE_REQUIRE_SLOT_PROOF") == "1" and (status != 200 or not correlated):
+    sys.exit("FATAL: slot gateway did not read back the canary's correlated row")
 PY
 
 echo "== SEAM 8: delegation projection writer log, last errors =="
@@ -445,3 +565,4 @@ writer_log | grep -iE "error|23502|null value|violat|refus|permission denied" | 
   || echo "  (no error lines in the last 400)"
 
 echo "== smoke complete: target=${TARGET} attribution=${ATTRIBUTION} correlation=${CORRELATION_ID} =="
+check_dev_tenants_control
