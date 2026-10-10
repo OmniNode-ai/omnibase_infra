@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: OMN-18596
+title: "The runtime image pins omninode-memory 0.18.4 from the plugin pin cascade"
+summary: The plugin pin cascade raised the omninode-memory floor in docker/Dockerfile.runtime from 0.18.3 to 0.18.4 after omnimemory released v0.18.4. A unit test reads the shipped pin and fails while the floor is below 0.18.4.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn18596-memory-pin
+    statement: The runtime image installs omninode-memory 0.18.4 or later, below the 1.0.0 ceiling.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: docker/Dockerfile.runtime pins omninode-memory with a floor of at least 0.18.4 -- falsifier: uv run pytest tests/unit/docker/test_runtime_memory_pin_omn18596.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The unit test parses the single omninode-memory pin in docker/Dockerfile.runtime and asserts its floor is at least 0.18.4 and below its ceiling.
+    command: uv run pytest tests/unit/docker/test_runtime_memory_pin_omn18596.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-18596-memory-pin-0-18-4
+    description: The runtime image's omninode-memory floor is at least 0.18.4.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_runtime_memory_pin_omn18596.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
