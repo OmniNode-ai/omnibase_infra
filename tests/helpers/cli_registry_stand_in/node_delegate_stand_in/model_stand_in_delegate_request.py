@@ -38,6 +38,7 @@ class ModelStandInDelegateRequest(BaseModel):
     system_prompt: str | None = None
     requested_timeout_seconds: int | None = None
     backend_id: str | None = None
+    model: str | None = None
     tenant_id: str | None = None
 
     @field_validator("acceptance_criteria")
