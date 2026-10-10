@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -159,3 +159,42 @@ def test_every_overlay_backend_is_bound_in_the_delegation_overlay() -> None:
     for voter in voters:
         if "backend_id" in voter:
             assert bound[voter["backend_id"]]["endpoint_url"], voter["voter_id"]
+
+
+def test_preflight_runs_in_the_installed_environment() -> None:
+    """The overlay reader imports omniintelligence.review_pairing, which needs numpy.
+
+    A preflight run from the bare clone (``uv run --no-project``) before the
+    install died on ModuleNotFoundError, resolved no voter and reported DEGRADED
+    on every run, so the install comes first and the preflight uses its
+    environment.
+    """
+    names = [str(s.get("name", "")) for s in _steps()]
+    install = names.index("Install omniintelligence dependencies")
+    preflight = next(i for i, n in enumerate(names) if n.startswith("Preflight"))
+    assert install < preflight
+    run = str(_step("Preflight")["run"])
+    assert "--no-project" not in run
+    assert "uv run --no-sync python" in run
+    assert "if" not in _step("Install omniintelligence dependencies")
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/hostile_review_voters_overlay_live_omn20910.json"
+)
+def test_every_overlay_voter_resolved_to_a_live_single_model_endpoint(
+    recorded_response: dict[str, object],
+) -> None:
+    """The overlay's voters, resolved by omniintelligence's loader, answered live.
+
+    Deliberately not bound to the overlay's current contents: changing a voter
+    is an overlay-only edit and must not require a new recording.
+    """
+    voters = cast("list[dict[str, object]]", recorded_response["voters"])
+    required = [v for v in voters if v["required"] is True]
+    assert len(required) >= 2
+    assert len({v["endpoint_sha256"] for v in required}) == len(required)
+    for voter in voters:
+        assert voter["http_status"] == 200, voter["voter_id"]
+        assert len(cast("list[str]", voter["served_model_ids"])) == 1, voter
+        assert str(voter["resolved_from"]).startswith("backend "), voter
