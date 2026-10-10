@@ -168,11 +168,17 @@ def _service_env(document: dict[str, Any], service: str) -> dict[str, str]:
 
 # The lane overlays that publish the runtime tick. dev-202 (OMN-20590) and the
 # h201 stability-test lane (OMN-20593, the backup delegation lane beside the
-# h201 dev lane, which stays off so its demo runtime is never restarted).
-_OPTED_IN_OVERLAYS = (
+# dev lane, which opts in below, OMN-20867).
+_ARCHIVE_ENV_OVERLAYS = (
     "docker-compose.dev-202.yml",
     "docker-compose.stability-test.yml",
 )
+# OMN-20867: the dev lane opts in as well, with no archive binding: the prunes
+# resolve their archive from the runtime overlay at the due effect boundary and
+# refuse, typed, when it is unbound (OMN-20591), so the archive test keeps to
+# the overlays above.
+_DEV_LANE_OVERLAY = "docker-compose.dev-lane.yml"
+_OPTED_IN_OVERLAYS = (*_ARCHIVE_ENV_OVERLAYS, _DEV_LANE_OVERLAY)
 
 
 class TestLaneOverlays:
@@ -192,7 +198,7 @@ class TestLaneOverlays:
         )
         assert carriers == ["omninode-runtime"]
 
-    @pytest.mark.parametrize("overlay", _OPTED_IN_OVERLAYS)
+    @pytest.mark.parametrize("overlay", _ARCHIVE_ENV_OVERLAYS)
     def test_overlay_gives_the_tick_driven_prunes_their_archive(
         self, overlay: str
     ) -> None:
