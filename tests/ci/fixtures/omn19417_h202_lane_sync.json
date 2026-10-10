@@ -1,0 +1,25 @@
+{
+  "_provenance": {
+    "source": "h202 check_lane_sync read-only Docker daemon identity and existing lane-census-check.sh --json",
+    "captured_utc": "2026-10-08T20:55:38.223599+00:00",
+    "base_sha": "0084b4725ddcaf35b5cd5f3305f3dfe216760b09",
+    "source_revision": "OMN-19417 working-tree probe before commit"
+  },
+  "responses": [
+    {
+      "returncode": 0,
+      "stdout": "omnipc2\n",
+      "stderr": ""
+    },
+    {
+      "returncode": 30,
+      "stdout": "{\"schema_version\": \"1.1.0\", \"host\": \"lab-202\", \"lanes_checked\": [\"sim-202\", \"dev-202\"], \"lanes_not_applicable\": [\"stability-test\", \"judge\", \"dev\", \"lakshman\", \"principal-issuer\", \"dogfood\", \"dev-200\", \"dev-105\", \"prepr-1\", \"prepr-2\", \"ci-bus\"], \"lanes_skipped_optional_down\": [\"sim-202\"], \"findings\": [{\"lane\": \"dev-202\", \"kind\": \"container_absent\", \"container\": \"omnibase-infra-dev-202-phoenix\", \"detail\": \"required service container 'omnibase-infra-dev-202-phoenix' is not running (desired replicas=1); lane 'dev-202' is degraded\", \"severity\": \"critical\"}], \"has_drift\": true}\n",
+      "stderr": "[2026-10-08T20:55:38Z] [lane-census] Starting (lane=ALL, host=omnipc2, LIVE)\n[2026-10-08T20:55:38Z] [lane-census] DRIFT detected:\n  [critical] container_absent omnibase-infra-dev-202-phoenix (dev-202): required service container 'omnibase-infra-dev-202-phoenix' is not running (desired replicas=1); lane 'dev-202' is degraded\n[2026-10-08T20:55:38Z] [lane-census] KAFKA_BOOTSTRAP_SERVERS unset \u2014 cannot publish. Drift event logged above for manual replay.\n"
+    }
+  ],
+  "check": {
+    "name": "lane_sync",
+    "ok": false,
+    "evidence": "{\"findings\": [{\"container\": \"omnibase-infra-dev-202-phoenix\", \"detail\": \"required service container 'omnibase-infra-dev-202-phoenix' is not running (desired replicas=1); lane 'dev-202' is degraded\", \"kind\": \"container_absent\", \"lane\": \"dev-202\", \"severity\": \"critical\"}], \"has_drift\": true, \"host\": \"lab-202\", \"lanes_checked\": [\"sim-202\", \"dev-202\"], \"lanes_not_applicable\": [\"stability-test\", \"judge\", \"dev\", \"lakshman\", \"principal-issuer\", \"dogfood\", \"dev-200\", \"dev-105\", \"prepr-1\", \"prepr-2\", \"ci-bus\"], \"lanes_skipped_optional_down\": [\"sim-202\"], \"schema_version\": \"1.1.0\"}"
+  }
+}

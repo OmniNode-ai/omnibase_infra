@@ -1,0 +1,77 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Repo Evidence Gate caller (OMN-20073, OCC retirement OR.5) verifies
+# omnibase_infra's own contracts/<OMN-N>.yaml at the PR head through
+# omnibase_core's receipt-gate reusable with evidence-source: caller.
+# This is the path omnimarket proved as the canary (OMN-20070, OMN-20072).
+#
+# Why pull_request_target (OMN-20074): GitHub reads a pull_request_target
+# workflow's definition from the base branch, so a pull request cannot edit the
+# caller, ci.yml or the CI Summary gate and change what judges it. omnimarket's
+# and omnibase_core's callers use the same trigger. scripts/audit-runner-routing.py
+# bans it in every workflow (OMN-15699: untrusted fork code must never reach
+# self-hosted runners); this file is the single named exception, ruled by the
+# operator at 2026-10-08T22:41:24Z and recorded as pull_request_target_exception in
+# config/runner_routing_policy.yaml. The audit holds this file to its present
+# shape: only this trigger, read-only permissions, one job that calls a
+# full-SHA-pinned reusable, no inline steps and no secrets. The reusable refuses
+# fork heads before any checkout; for a same-repository head it runs the cited
+# contract's checks (its bound tests) at the head and at the merge base on the
+# trusted runner fleet, as it did under pull_request. Check-runs of a
+# same-repository head attach to the PR head sha, so CI Summary still reads them.
+# Residual gap: a required check is matched by name, so a pull request could add
+# another workflow reporting the same name; only an org required-workflow rule
+# closes that, and the audit refuses any other workflow using this trigger.
+#
+# dev and main are the integration branches. The activity types cover new heads,
+# reopened and ready PRs, and edits to the ticket citation or base branch.
+# Per-PR concurrency cancels superseded runs so the latest event gets a verdict.
+# Read-only contents and pull-requests permissions are all this caller needs;
+# checkout and verification belong to the reusable, with no caller secrets.
+# The full-SHA pin makes the reusable immutable; verifier-version pins the
+# released verifier used to read the caller's contracts.
+#
+# The job id is the context prefix: repo-evidence / dod-verify carries the
+# verdict, so do not add a job name.
+#
+# S6 part 1 (OMN-20074): shadow is "false", and repo-evidence / dod-verify is
+# registered in CI Summary's EXPECTED_EXTERNAL_CONTEXTS (ci_summary_gate.py),
+# so an absent verdict blocks too, alongside a red or skipped verdict.
+# Registration follows pull_request_target runs on merged dev heads.
+# S6 part 2 (OMN-20074) removed every OCC caller from this repository, so no
+# OCC context is enforced beside it.
+# compare-with-occ is "false", so the difference step stops waiting for OCC.
+# verifier-version 0.4.305 ships the occ-difference classifier and omnimarket#3563,
+# so a rollback turns comparison back on with one input. The full-SHA pin is the
+# squash commit of omnibase_core#1914 on dev; caller-mode verify reports a success
+# no-op, leaving only dod-verify to carry the verdict, a writer-app
+# dependency-pin-only head is exempt by a verdict derived in the job
+# (omnibase_core#1911), and so is the writer app's release cut that adds only a
+# changelog entry for the head's version (omnibase_core#1914).
+# scripts/ci/check_pin_reachability.py (OMN-15538) accepts it because dev
+# contains it.
+
+name: Repo Evidence Gate
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+    branches: [dev, main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  repo-evidence:
+    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@fb0c6c2117d5868a398b0920cd0048d0824415b1 # OMN-20074: the squash commit of omnibase_core#1914 on dev; carries omnibase_core#1912 (caller-mode verify success no-op, the pin-only exemption derived in the job) and the writer app's release-cut exemption
+    with:
+      evidence-source: caller
+      verifier-version: 0.4.305
+      compare-with-occ: "false"
+      shadow: "false"

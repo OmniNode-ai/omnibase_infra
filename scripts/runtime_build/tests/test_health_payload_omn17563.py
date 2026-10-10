@@ -287,7 +287,19 @@ def _all_green_runner(revision: str = "deadbeef1234") -> object:
 
     def _run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         joined = " ".join(cmd)
-        if "{{.Image}}" in joined:
+        # OMN-19417: the gate ANDs a clean lane-sync census into its verdict.
+        if cmd[:2] == ["docker", "info"]:
+            stdout = "lab-201\n"
+        elif cmd[0] == "bash" and "lane-census-check.sh" in joined:
+            stdout = json.dumps(
+                {
+                    "host": "lab-201",
+                    "lanes_checked": ["stability-test"],
+                    "findings": [],
+                    "has_drift": False,
+                }
+            )
+        elif "{{.Image}}" in joined:
             stdout = "sha256:new\n"
         elif "{{.State.Status}}" in joined:
             # OMN-18061: the gate now also reads .State.Status, and ANDs

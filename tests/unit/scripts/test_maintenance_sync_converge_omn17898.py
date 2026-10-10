@@ -4,7 +4,7 @@
 
 WHAT IS UNDER TEST
     ``deploy/maintenance/omninode-host-maintenance-sync.sh --converge`` and the
-    cron unit that invokes it. These tests drive the artifact that actually
+    service unit that invokes it. These tests drive the artifact that actually
     runs on the host, not a re-implementation (memory
     ``feedback_test_the_artifact_that_runs``).
 
@@ -36,13 +36,15 @@ WHY NOT JUST SCHEDULE ``--install``
 HERMETICITY
     Each test builds a throwaway git repo as the "infra clone" and points the
     manifest at temp paths via ``OMNINODE_MAINTENANCE_SYNC_MANIFEST``, so no
-    test reads or writes a real ``/data/maintenance`` or ``/etc/cron.d`` path.
+    test reads or writes a real ``/data/maintenance`` or ``/etc/systemd/system``
+    path.
     ``OMNINODE_MAINTENANCE_SYNC_SKIP_FETCH=1`` keeps the network out.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -54,8 +56,12 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SYNC_SCRIPT = REPO_ROOT / "deploy" / "maintenance" / "omninode-host-maintenance-sync.sh"
-SYNC_CRON = (
-    REPO_ROOT / "deploy" / "maintenance" / "cron.d" / "omninode-host-maintenance-sync"
+SYNC_SERVICE = (
+    REPO_ROOT
+    / "deploy"
+    / "maintenance"
+    / "systemd"
+    / "omninode-host-maintenance-sync.service"
 )
 
 TRACKED_REL = "deploy/maintenance/omninode-system-slack-report.sh"
@@ -415,24 +421,20 @@ def test_a_failed_converge_alerts(tmp_path: Path, fake_clone: Path) -> None:
 # --------------------------------------------------------------------------
 
 
-def _cron_command_lines(unit: str) -> list[str]:
-    """The schedule lines only.
+def _exec_start_commands(unit: str) -> list[str]:
+    """The ExecStart commands only.
 
     Asserting against the whole file would make the unit's own comments part
     of the contract: a comment EXPLAINING why `--install` is not scheduled
     would fail a naive "--install not in unit" check. Per CLAUDE.md rule 15,
     prose that merely names a token must never be what a matcher fires on.
     """
-    return [
-        line
-        for line in unit.splitlines()
-        if line.strip() and not line.startswith(("#", "SHELL=", "PATH="))
-    ]
+    return re.findall(r"^\s*ExecStart\s*=(.*)$", unit, re.MULTILINE)
 
 
-def test_cron_unit_converges_rather_than_only_checking() -> None:
+def test_service_unit_converges_rather_than_only_checking() -> None:
     """The scheduled tick must repair. Detection alone is what OMN-17898 is."""
-    commands = _cron_command_lines(SYNC_CRON.read_text())
+    commands = _exec_start_commands(SYNC_SERVICE.read_text())
 
     assert len(commands) == 1, commands
     command = commands[0]
@@ -452,19 +454,18 @@ def test_cron_unit_converges_rather_than_only_checking() -> None:
 def test_the_unit_runs_as_root_and_the_script_never_sudos() -> None:
     """Privilege is declared by the scheduler, never taken by the script.
 
-    /data/maintenance/bin and /etc/cron.d are root-owned, so the writes need
-    root -- and the cron unit already supplies it in its user field. A `sudo`
+    /data/maintenance/bin and /etc/systemd/system are root-owned, so the writes
+    need root -- and a system service with no User= runs as root. A `sudo`
     inside the script would be a second, invisible privilege rule that works
-    from cron and prompts from a terminal.
+    from a timer and prompts from a terminal.
     """
-    unit = SYNC_CRON.read_text()
-    command_lines = _cron_command_lines(unit)
+    unit = SYNC_SERVICE.read_text()
+    command_lines = _exec_start_commands(unit)
     assert command_lines, unit
-    for line in command_lines:
-        assert line.split()[5] == "root", (
-            f"the converge writes root-owned paths; this line does not run as "
-            f"root: {line}"
-        )
+    assert not re.search(r"^\s*User\s*=", unit, re.MULTILINE), (
+        "the converge writes root-owned paths; the system service must use "
+        "the default root identity without a User= override"
+    )
 
     source = SYNC_SCRIPT.read_text()
     for line in source.splitlines():

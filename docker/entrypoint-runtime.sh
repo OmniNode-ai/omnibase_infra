@@ -50,7 +50,7 @@ fi
 # which code is running via: docker logs <container> | head -15
 #
 # RUNTIME_SOURCE_HASH and COMPOSE_PROJECT are stamped at build time from
-# --build-arg values passed by deploy-runtime.sh. They default to "unknown"
+# --build-arg values passed by onex-runtime-deploy. They default to "unknown"
 # when the image is built without those args (e.g. manual docker compose up).
 #
 # SOURCE_DIR is the installed package location inside the container.

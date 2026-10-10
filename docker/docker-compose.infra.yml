@@ -8,7 +8,7 @@
 #
 #
 # Usage (prefer `make up` / `make up-runtime` from the repo root, or
-# scripts/deploy-runtime.sh -- see knowledge-base-internal:runbooks/omnibase-infra-docker-deployment.md Quick Start):
+# onex-runtime-deploy -- see knowledge-base-internal:runbooks/omnibase-infra-docker-deployment.md Quick Start):
 #   # Core infrastructure -- postgres, valkey, redpanda, keycloak, infisical.
 #   # Infisical is always-on (OMN-5831), not a separate profile: INFISICAL_ENCRYPTION_KEY
 #   # and INFISICAL_AUTH_SECRET must be set in .env before this succeeds.
@@ -148,7 +148,7 @@ x-runtime-env: &runtime-env
   # OMN-13220: per-consumer Kafka consumer-start budget. On a fully-cold lane the
   # kernel joins a consumer group per subscribed topic; with 1300+ topics on a
   # freshly-provisioned broker the default 30s blew on the slow group-coordinator
-  # tail and the kernel recycled before reaching healthy. deploy-runtime.sh
+  # tail and the kernel recycled before reaching healthy. onex-runtime-deploy
   # exports a raised COLD_START_KAFKA_TIMEOUT_SECONDS before the restart; the
   # :-30 default preserves the prior steady-state value when the var is unset
   # (e.g. a plain `docker compose up` outside the deploy script). Mapped to
@@ -210,6 +210,7 @@ x-runtime-env: &runtime-env
   # creation to one partition unless an operator explicitly opts into wider
   # contract-declared partition counts.
   ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: ${ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS:-1}
+  ONEX_TRAJECTORY_EVALUATION_BACKEND: ${DEV_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set DEV_TRAJECTORY_EVALUATION_BACKEND}
   ONEX_BOUNDARY_DLQ_ENABLED: ${DEV_BOUNDARY_DLQ_ENABLED:?runtime policy contract must set DEV_BOUNDARY_DLQ_ENABLED}
   ONEX_SINGLE_OWNER_COMMAND_TOPICS: ${ONEX_SINGLE_OWNER_COMMAND_TOPICS:-0}
   ONEX_TOPIC_ENFORCEMENT_MODE: ${ONEX_TOPIC_ENFORCEMENT_MODE:-warn}
@@ -478,6 +479,8 @@ x-runtime-env: &runtime-env
   # empty value is not a silent disable — the resolver is required=True and
   # raises at the effect boundary, and the stall alert records the undelivered
   # decision by name on its terminal event.
+  DHARMA_API_KEY: ${DHARMA_API_KEY:-}
+  DHARMA_ORG_ID: ${DHARMA_ORG_ID:-}
   SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
   SLACK_CHANNEL_ID: ${SLACK_CHANNEL_ID:-}
   LLM_ENDPOINT_CIDR_ALLOWLIST: ${LLM_ENDPOINT_CIDR_ALLOWLIST:?LLM_ENDPOINT_CIDR_ALLOWLIST required for local LLM HTTP egress}
@@ -641,7 +644,7 @@ services:
       # REDPANDA_MEMORY. Three lanes -- dev (this file), stability-test
       # (docker-compose.stability-test.yml) and judge (docker-compose.judge.yml)
       # -- all read REDPANDA_MEMORY, and the value that actually takes effect
-      # comes from the host-global operator env file that deploy-runtime.sh
+      # comes from the host-global operator env file that onex-runtime-deploy
       # resolves via OMNIBASE_OPERATOR_ENV_FILE. So there was no way to change
       # the dev broker's reservation without also changing the other two at
       # their next recreate. lakshman, dogfood, prod and ci-bus already have
@@ -682,7 +685,7 @@ services:
       - "${REDPANDA_SCHEMA_REGISTRY_PORT:-18081}:18081"
       # Admin API, published on the host loopback ONLY (OMN-20260).
       # admin_api_require_auth is false on this broker (the healthcheck, the
-      # deploy-runtime.sh broker probe and the rpk one-shots call it with no
+      # onex-runtime-deploy broker probe and the rpk one-shots call it with no
       # credentials), so an all-interfaces publish let any LAN or tailnet host
       # create SCRAM users and rewrite cluster config, undoing per-developer
       # and per-tenant broker isolation. Every in-network consumer uses
@@ -725,11 +728,11 @@ services:
     image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-redpanda-partition-cap
     entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
-        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
+    extends:
+      file: docker-compose.broker-profile.yml
+      service: redpanda-settings
+    environment:
+      REDPANDA_PROFILE_MEMORY: ${DEV_REDPANDA_MEMORY:-12G}
     depends_on:
       redpanda:
         condition: service_healthy
@@ -947,7 +950,7 @@ services:
     # carrying the lane prefix, so it collided across compose projects on the
     # same host (e.g. a leftover dev-lane container blocked a stability rebuild).
     # Lane overlays append their lane segment, yielding the derivable form
-    # <compose-project>-forward-migration that deploy-runtime.sh waits on (OMN-12987).
+    # <compose-project>-forward-migration that onex-runtime-deploy waits on (OMN-12987).
     container_name: omnibase-infra-forward-migration
     profiles: ["runtime", "full"]
     depends_on:
@@ -1394,7 +1397,7 @@ services:
   # lane-prefixed fail-closed form but left this base line bare, so the dev lane
   # (which has no overlay — this file IS the dev lane) still resolved to 0: a plain
   # `up -d --no-deps runtime-worker` exited 0 creating nothing, while
-  # deploy-runtime.sh's RUNTIME_SERVICES / RT-6 deploy readback requires a running
+  # onex-runtime-deploy's RUNTIME_SERVICES / RT-6 deploy readback requires a running
   # container, aborting and auto-restoring every dev-lane deploy. deploy.replicas
   # below is now lane-prefixed and fail-closed, exactly like the sibling
   # DEV_RUNTIME_WORKER_* vars in this same service block.

@@ -9,7 +9,7 @@ store carries ``ONEXBOT_OCC_PRIVATE_KEY`` in exactly that form, and the agent
 hands ``dict(os.environ)`` to ``docker compose``, whose interpolation wrote the
 mangled key into every dev-lane container it created.
 
-``scripts/deploy-runtime.sh`` bash-``source``s the very same file on the very
+``src/omnibase_infra/handlers/handler_runtime_deploy.sh`` bash-``source``s the very same file on the very
 same host and decodes it correctly. These tests pin the unit onto that same
 transport and prove, with a throwaway generated key, that the two parsers really
 do disagree -- the positive control without which "the launcher works" is an
@@ -337,3 +337,15 @@ def test_launcher_refuses_a_non_identifier_protected_name(tmp_path: Path) -> Non
     )
     assert result.returncode == 2, (result.returncode, result.stderr)
     assert "non-identifier name" in result.stderr
+
+
+def test_launcher_selects_declared_clone_root_after_store_load(tmp_path: Path) -> None:
+    """The agent sees the same deploy source as a script loading this store."""
+    canonical = tmp_path / "canonical"
+    canonical.mkdir()
+    env_file = tmp_path / "store.env"
+    env_file.write_text(
+        f"OMNI_HOME={tmp_path / 'other'}\nDEPLOY_SOURCE_CLONE_ROOT={canonical}\n"
+    )
+    env = _run_launcher(tmp_path, env_file, "OMNI_HOME")
+    assert env["OMNI_HOME"] == str(canonical)

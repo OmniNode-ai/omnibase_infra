@@ -107,7 +107,7 @@ def test_dry_run_plan_dev_lane(tmp_path: Path) -> None:
     assert "OMNIBASE_INFRA_COMPOSE_PROJECT=omnibase-infra" in plan
     assert "DEPLOY_HOTPATCH=0" in plan
     # OMN-14562: the lab fast lane always forces a same-version overwrite --
-    # deploy-runtime.sh's version-directory collision guard otherwise fires
+    # onex-runtime-deploy's version-directory collision guard otherwise fires
     # before the RT-1 clean-ref checkout ever runs.
     assert "--execute --force" in plan
     assert "dry-run" in plan  # no build/deploy performed
@@ -196,7 +196,7 @@ def test_missing_omni_home_fails(tmp_path: Path) -> None:
 def test_execute_cuts_lab_tag_and_delegates(tmp_path: Path) -> None:
     omni_home = _make_omni_home(tmp_path)
     marker = tmp_path / "deploy_ran.marker"
-    stub = tmp_path / "stub-deploy-runtime.sh"
+    stub = tmp_path / "stub-onex-runtime-deploy"
     stub.write_text(
         f'#!/usr/bin/env bash\necho "stub deploy: $*" >&2\ntouch {marker}\nexit 0\n',
         encoding="utf-8",
@@ -216,7 +216,7 @@ def test_execute_cuts_lab_tag_and_delegates(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     # The stub deploy-runtime was actually invoked.
     assert marker.exists()
-    # OMN-14562: --force must reach deploy-runtime.sh so a same-version lab
+    # OMN-14562: --force must reach onex-runtime-deploy so a same-version lab
     # redeploy overwrites rather than tripping the version-directory guard.
     assert "--force" in result.stderr
 
@@ -253,7 +253,7 @@ def test_ref_missing_in_a_sibling_falls_back_instead_of_aborting(
     for repo in LAB_REF_REPOS:
         if repo != "omnibase_spi":
             _git(omni_home / repo, "tag", old_tag, "dev")
-    stub = tmp_path / "stub-deploy-runtime.sh"
+    stub = tmp_path / "stub-onex-runtime-deploy"
     stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     stub.chmod(0o755)
 
@@ -295,7 +295,7 @@ def test_ref_missing_in_the_infra_clone_still_aborts(tmp_path: Path) -> None:
     """The fallback is for siblings only: a --ref the build-context repo cannot
     resolve names nothing to build, and must still refuse."""
     omni_home = _make_omni_home(tmp_path)
-    stub = tmp_path / "stub-deploy-runtime.sh"
+    stub = tmp_path / "stub-onex-runtime-deploy"
     marker = tmp_path / "deploy_ran.marker"
     stub.write_text(f"#!/usr/bin/env bash\ntouch {marker}\n", encoding="utf-8")
     stub.chmod(0o755)

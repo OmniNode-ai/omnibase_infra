@@ -46,6 +46,7 @@ All credentials in this module are synthetic test constants.
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -124,6 +125,20 @@ class _RecordingAdminClient:
         # The metadata question, asked first and deliberately: an unreachable
         # broker must raise here rather than resolve to an empty group listing.
         return {"brokers": [{"node_id": 1}]}
+
+    async def _send_request(
+        self, request: Any, node_id: int | None = None
+    ) -> SimpleNamespace:
+        struct = request.prepare({16: (0, 4)})
+        assert struct.states_filter == ["Stable"]
+        return SimpleNamespace(
+            error_code=0,
+            groups=[
+                (group_id, "consumer", state, {})
+                for group_id, _ in self.listed_groups
+                if (state := self.described_states.get(group_id, "Stable")) == "Stable"
+            ],
+        )
 
     async def list_consumer_groups(self) -> list[tuple[str, str]]:
         return list(_RecordingAdminClient.listed_groups)

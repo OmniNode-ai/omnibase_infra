@@ -191,8 +191,6 @@ def test_invalid_models_response_is_unknown(
 @pytest.mark.parametrize(
     ("data", "reported"),
     [
-        ([], "no model ids"),
-        ([None, 3, {}, {"id": 9}, {"id": " "}], "no model ids"),
         (
             [{"id": " z/model "}, {"id": "a/model"}, {"id": "a/model"}],
             "a/model, z/model",

@@ -36,7 +36,9 @@ def test_paid_models_have_documented_rates(
     raw = yaml.safe_load(_DEFAULT_MANIFEST_PATH.read_text(encoding="utf-8"))
     raw_entry = raw["models"][model_id]
     assert raw_entry["confidence"] == "LOW_CONFIDENCE"
-    assert raw_entry["source"] == "FALLBACK_PROVIDER_DOCUMENTATION"
+    assert (
+        raw_entry["source"] == "PROVIDER_PUBLISHED_PRICING"
+    )  # OMN-20387: cited provider page
     assert raw_entry["evidence"]["authoritative"] is False
     assert raw_entry["evidence"]["source_url"].startswith("https://")
     assert raw_entry["evidence"]["retrieved_at"] == raw_entry["effective_date"]

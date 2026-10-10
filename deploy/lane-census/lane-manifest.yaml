@@ -61,7 +61,7 @@
 #   `lane-census-check.sh` run on .201 is what turns the gap into visible drift instead of
 #   silence. The census reporting ten `container_absent` findings after this merges is the
 #   gate working, not a regression — it clears when the lanes are refreshed through the
-#   sanctioned attributed paths (`scripts/deploy-runtime.sh --execute`,
+#   sanctioned attributed paths (`onex-runtime-deploy --execute`,
 #   `scripts/runtime_build/refresh_stability_lane.sh --execute`). Declaring the desired state
 #   FIRST is the same discipline the lakshman reservation above used, and it is the opposite
 #   of the failure this file exists for: a running-but-undeclared container is invisible,
@@ -245,8 +245,26 @@ hosts:
   # OMN-19505, the second deployed dev lane dev-202.
   lab-202:
     aliases: [omnipc2]
+# OMN-19416: a service with Docker health is graded after 1800 continuous
+# unhealthy seconds (FailingStreak times interval). unhealthy_after_seconds
+# may be an integer in 1..1800. restart_bound is a non-negative restart count;
+# a count above it is drift, including an exited container. The alarm reads
+# these same per-service bounds through config/lab_alarm.json's census_lane.
+# OMN-19419: expected broker keys are resolved from the settings service's
+# rendered environment; memory is compared with the broker startup command.
+# Lanes without a broker (prepr slots, principal-issuer) inherit their host's
+# dependency and do not reconcile it. Judge/collaborator mutation stays gated.
+x-broker-profile: &broker_profile
+  service: redpanda
+  settings_service: redpanda-partition-cap
+  keys:
+    segment_fallocation_step: REDPANDA_SEGMENT_FALLOCATION_STEP
+    log_segment_ms: REDPANDA_LOG_SEGMENT_MS
+    retention_bytes: REDPANDA_RETENTION_BYTES
+    memory: REDPANDA_PROFILE_MEMORY
 lanes:
   stability-test:
+    broker_profile: *broker_profile
     hosts: [lab-201]
     compose_file: docker/docker-compose.stability-test.yml
     compose_project: omnibase-infra-stability-test
@@ -340,7 +358,7 @@ lanes:
       # therefore cannot start them, by construction.
       #
       # They were declared `kind: service, replicas: 1` by OMN-13815 on
-      # 2026-07-02 evidence, when deploy-runtime.sh's warm `--restart` named the
+      # 2026-07-02 evidence, when onex-runtime-deploy's warm `--restart` named the
       # full RUNTIME_SERVICES set explicitly (naming a service on the CLI
       # bypasses profile filtering, so they did run). OMN-14873 then scoped the
       # stability refresh down to the 4 core services via
@@ -432,6 +450,7 @@ lanes:
   # idle-converge window of this lane (OMN-19509). The backup delegation lane
   # is the h201 stability-test lane (OMN-20593).
   dev:
+    broker_profile: *broker_profile
     hosts: [lab-201]
     compose_file: docker/docker-compose.generated.yml
     compose_project: omnibase-infra
@@ -439,10 +458,29 @@ lanes:
     image_tag_pattern: '.+'
     optional: true
     services:
+      # OMN-19416: bounds moved from the alarm; both readers use this manifest.
+      - name: omnibase-infra-postgres
+        kind: service
+        replicas: 1
+        restart_bound: 5
+      - name: omnibase-infra-redpanda
+        kind: service
+        replicas: 1
+        restart_bound: 5
+      - name: omnibase-infra-valkey
+        kind: service
+        replicas: 1
+        restart_bound: 5
+      - name: omnimarket-projection-api
+        kind: service
+        replicas: 1
+        restart_bound: 5
       - name: omninode-runtime
+        restart_bound: 5
         kind: service
         replicas: 1
       - name: omninode-runtime-effects
+        restart_bound: 5
         kind: service
         replicas: 1
       # OMN-17448: the standalone projection writers. Declared here so the lane
@@ -457,21 +495,27 @@ lanes:
       # how "undocumented-but-running" (and its mirror, "declared-but-never-
       # started") both hide.
       - name: omnimarket-projection-tenant-registry-writer
+        restart_bound: 5
         kind: service
         replicas: 1
       - name: omnimarket-projection-delegation-writer
+        restart_bound: 5
         kind: service
         replicas: 1
       - name: omnimarket-projection-registration-writer
+        restart_bound: 5
         kind: service
         replicas: 1
       - name: omnimarket-projection-savings-writer
+        restart_bound: 2
         kind: service
         replicas: 1
       - name: omnimarket-projection-tenant-credentials-writer
+        restart_bound: 5
         kind: service
         replicas: 1
       - name: omnimarket-projection-live-events-writer
+        restart_bound: 5
         kind: service
         replicas: 1
       # OMN-18114: the TENANT-domain projection CARRIER. Not one of the writers
@@ -673,6 +717,7 @@ lanes:
   #   `docker ps -a` grouped by compose project returns the same 10 rows under
   #   omnibase-infra-dogfood. No lane was mutated: every command was a read.
   dogfood:
+    broker_profile: *broker_profile
     hosts: [lab-105, lab-101, lab-200]
     compose_file: docker/docker-compose.dogfood.yml
     compose_project: omnibase-infra-dogfood
@@ -741,6 +786,7 @@ lanes:
   # .202 at 2026-09-24T01:18Z (`ss -ltn`: listeners 22, 53, 631, 3389, 8000 and
   # 8002 only).
   sim-202:
+    broker_profile: *broker_profile
     hosts: [lab-202]
     compose_file: docker/docker-compose.sim-202.yml
     compose_project: omnibase-infra-sim-202
@@ -809,6 +855,7 @@ lanes:
   # of the unified verification plan (no clone and no `.git` on .202 while the
   # C13, C14 and C29 producers run bare there).
   dev-202:
+    broker_profile: *broker_profile
     hosts: [lab-202]
     compose_file: docker/docker-compose.dev-202.yml
     compose_project: omnibase-infra-dev-202
@@ -924,6 +971,7 @@ lanes:
   # `optional: true`: a declared lane with nothing running yields no finding,
   # and one with any declared service running is reconciled in full.
   dev-200:
+    broker_profile: *broker_profile
     hosts: [lab-200]
     compose_file: docker/docker-compose.dev-200.yml
     compose_project: omnibase-infra-dev-200
@@ -1039,6 +1087,7 @@ lanes:
   # `optional: true`: declared before it is built, and absent whenever the host
   # slot belongs to a prover.
   dev-105:
+    broker_profile: *broker_profile
     hosts: [lab-105]
     compose_file: docker/docker-compose.dev-105.yml
     compose_project: omnibase-infra-dev-105
@@ -1382,6 +1431,7 @@ lanes:
   # So: the project exists, its network exists, both ports it claims are now held by
   # it, and the credential works from where it will actually be used.
   ci-bus:
+    broker_profile: *broker_profile
     hosts: [lab-201]
     compose_file: docker/docker-compose.ci-bus.yml
     compose_project: omninode-ci-bus
@@ -1389,6 +1439,8 @@ lanes:
     image_tag_pattern: '.+'
     optional: false
     services:
+      - name: omninode-ci-bus-redpanda-partition-cap
+        kind: oneshot
       - name: omninode-ci-bus-redpanda
         kind: service
         replicas: 1

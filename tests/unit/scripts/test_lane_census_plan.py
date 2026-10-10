@@ -99,12 +99,13 @@ def _container(
     state: str = "running",
     status: str = "Up 3 hours",
     image: str = "omninode-runtime:0.37.0",
-) -> dict[str, str]:
+) -> dict[str, Any]:
     return {
         "Names": name,
         "State": state,
         "Status": status,
         "Image": image,
+        "RestartCount": 0,
         "Labels": f"com.omninode.lane={lane},com.omninode.layer=runtime",
     }
 
@@ -624,7 +625,20 @@ def _fixture(path: Path) -> dict[str, Any]:
 
 def _bad_fixture_params() -> list[Any]:
     return [
-        pytest.param(path, id=path.stem.removeprefix("inventory_"))
+        pytest.param(
+            path,
+            id=path.stem.removeprefix("inventory_"),
+            marks=(
+                []
+                if path.stem == "inventory_container_unhealthy"
+                else [
+                    pytest.mark.xfail(
+                        strict=True,
+                        reason="remaining desired-state kinds await evaluation",
+                    )
+                ]
+            ),
+        )
         for path in _lab_sync_fixtures()
         if path.stem != "inventory_clean"
     ]
@@ -633,7 +647,21 @@ def _bad_fixture_params() -> list[Any]:
 def _plan_with_desired(fixture: dict[str, Any]) -> dict[str, Any]:
     envelope = dict(fixture["envelope"])
     envelope["desired_state"] = fixture["desired"]
-    plan: dict[str, Any] = PLAN.build_plan(envelope, MANIFEST)
+    # These historical captures contain runtime containers only; freeze that
+    # topology while still reading their existing services' current bounds.
+    manifest = copy.deepcopy(MANIFEST)
+    manifest["lanes"]["dev"]["services"] = [
+        svc
+        for svc in manifest["lanes"]["dev"]["services"]
+        if svc["name"]
+        not in {
+            "omnibase-infra-postgres",
+            "omnibase-infra-redpanda",
+            "omnibase-infra-valkey",
+            "omnimarket-projection-api",
+        }
+    ]
+    plan: dict[str, Any] = PLAN.build_plan(envelope, manifest)
     return plan
 
 
@@ -655,14 +683,13 @@ def test_lab_sync_kinds_are_new_and_every_kind_has_one_severity() -> None:
     assert set(PLAN.FINDING_KIND_SEVERITY) == set(legacy + lab_sync)
 
 
-def test_lab_sync_kind_is_not_emitted_without_evaluation() -> None:
-    """Declared is not evaluated: no code path in the planner names a lab-sync kind.
-
-    T1.2 (OMN-19414) and T1.3 (OMN-19416) add the evaluation and delete this test.
-    """
+def test_remaining_lab_sync_kinds_are_not_evaluated() -> None:
+    """This change evaluates only health and declared restart bounds."""
     source = (_REPO / "scripts" / "lane_census_plan.py").read_text(encoding="utf-8")
     body = source.split("FINDING_KIND_SEVERITY: dict[str, str] = {", 1)[1]
     for kind in _PLAN_LAB_SYNC_KINDS:
+        if kind in {"container_unhealthy", "container_restart_loop"}:
+            continue
         assert f'"{kind}"' not in body, f"{kind} is evaluated before T1.2"
 
 
@@ -702,7 +729,9 @@ def test_lab_sync_fixture_names_its_source_row(path: Path) -> None:
         assert finding["kind"] == fixture["expected_kind"]
 
 
-@pytest.mark.parametrize("path", _bad_fixture_params())
+@pytest.mark.parametrize(
+    "path", [p for p in _lab_sync_fixtures() if p.stem != "inventory_clean"]
+)
 def test_lab_sync_fixture_carries_its_kinds_collector_fields(path: Path) -> None:
     """The collector side of the seam: each fixture has what its kind grades."""
     fixture = _fixture(path)
@@ -730,13 +759,13 @@ def test_lab_sync_fixture_raises_no_census_kind_today(path: Path) -> None:
     nothing else.
     """
     plan = _plan_with_desired(_fixture(path))
-    assert plan["findings"] == [], plan["findings"]
+    assert not [
+        f
+        for f in plan["findings"]
+        if f["kind"] in {spec.kind for spec in PLAN.CENSUS_FINDING_KINDS}
+    ], plan["findings"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="lab-sync kinds are declared, not evaluated: T1.2 OMN-19414, T1.3 OMN-19416",
-)
 @pytest.mark.parametrize("path", _bad_fixture_params())
 def test_lab_sync_fixture_produces_its_named_kind(path: Path) -> None:
     """RED until T1.2: every known-bad fixture produces exactly its named finding."""
@@ -754,6 +783,72 @@ def test_lab_sync_fixture_produces_its_named_kind(path: Path) -> None:
 def test_lab_sync_clean_fixture_produces_no_finding() -> None:
     plan = _plan_with_desired(_fixture(_FIXTURES / "inventory_clean.json"))
     assert plan["has_drift"] is False, plan["findings"]
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"), [(1799, False), (1800, True), (1801, True)]
+)
+def test_unhealthy_continuous_threshold(seconds: int, expected: bool) -> None:
+    fixture = _fixture(_FIXTURES / "inventory_container_unhealthy.json")
+    row = next(
+        r
+        for r in fixture["envelope"]["containers"]
+        if r["Names"] == "omninode-stability-test-runtime"
+    )
+    row["Health"] = {"Status": "unhealthy", "FailingStreak": seconds}
+    row["HealthcheckIntervalSeconds"] = 1
+    findings = _plan_with_desired(fixture)["findings"]
+    assert any(f["kind"] == "container_unhealthy" for f in findings) is expected
+
+
+@pytest.mark.parametrize("status", ["healthy", "starting"])
+def test_unhealthy_streak_does_not_grade_other_health_states(status: str) -> None:
+    fixture = _fixture(_FIXTURES / "inventory_container_unhealthy.json")
+    for row in fixture["envelope"]["containers"]:
+        if row["Names"] == "omninode-stability-test-runtime":
+            row["Health"]["Status"] = status
+    assert not _plan_with_desired(fixture)["findings"]
+
+
+@pytest.mark.parametrize("bound", [1801, 0, -1, True, "1800"])
+def test_unhealthy_invalid_manifest_bound_refused_at_load(
+    tmp_path: Path, bound: Any
+) -> None:
+    import yaml
+
+    manifest = copy.deepcopy(MANIFEST)
+    manifest["lanes"]["stability-test"]["services"][0]["unhealthy_after_seconds"] = (
+        bound
+    )
+    path = tmp_path / "manifest.yaml"
+    path.write_text(yaml.safe_dump(manifest))
+    with pytest.raises(ValueError, match="unhealthy_after_seconds"):
+        PLAN.load_manifest(path)
+
+
+def test_unhealthy_lower_service_bound() -> None:
+    fixture = _fixture(_FIXTURES / "inventory_container_unhealthy.json")
+    manifest = copy.deepcopy(MANIFEST)
+    for svc in manifest["lanes"]["stability-test"]["services"]:
+        if svc["name"] == "omninode-stability-test-runtime":
+            svc["unhealthy_after_seconds"] = 60
+    for row in fixture["envelope"]["containers"]:
+        if row["Names"] == "omninode-stability-test-runtime":
+            row["Health"]["FailingStreak"] = 2
+    plan = PLAN.build_plan(fixture["envelope"], manifest)
+    assert any(f["kind"] == "container_unhealthy" for f in plan["findings"])
+
+
+@pytest.mark.parametrize(("restarts", "expected"), [(2, False), (3, True)])
+def test_restart_loop_uses_manifest_bound(restarts: int, expected: bool) -> None:
+    fixture = _fixture(_FIXTURES / "inventory_clean.json")
+    for row in fixture["envelope"]["containers"]:
+        if row["Names"] == "omnimarket-projection-savings-writer":
+            row["RestartCount"] = restarts
+    plan = _plan_with_desired(fixture)
+    assert (
+        any(f["kind"] == "container_restart_loop" for f in plan["findings"]) is expected
+    )
 
 
 def _event_over(fixture: dict[str, Any]) -> dict[str, Any]:

@@ -93,6 +93,11 @@ ALLOWED_EMPTY_DEFAULTS = {
     # loudly at the effect boundary; neither substitutes a default.
     "SLACK_BOT_TOKEN",
     "SLACK_CHANNEL_ID",
+    # OMN-20089: unprovisioned lanes can render, like Slack above. The
+    # evaluator resolves these refs with required=True and refuses missing
+    # credentials at the effect boundary instead of silently disabling.
+    "DHARMA_API_KEY",
+    "DHARMA_ORG_ID",
     # OMN-17398: the free OpenRouter rung's key. Present in the lane host's
     # `.env` on .201 (copied from the secret store's /lab-provider-keys) and
     # absent on lanes that do not route to OpenRouter, so a `:?` form would

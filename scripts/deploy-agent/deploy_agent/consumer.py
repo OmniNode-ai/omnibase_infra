@@ -108,6 +108,10 @@ from deploy_agent.routing import (
     ModelLaneFlags,
     is_promotion,
 )
+from omnibase_infra.topics.topic_namespace import (
+    apply_topic_namespace,
+    namespace_consumer_group_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -304,9 +308,9 @@ class DeployConsumer:
         self.load_gate_paused = None
         self.lane_flags = lane_flags
         self.consumer = KafkaConsumer(
-            TOPIC_REBUILD_REQUESTED,
+            apply_topic_namespace(TOPIC_REBUILD_REQUESTED),
             **kafka_config.consumer_kwargs(),
-            group_id=consumer_group_for(router),
+            group_id=namespace_consumer_group_id(consumer_group_for(router)),
             auto_offset_reset="latest",
             enable_auto_commit=False,
             value_deserializer=deserialize_command_value,
@@ -1299,7 +1303,9 @@ class DeployConsumer:
                 value_serializer=lambda v: json.dumps(v, default=str).encode("utf-8"),
             )
             try:
-                producer.send(TOPIC_DEPLOY_COMMAND_DLQ, value=record)
+                producer.send(
+                    apply_topic_namespace(TOPIC_DEPLOY_COMMAND_DLQ), value=record
+                )
                 producer.flush(timeout=10)
             finally:
                 producer.close()

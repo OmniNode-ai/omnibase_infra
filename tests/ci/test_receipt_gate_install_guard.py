@@ -23,9 +23,6 @@ import yaml
 
 pytestmark = pytest.mark.unit
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-CALL_RECEIPT_GATE = REPO_ROOT / ".github" / "workflows" / "call-receipt-gate.yml"
-
 # Resolve omni_home via env var (preferred) or walk up from worktree path.
 # Worktree layout: $OMNI_HOME/omni_worktrees/<ticket>/<repo>/tests/ci/<file>
 #   parents[2] = repo root, parents[3] = ticket dir,
@@ -45,54 +42,13 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return loaded
 
 
-class TestCallReceiptGateDelegation:
-    """call-receipt-gate.yml must delegate to the centralised omnibase_core workflow."""
-
-    def test_workflow_uses_reusable_omnibase_core_workflow(self) -> None:
-        workflow = _load_yaml(CALL_RECEIPT_GATE)
-        verify_job = workflow["jobs"]["verify"]
-        uses = verify_job.get("uses", "")
-        assert uses.startswith(
-            "OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml"
-        ), (
-            "call-receipt-gate.yml must delegate to the omnibase_core reusable "
-            f"workflow; found: {uses!r}"
-        )
-
-    def test_workflow_tracks_main_or_pinned_sha(self) -> None:
-        workflow = _load_yaml(CALL_RECEIPT_GATE)
-        uses: str = workflow["jobs"]["verify"]["uses"]
-        assert "@" in uses, "workflow_call reference must include a ref after '@'"
-        ref = uses.split("@", 1)[1]
-        assert ref, "ref after '@' must not be empty"
-
-    def test_caller_has_correct_permissions(self) -> None:
-        workflow = _load_yaml(CALL_RECEIPT_GATE)
-        perms = workflow.get("permissions", {})
-        assert perms.get("contents") == "read"
-        assert perms.get("pull-requests") == "read"
-
-    def test_caller_sets_branch_aware_policy_mode(self) -> None:
-        workflow = _load_yaml(CALL_RECEIPT_GATE)
-        verify_job = workflow["jobs"]["verify"]
-        with_block = verify_job.get("with", {})
-
-        policy_expr = with_block.get("branch-policy-mode", "")
-        assert "main-release" in policy_expr
-        assert "dev-preflight" in policy_expr
-        assert "github.event.pull_request.base.ref == 'main'" in policy_expr
-        assert "github.event.merge_group.base_ref == 'refs/heads/main'" in policy_expr
-        assert "github.event.pull_request.base.ref == 'dev'" in policy_expr
-        assert "github.event.merge_group.base_ref == 'refs/heads/dev'" in policy_expr
-
-
 class TestReceiptGateInstallSafeguards:
     """The reusable receipt-gate.yml from omnibase_core must have install safeguards.
 
     These tests check the LOCAL copy of receipt-gate.yml in the omnibase_core
     canonical clone under $OMNI_HOME, confirming the reusable workflow is sound.
-    In CI the caller downloads the @main version, so this test acts as a canary
-    ensuring the reusable workflow retains the OMN-9198/9283 safeguards.
+    This test ensures the sibling reusable workflow retains the OMN-9198/9283
+    safeguards independently of whether this repo calls it.
     """
 
     RECEIPT_GATE_YML = _RECEIPT_GATE_YML

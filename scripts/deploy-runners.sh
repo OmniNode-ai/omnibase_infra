@@ -40,7 +40,7 @@
 #   4. Build the versioned runner image via scripts/ci/build_runner_image.sh
 #   5. Deploy via SSH: docker compose up -d --force-recreate --remove-orphans
 #   6. Install docker prune cron idempotently (build cache + untagged images, tee)
-#   7. Install runner health monitor cron (Slack alerts on state transitions)
+#   7. Install runner health monitor timers (Slack alerts on state transitions)
 #   8. Poll GitHub API until the configured runner fleet is online
 #      (max 5 min, 15s interval)
 #   9. Retry once with fresh token if poll times out
@@ -67,11 +67,14 @@
 #   comment block below).
 #   --limit=N stops after N successful recreates: --limit=1 is the canary
 #   step, proven before the rest of the fleet is touched.
+#   Requires DEPLOY_RUNNER_TOKEN or --token-file before any remote action,
+#   including in --dry-run. The supplied token reaches each recreated runner;
+#   a credential-cache directory alone is not proof of a usable registration.
 #   A fleet service with no container at all (retired by --retire-surplus, or
 #   never created) is idle by construction and is CREATED on this path, but
-#   only with --token-file: its kept creds volume may hold credentials for a
-#   registration GitHub already deleted (OMN-19397). Without a token file it
-#   is skipped and reported, never created into a crash loop.
+#   only with a supplied token: its kept creds volume may hold credentials for a
+#   registration GitHub already deleted. Without a supplied token,
+#   the whole roll refuses before any container is recreated.
 #   --only=NAME converges exactly one fleet service. A runner that is busy
 #   through every retry pass is reported and left alone, which is correct --
 #   but without a way to come back for it later, the residual would have to be
@@ -425,11 +428,8 @@ TARGET_POOL=""
 SECONDARY_HOST=false
 # OMN-19895: the slice unit a pool declares, when it has one.
 POOL_SLICE_SOURCE=""
-# OMN-19274. Empty means no migration: --rolling skips (never recreates) a
-# runner whose CURRENT rendered label set has no matching credential-cache
-# entry. A path here opts a --rolling run into registering exactly those
-# skipped runners with a real token, one at a time, still busy-checked. Read
-# from a FILE, never argv or env, so the token never lands in `ps` or a log.
+# An operator-supplied file is an alternative to DEPLOY_RUNNER_TOKEN.
+# This script only reads it; it never obtains or persists a registration token.
 TOKEN_FILE=""
 
 for arg in "$@"; do
@@ -454,18 +454,16 @@ for arg in "$@"; do
             echo "  --rolling     Recreate the fleet ONE runner at a time, skipping any"
             echo "                runner executing a job. The only supported way to apply"
             echo "                a container-env change (env is frozen at creation)."
+            echo "                Requires DEPLOY_RUNNER_TOKEN or --token-file, also"
+            echo "                in --dry-run, before any remote action."
             echo "  --limit=N     With --rolling: stop after N successful recreates."
             echo "                --limit=1 is the canary step of a fleet roll."
             echo "  --only=NAME   With --rolling: converge exactly one fleet service,"
             echo "                for a runner that stayed busy through every pass."
             echo "  --token-file=PATH  With --rolling: a file holding a GitHub Actions"
-            echo "                registration token (never argv/env). Runners whose"
-            echo "                current label set has no matching credential cache"
-            echo "                would otherwise be SKIPPED -- with this, they are"
-            echo "                migrated one at a time (still busy-checked) using this"
-            echo "                token, instead of being left untouched. A fleet"
-            echo "                service with NO container (e.g. one --retire-surplus"
-            echo "                removed) always needs this and is created with it."
+            echo "                registration token, used instead of DEPLOY_RUNNER_TOKEN."
+            echo "                Passed to each recreated runner, still busy-checked;"
+            echo "                the token value is never logged or written by this script."
             echo "  --add=LIST    Additively stand up the named DECLARED non-general-pool"
             echo "                services: 'up -d --no-deps LIST' with NEITHER"
             echo "                --force-recreate NOR --remove-orphans, no cron installs,"
@@ -629,16 +627,17 @@ encode_token() {
 # A --force-recreate always picks up the CURRENTLY rendered compose env, so a
 # runner recreated after RUNNER_LABELS changes needs a cache entry under the
 # NEW key -- which only exists if that runner has been registered (with a
-# real token) since the label change. --rolling deliberately passes an empty
-# RUNNER_TOKEN (steady-state recreates never need one), so before OMN-19274 a
+# real token) since the label change. Previously --rolling passed an empty
+# RUNNER_TOKEN, so before the cache pre-flight a
 # runner missing that entry force-recreated straight into
 # "No credentials found and RUNNER_TOKEN is not set", stranded offline with
 # no automatic way back (discovered rolling OMN-19206's runner image onto
 # .201: two runners, both with intact OLD-key credentials, both still
 # registered under the old label set on GitHub, were left down this way).
 #
-# These two helpers let roll_one_runner() check BEFORE recreating, so it can
-# skip (never touching the runner) instead of recreating into an outage.
+# These helpers identify cache migrations before recreating. A cache directory
+# is not proof that restoration will succeed, so every roll now also requires
+# an operator-supplied registration token before it touches the fleet.
 
 # Render one service's compose config remotely and print its would-be cache
 # key. Two services can differ (docker-compose.model-review-canary.yml pins
@@ -854,13 +853,13 @@ install_prune_cron() {
 }
 
 # ---------------------------------------------------------------------------
-# Step 6: Install runner health monitor cron
+# Step 6: Install runner health monitor timers
 # ---------------------------------------------------------------------------
-# Deploys the runner-monitor.sh script with a cron that runs every 3 minutes.
+# Deploys the runner-monitor.sh script with a user timer that runs every 3 minutes.
 # Fires Slack alerts on state transitions (healthy→unhealthy, recovery).
 # Requires SLACK_BOT_TOKEN and SLACK_CHANNEL_ID in ~/.omnibase/.env.
 
-install_monitor_cron() {
+install_monitor_timers() {
     log "Installing runner health monitor on ${RUNNER_HOST}..."
 
     # Source local .env to get Slack credentials
@@ -881,7 +880,7 @@ install_monitor_cron() {
 
     if [[ -z "${slack_bot_token}" ]] || [[ -z "${slack_channel_id}" ]]; then
         warn "SLACK_BOT_TOKEN or SLACK_CHANNEL_ID not set in ~/.omnibase/.env"
-        warn "Skipping monitor cron install. Monitor script is deployed but cron won't work without credentials."
+        warn "Skipping monitor timer install. Monitor script is deployed but the timers won't work without credentials."
         return 0
     fi
     if [[ -z "${runner_github_token}" ]]; then
@@ -889,7 +888,7 @@ install_monitor_cron() {
     fi
     if [[ -z "${runner_github_token}" ]]; then
         warn "RUNNER_GITHUB_TOKEN/GH_PAT/GITHUB_TOKEN not set and gh auth token unavailable"
-        warn "Skipping monitor cron install. GitHub-aware monitor requires org runner API access."
+        warn "Skipping monitor timer install. GitHub-aware monitor requires org runner API access."
         return 0
     fi
 
@@ -910,25 +909,81 @@ ENVEOF
         ssh "${RUNNER_HOST}" "chmod 600 ${RUNNER_HOST_DIR}/.monitor-env"
     fi
 
-    # Install cron idempotently: replace any existing runner monitor/repair line
+    # OMN-20805: systemd USER timers, not crontab lines. A cron line records a
+    # start and no end; a oneshot service under a timer leaves the start, the end
+    # and the exit status of every run in the journal, which is the completion
+    # record the automation monitor reads. The commands, the calendar slots
+    # (every 3 and every 10 minutes) and the log files are the cron lines'.
+    #
+    # Force bash (-l, as the cron lines did): the monitor sources ${monitor_env}
+    # with `source`, which a POSIX sh does not have, and setup failures must land
+    # in the fleet's own log directory, which OMN-18819 moved off /tmp so it
+    # survives a reboot.
     local monitor_script="${RUNNER_HOST_DIR}/docker/runners/runner-monitor.sh"
     local monitor_env="${RUNNER_HOST_DIR}/.monitor-env"
-    # Cron uses /bin/sh by default on the runner host; bare `source` fails there
-    # before credentials load, silently disabling Slack alerts when no MTA exists.
-    # Force bash and redirect the whole monitor invocation so setup failures are
-    # visible in the fleet's own log directory, which OMN-18819 moved off /tmp
-    # so it survives a reboot:
-    # ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-monitor.log.
-    local monitor_cron_line="*/3 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; ${monitor_script}' >> ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-monitor.log 2>&1 # runner-monitor-alert"
-    local repair_cron_line="*/10 * * * * /bin/bash -lc 'set -a; source ${monitor_env}; set +a; MONITOR_AUTO_BOUNCE=1 OFFLINE_IDLE_RECREATE_AGE_SECONDS=600 ${monitor_script}' >> ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs/runner-repair.log 2>&1 # runner-repair-check"
+    local log_dir="${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs"
+    local unit_dir='${HOME}/.config/systemd/user'
 
+    # name | calendar | extra environment (KEY=VALUE, space separated) | log file.
+    # The environment is Environment= lines, not an inline prefix on the command,
+    # so a host that tunes the repair pass overrides it with a drop-in rather than
+    # by editing the unit this installer owns.
+    local specs=(
+        "omninode-runner-monitor|*:0/3||runner-monitor.log"
+        "omninode-runner-repair|*:0/10|MONITOR_AUTO_BOUNCE=1 OFFLINE_IDLE_RECREATE_AGE_SECONDS=600|runner-repair.log"
+    )
+    local spec name calendar extra logfile unit_text timer_text env_lines kv
+    local -a kvs
+    for spec in "${specs[@]}"; do
+        IFS='|' read -r name calendar extra logfile <<<"${spec}"
+        env_lines=""
+        read -r -a kvs <<<"${extra}"
+        for kv in ${kvs[@]+"${kvs[@]}"}; do
+            env_lines+="Environment=${kv}"$'\n'
+        done
+        unit_text="[Unit]
+Description=ONEX runner fleet monitor, ${name} (OMN-20805)
+
+[Service]
+Type=oneshot
+${env_lines}ExecStart=/bin/bash -lc 'set -a; source ${monitor_env}; set +a; ${monitor_script}'
+StandardOutput=append:${log_dir}/${logfile}
+StandardError=append:${log_dir}/${logfile}
+SyslogIdentifier=${name}
+"
+        timer_text="[Unit]
+Description=Schedule ${name} (OMN-20805)
+
+[Timer]
+OnCalendar=${calendar}
+AccuracySec=1s
+Unit=${name}.service
+
+[Install]
+WantedBy=timers.target
+"
+        if "${DRY_RUN}"; then
+            log "[DRY RUN] Would install user timer ${name}.timer (OnCalendar=${calendar})"
+        else
+            ssh "${RUNNER_HOST}" "mkdir -p ${log_dir} ${unit_dir} && cat > ${unit_dir}/${name}.service" <<<"${unit_text}"
+            ssh "${RUNNER_HOST}" "cat > ${unit_dir}/${name}.timer" <<<"${timer_text}"
+        fi
+    done
+
+    # Enable the timers BEFORE the legacy lines are removed, and remove the
+    # lines only when both timers are active: a failed enable must leave the old
+    # schedule running, not the host with none.
     run_ssh "
-        mkdir -p ${RUNNER_HOST_DIR}/.onex_state/runner-fleet-logs
+        set -e
+        systemctl --user daemon-reload
+        systemctl --user enable --now omninode-runner-monitor.timer omninode-runner-repair.timer
+        systemctl --user is-active --quiet omninode-runner-monitor.timer
+        systemctl --user is-active --quiet omninode-runner-repair.timer
         EXISTING=\$(crontab -l 2>/dev/null || true)
-        echo \"\${EXISTING}\" | grep -Ev 'runner-monitor|runner-repair-check' | { cat; echo '${monitor_cron_line}'; echo '${repair_cron_line}'; } | crontab -
+        echo \"\${EXISTING}\" | grep -Ev 'runner-monitor|runner-repair-check' | crontab -
     "
 
-    log "Runner health monitor cron installed (alerts every 3 minutes, repair every 10 minutes)."
+    log "Runner health monitor timers installed (alerts every 3 minutes, repair every 10 minutes)."
 }
 
 # ---------------------------------------------------------------------------
@@ -1034,7 +1089,7 @@ deploy_with_retry() {
         install_runner_slice
         deploy_runners "${token_b64}"
         install_prune_cron
-        install_monitor_cron
+        install_monitor_timers
         install_health_cron
         install_network_janitor_cron
         install_host_artifact_freshness_cron
@@ -1532,6 +1587,14 @@ wait_for_runner_online() {
 roll_one_runner() {
     local name="${1}"
     local compose_cmd="docker compose -f ${RUNNER_HOST_DIR}/docker/docker-compose.runners.yml -f ${RUNNER_HOST_DIR}/docker/docker-compose.model-review-canary.yml"
+    local mig_token="${2:-${DEPLOY_RUNNER_TOKEN:-}}" mig_token_b64
+    if [[ -z "${2:-}" && -n "${TOKEN_FILE}" ]]; then
+        mig_token=$(<"${TOKEN_FILE}") || return 3
+    fi
+    if [[ -z "${mig_token//[[:space:]]/}" ]]; then
+        warn "  ${name}: DEPLOY_RUNNER_TOKEN or --token-file is required -- refusing to recreate."
+        return 3
+    fi
 
     # Re-check immediately before stopping: a job can start between the
     # selection pass and this call.
@@ -1564,49 +1627,25 @@ roll_one_runner() {
         needs_token_reason="no credential-cache entry for its current label set (key=${key:0:12}...)"
     fi
     if [[ -n "${needs_token_reason}" ]]; then
-        if [[ -z "${TOKEN_FILE}" ]]; then
-            log "  ${name}: ${needs_token_reason}, and no --token-file given -- SKIPPING (left as it is, untouched)."
-            return 3
-        fi
         log "  ${name}: ${needs_token_reason} -- registering with the supplied token."
-        if "${DRY_RUN}"; then
-            log "[DRY RUN] would run (migration): ${compose_cmd} up -d --force-recreate --no-deps ${name} (RUNNER_TOKEN from --token-file)"
-            return 0
-        fi
-        local mig_token mig_token_b64
-        mig_token=$(<"${TOKEN_FILE}")
-        [[ -n "${mig_token}" ]] || err "--token-file=${TOKEN_FILE} is empty."
-        mig_token_b64=$(encode_token "${mig_token}")
-        ssh "${RUNNER_HOST}" "
-            set -euo pipefail
-            RUNNER_TOKEN=\$(echo '${mig_token_b64}' | base64 -d)
-            export RUNNER_TOKEN
-            cd ${RUNNER_HOST_DIR}
-            ${compose_cmd} up -d --force-recreate --no-deps --no-build ${name}
-        " || return 1
-        wait_for_runner_online "${name}" || return 1
-        return 0
     fi
 
     log "  Recreating ${name} ..."
     if "${DRY_RUN}"; then
-        log "[DRY RUN] would run: ${compose_cmd} up -d --force-recreate --no-deps ${name}"
+        log "[DRY RUN] would run: ${compose_cmd} up -d --force-recreate --no-deps ${name} (with supplied registration token)"
         return 0
     fi
 
     # ONE service name, always. No --remove-orphans on this path: a rolling
     # call names a single service, and an orphan sweep during a partial roll
     # would delete containers this pass has not reached yet.
-    # A roll asks GitHub for nothing, deliberately. A recreate restores the
-    # runner's cached registration from its per-runner named volume, so the
-    # container never re-registers and needs no registration handle at all;
-    # RUNNER_TOKEN is exported empty purely so compose interpolates
-    # deterministically instead of warning. A runner that nonetheless fails to
-    # come back halts the roll, and recovering it is then a deliberate
-    # operator step rather than something this path does silently.
+    # Pass the supplied handle at recreate time, without obtaining or persisting
+    # one. The entrypoint can register even when its cache cannot be restored.
+    mig_token_b64=$(encode_token "${mig_token}")
     ssh "${RUNNER_HOST}" "
         set -euo pipefail
-        export RUNNER_TOKEN=''
+        RUNNER_TOKEN=\$(echo '${mig_token_b64}' | base64 -d)
+        export RUNNER_TOKEN
         cd ${RUNNER_HOST_DIR}
         ${compose_cmd} up -d --force-recreate --no-deps --no-build ${name}
     " || return 1
@@ -1616,6 +1655,13 @@ roll_one_runner() {
 }
 
 rolling_deploy() {
+    # OMN-18877: reject the entire roll before syncing artifacts, installing
+    # the slice, or recreating any runner. Dry runs obey the same precondition.
+    local registration_token="${DEPLOY_RUNNER_TOKEN:-}"
+    if [[ -n "${TOKEN_FILE}" ]]; then
+        registration_token=$(<"${TOKEN_FILE}") || err "Cannot read --token-file=${TOKEN_FILE}; DEPLOY_RUNNER_TOKEN or --token-file is required."
+    fi
+    [[ -n "${registration_token//[[:space:]]/}" ]] || err "--rolling requires DEPLOY_RUNNER_TOKEN or --token-file with a registration token before recreating any container (also in --dry-run)."
     log "=== Rolling deploy (one runner at a time, busy-checked, fail-closed) ==="
     rsync_artifacts
     install_runner_slice
@@ -1652,7 +1698,7 @@ rolling_deploy() {
         local next=()
         for name in "${pending[@]}"; do
             rc=0
-            roll_one_runner "${name}" || rc=$?
+            roll_one_runner "${name}" "${registration_token}" || rc=$?
             case "${rc}" in
                 0) done_count=$((done_count + 1))
                    log "  [${done_count}/${total}] ${name} done."
@@ -1664,10 +1710,9 @@ rolling_deploy() {
                        return 0
                    fi ;;
                 2) next+=("${name}") ;;
-                # OMN-19274: no cache entry for the runner's current label set
-                # and no --token-file given. Never recreated, never retried --
-                # a busy runner can become idle on the next pass, but a
-                # missing cache entry will not, so retrying it would just
+                # A failed compose/cache-key probe is never recreated or retried --
+                # a busy runner can become idle on the next pass, but
+                # an unreadable configuration will not, so retrying it would just
                 # repeat the same read-only probe for nothing.
                 3) skip_migration+=("${name}") ;;
                 *) failed="${name}"; break ;;
@@ -1688,8 +1733,8 @@ rolling_deploy() {
         warn "Re-run with --rolling to converge; a runner already rolled is recreated again, which is idempotent."
     fi
     if [[ "${#skip_migration[@]}" -gt 0 ]]; then
-        warn "Skipped (no credential-cache entry for the current label set, or no container at all, and no --token-file given): ${skip_migration[*]}"
-        warn "Re-run with --rolling --token-file=PATH to migrate exactly these, one at a time, still busy-checked."
+        warn "Skipped (could not validate recreate inputs): ${skip_migration[*]}"
+        warn "Check the compose configuration before re-running --rolling with DEPLOY_RUNNER_TOKEN or --token-file."
     fi
 }
 

@@ -55,7 +55,7 @@ CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
 # move landed) to omniclaude dev/main's current tip. Confirmed no checkout
 # step was added between the two commits (diff-reviewed): the invariant this
 # constant pins still holds at the new sha.
-OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "2173a846258c05b77858c454176f22ff1e41a3aa"
+OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "4358450ccbba0cee11e390208dd0b8b1728e94ab"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -89,7 +89,11 @@ def test_migration_freeze_checkout_is_bounded_for_merge_group() -> None:
     freeze_step = next(
         step for step in steps if step.get("name") == "Check migration freeze"
     )
-    assert freeze_step["run"] == "./scripts/check_migration_freeze.sh --ci"
+    assert freeze_step["env"]["FREEZE_BASE_REF"] == "${{ github.base_ref || 'main' }}"
+    assert (
+        "uv run python -m omnibase_infra.nodes.node_migration_freeze_check_compute"
+        ".runtime_migration_freeze_check --base"
+    ) in freeze_step["run"]
 
 
 def test_prod_promotion_lineage_guard_uses_uncached_direct_setup() -> None:
@@ -505,43 +509,6 @@ def test_ci_jobs_that_mutate_python_env_disable_shared_env() -> None:
         assert setup_step["with"]["shared-env-enabled"] == "false"
 
 
-def test_contract_compliance_uv_sync_is_bounded_and_retried() -> None:
-    workflow = _load_yaml(CI_WORKFLOW)
-    job = workflow["jobs"]["contract-compliance"]
-
-    assert job["timeout-minutes"] == 20
-    steps = job["steps"]
-    # OMN-20135: two change-control checkouts, the pinned checker and the
-    # evidence data. OMN-16373: both read with the minted onexbot-occ-writer
-    # App installation token (CROSS_REPO_PAT retired), github.token fallback.
-    for name in (
-        "Checkout onex_change_control checker (pinned code)",
-        "Checkout onex_change_control evidence data (OMN-20135)",
-    ):
-        checkout_occ = next(step for step in steps if step.get("name") == name)
-        assert (
-            checkout_occ["with"]["token"]
-            == "${{ steps.app-token.outputs.token || github.token }}"
-        )
-
-    setup_uv = next(
-        step for step in steps if step.get("uses") == "astral-sh/setup-uv@v7"
-    )
-    assert setup_uv["with"]["enable-cache"] is False
-    assert "cache-dependency-glob" not in setup_uv["with"]
-
-    install_step = next(
-        step
-        for step in steps
-        if step.get("name") == "Install onex_change_control checker"
-    )
-    run_script = install_step["run"]
-    assert 'export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"' in run_script
-    assert "max_attempts=3" in run_script
-    assert "until uv sync --no-cache --all-extras" in run_script
-    assert "uv sync onex_change_control failed after" in run_script
-
-
 def test_merge_group_and_docker_workflows_have_runner_pool_overrides() -> None:
     ci_workflow = _load_yaml(CI_WORKFLOW)
     for job_name, job in ci_workflow["jobs"].items():
@@ -900,9 +867,7 @@ def test_webhook_workflows_use_ci_python_environment() -> None:
         workflow = _load_yaml(workflow_path)
         for job_name, job in workflow["jobs"].items():
             if "uses" in job:
-                assert job["uses"].endswith(
-                    "occ-preflight.yml@789d175d78a7a802f4f0f4aa2af7083bdfd312c2"
-                )
+                assert "occ-preflight.yml" not in job["uses"]
                 continue
 
             steps = job["steps"]

@@ -1,0 +1,18 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20805: this schedule ran from /etc/cron.d, which records a start and no end.
+# As a oneshot service under a timer, the journal records every run's start, end and
+# exit status. Installed and enabled by deploy/maintenance/omninode-host-maintenance-sync.sh.
+# Daily 03:47 host-local time, the slot the cron unit held.
+
+[Unit]
+Description=Schedule: 30-day retention for /data/inference log directories (logs only, never model weights)
+
+[Timer]
+OnCalendar=*-*-* 03:47:00
+AccuracySec=1s
+Unit=omninode-inference-log-retention.service
+
+[Install]
+WantedBy=timers.target

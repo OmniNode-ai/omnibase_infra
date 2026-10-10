@@ -22,8 +22,8 @@
 # It takes the same per-slot lane lock the bring-up takes, so a teardown cannot
 # run underneath a bring-up of the same slot, and two teardowns cannot overlap.
 #
-# Not here: the reaper and the heartbeat lease (the rest of Task 7), and tenant
-# revoke (Task 5 has not minted one yet).
+# Not here: the reaper and the heartbeat lease (the rest of Task 7).
+# Tenant offboard and its authentication proof run before resource removal.
 
 set -euo pipefail
 

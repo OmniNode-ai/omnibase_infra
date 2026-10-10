@@ -61,13 +61,17 @@ import json
 import logging
 import signal
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from aiohttp import web
-from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import KafkaError
 from pydantic import ValidationError
 
+from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
+    AdapterLinearGraphQLProjectTracker,
+)
 from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs_from_env
 from omnibase_infra.models.github.model_pr_merged_event import ModelPRMergedEvent
 from omnibase_infra.services.post_merge.checks import (
@@ -90,6 +94,9 @@ from omnibase_infra.topics.platform_topic_suffixes import (
     SUFFIX_GITHUB_POST_MERGE_RESULT,
 )
 from omnibase_infra.topics.topic_namespace import apply_topic_namespace
+
+if TYPE_CHECKING:
+    from aiokafka.structs import ConsumerRecord
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +233,7 @@ class PostMergeConsumer:
 
                 try:
                     await self._process_message(msg.value)
-                    await self._consumer.commit()
+                    await self._commit_through(msg)
                 except Exception:
                     logger.exception(
                         "Failed to process PR merged event",
@@ -238,7 +245,7 @@ class PostMergeConsumer:
                         },
                     )
                     # Commit anyway to avoid reprocessing poison pills
-                    await self._consumer.commit()
+                    await self._commit_through(msg)
         except KafkaError:
             logger.exception(
                 "Kafka error in consumer loop",
@@ -246,6 +253,19 @@ class PostMergeConsumer:
             )
         finally:
             await self.stop()
+
+    async def _commit_through(self, msg: ConsumerRecord[object, object]) -> None:
+        """Commit the record's own partition, one past the record itself.
+
+        A bare ``commit()`` commits the consumer's position for every assigned
+        partition; this commits only the coordinate of the record just handled
+        (OMN-18631), so it can never mark a record this loop has not seen as done.
+        """
+        if self._consumer is None:
+            raise RuntimeError("Consumer not started. Call start() first.")
+        await self._consumer.commit(
+            {TopicPartition(msg.topic, msg.partition): msg.offset + 1}
+        )
 
     # =========================================================================
     # Message Processing
@@ -419,8 +439,6 @@ class PostMergeConsumer:
         Returns:
             The created issue identifier (e.g. 'OMN-1234'), or None on failure.
         """
-        import httpx
-
         title = f"[post-merge] {finding.title} (PR #{event.pr_number})"
         body_parts = [
             "**Auto-created by post-merge consumer** ([OMN-6727])",
@@ -458,20 +476,15 @@ class PostMergeConsumer:
         }
         """
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                "https://api.linear.app/graphql",
-                headers={
-                    "Authorization": self._config.linear_api_key,
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "query": mutation,
-                    "variables": {
-                        "title": title,
-                        "description": body,
-                        "teamId": self._config.linear_team_id,
-                    },
+        async with AdapterLinearGraphQLProjectTracker.graphql_transport(
+            api_key=self._config.linear_api_key, timeout_seconds=30.0
+        ) as transport:
+            resp = await transport.post_graphql(
+                mutation,
+                {
+                    "title": title,
+                    "description": body,
+                    "teamId": self._config.linear_team_id,
                 },
             )
             resp.raise_for_status()

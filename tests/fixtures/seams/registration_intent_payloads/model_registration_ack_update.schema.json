@@ -1,0 +1,30 @@
+{
+  "additionalProperties": false,
+  "description": "Typed column set for ACK state-transition UPDATE.\n\nProduced by ``RegistrationReducerService.decide_ack()`` when transitioning\na registration projection from AWAITING_ACK to ACTIVE.\n\nField names match SQL column names in ``registration_projections`` exactly.",
+  "properties": {
+    "current_state": {
+      "description": "New FSM state value.",
+      "title": "Current State",
+      "type": "string"
+    },
+    "liveness_deadline": {
+      "description": "Initial liveness deadline.",
+      "format": "date-time",
+      "title": "Liveness Deadline",
+      "type": "string"
+    },
+    "updated_at": {
+      "description": "Timestamp of this state change.",
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "current_state",
+    "liveness_deadline",
+    "updated_at"
+  ],
+  "title": "ModelRegistrationAckUpdate",
+  "type": "object"
+}

@@ -100,23 +100,15 @@ hosts:
     runner_name_prefix: omninode-mini-runner
     expected_count: 1
     classes: [verify]
-  # .105 -- MacBook Air, M4, 10 cores, 32 GB. Docker Desktop 4.91.0, data folder
-  # on the internal disk (111 GiB free at provisioning, so no 1.5 TiB virtual
-  # disk like .101's external volume carries): 8 CPUs, 16384 MiB, 60 GiB. Same
-  # verify class and same reasoning as .101 -- cloud-touching jobs carry no
-  # architecture assumption, so they are the class that moves to arm64 without
-  # any workflow changing.
-  - host: omnibook.tail75df5e.ts.net
-    arch: arm64
-    runner_name_prefix: omninode-air-runner
-    expected_count: 1
-    classes: [verify]
+  # .105 was removed from the lab mix by the operator on 2026-10-01.
+  # OMN-17427 readback on 2026-10-06 found no omninode-air-runner registered;
+  # retired capacity is not part of the declared verify fleet.
   # .202 -- omnipc2, RTX 4090, 32 cores, 60 GiB (OMN-19507 AC3). One verify
   # runner, labelled host-202, for the dev-202 lane's per-merge verify job, which
   # reads that lane's docker daemon and so must run on this host. Addressed by
   # its LAN address because it is not on the tailnet (no tailscale on the host,
-  # read 2026-09-25). amd64, but verify class only: this host serves the model
-  # and the dev-202 and sim-202 lanes, so it takes no action-class job. It is
+  # read 2026-09-25). This host also carries the action and customer-plane
+  # pools declared below, isolated from its model server and lab lanes. It is
   # not the `omnipc2-customer` runner, which is a separate rootless podman
   # runner under another user and outside this inventory.
   - host: 192.168.86.202
@@ -250,7 +242,7 @@ git_mirror:
     - omniweb
     - omnimemory
     - omnibase_compat
-    - knowledge-base
+    - knowledge_base
     - knowledge-base-internal
   # Space-separated RUNNER_NAME allowlist consumed by the pre-seed, or ALL.
   # Narrowed on the deployed copy of the hook during canary; the committed
@@ -276,7 +268,7 @@ tool_cache:
   durable: false
   snapshot_root: /home/jonah/.omnibase/runners/toolcache-seed
   seed_script: docker/runners/toolcache-seed.sh
-  recreate_procedure: knowledge-base:runbooks/c2-git-mirror-egress-rollout.md
+  recreate_procedure: knowledge_base:runbooks/c2-git-mirror-egress-rollout.md
 # OMN-15736 — local caching DNS resolver (unbound) endpoint. Scaling
 # precondition #1 (capacity probe: [mergesweep-0808-capacity]). STATUS:
 # pending-activation / INERT — the cache service

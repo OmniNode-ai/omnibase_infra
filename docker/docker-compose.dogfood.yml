@@ -55,6 +55,7 @@ x-runtime-base: &runtime-base
         cpus: "0.25"
         memory: 256M
 x-dogfood-runtime-env: &dogfood-runtime-env
+  ONEX_TRAJECTORY_EVALUATION_BACKEND: ${DOGFOOD_TRAJECTORY_EVALUATION_BACKEND:?runtime policy contract must set DOGFOOD_TRAJECTORY_EVALUATION_BACKEND}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
   POSTGRES_HOST: postgres
@@ -290,21 +291,11 @@ services:
     container_name: omnibase-infra-dogfood-redpanda-partition-cap
     profiles: ["dogfood"]
     entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
-        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
-        # OMN-19070 disk dials. On .105 this broker shares one Docker Desktop VM
-        # disk with the arm64 CI runner, which refuses every job under 5 GB free.
-        # An idle partition held a full 32 MiB preallocated segment for up to
-        # 14 days. 1 MiB steps plus a daily roll bound it; segments opened before
-        # these values were set keep 32 MiB until the broker next restarts.
-        # retention_bytes caps the few partitions carrying real data at 1 GiB.
-        # Basis and measurements: tests/unit/infra/test_dogfood_redpanda_disk_dials_omn19070.py
-        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set segment_fallocation_step 1048576
-        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set log_segment_ms 86400000
-        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set retention_bytes 1073741824
+    extends:
+      file: docker-compose.broker-profile.yml
+      service: redpanda-settings
+    environment:
+      REDPANDA_PROFILE_MEMORY: ${DOGFOOD_REDPANDA_MEMORY:-2G}
     depends_on:
       redpanda:
         condition: service_healthy
@@ -465,7 +456,7 @@ services:
       !!merge <<: [*dogfood-runtime-env, *dogfood-strict-wiring-env]
       RUNTIME_PROFILE: main
       # OMN-19494 (LO4): this runtime names its lane (see the same block in
-      # docker-compose.judge.yml for why). Literal, main runtime only.
+      # docker-compose.judge.yml for why). Literal, main and effects runtimes.
       # docker-compose.sim-202.yml layers over this file and must override it.
       ONEX_RUNTIME_LANE: "dogfood"
       OTEL_SERVICE_NAME: omninode-dogfood-runtime-main
@@ -520,6 +511,8 @@ services:
       redpanda:
         condition: service_healthy
     environment:
+      # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
+      ONEX_RUNTIME_LANE: "dogfood"
       !!merge <<: [*dogfood-runtime-env, *dogfood-strict-wiring-env]
       RUNTIME_PROFILE: effects
       OTEL_SERVICE_NAME: omninode-dogfood-runtime-effects
@@ -595,7 +588,7 @@ services:
       - "com.omninode.service=projection-api"
   # OMN-13772 / OMN-13581 defence-in-depth. This file is designed to be run
   # STANDALONE (`-f docker/docker-compose.dogfood.yml`), and no sanctioned tool
-  # layers it — `scripts/deploy-runtime.sh` does not know this lane, deliberately
+  # layers it — `onex-runtime-deploy` does not know this lane, deliberately
   # (see the governance note in this file's header). But the base infra compose
   # defines keycloak and infisical with NO compose profile, so if anyone ever
   # renders `-f docker-compose.infra.yml -f docker-compose.dogfood.yml` the two

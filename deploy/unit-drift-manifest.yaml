@@ -118,3 +118,49 @@ units:
     installed: ~/.config/systemd/user/onex-rung-eval.timer
     hosts:
       - omnipc2
+  - name: onex-shadow-review.service
+    tracked: deploy/shadow-review/onex-shadow-review.service
+    installed: ~/.config/systemd/user/onex-shadow-review.service
+    hosts:
+      - omnipc2
+  - name: onex-shadow-review.timer
+    tracked: deploy/shadow-review/onex-shadow-review.timer
+    installed: ~/.config/systemd/user/onex-shadow-review.timer
+    hosts:
+      - omnipc2
+  # Scheduled unit entrypoints must be observed along with their unit files.
+  - name: disk-gc.sh
+    tracked: scripts/disk-gc.sh
+    installed: '{registry_root}/omnibase_infra/scripts/disk-gc.sh'
+    hosts:
+      - omninode-pc
+  - name: docker-volume-gc.sh
+    tracked: scripts/docker-volume-gc.sh
+    installed: '{registry_root}/omnibase_infra/scripts/docker-volume-gc.sh'
+    hosts:
+      - omninode-pc
+  - name: disk-watermark-check.sh
+    tracked: scripts/disk-watermark-check.sh
+    installed: '{registry_root}/omnibase_infra/scripts/disk-watermark-check.sh'
+    hosts:
+      - omninode-pc
+  - name: buildx-orphan-sweep.sh
+    tracked: scripts/buildx-orphan-sweep.sh
+    installed: '{registry_root}/omnibase_infra/scripts/buildx-orphan-sweep.sh'
+    hosts:
+      - omninode-pc
+  - name: runner-disk-admission-restore.sh
+    tracked: scripts/runner-disk-admission-restore.sh
+    installed: '{registry_root}/omnibase_infra/scripts/runner-disk-admission-restore.sh'
+    hosts:
+      - omninode-pc
+  - name: onex-build-loop-trigger.sh
+    tracked: scripts/onex-build-loop-trigger.sh
+    installed: ~/.local/bin/onex-build-loop-trigger.sh
+    hosts:
+      - omninode-pc
+  - name: monitor_logs.py
+    tracked: scripts/monitor_logs.py
+    installed: ~/.omnibase/infra/deployed/0.34.1/scripts/monitor_logs.py
+    hosts:
+      - omninode-pc

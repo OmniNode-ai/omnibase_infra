@@ -91,7 +91,6 @@ scripts/check_lane_census_drift.py
 scripts/check_lane_env_drift.py
 scripts/check_llm_endpoint_env_contract.py
 scripts/check_llm_endpoints.sh
-scripts/check_migration_freeze.sh
 scripts/check_migration_required.py
 scripts/check_migrations_complete.sh
 scripts/check_no_cloud_bus_wrapper.sh
@@ -145,7 +144,6 @@ scripts/ci/check_lane_sibling_revision.py
 scripts/ci/check_lockfile_cve.py
 scripts/ci/check_lockfile_registry_allowlist.py
 scripts/ci/check_no_credential_in_log.py
-scripts/ci/check_occ_companion_merged.py
 scripts/ci/check_omnimarket_contract_pin_advance.py
 scripts/ci/check_pin_reachability.py
 scripts/ci/check_probe_placement_drift.py
@@ -161,10 +159,7 @@ scripts/ci/check_workflow_uv_available.py
 scripts/ci/ci_cascade_graph.py
 scripts/ci/ci_env_digest.py
 scripts/ci/ci_summary_gate.py
-scripts/ci/classify_contract_compliance_scope.py
 scripts/ci/compute_golden.py
-scripts/ci/defer_test_passes_driver.py
-scripts/ci/deferred_test_passes_gate.py
 scripts/ci/delegation_health_check.py
 scripts/ci/dependabot_lock_refresh.py
 scripts/ci/deploy_lane_verify_route.py
@@ -184,9 +179,6 @@ scripts/ci/merge_queue_janitor.py
 scripts/ci/model_review_capability_canary.py
 scripts/ci/nonrequired_check_failure_rate.py
 scripts/ci/normalize_product_clone.sh
-scripts/ci/occ_companion_merge_heal.py
-scripts/ci/occ_manual_replay_precheck.py
-scripts/ci/occ_preflight_heal.py
 scripts/ci/parity_red_on_base_baseline.py
 scripts/ci/post_hostile_review_threads.py
 scripts/ci/post_release_dev_bump.py
@@ -208,11 +200,8 @@ scripts/ci/reject-node-implementations.sh
 scripts/ci/release_dependency_advance.py
 scripts/ci/release_train.py
 scripts/ci/replay_hook_history.py
-scripts/ci/resolve_contract_compliance_evidence.py
-scripts/ci/resolve_contract_compliance_pr.py
 scripts/ci/resolve_modern_bash.sh
 scripts/ci/run_compliance_sweep.py
-scripts/ci/run_contract_compliance_with_evidence.py
 scripts/ci/run_contract_sweep.py
 scripts/ci/run_duplication_sweep.py
 scripts/ci/run_on_gate_runner.sh
@@ -285,7 +274,6 @@ scripts/deploy-agent/deploy_agent/unit_drift.py
 scripts/deploy-build-loop-trigger.sh
 scripts/deploy-gateway.sh
 scripts/deploy-runners.sh
-scripts/deploy-runtime.sh
 scripts/deploy-timers.sh
 scripts/deploy-trigger.py
 scripts/diagnose_e2e.sh
@@ -355,7 +343,6 @@ scripts/lane_container_memory_event.py
 scripts/lane_scratch.py
 scripts/launchd/install-lab-alarm.sh
 scripts/launchd/install-worktree-prune.sh
-scripts/ledger_lock.py
 scripts/ledger_watermark.py
 scripts/lib/merge_sweep_common.sh
 scripts/lib/venv_reconcile_lock.sh
@@ -399,7 +386,6 @@ scripts/push_lanes/queue-runner.py
 scripts/push_lanes/queue-runner.sh
 scripts/rebalance-test-splits.sh
 scripts/recompute_measured_pricing.py
-scripts/reconcile-host.sh
 scripts/reconcile-workspace-venvs.sh
 scripts/reconcile_privilege_lib.sh
 scripts/reconcile_verify_movement.py
@@ -474,13 +460,11 @@ scripts/update-plugin-pins.py
 scripts/update_version_matrix.py
 scripts/validate-kafka-schema-handshake.py
 scripts/validate-pr-contract-sync.sh
-scripts/validate-pr-deploy-required.sh
 scripts/validate.py
 scripts/validate_delegation_cohort_keys.py
 scripts/validate_env.py
 scripts/validate_handler_contracts.py
 scripts/validate_no_direct_env.py
-scripts/validate_no_env_fallbacks.py
 scripts/validate_pr_contracts.py
 scripts/validation/__init__.py
 scripts/validation/check_ai_slop.py
@@ -488,7 +472,6 @@ scripts/validation/check_claudemd_references.py
 scripts/validation/check_cli_registry_vocabulary.py
 scripts/validation/check_exposed_identifiers.py
 scripts/validation/check_kafka_no_hardcoded_fallback.sh
-scripts/validation/check_migration_append_only.py
 scripts/validation/check_migration_class.py
 scripts/validation/check_migration_conflicts.py
 scripts/validation/check_migration_rls_policy_atomicity.py
@@ -510,8 +493,6 @@ scripts/validation/validate_application_migration_manifest.py
 scripts/validation/validate_clean_root.py
 scripts/validation/validate_db_quality_gate.py
 scripts/validation/validate_markdown_links.py
-scripts/validation/validate_migration_freeze.py
-scripts/validation/validate_migration_sequence.py
 scripts/validation/validate_model_dump_json_mode.py
 scripts/validation/validate_naming.py
 scripts/validation/validate_precommit_fail_loud.py

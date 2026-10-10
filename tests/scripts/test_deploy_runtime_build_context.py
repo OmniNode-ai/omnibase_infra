@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import fnmatch
+import json
 import os
 import re
 import shlex
@@ -19,9 +20,91 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 DOCKERFILE = REPO_ROOT / "docker" / "Dockerfile.runtime"
 DOCKER_DIR = REPO_ROOT / "docker"
+
+
+@pytest.mark.unit
+def test_deploy_runtime_reads_clone_keyed_staging_manifest(tmp_path: Path) -> None:
+    """Build refs and the post-stage preflight must use the tree RT-1 selected."""
+    script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    function = script.split("sibling_source_path() {", 1)[1].split("\n}\n", 1)[0]
+    manifest = tmp_path / "refs.json"
+    tree = tmp_path / "source-trees" / "clone-key" / "omnimarket"
+    tree.mkdir(parents=True)
+    manifest.write_text(json.dumps({"repos": {"omnimarket": {"path": str(tree)}}}))
+    shell = (
+        "set -euo pipefail\n"
+        'SIBLING_SOURCE_ROOT="$1"\n'
+        'SIBLING_SOURCE_REFS_OUT="$2"\n'
+        f"sibling_source_path() {{{function}\n}}\n"
+        'sibling_source_path "$3" omnimarket\n'
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            shell,
+            "test",
+            str(tree.parents[1]),
+            str(manifest),
+            str(tmp_path / "ambient"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(tree)
+
+
+@pytest.mark.unit
+def test_deploy_runtime_forwards_and_reads_stage_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The deploy wrapper shares its manifest path with staging and preflight."""
+    text = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    functions = []
+    for name in ("sibling_source_path", "stage_workspace_if_needed"):
+        body = text.split(f"{name}() {{", 1)[1].split("\n}\n", 1)[0]
+        functions.append(f"{name}() {{{body}\n}}")
+    context = tmp_path / "context"
+    scripts = context / "scripts" / "runtime_build"
+    scripts.mkdir(parents=True)
+    tree = tmp_path / "trees" / "clone-key" / "omnimarket"
+    tree.mkdir(parents=True)
+    manifest = tmp_path / "state" / "refs.json"
+    manifest_json = json.dumps({"repos": {"omnimarket": {"path": str(tree)}}})
+    (scripts / "stage_workspace.sh").write_text(
+        'set -euo pipefail\nmkdir -p "$(dirname "$DEPLOY_SOURCE_REFS_OUT")"\n'
+        f'printf "%s" {shlex.quote(manifest_json)} > "$DEPLOY_SOURCE_REFS_OUT"\n'
+    )
+    monkeypatch.setenv("DEPLOY_SOURCE_REFS_OUT", str(manifest))
+    monkeypatch.setenv("DEPLOY_SOURCE_WORKTREE_ROOT", str(tmp_path / "trees"))
+    monkeypatch.setenv("DEPLOY_REF", "dev")
+    monkeypatch.setenv("DEPLOY_HOTPATCH", "0")
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path / "ambient"))
+    shell = (
+        "set -euo pipefail\nSIBLING_SOURCE_ROOT=''\nSIBLING_SOURCE_REFS_OUT=''\n"
+        "resolve_build_source() { echo workspace; }\n"
+        "log_step() { :; }\nlog_cmd() { :; }\n"
+        'check_sibling_lock_pins() { sibling_source_path "$2" omnimarket; }\n'
+        + "\n".join(functions)
+        + '\nstage_workspace_if_needed "$1"\n'
+    )
+    result = subprocess.run(
+        ["bash", "-c", shell, "test", str(context)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == str(tree)
+    assert manifest.exists()
+
 
 # Matches a COPY directive's argument list. We discard `--from=<stage>` lines
 # (those copy from a prior build stage, not the host build context) and any
@@ -33,7 +116,7 @@ _COPY_LINE_RE = re.compile(r"^COPY\s+(?P<args>.+)$", re.MULTILINE)
 def _dockerfile_workspace_copy_sources() -> list[str]:
     """Every Dockerfile.runtime COPY source that pulls from the workspace/ tree.
 
-    The deployed build context is assembled by deploy-runtime.sh's sync_files;
+    The deployed build context is assembled by onex-runtime-deploy's sync_files;
     each of these paths must be rsynced (or generated) into that context or the
     workspace-mode `docker build` fails with "failed to calculate checksum ...:
     not found" (the OMN-12987 regression). This list is derived from the live
@@ -74,7 +157,7 @@ def _dockerfile_config_copy_sources() -> list[str]:
 
 @pytest.mark.unit
 def test_deploy_runtime_syncs_runtime_dockerfile_copy_sources() -> None:
-    """deploy-runtime.sh must ship paths copied by Dockerfile.runtime."""
+    """onex-runtime-deploy must ship paths copied by Dockerfile.runtime."""
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
     deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
@@ -95,7 +178,7 @@ def test_deploy_runtime_stages_every_workspace_copy_source() -> None:
 
     Regression guard for OMN-12987: Dockerfile.runtime COPYs
     workspace/sibling-pin-comparison.json (and workspace/sibling-repos/), but an
-    earlier deploy-runtime.sh only rsynced workspace/sibling-repos/ into the
+    earlier onex-runtime-deploy only rsynced workspace/sibling-repos/ into the
     deployed build context. The root-level comparison file was never carried
     over, so every workspace-mode `docker build` failed with "failed to
     calculate checksum of ref ...:/workspace/sibling-pin-comparison.json: not
@@ -103,7 +186,7 @@ def test_deploy_runtime_stages_every_workspace_copy_source() -> None:
     where the committed placeholder exists.
 
     This test derives the workspace/ COPY sources from the live Dockerfile and
-    asserts deploy-runtime.sh references each as an rsync source for the deployed
+    asserts onex-runtime-deploy references each as an rsync source for the deployed
     context, so a future Dockerfile COPY without a matching rsync fails CI.
     """
     deploy_script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
@@ -117,13 +200,13 @@ def test_deploy_runtime_stages_every_workspace_copy_source() -> None:
     missing: list[str] = []
     for source in workspace_sources:
         # A directory source (trailing slash) and a file source both appear in
-        # deploy-runtime.sh as an rsync argument quoted under ${repo_root}.
+        # onex-runtime-deploy as an rsync argument quoted under ${repo_root}.
         staged = f'"${{repo_root}}/{source}"' in deploy_script
         if not staged:
             missing.append(source)
 
     assert not missing, (
-        "Dockerfile.runtime COPYs these workspace/ paths but deploy-runtime.sh "
+        "Dockerfile.runtime COPYs these workspace/ paths but onex-runtime-deploy "
         f"does not stage them into the deployed build context: {missing}. Add an "
         "rsync of each into sync_files() or workspace-mode `docker build` will "
         "fail with 'failed to calculate checksum ...: not found' (OMN-12987)."
@@ -143,7 +226,7 @@ def test_deploy_runtime_stages_every_config_copy_source() -> None:
     for workspace/.
 
     This test derives the config/ COPY sources from the live Dockerfile and
-    asserts deploy-runtime.sh stages each -- either via an exact-file rsync
+    asserts onex-runtime-deploy stages each -- either via an exact-file rsync
     argument, or by rsyncing the containing config/ directory -- so a future
     Dockerfile COPY without a matching rsync fails CI.
     """
@@ -163,7 +246,7 @@ def test_deploy_runtime_stages_every_config_copy_source() -> None:
             missing.append(source)
 
     assert not missing, (
-        "Dockerfile.runtime COPYs these config/ paths but deploy-runtime.sh "
+        "Dockerfile.runtime COPYs these config/ paths but onex-runtime-deploy "
         f"does not stage them into the deployed build context: {missing}. Add an "
         "rsync of each (or of config/ as a whole) into sync_files() or "
         "workspace-mode `docker build` will fail with 'failed to calculate "
@@ -174,7 +257,7 @@ def test_deploy_runtime_stages_every_config_copy_source() -> None:
 # =============================================================================
 # General build-context parity: every Dockerfile the deploy path can build,
 # every COPY/ADD source it references, matched against every rsync rule
-# deploy-runtime.sh's sync_files() actually stages (OMN-16103).
+# onex-runtime-deploy's sync_files() actually stages (OMN-16103).
 #
 # The scoped tests above (workspace/, config/) only fired because someone
 # hand-listed the prefix to check. OMN-16103 was a `COPY scripts/<x>` that no
@@ -202,7 +285,7 @@ _COPY_OR_ADD_RE = re.compile(r"^(?:COPY|ADD)\s+(?P<args>.+)$", re.MULTILINE)
 def _join_line_continuations(text: str) -> str:
     """Join `\\`-continued lines into one logical line each.
 
-    Shared join logic for both bash (deploy-runtime.sh) and Dockerfile syntax
+    Shared join logic for both bash (onex-runtime-deploy) and Dockerfile syntax
     -- both use a trailing backslash for line continuation. Without this, a
     multi-line `COPY --chown=... \\\n    src \\\n    dst` (or the equivalent
     wrapped `rsync ... \\\n    src dst`) is invisible to a single-line regex,
@@ -224,13 +307,13 @@ def _join_line_continuations(text: str) -> str:
 
 
 def _dockerfiles_built_by_deploy_path() -> list[Path]:
-    """Every Dockerfile reachable from a deploy-runtime.sh compose invocation.
+    """Every Dockerfile reachable from a onex-runtime-deploy compose invocation.
 
-    deploy-runtime.sh always layers docker-compose.infra.yml plus exactly one
+    onex-runtime-deploy always layers docker-compose.infra.yml plus exactly one
     lane overlay (resolve_compose_file_args()); rather than re-implement that
     lane-selection logic here (and drift from it), this scans every
     docker-compose.*.yml filename literally referenced anywhere in
-    deploy-runtime.sh (comments included -- every real overlay is named in a
+    onex-runtime-deploy (comments included -- every real overlay is named in a
     comment near resolve_compose_file_args()/resolve_lane_overlay_filename())
     and collects the `dockerfile:` build source each one declares. A regex
     that matched nothing would silently vacuous-pass the parity test below,
@@ -335,11 +418,11 @@ class _RsyncCoverageRule:
 
 
 def _rsync_manifest_rules(deploy_script: str) -> list[_RsyncCoverageRule]:
-    """Every rsync rule deploy-runtime.sh stages from `${repo_root}` sources.
+    """Every rsync rule onex-runtime-deploy stages from `${repo_root}` sources.
 
     Parses every logical `rsync ...` invocation in the script (after joining
     line continuations), keeping only source operands anchored at
-    `${repo_root}/` -- deploy-runtime.sh also rsyncs migration-tree snapshots
+    `${repo_root}/` -- onex-runtime-deploy also rsyncs migration-tree snapshots
     from unrelated `${src_tree}`/`${snapshot_dir}` vars (line ~1542/1565);
     those aren't repo_root-anchored and are naturally excluded rather than
     needing an explicit denylist.
@@ -399,12 +482,12 @@ def _rsync_manifest_rules(deploy_script: str) -> list[_RsyncCoverageRule]:
 @pytest.mark.unit
 def test_deploy_runtime_rsync_manifest_covers_every_dockerfile_copy_source() -> None:
     """Every Dockerfile the deploy path builds must have its COPY/ADD sources
-    covered by deploy-runtime.sh's rsync manifest (OMN-16103).
+    covered by onex-runtime-deploy's rsync manifest (OMN-16103).
 
     General build-context parity guard, superseding the need to hand-add a
     prefix-scoped test (like the workspace/ and config/ tests above) every
     time a new COPY namespace appears. Derives both sides from live source:
-    the Dockerfile set from every compose file deploy-runtime.sh can invoke,
+    the Dockerfile set from every compose file onex-runtime-deploy can invoke,
     and the coverage model from every rsync rule (including --include
     allowlists, which only cover their listed paths -- not their whole
     source directory) in sync_files(). A future `COPY <path>` with no
@@ -433,7 +516,7 @@ def test_deploy_runtime_rsync_manifest_covers_every_dockerfile_copy_source() -> 
 
     assert not failures, (
         "These Dockerfile COPY/ADD sources are not covered by any rsync rule "
-        f"in deploy-runtime.sh's sync_files(): {failures}. Every .201 "
+        f"in onex-runtime-deploy's sync_files(): {failures}. Every .201 "
         "git-ref redeploy building this image will fail at `docker build` "
         "with a COPY-source-not-found error. Add a matching rsync (or "
         "--include entry, if the containing directory uses an allowlist "
@@ -519,6 +602,8 @@ def test_workspace_printed_build_command_uses_operator_omni_home(
     _write_fake_docker(bin_dir)
 
     env = os.environ.copy()
+    env["ONEX_DEPLOY_REPOSITORY_ROOT"] = str(REPO_ROOT)
+    env["HOTPATCH_LEDGER_PATH"] = str(tmp_path / "no-hotpatch-ledger.yaml")
     env.update(
         {
             "BUILD_SOURCE": "workspace",
@@ -530,7 +615,14 @@ def test_workspace_printed_build_command_uses_operator_omni_home(
     env.pop("EXPECTED_BUILD_SOURCE", None)
 
     result = subprocess.run(
-        ["bash", str(DEPLOY_SCRIPT), "--print-compose-cmd"],
+        [
+            "bash",
+            "-c",
+            'source "$1"; shift; main "$@"',
+            "onex-runtime-deploy",
+            str(DEPLOY_SCRIPT),
+            "--print-compose-cmd",
+        ],
         cwd=REPO_ROOT,
         env=env,
         check=True,
@@ -583,7 +675,7 @@ def test_deploy_runtime_uses_current_lock_pin_preflight_interface() -> None:
     Regression guard: OMN-12977/12987 replaced the original ``--provenance-out``
     flag with ``--lock`` (required pin authority), repeatable ``--repo
     PACKAGE=PATH`` (the canonical clones the build vendors), and ``--output``
-    (where to write the comparison JSON). The deploy-runtime.sh caller was left
+    (where to write the comparison JSON). The onex-runtime-deploy caller was left
     pinned to the removed ``--provenance-out`` flag, so EVERY workspace
     ``--execute`` deploy failed at argparse (``the following arguments are
     required: --lock``) before any build started. This test pins the corrected
@@ -636,7 +728,7 @@ def test_stage_workspace_emits_build_sha_marker() -> None:
     recoverable SHA and the lock-pin preflight cannot verify the vendored commit.
     """
     stage_script = (
-        DEPLOY_SCRIPT.parent / "runtime_build" / "stage_workspace.sh"
+        REPO_ROOT / "scripts" / "runtime_build" / "stage_workspace.sh"
     ).read_text(encoding="utf-8")
 
     # OMN-13030 refactored the SHA capture to a variable (reused for the

@@ -955,9 +955,11 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
         trace_dir=trace_dir,
         timeout=timeout,
     )
+    # The probe parses typed receipt JSON, printed only with --json since
+    # omnibase_infra 0.38.67 (OMN-20124).
     steps["unconfigured"] = _run_step(
         "unconfigured",
-        [str(onex), "delegate", args.prompt],
+        [str(onex), "delegate", args.prompt, "--json"],
         env=base_env,
         cwd=workdir,
         strace=strace,
@@ -983,7 +985,7 @@ def observe_live(args: argparse.Namespace) -> dict[str, Any]:
     tokens_before_configured = tokens_predicted(base_url)
     steps["configured"] = _run_step(
         "configured",
-        [str(onex), "delegate", args.prompt],
+        [str(onex), "delegate", args.prompt, "--json"],
         env=configured_env,
         cwd=workdir,
         strace=strace,

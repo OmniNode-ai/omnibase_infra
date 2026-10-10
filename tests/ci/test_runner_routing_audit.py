@@ -182,6 +182,163 @@ jobs:
     assert "pull_request_target is prohibited" in findings[0].message
 
 
+_CALLER = ".github/workflows/call-repo-evidence-gate.yml"
+_PINNED = "OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@" + "a" * 40
+_EXCEPTION = {
+    "path": _CALLER,
+    "ruling": "RULING 2026-10-08T22:41:24Z lane=orchestrator-9f8a (OMN-20074)",
+    "reason": "test",
+}
+
+
+def _caller_text(
+    *,
+    trigger: str = "pull_request_target",
+    permissions: str = "  contents: read\n  pull-requests: read\n",
+    job: str | None = None,
+) -> str:
+    body = job or f"    uses: {_PINNED}\n    with:\n      evidence-source: caller\n"
+    return (
+        f"name: Repo Evidence Gate\non:\n  {trigger}:\n    branches: [dev]\n"
+        f"permissions:\n{permissions}jobs:\n  repo-evidence:\n{body}"
+    )
+
+
+def _audit_with_caller(tmp_path: Path, text: str, exception: object) -> list:
+    module = _load_script()
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (tmp_path / _CALLER).write_text(text, encoding="utf-8")
+    policy: dict[str, object] = {"hosted_runner_allowlist": []}
+    if exception is not None:
+        policy["pull_request_target_exception"] = exception
+    return module.audit_local_workflows(policy, tmp_path)
+
+
+def test_pull_request_target_exception_admits_the_named_caller(tmp_path: Path) -> None:
+    assert _audit_with_caller(tmp_path, _caller_text(), _EXCEPTION) == []
+
+
+def test_pull_request_target_exception_admits_no_other_workflow(
+    tmp_path: Path,
+) -> None:
+    module = _load_script()
+    workflow_dir = tmp_path / ".github" / "workflows"
+    workflow_dir.mkdir(parents=True)
+    (tmp_path / _CALLER).write_text(_caller_text(), encoding="utf-8")
+    (workflow_dir / "other.yml").write_text(
+        _caller_text().replace("Repo Evidence Gate", "other"), encoding="utf-8"
+    )
+
+    findings = module.audit_local_workflows(
+        {"pull_request_target_exception": _EXCEPTION}, tmp_path
+    )
+
+    assert [f.scope for f in findings] == [".github/workflows/other.yml"]
+    assert "pull_request_target is prohibited" in findings[0].message
+
+
+def test_pull_request_target_is_prohibited_without_a_policy_exception(
+    tmp_path: Path,
+) -> None:
+    findings = _audit_with_caller(tmp_path, _caller_text(), None)
+
+    assert len(findings) == 1
+    assert "pull_request_target is prohibited" in findings[0].message
+
+
+@pytest.mark.parametrize(
+    "exception",
+    [
+        pytest.param({**_EXCEPTION, "path": ".github/workflows/*.yml"}, id="glob"),
+        pytest.param({**_EXCEPTION, "path": ".github/workflows/"}, id="directory"),
+        pytest.param({**_EXCEPTION, "path": "call-repo-evidence-gate.yml"}, id="bare"),
+        pytest.param({**_EXCEPTION, "ruling": ""}, id="no-ruling"),
+        pytest.param({**_EXCEPTION, "reason": ""}, id="no-reason"),
+        pytest.param([_EXCEPTION], id="list-of-exceptions"),
+    ],
+)
+def test_pull_request_target_exception_must_be_one_named_file_citing_a_ruling(
+    tmp_path: Path, exception: object
+) -> None:
+    findings = _audit_with_caller(tmp_path, _caller_text(), exception)
+
+    messages = [f.message for f in findings]
+    assert any("pull_request_target_exception" in m for m in messages), messages
+    assert any("pull_request_target is prohibited" in m for m in messages), messages
+
+
+@pytest.mark.parametrize(
+    ("text", "needle"),
+    [
+        pytest.param(
+            _caller_text(trigger="pull_request"),
+            "only the pull_request_target trigger",
+            id="wrong-trigger",
+        ),
+        pytest.param(
+            _caller_text(permissions="  contents: write\n"),
+            "read-only",
+            id="write-permission",
+        ),
+        pytest.param(
+            _caller_text(permissions="  contents: read\n"),
+            "",
+            id="read-only-is-fine",
+        ),
+        pytest.param(
+            _caller_text(
+                job="    runs-on: ubuntu-latest\n    steps:\n      - run: x\n"
+            ),
+            "reusable workflow",
+            id="inline-steps",
+        ),
+        pytest.param(
+            _caller_text(job=f"    uses: {_PINNED}\n    secrets: inherit\n"),
+            "secrets",
+            id="inherits-secrets",
+        ),
+        pytest.param(
+            _caller_text(
+                job="    uses: OmniNode-ai/omnibase_core/.github/workflows/receipt-gate.yml@dev\n"
+            ),
+            "full-SHA",
+            id="unpinned",
+        ),
+    ],
+)
+def test_pull_request_target_caller_stays_a_pinned_read_only_reusable_call(
+    tmp_path: Path, text: str, needle: str
+) -> None:
+    findings = _audit_with_caller(tmp_path, text, _EXCEPTION)
+
+    if not needle:
+        assert findings == []
+        return
+    assert any(needle in f.message for f in findings), [f.message for f in findings]
+
+
+def test_policy_names_exactly_the_repo_evidence_caller_as_the_exception() -> None:
+    import yaml
+
+    policy = yaml.safe_load(POLICY.read_text(encoding="utf-8"))
+    exception = policy["pull_request_target_exception"]
+
+    assert exception["path"] == _CALLER
+    assert "RULING 2026-10-08T22:41:24Z" in exception["ruling"]
+    assert "OMN-20074" in exception["ruling"]
+
+
+def test_only_the_named_caller_mentions_the_base_branch_trigger() -> None:
+    carriers = sorted(
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in (REPO_ROOT / ".github" / "workflows").iterdir()
+        if path.is_file() and "pull_request_target" in path.read_text("utf-8")
+    )
+
+    assert carriers == [_CALLER]
+
+
 def test_policy_tracks_repos_that_drifted_to_hosted_minutes() -> None:
     import yaml
 
@@ -1171,13 +1328,8 @@ def test_second_audit_step_is_not_masked_by_the_first_steps_failure() -> None:
     2026-08-26/27 re-flip, stale policy drift failed the first step and the
     second (the ``OMN-16683`` fork-isolation surface) never ran at all.
 
-    The fix requires three things of the workflow, all missing today:
-    1. the local-workflows step tolerates its own failure so later steps run
-       (``continue-on-error: true``),
-    2. the github-vars step's condition includes ``always()`` so a first-step
-       failure cannot skip it, and
-    3. a final step evaluates both outcomes and fails the job once, so neither
-       surface's finding is silently swallowed by a per-step green checkmark.
+    The live pass must run after a local failure. Both passes retain their
+    failure status; always() supplies the ordering without error tolerance.
     """
     import yaml
 
@@ -1192,10 +1344,8 @@ def test_second_audit_step_is_not_masked_by_the_first_steps_failure() -> None:
         s for s in steps if s.get("name") == "Audit GitHub runner variables"
     )
 
-    assert local_step.get("continue-on-error") is True, (
-        "the local-workflows step must tolerate its own failure so the "
-        "github-vars step is not skipped"
-    )
+    assert not local_step.get("continue-on-error", False)
+    assert not github_vars_step.get("continue-on-error", False)
     assert "always()" in str(github_vars_step.get("if", "")), (
         "the github-vars step's condition must include always() or a first-"
         "step failure skips it (the implicit success() default)"
@@ -1211,6 +1361,225 @@ def test_second_audit_step_is_not_masked_by_the_first_steps_failure() -> None:
         "no step evaluates both step outcomes and fails the job once; without "
         "it a per-step green checkmark can still hide a finding"
     )
+
+
+def test_pr_and_scheduled_audit_execute_the_same_live_assertions() -> None:
+    """A PR may not report clean by omitting the pass that finds live drift."""
+    import yaml
+
+    workflow = yaml.safe_load(RUNNER_ROUTING_AUDIT_WORKFLOW.read_text())
+    steps = workflow["jobs"]["audit"]["steps"]
+    live = next(s for s in steps if s.get("id") == "github_vars")
+    assert live["if"] == "always()"
+    assert (
+        live["run"]
+        .rstrip()
+        .endswith("uv run python scripts/audit-runner-routing.py --github-vars")
+    )
+    assert 'if [ -z "${GH_TOKEN:-}" ]' in live["run"]
+    combined = next(s for s in steps if "combined" in s.get("name", ""))
+    # Missing/skipped/error outcomes are not a clean evaluation either.
+    assert 'steps.local_workflows.outcome }}" != "success"' in combined["run"]
+    assert 'steps.github_vars.outcome }}" != "success"' in combined["run"]
+    assert workflow["concurrency"]["group"].startswith("runner-routing-audit-")
+
+
+def test_runner_audit_is_reused_inside_required_ci_and_precommit() -> None:
+    import yaml
+
+    workflow = yaml.safe_load(RUNNER_ROUTING_AUDIT_WORKFLOW.read_text())
+    triggers = workflow.get("on", workflow.get(True))
+    assert "workflow_call" in triggers
+    ci = yaml.safe_load((REPO_ROOT / ".github/workflows/ci.yml").read_text())
+    caller = ci["jobs"]["runner-routing-audit"]
+    assert caller["uses"] == "./.github/workflows/runner-routing-audit.yml"
+    assert "if" not in caller and "needs" not in caller
+    gate_path = REPO_ROOT / "scripts/ci/ci_summary_gate.py"
+    spec = importlib.util.spec_from_file_location("runner_audit_summary", gate_path)
+    assert spec and spec.loader
+    summary = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = summary
+    spec.loader.exec_module(summary)
+    name = "runner-routing-audit / Runner Routing Audit"
+    assert name in summary.STRICT_GATE_JOBS
+    other_jobs = [
+        {"name": n, "status": "completed", "conclusion": "success"}
+        for n in summary.GATE_JOBS
+        if n != name
+    ]
+    for conclusion in ("failure", "skipped", "cancelled"):
+        result, report = summary.evaluate(
+            [
+                *other_jobs,
+                {"name": name, "status": "completed", "conclusion": conclusion},
+            ]
+        )
+        assert result != 0 and name in report
+    result, report = summary.evaluate(other_jobs)
+    assert result != 0 and name in report
+    result, report = summary.evaluate(
+        [*other_jobs, {"name": name, "status": "completed", "conclusion": "success"}]
+    )
+    assert result == 0, report
+    hooks = yaml.safe_load((REPO_ROOT / ".pre-commit-config.yaml").read_text())
+    hook = next(
+        h
+        for r in hooks["repos"]
+        for h in r["hooks"]
+        if h["id"] == "runner-routing-audit"
+    )
+    assert "tests/ci/test_runner_routing_audit.py" in hook["entry"]
+    assert hook["pass_filenames"] is False
+
+
+@pytest.mark.parametrize(
+    ("workflow", "conclusion", "expected_alerts", "listed"),
+    [
+        (".github/workflows/runner-routing-audit.yml", "failure", 1, True),
+        (".github/workflows/runner-routing-audit.yml", "success", 0, True),
+        (".github/workflows/dlq-depth-monitor.yml", "failure", 0, True),
+        (".github/workflows/runner-routing-audit.yml", "failure", 1, False),
+    ],
+)
+def test_scheduled_routing_audit_reaches_existing_host_reporter(
+    monkeypatch: pytest.MonkeyPatch,
+    workflow: str,
+    conclusion: str,
+    expected_alerts: int,
+    listed: bool,
+) -> None:
+    """Exercise the deployed reader-to-host-reporter path without sending chat."""
+    import argparse
+
+    path = REPO_ROOT / "scripts/ci/nonrequired_check_failure_rate.py"
+    spec = importlib.util.spec_from_file_location("runner_audit_alerter", path)
+    assert spec and spec.loader
+    alerter = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = alerter
+    spec.loader.exec_module(alerter)
+    policy = alerter.load_policy(POLICY)
+    assert "omnibase_infra" in policy["fleet_repos"]
+    assert "omnibase_infra" not in policy["scheduled_actions_repos"]
+    monkeypatch.setattr(
+        alerter,
+        "active_workflows",
+        lambda *_: (
+            [{"id": 1, "path": workflow}]
+            + (
+                [{"id": 2, "path": ".github/workflows/runner-routing-audit.yml"}]
+                if workflow != ".github/workflows/runner-routing-audit.yml"
+                else []
+            )
+        )
+        if listed
+        else [],
+    )
+    reads = []
+
+    def workflow_metadata(path, _token):
+        reads.append(path)
+        return {"id": 1, "path": workflow, "state": "active"}
+
+    monkeypatch.setattr(alerter, "_gh_object", workflow_metadata)
+    run_url = "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/1"
+    monkeypatch.setattr(
+        alerter,
+        "scheduled_runs_for_workflow",
+        lambda _slug, workflow_id, *_: [
+            {
+                "conclusion": conclusion if workflow_id == 1 else "success",
+                "created_at": "2026-10-08T02:00:00Z",
+                "html_url": run_url,
+            }
+        ]
+        + [{"conclusion": "success", "created_at": "2026-10-07T02:00:00Z"}] * 19,
+    )
+    alerts: list = []
+    report = {"repos": {}}
+    alerter._evaluate_one_repo(
+        args=argparse.Namespace(),
+        repo="omnibase_infra",
+        check_runs=False,
+        scheduled=True,
+        slug="OmniNode-ai/omnibase_infra",
+        token=None,
+        threshold=3,
+        umbrella={},
+        scheduled_threshold_pct=policy["scheduled_failure_threshold_pct"],
+        scheduled_window_days=policy["scheduled_window_days"],
+        scheduled_since="2026-10-01",
+        all_alerts=[],
+        all_scheduled_alerts=alerts,
+        report=report,
+        scheduled_workflow_thresholds=policy.get("scheduled_workflow_thresholds", {}),
+    )
+    assert len(alerts) == expected_alerts
+    assert reads == (
+        []
+        if listed
+        else [
+            "repos/OmniNode-ai/omnibase_infra/actions/workflows/runner-routing-audit.yml"
+        ]
+    )
+    if not alerts:
+        assert (
+            report["repos"]["OmniNode-ai/omnibase_infra"]["scheduled"]["alerts"] == []
+        )
+        return
+    assert alerts[0].last_failure_url == run_url
+    probe_path = REPO_ROOT / "scripts/omninode-fleet-failure-probe.py"
+    probe_spec = importlib.util.spec_from_file_location(
+        "runner_audit_fleet_probe", probe_path
+    )
+    assert probe_spec and probe_spec.loader
+    probe = importlib.util.module_from_spec(probe_spec)
+    sys.modules[probe_spec.name] = probe
+    probe_spec.loader.exec_module(probe)
+    rows, heartbeat = probe._rows_from_report(report, policy["failure_threshold"])
+    assert len(rows) == 1
+    assert rows[0]["status"] == "WARNING"
+    assert rows[0]["key"] == "sched/omnibase_infra/runner-routing-audit.yml"
+    assert run_url in rows[0]["detail"]
+    assert "1 above threshold" in heartbeat
+
+
+@pytest.mark.parametrize(
+    "thresholds",
+    [
+        [],
+        {"outside-fleet": {".github/workflows/runner-routing-audit.yml": 0}},
+        {"omnibase_infra": {}},
+        {"omnibase_infra": {"not-a-workflow": 0}},
+        {"omnibase_infra": {".github/workflows/runner-routing-audit.yml": 11}},
+        {"omnibase_infra": {".github/workflows/runner-routing-audit.yml": -1}},
+        {"omnibase_infra": {".github/workflows/runner-routing-audit.yml": True}},
+        {
+            "omnibase_infra": {
+                ".github/workflows/runner-routing-audit.yml": float("nan")
+            }
+        },
+    ],
+)
+def test_scheduled_workflow_thresholds_cannot_relax_or_escape_fleet_policy(
+    tmp_path: Path,
+    thresholds: object,
+) -> None:
+    import yaml
+
+    path = REPO_ROOT / "scripts/ci/nonrequired_check_failure_rate.py"
+    spec = importlib.util.spec_from_file_location("runner_audit_threshold_policy", path)
+    assert spec and spec.loader
+    alerter = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = alerter
+    spec.loader.exec_module(alerter)
+    policy = yaml.safe_load(POLICY.read_text())
+    policy["route"]["nonrequired_check_alert"]["scheduled_workflow_thresholds"] = (
+        thresholds
+    )
+    fixture = tmp_path / "policy.yaml"
+    fixture.write_text(yaml.safe_dump(policy))
+    with pytest.raises(ValueError, match="scheduled_workflow_thresholds"):
+        alerter.load_policy(fixture)
 
 
 def test_repository_universe_derived_from_live_visibility(
@@ -1307,7 +1676,19 @@ def test_live_repository_visibility_uses_a_gh_cli_flag_that_actually_exists(
     result = module._live_repository_visibility("OmniNode-ai")
 
     assert captured_args == [
-        ["repo", "list", "OmniNode-ai", "--limit", "500", "--json", "name,isPrivate"]
+        [
+            "repo",
+            "list",
+            "OmniNode-ai",
+            "--no-archived",
+            "--limit",
+            "500",
+            "--json",
+            "name,isPrivate",
+        ]
     ]
     assert "--visibility" not in captured_args[0]
+    # OMN-18780: archived repositories run no workflows, so their pins are
+    # out of scope for a merge-gating placement check.
+    assert "--no-archived" in captured_args[0]
     assert result == [("a-private-repo", True), ("a-public-repo", False)]

@@ -121,8 +121,8 @@ async def test_injected_credential_reaches_linear_request_not_env() -> None:
             clear=False,
         ),
         patch(
-            "omnibase_infra.nodes.node_merge_gate_effect.handlers."
-            "handler_upsert_merge_gate.httpx.AsyncClient"
+            "omnibase_infra.adapters.project_tracker."
+            "linear_graphql_project_tracker_adapter.httpx.AsyncClient"
         ) as mock_client_cls,
     ):
         mock_client = AsyncMock()
@@ -151,8 +151,8 @@ async def test_missing_injected_credential_skips_linear_call() -> None:
     payload = _make_quarantine_payload()
 
     with patch(
-        "omnibase_infra.nodes.node_merge_gate_effect.handlers."
-        "handler_upsert_merge_gate.httpx.AsyncClient"
+        "omnibase_infra.adapters.project_tracker."
+        "linear_graphql_project_tracker_adapter.httpx.AsyncClient"
     ) as mock_client_cls:
         handler = HandlerUpsertMergeGate(_make_pool())
         result = await handler.handle(payload, uuid4())

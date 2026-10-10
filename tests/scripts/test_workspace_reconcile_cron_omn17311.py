@@ -12,7 +12,7 @@ running:
    gateway forwarder). The MANIFEST is the mechanism that turns "someone should
    copy this file" into a scheduled check that reddens.
 
-2. **Its cron slot does not collide.** Three root jobs touching the same clones
+2. **Its timer slot does not collide.** Root jobs touching the same clones
    and the same Slack workspace need to not run at the same minute. The
    separation is asserted here rather than left in a comment, because a comment
    does not survive the next edit.
@@ -29,32 +29,34 @@ pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _MAINTENANCE = _REPO_ROOT / "deploy" / "maintenance"
-_CRON_DIR = _MAINTENANCE / "cron.d"
+_SYSTEMD_DIR = _MAINTENANCE / "systemd"
 _SYNC_SCRIPT = _MAINTENANCE / "omninode-host-maintenance-sync.sh"
-_UNIT = _CRON_DIR / "omninode-workspace-reconcile"
+_SERVICE = _SYSTEMD_DIR / "omninode-workspace-reconcile.service"
+_TIMER = _SYSTEMD_DIR / "omninode-workspace-reconcile.timer"
 _WRAPPER = _MAINTENANCE / "omninode-workspace-reconcile.sh"
 
-_CRON_LINE = re.compile(
-    r"^(?P<minute>\S+)\s+(?P<hour>\S+)\s+\S+\s+\S+\s+\S+\s+(?P<user>\S+)\s+(?P<command>.+)$"
-)
+
+def _directives(unit: Path, name: str) -> list[str]:
+    return re.findall(
+        rf"^\s*{name}\s*=(.*)$", unit.read_text(encoding="utf-8"), re.MULTILINE
+    )
 
 
-def _cron_entries(unit: Path) -> list[re.Match[str]]:
-    entries = []
-    for line in unit.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" in line.split()[0]:
-            continue
-        matched = _CRON_LINE.match(line)
-        assert matched, f"unparseable cron line in {unit.name}: {line}"
-        entries.append(matched)
-    return entries
+def _calendar_minute_fields(unit: Path) -> list[str]:
+    calendars = _directives(unit, "OnCalendar")
+    assert calendars, f"no calendar schedule in {unit.name}"
+    fields = []
+    for calendar in calendars:
+        matched = re.fullmatch(r"\*-\*-\*\s+[^:\s]+:([^:\s]+):[^:\s]+", calendar)
+        assert matched, f"unparseable OnCalendar in {unit.name}: {calendar}"
+        fields.append(matched.group(1))
+    return fields
 
 
 def _expand_minutes(field: str) -> set[int]:
-    if field.startswith("*/"):
-        step = int(field[2:])
-        return set(range(0, 60, step))
+    if "/" in field:
+        start, step = field.split("/")
+        return set(range(0 if start == "*" else int(start), 60, int(step)))
     if field == "*":
         return set(range(60))
     return {int(part) for part in field.split(",")}
@@ -71,8 +73,12 @@ def _expand_minutes(field: str) -> set[int]:
             "/data/maintenance/bin/omninode-workspace-reconcile.sh",
         ),
         (
-            "deploy/maintenance/cron.d/omninode-workspace-reconcile",
-            "/etc/cron.d/omninode-workspace-reconcile",
+            "deploy/maintenance/systemd/omninode-workspace-reconcile.service",
+            "/etc/systemd/system/omninode-workspace-reconcile.service",
+        ),
+        (
+            "deploy/maintenance/systemd/omninode-workspace-reconcile.timer",
+            "/etc/systemd/system/omninode-workspace-reconcile.timer",
         ),
     ],
 )
@@ -87,26 +93,29 @@ def test_host_artifacts_are_in_the_sync_manifest(
     )
 
 
-def test_both_host_artifacts_exist_in_the_repo() -> None:
-    assert _UNIT.is_file()
+def test_all_host_artifacts_exist_in_the_repo() -> None:
+    assert _SERVICE.is_file()
+    assert _TIMER.is_file()
     assert _WRAPPER.is_file()
 
 
 # --------------------------------------------------------------------------- #
 # AC3 -- no schedule collision
 # --------------------------------------------------------------------------- #
-def test_reconcile_slot_does_not_collide_with_any_other_root_cron_job() -> None:
-    ours = _cron_entries(_UNIT)
+def test_reconcile_slot_does_not_collide_with_any_other_root_timer() -> None:
+    ours = _calendar_minute_fields(_TIMER)
     assert len(ours) == 1, (
         "one reconcile schedule, so there is one thing to reason about"
     )
-    our_minutes = _expand_minutes(ours[0].group("minute"))
+    our_minutes = _expand_minutes(ours[0])
+    assert our_minutes, "no minute could be read from the reconcile timer"
+    assert _directives(_TIMER, "Unit") == [_SERVICE.name]
 
-    for unit in sorted(_CRON_DIR.iterdir()):
-        if unit == _UNIT or not unit.is_file():
+    for unit in sorted(_SYSTEMD_DIR.glob("*.timer")):
+        if unit == _TIMER:
             continue
-        for entry in _cron_entries(unit):
-            other = _expand_minutes(entry.group("minute"))
+        for field in _calendar_minute_fields(unit):
+            other = _expand_minutes(field)
             overlap = our_minutes & other
             assert not overlap, (
                 f"the reconcile slot collides with {unit.name} at minute(s) "
@@ -117,16 +126,18 @@ def test_reconcile_slot_does_not_collide_with_any_other_root_cron_job() -> None:
 
 
 def test_the_unit_runs_the_governed_wrapper_and_not_an_inline_recipe() -> None:
-    """The cron line must not carry logic of its own.
+    """ExecStart must not carry logic of its own.
 
-    A cron line is the least reviewable, least testable place in the system to
-    put behaviour, and it is invisible to every gate in this repo.
+    A service command is the least reviewable, least testable place in the
+    system to put behaviour, and it is invisible to every gate in this repo.
     """
-    command = _cron_entries(_UNIT)[0].group("command")
+    commands = _directives(_SERVICE, "ExecStart")
+    assert len(commands) == 1, commands
+    command = commands[0]
     assert command.startswith("/data/maintenance/bin/omninode-workspace-reconcile.sh")
-    for shell_ism in ("&&", "||", ";", "$("):
-        assert shell_ism not in command.split(">>")[0], (
-            f"the cron command contains {shell_ism!r}; put it in the wrapper, "
+    for shell_ism in ("&&", "||", ";", "$(", "`", ">", "<", "|"):
+        assert shell_ism not in command, (
+            f"ExecStart contains {shell_ism!r}; put it in the wrapper, "
             "which is version-controlled, manifest-governed and testable"
         )
 
@@ -144,7 +155,7 @@ def test_wrapper_delegates_to_the_one_reconciler(
     third incident would reveal.
     """
     source = _WRAPPER.read_text(encoding="utf-8")
-    assert "scripts/reconcile-host.sh" in source
+    assert "/bin/onex-host-reconcile" in source
     for repair in (
         "uv sync",
         "git pull",
@@ -158,7 +169,7 @@ def test_wrapper_delegates_to_the_one_reconciler(
 
 
 def test_wrapper_fails_closed_when_the_reconciler_is_absent(tmp_path: Path) -> None:
-    """A missing reconciler must be loud, not a silent no-op cron tick."""
+    """A missing reconciler must be loud, not a silent no-op timer tick."""
     import subprocess
 
     proc = subprocess.run(
@@ -178,7 +189,7 @@ def test_wrapper_fails_closed_when_the_reconciler_is_absent(tmp_path: Path) -> N
 
 
 def test_wrapper_never_echoes_the_alert_credentials(tmp_path: Path) -> None:
-    """A secret printed into a root cron log outlives the run.
+    """A secret printed into a root service log outlives the run.
 
     The wrapper sources an env file that carries a Slack bot token, so this is a
     real exposure path rather than a hypothetical one.

@@ -25,7 +25,6 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_consta
     BOUNDARY_RE,
     BRANCHES,
     CURSOR_FIELD,
-    GENERIC_DLQ,
     KINDS,
     NEGATIVE_TESTS,
     PAIRING_LOOKAHEAD,
@@ -50,6 +49,7 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers.handler_consumer_flow
 )
 from omnibase_infra.nodes.node_board_probe_effect.models.typed_dict_consumer_flow import (
     TypedDictConsumerFlowCollected,
+    TypedDictConsumerFlowIdentity,
     TypedDictConsumerFlowInjection,
     TypedDictConsumerFlowNatural,
     TypedDictConsumerFlowNegative,
@@ -319,7 +319,7 @@ def inject(lane: ConsumerFlowLane) -> TypedDictConsumerFlowInjection:
 def observe_injection(
     lane: ConsumerFlowLane,
     inj: TypedDictConsumerFlowInjection,
-    dlq_before: int,
+    seam_dlq_before: int,
     wait_seconds: float,
 ) -> TypedDictConsumerFlowInjection:
     deadline = lane.monotonic() + wait_seconds
@@ -340,15 +340,15 @@ def observe_injection(
                 if (m := BOUNDARY_RE.search(ln))
                 and m.group("cid") == inj["correlation_id"]
             )
-        dlq_after = lane.high_watermark(GENERIC_DLQ)
+        seam_dlq_after = lane.high_watermark(SEAM_DLQ)
         copies = 0
-        if dlq_after > dlq_before:
+        if seam_dlq_after > seam_dlq_before:
             out = lane.rpk(
                 "topic",
                 "consume",
-                GENERIC_DLQ,
+                SEAM_DLQ,
                 "-o",
-                f"{dlq_before}:{dlq_after}",
+                f"{seam_dlq_before}:{seam_dlq_after}",
                 "-f",
                 "%o\\t%v\\n",
                 timeout=120,
@@ -360,10 +360,23 @@ def observe_injection(
                 "validation_errors_after": errors,
                 "boundary_lines": boundaries,
                 "dlq_copies": copies,
-                "generic_dlq_before": dlq_before,
-                "generic_dlq_after": dlq_after,
+                "seam_dlq_before": seam_dlq_before,
+                "seam_dlq_after": seam_dlq_after,
             }
         lane.sleep(10)
+
+
+def _changed_boot_containers(
+    ident_before: dict[str, TypedDictConsumerFlowIdentity],
+    ident_after: dict[str, TypedDictConsumerFlowIdentity],
+) -> dict[str, tuple[str, str | None]]:
+    return {
+        n: (ident_before[n]["id"], ident_after.get(n, {}).get("id"))
+        for n in BOOT_CONTAINERS
+        if ident_before[n]["id"] != ident_after.get(n, {}).get("id")
+        or ident_before[n]["started_at"] != ident_after.get(n, {}).get("started_at")
+        or ident_after.get(n, {}).get("status") != "running"
+    }
 
 
 def observe_lane(
@@ -375,7 +388,49 @@ def observe_lane(
     injection_wait: float,
 ) -> TypedDictConsumerFlowCollected:
     ident_before = lane.wait_settled(settle_seconds)
+    try:
+        return _observe_settled(
+            lane,
+            ident_before,
+            samples=samples,
+            interval=interval,
+            injection_wait=injection_wait,
+        )
+    except ConsumerFlowBootChangedError:
+        raise
+    except ConsumerFlowInputError as exc:
+        # OMN-17427: a deploy that starts AFTER the settle wait is a boot change
+        # too. C28 run 37710404847 settled at 00:58:07Z, the dev lane's
+        # containers were recreated at 00:58:19Z, and the exposure GET was
+        # refused before the after-run identity read could see the new boot,
+        # so the run graded INDETERMINATE instead of re-measuring. A failed
+        # read is re-classified only when the containers measurably changed
+        # or stopped; the same running containers still refusing a read stay
+        # unreadable.
+        try:
+            ident_after = lane.identity()
+        except ConsumerFlowInputError as identity_exc:
+            raise ConsumerFlowBootChangedError(
+                "lane containers replaced during the run: identity unreadable: "
+                f"{identity_exc}; first read error: {exc}"
+            ) from exc
+        changed = _changed_boot_containers(ident_before, ident_after)
+        if changed:
+            raise ConsumerFlowBootChangedError(
+                f"lane containers replaced during the run: {changed}; "
+                f"first read error: {exc}"
+            ) from exc
+        raise
 
+
+def _observe_settled(
+    lane: ConsumerFlowLane,
+    ident_before: dict[str, TypedDictConsumerFlowIdentity],
+    *,
+    samples: int,
+    interval: float,
+    injection_wait: float,
+) -> TypedDictConsumerFlowCollected:
     natural: dict[str, TypedDictConsumerFlowNatural] = {}
     for c in RUNTIME_CONTAINERS:
         lines = lane.logs(c)
@@ -414,18 +469,11 @@ def observe_lane(
         else None
     )
 
-    dlq_before = lane.high_watermark(GENERIC_DLQ)
     seam_dlq_before = lane.high_watermark(SEAM_DLQ)
-    inj = observe_injection(lane, inject(lane), dlq_before, injection_wait)
+    inj = observe_injection(lane, inject(lane), seam_dlq_before, injection_wait)
     seam_dlq_after = lane.high_watermark(SEAM_DLQ)
 
-    ident_after = lane.identity()
-    changed = {
-        n: (ident_before[n]["id"], ident_after.get(n, {}).get("id"))
-        for n in BOOT_CONTAINERS
-        if ident_before[n]["id"] != ident_after.get(n, {}).get("id")
-        or ident_before[n]["started_at"] != ident_after.get(n, {}).get("started_at")
-    }
+    changed = _changed_boot_containers(ident_before, lane.identity())
     if changed:
         raise ConsumerFlowBootChangedError(
             f"lane containers replaced during the run: {changed}"

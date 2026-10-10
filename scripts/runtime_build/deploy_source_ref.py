@@ -58,12 +58,14 @@ inside the build context without the project venv.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 USAGE_ERROR = 2
@@ -368,15 +370,48 @@ def refuse_canonical_checkout(repo_path: Path) -> None:
 def pinned_worktree(
     repo_path: Path, sha: str, worktree_root: Path, *, force: bool
 ) -> Path:
-    """Create ``<worktree_root>/<repo>`` as a fresh detached linked worktree of
-    ``repo_path`` at ``sha`` and return it.
+    """Create a clone-keyed detached linked worktree at ``sha`` and return it.
 
     The clone's own HEAD, index and working tree are never touched. A worktree
     this function created on an earlier run is removed first (``force`` discards
-    anything written into it since); any other entry at that path is refused,
-    never overwritten.
+    anything written into it since). Foreign Git trees are renamed to dated
+    quarantines, preserving their contents; non-Git entries are still refused.
     """
-    target = Path(worktree_root).resolve() / repo_path.name
+    repo_path = repo_path.resolve()
+    root = worktree_root.resolve()
+    clone_key = hashlib.sha256(os.fsencode(repo_path)).hexdigest()
+    target = root / clone_key / repo_path.name
+    common_dir = Path(
+        _git(repo_path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    ).resolve()
+    # Inspect both the new key and the pre-OMN-20658 location. Never delete or
+    # deregister another clone's tree, even if its contents are dirty.
+    for candidate in (root / repo_path.name, target):
+        if not candidate.exists():
+            continue
+        # A directory inside some parent Git repository is not a staging tree.
+        if not (candidate / ".git").exists():
+            raise DeploySourceRefError(
+                f"{repo_path.name}: {candidate} exists and is not a Git tree; "
+                "refusing to overwrite it",
+                CHECKOUT_FAILED,
+            )
+        candidate_common = Path(
+            _git(candidate, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        ).resolve()
+        if candidate_common != common_dir:
+            while True:
+                stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+                quarantine = candidate.with_name(f"{candidate.name}.foreign-{stamp}")
+                if not quarantine.exists():
+                    break
+            candidate.rename(quarantine)
+            print(
+                f"RT-1: foreign clone tree {candidate} (common dir "
+                f"{candidate_common}, expected {common_dir}) moved aside to "
+                f"{quarantine}; contents preserved (OMN-20658)",
+                file=sys.stderr,
+            )
     _git(repo_path, "worktree", "prune")
     registered = {
         Path(line.removeprefix("worktree ")).resolve()
@@ -434,7 +469,7 @@ def clean_checkout(
     was asked for are both readable afterwards.
 
     ``worktree_root`` (OMN-20263) checks the ref out in a fresh detached
-    worktree ``<worktree_root>/<repo>`` instead of in ``repo_path``, and the
+    clone-keyed worktree under ``worktree_root`` instead of in ``repo_path``, and the
     result's ``path`` names that worktree. Without it, a ``repo_path`` that is a
     canonical clone is refused before any checkout.
     """
@@ -879,7 +914,7 @@ def checkout_immutable_selections(
     is changed until every requested commit has resolved in its own repository.
 
     ``worktree_root`` (OMN-20263) checks each pin out in a fresh detached
-    worktree ``<worktree_root>/<repo>`` instead, so the clone's own tree is
+    clone-keyed worktree under ``worktree_root`` instead, so the clone's own tree is
     neither read for dirt nor changed.
     """
     if worktree_root is None:
@@ -1093,7 +1128,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_checkout.add_argument(
         "--worktree-root",
-        help="check each ref out in a fresh detached worktree <dir>/<repo> of "
+        help="check each ref out in a fresh detached clone-keyed worktree under <dir> of "
         "its clone, never in the clone itself (OMN-20263); the manifest's path "
         "names the worktree",
     )

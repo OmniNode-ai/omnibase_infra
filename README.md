@@ -46,7 +46,7 @@ in the tree — this section is the pointer, and the `kb-doc-gate` check
 
 | Home | What is there |
 |------|---------------|
-| [`OmniNode-ai/knowledge-base`](https://github.com/OmniNode-ai/knowledge-base) (public) | Platform documentation anyone can read: `architecture/`, `reference/`, `guides/`, `runbooks/`, and the ADR ledger. This repository's pages are prefixed `omnibase-infra-`. |
+| [`OmniNode-ai/knowledge_base`](https://github.com/OmniNode-ai/knowledge_base) (public) | Platform documentation anyone can read: `architecture/`, `reference/`, `guides/`, `runbooks/`, and the ADR ledger. This repository's pages are prefixed `omnibase-infra-`. |
 
 | Need | Where |
 |------|-------|
@@ -102,13 +102,13 @@ make seed-infisical
 # Show running containers
 make status
 
-# Stop the core bundle ONLY (auth/runtime stay running)
+# Stop the last generated compose project (keeps volumes)
 make down
 
-# Stop the auth bundle (keycloak)
+# Same project-wide teardown (the auth argument is ignored; keeps volumes)
 make down-auth
 
-# Stop everything (runtime + auth + core, in safe teardown order)
+# Repeat project-wide teardown for legacy bundle arguments (keeps volumes)
 make down-all
 
 # List all targets
@@ -197,7 +197,7 @@ this `README.md`, `CLAUDE.md`, `CHANGELOG.md`, `SECURITY.md`, anything under
 `kb-doc-gate` required check enforces that list in `strict` mode, so a new
 document under `docs/` fails CI rather than quietly re-growing the tree.
 
-New prose goes to [the public knowledge base](https://github.com/OmniNode-ai/knowledge-base) by default. Prose that
+New prose goes to [the public knowledge base](https://github.com/OmniNode-ai/knowledge_base) by default. Prose that
 would name real internal topology, the lab or CI fleet, deploy lanes, or the
 secrets manager does not go to a public destination at all. Dated point-in-time
 artifacts — evidence bundles, audit snapshots, run transcripts — are not

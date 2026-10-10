@@ -5,12 +5,12 @@
 # compose_files.sh -- the ONE derivation of a lane's `docker compose -f ...`
 # token sequence [OMN-16729, extending OMN-13581 / OMN-15379].
 #
-# Sourced by scripts/deploy-runtime.sh, scripts/runtime_build/refresh_dev_lane.sh
+# Sourced by onex-runtime-deploy, scripts/runtime_build/refresh_dev_lane.sh
 # and scripts/runtime_build/refresh_stability_lane.sh. Same shared-helper shape
 # as compose_wait_timeout.sh and lane_lock.sh, which those three already share.
 #
 # WHY THIS FILE EXISTS, measured on the .201 dev lane 2026-09-08T18:48:59Z:
-# deploy-runtime.sh resolved both compose files correctly, but
+# onex-runtime-deploy resolved both compose files correctly, but
 # refresh_dev_lane.sh carried its OWN, SEPARATE compose invocations -- the
 # service-id resolver and the failure ROLLBACK recreate -- and each of those
 # spelled a single `-f docker/docker-compose.infra.yml` by hand. The dev lane's
@@ -33,7 +33,7 @@
 
 # Emit an error through the caller's own logger when it has one, so a message
 # from this lib is indistinguishable from the host script's own. Resolved at
-# CALL time, not source time: deploy-runtime.sh sources this file above its own
+# CALL time, not source time: onex-runtime-deploy sources this file above its own
 # log_error definition.
 _compose_files_log_error() {
     if declare -F log_error >/dev/null 2>&1; then
@@ -51,7 +51,7 @@ _compose_files_log_error() {
 # "the dev project gets no overlay" reading of this mapping is WRONG and is the
 # sentence the 2026-09-08 rollback was written against.
 #
-# OMN-13581: deploy-runtime.sh historically passed ONLY `-f infra.yml` on every
+# OMN-13581: onex-runtime-deploy historically passed ONLY `-f infra.yml` on every
 # `docker compose` call, including warm_broker_topic_provisioning's `up redpanda`
 # step. The base infra compose hardcodes `container_name: omnibase-infra-redpanda`
 # (the DEV name) and the dev network, so running the warmup against a non-dev
@@ -141,7 +141,7 @@ resolve_compose_file_args() {
     #   docker compose -p "${compose_project}" "${compose_args[@]}" ...
     #
     # `deploy_target` is the directory that CONTAINS docker/ -- the versioned
-    # deploy root for deploy-runtime.sh, the ambient clone for the refresh
+    # deploy root for onex-runtime-deploy, the ambient clone for the refresh
     # wrappers. Both spell the same files.
     local _out_args_name="$1"
     local deploy_target="$2"

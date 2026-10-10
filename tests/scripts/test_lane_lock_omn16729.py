@@ -6,7 +6,7 @@
 Defect this closes, measured on the .201 dev lane 2026-09-08T13:51Z (third
 recorded occurrence of the class, after the 2026-09-05/06 prophylactic ones):
 `scripts/runtime_build/refresh_dev_lane.sh`, `refresh_stability_lane.sh` and
-`scripts/deploy-runtime.sh` all mutate ONE lane, and none of them took a
+`src/omnibase_infra/handlers/handler_runtime_deploy.sh` all mutate ONE lane, and none of them took a
 host-level lock over the whole critical section. A lane's own refresh completed
 at 13:44:04Z and, at 13:51:14Z, WHILE its post-deploy readback was running, a
 second sanctioned refresh of the same compose project recreated all four core
@@ -14,7 +14,7 @@ containers. The first lane's readback died mid-loop with
 "container a8612839b451 is not running", and the lane was left carrying a
 feature branch rather than the ref either lane intended.
 
-`deploy-runtime.sh`'s pre-existing `.deploy.lock` did not and could not prevent
+`onex-runtime-deploy`'s pre-existing `.deploy.lock` did not and could not prevent
 this: it is host-WIDE (unrelated lanes block each other) and it is scoped to
 that one script, so it is already released while the wrapper is still capturing
 pre-state, health-gating and reading back.
@@ -157,7 +157,7 @@ def test_second_acquirer_times_out_and_names_the_holder(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_nested_reentry_succeeds_without_deadlock(tmp_path: Path) -> None:
-    """AC2: a nested call (refresh_*_lane.sh -> deploy-runtime.sh) inherits the
+    """AC2: a nested call (refresh_*_lane.sh -> onex-runtime-deploy) inherits the
     token and re-enters immediately instead of blocking on its own parent."""
     lock_dir = tmp_path / "locks"
     inner = "\n".join(
@@ -410,7 +410,7 @@ def test_every_lane_mutating_script_takes_the_lock() -> None:
     the helper and call lane_lock_acquire. A fourth entry point added later
     without a lock is exactly how this class recurred three times."""
     for rel in (
-        "scripts/deploy-runtime.sh",
+        "src/omnibase_infra/handlers/handler_runtime_deploy.sh",
         "scripts/runtime_build/refresh_dev_lane.sh",
         "scripts/runtime_build/refresh_stability_lane.sh",
     ):

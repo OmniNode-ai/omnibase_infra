@@ -109,9 +109,14 @@ def test_the_same_guard_accepts_the_same_bytes_with_the_committed_entry(
 ) -> None:
     root = _root_with_the_captured_bytes(tmp_path)
     # The committed C11 entry's cron moves whenever the live probe's cadence
-    # does (OMN-17427 made it hourly); these are the captured bytes, so the
-    # entry is judged with the captured workflow's own cron.
+    # does (OMN-17427 made it hourly) and its duration moves with the job's
+    # timeout (OMN-19811 added the deploy wait); these are the captured bytes,
+    # so the entry is judged with the captured workflow's own cron and the
+    # captured 10-minute timeout.
     (cron,) = plw.workflow_crons(plw.read_workflow(FIXTURE))
-    entry = [dataclasses.replace(w, cron=(cron,)) for w in _committed(("C11",))]
+    entry = [
+        dataclasses.replace(w, cron=(cron,), max_duration_minutes=10)
+        for w in _committed(("C11",))
+    ]
     assert len(entry) == 1
     assert plw.check(entry, {"omnibase_infra": root}) == []

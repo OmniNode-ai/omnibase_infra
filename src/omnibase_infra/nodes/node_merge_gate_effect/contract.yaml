@@ -206,6 +206,10 @@ dependencies:
     env_var: "LINEAR_TEAM_ID"
     description: "Linear team ID for quarantine ticket creation (optional)"
     required: false
+  - name: "linear_graphql_transport"
+    type: "service"
+    description: "OMN-17678: every Linear GraphQL POST goes through AdapterLinearGraphQLProjectTracker.graphql_transport (ProtocolLinearGraphQLTransport). The handler keeps its own status, retry and Done-write handling."
+    required: false
 # Capabilities provided by this node
 capabilities:
   - name: "merge_gate_persistence"

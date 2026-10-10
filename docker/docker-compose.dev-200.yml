@@ -30,7 +30,7 @@
 #   * the four runtime-kernel services mount this lane's own Bifrost overlay
 #     (docker/lane-overlays/dev-200.bifrost.yaml: cloud locale, no local model
 #     rung) and never the dev lane's, which binds the .201 model server. The
-#     gpt-oss planner on .200's :8130 is not bound either;
+#     qwen3.6-35b-a3b planner on .200's :8130 is not bound either;
 #   * host credential mounts (Vertex token) are pinned to /dev/null; this lane
 #     carries no operator login.
 #
@@ -123,6 +123,8 @@ services:
     container_name: omnibase-infra-dev-200-redpanda-sasl-enable
   redpanda-partition-cap:
     container_name: omnibase-infra-dev-200-redpanda-partition-cap
+    environment:
+      REDPANDA_PROFILE_MEMORY: ${DEV_200_REDPANDA_MEMORY:-2G}
   valkey:
     container_name: omnibase-infra-dev-200-valkey
     ports: !override
@@ -161,11 +163,17 @@ services:
     container_name: omnibase-infra-dev-200-autoheal
   phoenix:
     container_name: omnibase-infra-dev-200-phoenix
+    # OMN-19417: the census declares this container running and the lane_sync
+    # check fails the lab-pass receipt while it is absent. The agent's deps leg
+    # (`--profile core up -d`, no service list) is the only leg that starts a
+    # service outside its runtime list, so Phoenix joins `core` on this lane.
+    profiles: !override ["core", "runtime", "full"]
     ports: !override
       - "127.0.0.1:42006:6006"
   omninode-runtime:
     container_name: omninode-dev-200-runtime
     environment:
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       ONEX_RUNTIME_LANE: "compose-dev-200"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-200.bifrost.yaml
     ports: !override
@@ -180,6 +188,9 @@ services:
   runtime-effects:
     container_name: omninode-dev-200-runtime-effects
     environment:
+      # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
+      ONEX_RUNTIME_LANE: "compose-dev-200"
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-200.bifrost.yaml
       # OMN-20533: docker-compose.dev-lane.yml binds runtime-effects to the .201
       # dev lane's tenant-credential READ config and its own Infisical identity.
@@ -198,6 +209,10 @@ services:
       # refusing projection_binding_unconfigured instead of failing to load a file
       # this lane never mounts (projection_binding_invalid).
       OMNIMARKET_PROJECTION_READ_BINDING_OVERLAY: ""
+      # OMN-17427: docker-compose.dev-lane.yml also names the skill overlay roots
+      # mount, which this lane's volume override drops. Blank is no overlay, so a
+      # morning run here is refused by name; the runtime boots either way.
+      ONEX_SKILL_OVERLAY_ROOTS: ""
     ports: !override
       - "127.0.0.1:42086:8085"
     networks: !override
@@ -212,6 +227,7 @@ services:
   runtime-worker:
     container_name: omninode-dev-200-runtime-worker
     environment:
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-200.bifrost.yaml
     volumes: !override
       - worker_logs:/app/logs
@@ -221,6 +237,7 @@ services:
   tenant-projection-writer:
     container_name: omnimarket-dev-200-tenant-projection-writer
     environment:
+      ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-200.bifrost.yaml
     labels:
       com.omninode.lane: dev-200

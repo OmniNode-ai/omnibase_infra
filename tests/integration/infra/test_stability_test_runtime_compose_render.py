@@ -806,7 +806,7 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
     )
 
     partition_cap_command = "\n".join(services["redpanda-partition-cap"]["command"])
-    assert "/usr/bin/rpk -X brokers=redpanda:9092" in partition_cap_command
+    assert "RPK_BROKERS=redpanda:9092" in partition_cap_command
     assert "admin.hosts=redpanda:9644" in partition_cap_command
     assert "topic_partitions_per_shard" in partition_cap_command
     # Extract the literal value passed to `rpk cluster config set`, not a bare
@@ -815,7 +815,14 @@ def test_stability_lane_render_does_not_expose_production_ports_or_services() ->
     # test.yml's OMN-14013 comment block).
     partition_cap_match = re.search(
         r"cluster config set topic_partitions_per_shard\s+(\d+)",
-        partition_cap_command,
+        partition_cap_command.replace(
+            '"$$REDPANDA_PARTITIONS_PER_SHARD"',
+            str(
+                services["redpanda-partition-cap"]["environment"][
+                    "REDPANDA_PARTITIONS_PER_SHARD"
+                ]
+            ),
+        ),
     )
     assert partition_cap_match is not None, partition_cap_command
     assert int(partition_cap_match.group(1)) == (

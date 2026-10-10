@@ -71,8 +71,8 @@ admission_policy:
         # drain, so the two surfaces agree.
         declared_here: false
         input_field: "collaborator_logins"
-        source_repo: "omni_home (private)"
-        source_path: "docs/workflows/_shared/merge_sweep_collaborator_roster.yaml"
+        source_repo_env: "OMNI_HYGIENE_VOCAB_REPO"
+        source_path: "vocabularies/merge_sweep_collaborator_roster.yaml"
         source_note: >-
           Beside the public-repo hygiene denylist vocabulary and the shared person-name wordlist. One private vocabulary home, not three.
 metadata:

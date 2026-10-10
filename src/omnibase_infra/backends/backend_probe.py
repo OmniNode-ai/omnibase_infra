@@ -20,9 +20,11 @@ Authority doctrine:
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import socket
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Protocol, cast
 
 from omnibase_infra.backends.enum_probe_state import EnumProbeState
@@ -99,6 +101,177 @@ class ConsumerGroupLivenessUnknownError(RuntimeError):
     an acceptable fallback. A fail-closed dispatch gate cannot use that
     collapse — UNKNOWN has to refuse, not proceed (OMN-17295 AC1).
     """
+
+
+class ConsumerGroupLivenessTransientError(ConsumerGroupLivenessUnknownError):
+    """OMN-20646: transport failed, so asking again may answer the question.
+
+    A request timed out or the connection dropped. This is still UNKNOWN:
+    a fail-closed caller that stops asking must refuse.
+    """
+
+
+def _is_transient_liveness_failure(exc: BaseException) -> bool:
+    """A request that timed out or a connection that dropped (OMN-20646).
+
+    Asking again may answer these. Everything else (a decode error, a broker
+    error code, a refused login) would answer the same way twice.
+    """
+    from aiokafka.errors import (
+        KafkaConnectionError,
+        KafkaTimeoutError,
+        NodeNotReadyError,
+        RequestTimedOutError,
+    )
+
+    return isinstance(
+        exc,
+        (
+            TimeoutError,
+            KafkaTimeoutError,
+            RequestTimedOutError,
+            KafkaConnectionError,
+            NodeNotReadyError,
+        ),
+    )
+
+
+# Kafka's ListGroups API. v4 (KIP-518) adds a states filter the broker applies
+# before it answers; aiokafka 0.13 speaks only v0 to v2, which list every group.
+_LIST_GROUPS_API_KEY = 16
+_LIST_GROUPS_STATES_FILTER_VERSION = 4
+
+
+@functools.cache
+def _list_groups_v4_structs() -> tuple[Callable[..., object], type]:
+    """Build the ListGroups v4 request and response structs (OMN-20646).
+
+    Laid out field for field like aiokafka's own flexible-version structs
+    (compact strings and arrays, tagged fields), and built with ``type()``
+    because aiokafka's protocol modules carry no type information. Built on
+    first use, like every other aiokafka import in this module.
+
+    Returns:
+        The request struct class and the response struct class.
+    """
+    from aiokafka.protocol.api import RequestStruct, Response
+    from aiokafka.protocol.types import (
+        CompactArray,
+        CompactString,
+        Int16,
+        Int32,
+        Schema,
+        TaggedFields,
+    )
+
+    response = type(
+        "ListGroupsResponse_v4",
+        (Response,),
+        {
+            "API_KEY": _LIST_GROUPS_API_KEY,
+            "API_VERSION": _LIST_GROUPS_STATES_FILTER_VERSION,
+            "SCHEMA": Schema(
+                ("throttle_time_ms", Int32),
+                ("error_code", Int16),
+                (
+                    "groups",
+                    CompactArray(
+                        ("group_id", CompactString("utf-8")),
+                        ("protocol_type", CompactString("utf-8")),
+                        ("group_state", CompactString("utf-8")),
+                        ("tags", TaggedFields),
+                    ),
+                ),
+                ("tags", TaggedFields),
+            ),
+        },
+    )
+    request = type(
+        "ListGroupsRequest_v4",
+        (RequestStruct,),
+        {
+            "FLEXIBLE_VERSION": True,
+            "API_KEY": _LIST_GROUPS_API_KEY,
+            "API_VERSION": _LIST_GROUPS_STATES_FILTER_VERSION,
+            "RESPONSE_TYPE": response,
+            "SCHEMA": Schema(
+                ("states_filter", CompactArray(CompactString("utf-8"))),
+                ("tags", TaggedFields),
+            ),
+        },
+    )
+    return request, response
+
+
+class StableListGroupsRequest:
+    """ListGroups v4 asking the broker for ``Stable`` groups only (OMN-20646).
+
+    An aiokafka connection asks a request for one thing, ``prepare(versions)``,
+    which picks the struct to send from the versions the broker advertised.
+    This request has one version, so a broker that cannot speak it raises
+    what aiokafka's own requests raise there, ``IncompatibleBrokerVersion``
+    for an API it does not list and ``NotImplementedError`` for a range that
+    stops short, and the caller falls back to the unfiltered listing.
+    """
+
+    API_KEY = _LIST_GROUPS_API_KEY
+
+    def prepare(self, versions: dict[int, tuple[int, int]]) -> object:
+        from aiokafka.errors import IncompatibleBrokerVersion
+
+        supported = versions.get(_LIST_GROUPS_API_KEY)
+        if supported is None:
+            raise IncompatibleBrokerVersion(
+                "ListGroups cannot be used if the API version is unknown"
+            )
+        low, high = supported
+        if not low <= _LIST_GROUPS_STATES_FILTER_VERSION <= high:
+            raise NotImplementedError(
+                f"ListGroups v{_LIST_GROUPS_STATES_FILTER_VERSION} is outside "
+                f"the broker's range v{low} to v{high}"
+            )
+        request, _ = _list_groups_v4_structs()
+        return request(states_filter=["Stable"], tags={})
+
+
+async def _list_candidate_group_ids(
+    admin: AIOKafkaAdminClient, broker_ids: list[int]
+) -> list[str]:
+    """List the ids of the groups that can be live, Stable only (OMN-20646).
+
+    Measured on the .201 dev broker 2026-10-07: 28,352 groups, about 3.9 MB
+    per unfiltered listing, and every dispatched delegation lists twice
+    (first hop, then the downstream chain). Asked for ``Stable`` only, the
+    same broker answered with 708 groups, about 100 KB. Over the lab's
+    degraded path (about 220 ms, 20% loss, DERP relay) the unfiltered answer
+    missed the 5 s request bound on 7 of 12 walker draws.
+
+    The filter only narrows a read-only question. DescribeGroups on each
+    candidate still decides liveness and keeps the OMN-19914 denial
+    semantics. A broker without ListGroups v4 gets the unfiltered listing,
+    which is the behaviour before this change.
+    """
+    from aiokafka.errors import IncompatibleBrokerVersion, for_code
+
+    ids: set[str] = set()
+    for broker_id in broker_ids:
+        try:
+            # The admin client has no public way to send a request it did not
+            # build. ``_send_request`` is the call its own list_consumer_groups
+            # makes, with the same per-connection version negotiation.
+            response = await admin._send_request(StableListGroupsRequest(), broker_id)
+        except (IncompatibleBrokerVersion, NotImplementedError):
+            logger.debug(
+                "broker %s has no ListGroups v%d; listing every consumer group",
+                broker_id,
+                _LIST_GROUPS_STATES_FILTER_VERSION,
+            )
+            listing = await admin.list_consumer_groups()
+            return sorted({str(entry[0]) for entry in listing if entry})
+        if response.error_code:
+            raise for_code(response.error_code)("Error listing consumer groups")
+        ids.update(str(group[0]) for group in response.groups)
+    return sorted(ids)
 
 
 # Kafka's GROUP_AUTHORIZATION_FAILED. Named by number here because the
@@ -308,7 +481,12 @@ def live_consumer_groups(
     except ConsumerGroupLivenessUnknownError:
         raise
     except Exception as exc:
-        raise ConsumerGroupLivenessUnknownError(
+        error_class = (
+            ConsumerGroupLivenessTransientError
+            if _is_transient_liveness_failure(exc)
+            else ConsumerGroupLivenessUnknownError
+        )
+        raise error_class(
             f"could not list consumer groups on {resolved}: {exc}"
         ) from exc
 
@@ -352,7 +530,12 @@ def live_chain_consumer_groups(
     except ConsumerGroupLivenessUnknownError:
         raise
     except Exception as exc:
-        raise ConsumerGroupLivenessUnknownError(
+        error_class = (
+            ConsumerGroupLivenessTransientError
+            if _is_transient_liveness_failure(exc)
+            else ConsumerGroupLivenessUnknownError
+        )
+        raise error_class(
             f"could not list consumer groups on {resolved}: {exc}"
         ) from exc
 
@@ -384,13 +567,17 @@ async def _live_chain_consumer_groups_async(
         admin, bootstrap_servers=bootstrap_servers, principal=principal
     )
     try:
-        await admin.describe_cluster()
-        listing = await admin.list_consumer_groups()
+        cluster = await admin.describe_cluster()
+        listing = await _list_candidate_group_ids(
+            admin, [int(broker["node_id"]) for broker in cluster["brokers"]]
+        )
         topics_by_base: dict[str, set[str]] = {}
-        for entry in listing:
-            if not entry:
-                continue
-            base, infix, topic = str(entry[0]).partition(TOPIC_SCOPE_INFIX)
+        # OMN-20646: with the Stable filter, a base must have a Stable group
+        # on every topic of the footprint. A non-Stable footprint group means
+        # that consumer is not joined; an empty answer goes to the caller's
+        # bounded rebind wait, not a refusal.
+        for group_id in listing:
+            base, infix, topic = group_id.partition(TOPIC_SCOPE_INFIX)
             if infix:
                 topics_by_base.setdefault(base, set()).add(topic)
         required = set(subscribe_topics)
@@ -476,8 +663,10 @@ async def _live_consumer_groups_async(
         # question anyway answers it EMPTY — which reads as "nobody is bound"
         # and is exactly the UNKNOWN/absent conflation this function exists to
         # prevent. Observed live 2026-08-31 against a closed port.
-        await admin.describe_cluster()
-        listing = await admin.list_consumer_groups()
+        cluster = await admin.describe_cluster()
+        listing = await _list_candidate_group_ids(
+            admin, [int(broker["node_id"]) for broker in cluster["brokers"]]
+        )
 
         # OMN-20235: the topic suffix alone admits every per-run and every
         # other-node group on the topic. Measured 2026-10-01: 385 groups,
@@ -487,11 +676,10 @@ async def _live_consumer_groups_async(
         suffix = f"{TOPIC_SCOPE_INFIX}{topic}"
         candidates = sorted(
             {
-                str(entry[0])
-                for entry in listing
-                if entry
-                and str(entry[0]).endswith(suffix)
-                and (owner is None or owner.matches(str(entry[0])))
+                group_id
+                for group_id in listing
+                if group_id.endswith(suffix)
+                and (owner is None or owner.matches(group_id))
             }
         )
     except BaseException:
@@ -591,7 +779,7 @@ async def _describe_live_consumer_groups(
     finally:
         await admin.close()
 
-    # Wiring truth needs the group's STATE, which the listing does not carry.
+    # Wiring truth needs the group's current STATE, confirmed after listing.
     # ``Stable`` is Kafka's own spelling on the wire; the confluent enum spelled
     # it ``STABLE``, so the comparison is case-folded rather than literal.
     found: set[str] = set()

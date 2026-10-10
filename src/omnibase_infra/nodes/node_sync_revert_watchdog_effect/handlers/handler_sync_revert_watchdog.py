@@ -98,6 +98,9 @@ from uuid import uuid4
 
 import httpx
 
+from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
+    AdapterLinearGraphQLProjectTracker,
+)
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.handlers.done_write_receipt_guard import (
     DoneWriteReceiptGuard,
@@ -133,7 +136,6 @@ TypeLinearQuery = Callable[
 # disabling one sweep never silently disables the other).
 _KILL_SWITCH_ENV_VAR = "ONEX_SYNC_REVERT_WATCHDOG_DISABLED"
 
-_LINEAR_API_URL = "https://api.linear.app/graphql"  # url-authority-ok: fixed public GraphQL API, no ONEX routing authority
 
 _COMPLETED_TYPE = "completed"
 
@@ -274,16 +276,11 @@ class _LinearClient:
         if not self._api_key:
             logger.warning("LINEAR_API_KEY is not set — cannot call Linear API.")
             return None
-        headers = {
-            "Authorization": self._api_key,
-            "Content-Type": "application/json",
-        }
-        payload = {"query": query, "variables": variables}
         try:
-            async with httpx.AsyncClient(timeout=timeout or self._timeout) as client:
-                response = await client.post(
-                    _LINEAR_API_URL, json=payload, headers=headers
-                )
+            async with AdapterLinearGraphQLProjectTracker.graphql_transport(
+                api_key=self._api_key, timeout_seconds=timeout or self._timeout
+            ) as transport:
+                response = await transport.post_graphql(query, variables)
                 response.raise_for_status()
                 data = response.json()
         except (httpx.HTTPError, ValueError) as exc:

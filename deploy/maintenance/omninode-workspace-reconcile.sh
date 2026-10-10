@@ -6,15 +6,15 @@
 # workspace reconciler (OMN-17311).
 #
 # WHAT THIS IS
-#   The thin host-side wrapper that /etc/cron.d/omninode-workspace-reconcile
+#   The thin host-side wrapper that omninode-workspace-reconcile.timer (via its service)
 #   invokes as root. It does three things and nothing else: load the alert
 #   credentials, point OMNI_HOME at the deploy-source tree, and exec
-#   `scripts/reconcile-host.sh` from that tree.
+#   `onex-host-reconcile` from that tree.
 #
 #   Arguments are FORWARDED to the reconciler (OMN-17336), so the modes an
 #   operator is told to reach for actually work through this entry point:
 #
-#     omninode-workspace-reconcile.sh              # what cron runs: full repair
+#     omninode-workspace-reconcile.sh              # what the timer runs: full repair
 #     omninode-workspace-reconcile.sh --check      # observe only, mutate nothing
 #     omninode-workspace-reconcile.sh --verbose
 #
@@ -23,30 +23,19 @@
 #   surface, unfiltered: this wrapper does not maintain a second copy of it.
 #
 #   All reconciliation logic and all movement verification live in
-#   `scripts/reconcile-host.sh` (OMN-17307), which is the SAME script the Mac
-#   runs from its plugin tick. There is one reconciler; this file is a
+#   `onex-host-reconcile` (OMN-17307), which is the same command every host
+#   runs. There is one reconciler; this file is a
 #   scheduler adapter, and it must stay that way — the moment it grows a repair
 #   step, the two hosts stop being reconciled by the same code and the whole
 #   point is gone.
 #
-# WHY IT RUNS THE SCRIPT FROM THE CLONE, NOT FROM /data/maintenance/bin
-#   `reconcile-host.sh` resolves its collaborators relative to its own location:
-#   the clone manifest, the movement verifier, the clone delegate, the venv
-#   delegate. Installed flat into /data/maintenance/bin it would find none of
-#   them. Running it from `${OMNI_HOME}/omnibase_infra/scripts/` keeps that tree
-#   internally consistent.
-#
-#   The obvious objection is real and is accepted deliberately: a stale clone
-#   runs a stale reconciler. It is bounded — the reconciler's first act is to
-#   advance the clones, so the next tick runs the current code — and the
-#   alternative (a hand-copied second copy of five files) is the OMN-15525 drift
-#   this maintenance path exists to prevent. What must NOT drift is this wrapper
-#   and its cron unit, and both are in the MANIFEST of
-#   `omninode-host-maintenance-sync.sh`, which reddens on divergence from
-#   origin/dev.
+# WHY IT RUNS THE INSTALLED COMMAND
+#   The dispatch venv provides the packaged node and its bus runtime. The command
+#   resolves the existing manifest, verifier and repair delegates below the explicit
+#   OMNI_HOME registry. Install the command before deploying this scheduler.
 #
 # WHY IT SOURCES THE ALERT ENV FILE
-#   `reconcile-host.sh` alerts on an unprovable surface via SLACK_BOT_TOKEN /
+#   `onex-host-reconcile` alerts on an unprovable surface via SLACK_BOT_TOKEN /
 #   SLACK_CHANNEL_ID. cron starts with almost no environment, so without this
 #   the failure would be detected, exit non-zero, and be seen by nobody — the
 #   quiet half of the failure mode this whole epic is about.
@@ -61,7 +50,7 @@
 #   OMNINODE_ALERT_ENV_FILE      env file carrying the Slack credentials
 #   RECONCILE_BRANCH             tracked branch (default: dev)
 #
-# Exit codes are `reconcile-host.sh`'s, unchanged: 0 proven, 2 a surface could
+# Exit codes are `onex-host-reconcile`'s, unchanged: 0 proven, 2 a surface could
 # not be proven at target, 3 indeterminate configuration.
 set -uo pipefail
 
@@ -115,9 +104,9 @@ if [[ -r "$ALERT_ENV_FILE" ]]; then
   unset _xtrace_was_on
 fi
 
-RECONCILER="${OMNI_HOME}/omnibase_infra/scripts/reconcile-host.sh"
+RECONCILER="${ONEX_DISPATCH_VENV:-$OMNI_HOME/.onex-dispatch-venv}/bin/onex-host-reconcile"
 
-if [[ ! -f "$RECONCILER" ]]; then
+if [[ ! -x "$RECONCILER" ]]; then
   echo "[workspace-reconcile] FATAL: no reconciler at $RECONCILER" >&2
   echo "[workspace-reconcile]   OMNI_HOME=$OMNI_HOME — is the deploy-source clone present?" >&2
   exit 3
@@ -138,7 +127,7 @@ fi
 # -- precisely the OMN-17365 split, arriving through a new door -- while dropping
 # it quietly would be the OMN-17336 defect itself. Refusing is the only answer
 # that is neither. An operator who genuinely wants another root should invoke
-# reconcile-host.sh directly, which is not a scheduler adapter and has no root of
+# onex-host-reconcile directly, which is not a scheduler adapter and has no root of
 # its own to contradict.
 for _arg in "$@"; do
   case "$_arg" in
@@ -149,7 +138,7 @@ for _arg in "$@"; do
       echo "[workspace-reconcile]   checkout against another tree (OMN-17365)." >&2
       echo "[workspace-reconcile]   resolved root : $OMNI_HOME" >&2
       echo "[workspace-reconcile]   For another root, call the reconciler directly:" >&2
-      echo "[workspace-reconcile]     bash <root>/omnibase_infra/scripts/reconcile-host.sh --omni-home <root>" >&2
+      echo "[workspace-reconcile]     onex-host-reconcile --omni-home <root>" >&2
       exit 3
       ;;
   esac
@@ -157,12 +146,12 @@ done
 unset _arg
 
 # "$@" goes LAST so an explicitly-passed flag beats the default beside it:
-# reconcile-host.sh parses left to right and lets the last occurrence win, so
+# onex-host-reconcile parses left to right and lets the last occurrence win, so
 # `--branch main` overrides the RECONCILE_BRANCH default rather than being
 # overridden by it. It also rejects an unknown argument with exit 3 instead of
 # ignoring it, which is what makes blanket forwarding safe -- a typo stays loud
 # rather than silently becoming the full repair that `--check` used to become.
-exec env OMNI_HOME="$OMNI_HOME" bash "$RECONCILER" \
+exec env OMNI_HOME="$OMNI_HOME" "$RECONCILER" \
   --omni-home "$OMNI_HOME" \
   --branch "${RECONCILE_BRANCH:-dev}" \
   "$@"

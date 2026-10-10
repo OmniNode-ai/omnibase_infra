@@ -99,6 +99,24 @@ channel's deduplication: a condition that stays bad posts once, not once an
 hour. A failed send is recorded as a failure rather than swallowed, because an
 alarm that believes it delivered and did not is this ticket's own defect in a
 new place.
+
+EVERY RAISED ALARM ALSO REACHES THE LEDGER (OMN-20794)
+
+On 2026-10-09 this alarm raised ``container_restarts`` for
+``omninode-runtime-effects`` at 10:25:05Z and delivered it to Slack only. The
+rolling ledger carried no ``lab-alarm`` row, so the orchestrator learned of the
+crash fifteen minutes later from a stale projection. Each newly raised alarm now
+appends ONE FRICTION row through the ledger's own append
+(:func:`make_ledger_appender`), naming the condition, the subject and the
+evidence the condition read. It does not wait on Slack: a channel with no
+consent row, no token or no route still leaves the ledger row. No new ssh or
+HTTP read is made for it.
+
+A row that could not be written is kept in the state file and retried on every
+tick until it lands, and the run exits as an alarm meanwhile: an alarm that
+believes it recorded and did not is the defect again. A subject that clears and
+re-raises inside ``ledger_dedupe_window`` appends no second row, so a flapping
+condition leaves one row, not one per flap.
 """
 
 from __future__ import annotations
@@ -113,7 +131,7 @@ import shlex
 import stat
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -135,6 +153,13 @@ from scripts.ci.lab_pass_receipt import (
     download_receipt,
     evaluate_workflow_verdict,
     list_artifacts,
+)
+from scripts.lane_census_event import _alert_key as census_alert_key
+from scripts.lane_census_event import validate_event as validate_census_event
+from scripts.lane_census_plan import (
+    FINDING_KIND_SEVERITY,
+    load_manifest,
+    restart_bounds_for_lane,
 )
 
 #: OMN-18867/OMN-19091: the consumer-lag condition reads the dev broker
@@ -211,6 +236,8 @@ class EnumAlarmCondition(StrEnum):
     EFFECTS_HELD_BEHIND_RUNTIME = "effects_held_behind_runtime"
     WORK_LEDGER_PROJECTION_STALE = "work_ledger_projection_stale"
     DELEGATION_CHAIN_CANARY = "delegation_chain_canary"
+    LANE_DRIFT = "lane_drift"
+    CONTAINER_UNHEALTHY = "container_unhealthy"
     STALE_INDETERMINATE = "stale_indeterminate"
 
 
@@ -335,13 +362,14 @@ class ModelConditionReport:
 
 @dataclass(frozen=True)
 class ModelAlarmRun:
-    """One tick. Carries all seven conditions whether or not anything fired."""
+    """One tick. Carries every declared condition whether or not anything fired."""
 
     started_at: str
     finished_at: str
     reports: tuple[ModelConditionReport, ...]
     raised: tuple[ModelAlarm, ...]
     posting: str
+    ledger: str
     run_version: str = RUN_RECORD_VERSION
 
     def __post_init__(self) -> None:
@@ -364,6 +392,7 @@ class ModelAlarmRun:
             "reports": [report.to_json() for report in self.reports],
             "raised": [alarm.to_json() for alarm in self.raised],
             "posting": self.posting,
+            "ledger": self.ledger,
         }
 
 
@@ -1199,6 +1228,138 @@ class ModelRecoveryNotice:
         }
 
 
+_CENSUS_CONDITIONS = (
+    EnumAlarmCondition.LANE_DRIFT,
+    EnumAlarmCondition.CONTAINER_UNHEALTHY,
+)
+
+
+def evaluate_lane_census(
+    *,
+    state_dir: Path,
+    command: Sequence[str],
+    runner: CommandRunner,
+    now: str,
+    max_age: timedelta,
+) -> tuple[ModelConditionReport, ...]:
+    """Read the existing census snapshot, also emitted on the census bus topics.
+
+    The local state-directory fixture is the timer's injection seam. Otherwise
+    the declared command reads the lab's live snapshot, never the checked-in
+    snapshot. Invalid, stale or unreadable input preserves every active episode
+    and participates in the existing STALE_INDETERMINATE condition.
+    """
+    fixture = state_dir / "lane-census.json"
+    try:
+        if fixture.exists() or not command:
+            raw = fixture.read_text(encoding="utf-8")
+        else:
+            completed = runner(command, timeout=15.0)
+            if completed.returncode != 0:
+                raise ValueError(
+                    f"census snapshot command exited {completed.returncode}: "
+                    f"{completed.stderr.strip()}"
+                )
+            raw = completed.stdout
+        census = json.loads(raw)
+        if not isinstance(census, dict):
+            raise ValueError("census snapshot is not an object")
+        errors = validate_census_event(census, kind_severity=FINDING_KIND_SEVERITY)
+        if errors:
+            raise ValueError("; ".join(errors))
+        if census["event_type"] != "lane-census-drift" or not census["host"]:
+            raise ValueError("census snapshot has no census event type or host")
+        if census["alert_key"] != census_alert_key(census["host"], census):
+            raise ValueError("census alert_key does not match its finding set")
+        age = datetime.fromisoformat(now) - datetime.fromisoformat(census["emitted_at"])
+        # _now() records whole seconds; the producer retains microseconds.
+        if age < -timedelta(seconds=1) or age > max_age:
+            raise ValueError(f"census snapshot age {age} is outside -1s..{max_age}")
+    except (OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
+        return tuple(
+            ModelConditionReport(
+                condition=condition,
+                outcome=EnumConditionOutcome.INDETERMINATE,
+                evidence=f"lane census unreadable: {exc}",
+            )
+            for condition in _CENSUS_CONDITIONS
+        )
+
+    reports: list[ModelConditionReport] = []
+    for condition in _CENSUS_CONDITIONS:
+        findings = [
+            finding
+            for finding in census["findings"]
+            if (finding["kind"] == "container_unhealthy")
+            == (condition is EnumAlarmCondition.CONTAINER_UNHEALTHY)
+        ]
+        evidence = (
+            f"census host={census['host']} emitted_at={census['emitted_at']} "
+            f"alert_key={census['alert_key']}; {len(findings)} {condition.value} findings"
+        )
+        alarms: tuple[ModelAlarm, ...] = ()
+        if findings:
+            alarms = (
+                ModelAlarm(
+                    condition=condition,
+                    subject=census["alert_key"],
+                    detail="\n".join(
+                        f"{finding['lane']}/{finding['container']}: "
+                        f"{finding['kind']} — {finding['detail']}"
+                        for finding in findings
+                    ),
+                ),
+            )
+        reports.append(
+            ModelConditionReport(
+                condition=condition,
+                outcome=EnumConditionOutcome.ALARM
+                if alarms
+                else EnumConditionOutcome.OK,
+                evidence=evidence,
+                alarms=alarms,
+            )
+        )
+    return tuple(reports)
+
+
+def select_census_recoveries(
+    reports: Sequence[ModelConditionReport], state: ModelAlarmState, *, now: str
+) -> tuple[ModelRecoveryNotice, ...]:
+    """Read exits before select_new_alarms clears their durable episode state."""
+    notices: list[ModelRecoveryNotice] = []
+    for report in reports:
+        if report.condition not in _CENSUS_CONDITIONS:
+            continue
+        if report.outcome is not EnumConditionOutcome.OK:
+            continue
+        prefix = f"{report.condition.value}:"
+        for key, since in state.active.items():
+            if key.startswith(prefix):
+                notices.append(
+                    ModelRecoveryNotice(
+                        condition=report.condition,
+                        subject=key[len(prefix) :],
+                        detail=f"census episode cleared; raised_at={since}; recovered_at={now}; {report.evidence}",
+                    )
+                )
+    return tuple(notices)
+
+
+def restore_census_episode(
+    condition: EnumAlarmCondition, state: ModelAlarmState, previous: Mapping[str, str]
+) -> None:
+    """Keep a failed census delivery eligible on the next durable tick."""
+    if condition not in _CENSUS_CONDITIONS:
+        return
+    prefix = f"{condition.value}:"
+    for key in [key for key in state.active if key.startswith(prefix)]:
+        del state.active[key]
+    state.active.update(
+        {key: value for key, value in previous.items() if key.startswith(prefix)}
+    )
+
+
 def evaluate_effects_held_behind_runtime(
     reader: EffectsHeldReader,
     *,
@@ -1554,7 +1715,7 @@ def evaluate_work_ledger_projection_stale(
 
 #: A consent row in the CANONICAL shape Operating Rule 18 specifies.
 _CONSENT_ROW_LABELLED = re.compile(
-    r"OPERATOR-CONSENT.*?APPROVED SCOPE:(?P<approved>.*?)\|"
+    r"^[^|]+\|\s*OPERATOR-CONSENT\s*\|.*?APPROVED SCOPE:(?P<approved>.*?)\|"
     r"\s*OUT OF SCOPE:(?P<out>.*?)(\||$)",
     re.IGNORECASE,
 )
@@ -1578,11 +1739,14 @@ _CONSENT_ROW_LABELLED = re.compile(
 #: What still refuses, and is proven by its own control: a row with no
 #: approver, a row naming no channel, a row naming a DIFFERENT channel, a row
 #: with no exclusion clause at all, and an unreadable ledger.
-_CONSENT_ROW_RULING = re.compile(r"OPERATOR-CONSENT(?P<body>.*)", re.IGNORECASE)
+_CONSENT_ROW_RULING = re.compile(
+    r"^[^|]+\|\s*RULING\s*\|.*?OPERATOR-CONSENT(?P<body>.*)", re.IGNORECASE
+)
 _APPROVED_BY = re.compile(
     r"approved_by\s*=\s*(?P<who>[A-Za-z0-9_@.:-]+)", re.IGNORECASE
 )
 _EXCLUSION = re.compile(r"\bno\s+new\b|\bno\s+webhook\b|OUT OF SCOPE:", re.IGNORECASE)
+_LAB_ALARM_SCOPE = re.compile(r"\blab alarms?\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -1611,8 +1775,13 @@ def resolve_posting_consent(
 
     Two accepted shapes, both requiring the same four substantive facts: the
     OPERATOR-CONSENT token, an ``approved_by``, the destination channel, and an
-    explicit exclusion. See :data:`_CONSENT_ROW_RULING` for why the second
-    shape is accepted.
+    explicit exclusion. Both must authorize lab alarms: consent for another
+    purpose in the same channel does not authorize this sender. See
+    :data:`_CONSENT_ROW_RULING` for why the second shape is accepted.
+
+    Ledger rolls preserve authority in sibling ``archive/*-split.md`` files.
+    Read those after the live file, retaining the source file and line in the
+    citation rather than attributing an archived grant to the current ledger.
 
     An unreadable ledger returns ``None``: a grant that cannot be read is not
     a grant.
@@ -1622,36 +1791,68 @@ def resolve_posting_consent(
     except OSError:
         return None
 
-    for number, line in enumerate(lines, start=1):
-        labelled = _CONSENT_ROW_LABELLED.search(line)
-        if labelled is not None and labelled.group("out").strip():
-            if channel.lower() in labelled.group("approved").lower():
-                who = _APPROVED_BY.search(line)
-                return ModelPostingConsent(
-                    channel=channel,
-                    ledger_path=str(ledger_path),
-                    line=number,
-                    approved_by=who.group("who") if who else "operator",
-                )
-            continue
-
-        ruling = _CONSENT_ROW_RULING.search(line)
-        if ruling is None:
-            continue
-        body = ruling.group("body")
-        who = _APPROVED_BY.search(body)
-        if who is None:
-            continue
-        if channel.lower() not in body.lower():
-            continue
-        if _EXCLUSION.search(body) is None:
-            continue
-        return ModelPostingConsent(
-            channel=channel,
-            ledger_path=str(ledger_path),
-            line=number,
-            approved_by=who.group("who"),
+    channel_name = re.compile(
+        rf"(?<![\w#-]){re.escape(channel)}(?![\w-])", re.IGNORECASE
+    )
+    sources = [ledger_path]
+    try:
+        sources.extend(
+            sorted(
+                (ledger_path.parent / "archive").glob(f"{ledger_path.stem}_*-split.md"),
+                reverse=True,
+            )
         )
+    except OSError:
+        return None
+
+    for source in sources:
+        if source == ledger_path:
+            source_lines = lines
+        else:
+            try:
+                source_lines = source.read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()
+            except OSError:
+                continue
+        for number, line in enumerate(source_lines, start=1):
+            labelled = _CONSENT_ROW_LABELLED.search(line)
+            if labelled is not None:
+                approved = labelled.group("approved")
+                who = _APPROVED_BY.search(line)
+                if (
+                    who is not None
+                    and labelled.group("out").strip()
+                    and channel_name.search(approved) is not None
+                    and _LAB_ALARM_SCOPE.search(approved) is not None
+                ):
+                    return ModelPostingConsent(
+                        channel=channel,
+                        ledger_path=str(source),
+                        line=number,
+                        approved_by=who.group("who"),
+                    )
+                continue
+
+            ruling = _CONSENT_ROW_RULING.search(line)
+            if ruling is None:
+                continue
+            body = ruling.group("body")
+            who = _APPROVED_BY.search(body)
+            if who is None:
+                continue
+            if channel_name.search(body) is None:
+                continue
+            if _LAB_ALARM_SCOPE.search(body) is None:
+                continue
+            if _EXCLUSION.search(body) is None:
+                continue
+            return ModelPostingConsent(
+                channel=channel,
+                ledger_path=str(source),
+                line=number,
+                approved_by=who.group("who"),
+            )
     return None
 
 
@@ -1774,6 +1975,192 @@ def post_recovery(
 
 
 # ---------------------------------------------------------------------------
+# The ledger row for a raised alarm (OMN-20794)
+# ---------------------------------------------------------------------------
+
+#: The lane the rows are written under, so ``onex_ledger.py query --lane
+#: lab-alarm`` answers "what has the lab alarm raised".
+LEDGER_LANE = "lab-alarm"
+
+#: A FRICTION row must carry a cost with a digit (the ledger's friction guard,
+#: OMN-18274). An alarm cannot know the cost of the condition it detects, so it
+#: states the only honest figure: nothing had accrued when it was raised.
+_LEDGER_COST = "~0 lane-minutes at raise (accrues until the alarm clears)"
+
+#: Longest evidence a row quotes. A census finding set can run long, and the
+#: full reading is in the run record the row points at.
+_LEDGER_EVIDENCE_LIMIT = 600
+
+
+class LedgerAppendError(RuntimeError):
+    """The ledger's own append refused or could not be reached."""
+
+
+class LedgerAppender(Protocol):
+    def __call__(self, row: str) -> None:
+        """Append one row, or raise :class:`LedgerAppendError`."""
+
+
+def make_ledger_appender(
+    command: Sequence[str],
+    ledger_path: Path,
+    *,
+    runner: CommandRunner = _run_read_only,
+    timeout_seconds: float = 120.0,
+) -> LedgerAppender:
+    """Bind the ledger's own append to *ledger_path*.
+
+    ``command`` is the ledger tool's argv prefix (``... onex-ledger``); the
+    ledger path and ``--append <row>`` are added here, as fixed argv with no
+    shell, so a row can carry any text without being interpreted. The write
+    itself is the tool's locked, grammar-checked append, so a row the ledger
+    refuses (a missing cost, a bad ticket) is a failure here and not a
+    swallowed one. ``runner`` is the same fixed-argv seam the conditions are
+    tested through; the default runs the command and the append happens inside
+    the tool.
+    """
+    prefix = list(command)
+    if not prefix:
+        raise ValueError("ledger append command is empty")
+
+    def append(row: str) -> None:
+        argv = [*prefix, str(ledger_path), "--timeout", "60s", "--append", row]
+        try:
+            result = runner(argv, timeout=timeout_seconds)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise LedgerAppendError(
+                f"ledger append {type(exc).__name__}: timed out or could not start "
+                f"{prefix[0]}"
+            ) from exc
+        if result.returncode != 0:
+            raise LedgerAppendError(
+                f"onex-ledger exited {result.returncode}: "
+                f"{(result.stderr or result.stdout or '').strip()[:300]}"
+            )
+
+    return append
+
+
+def _ledger_cell(value: str, *, limit: int | None = None) -> str:
+    """One cell's text: no pipe, no newline, so it cannot become another cell."""
+    flattened = " ".join(value.replace("|", "/").split())
+    if limit is not None and len(flattened) > limit:
+        return flattened[: limit - 1] + "…"
+    return flattened
+
+
+def _ledger_stamp(iso: str) -> str:
+    return datetime.fromisoformat(iso).astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def render_ledger_row(
+    alarm: ModelAlarm,
+    *,
+    evidence: str,
+    stamp: str,
+    raised_at: str,
+    ticket: str,
+) -> str:
+    """One FRICTION row naming the condition, the subject and the evidence."""
+    cells = [
+        stamp,
+        "FRICTION",
+        f"lane={LEDGER_LANE}",
+        f"existing={ticket}",
+        f"cost={_LEDGER_COST}",
+        f"condition={alarm.condition.value}",
+        f"subject={_ledger_cell(alarm.subject)}",
+        f"raised_at={raised_at}",
+        f"detail={_ledger_cell(alarm.detail)}",
+        f"evidence={_ledger_cell(evidence, limit=_LEDGER_EVIDENCE_LIMIT)}",
+        f"lab alarm raised {alarm.condition.value} on {_ledger_cell(alarm.subject)}; "
+        "the detail and evidence cells carry what it read",
+    ]
+    return " | ".join(cells)
+
+
+def record_alarms_in_ledger(
+    raised: Sequence[ModelAlarm],
+    reports: Sequence[ModelConditionReport],
+    state: ModelAlarmState,
+    *,
+    appender: LedgerAppender,
+    ticket: str,
+    window: timedelta,
+    now: str,
+) -> str:
+    """Append one ledger row per newly raised alarm; return the run's summary.
+
+    Three sets are worked in order: rows an earlier tick could not write
+    (retried, whatever the window says, because nothing landed), the alarms
+    raised this tick, and the ones among those that re-raise inside *window*
+    of a row already written (counted and skipped). A write that fails stays in
+    ``state.ledger_pending`` and is named in the summary, which ``exit_code``
+    reads as an alarm.
+    """
+    evidence_for = {report.condition: report.evidence for report in reports}
+    now_dt = datetime.fromisoformat(now)
+    state.ledger_last_row = {
+        key: stamped
+        for key, stamped in state.ledger_last_row.items()
+        if now_dt - datetime.fromisoformat(stamped) < window
+    }
+
+    work: dict[str, dict[str, str]] = dict(state.ledger_pending)
+    retried = len(work)
+    suppressed: list[str] = []
+    for alarm in raised:
+        if alarm.key in work:
+            continue
+        if alarm.key in state.ledger_last_row:
+            suppressed.append(alarm.key)
+            continue
+        work[alarm.key] = {
+            **alarm.to_json(),
+            "evidence": evidence_for.get(alarm.condition, ""),
+            "raised_at": now,
+        }
+
+    written = 0
+    failures: list[str] = []
+    for key, entry in work.items():
+        alarm = ModelAlarm(
+            condition=EnumAlarmCondition(entry["condition"]),
+            subject=entry["subject"],
+            detail=entry["detail"],
+        )
+        row = render_ledger_row(
+            alarm,
+            evidence=entry["evidence"] or "no evidence recorded",
+            stamp=_ledger_stamp(now),
+            raised_at=entry["raised_at"],
+            ticket=ticket,
+        )
+        try:
+            appender(row)
+        except LedgerAppendError as exc:
+            state.ledger_pending[key] = entry
+            failures.append(f"{key}: {exc}")
+            continue
+        state.ledger_pending.pop(key, None)
+        state.ledger_last_row[key] = now
+        written += 1
+
+    summary = f"appended {written}/{len(work)} lane={LEDGER_LANE} rows"
+    if retried:
+        summary += f" ({retried} retried from an earlier tick)"
+    if suppressed:
+        summary += (
+            f"; dedupe: {len(suppressed)} re-raise inside "
+            f"{int(window.total_seconds() // 60)} minutes of a row already written "
+            f"({', '.join(suppressed)})"
+        )
+    if failures:
+        summary += f"; FAILED: {'; '.join(failures)}"
+    return summary
+
+
+# ---------------------------------------------------------------------------
 # State: edge-triggering and the previous lag sample
 # ---------------------------------------------------------------------------
 
@@ -1793,6 +2180,11 @@ class ModelAlarmState:
     #: the moment a live member is read again -- see
     #: evaluate_effects_held_behind_runtime.
     effects_held_since: dict[str, str] = field(default_factory=dict)
+    #: OMN-20794: alarm key -> when its ledger row was last written, for the
+    #: dedupe window; and alarm key -> the alarm a failed append left unwritten,
+    #: retried on every tick until it lands.
+    ledger_last_row: dict[str, str] = field(default_factory=dict)
+    ledger_pending: dict[str, dict[str, str]] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> ModelAlarmState:
@@ -1812,6 +2204,8 @@ class ModelAlarmState:
         sample = payload.get("lag_sample")
         since = payload.get("indeterminate_since")
         held_since = payload.get("effects_held_since")
+        last_row = payload.get("ledger_last_row")
+        pending = payload.get("ledger_pending")
         return cls(
             active={
                 str(k): str(v) for k, v in active.items() if isinstance(active, dict)
@@ -1827,6 +2221,16 @@ class ModelAlarmState:
             effects_held_since={str(k): str(v) for k, v in held_since.items()}
             if isinstance(held_since, dict)
             else {},
+            ledger_last_row={str(k): str(v) for k, v in last_row.items()}
+            if isinstance(last_row, dict)
+            else {},
+            ledger_pending={
+                str(k): {str(f): str(x) for f, x in v.items()}
+                for k, v in pending.items()
+                if isinstance(v, dict)
+            }
+            if isinstance(pending, dict)
+            else {},
         )
 
     def save(self, path: Path) -> None:
@@ -1838,6 +2242,8 @@ class ModelAlarmState:
                     "lag_sample": self.lag_sample,
                     "indeterminate_since": self.indeterminate_since,
                     "effects_held_since": self.effects_held_since,
+                    "ledger_last_row": self.ledger_last_row,
+                    "ledger_pending": self.ledger_pending,
                 },
                 indent=2,
             ),
@@ -1868,6 +2274,17 @@ def select_new_alarms(
             continue
         for alarm in report.alarms:
             if alarm.key in state.active:
+                continue
+            # A census alert_key describes the current finding set. Replace
+            # the previous set so A -> B -> A raises on both changes rather
+            # than suppressing A for the remainder of the episode.
+            if report.condition in _CENSUS_CONDITIONS:
+                previous = [k for k in state.active if k.startswith(prefix)]
+                since = min((state.active[k] for k in previous), default=now)
+                for key in previous:
+                    del state.active[key]
+                state.active[alarm.key] = since
+                fresh.append(alarm)
                 continue
             state.active[alarm.key] = now
             fresh.append(alarm)
@@ -2085,16 +2502,7 @@ def expand_env(value: str, *, source: Path) -> str:
 
 @dataclass(frozen=True)
 class ModelAlarmConfig:
-    """Declared subjects and bounds. JSON, not YAML, on purpose.
-
-    This module runs under launchd on the brew interpreter with no virtual
-    environment -- the same reason ``scripts/ci/lab_pass_receipt.py`` is
-    stdlib-only. A YAML config here would put a third-party import on a path
-    that has to run before the alarm can even discover what it is bounded to
-    load. This predates, and is unrelated to, the ``yaml``/``aiokafka``
-    import OMN-19091 added for the consumer-lag identity read -- config
-    PARSING stays JSON; nothing about how the config is spelled changed.
-    """
+    """JSON alarm subjects; restart bounds come from the census lane manifest."""
 
     repo: str
     lane: EnumLabLane
@@ -2115,6 +2523,11 @@ class ModelAlarmConfig:
     work_ledger_db_container: str
     work_ledger_database: str
     work_ledger_max_lag: timedelta
+    #: OMN-20794: the ticket every ledger row cites as ``existing=`` (the
+    #: friction guard demands an OMN id), and how long after a row a re-raise of
+    #: the same subject appends no second one.
+    ledger_row_ticket: str
+    ledger_dedupe_window: timedelta
     #: OMN-18867: omniclaude's deploy-gate path validator, the runtime-change
     #: classifier's path rule. Empty disables the nearest-runtime-affecting
     #: ancestor rule and asks the delivered sha itself.
@@ -2124,21 +2537,58 @@ class ModelAlarmConfig:
     chain_canary_workflow: str = "chain-canary.yml"
     chain_canary_branch: str = "dev"
     chain_canary_max_age: timedelta = timedelta(hours=3)
+    census_command: tuple[str, ...] = ()
+    census_max_age: timedelta = timedelta(hours=2)
+    #: OMN-20794: the ledger tool's argv prefix, ledger path and ``--append``
+    #: excluded. Empty only for a caller that injects its own appender.
+    ledger_append_command: tuple[str, ...] = ()
 
     @classmethod
     def load(cls, path: Path) -> ModelAlarmConfig:
         payload = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
             raise ValueError(f"{path} is not a JSON object")
-        bounds = payload.get("container_restart_bounds") or {}
-        if not isinstance(bounds, dict):
-            raise ValueError(f"{path}: container_restart_bounds must be an object")
+        manifest_path = Path(expand_env(str(payload["lane_manifest"]), source=path))
+        if not manifest_path.is_absolute():
+            manifest_path = path.resolve().parent / manifest_path
+        bounds = restart_bounds_for_lane(
+            load_manifest(manifest_path), str(payload["census_lane"])
+        )
         groups = payload.get("consumer_groups") or []
         if not isinstance(groups, list):
             raise ValueError(f"{path}: consumer_groups must be a list")
         docker = payload.get("docker_command") or ["docker"]
         if not isinstance(docker, list) or not docker:
             raise ValueError(f"{path}: docker_command must be a non-empty list")
+        census_command = payload["census_command"]
+        if (
+            not isinstance(census_command, list)
+            or not census_command
+            or not all(isinstance(part, str) and part for part in census_command)
+        ):
+            raise ValueError(f"{path}: census_command must be a non-empty string list")
+        census_max_age_minutes = payload["census_max_age_minutes"]
+        if type(census_max_age_minutes) is not int or census_max_age_minutes <= 0:
+            raise ValueError(
+                f"{path}: census_max_age_minutes must be a positive integer"
+            )
+        ledger_command = payload["ledger_append_command"]
+        if (
+            not isinstance(ledger_command, list)
+            or not ledger_command
+            or not all(isinstance(part, str) and part for part in ledger_command)
+        ):
+            raise ValueError(
+                f"{path}: ledger_append_command must be a non-empty string list"
+            )
+        ledger_ticket = str(payload["ledger_row_ticket"])
+        if not re.fullmatch(r"OMN-\d+", ledger_ticket):
+            raise ValueError(f"{path}: ledger_row_ticket must be an OMN id")
+        ledger_window_minutes = payload["ledger_dedupe_window_minutes"]
+        if type(ledger_window_minutes) is not int or ledger_window_minutes <= 0:
+            raise ValueError(
+                f"{path}: ledger_dedupe_window_minutes must be a positive integer"
+            )
         return cls(
             repo=expand_env(str(payload["repo"]), source=path),
             lane=EnumLabLane(str(payload.get("lane", EnumLabLane.COMPOSE_DEV.value))),
@@ -2148,7 +2598,7 @@ class ModelAlarmConfig:
                 str(payload["kafka_bootstrap_servers"]), source=path
             ),
             docker_command=tuple(expand_env(str(p), source=path) for p in docker),
-            container_restart_bounds={str(k): int(v) for k, v in bounds.items()},
+            container_restart_bounds=bounds,
             consumer_groups=tuple(str(g) for g in groups),
             effects_group_prefix=str(payload["effects_group_prefix"]),
             effects_group_suffix=str(payload["effects_group_suffix"]),
@@ -2156,6 +2606,11 @@ class ModelAlarmConfig:
             work_ledger_database=str(payload["work_ledger_database"]),
             work_ledger_max_lag=timedelta(
                 minutes=int(payload["work_ledger_max_lag_minutes"])
+            ),
+            ledger_row_ticket=ledger_ticket,
+            ledger_dedupe_window=timedelta(minutes=ledger_window_minutes),
+            ledger_append_command=tuple(
+                expand_env(part, source=path) for part in ledger_command
             ),
             runtime_path_validator=expand_env(
                 str(payload.get("runtime_path_validator", "")), source=path
@@ -2165,6 +2620,10 @@ class ModelAlarmConfig:
             chain_canary_max_age=timedelta(
                 minutes=int(payload["chain_canary_max_age_minutes"])
             ),
+            census_command=tuple(
+                expand_env(part, source=path) for part in census_command
+            ),
+            census_max_age=timedelta(minutes=census_max_age_minutes),
         )
 
 
@@ -2191,10 +2650,16 @@ def run_once(
     canary_reader: CanaryVerdictReader,
     posting_channel: str,
     env_file: Path,
+    ledger_appender: LedgerAppender,
     subject_resolver: SubjectResolver | None = None,
+    clock: Callable[[], str] = _now,
 ) -> ModelAlarmRun:
-    """Evaluate all seven conditions, record the run, return it."""
-    started = _now()
+    """Evaluate every declared condition, record the run, return it.
+
+    ``clock`` is the seam a replay of a past window runs through; it returns
+    the ISO form :func:`_now` does.
+    """
+    started = clock()
     state = ModelAlarmState.load(state_dir / "state.json")
 
     receipt_report = evaluate_lab_pass_receipt(
@@ -2227,6 +2692,13 @@ def run_once(
         branch=config.chain_canary_branch,
         max_age=config.chain_canary_max_age,
     )
+    census_reports = evaluate_lane_census(
+        state_dir=state_dir,
+        command=config.census_command,
+        runner=runner,
+        now=started,
+        max_age=config.census_max_age,
+    )
     watched_reports = (
         receipt_report,
         restart_report,
@@ -2234,13 +2706,29 @@ def run_once(
         effects_report,
         work_ledger_report,
         canary_report,
+        *census_reports,
     )
     stale_report = evaluate_stale_indeterminate(watched_reports, state, now=started)
 
     reports = (*watched_reports, stale_report)
+    recoveries = select_census_recoveries(census_reports, state, now=started)
+    if recovery is not None:
+        recoveries = (recovery, *recoveries)
+    previous_active = dict(state.active)
     raised = select_new_alarms(reports, state, now=started)
     state.lag_sample = lag_sample
-    state.save(state_dir / "state.json")
+
+    # The ledger row comes first and never waits on the channel: a raise with
+    # no Slack consent, token or route still leaves its record (OMN-20794).
+    ledger_summary = record_alarms_in_ledger(
+        raised,
+        reports,
+        state,
+        appender=ledger_appender,
+        ticket=config.ledger_row_ticket,
+        window=config.ledger_dedupe_window,
+        now=started,
+    )
 
     consent = resolve_posting_consent(ledger_path, channel=posting_channel)
     if consent is None:
@@ -2248,7 +2736,7 @@ def run_once(
             f"disabled: no OPERATOR-CONSENT row in {ledger_path} authorizes "
             f"{posting_channel}"
         )
-    elif not raised and recovery is None:
+    elif not raised and not recoveries:
         posting = (
             f"authorized by {consent.citation} (approved_by={consent.approved_by}); "
             "nothing new to deliver this run"
@@ -2268,18 +2756,24 @@ def run_once(
                 )
             except PostingError as exc:
                 failures.append(str(exc))
+                restore_census_episode(alarm.condition, state, previous_active)
         recovered: list[str] = []
-        if recovery is not None:
+        for notice in recoveries:
             try:
                 recovered.append(
-                    f"{recovery.subject}@{post_recovery(recovery, consent=consent, env_file=env_file)}"
+                    f"{notice.subject}@{post_recovery(notice, consent=consent, env_file=env_file)}"
                 )
             except PostingError as exc:
                 failures.append(str(exc))
+                restore_census_episode(notice.condition, state, previous_active)
         posting = (
             f"authorized by {consent.citation} (approved_by={consent.approved_by}); "
             f"delivered {len(delivered)}/{len(raised)} alarms to {consent.channel}"
-            + (f", {len(recovered)}/1 recovery notice" if recovery is not None else "")
+            + (
+                f", {len(recovered)}/{len(recoveries)} recovery notice"
+                if recoveries
+                else ""
+            )
             + (
                 f"; delivery ids {', '.join(delivered + recovered)}"
                 if delivered or recovered
@@ -2288,12 +2782,14 @@ def run_once(
             + (f"; FAILED: {'; '.join(failures)}" if failures else "")
         )
 
+    state.save(state_dir / "state.json")
     run = ModelAlarmRun(
         started_at=started,
-        finished_at=_now(),
+        finished_at=clock(),
         reports=reports,
         raised=raised,
         posting=posting,
+        ledger=ledger_summary,
     )
     _append_jsonl(state_dir / "alarm-runs.jsonl", run.to_json())
     for alarm in raised:
@@ -2314,6 +2810,7 @@ def render(run: ModelAlarmRun) -> str:
     else:
         lines.append("  raised nothing new this run")
     lines.append(f"  posting: {run.posting}")
+    lines.append(f"  ledger: {run.ledger}")
     return "\n".join(lines)
 
 
@@ -2335,7 +2832,7 @@ def exit_code(run: ModelAlarmRun) -> int:
     is exactly how a monitor reports green over an outage. It ranks below
     ALARM only because a known failure is the more actionable of the two.
     """
-    if run.raised:
+    if run.raised or "; FAILED:" in run.posting or "; FAILED:" in run.ledger:
         return EXIT_ALARM
     if any(
         report.outcome is EnumConditionOutcome.INDETERMINATE for report in run.reports
@@ -2488,6 +2985,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         canary_reader=read_chain_canary_verdict,
         posting_channel=args.posting_channel,
         env_file=args.env_file,
+        ledger_appender=make_ledger_appender(config.ledger_append_command, args.ledger),
         subject_resolver=make_clone_subject_resolver(
             clone=_REPO_ROOT,
             runtime_path_validator=config.runtime_path_validator,

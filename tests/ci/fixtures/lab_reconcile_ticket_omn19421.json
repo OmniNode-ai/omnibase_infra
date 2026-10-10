@@ -1,0 +1,40 @@
+{
+  "_provenance": {
+    "source": "https://api.linear.app/graphql",
+    "captured_utc": "2026-10-08T20:47:32.563155+00:00",
+    "source_sha256": "d6bdeb45dcc452ae0dc5bb6e7f6ae85320e86c1a8081e6740505d361de0c3384",
+    "transport": "AdapterLinearGraphQLProjectTracker.post_graphql",
+    "query": "query($id: String!){issue(id:$id){identifier comments{nodes{id createdAt}} attachments{nodes{id title url}}}}",
+    "variables": {
+      "id": "b6279fc6-ba33-4c1e-965b-3d31eb50354a"
+    }
+  },
+  "response": {
+    "data": {
+      "issue": {
+        "identifier": "OMN-19421",
+        "comments": {
+          "nodes": [
+            {
+              "id": "e63757a3-90d9-42f2-85cf-e19ec8685831",
+              "createdAt": "2026-09-24T17:23:57.998Z"
+            },
+            {
+              "id": "b96faee9-d8c3-4f36-91d7-18bcf326be5e",
+              "createdAt": "2026-09-24T17:23:32.831Z"
+            }
+          ]
+        },
+        "attachments": {
+          "nodes": [
+            {
+              "id": "7060bbac-f6c3-4d2d-944e-34021bc1436f",
+              "title": "T0.4 TLA+ model, 8 TLC configs, 8 TLC logs",
+              "url": "https://uploads.linear.app/f00f74d3-d620-4464-ba9d-edc2ab5351a1/396e0693-f587-434b-a67a-fa23d3032547/28c3be97-87d5-4d56-9bce-c1b9c940ca25"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

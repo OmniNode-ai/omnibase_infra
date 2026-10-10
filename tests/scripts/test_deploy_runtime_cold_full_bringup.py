@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Coverage for the OMN-13414 cold-lane FULL bring-up path in deploy-runtime.sh.
+"""Coverage for the OMN-13414 cold-lane FULL bring-up path in onex-runtime-deploy.
 
 The dev lane is ephemeral (GC/idle-reclaimed). Bringing a fully COLD lane back
 up is materially harder than the warm "recreate the runtime services" restart,
@@ -11,7 +11,7 @@ run (evidence: .onex_state/runtime-e2e-2026-06-21/02-dev-deploy/):
 1. Runtime services are gated behind the compose ``runtime`` profile. A bare
    ``docker compose up -d`` matches NO profiled service and starts NOTHING — the
    ``--profile runtime`` selector is mandatory.
-2. deploy-runtime.sh defaults ``BUILD_SOURCE=release``; a cold/GC-reclaimed lane
+2. onex-runtime-deploy defaults ``BUILD_SOURCE=release``; a cold/GC-reclaimed lane
    must be rebuilt from the merged-dev workspace siblings, which needs
    ``BUILD_SOURCE=workspace`` + ``OMNI_HOME`` + the sibling REF build-args and
    ``scripts/runtime_build/stage_workspace.sh``.
@@ -28,7 +28,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 
 
 def _deploy_script_text() -> str:
@@ -36,7 +38,7 @@ def _deploy_script_text() -> str:
 
 
 def _deploy_script_noncomment() -> str:
-    """deploy-runtime.sh with comment-only lines stripped.
+    """onex-runtime-deploy with comment-only lines stripped.
 
     Assertions about *active* behavior must not be satisfied by a comment that
     merely mentions the token, so the active-code checks run against this view.
@@ -52,7 +54,7 @@ def _deploy_script_noncomment() -> str:
 def _function_body(name: str) -> str:
     """Return the source of a top-level shell function ``name() { ... }``.
 
-    Every top-level function in deploy-runtime.sh closes with a ``}`` at column
+    Every top-level function in onex-runtime-deploy closes with a ``}`` at column
     0; nested braces are indented. We slice from the ``name() {`` line to the
     next bare ``}`` so an assertion about one function cannot be satisfied by
     code that lives in another.
@@ -63,7 +65,7 @@ def _function_body(name: str) -> str:
     anchored = text.find(f"\n{name}() {{")
     start = 0 if text.startswith(f"{name}() {{") else anchored + 1
     assert anchored != -1 or text.startswith(f"{name}() {{"), (
-        f"function {name}() not found in deploy-runtime.sh"
+        f"function {name}() not found in onex-runtime-deploy"
     )
     rest = text[start:]
     end_rel = rest.find("\n}\n")

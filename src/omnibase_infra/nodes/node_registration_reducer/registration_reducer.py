@@ -329,7 +329,7 @@ from omnibase_infra.models.registration import (
     ModelNodeIntrospectionEvent,
     ModelNodeRegistrationRecord,
 )
-from omnibase_infra.nodes.node_registration_reducer.models.model_payload_postgres_upsert_registration import (
+from omnibase_infra.models.registration.model_payload_postgres_upsert_registration import (
     ModelPayloadPostgresUpsertRegistration,
 )
 from omnibase_infra.nodes.node_registration_reducer.models.model_registration_confirmation import (
