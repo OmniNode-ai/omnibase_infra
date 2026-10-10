@@ -123,6 +123,7 @@ SELF_JOB_NAME = "CI Summary"
 # the ``name:`` display strings the Actions jobs API returns (verified against
 # ci.yml on 2026-07-07).
 STRICT_GATE_JOBS: tuple[str, ...] = (
+    "runner-routing-audit / Runner Routing Audit",  # OMN-18780: live + local routing assertions
     "occ-preflight / eligibility",  # occ-preflight reusable gate
     "CI Tests Gate",  # tests-gate — aggregator over the split matrix
     "Lint",  # lint
@@ -796,6 +797,29 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # dev; registered so a red run blocks a merge. Admitted under
     # POST_FIXTURE_WINDOW_CONTEXTS and placed at the tail for the same reason.
     "Direct Model Call Gate",
+    # OMN-18786: the existing seed-provenance workflow is blocking and now
+    # unfiltered on every PR and merge group. A missing or skipped context
+    # cannot silently remove provenance coverage.
+    "Seed Provenance Check",
+    # OMN-18648: unconditional new admission workflow. Body edits re-evaluate
+    # this context without re-running the full CI matrix.
+    "CI Live Contact (OMN-18648)",
+    # OMN-20074: require the repo-owned verdict, so ABSENCE cannot silently
+    # pass dev's sole required context, CI Summary. The operator ruling at
+    # 2026-10-08T22:41:24Z admits call-repo-evidence-gate.yml's
+    # pull_request_target producer: GitHub reads the base-branch definition,
+    # and the reusable reports this verdict on the PR head. Caller-mode
+    # "repo-evidence / verify" is a success no-op and is NOT registered.
+    # Admission evidence: merged dev heads #4767
+    # 28b945ef0e9cbf033f189e41a1dfbdb184c63ad9, run 37928489908
+    # (pull_request_target), check 113813114010 success (app id 15368);
+    # #4765 44e1c42234c271f5c38405485ec3083cdcae7fbb, check 113802506448
+    # success; #4758 adf88b2586003e68978d10ad798beb6e00d3b650, check
+    # 113731199381 success. These postdate both historical fixture windows.
+    # EXPECTED_EXTERNAL_CONTEXTS is asserted only on pull_request CI Summary
+    # runs, so this PR-only producer needs no merge_group trigger. Every OCC
+    # context remains enforced until S6 part 2.
+    "repo-evidence / dod-verify",
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -818,6 +842,17 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
 # finding, not a fixture convenience.
 POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
     {
+        # OMN-20074: the repo-owned caller's October merged-head runs postdate
+        # both historical fixture windows (#2546...#2567, #2705...#2720).
+        # Historical recording metadata only; live absence/red still blocks.
+        "repo-evidence / dod-verify",
+        # OMN-18786: the unconditional context starts after the captured
+        # historical windows. Runtime enforcement still requires success;
+        # no synthetic rows are added to those historical fixtures.
+        "Seed Provenance Check",
+        # OMN-18648: the producer first exists in this PR. This is historical
+        # recording metadata only; live missing/red admission always blocks.
+        "CI Live Contact (OMN-18648)",
         # OMN-19451: registered 2026-09-29, after both fixture windows closed.
         # Comes out at the next fixture re-capture.
         "delegation-health-check / Delegation Health Check",
@@ -1413,7 +1448,7 @@ EXTERNAL_SWEEP_EXCLUSIONS: dict[str, SweepExclusion] = {
             "job of prod-promotion-lineage.yml, which carries the condition "
             "github.event_name == 'workflow_call' && inputs.enforce_lineage. The "
             "workflow runs on pull_request for a path filter that includes the "
-            "deploy-agent executor and deploy-runtime.sh, so on every such pull "
+            "deploy-agent executor and onex-runtime-deploy, so on every such pull "
             "request the job skips without producing a verdict. Measured on "
             "omnibase_infra#3980 at head ba61dc95: every producer green, CI Summary "
             "red on this skipped row alone. The job does its real work only when the "
@@ -2507,7 +2542,7 @@ def draft_ready_check_runs(
     runs = {
         _run_int(run, "id"): run
         for run in workflow_runs or []
-        if run.get("event") in {"pull_request", "push"}
+        if run.get("event") in {"pull_request", "pull_request_target", "push"}
         and run.get("head_sha") == head_sha
         and _run_int(run, "workflow_id")
         and _parse_timestamp(str(run.get("created_at") or "")) is not None

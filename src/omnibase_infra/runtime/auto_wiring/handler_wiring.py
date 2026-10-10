@@ -39,7 +39,7 @@ from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from functools import lru_cache
+from functools import cache, lru_cache
 from pathlib import Path
 from types import MappingProxyType
 from typing import (
@@ -133,6 +133,7 @@ from omnibase_infra.protocols.protocol_event_bus_like import ProtocolEventBusLik
 from omnibase_infra.protocols.protocol_topic_provisioner import (
     ProtocolTopicProvisioner,
 )
+from omnibase_infra.runtime.auto_wiring.discovery import read_contract_yaml
 from omnibase_infra.runtime.auto_wiring.enum_quarantine_reason import (
     EnumQuarantineReason,
 )
@@ -2994,11 +2995,7 @@ def _read_declared_key_grains(contract_path: Path) -> tuple[str, ...]:
     answer and neither is an exemption.
     """
     try:
-        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
-        import yaml  # type: ignore[import-untyped]
-
-        with open(contract_path) as f:
-            raw = yaml.safe_load(f)
+        raw = read_contract_yaml(contract_path)
     except (OSError, Exception):  # noqa: BLE001 -- never fail wiring over this
         return ()
     if not isinstance(raw, dict):
@@ -3054,11 +3051,7 @@ def _read_dlq_topics(contract_path: Path) -> list[str]:
     rather than silently degrading to a no-DLQ projection wiring.
     """
     try:
-        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
-        import yaml  # type: ignore[import-untyped]
-
-        with open(contract_path) as f:
-            raw = yaml.safe_load(f)
+        raw = read_contract_yaml(contract_path)
     except FileNotFoundError:
         return []
     if not isinstance(raw, dict):
@@ -3095,11 +3088,7 @@ def _read_state_io(contract_path: Path) -> dict[str, object]:
     in; it defaults to ``correlation_id`` (the pre-OMN-16924 hardcoded key).
     """
     try:
-        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
-        import yaml  # type: ignore[import-untyped]
-
-        with open(contract_path) as f:
-            raw = yaml.safe_load(f)
+        raw = read_contract_yaml(contract_path)
     except FileNotFoundError:
         return {}
     if not isinstance(raw, dict):
@@ -3122,11 +3111,7 @@ def _read_completion_bound(contract_path: Path) -> ModelCompletionBound | None:
     :mod:`omnibase_infra.runtime.state_io.model_completion_bound`.
     """
     try:
-        # Why: Optional integration dependency is validated at runtime but ships incomplete typing.
-        import yaml  # type: ignore[import-untyped]
-
-        with open(contract_path) as f:
-            raw = yaml.safe_load(f)
+        raw = read_contract_yaml(contract_path)
     except FileNotFoundError:
         return None
     if not isinstance(raw, dict):
@@ -5971,6 +5956,9 @@ def _make_stateful_dispatch_callback(
                 correlation_id=cid_uuid,
                 event_type=event_type,
                 parent_envelope_id=edge,
+                # OMN-18389: recovery has only the persisted entry; payload
+                # attribution alone cannot attribute a quality-gate verdict.
+                tenant_id=_extract_dispatch_tenant_id(entry),
             )
             key: bytes | None = None
             for attr in ("entity_id", "node_id", "session_id", "correlation_id"):
@@ -7299,6 +7287,7 @@ def _make_event_bus_callback(
     declares_output: bool | None = None,
     failure_terminal_topics: Sequence[str] = (),
     terminal_answer_topic: str | None = None,
+    dlq_topic: str | None = None,
 ) -> Callable[..., Awaitable[None]]:
     """Create a Kafka on_message callback that deserializes and dispatches to engine.
 
@@ -7363,6 +7352,12 @@ def _make_event_bus_callback(
     to nothing. See ``_resolve_boundary_terminal_answer_topic`` for the full
     precedence and the guards it keeps. ``None`` (the default) preserves the
     pre-OMN-17432 silence for callers/tests that wire no terminal address.
+
+    ``dlq_topic`` (OMN-18879): the contract's first declared dead-letter sink,
+    matching projection-sink routing. This address is independent of reply
+    terminals. A declared sink must acknowledge the write itself; success on
+    a category fallback cannot satisfy the contract. Undeclared contracts
+    retain category routing.
     """
     import json
 
@@ -7860,6 +7855,10 @@ def _make_event_bus_callback(
                 get_dlq_topic_for_original,
             )
 
+            resolved_dlq_topic = dlq_topic or get_dlq_topic_for_original(topic)
+            declared_dlq_options: dict[str, object] = (
+                {"require_declared_topic": True} if dlq_topic else {}
+            )
             dlq_persisted = await publish_dlq_fn(
                 original_topic=topic,
                 raw_msg=message,
@@ -7867,7 +7866,8 @@ def _make_event_bus_callback(
                 correlation_id=correlation_id,
                 failure_type="handler_exception",
                 consumer_group="auto-wiring",
-                dlq_topic=get_dlq_topic_for_original(topic),
+                dlq_topic=resolved_dlq_topic,
+                **declared_dlq_options,
             )
             if dlq_persisted:
                 from omnibase_infra.runtime.boundary_failure_terminal import (
@@ -7887,9 +7887,10 @@ def _make_event_bus_callback(
                     flow_counters.record_dlq(consumer_group, topic)
                 logger.error(
                     "metric_name=boundary_swallow_prevented dlq_routed=true "
-                    "dlq_enabled=%s topic=%s error_type=%s correlation_id=%s",
+                    "dlq_enabled=%s topic=%s dlq_topic=%s error_type=%s correlation_id=%s",
                     dlq_enabled,
                     topic,
+                    resolved_dlq_topic,
                     type(exc).__name__,
                     correlation_id,
                 )
@@ -7912,9 +7913,10 @@ def _make_event_bus_callback(
                 logger.error(
                     "metric_name=boundary_swallow_observed dlq_routed=false "
                     "dlq_enabled=%s dlq_publish_failed=true message_lost=true "
-                    "topic=%s error_type=%s correlation_id=%s",
+                    "topic=%s dlq_topic=%s error_type=%s correlation_id=%s",
                     dlq_enabled,
                     topic,
+                    resolved_dlq_topic,
                     type(exc).__name__,
                     correlation_id,
                 )
@@ -8353,7 +8355,10 @@ def _derive_route_id(
     guaranteeing each entry gets a distinct route ID (OMN-9461 / OMN-10447).
     """
     safe_topic = re.sub(r"[.\-]", "_", topic)
-    return f"route.auto.{contract_name}.{handler_key}.{safe_topic}"
+    return _bound_dispatch_identifier(
+        f"route.auto.{contract_name}.{handler_key}.{safe_topic}",
+        _dispatch_route_field_max_length("route_id"),
+    )
 
 
 def _derive_dispatcher_id(contract_name: str, handler_key: str) -> str:
@@ -8364,8 +8369,59 @@ def _derive_dispatcher_id(contract_name: str, handler_key: str) -> str:
     ``inference.variant_b``), the plain handler name alone produces a
     collision.  The entry key includes the sanitized operation suffix and keeps
     dispatcher IDs distinct (OMN-9461 / OMN-10447).
+
+    The dispatcher ID is the route's ``handler_id``, so it is bounded to that
+    field's limit the same way route IDs are (OMN-20767).
     """
-    return f"dispatcher.auto.{contract_name}.{handler_key}"
+    return _bound_dispatch_identifier(
+        f"dispatcher.auto.{contract_name}.{handler_key}",
+        _dispatch_route_field_max_length("handler_id"),
+    )
+
+
+# Hex characters of the SHA-256 digest that replace the tail of an over-long
+# identifier. 16 hex characters (64 bits) keeps a collision between two
+# distinct over-long ids on one runtime out of reach.
+_BOUNDED_ID_DIGEST_HEX = 16
+
+
+@cache
+def _dispatch_route_field_max_length(field_name: str) -> int:
+    """Return ``ModelDispatchRoute.<field_name>``'s declared ``max_length``.
+
+    Read from the core model so the bound has one source: if core changes the
+    limit, derivation follows it without an infra edit (OMN-20767).
+    """
+    from omnibase_core.models.dispatch.model_dispatch_route import (
+        ModelDispatchRoute,
+    )
+    from omnibase_infra.errors import ProtocolConfigurationError
+
+    for constraint in ModelDispatchRoute.model_fields[field_name].metadata:
+        max_length = getattr(constraint, "max_length", None)
+        if isinstance(max_length, int):
+            return max_length
+    raise ProtocolConfigurationError(
+        f"ModelDispatchRoute.{field_name} declares no max_length; "
+        "auto-wiring cannot bound derived dispatch identifiers"
+    )
+
+
+def _bound_dispatch_identifier(natural_id: str, max_length: int) -> str:
+    """Bound a derived dispatch identifier to ``max_length`` without collisions.
+
+    An identifier within the limit is returned unchanged, so no existing route
+    or dispatcher ID moves. A longer one keeps its leading characters (so logs
+    still name the contract) and ends in ``.`` plus a SHA-256 digest of the
+    FULL natural identifier, so two long names that share a prefix stay
+    distinct and the same inputs derive the same ID on every boot. Truncating
+    without the digest would silently merge distinct routes (OMN-20767).
+    """
+    if len(natural_id) <= max_length:
+        return natural_id
+    digest = hashlib.sha256(natural_id.encode()).hexdigest()[:_BOUNDED_ID_DIGEST_HEX]
+    prefix_length = max_length - len(digest) - 1
+    return f"{natural_id[:prefix_length]}.{digest}"
 
 
 def _derive_handler_entry_key(entry: ModelHandlerRoutingEntry) -> str:
@@ -11272,13 +11328,22 @@ async def _subscribe_contract_topics(
                 f"contract '{contract.name}' declares consume_concurrency."
                 f"max_in_flight_records={consume_concurrency.max_in_flight_records}, "
                 f"but the wired event bus ({type(event_bus).__name__}) cannot "
-                "bound in-flight records. A declared bound that silently does "
+                "bound in-flight records. Implement "
+                "ProtocolConsumeConcurrencyDeclarer.declare_consume_concurrency "
+                "on the bus and record the declared bound before subscribing. "
+                "A declared bound that silently does "
                 "nothing is the defect OMN-18852 exists to remove"
             )
         concurrency_declarer = event_bus
 
     # Build callbacks for all topics first (synchronous, no I/O).
     topic_callbacks: list[tuple[str, Callable[..., Awaitable[None]]]] = []
+    # OMN-18879: provisioning already reads this declaration, and projection
+    # sinks route to its first entry. Carry that same address to the consume
+    # boundary instead of deriving a different category topic there.
+    declared_dlq_topics = contract.event_bus.dlq_topics or tuple(
+        _read_dlq_topics(contract.contract_path)
+    )
     for topic in contract.event_bus.subscribe_topics:
         # OMN-14758 (S6) / OMN-14771 (S8 §D1=4b): the ONE core RuntimeDispatch owns this
         # topic's OWNER route. Skip the legacy push callback for the OWNER only, so
@@ -11360,6 +11425,7 @@ async def _subscribe_contract_topics(
                 # publishes SUCCESS to, so it is inside the publish allowlist by
                 # construction and needs no second derivation.
                 terminal_answer_topic=output_topic,
+                dlq_topic=declared_dlq_topics[0] if declared_dlq_topics else None,
             )
         topic_callbacks.append((topic, callback))
 

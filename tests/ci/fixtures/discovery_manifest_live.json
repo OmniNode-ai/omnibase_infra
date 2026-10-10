@@ -1,0 +1,89 @@
+{
+  "_provenance": {
+    "source": "Deployed effects runtime HTTP GET /v1/introspection/manifest",
+    "captured_utc": "2026-10-08T19:07:21.339436+00:00",
+    "source_sha256": "34bd6f22774a23c5a17317c5e4a0024411cdf5fd2bc28dd703a877b4f9738d61",
+    "http_status": 200,
+    "projection": "One actual infrastructure contract and the first actual discovery error; runtime-local paths normalized and unrelated ticket citation removed.",
+    "source_contract_count": 204,
+    "source_error_count": 1
+  },
+  "response": {
+    "contracts": [
+      {
+        "name": "node_coding_agent_fsm_reducer",
+        "node_type": "REDUCER_GENERIC",
+        "description": "Pure coding-agent FSM reducer. Folds one workflow event (prior FSM state + event) into the next ModelCodingAgentFsmState and materializes the coding-agent correlation-trace projection. Owns the IDLE -> VALIDATING -> INVOKING -> CAPTURING -> terminal sequence, the retry policy (workspace-write invocations are never auto-retried, a duplicate correlation_id never re-runs, read-only invocations retry up to a bounded count), and the N-failure circuit breaker that trips to FAILED. Pure fold \u2014 no events, no intents over the bus, no I/O; the orchestrator publishes transition commands. Replay recomputes state + projection but the reducer issues no live intent, so replay can never cause a subprocess.\n",
+        "contract_version": {
+          "major": 1,
+          "minor": 0,
+          "patch": 0
+        },
+        "node_version": "1.0.0",
+        "contract_path": "src/omnibase_infra/nodes/node_coding_agent_fsm_reducer/contract.yaml",
+        "contract_content_hash": "84ee2efb364d60fa52b9dea8f0548f191865c014cb9963bfafc32b5b52f15a4b",
+        "entry_point_name": "node_coding_agent_fsm_reducer",
+        "package_name": "omnibase_infra",
+        "package_version": "0.38.70",
+        "runtime_profiles": [
+          "effects"
+        ],
+        "runtime_lanes": null,
+        "compatibility_publish_topics": [],
+        "terminal_event": null,
+        "requires_cloud_gateway": false,
+        "event_bus": {
+          "subscribe_topics": [
+            "onex.evt.omnibase-infra.coding-agent-fsm-advance.v1"
+          ],
+          "publish_topics": [
+            "onex.evt.omnibase-infra.coding-agent-fsm-state-updated.v1",
+            "onex.snapshot.projection.coding-agent.correlation-trace.v1"
+          ],
+          "dlq_topics": [],
+          "consumer_group": null,
+          "consumer_purpose": null,
+          "plugin_managed": false,
+          "tenant_scoped_ingress": false,
+          "terminal_event": null
+        },
+        "handler_routing": {
+          "routing_strategy": "operation_match",
+          "handlers": [
+            {
+              "handler": {
+                "name": "HandlerCodingAgentFsm",
+                "module": "omnibase_infra.nodes.node_coding_agent_fsm_reducer.handlers.handler_coding_agent_fsm"
+              },
+              "event_model": {
+                "name": "ModelCodingAgentFsmAdvance",
+                "module": "omnibase_infra.nodes.node_coding_agent_fsm_reducer.models.model_coding_agent_fsm_advance"
+              },
+              "operation": "coding_agent.fsm.advance",
+              "event_type": null,
+              "message_category": null,
+              "topic": null
+            }
+          ]
+        },
+        "db_io": null
+      }
+    ],
+    "errors": [
+      {
+        "entry_point_name": "node_branch_claim_check_effect",
+        "package_name": "omnimarket",
+        "error": "contract 'branch_claim_check_effect' is scoped to runtime lanes ['compose-dev', 'onex-lab', 'onex-lab-k3s'] and this runtime cannot name its lane (ONEX_RUNTIME_LANE is not set); NOT attached, fail-closed. Declare ONEX_RUNTIME_LANE in this runtime's deployment as one of ['compose-dev', 'compose-dev-105', 'compose-dev-200', 'compose-dev-202', 'dogfood', 'judge', 'lakshman', 'onex-dev', 'onex-lab', 'onex-lab-k3s', 'onex-prod', 'prepr-1', 'prepr-2', 'sim-202', 'stability-test']."
+      }
+    ],
+    "runtime_profile": "effects",
+    "image_sha": {
+      "value": null,
+      "absent_reason": "ONEX_IMAGE_DIGEST is not set"
+    },
+    "deployment_sha": {
+      "value": null,
+      "absent_reason": "ONEX_DEPLOYMENT_SHA is not set"
+    }
+  }
+}

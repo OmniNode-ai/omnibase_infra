@@ -776,6 +776,14 @@ repositories:
   # of those shadows, so the scoped-variable pass now asserts their ABSENCE here
   # too.
   - omnistream
+# OMN-20074: the single named exception to the OMN-15699 ban on the base-branch
+# pull request trigger. Exactly one workflow, by exact path (a pattern or a list
+# is refused by scripts/audit-runner-routing.py). The audit also holds that file
+# to a pinned read-only reusable call with no inline steps and no secrets.
+pull_request_target_exception:
+  path: .github/workflows/call-repo-evidence-gate.yml
+  ruling: "RULING 2026-10-08T22:41:24Z lane=orchestrator-9f8a (OMN-20074), operator words \"1 yes\""
+  reason: "GitHub reads the Repo Evidence Gate caller from dev, so a pull request cannot edit the workflow that judges it, which is what lets repo-evidence / dod-verify later be required on dev, as omnimarket and omnibase_core already do. Same-repository heads run on the trusted runners as they do under pull_request, and the pinned reusable refuses fork heads before any checkout."
 hosted_runner_allowlist:
   - path: .github/workflows/application-acl-postgres16-proof.yml
     reason: "OMN-18291: the `request-cloud-capacity` job is bare hosted BY NECESSITY -- it is the job that asks the scale-to-zero cloud fleet for the runner the routed job below it needs, so it cannot itself resolve through the routing variable it is serving. Pinning it by literal also means no future flip of any seam can relocate the requester onto the capacity it is trying to request. The workflow's other job, `rebuilt-postgres16-proof`, is NOT hosted -- it is the canary routed to the cloud fleet through cloud_canary_runner_variable."
@@ -925,6 +933,12 @@ route:
     # tests/ci/test_scheduled_run_failure_rate_omn18322.py for the captured
     # evidence), so a workflow that is merely occasionally flaky does not page.
     scheduled_failure_threshold_pct: 10.0
+    # OMN-18780: routing drift is actionable even below the fleet's general
+    # noise threshold. Reuse B1's evaluator, destination and dedup window;
+    # this stricter per-workflow threshold changes no runner placement.
+    scheduled_workflow_thresholds:
+      omnibase_infra:
+        .github/workflows/runner-routing-audit.yml: 0.0
     # 7 days: long enough that a 10-minute cron (pr-ci-zombie-detector.yml
     # itself: ~1000 scheduled runs/week) and a nightly job (~7 runs/week) both
     # clear a sample size worth a percentage, short enough that the alert
@@ -971,6 +985,9 @@ route:
       - omninode_infra
       - omniweb
       - onex_change_control
+      - omnibase_internal
+      - omniclaude-internal
+      - omnicursor
     # WHICH CALLER EVALUATES EACH FLEET REPOSITORY'S SCHEDULED RUNS (OMN-18942).
     #
     # The scheduled sweep has two callers, and every fleet repository belongs to
@@ -993,8 +1010,21 @@ route:
     #
     # A repository moves back to the host by deleting it here and removing its
     # `--scheduled-repo` line; the tests refuse a mismatch between the two.
+    # WHY omnibase_internal, omniclaude-internal AND omnicursor ARE HERE
+    # (OMN-20794). Measured 2026-10-09: the fleet list named thirteen
+    # repositories and none of these three, so a scheduled workflow failing in
+    # any of them raised nothing anywhere. They are evaluated by the
+    # `nonrequired-check-failure-rate` job, which runs on a GitHub-hosted
+    # runner (`ubuntu-latest`) under the onexbot App token, so the dead-man's
+    # own workflow and these three repositories never depend on the `.201`
+    # host reporter being alive. Nothing is created, widened or rotated: the
+    # installation's selection is `all`, and the mint step requests three more
+    # repositories out of it.
     scheduled_actions_repos:
       - omni_home
+      - omnibase_internal
+      - omniclaude-internal
+      - omnicursor
     # ALERT DEDUP WINDOW (OMN-18942), in hours.
     #
     # Measured 2026-09-23: with the channel secrets set at 10:43Z, every
@@ -1045,6 +1075,10 @@ route:
       # constants live and fails when the two disagree, so drift is a red test
       # rather than a silent false positive.
       omnibase_infra:
+        # OMN-18780: the reusable audit now belongs to the required CI Summary.
+        - runner-routing-audit / Runner Routing Audit
+        # OMN-18648: required through the CI Summary external assertion.
+        - CI Live Contact (OMN-18648)
         # OMN-18796: the no-new-advisory-job gate. Enforced by the CI Summary
         # poller via EXPECTED_EXTERNAL_CONTEXTS and absent from branch
         # protection, which is exactly the shape this list records.
@@ -1131,11 +1165,16 @@ route:
         # branch protection, which is exactly the shape this list records.
         - pypi-pin-resolvability
         - receipt-honesty
+        # OMN-20074: repo-owned verdict enforced by CI Summary on PR runs.
+        - repo-evidence / dod-verify
         - required-check-skip-guard / check-skip-vectors
         - Runner Route (OMN-18031) / route
         # OMN-20562: the runtime_profiles validator, registered STRICT once its
         # allowlist was emptied and deleted.
         - Runtime Profiles / validate
+        # OMN-18786: the seed-provenance check, now unconditional and registered in
+        # EXPECTED_EXTERNAL_CONTEXTS.
+        - Seed Provenance Check
         # OMN-18926: the from-empty migration proof, now called from ci.yml and
         # registered STRICT. Enforced by the CI Summary poller and absent from
         # branch protection, which is exactly the shape this list records.

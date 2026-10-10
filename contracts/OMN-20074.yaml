@@ -1,0 +1,62 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20074
+title: Switch omnibase_infra's repo-evidence caller to the base-branch trigger for S6 part 1 of the OCC retirement
+summary: Move the repo-evidence caller to the base-branch trigger as the single named exception to the runner-routing ban, ruled by the operator (2026-10-08T22:41:24Z). Registering repo-evidence / dod-verify in CI Summary waits for a follow-up once base-branch-trigger runs exist on merged dev heads; OCC removal belongs to S6 part 2.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-repo-evidence-s6-part1
+    statement: omnibase_infra must run the repo-owned evidence caller on the base-branch trigger, as the one audited exception, while retaining every existing OCC gate for the S6 part 1 overlap.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the caller pins receipt-gate.yml at fb0c6c2117d5868a398b0920cd0048d0824415b1 (omnibase_core#1914), sets shadow to "false" and compare-with-occ to "false" -- falsifier: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s6_part1'
+      - id: AC2
+        statement: 'AC2: the runner-routing audit admits pull_request_target in exactly one workflow, call-repo-evidence-gate.yml, named in config/runner_routing_policy.yaml with the operator ruling, refuses a pattern or a list in its place and any other workflow using the trigger, and holds that file to a read-only pinned reusable call with no inline steps or secrets -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k pull_request_target'
+  - id: req-repo-evidence-required-ci-summary
+    statement: omnibase_infra's CI Summary must expect repo-evidence / dod-verify on every pull_request run, so an absent repo-owned evidence verdict fails the only required context on dev, while every OCC context stays enforced until S6 part 2.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: repo-evidence / dod-verify is a member of EXPECTED_EXTERNAL_CONTEXTS, a pull_request check-run set without it fails the expected-context evaluation naming it, and a green pull_request_target row satisfies it -- falsifier: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q fails at the merge base'
+evidence_requirements:
+  - kind: tests
+    description: The caller enforces at the caller-mode success-no-op pin without waiting for OCC comparison.
+    command: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s6_part1
+  - kind: tests
+    description: The runner-routing audit admits the base-branch trigger in the one named caller and nowhere else.
+    command: uv run pytest tests/ci/test_runner_routing_audit.py -q -k pull_request_target
+  - kind: tests
+    description: CI Summary requires the repo-owned verdict, refuses its absence or failure, and accepts a green base-branch-trigger row.
+    command: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-repo-evidence-s6-part1-ac1
+    description: The focused cutover test proves the full-SHA pin and enforcing caller inputs.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_repo_evidence_caller_workflow_omn20073.py -q -k s6_part1
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-repo-evidence-s6-part1-ac2
+    description: The audit tests prove the single named exception and its fail-closed shape.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -k pull_request_target
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-repo-evidence-required-ci-summary-ac3
+    description: The focused tests prove required-context membership, absent-verdict refusal and green base-branch-trigger admission.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_repo_evidence_dod_verify_required_omn20074.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

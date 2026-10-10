@@ -10,7 +10,7 @@
 # only compose file in this directory that no lane deploy path can reach:
 # `resolve_lane_overlay_filename` in scripts/runtime_build/compose_files.sh has
 # no `prepr-*` arm, so its fail-closed default refuses a pool project outright
-# and scripts/deploy-runtime.sh cannot be pointed at a slot. That refusal is
+# and onex-runtime-deploy cannot be pointed at a slot. That refusal is
 # the point of a separate entrypoint (rule 24(e)) and is pinned by a test.
 #
 # WHY AN OVERLAY AND NOT A STANDALONE FILE
@@ -216,15 +216,18 @@ services:
       # connection failure that reads like an unreachable server rather than
       # like a name this lane built wrong.
       #
-      # It also needs the SUPERUSER connection rather than a slot principal:
-      # it runs the migrations, and the slot's own roles deliberately cannot.
-      # That is inherited unchanged from docker-compose.infra.yml, which is
-      # the other half of why this block merges nothing else.
+      # OMN-18892: branch migrations authenticate as slot principals. The
+      # runner selects the analytics principal for its node phase. Neither
+      # connection receives the shared server's admin credential.
       !!merge <<: [*prepr_slot_marker_env]
+      POSTGRES_USER: "role_omnibase_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}"
+      POSTGRES_PASSWORD: "${ROLE_OMNIBASE_PASSWORD:?ROLE_OMNIBASE_PASSWORD must be set}"
+      ROLE_OMNIDASH_PASSWORD: "${ROLE_OMNIDASH_PASSWORD:?ROLE_OMNIDASH_PASSWORD must be set}"
+      ROLE_OMNINODE_PASSWORD: "${ROLE_OMNINODE_PASSWORD:?ROLE_OMNINODE_PASSWORD must be set}"
   # The slot's intelligence migration (OMN-19404). Same shape as the forward
   # migration above and for the same reasons: its own `prepr-migrate` profile,
-  # the superuser connection inherited unchanged, and only the slot marker
-  # merged. ONEX_DB_SLOT makes scripts/run-intelligence-migrations.sh target
+  # the slot's intelligence principal, and only the slot marker merged.
+  # ONEX_DB_SLOT makes scripts/run-intelligence-migrations.sh target
   # omniintelligence_<slot> and refuse to create it. It used to be fenced,
   # and then nothing created public.db_metadata in the slot's intelligence
   # database, so the fourth slot boot (2026-09-24) failed stamping there.
@@ -234,6 +237,8 @@ services:
     depends_on: !override []
     environment:
       !!merge <<: [*prepr_slot_marker_env]
+      POSTGRES_USER: "role_omniintelligence_${ONEX_DB_SLOT:?ONEX_DB_SLOT must be set}"
+      POSTGRES_PASSWORD: "${ROLE_OMNIINTELLIGENCE_PASSWORD:?ROLE_OMNIINTELLIGENCE_PASSWORD must be set}"
   # =========================================================================
   # The gateway's existing corpus and runner, scoped to the slot. The corpus
   # volume must also be private: its copier deletes the previous contents.
@@ -313,6 +318,8 @@ services:
       # comment-only match still fails it.
       - "${PREPR_RUNTIME_EFFECTS_PORT:?PREPR_RUNTIME_EFFECTS_PORT must be set}:8085"
     environment:
+      # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
+      ONEX_RUNTIME_LANE: "prepr-${ONEX_PREPR_SLOT}"
       !!merge <<: [*prepr_slot_db_env, *prepr_slot_bus_env, *prepr_slot_marker_env]
       ONEX_GROUP_ID: "prepr-${ONEX_PREPR_SLOT}-runtime-effects"
       # OMN-20533: docker-compose.dev-lane.yml binds runtime-effects to the .201
@@ -332,6 +339,10 @@ services:
       # refusing projection_binding_unconfigured instead of failing to load a file
       # this lane never mounts (projection_binding_invalid).
       OMNIMARKET_PROJECTION_READ_BINDING_OVERLAY: ""
+      # OMN-17427: docker-compose.dev-lane.yml also names the skill overlay roots
+      # mount, which this lane's volume override drops. Blank is no overlay, so a
+      # morning run here is refused by name; the runtime boots either way.
+      ONEX_SKILL_OVERLAY_ROOTS: ""
     volumes: !override
       - prepr_effects_logs:/app/logs
       - prepr_effects_data:/app/data

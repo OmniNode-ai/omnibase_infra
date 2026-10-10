@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -271,6 +272,88 @@ def test_self_pause_fails_open_without_pause_dir_mount(tmp_path: Path) -> None:
     assert "self-pause skipped" in last_result.stdout
     assert "not mounted" in last_result.stdout
     assert not missing_pause_dir.exists()
+
+
+@pytest.mark.parametrize("existing_marker", [False, True])
+def test_failed_self_stop_is_retried_without_replacing_pause_evidence(
+    tmp_path: Path, existing_marker: bool
+) -> None:
+    """OMN-19070: a durable marker does not prove the listener stopped.
+
+    The first docker stop fails. Another low-disk job must retry the stop,
+    preserving the original marker for the host-side restore guard.
+    """
+    runner_home = tmp_path / "actions-runner"
+    workspace = runner_home / "_work" / "omnibase_infra" / "omnibase_infra"
+    workspace.mkdir(parents=True)
+    stale = workspace / "stale.txt"
+    stale.write_text("untouched")
+    pause_dir = tmp_path / "pause"
+    pause_dir.mkdir()
+    marker = pause_dir / "omninode-runner-1"
+    if existing_marker:
+        marker.write_text(
+            "runner=omninode-runner-1\navail_gb=1.00\n"
+            "paused_at=2026-09-21T18:24:00Z\n"
+            "reason=consecutive_disk_admission_failures\n"
+        )
+    seed_marker = marker.read_text() if existing_marker else None
+    seed_mtime = marker.stat().st_mtime_ns if existing_marker else None
+
+    stub_bin = tmp_path / "stubbin"
+    stub_bin.mkdir()
+    docker_log = tmp_path / "docker_calls.log"
+    stopped = tmp_path / "stopped"
+    (stub_bin / "docker").write_text(
+        "#!/usr/bin/env bash\n"
+        f'echo "$@" >> "{docker_log}"\n'
+        f'if [[ $(wc -l < "{docker_log}") -eq 1 ]]; then exit 1; fi\n'
+        f'touch "{stopped}"\n'
+    )
+    (stub_bin / "docker").chmod(0o755)
+
+    result = _run_hook(
+        runner_home,
+        workspace,
+        avail_kb=1024 * 1024,
+        pause_dir=pause_dir,
+        backoff_n=1,
+        extra_path=stub_bin,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not docker_log.exists():
+        time.sleep(0.1)
+    assert docker_log.exists(), result.stdout + result.stderr
+    assert docker_log.read_text().splitlines() == ["stop omninode-runner-1"]
+    assert not stopped.exists(), "positive control: first stop deliberately failed"
+    original_marker = marker.read_text()
+    original_mtime = marker.stat().st_mtime_ns
+    if existing_marker:
+        assert original_marker == seed_marker
+        assert original_mtime == seed_mtime
+
+    result = _run_hook(
+        runner_home,
+        workspace,
+        avail_kb=1024 * 1024,
+        pause_dir=pause_dir,
+        backoff_n=1,
+        extra_path=stub_bin,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not stopped.exists():
+        time.sleep(0.1)
+    assert stopped.exists(), result.stdout + result.stderr
+    assert docker_log.read_text().splitlines() == [
+        "stop omninode-runner-1",
+        "stop omninode-runner-1",
+    ]
+    assert marker.read_text() == original_marker
+    assert marker.stat().st_mtime_ns == original_mtime
+    assert not list(pause_dir.glob("*.tmp"))
+    assert stale.read_text() == "untouched"
 
 
 def test_recovery_clears_consecutive_failure_streak(tmp_path: Path) -> None:

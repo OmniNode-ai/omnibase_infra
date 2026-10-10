@@ -3,8 +3,12 @@
 
 # Contract Validation Gate
 #
-# Validates ONEX ticket contracts for PRs in omnibase_infra using the
-# reusable composite action from onex_change_control.
+# Validates ONEX ticket contracts for PRs in omnibase_infra with the
+# onex_change_control validators, checked out at the onex_change_control pin
+# of the sibling-pins file. OMN-14186: the composite action this used to call
+# by `@main` read OCC main, whose schema predates `binds_ac` and refused every
+# contract that repo-evidence / dod-verify requires; addressed by a sha, that
+# action's inner checkout fails, so its steps run inline here.
 #
 # Required status check: "contract-validation"
 # Must pass (or skip) before merging to main.
@@ -93,13 +97,96 @@ jobs:
           echo "resolved_branch=$BRANCH" >> "$GITHUB_OUTPUT"
           echo "::notice::Resolved branch name: $BRANCH"
 
+      - name: Checkout calling repository
+        if: steps.resolve-branch.outputs.skip_validation != 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Checkout onex_change_control validators
+        if: steps.resolve-branch.outputs.skip_validation != 'true'
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/onex_change_control
+          ref: 802b5f7101f4c49f8b30e8deda3d4c5d024c5710 # .github/sibling-pins.yaml
+          path: .onex_change_control_validators
+
+      - name: Set up Python
+        if: steps.resolve-branch.outputs.skip_validation != 'true'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        if: steps.resolve-branch.outputs.skip_validation != 'true'
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Install onex_change_control validators
+        if: steps.resolve-branch.outputs.skip_validation != 'true'
+        env:
+          UV_HTTP_TIMEOUT: "600"
+          UV_SYNC_ATTEMPTS: "5"
+          UV_SYNC_RETRY_DELAY_SECONDS: "10"
+          UV_CONCURRENT_DOWNLOADS: "2"
+        run: |
+          cd .onex_change_control_validators
+          git config --global http.version HTTP/1.1
+          attempt=1
+          until uv sync --no-group dev; do
+            status=$?
+            if [ "$attempt" -ge "$UV_SYNC_ATTEMPTS" ]; then
+              echo "::error::uv sync failed after ${attempt} attempt(s)"
+              exit "$status"
+            fi
+            sleep_seconds=$((UV_SYNC_RETRY_DELAY_SECONDS * attempt))
+            echo "::warning::uv sync attempt ${attempt}/${UV_SYNC_ATTEMPTS} failed with exit ${status}; retrying in ${sleep_seconds}s"
+            sleep "$sleep_seconds"
+            attempt=$((attempt + 1))
+          done
+
       - name: Run contract validation
         id: validate-contract
         if: steps.resolve-branch.outputs.skip_validation != 'true'
-        uses: OmniNode-ai/onex_change_control/.github/actions/validate-contract@main
-        with:
-          branch-name: ${{ steps.resolve-branch.outputs.resolved_branch }}
-          contracts-path: contracts
+        env:
+          BRANCH: ${{ steps.resolve-branch.outputs.resolved_branch }}
+          CONTRACTS_PATH: contracts
+        run: |
+          # Extract OMN-XXXX (case-insensitive) from anywhere in the branch name.
+          TICKET_ID=$(echo "$BRANCH" | grep -oiE 'OMN-[0-9]+' || true)
+          TICKET_ID=$(echo "$TICKET_ID" | head -1 | tr '[:lower:]' '[:upper:]')
+          echo "ticket-id=$TICKET_ID" >> "$GITHUB_OUTPUT"
+          if [[ -z "$TICKET_ID" ]]; then
+            echo "validation-status=skipped" >> "$GITHUB_OUTPUT"
+            echo "::notice::No OMN-XXXX ticket ID found in branch name: $BRANCH"
+            exit 0
+          fi
+          echo "::notice::Extracted ticket ID: $TICKET_ID from branch: $BRANCH"
+
+          # Support both OMN-1234.yaml and omn-1234.yaml casing
+          CONTRACT_PATH="$CONTRACTS_PATH/$TICKET_ID.yaml"
+          if [[ ! -f "$CONTRACT_PATH" ]]; then
+            CONTRACT_PATH="$CONTRACTS_PATH/$(echo "$TICKET_ID" | tr '[:upper:]' '[:lower:]').yaml"
+          fi
+          if [[ ! -f "$CONTRACT_PATH" ]]; then
+            echo "validation-status=skipped" >> "$GITHUB_OUTPUT"
+            echo "::notice::No contract file found for $TICKET_ID in $CONTRACTS_PATH/ — skipping validation."
+            exit 0
+          fi
+
+          echo "::group::Validating contract: $CONTRACT_PATH"
+          CONTRACT_FILE="$PWD/$CONTRACT_PATH"
+          if (cd .onex_change_control_validators && uv run validate-yaml "$CONTRACT_FILE"); then
+            echo "::endgroup::"
+            echo "validation-status=passed" >> "$GITHUB_OUTPUT"
+            echo "::notice::Contract validation passed for $TICKET_ID"
+          else
+            echo "::endgroup::"
+            echo "validation-status=failed" >> "$GITHUB_OUTPUT"
+            echo "::error::Contract validation FAILED for $TICKET_ID — see above for details."
+            exit 1
+          fi
 
       - name: Report validation result
         if: always()

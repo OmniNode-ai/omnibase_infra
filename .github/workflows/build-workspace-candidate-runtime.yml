@@ -5,7 +5,7 @@
 #
 # Builds a SCANNED workspace-from-dev runtime image and pushes it to ECR as an
 # explicitly NON-PROD "stability-candidate". This is the CI counterpart of the
-# local deploy-runtime.sh BUILD_SOURCE=workspace path: it stages the sibling
+# local onex-runtime-deploy BUILD_SOURCE=workspace path: it stages the sibling
 # repos at their dev HEAD, builds docker/Dockerfile.runtime in WORKSPACE mode,
 # runs the SAME Trivy scan + the OMN-9139 source-hash attestation + a provenance
 # manifest, and pushes a candidate-tagged image.

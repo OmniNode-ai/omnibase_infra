@@ -495,7 +495,7 @@ services:
       !!merge <<: [*lakshman-runtime-env, *lakshman-strict-wiring-env]
       RUNTIME_PROFILE: main
       # OMN-19494 (LO4): this runtime names its lane (see the same block in
-      # docker-compose.judge.yml for why). Literal, main runtime only, and
+      # docker-compose.judge.yml for why). Literal, main and effects runtimes, and
       # outside the lab lane-health vocabulary (OMN-18769 AC6). Takes effect
       # when the collaborator rebuilds this lane; nothing restarts it.
       ONEX_RUNTIME_LANE: "lakshman"
@@ -551,6 +551,8 @@ services:
       redpanda:
         condition: service_healthy
     environment:
+      # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
+      ONEX_RUNTIME_LANE: "lakshman"
       !!merge <<: [*lakshman-runtime-env, *lakshman-strict-wiring-env]
       RUNTIME_PROFILE: effects
       OTEL_SERVICE_NAME: omninode-lakshman-runtime-effects
@@ -810,7 +812,7 @@ services:
       - "com.omninode.service=projection-tenant-registry-writer"
   # OMN-13772 / OMN-13581 defence-in-depth. This file is designed to be run
   # STANDALONE (`-f docker/docker-compose.lakshman.yml`), and no sanctioned tool
-  # layers it — `scripts/deploy-runtime.sh` does not know this lane, deliberately
+  # layers it — `onex-runtime-deploy` does not know this lane, deliberately
   # (see the governance note in this file's header). But the base infra compose
   # defines keycloak and infisical with NO compose profile, so if anyone ever
   # renders `-f docker-compose.infra.yml -f docker-compose.lakshman.yml` the two

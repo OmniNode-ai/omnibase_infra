@@ -5,7 +5,7 @@
 
 This module is the half of chain-canary link 5 that OMN-16025 actually asks
 for. The canary itself is a READER: ``_replay_ledger_chain_via_asyncpg``
-selects ``hop, replay_green, verifier_verdict`` out of ``ledger_chain`` and
+selects ``hop, replay_green, verifier_verdict, chain_state`` out of ``ledger_chain`` and
 classifies what it finds. It computes nothing. Whoever writes those two derived
 columns is where "complete ledger chain + replay green through an HONEST
 tier-2 verifier" either happens or is faked, and this module is that writer's
@@ -69,6 +69,14 @@ SKIPPED_NOT_CONFIGURED is not CLEAN", and OMN-16931 found a verdict derived
 from a claim rather than from evidence. A verifier that returned PASS for a
 hop it had no declaration for would re-create both defects at once.
 
+IN-PROCESS TERMINAL-ONLY (OMN-17427)
+------------------------------------
+The in-process path deliberately publishes only its terminal. Contract-declared
+producer evidence and an absent parent label that shape, never timing. It has
+no bus chain to replay, so it is neither a pass nor a fault. Other partial
+chains stay incomplete. Both classification and grading use the same deduped
+hop partition, excluding re-route parent evidence.
+
 NO GAP IS FILLED
 ----------------
 A hop that was never observed produces NO ROW. It is tempting to emit a
@@ -85,6 +93,9 @@ from __future__ import annotations
 from collections.abc import Sequence, Set
 from uuid import UUID
 
+from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.enum_ledger_chain_state import (
+    EnumLedgerChainState,
+)
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.enum_tier_two_verdict import (
     EnumTierTwoVerdict,
 )
@@ -96,6 +107,13 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_ledge
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.model_observed_hop import (
     ModelObservedHop,
+)
+
+_IN_PROCESS_TERMINAL_ONLY_DETAIL = (
+    "in-process terminal-only chain (OMN-17427): the terminal was published "
+    "by an in-process producer declared in the contract and records no parent; "
+    "the in-process delegation path publishes no upstream hop, so there is no "
+    "causal edge to re-derive; this is not a pass and not a fault"
 )
 
 _NO_DECLARATION_DETAIL = (
@@ -346,33 +364,11 @@ def _verify_one_hop(
     return EnumTierTwoVerdict.PASS, ""
 
 
-def assemble_replay_and_verify(
-    correlation_id: UUID,
+def _partition_observed(
     observed: Sequence[ModelObservedHop],
     declared_chain: Sequence[ModelDeclaredChainHop],
-) -> tuple[ModelLedgerChainRow, ...]:
-    """Turn observed envelopes into replayed, tier-2-verified ledger rows.
-
-    ``observed`` must already be in the order the envelopes were seen; this
-    function does not reorder it, because the observed order IS the evidence
-    and sorting it would erase a transposition that tier 2 exists to catch.
-    It does REMOVE exact redeliveries (OMN-18916) -- the same envelope id
-    seen more than once -- which drops no evidence, because a second copy of
-    one envelope says nothing the first did not.
-
-    ``declared_chain`` is the authority for BOTH tiers: the ordered hops the
-    node contracts say a delegation traverses, each naming the declared topic
-    that causes it. Tier 2 reads the ORDER; tier 1 reads the PARENT RELATION.
-    An EMPTY declaration is legitimate and yields SKIP on every tier-2 row and
-    a stated-reason RED on every tier-1 row — the canary then reports
-    VERIFIER_SKIPPED, which is red. It is never treated as "nothing to check,
-    therefore fine".
-
-    An empty ``observed`` returns zero rows rather than any synthetic row. The
-    canary computes ``all(row.replay_green for row in rows)``, which is
-    vacuously TRUE over an empty sequence, so it guards on the row count
-    separately; a single fabricated green row here would defeat that guard.
-    """
+) -> tuple[tuple[ModelObservedHop, ...], tuple[ModelObservedHop, ...]]:
+    """Deduplicate envelopes and separate graded hops from parent evidence."""
     # OMN-18916: collapse a REDELIVERY before grading anything.
     #
     # A redelivery is the identical envelope arriving twice -- measured on the
@@ -405,7 +401,77 @@ def assemble_replay_and_verify(
         if parent not in hop_topics
     }
     parent_evidence = tuple(h for h in deduplicated if h.topic in evidence_topics)
-    observed = tuple(h for h in deduplicated if h.topic not in evidence_topics)
+    graded = tuple(h for h in deduplicated if h.topic not in evidence_topics)
+    return graded, parent_evidence
+
+
+def derive_chain_state(
+    observed: Sequence[ModelObservedHop],
+    declared_chain: Sequence[ModelDeclaredChainHop],
+    in_process_terminal_sources: Sequence[str],
+) -> EnumLedgerChainState:
+    """Label completeness from graded observations and terminal evidence."""
+    graded, _ = _partition_observed(observed, declared_chain)
+    return _derive_graded_chain_state(
+        graded, declared_chain, in_process_terminal_sources
+    )
+
+
+def _derive_graded_chain_state(
+    observed: Sequence[ModelObservedHop],
+    declared_chain: Sequence[ModelDeclaredChainHop],
+    in_process_terminal_sources: Sequence[str],
+) -> EnumLedgerChainState:
+    if declared_chain and all(
+        any(hop.topic in entry.topics for hop in observed) for entry in declared_chain
+    ):
+        return EnumLedgerChainState.COMPLETE
+    if (
+        declared_chain
+        and observed
+        and all(
+            hop.topic in declared_chain[-1].topics
+            and hop.source in in_process_terminal_sources
+            and hop.parent_envelope_id is None
+            for hop in observed
+        )
+    ):
+        return EnumLedgerChainState.IN_PROCESS_TERMINAL_ONLY
+    return EnumLedgerChainState.INCOMPLETE
+
+
+def assemble_replay_and_verify(
+    correlation_id: UUID,
+    observed: Sequence[ModelObservedHop],
+    declared_chain: Sequence[ModelDeclaredChainHop],
+    in_process_terminal_sources: Sequence[str] = (),
+) -> tuple[ModelLedgerChainRow, ...]:
+    """Turn observed envelopes into replayed, tier-2-verified ledger rows.
+
+    ``observed`` must already be in the order the envelopes were seen; this
+    function does not reorder it, because the observed order IS the evidence
+    and sorting it would erase a transposition that tier 2 exists to catch.
+    It does REMOVE exact redeliveries (OMN-18916) -- the same envelope id
+    seen more than once -- which drops no evidence, because a second copy of
+    one envelope says nothing the first did not.
+
+    ``declared_chain`` is the authority for BOTH tiers: the ordered hops the
+    node contracts say a delegation traverses, each naming the declared topic
+    that causes it. Tier 2 reads the ORDER; tier 1 reads the PARENT RELATION.
+    An EMPTY declaration is legitimate and yields SKIP on every tier-2 row and
+    a stated-reason RED on every tier-1 row — the canary then reports
+    VERIFIER_SKIPPED, which is red. It is never treated as "nothing to check,
+    therefore fine".
+
+    An empty ``observed`` returns zero rows rather than any synthetic row. The
+    canary computes ``all(row.replay_green for row in rows)``, which is
+    vacuously TRUE over an empty sequence, so it guards on the row count
+    separately; a single fabricated green row here would defeat that guard.
+    """
+    observed, parent_evidence = _partition_observed(observed, declared_chain)
+    chain_state = _derive_graded_chain_state(
+        observed, declared_chain, in_process_terminal_sources
+    )
 
     rows: list[ModelLedgerChainRow] = []
     # Which declared hops have already had their FIRST occurrence. Tier 2
@@ -425,6 +491,8 @@ def assemble_replay_and_verify(
             declared_chain,
             correlation_id,
         )
+        if chain_state is EnumLedgerChainState.IN_PROCESS_TERMINAL_ONLY:
+            replay_green, replay_detail = False, _IN_PROCESS_TERMINAL_ONLY_DETAIL
         verdict, verifier_detail = _verify_one_hop(
             hop, declared_chain, first_seen_declared_indices
         )
@@ -434,6 +502,7 @@ def assemble_replay_and_verify(
 
         rows.append(
             ModelLedgerChainRow(
+                chain_state=chain_state,
                 correlation_id=correlation_id,
                 hop_index=index,
                 hop=hop.topic,
@@ -450,4 +519,4 @@ def assemble_replay_and_verify(
     return tuple(rows)
 
 
-__all__ = ["assemble_replay_and_verify"]
+__all__ = ["assemble_replay_and_verify", "derive_chain_state"]

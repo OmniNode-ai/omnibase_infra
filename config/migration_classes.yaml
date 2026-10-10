@@ -119,6 +119,7 @@ migrations:
   forward/106_add_delegation_workflow_state_traffic_class.sql: forward-only # DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT CK_DELEGATION_WORKFLOW_STATE_TRAFFIC_CLASS
   forward/108_create_pr_landing_workflow_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
   forward/109_delegation_workflow_state_updated_at_only_on_transition.sql: forward-only # CREATE OR REPLACE FUNCTION on an existing trigger function
+  forward/110_add_ledger_chain_chain_state.sql: forward-only # DROP; ALTER TABLE public.ledger_chain DROP CONSTRAINT IF; ALTER TABLE public.ledger_chain ADD CONSTRAINT CK_LEDGER_CHAIN_CHAIN_STATE (ADD CONSTRAINT class)
   forward/nodes/node_canary_score_reducer/0001_create_capability_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0002_capability_scores_tenant_id_and_rls.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
@@ -391,6 +392,7 @@ migrations:
   forward/nodes/node_projection_tenant_credentials/0000_create_tenant_inference_credentials.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/0001_relax_name_provider_not_null.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_tenant_credentials/0002_credential_identity_not_null.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_INFEREN
+  forward/nodes/node_projection_tenant_credentials/0005_tenant_credentials_fingerprint_and_set_at.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/003_grant_tenant_projection_writer_tenant_inference_credentials.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql: forward-only # DROP
   forward/nodes/node_projection_tenant_registry/0000_create_tenant_registry_mirror.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_REGISTR
@@ -407,6 +409,7 @@ migrations:
   forward/nodes/node_projection_work_ledger/0000_create_work_ledger.sql: forward-only # adds is_open GENERATED and reconciles drifted shape (SET NOT NULL, ADD COLUMN NOT NULL)
   forward/nodes/node_projection_work_ledger/0001_grant_omninode_runtime_work_ledger.sql: expand-only # additive
   forward/nodes/node_projection_work_ledger/0002_work_ledger_typed_records.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.work_ledger_rows) over a new nullable column; ALTER TABLE ADD COLUMN IF NOT EXISTS
+  forward/nodes/node_projection_work_ledger/0003_work_ledger_seq.sql: expand-only # additive nullable ledger_seq and non-unique partial index
   forward/nodes/node_projection_worktree_reconcile/0000_create_worktree_reconcile_hosts.sql: expand-only # additive
   forward/nodes/node_projection_worktree_reconcile/0001_grant_runtime_worktree_reconcile.sql: expand-only # additive
   forward/nodes/node_renderer_capability_projection/0001_create_renderer_capability_projection.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT RENDERER_CAPABILITY_PROJECTION_PKEY; ALTER TABLE ADD CONSTRAINT UQ_RENDERE

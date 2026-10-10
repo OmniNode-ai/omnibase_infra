@@ -106,8 +106,9 @@ Subcommands
     ``--lane`` is ANY-OF: one PASS among them satisfies it. ``--require-lane``
     (OMN-19312) is ALL-OF: every named lane must carry its own PASS, and no
     other lane's PASS substitutes. The distinction is load-bearing: the push
-    path's unqualified call is satisfied by the onex-lab boot receipt the same
-    workflow emits, so a verdict can only bind delivery as a required lane.
+    delivery call selects only onex-lab-k3s for the exact sha; the compose-dev
+    primary receipt remains required for its resolved runtime subject. Candidate
+    boot smoke receipts cannot satisfy the lab premise (OMN-18276).
     ``--wait-seconds`` polls, bounded, for a required receipt that has not
     landed yet, and expiry refuses. ``--resolve-runtime-ancestor`` asks required
     lanes about the nearest runtime-affecting ancestor, by the release train's
@@ -167,6 +168,7 @@ import os
 import re
 import subprocess  # fixed argv, no shell, trusted git/gh binaries
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -329,10 +331,12 @@ class EnumLabLane(StrEnum):
     """The lab surfaces rule 24(a) names as receipt emitters.
 
     ``COMPOSE_DEV`` is the ``.201`` compose dev lane (compose project
-    ``omnibase-infra``, ports 8085/8086). ``ONEX_LAB`` is the ``k8s/onex-lab``
-    overlay applied from the same head.
+    ``omnibase-infra``, ports 8085/8086). ``CANDIDATE_BOOT`` is the ephemeral
+    kind render/wiring smoke check. Its artifact is named candidate-boot-receipt
+    and cannot satisfy a lab-pass gate (OMN-18276). ``ONEX_LAB`` identifies
+    historical kind receipts; it is excluded from the default lab premise.
 
-    ``ONEX_LAB_K3S`` (OMN-18200) is the PERSISTENT lab cluster -- the same
+    ``ONEX_LAB_K3S`` is the PERSISTENT lab cluster -- the same
     overlay, applied to the k3s node on the lab host by
     ``k8s/onex-lab/apply_lab_lane.sh`` rather than to a per-candidate ``kind``
     cluster. It is a separate value rather than a second emitter on ``ONEX_LAB``
@@ -398,6 +402,7 @@ class EnumLabLane(StrEnum):
     COMPOSE_DEV = "compose-dev"
     ONEX_LAB = "onex-lab"
     ONEX_LAB_K3S = "onex-lab-k3s"
+    CANDIDATE_BOOT = "candidate-boot"
     COMPOSE_DEV_CHAIN = "compose-dev-chain"
     COMPOSE_DEV_CORPUS = "compose-dev-corpus"
     COMPOSE_DEV_202 = "compose-dev-202"
@@ -405,7 +410,7 @@ class EnumLabLane(StrEnum):
     PR_HEAD = "pr-head"
 
 
-#: The lanes an unqualified ``gate`` reads with ANY-OF semantics: the three lab
+#: The lanes an unqualified ``gate`` reads with ANY-OF semantics: the persistent lab
 #: surfaces rule 24(b) means by "a passing lab receipt". The OMN-19312 verdict
 #: lanes are deliberately absent -- a chain canary PASS is not evidence that the
 #: candidate booted, and must never be able to stand in for that premise.
@@ -414,7 +419,6 @@ class EnumLabLane(StrEnum):
 #: take either for the any-of premise.
 ANY_OF_DEFAULT_LANES: Final[tuple[EnumLabLane, ...]] = (
     EnumLabLane.COMPOSE_DEV,
-    EnumLabLane.ONEX_LAB,
     EnumLabLane.ONEX_LAB_K3S,
 )
 
@@ -1173,6 +1177,8 @@ def artifact_name(lane: EnumLabLane, sha: str) -> str:
     reads a receipt it then has to check the sha of. (It checks anyway — see
     ``gate`` — because a name and a payload that disagree is itself a finding.)
     """
+    if lane is EnumLabLane.CANDIDATE_BOOT:
+        return f"candidate-boot-receipt-{sha}"
     return f"lab-pass-receipt-{lane.value}-{sha}"
 
 
@@ -1456,6 +1462,7 @@ class ModelSettleBudget:
 #: PROBES_NOT_YET_WIRED because it needs nothing the other four do not -- the
 #: introspection manifest is served by the same health server, on the same
 #: port, as ``/ready`` and ``/health``.
+LANE_SYNC_CHECK: Final[str] = "lane_sync"
 MIGRATIONS_APPLIED_CHECK: Final[str] = "migrations_applied"
 CONSUMER_GROUP_LAG_CHECK: Final[str] = "consumer_group_lag"
 DELEGATION_GOLDEN_CHAIN_CHECK: Final[str] = "delegation_golden_chain"
@@ -1468,16 +1475,12 @@ COMPOSE_DEV_HTTP_CHECKS = (
     "node_inventory",
 )
 
-#: The three integration checks OMN-18866 wired, named here beside the HTTP set
-#: because they are emitted by a different mechanism -- the docker socket and
-#: the chain canary's receipt, not an HTTP GET -- and a reader counting the
-#: checks on a receipt should be able to see where each came from.
-#:
-#: Each is emitted ONLY when the caller supplies its subject, on the same rule
-#: the settle budget and the generation binding already follow: supplying the
-#: input IS the claim, so an ad hoc read makes no claim about migrations, lag
-#: or delegation instead of making an empty one.
+#: Socket-backed compose probes. The receipt CLI always supplies lane_sync
+#: (OMN-19417); migration and lag checks run when their subjects are supplied.
+#: The HTTP set above and this tuple are cross-checks of the emitting code,
+#: rather than the versioned wave-exit policy's enforcement authority.
 COMPOSE_DEV_INTEGRATION_CHECKS = (
+    LANE_SYNC_CHECK,
     MIGRATIONS_APPLIED_CHECK,
     CONSUMER_GROUP_LAG_CHECK,
 )
@@ -2058,21 +2061,107 @@ class CommandRunner(Protocol):
     """
 
     def __call__(
-        self, argv: Sequence[str], *, timeout: float
+        self,
+        argv: Sequence[str],
+        *,
+        timeout: float,
+        env: Mapping[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]: ...
 
 
 def _run_read_only(
-    argv: Sequence[str], *, timeout: float
+    argv: Sequence[str],
+    *,
+    timeout: float,
+    env: Mapping[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a fixed-argv, no-shell, read-only command."""
+    """Run a fixed-argv, no-shell, read-only command.
+
+    ``env`` is added to the inherited environment. It is how a credential reaches a
+    child without sitting in argv, which every user on the host reads through ``ps``.
+    """
     return subprocess.run(
         list(argv),
         capture_output=True,
         text=True,
         check=False,
         timeout=timeout,
+        env={**os.environ, **env} if env else None,
     )
+
+
+def check_lane_sync(
+    *,
+    lane: str | None = None,
+    runner: CommandRunner | None = None,
+) -> ModelLabPassCheck:
+    """Run the existing census against this daemon; every finding refuses (OMN-19417).
+
+    The host identity comes from the daemon, as in the census refresh job.
+    Report-only transport reuses the collector and planner without publishing
+    another alert. A zero must name at least one checked lane.
+    """
+    run = runner or _run_read_only
+    try:
+        host_read = run(["docker", "info", "--format", "{{.Name}}"], timeout=30)
+        host = host_read.stdout.strip()
+        if host_read.returncode or not host or "\n" in host:
+            raise ValueError(f"daemon identity unreadable: {host_read.stderr.strip()}")
+        repo = Path(__file__).resolve().parents[2]
+        argv = ["bash", str(repo / "scripts" / "lane-census-check.sh")]
+        if lane is not None:
+            argv.extend(["--lane", lane])
+        argv.append("--json")
+        with tempfile.TemporaryDirectory(prefix="lane-sync-") as scratch:
+            result = run(
+                argv,
+                timeout=120,
+                env={
+                    "LANE_CENSUS_HOST": host,
+                    "LANE_CENSUS_PYTHON": sys.executable,
+                    "LANE_MANIFEST": str(
+                        repo / "deploy" / "lane-census" / "lane-manifest.yaml"
+                    ),
+                    "LANE_CENSUS_LOG_FILE": str(Path(scratch) / "census.log"),
+                    "KAFKA_BOOTSTRAP_SERVERS": "",
+                },
+            )
+        if result.returncode not in (0, 30):
+            raise ValueError(
+                f"census exit={result.returncode}: {result.stderr.strip()}"
+            )
+        plan = json.loads(result.stdout)
+        if not isinstance(plan, dict):
+            raise ValueError("census plan is not an object")
+        checked = plan.get("lanes_checked")
+        findings = plan.get("findings")
+        if (
+            not isinstance(plan.get("host"), str)
+            or not plan["host"]
+            or not isinstance(checked, list)
+            or any(not isinstance(item, str) or not item for item in checked)
+            or not isinstance(findings, list)
+            or any(
+                not isinstance(item, dict) or not item.get("kind") for item in findings
+            )
+            or (not checked and not findings)
+            or type(plan.get("has_drift")) is not bool
+            or plan["has_drift"] != bool(findings)
+            or (result.returncode == 30) != bool(findings)
+        ):
+            raise ValueError(
+                "census plan is empty, malformed or disagrees with its drift exit"
+            )
+        return ModelLabPassCheck(
+            name=LANE_SYNC_CHECK,
+            ok=not findings,
+            evidence=json.dumps(plan, sort_keys=True),
+        )
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        return ModelLabPassCheck.indeterminate_check(
+            name=LANE_SYNC_CHECK,
+            evidence=f"census unreadable: {type(exc).__name__}: {exc}",
+        )
 
 
 @dataclass(frozen=True)
@@ -2252,29 +2341,103 @@ class ModelBrokerAccess:
         return bool(self.sasl_mechanism)
 
     def rpk_flags(self) -> list[str]:
-        flags = ["-X", f"brokers={self.brokers}"]
-        if self.authenticated:
-            flags += [
-                "-X",
-                f"user={self.sasl_username}",
-                "-X",
-                f"pass={self.sasl_password}",
-                "-X",
-                f"sasl.mechanism={self.sasl_mechanism}",
+        """The rpk flags: the broker address only, never a credential (OMN-17427)."""
+        return ["-X", f"brokers={self.brokers}"]
+
+    def rpk_env(self) -> dict[str, str]:
+        """The credential as the ``RPK_*`` variables rpk reads, empty when anonymous.
+
+        Pass it to the runner as ``env``. A password flag would put the password in the
+        argv of ``docker exec`` and of the in-container ``rpk``, where ``ps`` shows it
+        to every user on the host.
+        """
+        if not self.authenticated:
+            return {}
+        return {
+            "RPK_USER": self.sasl_username,
+            "RPK_PASS": self.sasl_password,
+            "RPK_SASL_MECHANISM": self.sasl_mechanism,
+        }
+
+    def docker_exec_env_flags(self) -> list[str]:
+        """``-e NAME`` for each ``RPK_*`` variable, with no value.
+
+        ``docker exec -e NAME`` copies the value from the docker client's own
+        environment, so only the names appear in argv.
+        """
+        return [flag for name in self.rpk_env() for flag in ("-e", name)]
+
+
+@dataclass(frozen=True)
+class ModelGroupLagReading:
+    """One ``rpk group describe`` reading of a consumer group.
+
+    ``partitions`` maps ``<topic>/<partition>`` to ``(committed, lag)``; ``committed``
+    is None where rpk prints ``-`` (the group has never committed there). It is None as
+    a whole when the reply carried no partition table, which is a different fact from a
+    group with no partitions, and ``check_consumer_group_lag`` says which it judged.
+    """
+
+    total_lag: int
+    partitions: Mapping[str, tuple[int | None, int]] | None
+
+
+def _offset_cell(raw: str) -> int | None:
+    return None if raw == "-" else int(raw)
+
+
+def parse_partition_offsets(
+    stdout: str,
+) -> dict[str, tuple[int | None, int]] | None:
+    """The per-partition committed offset and lag, matched by column label.
+
+    Labelled for the same reason TOTAL-LAG is: rpk pads the table differently between
+    versions. The columns read here all precede MEMBER-ID, so a row whose member cells
+    are blank still carries them. Returns None when no table header is printed or a
+    row's offsets are not numbers.
+    """
+    lines = stdout.splitlines()
+    for index, line in enumerate(lines):
+        header = line.split()
+        if not header or header[0] != "TOPIC":
+            continue
+        try:
+            columns = [
+                header.index(label)
+                for label in ("TOPIC", "PARTITION", "CURRENT-OFFSET", "LAG")
             ]
-        return flags
+        except ValueError:
+            continue
+        offsets: dict[str, tuple[int | None, int]] = {}
+        for row in lines[index + 1 :]:
+            cells = row.split()
+            if len(cells) <= max(columns):
+                continue
+            topic, partition, committed, lag = (cells[c] for c in columns)
+            try:
+                offsets[f"{topic}/{int(partition)}"] = (
+                    _offset_cell(committed),
+                    _offset_cell(lag) or 0,
+                )
+            except ValueError:
+                # A row this parse cannot read makes the table unreadable as a
+                # whole, so the check judges the total alone, as it did before
+                # partitions were read, rather than refusing the group.
+                return None
+        return offsets
+    return None
 
 
-def read_group_total_lag(
+def read_group_lag(
     access: ModelBrokerAccess,
     group: str,
     *,
     runner: CommandRunner | None = None,
     timeout_seconds: float = 60.0,
-) -> int:
-    """Read one consumer group's TOTAL-LAG off ``rpk group describe``.
+) -> ModelGroupLagReading:
+    """Read one consumer group's TOTAL-LAG and partition offsets off ``rpk group describe``.
 
-    The parse mirrors ``scripts/runtime_build/declared_consumer_groups.py``'s
+    The TOTAL-LAG parse mirrors ``scripts/runtime_build/declared_consumer_groups.py``'s
     ``parse_group_describe`` -- a ``TOTAL-LAG <n>`` line, matched on the label
     rather than a column offset, because rpk pads that table differently
     between versions. One parse rule for one output format; two would be two
@@ -2282,9 +2445,11 @@ def read_group_total_lag(
     """
     run = runner or _run_read_only
     result = run(
-        ["docker", "exec", access.container, "rpk", "group", "describe", group]
+        ["docker", "exec", *access.docker_exec_env_flags(), access.container]
+        + ["rpk", "group", "describe", group]
         + access.rpk_flags(),
         timeout=timeout_seconds,
+        env=access.rpk_env(),
     )
     if result.returncode != 0:
         msg = (
@@ -2292,16 +2457,38 @@ def read_group_total_lag(
             f"{_truncate((result.stderr or '').strip())}"
         )
         raise ValueError(msg)
-    for line in (result.stdout or "").splitlines():
+    stdout = result.stdout or ""
+    for line in stdout.splitlines():
         fields = line.split()
         if len(fields) >= 2 and fields[0] == "TOTAL-LAG":
             try:
-                return int(fields[1])
+                total = int(fields[1])
             except ValueError as exc:
                 msg = f"TOTAL-LAG for {group} is not an integer: {fields[1]!r}"
                 raise ValueError(msg) from exc
+            return ModelGroupLagReading(
+                total_lag=total, partitions=parse_partition_offsets(stdout)
+            )
     msg = f"rpk group describe {group} printed no TOTAL-LAG line"
     raise ValueError(msg)
+
+
+def stalled_partitions(
+    first: ModelGroupLagReading, second: ModelGroupLagReading
+) -> list[str] | None:
+    """Partitions that had work waiting at the first read and committed none of it.
+
+    None when either reading has no partition table, so the caller can say it judged
+    the total alone rather than imply it read offsets.
+    """
+    if first.partitions is None or second.partitions is None:
+        return None
+    stalled: list[str] = []
+    for key, (committed, lag) in sorted(first.partitions.items()):
+        later = second.partitions.get(key)
+        if lag > 0 and later is not None and later[0] == committed:
+            stalled.append(f"{key} committed {committed} with {lag} waiting")
+    return stalled
 
 
 def check_consumer_group_lag(
@@ -2309,7 +2496,7 @@ def check_consumer_group_lag(
     groups: Sequence[str],
     *,
     max_lag: int,
-    first_sample: Mapping[str, int] | None = None,
+    first_sample: Mapping[str, ModelGroupLagReading] | None = None,
     runner: CommandRunner | None = None,
     timeout_seconds: float = 60.0,
     source_error: str = "",
@@ -2327,6 +2514,15 @@ def check_consumer_group_lag(
     settle wait so the two samples straddle real time rather than being two
     reads a millisecond apart. Absent, the probe reports the bound only and
     says so in its evidence rather than implying it checked growth.
+
+    A rising total is a stall only when some partition had work waiting at the
+    first read and committed none of it by the second (OMN-17427). The two
+    reads can land seconds apart once the lane has already settled: on
+    2026-10-09 they were 5.5 s apart, and one heartbeat between its produce and
+    its commit read 0 -> 1 on a group whose offsets were advancing. A group
+    with nothing waiting at the first read has given no evidence of stopping.
+    When either reading carries no partition table the total alone is judged,
+    as before, and the evidence says so.
     """
     # The source failing to be READ and the lane declaring NOTHING are two
     # different facts, and conflating them is the OMN-18866 production defect:
@@ -2345,11 +2541,11 @@ def check_consumer_group_lag(
             "not a healthy lane, and this is NOT the same as the source being "
             "unreadable, which is reported separately",
         )
-    second: dict[str, int] = {}
+    second: dict[str, ModelGroupLagReading] = {}
     unreadable: list[str] = []
     for group in groups:
         try:
-            second[group] = read_group_total_lag(
+            second[group] = read_group_lag(
                 access, group, runner=runner, timeout_seconds=timeout_seconds
             )
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
@@ -2364,15 +2560,23 @@ def check_consumer_group_lag(
             f"(authenticated={access.authenticated}): {'; '.join(unreadable[:3])}"
             f"{', ...' if len(unreadable) > 3 else ''}",
         )
-    over_bound = sorted(g for g, lag in second.items() if lag > max_lag)
+    over_bound = sorted(g for g, r in second.items() if r.total_lag > max_lag)
     growing: list[str] = []
+    in_flight: list[str] = []
     if first_sample is not None:
-        growing = sorted(
-            g
-            for g, lag in second.items()
-            if g in first_sample and lag > first_sample[g]
-        )
-    worst = max(second.values())
+        for g in sorted(second):
+            earlier = first_sample.get(g)
+            if earlier is None or second[g].total_lag <= earlier.total_lag:
+                continue
+            delta = f"{g} {earlier.total_lag}->{second[g].total_lag}"
+            stalled = stalled_partitions(earlier, second[g])
+            if stalled is None:
+                growing.append(f"{delta} (no partition offsets, total judged alone)")
+            elif stalled:
+                growing.append(f"{delta} ({'; '.join(stalled[:3])})")
+            else:
+                in_flight.append(delta)
+    worst = max(r.total_lag for r in second.values())
     evidence = (
         f"{len(second)} declared group(s) read via {access.container}; "
         f"max TOTAL-LAG {worst} against bound {max_lag}; "
@@ -2386,15 +2590,18 @@ def check_consumer_group_lag(
     problems: list[str] = []
     if over_bound:
         problems.append(
-            f"over bound: {', '.join(f'{g}={second[g]}' for g in over_bound[:5])}"
+            "over bound: "
+            + ", ".join(f"{g}={second[g].total_lag}" for g in over_bound[:5])
         )
     if growing:
         problems.append(
-            "GROWING across two samples: "
-            + ", ".join(
-                f"{g} {first_sample[g]}->{second[g]}"  # type: ignore[index]
-                for g in growing[:5]
-            )
+            "GROWING across two samples with work left uncommitted: "
+            + ", ".join(growing[:5])
+        )
+    if in_flight:
+        evidence += (
+            "; grew with nothing waiting at the first read or every waiting "
+            f"partition committed, so not stopped: {', '.join(in_flight[:5])}"
         )
     if problems:
         return ModelLabPassCheck(
@@ -2465,7 +2672,7 @@ def sample_group_lag(
     *,
     runner: CommandRunner | None = None,
     timeout_seconds: float = 60.0,
-) -> dict[str, int]:
+) -> dict[str, ModelGroupLagReading]:
     """One reading of every declared group's lag, for the EARLIER sample.
 
     A group that cannot be read is OMITTED rather than recorded as zero. The
@@ -2473,10 +2680,10 @@ def sample_group_lag(
     zero would manufacture a baseline that makes any later reading look like
     growth.
     """
-    sample: dict[str, int] = {}
+    sample: dict[str, ModelGroupLagReading] = {}
     for group in groups:
         try:
-            sample[group] = read_group_total_lag(
+            sample[group] = read_group_lag(
                 access, group, runner=runner, timeout_seconds=timeout_seconds
             )
         except (OSError, ValueError, subprocess.SubprocessError):
@@ -2484,14 +2691,39 @@ def sample_group_lag(
     return sample
 
 
-def load_lag_sample(path: Path | None) -> dict[str, int] | None:
+def dump_lag_sample(sample: Mapping[str, ModelGroupLagReading]) -> str:
+    """The sample file ``sample-lag`` writes and ``load_lag_sample`` reads."""
+    return json.dumps(
+        {
+            group: {
+                "total_lag": reading.total_lag,
+                "partitions": None
+                if reading.partitions is None
+                else {
+                    key: {"committed": committed, "lag": lag}
+                    for key, (committed, lag) in reading.partitions.items()
+                },
+            }
+            for group, reading in sample.items()
+        },
+        indent=2,
+        sort_keys=True,
+    )
+
+
+def _is_offset(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def load_lag_sample(path: Path | None) -> dict[str, ModelGroupLagReading] | None:
     """Read an earlier lag sample, or None when the caller supplied none.
 
     An unreadable or malformed file returns None rather than raising: the
     growth arm is then not measured and ``check_consumer_group_lag`` SAYS it
     was not measured in its own evidence. Silently treating a broken baseline
     as an empty one would let the check claim it checked growth against
-    nothing.
+    nothing. A group entry that is not the shape ``dump_lag_sample`` writes is
+    dropped, so that group has no baseline rather than a made-up one.
     """
     if path is None or not path.exists():
         return None
@@ -2501,11 +2733,29 @@ def load_lag_sample(path: Path | None) -> dict[str, int] | None:
         return None
     if not isinstance(payload, dict):
         return None
-    return {
-        str(key): int(value)
-        for key, value in payload.items()
-        if isinstance(value, int) and not isinstance(value, bool)
-    }
+    sample: dict[str, ModelGroupLagReading] = {}
+    for group, entry in payload.items():
+        if not isinstance(entry, dict) or not _is_offset(entry.get("total_lag")):
+            continue
+        raw_partitions = entry.get("partitions")
+        partitions: dict[str, tuple[int | None, int]] | None = None
+        if isinstance(raw_partitions, dict):
+            partitions = {}
+            for key, cell in raw_partitions.items():
+                if not isinstance(cell, dict) or not _is_offset(cell.get("lag")):
+                    partitions = None
+                    break
+                committed = cell.get("committed")
+                if committed is not None and not _is_offset(committed):
+                    partitions = None
+                    break
+                partitions[str(key)] = (committed, cell["lag"])
+        elif raw_partitions is not None:
+            continue
+        sample[str(group)] = ModelGroupLagReading(
+            total_lag=entry["total_lag"], partitions=partitions
+        )
+    return sample
 
 
 def check_delegation_golden_chain(receipt_path: Path) -> ModelLabPassCheck:
@@ -2863,6 +3113,7 @@ def probe_compose_dev(
     expected_generation: ModelLaneGeneration | None = None,
     generation_container: str | None = None,
     read_node_inventory: Callable[[], ModelNodeInventoryProbe] | None = None,
+    read_lane_sync: Callable[[], ModelLabPassCheck] | None = None,
     health_observe_budget_seconds: float | None = None,
     declared_migrations: Sequence[str] | None = None,
     migration_ledger: ModelMigrationLedger | None = None,
@@ -2870,7 +3121,7 @@ def probe_compose_dev(
     declared_consumer_groups: Sequence[str] | None = None,
     consumer_group_source_error: str = "",
     max_consumer_lag: int = 0,
-    first_lag_sample: Mapping[str, int] | None = None,
+    first_lag_sample: Mapping[str, ModelGroupLagReading] | None = None,
     chain_canary_receipt: Path | None = None,
     runner: CommandRunner | None = None,
 ) -> list[ModelLabPassCheck]:
@@ -2989,6 +3240,8 @@ def probe_compose_dev(
     # what they mean. A migration ledger, a consumer group's lag and a
     # delegation's terminal are not properties of the lane's boot, and stamping
     # a settle phrase onto them would imply a relationship that is not there.
+    if read_lane_sync is not None:
+        annotated.append(read_lane_sync())
     if migration_ledger is not None:
         annotated.append(
             check_migrations_applied(
@@ -4470,6 +4723,11 @@ def evaluate_gate(
             "sha": sha,
             "subject": subject,
             "required_lanes": [lane.value for lane in required],
+            "exact_lanes": (
+                {EnumLabLane.ONEX_LAB_K3S.value: sha}
+                if list(lanes) == [EnumLabLane.ONEX_LAB_K3S]
+                else {}
+            ),
             "lanes": dict(lane_tokens),
             "token": token.value,
             "first_read_at": _utc_stamp(first),
@@ -4492,6 +4750,17 @@ def evaluate_gate(
             )
             _record(EnumGateToken.UNREADABLE, {})
             return 1
+    if any(
+        lane in {EnumLabLane.CANDIDATE_BOOT, EnumLabLane.ONEX_LAB}
+        for lane in (*lanes, *required)
+    ):
+        print(
+            f"::error::lab-pass gate FAILED for {sha}: a kind boot receipt is a "
+            "render/wiring smoke check, never a lab pass. token=UNREADABLE",
+            file=out,
+        )
+        _record(EnumGateToken.UNREADABLE, {})
+        return 1
     if not lanes and not required:
         print(
             f"::error::lab-pass gate FAILED for {sha}: no lane was named to read, "
@@ -4532,7 +4801,11 @@ def evaluate_gate(
     # OMN-19233: one token per required lane, and the overall bound.
     lane_tokens: dict[str, EnumGateToken] = {}
     lane_notes: dict[str, str] = {}
-    for read in all_of:
+    # OMN-18276: a singleton persistent-lab selection is an exact-sha
+    # requirement, independently of the compose-dev ancestor subject. Record
+    # its actual failure class so absence can be re-read and a FAIL stands.
+    exact_reads = any_of if list(lanes) == [EnumLabLane.ONEX_LAB_K3S] else []
+    for read in [*all_of, *exact_reads]:
         if read.passed:
             lane_tokens[read.lane.value] = EnumGateToken.PASS
         elif read.receipt is not None:
@@ -4584,6 +4857,8 @@ def evaluate_gate(
         )
         if required_note:
             print(f"  subject    : {required_note}", file=out)
+    if exact_reads:
+        print(f"  exact      : onex-lab-k3s for delivered sha {sha}", file=out)
     if wait_seconds:
         print(f"  waited     : up to {wait_seconds:g} s, {polls} read(s)", file=out)
     rendered: set[tuple[EnumLabLane, str]] = set()
@@ -4638,7 +4913,7 @@ def evaluate_gate(
                 file=out,
             )
 
-    for read in all_of:
+    for read in [*all_of, *exact_reads]:
         if read.passed:
             continue
         if read.receipt is not None:
@@ -4664,7 +4939,7 @@ def evaluate_gate(
 
     any_of_ok = not any_of or any(r.passed for r in any_of)
     refusals = [t for t in lane_tokens.values() if t is not EnumGateToken.PASS]
-    if not any_of_ok:
+    if not any_of_ok and not exact_reads:
         refusals.append(EnumGateToken.ANY_OF_UNMET)
     if timed_out:
         refusals.append(EnumGateToken.TIMED_OUT)
@@ -5170,6 +5445,34 @@ def rerun_refused_deliveries(
         for reason in reasons:
             print(f"  {reason}", file=out)
         for run in selected:
+            # OMN-18276: the compose-dev PASS does not replace the persistent
+            # apply. Re-read the exact delivered sha only after both receipts
+            # have arrived. Old verdicts with no exact requirement retain
+            # their existing selection semantics.
+            exact_lanes = (run.verdict or {}).get("exact_lanes", {})
+            if exact_lanes:
+                delivered_sha = (run.verdict or {}).get("sha", "")
+                if (
+                    not isinstance(delivered_sha, str)
+                    or not _SHA_RE.match(delivered_sha)
+                    or exact_lanes != {EnumLabLane.ONEX_LAB_K3S.value: delivered_sha}
+                ):
+                    print(
+                        f"::error::delivery run {run.run_id}: unreadable exact-lane requirement",
+                        file=out,
+                    )
+                    failures += 1
+                    continue
+                persistent = read_lane(repo, EnumLabLane.ONEX_LAB_K3S, delivered_sha)
+                if not persistent.passed:
+                    print(
+                        f"delivery run {run.run_id}: persistent lab receipt for "
+                        f"{delivered_sha} is not PASS; no re-run",
+                        file=out,
+                    )
+                    if persistent.kind in {"unreadable", "mismatch"}:
+                        failures += 1
+                    continue
             path = f"repos/{repo}/actions/runs/{run.run_id}/rerun-failed-jobs"
             try:
                 _gh_api_post(path)
@@ -5287,7 +5590,9 @@ def evaluate_workflow_verdict(
 
     ``dispatch_title_contains`` (OMN-19311, D11) narrows an admitted
     ``workflow_dispatch`` further: such a run is a measurement only when its run
-    title carries the token. D11's nightly takes a ``lane`` input and renders it
+    title carries the complete whitespace-delimited token. A substring such as
+    ``lane=stability-test-copy`` or ``other-lane=stability-test`` does not name
+    the governed lane. D11's nightly takes a ``lane`` input and renders it
     into its ``run-name``; admitting its dispatches (the fast path to a fresh
     measurement after a fix) without this would let a green dispatch aimed at
     the dev lane stand in for the governed stability-test verdict, dropping the
@@ -5421,7 +5726,7 @@ def evaluate_workflow_verdict(
         and (
             not dispatch_title_contains
             or r.get("event") != "workflow_dispatch"
-            or dispatch_title_contains in str(r.get("display_title", ""))
+            or dispatch_title_contains in str(r.get("display_title", "")).split()
         )
     ]
     ignored = len(runs) - len(candidates)
@@ -5885,7 +6190,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[e.value for e in EnumLabLane],
         help=(
             "repeatable, ANY-OF: one PASS among these satisfies the rule 24(b) "
-            "premise. Defaults to compose-dev, onex-lab and onex-lab-k3s"
+            "premise. Defaults to compose-dev and onex-lab-k3s"
         ),
     )
     gate.add_argument(
@@ -6004,7 +6309,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help=(
             "OMN-19311: an admitted workflow_dispatch run is a measurement only "
-            "when its run title carries this token (the lane it measured)"
+            "when its run title carries this complete whitespace-delimited "
+            "token (the lane it measured)"
         ),
     )
     verdict.add_argument(
@@ -6306,7 +6612,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             sample_groups = parse_group_list_argument(args.consumer_groups or "")
         readings = sample_group_lag(sample_access, sample_groups)
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(json.dumps(readings, indent=2, sort_keys=True), "utf-8")
+        args.out.write_text(dump_lag_sample(readings), "utf-8")
         print(
             f"lag baseline: {len(readings)} group(s) read, written to {args.out}",
             file=sys.stderr,
@@ -6417,6 +6723,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             expected_generation=expected_generation,
             generation_container=args.generation_container,
             read_node_inventory=read_node_inventory,
+            read_lane_sync=check_lane_sync,
             health_observe_budget_seconds=args.health_observe_budget_seconds,
             declared_migrations=declared_migrations,
             migration_ledger=migration_ledger,
@@ -6457,7 +6764,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             checks = [parse_check_argument(raw) for raw in args.check]
             checks.extend(load_checks_json(args.checks_json))
-            ticket_id, criterion_labels = "", ()
+            ticket_id = ""
+            criterion_labels: tuple[str, ...] = ()
             if args.bind_from_commit is not None:
                 checks, ticket_id, criterion_labels = bind_commit_checks(
                     args.sha,

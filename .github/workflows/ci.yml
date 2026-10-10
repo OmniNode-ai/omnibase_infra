@@ -140,6 +140,16 @@ env:
   LLM_ENDPOINT_CIDR_ALLOWLIST: "10.0.0.0/8"
 
 jobs:
+  # OMN-18780: execute the existing audit inside this required umbrella run.
+  # No preflight dependency: routing drift must remain observable on a red base.
+  runner-routing-audit:
+    uses: ./.github/workflows/runner-routing-audit.yml
+    permissions:
+      contents: read
+      actions: read
+    secrets:
+      CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+
   # =============================================================================
   # Per-run runner routing (OMN-18031)
   # =============================================================================
@@ -328,6 +338,29 @@ jobs:
 
       - name: Unit tests for endpoint guard (OMN-20173)
         run: uv run pytest tests/unit/scripts/test_check_no_coding_plan_endpoint.py -q -p no:cacheprovider
+
+      - name: Rolling runner registration preflight (OMN-18877)
+        run: uv run --frozen pytest tests/ci/test_deploy_runners_registration_preflight.py -q
+
+      # OMN-17678: same focused suite as the pre-commit transport gate.
+      - name: Linear transport consolidation regression (OMN-17678)
+        run: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q
+
+      # OMN-19421: same evidence gate as the pre-commit hook, including the
+      # passing safety/liveness controls and lock-removed counterexample.
+      - name: Reviewed lab reconcile model evidence (OMN-19421)
+        run: uv run --frozen pytest tests/ci/test_lab_reconcile_model.py -q --no-cov
+
+      # OMN-19070: same focused suite as the self-pause pre-commit hook.
+      - name: Runner disk admission self-pause regression (OMN-19070)
+        run: uv run --frozen pytest tests/scripts/test_runner_job_started_disk_admission.py -q
+
+      # OMN-18713: same focused suite as contract-discovery-reconciliation in pre-commit.
+      - name: Contract discovery reconciliation (OMN-18713)
+        run: uv run --frozen pytest tests/unit/runtime/auto_wiring/test_discovery.py -q --timeout=60
+
+      - name: Discovery manifest recorded runtime replay (OMN-18713)
+        run: uv run --frozen pytest tests/ci/test_discovery_manifest_live_replay.py -q --timeout=60
 
       # OMN-18364. A hosted-runner step that invokes `uv` before its job
       # installs it exits 127, and where that step's outcome feeds a receipt
@@ -1024,6 +1057,12 @@ jobs:
       - name: SPDX header check (OMN-19612)
         run: uv run --frozen onex spdx validate src tests scripts
 
+      - name: Census health and shared restart bounds (OMN-19416)
+        run: |
+          uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "unhealthy or restart_loop" -q
+          uv run --frozen pytest tests/unit/scripts/test_lane_census_inventory.py -q
+          uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k "restart or shipped_config or manifest" -q
+
   infra-node-handler-ownership:
     needs: occ-preflight
     name: Infra Node Handler Ownership
@@ -1253,6 +1292,13 @@ jobs:
           echo "================================================================"
           uv run python scripts/validation/lint_topic_names.py \
             --scan-contracts src/omnibase_infra/nodes
+
+      # OMN-19315: this required context checks consumer sets in Python too.
+      - name: Refuse mixed consumer topic namespaces
+        run: uv run --frozen python scripts/validation/lint_topic_names.py --scan-python src/omnibase_infra
+
+      - name: Prove consumer namespace refusal and valid controls
+        run: uv run --frozen pytest tests/unit/scripts/validation/test_lint_topic_names.py -q --no-cov
 
       - name: Check for placeholder topic names (OMN-4805)
         run: |
@@ -1815,7 +1861,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
+          ref: 33a29cdfba6f14be6f94c3c77a05e29f345c692b # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1904,7 +1950,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
+          ref: 33a29cdfba6f14be6f94c3c77a05e29f345c692b # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -2039,6 +2085,9 @@ jobs:
           uv run python scripts/validation/check_topic_literals.py \
             --baseline scripts/validation/topic_literal_baseline.txt
 
+      - name: Operator script topic namespace gate (OMN-18913)
+        run: uv run --frozen pytest tests/ci/test_operator_script_topic_namespace_omn18913.py -q
+
   plugin-env-service-completeness:
     needs: occ-preflight
     name: "Plugin ENV->Service Completeness (OMN-4313)"
@@ -2155,6 +2204,9 @@ jobs:
       - name: Verify pre-PR tenant lifecycle (OMN-18894)
         run: uv run --frozen pytest tests/unit/scripts/test_prepr_tenant_lifecycle_omn18894.py -q --timeout=60
 
+      - name: Check delegation routing tiers deployment bindings (OMN-15645)
+        run: uv run --frozen pytest tests/unit/docker/test_delegation_routing_tiers_path_binding_omn15645.py -q --no-cov
+
   # OMN-18247 (epic OMN-18232 phase 3): CI evidence-artifact honesty.
   #
   # An evidence-producing job that reports green while producing nothing is the
@@ -2189,6 +2241,10 @@ jobs:
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
+
+      - name: Check census alarm episodes and recoveries (OMN-19418)
+        # The same focused episode proof runs before commit.
+        run: uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k lane_drift -q
 
       - name: Check the lab-load probe reports honestly (OMN-18253)
         run: |
@@ -2250,6 +2306,9 @@ jobs:
           echo "Read from parsed workflow structure, never from file text."
           echo "================================================================"
           uv run pytest tests/ci/test_ci_evidence_policy.py -v --tb=short
+
+      - name: Check autoclose historical evidence controls (OMN-16106)
+        run: uv run --frozen pytest tests/ci/test_autoclose_history_omn16106.py -q --no-cov
 
   # Contract path pre-flight: verify all referenced module paths exist before expensive test splits (F8/OMN-6478)
   contract-path-preflight:
@@ -2419,6 +2478,11 @@ jobs:
       - name: Test impacted-test selector
         run: uv run --frozen pytest tests/unit/scripts/ci/test_detect_test_paths.py -q --timeout=60
 
+      # OMN-18892: the required detection job must prove the migration
+      # principal fence before its selected test matrix can be trusted.
+      - name: Test slot migration principal confinement (OMN-18892)
+        run: uv run --frozen pytest tests/unit/infra/test_db_slot_provisioner_omn18892.py -q --timeout=60
+
       # OMN-19927 (plan task S2): was this commit validated by a successful
       # merge group? A queue landing fast-forwards `dev` to the merge-group
       # commit, so the answer is a lookup of that sha's merge-group `CI`
@@ -2577,8 +2641,24 @@ jobs:
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
           "${HOME}/.local/bin/shellcheck" --version
 
+      - name: Verify lane-sync receipt refusal and stability refresh (OMN-19417)
+        if: matrix.split == 1
+        run: |
+          uv run --frozen pytest tests/ci/test_lab_pass_receipt_integration_probes_omn18866.py -q
+          uv run --frozen pytest tests/unit/scripts/test_check_lane_census_drift_omn18949.py -q
+          uv run --frozen pytest scripts/runtime_build/tests/test_verify_stability_refresh.py -q
+
       - name: Verify lab-pass criterion bindings and closer pins (OMN-18488)
         run: uv run --frozen pytest tests/scripts/ci/test_lab_pass_criterion_bindings_omn18488.py -q
+
+      - name: Verify persistent lab receipt and candidate smoke isolation (OMN-18276)
+        run: uv run --frozen pytest tests/scripts/ci/test_persistent_lab_receipt_omn18276.py -q --no-cov
+
+      - name: Verify D11 workflow verdict lane matching (OMN-19311)
+        run: uv run --frozen pytest tests/ci/test_workflow_verdict_omn_d11.py -q --no-cov
+
+      - name: Verify cloud migration failure scope (OMN-18496)
+        run: uv run --frozen pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py -q
 
       - name: Run pytest (smart selection)
         if: vars.ENABLE_SMART_TESTS == 'true' && needs.detect-changes.outputs.is_full_suite == 'false'
@@ -3633,6 +3713,12 @@ jobs:
   # workflow_dispatch and merge_group. Unrelated pull requests skip it, which
   # the CI Summary sweep accepts; a failure when it does run fails CI Summary.
   # Widening the path set is a one-line change once it has a green record.
+  #
+  # OMN-17427: the job ends with a dev-lane class phase. It recreates both
+  # kernels with the bindings it reads from docker-compose.dev-lane.yml and
+  # docker-compose.infra.yml (strict auto-wiring, a secrets-store address set),
+  # on the current omnimarket release, and fails on any restart. Those two
+  # compose files are in the path set because the phase derives from them.
   # ============================================================================
   laptop-profile-paths:
     name: Laptop profile paths changed (OMN-19498)
@@ -3677,7 +3763,7 @@ jobs:
               ;;
           esac
           changed_files="$(git diff --name-only "$range")"
-          pattern='^(docker/catalog/|docker/Dockerfile\.runtime$|docker/entrypoint-runtime\.sh$|docker/local\.env\.example$|docker/lane-overlays/local\.|docker/runtime-policy\.env$|docker/migrations/|scripts/run-forward-migrations\.sh$|scripts/check_migrations_complete\.sh$|src/omnibase_infra/docker/catalog/|src/omnibase_infra/runtime/service_kernel\.py$|src/omnibase_infra/runtime/auto_wiring/|Makefile$|pyproject\.toml$|uv\.lock$|\.github/workflows/reusable-runtime-boot\.yml$)'
+          pattern='^(docker/catalog/|docker/Dockerfile\.runtime$|docker/entrypoint-runtime\.sh$|docker/local\.env\.example$|docker/lane-overlays/local\.|docker/runtime-policy\.env$|docker/docker-compose\.(infra|dev-lane)\.yml$|docker/migrations/|scripts/run-forward-migrations\.sh$|scripts/check_migrations_complete\.sh$|src/omnibase_infra/docker/catalog/|src/omnibase_infra/runtime/service_kernel\.py$|src/omnibase_infra/runtime/auto_wiring/|Makefile$|pyproject\.toml$|uv\.lock$|\.github/workflows/reusable-runtime-boot\.yml$)'
           matched="$(printf '%s\n' "$changed_files" | grep -E "$pattern" || true)"
           if [ -n "$matched" ]; then
             echo "Laptop profile surfaces changed:"
@@ -4523,7 +4609,7 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     timeout-minutes: 15
     env:
-      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@8c8f6744c9612ae52abaa760a6423b995eddc871"
+      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@422e207e953841b11b7ae4919bd486f8c84b8c24"
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4586,7 +4672,7 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     timeout-minutes: 15
     env:
-      NODE_BOUNDARY_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@8c8f6744c9612ae52abaa760a6423b995eddc871"
+      NODE_BOUNDARY_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@422e207e953841b11b7ae4919bd486f8c84b8c24"
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4979,7 +5065,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 51e1cb356453ad325d76aea57ab371cf975df3a4 # .github/sibling-pins.yaml
+          ref: 33a29cdfba6f14be6f94c3c77a05e29f345c692b # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 

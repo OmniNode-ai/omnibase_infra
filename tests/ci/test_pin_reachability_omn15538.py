@@ -47,11 +47,14 @@ import yaml
 
 from scripts.ci.check_pin_reachability import (
     PinRef,
+    Resolution,
     Verdict,
     _api_get,
+    _default_targets,
     _is_transient_http_status,
     _Resolver,
     extract_pins,
+    extract_precommit_pins,
     extract_pyproject_pins,
     extract_uv_lock_pins,
     extract_workflow_pins,
@@ -198,6 +201,137 @@ def test_workflow_extraction_ignores_non_workflow_yaml(tmp_path: Path) -> None:
     fixture = tmp_path / "not-a-workflow.yml"
     fixture.write_text("just: a mapping\n", encoding="utf-8")
     assert extract_workflow_pins(fixture) == []
+
+
+@pytest.mark.unit
+def test_workflow_git_pins_cover_every_string_value(tmp_path: Path) -> None:
+    fixture = tmp_path / "fixture.yml"
+    fixture.write_text(
+        rf"""
+env:
+  CORE: git+https://github.com/OmniNode-ai/omnibase_core.git@{INCIDENT_B_GOOD_SHA}
+  DYNAMIC: git+https://github.com/OmniNode-ai/omnimarket@${{OMNIMARKET_SHA}}
+  FOREIGN: git+https://github.com/other/thing@main
+  # COMMENTED: git+https://github.com/OmniNode-ai/omniclaude@commented-out
+jobs:
+  checks:
+    env:
+      CORE: git+https://github.com/OmniNode-ai/omnibase_core@dev
+    with:
+      dependency: git+https://github.com/OmniNode-ai/omnibase_spi@feature/pin
+    steps:
+      - env:
+          CORE: git+https://github.com/OmniNode-ai/omnibase_core@v1.2.3
+          MIXED: '${{{{ github.sha }}}} git+https://github.com/OmniNode-ai/omniclaude@main'
+          EXPRESSION: git+https://github.com/OmniNode-ai/omnimarket@${{{{ github.sha }}}}
+        run: |
+          uv run --with 'omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@{INCIDENT_B_GOOD_SHA}' \
+            python -m omnibase_core.validators.canonical_file_shape
+        with:
+          dependencies:
+            - 'git+https://github.com/OmniNode-ai/omnibase_spi.git@dev git+https://github.com/OmniNode-ai/omniclaude@main'
+""",
+        encoding="utf-8",
+    )
+    pins = extract_workflow_pins(fixture)
+    assert [(p.locus, p.repo, p.ref) for p in pins] == [
+        ("env.CORE", "omnibase_core", INCIDENT_B_GOOD_SHA),
+        ("jobs.checks.env.CORE", "omnibase_core", "dev"),
+        ("jobs.checks.with.dependency", "omnibase_spi", "feature/pin"),
+        ("jobs.checks.steps[0].env.CORE", "omnibase_core", "v1.2.3"),
+        ("jobs.checks.steps[0].env.MIXED", "omniclaude", "main"),
+        ("jobs.checks.steps[0].run", "omnibase_core", INCIDENT_B_GOOD_SHA),
+        ("jobs.checks.steps[0].with.dependencies[0]", "omnibase_spi", "dev"),
+        ("jobs.checks.steps[0].with.dependencies[0]", "omniclaude", "main"),
+    ]
+    assert all(p.kind == "workflow-git-pin" and p.source == str(fixture) for p in pins)
+
+
+@pytest.mark.unit
+def test_workflow_git_pins_do_not_require_jobs(tmp_path: Path) -> None:
+    fixture = tmp_path / "fixture.yml"
+    fixture.write_text(
+        "env:\n  CORE: git+https://github.com/OmniNode-ai/omnibase_core@dev\n",
+        encoding="utf-8",
+    )
+    assert extract_workflow_pins(fixture) == [
+        PinRef(str(fixture), "env.CORE", "workflow-git-pin", "omnibase_core", "dev")
+    ]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("document", ["", "plain scalar", "[]", "null"])
+def test_yaml_extractors_ignore_non_dict_documents(
+    tmp_path: Path, document: str
+) -> None:
+    fixture = tmp_path / "fixture.yaml"
+    fixture.write_text(document, encoding="utf-8")
+    assert extract_workflow_pins(fixture) == []
+    assert extract_precommit_pins(fixture) == []
+
+
+# ---------------------------------------------------------------------------
+# Pre-commit extraction
+# ---------------------------------------------------------------------------
+
+
+_PRECOMMIT_FIXTURE = f"""\
+repos:
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: {INCIDENT_B_GOOD_SHA}
+  - repo: https://github.com/OmniNode-ai/omnibase_spi.git
+    rev: dev
+  - repo: local
+    rev: main
+  - repo: meta
+    rev: main
+  - repo: https://github.com/other/thing
+    rev: main
+  - repo: https://github.com/OmniNode-ai/omniclaude
+  - repo: https://github.com/OmniNode-ai/omniclaude
+    rev: ''
+  - repo: https://github.com/OmniNode-ai/omniclaude
+    rev: 123
+  - repo: https://github.com/OmniNode-ai/omniclaude
+    rev: ${{{{ github.sha }}}}
+  - repo: [https://github.com/OmniNode-ai/omniclaude]
+    rev: main
+  - not-a-mapping
+"""
+
+
+@pytest.mark.unit
+def test_precommit_extraction_covers_literal_omninode_revs(tmp_path: Path) -> None:
+    fixture = tmp_path / ".pre-commit-config.yaml"
+    fixture.write_text(_PRECOMMIT_FIXTURE, encoding="utf-8")
+    assert extract_precommit_pins(fixture) == [
+        PinRef(
+            str(fixture),
+            "repos[0].rev",
+            "precommit-rev",
+            "omnibase_core",
+            INCIDENT_B_GOOD_SHA,
+        ),
+        PinRef(str(fixture), "repos[1].rev", "precommit-rev", "omnibase_spi", "dev"),
+    ]
+
+
+@pytest.mark.unit
+def test_extract_pins_expands_and_dispatches_precommit_config(tmp_path: Path) -> None:
+    fixture = tmp_path / ".pre-commit-config.yaml"
+    fixture.write_text(_PRECOMMIT_FIXTURE, encoding="utf-8")
+    expected = extract_precommit_pins(fixture)
+    assert len(expected) == 2
+    assert extract_pins([tmp_path]) == expected
+    assert extract_pins([fixture]) == expected
+
+
+@pytest.mark.unit
+def test_default_targets_include_precommit_config(tmp_path: Path) -> None:
+    fixture = tmp_path / ".pre-commit-config.yaml"
+    assert fixture not in _default_targets(tmp_path)
+    fixture.write_text(_PRECOMMIT_FIXTURE, encoding="utf-8")
+    assert fixture in _default_targets(tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +484,114 @@ def test_real_tree_extraction_is_nonempty() -> None:
         "the extractor is more likely broken than the tree is clean"
     )
     assert {p.kind for p in pins} >= {"workflow-uses", "pyproject-source", "uv-lock"}
+
+
+@pytest.mark.unit
+def test_real_tree_extracts_precommit_revs_and_workflow_git_pins() -> None:
+    pins = extract_pins([WORKFLOWS_DIR, REPO_ROOT / ".pre-commit-config.yaml"])
+    assert any(p.kind == "precommit-rev" for p in pins)
+    assert any(p.kind == "workflow-git-pin" for p in pins)
+
+
+@pytest.mark.unit
+def test_real_tree_core_ratchet_pins_stay_equal() -> None:
+    """Canonical-file-shape and node-boundary hooks share their CI core SHA."""
+    precommit = REPO_ROOT / ".pre-commit-config.yaml"
+    pins = extract_pins([WORKFLOWS_DIR, precommit])
+    workflow_pins = [
+        p
+        for p in pins
+        if p.source == str(WORKFLOWS_DIR / "ci.yml")
+        and p.kind == "workflow-git-pin"
+        and p.repo == "omnibase_core"
+        and p.locus.endswith(
+            (".env.CANONICAL_FILE_SHAPE_CORE", ".env.NODE_BOUNDARY_CORE")
+        )
+    ]
+    assert len(workflow_pins) == 2
+    config = yaml.safe_load(precommit.read_text(encoding="utf-8"))
+    hook_ids = {"canonical-file-shape", "check-node-boundary-imports"}
+    hook_loci = {
+        hook["id"]: f"repos[{index}].rev"
+        for index, entry in enumerate(config["repos"])
+        for hook in entry.get("hooks", [])
+        if hook["id"] in hook_ids
+    }
+    assert hook_loci.keys() == hook_ids
+    precommit_pins = [
+        p
+        for p in pins
+        if p.source == str(precommit)
+        and p.kind == "precommit-rev"
+        and p.repo == "omnibase_core"
+        and p.locus in hook_loci.values()
+    ]
+    assert len(precommit_pins) == 2
+    refs = {p.ref for p in workflow_pins + precommit_pins}
+    assert len(refs) == 1
+    assert all(len(ref) == 40 and set(ref) <= set("0123456789abcdef") for ref in refs)
+
+
+@pytest.mark.unit
+def test_omn20703_infra4687_rejects_core1902_pre_squash_head() -> None:
+    """OMN-20703 / omnibase_infra#4687: reject omnibase_core#1902's branch head.
+
+    The pre-squash head is unreachable from core dev/main after branch deletion;
+    neither pre-commit revs nor workflow git pins may retain it.
+    """
+    pins = extract_pins([WORKFLOWS_DIR, REPO_ROOT / ".pre-commit-config.yaml"])
+    assert not any(p.ref == "8c8f6744c9612ae52abaa760a6423b995eddc871" for p in pins)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("offender", ["precommit", "workflow"])
+def test_main_resolves_precommit_and_workflow_git_pins(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    offender: str,
+) -> None:
+    monkeypatch.delenv("CI", raising=False)
+    precommit = tmp_path / ".pre-commit-config.yaml"
+    precommit.write_text(
+        "repos:\n  - repo: https://github.com/OmniNode-ai/omnibase_core\n"
+        f"    rev: {INCIDENT_B_GOOD_SHA}\n",
+        encoding="utf-8",
+    )
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    workflow = workflows / "fixture.yml"
+    workflow.write_text(
+        "env:\n  CORE: git+https://github.com/OmniNode-ai/omnibase_core@"
+        f"{INCIDENT_A_GOOD_SHA}\njobs: {{}}\n",
+        encoding="utf-8",
+    )
+    bad_ref = INCIDENT_B_GOOD_SHA if offender == "precommit" else INCIDENT_A_GOOD_SHA
+    calls: list[tuple[str, str]] = []
+
+    def resolve(_self: _Resolver, repo: str, ref: str) -> Resolution:
+        calls.append((repo, ref))
+        if ref == bad_ref:
+            return Resolution(Verdict.UNREACHABLE, "ahead")
+        return Resolution(Verdict.REACHABLE, "behind")
+
+    monkeypatch.setattr("scripts.ci.check_pin_reachability._Resolver.resolve", resolve)
+    assert main(["--root", str(tmp_path)]) == 1
+    stderr = capsys.readouterr().err
+    source_locus = (
+        f"{precommit}::repos[0].rev"
+        if offender == "precommit"
+        else f"{workflow}::env.CORE"
+    )
+    assert source_locus in stderr
+    assert "ahead" in stderr
+    assert set(calls) == {
+        ("omnibase_core", INCIDENT_B_GOOD_SHA),
+        ("omnibase_core", INCIDENT_A_GOOD_SHA),
+    }
+    bad_ref = ""
+    assert main(["--root", str(tmp_path)]) == 0
+    assert capsys.readouterr().err == ""
 
 
 @pytest.mark.unit

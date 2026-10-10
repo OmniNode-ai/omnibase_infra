@@ -7,7 +7,7 @@
 #
 # Measured defect (.201, 2026-09-23T21:33Z): a governed
 # `refresh_stability_lane.sh --ref origin/dev --execute` recreated the
-# stability-test runtime on 0.38.57. deploy-runtime.sh then polled /health 15
+# stability-test runtime on 0.38.57. onex-runtime-deploy then polled /health 15
 # times 4 s apart, about 60 s, while the runtime took about 73 s to boot
 # (/health 503 at 21:34:13Z, docker `healthy` at 21:34:33Z). The deploy
 # declared the lane dead, re-tagged every image to its pre-build id and wrote

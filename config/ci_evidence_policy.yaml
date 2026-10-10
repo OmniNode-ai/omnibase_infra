@@ -190,15 +190,15 @@ evidence_artifacts:
   # so the uploader is satisfied. Rule 24(b) fails staging delivery closed on a
   # missing receipt for a sha, so a receipt that exists and says nothing is the
   # worst of the three states -- it passes the uploader and fails the reader.
-  - id: lab-pass-receipt-onex-lab
+  - id: candidate-boot-receipt
     workflow: .github/workflows/deliver-dev-candidate-to-staging.yml
     job: candidate-boot-gate
-    producer_step: "Emit the onex-lab lab-pass receipt"
-    artifact_name: lab-pass-receipt-onex-lab-${{ github.sha }}
+    producer_step: "Emit the candidate render/wiring smoke receipt"
+    artifact_name: candidate-boot-receipt-${{ github.sha }}
     required_paths:
-      - /tmp/lab-pass-receipt/receipt.json
+      - /tmp/candidate-boot-receipt/receipt.json
     rationale: >-
-      The onex-lab lab pass for the delivered sha. deliver-dev-candidate-to- staging.yml's lab-pass-gate job refuses the staging announcement without a PASS receipt for the exact sha (rule 24(b)).
+      The ephemeral kind candidate render/wiring smoke receipt for the delivered sha. Its absence remains fatal to candidate-boot-gate, but it cannot satisfy the persistent lab-pass gate.
   # OMN-19233: the staging delivery gate's own verdict, one per run attempt.
   # The compose-dev emitter's re-run selector (runtime-rebuild-trigger.yml,
   # job rerun-refused-deliveries) reads it to decide whether a refused delivery

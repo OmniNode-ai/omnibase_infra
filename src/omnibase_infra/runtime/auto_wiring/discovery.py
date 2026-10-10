@@ -28,6 +28,7 @@ from omnibase_core.models.contracts.subcontracts.model_db_ownership_subcontract 
 from omnibase_core.models.contracts.subcontracts.model_runtime_lane_scope import (
     ModelRuntimeLaneScope,
 )
+from omnibase_infra.models.model_discovery_skip import ModelDiscoverySkip
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelContractVersion,
@@ -114,6 +115,59 @@ def _skip_dormant_cloud_gateway(contract: ModelDiscoveredContract) -> bool:
         "ONEX_GATEWAY_CLOUD_MIRRORING_ENABLED",
     )
     return True
+
+
+def _policy_skip(
+    contract: ModelDiscoveredContract,
+    active_packages: frozenset[str] | None,
+) -> ModelDiscoverySkip | None:
+    """Use the same typed exclusion report for both discovery entry points."""
+    if not _contract_targets_active_runtime_packages(contract, active_packages):
+        logger.info(
+            "Skipping contract '%s' from %s because it targets an inactive runtime package domain",
+            contract.name,
+            contract.contract_path,
+        )
+        return ModelDiscoverySkip(
+            contract_path=contract.contract_path,
+            reason="inactive_runtime_package",
+            message="Contract publishes into an inactive runtime package domain",
+        )
+    if _skip_dormant_cloud_gateway(contract):
+        return ModelDiscoverySkip(
+            contract_path=contract.contract_path,
+            reason="dormant_cloud_gateway",
+            message="Contract declares a cloud gateway leg but cloud mirroring is disabled",
+        )
+    return None
+
+
+def _duplicate_error(
+    contract: ModelDiscoveredContract,
+    first_owner: str,
+) -> ModelDiscoveryError:
+    """Keep the existing duplicate-name error shape in both discovery APIs."""
+    error_msg = (
+        f"Duplicate contract name '{contract.name}' already registered "
+        f"by package '{first_owner}'. Skipping registration from "
+        f"'{contract.package_name}' to prevent DUPLICATE_REGISTRATION crash. "
+        f"Remove the stale entry point from one of these packages."
+    )
+    logger.error(
+        "DUPLICATE_REGISTRATION prevented: contract='%s' "
+        "first_owner='%s' duplicate_package='%s' entry_point='%s'",
+        contract.name,
+        first_owner,
+        contract.package_name,
+        contract.entry_point_name,
+    )
+    return ModelDiscoveryError(
+        entry_point_name=contract.entry_point_name,
+        package_name=contract.package_name,
+        error=error_msg,
+        contract_path=contract.contract_path,
+        reason="duplicate_contract_name",
+    )
 
 
 class DiscoveryMemo:
@@ -303,6 +357,7 @@ def _scan_contracts(
     """
     contracts: list[ModelDiscoveredContract] = []
     errors: list[ModelDiscoveryError] = []
+    skips: list[ModelDiscoverySkip] = []
     resolved_paths: list[Path] = []
     # Tracks first-seen package for each contract name — used to detect
     # cross-package duplicates before they reach the dispatch engine.
@@ -376,50 +431,21 @@ def _scan_contracts(
                     entry_point_name=ep.name,
                     package_name=dist_name,
                     error=f"Failed to parse contract: {exc}",
+                    contract_path=contract_path,
+                    reason="parse_error",
                 )
             )
             continue
 
-        if not _contract_targets_active_runtime_packages(contract, active_packages):
-            logger.info(
-                "Skipping contract '%s' from '%s' because it targets an inactive runtime package domain",
-                contract.name,
-                dist_name,
-            )
+        skip = _policy_skip(contract, active_packages)
+        if skip is not None:
+            skips.append(skip)
             continue
 
-        if _skip_dormant_cloud_gateway(contract):
-            continue
-
-        # Duplicate contract name guard (OMN-11958): two packages shipping a
-        # contract with the same ``name`` field would produce identical dispatcher
-        # IDs and crash with ONEX_CORE_064_DUPLICATE_REGISTRATION.  Surface the
-        # collision as a discovery error and skip the duplicate so the runtime
-        # boots cleanly.  The first occurrence (by entry_point iteration order)
-        # wins; the owning package should remove the stale copy.
+        # Preserve the first contract and report the collision before wiring.
         if contract.name in seen_contract_names:
-            first_owner = seen_contract_names[contract.name]
-            error_msg = (
-                f"Duplicate contract name '{contract.name}' already registered "
-                f"by package '{first_owner}'. Skipping registration from "
-                f"'{dist_name}' to prevent DUPLICATE_REGISTRATION crash. "
-                f"Remove the stale entry point from one of these packages."
-            )
-            logger.error(
-                "DUPLICATE_REGISTRATION prevented: contract='%s' "
-                "first_owner='%s' duplicate_package='%s' "
-                "entry_point='%s'",
-                contract.name,
-                first_owner,
-                dist_name,
-                ep.name,
-            )
             errors.append(
-                ModelDiscoveryError(
-                    entry_point_name=ep.name,
-                    package_name=dist_name,
-                    error=error_msg,
-                )
+                _duplicate_error(contract, seen_contract_names[contract.name])
             )
             continue
 
@@ -437,6 +463,7 @@ def _scan_contracts(
         ModelAutoWiringManifest(
             contracts=tuple(contracts),
             errors=tuple(errors),
+            skips=tuple(skips),
         ),
         tuple(resolved_paths),
     )
@@ -454,11 +481,13 @@ def discover_contracts_from_paths(
         contract_paths: List of paths to contract.yaml files.
 
     Returns:
-        A :class:`ModelAutoWiringManifest` with all discovered contracts and errors.
+        A :class:`ModelAutoWiringManifest` with discovered contracts, errors and policy skips.
     """
     contracts: list[ModelDiscoveredContract] = []
     errors: list[ModelDiscoveryError] = []
+    skips: list[ModelDiscoverySkip] = []
     active_packages = get_active_runtime_packages()
+    seen_contract_names: dict[str, str] = {}
 
     for path in contract_paths:
         name = path.parent.name
@@ -476,23 +505,27 @@ def discover_contracts_from_paths(
                     entry_point_name=name,
                     package_name="local",
                     error=f"Failed to parse contract: {exc}",
+                    contract_path=path,
+                    reason="parse_error",
                 )
             )
             continue
-        if not _contract_targets_active_runtime_packages(contract, active_packages):
-            logger.info(
-                "Skipping contract '%s' from explicit path %s because it targets an inactive runtime package domain",
-                contract.name,
-                path,
+        skip = _policy_skip(contract, active_packages)
+        if skip is not None:
+            skips.append(skip)
+            continue
+        if contract.name in seen_contract_names:
+            errors.append(
+                _duplicate_error(contract, seen_contract_names[contract.name])
             )
             continue
-        if _skip_dormant_cloud_gateway(contract):
-            continue
+        seen_contract_names[contract.name] = contract.package_name
         contracts.append(contract)
 
     return ModelAutoWiringManifest(
         contracts=tuple(contracts),
         errors=tuple(errors),
+        skips=tuple(skips),
     )
 
 
@@ -560,6 +593,27 @@ def _parse_bool_field(raw_dict: dict, field_name: str, default: bool = False) ->
     return value
 
 
+def read_contract_yaml(contract_path: Path) -> object:
+    """Read contract YAML safely for discovery and pre-subscription wiring.
+
+    Cold wiring re-reads contract extensions after discovery. Keep those reads
+    on the same fast safe parser so they do not restore the pure-Python parse
+    delay before the first consumer bind (OMN-18843). I/O and parse errors
+    propagate to the caller, which owns the field's refusal semantics.
+    """
+    with open(contract_path) as f:
+        # OMN-18843: cold discovery gates the first consumer bind. Use the
+        # safe LibYAML parser when available; the memo only helps later scans.
+        # Both loaders reject Python object tags, with a portable fallback.
+        loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)(f)
+        try:
+            raw = loader.get_single_data()
+        finally:
+            loader.dispose()
+
+    return raw
+
+
 def _parse_contract(
     *,
     contract_path: Path,
@@ -571,15 +625,7 @@ def _parse_contract(
 
     Only reads the fields needed for auto-wiring. Unknown fields are ignored.
     """
-    with open(contract_path) as f:
-        # OMN-18843: cold discovery gates the first consumer bind. Use the
-        # safe LibYAML parser when available; the memo only helps later scans.
-        # Both loaders reject Python object tags, with a portable fallback.
-        loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)(f)
-        try:
-            raw = loader.get_single_data()
-        finally:
-            loader.dispose()
+    raw = read_contract_yaml(contract_path)
 
     if not isinstance(raw, dict):
         raise ValueError(f"Expected YAML dict, got {type(raw).__name__}")

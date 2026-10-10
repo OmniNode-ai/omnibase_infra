@@ -171,8 +171,8 @@ class _RecordingProjection:
 class _RecordingLedger:
     async def __call__(
         self, source: str, correlation_id: str, timeout_s: float
-    ) -> tuple[tuple[str, ...] | None, bool, str, str]:
-        return _FULL_CHAIN, True, "pass", ""
+    ) -> tuple[tuple[str, ...] | None, bool, str, str, str]:
+        return _FULL_CHAIN, True, "pass", "complete", ""
 
 
 def _handler(

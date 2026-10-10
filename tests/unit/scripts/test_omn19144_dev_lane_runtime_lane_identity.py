@@ -46,6 +46,7 @@ import yaml
 from omnibase_infra.runtime.health import runtime_lane_identity
 from omnibase_infra.runtime.health.runtime_lane_identity import (
     ENV_RUNTIME_LANE,
+    ENV_RUNTIME_LANE_HEALTH_SPEAKER,
     KNOWN_LANES,
     resolve_declared_runtime_lane,
     resolve_runtime_lane,
@@ -66,8 +67,12 @@ def fresh_warn_once_state() -> Iterator[None]:
     environment.
     """
     runtime_lane_identity._warn_absent_lane.cache_clear()
+    runtime_lane_identity._note_health_non_speaker.cache_clear()
+    runtime_lane_identity._warn_invalid_health_speaker.cache_clear()
     yield
     runtime_lane_identity._warn_absent_lane.cache_clear()
+    runtime_lane_identity._note_health_non_speaker.cache_clear()
+    runtime_lane_identity._warn_invalid_health_speaker.cache_clear()
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -85,16 +90,15 @@ DEV_LANE_VALUE = "compose-dev"
 #: both emit on the health topic -- verified read-only on the lab 2026-09-22,
 #: each logging four monitor lines in the same 40-minute window. Only one of
 #: them may claim the lane. The projection's health arm is an upsert guarded on
-#: ``observed_at``, not a fold across processes, so two services declaring the
+#: ``observed_at``, not a fold across processes, so two health speakers for the
 #: same lane would make the lane's stored verdict whichever process emitted
 #: last rather than a statement about the lane.
 #:
 #: ``omninode-runtime`` is the one that speaks, because it is the lane's health
 #: surface: port 8085 is the endpoint the lane's own acceptance falsifier reads.
-#: ``runtime-effects`` keeps no lane and its health events stay unkeyable and
-#: dropped -- an honest "this process cannot speak for the lane", not an
-#: oversight. A worst-of fold across a lane's runtimes is a different design and
-#: belongs to the parent ticket, not to this repair.
+#: ``runtime-effects`` names its lane for placement but declares
+#: ``ONEX_RUNTIME_LANE_HEALTH_SPEAKER=false`` so its health stays unkeyed
+#: (OMN-19812). A worst-of fold across runtimes belongs to the parent ticket.
 LANE_SPEAKING_SERVICE = "omninode-runtime"
 
 #: Overlays for lanes the lab lane-health vocabulary deliberately excludes
@@ -222,7 +226,9 @@ def test_the_declared_lane_is_one_the_emitter_resolver_accepts() -> None:
     assert value is not None, (
         "no lane is declared at all -- see the sibling test in this module"
     )
-    resolved = resolve_runtime_lane({ENV_RUNTIME_LANE: value})
+    resolved = resolve_runtime_lane(
+        _service_environments(DEV_LANE_OVERLAY)[LANE_SPEAKING_SERVICE]
+    )
     assert resolved is not None, (
         f"the dev lane declares {ENV_RUNTIME_LANE}={value!r}, which "
         f"resolve_runtime_lane refuses: it is not in {sorted(KNOWN_LANES)}. A "
@@ -232,25 +238,32 @@ def test_the_declared_lane_is_one_the_emitter_resolver_accepts() -> None:
     assert resolved == DEV_LANE_VALUE
 
 
-def test_exactly_one_dev_lane_service_speaks_for_the_lane() -> None:
+def test_exactly_one_dev_lane_service_resolves_to_a_health_lane() -> None:
     """Two claimants make the stored verdict a race, not a measurement.
 
     Both ``omninode-runtime`` and ``runtime-effects`` run the health monitor on
     this lane. The projection's health arm is an ``observed_at``-guarded upsert
-    on a row keyed by lane alone, so a second service declaring the same lane
+    on a row keyed by lane alone, so a second service speaking for the same lane
     does not add a fact -- it overwrites the first one whenever it emits later.
     Adding a claimant is therefore a modelling decision (a lane-level fold), not
     a configuration tweak, and it fails here until someone makes it.
     """
-    declared = _lane_declarations(DEV_LANE_OVERLAY)
-
-    assert sorted(declared) == [LANE_SPEAKING_SERVICE], (
-        f"{sorted(declared)} declare {ENV_RUNTIME_LANE} on "
-        f"{DEV_LANE_OVERLAY.name}; exactly one service may speak for a lane "
-        "while the projection stores one row per lane with no cross-process "
-        "fold. Whichever of these emits last silently becomes the lane's "
-        "recorded health."
+    environments = _service_environments(DEV_LANE_OVERLAY)
+    declared = {
+        name: env for name, env in environments.items() if ENV_RUNTIME_LANE in env
+    }
+    assert set(declared) == {LANE_SPEAKING_SERVICE, "runtime-effects"}
+    speakers = {
+        name: lane
+        for name, env in declared.items()
+        if (lane := resolve_runtime_lane(env)) is not None
+    }
+    assert speakers == {LANE_SPEAKING_SERVICE: DEV_LANE_VALUE}, (
+        "exactly one service may key health while the projection stores one row per lane"
     )
+    effects = declared["runtime-effects"]
+    assert resolve_runtime_lane(effects) is None
+    assert resolve_declared_runtime_lane(effects) == DEV_LANE_VALUE
 
 
 @pytest.mark.parametrize(
@@ -298,9 +311,12 @@ def test_the_stability_test_main_runtime_names_its_lane() -> None:
 
     declared = _lane_declarations(overlay)
 
-    assert declared == {LANE_SPEAKING_SERVICE: "stability-test"}, (
-        f"{overlay.name} declares {declared!r}; the main runtime must declare "
-        f"{ENV_RUNTIME_LANE}=stability-test (OMN-19408)"
+    assert declared == {
+        LANE_SPEAKING_SERVICE: "stability-test",
+        "runtime-effects": "stability-test",
+    }, (
+        f"{overlay.name} declares {declared!r}; main and effects must declare "
+        f"{ENV_RUNTIME_LANE}=stability-test (OMN-19408, OMN-19812)"
     )
     assert resolve_declared_runtime_lane({ENV_RUNTIME_LANE: "stability-test"}) == (
         "stability-test"
@@ -359,3 +375,67 @@ def test_the_absent_lane_warning_does_not_repeat_every_check_interval(
         f"the absent-lane warning fired {len(warnings)} times across five "
         "resolutions; it must be emitted once per process"
     )
+
+
+@pytest.mark.parametrize("speaker", ["false", "False "])
+def test_health_non_speaker_preserves_placement(speaker: str) -> None:
+    environment = {
+        ENV_RUNTIME_LANE: DEV_LANE_VALUE,
+        ENV_RUNTIME_LANE_HEALTH_SPEAKER: speaker,
+    }
+    assert resolve_runtime_lane(environment) is None
+    assert resolve_declared_runtime_lane(environment) == DEV_LANE_VALUE
+
+
+@pytest.mark.parametrize("speaker", [None, "", "  ", "true", " TRUE "])
+def test_default_and_explicit_health_speaker_keep_current_behavior(
+    speaker: str | None,
+) -> None:
+    environment = {ENV_RUNTIME_LANE: DEV_LANE_VALUE}
+    if speaker is not None:
+        environment[ENV_RUNTIME_LANE_HEALTH_SPEAKER] = speaker
+    assert resolve_runtime_lane(environment) == DEV_LANE_VALUE
+    assert resolve_declared_runtime_lane(environment) == DEV_LANE_VALUE
+
+
+def test_invalid_health_speaker_refuses_health_and_warns_once(
+    caplog: pytest.LogCaptureFixture,
+    fresh_warn_once_state: None,
+) -> None:
+    environment = {
+        ENV_RUNTIME_LANE: DEV_LANE_VALUE,
+        ENV_RUNTIME_LANE_HEALTH_SPEAKER: "bogus",
+    }
+    with caplog.at_level(logging.WARNING):
+        for _ in range(5):
+            assert resolve_runtime_lane(environment) is None
+    assert resolve_declared_runtime_lane(environment) == DEV_LANE_VALUE
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert ENV_RUNTIME_LANE_HEALTH_SPEAKER in warnings[0]
+    assert all(
+        value in warnings[0] for value in ("bogus", "absent/blank", "true", "false")
+    )
+
+
+@pytest.mark.parametrize("lane", [None, DEV_LANE_VALUE])
+def test_health_non_speaker_logs_once_without_absent_lane_warning(
+    lane: str | None,
+    caplog: pytest.LogCaptureFixture,
+    fresh_warn_once_state: None,
+) -> None:
+    environment = {ENV_RUNTIME_LANE_HEALTH_SPEAKER: "false"}
+    if lane is not None:
+        environment[ENV_RUNTIME_LANE] = lane
+    with caplog.at_level(logging.INFO):
+        for _ in range(5):
+            assert resolve_runtime_lane(environment) is None
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    notes = [
+        r
+        for r in caplog.records
+        if r.levelno == logging.INFO
+        and ENV_RUNTIME_LANE_HEALTH_SPEAKER in r.getMessage()
+    ]
+    assert len(notes) == 1
+    assert runtime_lane_identity._warn_absent_lane.cache_info().misses == 0

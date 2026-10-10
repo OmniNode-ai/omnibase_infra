@@ -27,7 +27,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from aiokafka import AIOKafkaConsumer
+from aiokafka import AIOKafkaConsumer, TopicPartition
 from aiokafka.errors import KafkaError
 
 from omnibase_infra.services.observability.consumer_health import (
@@ -198,7 +198,10 @@ async def test_health_check_programmatic_snapshot() -> None:
 def _make_batch(
     events: list[dict[str, object]],
 ) -> list[tuple[object, dict[str, object]]]:
-    return [(SimpleNamespace(value=event), event) for event in events]
+    return [
+        (SimpleNamespace(value=event, topic="topic", partition=0, offset=offset), event)
+        for offset, event in enumerate(events)
+    ]
 
 
 async def test_flush_batch_empty_is_noop() -> None:
@@ -234,7 +237,28 @@ async def test_flush_batch_success_updates_metrics_and_commits() -> None:
     assert consumer._messages_failed == 0
     assert consumer._batches_processed == 1
     assert consumer._last_write_at is not None
-    kafka.commit.assert_awaited_once()
+    kafka.commit.assert_awaited_once_with({TopicPartition("topic", 0): 2})
+
+
+async def test_flush_batch_commits_one_past_last_record_per_partition() -> None:
+    """The commit is bounded by the batch's own records, partition by partition."""
+    consumer = _make_consumer()
+    writer = MagicMock()
+    writer.write_batch = AsyncMock(return_value=3)
+    consumer._writer = writer
+    kafka = AsyncMock(spec=AIOKafkaConsumer)
+    consumer._consumer = kafka
+
+    batch = [
+        (SimpleNamespace(topic="a", partition=0, offset=5), {"event_id": "e1"}),
+        (SimpleNamespace(topic="a", partition=0, offset=6), {"event_id": "e2"}),
+        (SimpleNamespace(topic="b", partition=1, offset=3), {"event_id": "e3"}),
+    ]
+    await consumer._flush_batch(batch)
+
+    kafka.commit.assert_awaited_once_with(
+        {TopicPartition("a", 0): 7, TopicPartition("b", 1): 4}
+    )
 
 
 async def test_flush_batch_short_write_counts_failures() -> None:
@@ -275,7 +299,9 @@ async def test_run_processes_record_and_flushes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     consumer = _make_consumer(batch_size=1, batch_timeout_ms=100)
-    record = SimpleNamespace(value={"event_id": "e1"})
+    record = SimpleNamespace(
+        value={"event_id": "e1"}, topic="topic", partition=0, offset=7
+    )
 
     async def fake_getmany(**_kwargs: object) -> dict[tuple[str, int], list[object]]:
         consumer._shutdown_event.set()  # exit after this iteration
@@ -297,7 +323,7 @@ async def test_run_processes_record_and_flushes(
     assert consumer._messages_received == 1
     assert consumer._messages_processed == 1
     writer.write_batch.assert_awaited_once()
-    kafka.commit.assert_awaited_once()
+    kafka.commit.assert_awaited_once_with({TopicPartition("topic", 0): 8})
 
 
 async def test_run_skips_none_valued_records(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -46,9 +46,14 @@ def test_rpk_pins_internal_broker_and_preserves_credentials_and_args(
     rpk_args = shlex.split(script)
     broker_index = rpk_args.index("brokers=redpanda:9092")
     assert rpk_args[broker_index - 1] == "-X"
-    assert script.startswith('rpk "$@" ')
-    assert '-X user="$DEV_KAFKA_SASL_USERNAME"' in script
-    assert '-X pass="$DEV_KAFKA_SASL_PASSWORD"' in script
+    # The credential rides rpk's environment; a -X pass= flag would be expanded
+    # into the in-container rpk argv, where `ps` shows it to every user (OMN-17427).
+    assert script.startswith('RPK_USER="$DEV_KAFKA_SASL_USERNAME" ')
+    assert 'RPK_PASS="$DEV_KAFKA_SASL_PASSWORD"' in script
+    assert "RPK_SASL_MECHANISM=SCRAM-SHA-256" in script
+    assert 'rpk "$@" ' in script
+    assert "-X pass" not in script
+    assert "-X user" not in script
     assert script.count("$DEV_KAFKA_SASL_PASSWORD") == 1
     assert "host-password-must-not-be-forwarded" not in " ".join(argv)
     assert all("DEV_KAFKA_SASL_PASSWORD" not in arg for arg in argv[:6] + argv[7:])

@@ -3,7 +3,7 @@
 
 """prune_old_deployments() must not delete a bundle another lane still needs (OMN-19910).
 
-Defect: ``prune_old_deployments()`` (``scripts/deploy-runtime.sh``) resolved
+Defect: ``prune_old_deployments()`` (``src/omnibase_infra/handlers/handler_runtime_deploy.sh``) resolved
 "is this deployment still needed" from exactly one source -- the invoking
 lane's own ``REGISTRY_FILE`` (``registry.<compose_project>.json``). Every
 other lane (dev, stability-test, prepr-1, prepr-2, lakshman, ...) writes its
@@ -34,7 +34,7 @@ Fix, two layers, both exercised here:
 
 These tests drive the ACTUAL script seam per ``feedback_test_the_artifact_that_
 runs``: ``prune_old_deployments()`` and ``containers_bound_to_deploy_dir()``
-are extracted VERBATIM from ``deploy-runtime.sh`` and executed under bash,
+are extracted VERBATIM from ``onex-runtime-deploy`` and executed under bash,
 with only the true I/O boundary (``docker``) replaced by a file-backed fake.
 """
 
@@ -50,7 +50,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 
 
 def _script_text() -> str:
@@ -64,7 +66,7 @@ def _extract_function(name: str) -> str:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, (
-        f"could not extract function {name}() from deploy-runtime.sh"
+        f"could not extract function {name}() from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -360,7 +362,7 @@ def test_prune_does_not_crash_when_no_registry_exists_anywhere(
     `set -euo pipefail`, an unguarded `"${active_paths[@]}"` expansion of an
     empty array is an unbound-variable hard error on bash < 4.4 (the array
     expansion must use the repo's own `${arr[@]+"${arr[@]}"}` guard, already
-    used elsewhere in this same file at deploy-runtime.sh:4469). The script
+    used elsewhere in this same file at onex-runtime-deploy:4469). The script
     must still run to completion and still prune true orphans.
     """
     versions = [f"0.7{i}.0" for i in range(6)]

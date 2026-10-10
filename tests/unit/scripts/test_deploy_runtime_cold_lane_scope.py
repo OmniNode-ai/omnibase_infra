@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""`--cold` lane-scope guard ratchet for deploy-runtime.sh (OMN-16803).
+"""`--cold` lane-scope guard ratchet for onex-runtime-deploy (OMN-16803).
 
 Two defects this pins.
 
@@ -36,7 +36,9 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
-_DEPLOY_SCRIPT = _REPO / "scripts" / "deploy-runtime.sh"
+_DEPLOY_SCRIPT = (
+    _REPO / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 
 
 def _script() -> str:
@@ -55,7 +57,7 @@ def _guard_body() -> str:
 def test_cold_lane_scope_guard_exists() -> None:
     """The guard must exist as a named function, not inline in main()."""
     assert "guard_cold_bringup_lane_scope() {" in _script(), (
-        "deploy-runtime.sh lost guard_cold_bringup_lane_scope — the --cold lane "
+        "onex-runtime-deploy lost guard_cold_bringup_lane_scope — the --cold lane "
         "scope check (OMN-16803) must stay a named, greppable guard"
     )
 

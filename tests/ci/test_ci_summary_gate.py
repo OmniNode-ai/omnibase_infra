@@ -3565,7 +3565,7 @@ class TestDraftReadySupersessionOmn19379:
         assert "--pr-timeline-file pr_timeline.json" in poll["run"]
         assert '--head-sha "${HEAD_SHA}"' in poll["run"]
 
-    @pytest.mark.parametrize("event", ["pull_request", "push"])
+    @pytest.mark.parametrize("event", ["pull_request", "push", "pull_request_target"])
     def test_draft_creation_era_includes_push_runs(self, event: str) -> None:
         fixture = self._fixture()
         fixture["workflow_runs"][0]["event"] = event

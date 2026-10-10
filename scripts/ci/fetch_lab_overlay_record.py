@@ -197,7 +197,17 @@ def checks_from_record(payload: Any, *, sha: str, url: str) -> list[dict[str, An
                 f"{{name, ok, evidence}}: {_truncate(json.dumps(bad))}"
             )
         return [{"name": RECORD_CHECK, "ok": False, "evidence": evidence}]
-    return checks
+    return [
+        {
+            "name": RECORD_CHECK,
+            "ok": True,
+            "evidence": (
+                f"persistent lab apply record: GET {url} names merged sha {sha}; "
+                "checks below are from the lab deploy agent's own apply_lab_lane.sh record"
+            ),
+        },
+        *checks,
+    ]
 
 
 def _gh_compare_status(repo: str, base: str, head: str) -> str:
@@ -305,7 +315,8 @@ def resolve_via_latest(
             "name": RECORD_CHECK,
             "ok": True,
             "evidence": (
-                f"no exact record for {sha}; the agent's latest applied record is "
+                f"persistent lab apply record: GET {url}; no exact record for {sha}; "
+                "the agent's latest applied record is "
                 f"for {observed_sha}, a {relation} of {sha} on {repo} -- accepted "
                 "via descendant tolerance (OMN-18399). Checks below are from that "
                 "record."

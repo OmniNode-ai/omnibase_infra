@@ -28,7 +28,7 @@ assertion unchanged.
 
 Same seam-level harness as `test_deploy_runtime_rt6_scoped_readback.py`: the
 real `readback_deployed_ref()` and its real dependencies are extracted from
-`scripts/deploy-runtime.sh` and executed under bash with only `docker` stubbed.
+`src/omnibase_infra/handlers/handler_runtime_deploy.sh` and executed under bash with only `docker` stubbed.
 """
 
 from __future__ import annotations
@@ -42,8 +42,10 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
-# OMN-16729: the lane -> compose-file mapping moved out of deploy-runtime.sh into
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
+# OMN-16729: the lane -> compose-file mapping moved out of onex-runtime-deploy into
 # a shared lib, because refresh_dev_lane.sh's rollback recreate needed the
 # identical derivation and its hand-spelled copy had lost the dev-lane overlay.
 # The harness sources the lib rather than extracting those functions by regex.
@@ -68,7 +70,7 @@ def _extract_function(name: str) -> str:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, (
-        f"could not extract function {name}() from deploy-runtime.sh"
+        f"could not extract function {name}() from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -80,7 +82,7 @@ def _extract_array(name: str) -> str:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, (
-        f"could not extract array {name}=() from deploy-runtime.sh"
+        f"could not extract array {name}=() from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -91,7 +93,7 @@ def _extract_scalar_omn18656(name: str) -> str:
         rf'^readonly {re.escape(name)}="[^"]*"$', _script_text(), re.MULTILINE
     )
     assert match is not None, (
-        f"could not extract readonly {name}= from deploy-runtime.sh"
+        f"could not extract readonly {name}= from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -153,6 +155,17 @@ if [[ "$1" == "inspect" ]]; then
         *)               key="revision" ;;
     esac
     f="${DOCKER_STUB_DIR}/inspect/${container}.${key}"
+    # OMN-17427: a `<file>.seq` answers one line per call, then sticks on its
+    # last line -- how a one-shot that is still running at the first sample
+    # and exits on a later one is modelled.
+    if [[ -f "${f}.seq" ]]; then
+        head -n 1 "${f}.seq"
+        if [[ "$(wc -l < "${f}.seq")" -gt 1 ]]; then
+            tail -n +2 "${f}.seq" > "${f}.seq.next"
+            mv "${f}.seq.next" "${f}.seq"
+        fi
+        exit 0
+    fi
     if [[ -f "${f}" ]]; then
         cat "${f}"
     fi
@@ -185,6 +198,7 @@ def _run_readback(
     all_containers: dict[str, str],
     inspect: dict[str, dict[str, str]],
     deploy_started_at: str = DEPLOY_STARTED_AT,
+    wait_attempts: int = 1,
 ) -> subprocess.CompletedProcess[str]:
     stub_dir = tmp_path / "stubs"
     for sub in ("ps", "ps_all", "inspect", "version"):
@@ -212,10 +226,18 @@ def _run_readback(
             "log_error() { printf 'ERR: %s\\n' \"$*\" >&2; }",
             "log_cmd() { printf 'CMD: %s\\n' \"$*\" >&2; }",
             f'DEPLOY_STARTED_AT="{deploy_started_at}"',
+            # OMN-17427: the one-shot settle wait, bounded by attempts; no real
+            # sleep in a unit test.
+            f"RT6_ONE_SHOT_WAIT_ATTEMPTS={wait_attempts}",
+            "RT6_ONE_SHOT_POLL_SECONDS=0",
             f'source "{COMPOSE_FILES_SH}"',
             _extract_function("resolve_lane_runtime_container_name"),
             _extract_array("DEV_LANE_ONLY_RUNTIME_SERVICES"),
             _extract_array("STABILITY_TEST_LANE_ONLY_RUNTIME_SERVICES"),
+            # OMN-18496: readback scope is filtered through the cloud-migration gate.
+            _extract_array("DEV_LANE_CLOUD_DB_SERVICES"),
+            "DEV_LANE_CLOUD_MIGRATIONS_READY=true",
+            _extract_function("exclude_cloud_database_services"),
             _extract_function("resolve_lane_runtime_services"),
             _extract_function("service_is_one_shot"),
             _extract_function("readback_one_shot_service"),
@@ -325,6 +347,88 @@ def test_one_shot_still_running_is_rejected(tmp_path: Path) -> None:
     )
     assert result.returncode != 0
     assert "expected 'exited'" in result.stderr
+
+
+@pytest.mark.unit
+def test_one_shot_sampled_mid_run_is_waited_for_until_it_exits(
+    tmp_path: Path,
+) -> None:
+    """OMN-17427: the live 2026-10-09T14:03Z case on the .201 dev lane.
+
+    redpanda-sasl-enable ran 14:03:47Z..14:03:56Z and exited 0, but RT-6
+    sampled it once while it was still running and refused the deploy; the
+    refresh then rolled the lane back. A one-shot that is still running is
+    not yet a finding: RT-6 re-reads it, within a bound, until it is terminal.
+    """
+    stub_inspect = {
+        "oneshot1": {
+            "restart": "no",
+            # Two mid-run samples, then terminal. Exit code and finished-at
+            # are read once the one-shot settles, so they carry final values.
+            "state.seq": "running\nrunning\nexited\n",
+            "exit_code": "0",
+            "finished_at": "2026-09-08T13:38:13.5Z",
+        }
+    }
+    result = _run_readback(
+        tmp_path,
+        services=[ONE_SHOT],
+        running={ONE_SHOT: "oneshot1"},
+        all_containers={ONE_SHOT: "oneshot1"},
+        inspect=stub_inspect,
+        wait_attempts=5,
+    )
+    assert result.returncode == 0, f"stderr={result.stderr!r}"
+    assert "one-shot exited 0" in result.stderr
+    assert "waiting for it to finish" in result.stderr
+
+
+@pytest.mark.unit
+def test_one_shot_still_running_after_the_bound_is_rejected(tmp_path: Path) -> None:
+    """OMN-17427: the wait is a bound, not retry-until-green. A one-shot still
+    running when the attempts run out fails exactly as before, and the error
+    names how long it was given."""
+    result = _run_readback(
+        tmp_path,
+        services=[ONE_SHOT],
+        running={ONE_SHOT: "oneshot1"},
+        all_containers={ONE_SHOT: "oneshot1"},
+        inspect={
+            "oneshot1": _one_shot_inspect(
+                state="running", finished_at="0001-01-01T00:00:00Z"
+            )
+        },
+        wait_attempts=3,
+    )
+    assert result.returncode != 0
+    assert "expected 'exited'" in result.stderr
+    assert "after 3 sample(s)" in result.stderr
+
+
+@pytest.mark.unit
+def test_one_shot_that_exits_nonzero_after_the_wait_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """OMN-17427: waiting must not launder a failure -- the exit code is read
+    AFTER the one-shot settles, so a mid-run sample followed by exit 1 fails."""
+    stub_inspect = {
+        "oneshot1": {
+            "restart": "no",
+            "state.seq": "running\nexited\n",
+            "exit_code": "1",
+            "finished_at": "2026-09-08T13:38:13.5Z",
+        }
+    }
+    result = _run_readback(
+        tmp_path,
+        services=[ONE_SHOT],
+        running={ONE_SHOT: "oneshot1"},
+        all_containers={ONE_SHOT: "oneshot1"},
+        inspect=stub_inspect,
+        wait_attempts=5,
+    )
+    assert result.returncode != 0
+    assert "exited 1, expected 0" in result.stderr
 
 
 @pytest.mark.unit

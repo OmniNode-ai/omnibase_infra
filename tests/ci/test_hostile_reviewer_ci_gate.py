@@ -118,7 +118,7 @@ def test_hostile_reviewer_gate_blocks_on_failed_review_or_missing_preflight() ->
 
 def test_hostile_review_job_uses_live_local_models() -> None:
     """The gate targets live local models (OMN-14176). Since OMN-17492 those
-    are two DIFFERENT models: qwen3-review (.201) and gpt-oss-review (.200).
+    are two DIFFERENT models: qwen3-review (.201) and local-studio-planner (.200).
     qwen3-review-b named the same .201 model as qwen3-review, so it is no
     longer a voter; test_hostile_review_distinct_reviewers_omn17492.py pins
     the full roster."""
@@ -128,7 +128,7 @@ def test_hostile_review_job_uses_live_local_models() -> None:
     review_step = next(s for s in steps if s.get("name") == "Run adversarial review")
     script = review_step["run"]
     assert "--model qwen3-review " in script
-    assert "--model gpt-oss-review" in script
+    assert "--model local-studio-planner" in script
     assert "--model qwen3-review-b" not in script
 
 

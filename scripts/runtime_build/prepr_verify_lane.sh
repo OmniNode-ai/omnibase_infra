@@ -29,7 +29,7 @@
 # no --force and no --skip. The compose project is DERIVED from the slot
 # number, so there is no argument through which a caller could aim this script
 # at a governed lane. That is the whole reason this is a separate entrypoint
-# rather than a flag on scripts/deploy-runtime.sh: a pool arm there would put a
+# rather than a flag on onex-runtime-deploy: a pool arm there would put a
 # branch workspace build one argument away from every governed lane.
 #
 # WHY NOT stage_workspace.sh
@@ -533,7 +533,7 @@ log "snapshot staged; target content digest ${TARGET_SNAPSHOT_DIGEST:0:16}..."
 # -----------------------------------------------------------------------------
 # 6. THE OPERATOR ENVIRONMENT, SOURCED BEFORE BOTH THE PROVISIONER AND THE SLOT.
 #
-# Same two files scripts/deploy-runtime.sh and refresh_dev_lane.sh source, in
+# Same two files onex-runtime-deploy and refresh_dev_lane.sh source, in
 # the same order, under `set -a`: the rendered runtime policy and the operator
 # env file. Compose then reads the process environment, and no `--env-file` is
 # passed -- the stale-snapshot copy that used to live at docker/.env was

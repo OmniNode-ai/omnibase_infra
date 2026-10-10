@@ -5,7 +5,7 @@
 # development compose file. Docker Compose interpolates every input file before
 # merge, so a pure overlay would still inherit dev-only .env requirements.
 #
-# HOWEVER: deploy-runtime.sh (resolve_compose_file_args, OMN-13581) layers this
+# HOWEVER: onex-runtime-deploy (resolve_compose_file_args, OMN-13581) layers this
 # file ON TOP of docker-compose.infra.yml on the .201 host. Compose merges plain
 # `networks:` / `ports:` lists by UNION with the base file, which attached every
 # judge service to BOTH the judge and dev networks (cross-lane isolation hole,
@@ -483,8 +483,8 @@ services:
       # OMN-19494 (LO4): this runtime names its lane. A lane-scoped node
       # contract fails closed on a main runtime that declares none, and each
       # refusal reads as a DEGRADED discovery_errors dimension. Literal, so an
-      # exported shell value cannot rename the lane; on the main runtime only,
-      # because the other runtimes of this lane own no lane-scoped contract.
+      # exported shell value cannot rename the lane; main and effects runtimes
+      # both own lane-scoped contracts (OMN-19812).
       # `judge` is outside the lab lane-health vocabulary on purpose
       # (OMN-18769 AC6), so no lab-keyed verdict comes from this lane. Held by
       # tests/unit/docker/test_omn19494_compose_runtime_lane.py.
@@ -540,6 +540,8 @@ services:
       redpanda:
         condition: service_healthy
     environment:
+      # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
+      ONEX_RUNTIME_LANE: "judge"
       !!merge <<: *judge-runtime-env
       RUNTIME_PROFILE: effects
       OTEL_SERVICE_NAME: omninode-judge-runtime-effects
@@ -614,7 +616,7 @@ services:
       - "com.omninode.service=projection-api"
   # OMN-13772: the base infra compose defines keycloak and infisical with NO
   # compose profile, so the layered deploy render (`-f docker-compose.infra.yml
-  # -f docker-compose.judge.yml --profile judge`, see deploy-runtime.sh
+  # -f docker-compose.judge.yml --profile judge`, see onex-runtime-deploy
   # resolve_compose_file_args) activates them attached to the DEV network with
   # dev container names — the OMN-13581 cross-lane displacement class. The judge
   # lane runs neither (lane manifest + EXPECTED_RENDERED_SERVICES agree), so
