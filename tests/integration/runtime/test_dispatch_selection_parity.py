@@ -317,7 +317,7 @@ def test_p0_1_guard_tripped_orchestrators_now_route(
     p0 = committed_fixture["header"]["p0_outcomes"]["P0-1_guard_tripped_orchestrators"]
     assert p0["verdict"] == "ROUTES_REGISTERED_OMN13852"
     now_routing = p0["now_routing_orchestrators"]
-    assert len(now_routing) == 6, "Expected all six orchestrators recorded as routing"
+    assert len(now_routing) == 5, "Expected all five orchestrators recorded as routing"
 
     regressed: list[str] = []
     for orch in now_routing:

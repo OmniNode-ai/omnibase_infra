@@ -13,7 +13,6 @@
 allowlist:
   - "omnibase_infra.adapters._internal.adapter_infisical:AdapterInfisical"
   - "omnibase_infra.adapters.adapter_onex_tool_execution:AdapterONEXToolExecution"
-  - "omnibase_infra.adapters.github.adapter_github_client:GitHubHttpClient"
   - "omnibase_infra.adapters.llm.adapter_code_analysis_enrichment:AdapterCodeAnalysisEnrichment"
   - "omnibase_infra.adapters.llm.adapter_code_review_analysis:AdapterCodeReviewAnalysis"
   - "omnibase_infra.adapters.llm.adapter_documentation_generation:AdapterDocumentationGeneration"
