@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-19558
 title: A delegate-skill command whose terminal never arrives is not dead-lettered and replayed as a new command
-summary: The delegation dispatch port supplies the typed timeout cause when the Pattern B broker reports a timeout without one, so the consumer converts it into one typed timeout terminal instead of a provider_error. Supplied causes and other statuses are unchanged. AC1 and AC2 shipped earlier; this change carries the in-process part of AC3, and AC3's live held-model exercise is pending.
+summary: The delegation dispatch port supplies the typed timeout cause when the Pattern B broker reports a timeout without one, so the consumer converts it into one typed timeout terminal instead of a provider_error. Supplied causes and other statuses are unchanged. AC1 and AC2 shipped in omnibase_infra#4289 and are not claimed here; this change carries the in-process part of AC3, and AC3's live held-model exercise is pending.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -9,10 +9,6 @@ requirements:
   - id: req-omn19558
     statement: A delegate-skill command that waits past its budget yields one typed timeout terminal, and a dead-lettered replay is the same delivery rather than a new command.
     acceptance:
-      - id: AC1
-        statement: 'AC1: the consume deadline for onex.cmd.omnimarket.delegate-skill.v1 is never shorter than the handler budget plus its terminal delivery margin on any bundle, including the laptop profile -- falsifier: a pytest that builds the Kafka config for each catalog bundle and asserts effective_dispatch_deadline_seconds >= 300 for a node declaring max_handler_duration_seconds 240'
-      - id: AC2
-        statement: 'AC2: a record replayed by node_dlq_replay_effect carries the original message_id, so the delegate-skill claim sees a replay as the same delivery and serves the recorded terminal -- falsifier: a red-first pytest in omnibase_infra that replays a captured DLQ row and asserts the replayed record headers include the original message_id'
       - id: AC3
         statement: 'AC3: a delegate-skill command whose terminal never arrives yields exactly one typed timeout terminal and no replayed re-dispatch -- falsifier: onex delegate against a lab stack with the model endpoint held open past the budget, then count delegate-skill-failed and delegation-request records for the correlation with rpk topic consume'
 evidence_requirements:
@@ -36,21 +32,3 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
-  - id: dod-omn-19558-ac1-consume-deadline
-    description: AC1 shipped in omnibase_infra#4289. For every catalog bundle, including the laptop profile, the Kafka config gives effective_dispatch_deadline_seconds of at least the 240-second handler budget plus its terminal delivery margin for the delegate-skill command.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: uv run pytest tests/unit/infra/test_omn19558_consume_deadline_covers_delegate_skill_budget.py -q
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC1
-  - id: dod-omn-19558-ac2-replay-message-id
-    description: AC2 shipped in omnibase_infra#4289. A record replayed by node_dlq_replay_effect carries the message_id recorded on the DLQ row, so the delegate-skill claim sees the replay as the same delivery.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_dlq_replay_effect/test_omn19558_replay_keeps_message_id.py -q
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC2
