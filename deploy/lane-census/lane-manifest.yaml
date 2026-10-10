@@ -1180,6 +1180,49 @@ lanes:
         kind: service
         replicas: 1
   # ---------------------------------------------------------------------------
+  # lab-tenant — a satellite's runtime pair as a TENANT of the .201 dev lane
+  # (OMN-20207)
+  # ---------------------------------------------------------------------------
+  # Operator, 2026-09-30 ~22:55Z (OPERATOR-CONSENT, rolling ledger row 19808):
+  # "all they need is the runtime" / "they can be tenants of the lab". The
+  # compose file is an overlay on docker/docker-compose.dogfood.yml that fences
+  # every dependency service and points the runtime pair at the dev lane's
+  # Postgres, Redpanda and Valkey under the tenant's own database set, topic
+  # and group prefix, bus login and Valkey index. Per-host values live in
+  # deploy/lab/satellite-tenants.yaml, rendered by scripts/render_lab_tenant_env.py.
+  #
+  # Same container names on both hosts, as the dogfood lane has on three:
+  # the census runs per host (OMN-19088), so a name is never ambiguous.
+  #
+  # A PREMISE FOR NOTHING: not in GOVERNED_LANES or GRANT_INTERLOCK_LANES and
+  # sources no `stability-proven` digest; tests/ci/test_lab_tenant_lane_omn20207.py
+  # pins that, the fence and the loopback port block.
+  #
+  # `optional: true`: declared before it is brought up. Each host keeps its
+  # dogfood stack until its tenant runtime is proven, and absent is valid.
+  #
+  # PORT BLOCK, loopback only: runtime main 44085, effects 44086. Read free on
+  # h101 and h105 by `lsof -iTCP -sTCP:LISTEN` on 2026-09-30T23:15Z.
+  # verified: 2026-09-30T23:20Z via `docker compose -p omnibase-infra-lab-tenant
+  #   ... -f docker/docker-compose.dogfood.yml -f docker/docker-compose.lab-tenant.yml
+  #   --profile dogfood config` on h105 (omnibook) against its deployed 0.38.40
+  #   bundle: exactly the two runtime services render, no dependency service,
+  #   no depends_on, network omnibase-infra-lab-tenant-network (OMN-20207).
+  lab-tenant:
+    hosts: [lab-105, lab-101]
+    compose_file: docker/docker-compose.lab-tenant.yml
+    compose_project: omnibase-infra-lab-tenant
+    network: omnibase-infra-lab-tenant-network
+    image_tag_pattern: '.+'
+    optional: true
+    services:
+      - name: omninode-lab-tenant-runtime
+        kind: service
+        replicas: 1
+      - name: omninode-lab-tenant-runtime-effects
+        kind: service
+        replicas: 1
+  # ---------------------------------------------------------------------------
   # prepr-1 / prepr-2 — the EPHEMERAL PRE-PR VERIFY POOL (OMN-18890, epic
   # OMN-18888)
   # ---------------------------------------------------------------------------
