@@ -176,6 +176,9 @@ def test_the_override_carries_the_dev_lane_bindings_on_both_kernels(
     strict = _compose(_REPO / "docker" / "docker-compose.dev-lane.yml")[
         "x-dev-lane-strict-wiring-env"
     ]
+    runtime_env = _compose(_REPO / "docker" / "docker-compose.infra.yml")[
+        "x-runtime-env"
+    ]
     assert strict, "the dev lane overlay no longer binds strict wiring"
     for kernel in _KERNELS:
         env = override["services"][kernel]["environment"]
@@ -184,6 +187,11 @@ def test_the_override_carries_the_dev_lane_bindings_on_both_kernels(
         assert env["INFISICAL_ADDR"].strip(), (
             f"{kernel}: the secrets-store address is unset"
         )
+        for key in ("GITHUB_TOKEN", "GH_TOKEN"):
+            assert env.get(key) == runtime_env[key], (
+                f"{kernel}: {key} must override the laptop's blank credential "
+                "with the dev lane's binding"
+            )
     effects_env = override["services"]["runtime-effects"]["environment"]
     infra_effects = _compose(_REPO / "docker" / "docker-compose.infra.yml")["services"][
         "runtime-effects"
@@ -192,6 +200,27 @@ def test_the_override_carries_the_dev_lane_bindings_on_both_kernels(
         assert effects_env[key] == str(infra_effects[key]), (
             f"runtime-effects: {key} differs from the infra base"
         )
+
+
+@pytest.mark.parametrize("step_name", [_REBUILD, _RECREATE])
+def test_dev_lane_compose_steps_supply_the_workflow_github_identity(
+    step_name: str,
+) -> None:
+    assert _step(step_name).get("env", {}).get("GITHUB_TOKEN") == "${{ github.token }}"
+
+
+@pytest.mark.parametrize("key", ["GITHUB_TOKEN", "GH_TOKEN"])
+def test_an_infra_base_without_a_github_binding_refuses(
+    tmp_path: Path, key: str
+) -> None:
+    infra = _compose(_REPO / "docker" / "docker-compose.infra.yml")
+    infra["x-runtime-env"].pop(key)
+    mutated = tmp_path / "infra.yml"
+    mutated.write_text(yaml.safe_dump(infra), encoding="utf-8")
+    proc = _derive(tmp_path, _REPO / "docker" / "docker-compose.dev-lane.yml", mutated)
+    assert proc.returncode != 0
+    assert key in proc.stdout + proc.stderr
+    assert not (tmp_path / "override.yml").exists()
 
 
 def test_a_dev_lane_without_the_strict_binding_refuses_rather_than_defaults(
