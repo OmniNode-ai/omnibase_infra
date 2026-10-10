@@ -1,0 +1,41 @@
+{
+  "_provenance": {
+    "source": "GET /health on the dev-201 lab lane's deploy agent, at the deploy_agent_url its LAB_LANES_JSON entry declares, read from a lab host with curl",
+    "captured_utc": "2026-10-10T11:47:54Z",
+    "source_sha256": "19177f0115130f9528d8baf63139cd01b9f95462f3c304691ebf1bbb014ced41",
+    "source_revision": "OMN-18866 lane lab-fill-omn18866-10101130; loaded_code_sha equalled the dev head fdd3daa0384a0fe5e375994e03907fb7ac43203d at capture"
+  },
+  "body": {
+    "state": "idle",
+    "version": "0.1.0",
+    "loaded_code_sha": "fdd3daa0384a0fe5e375994e03907fb7ac43203d",
+    "uptime_seconds": 20956,
+    "active_job": null,
+    "last_result": {
+      "correlation_id": "0b31e385-ceaf-43ee-ad8d-406268775185",
+      "status": "success",
+      "completed_at": "2026-10-10T11:06:50.690927+00:00",
+      "phase_results": {
+        "preflight": "success",
+        "git": "success",
+        "compose_gen": "success",
+        "seed": "success",
+        "runtime": "success",
+        "verification": "success",
+        "core": "skipped",
+        "publish": "success"
+      },
+      "settling": false,
+      "settling_stage": null
+    },
+    "pending_publish_count": 0,
+    "accept_backlog": {
+      "status": "healthy",
+      "queue_depth": 0,
+      "undrained_seconds": 0.0,
+      "bound_seconds": 30.0,
+      "observed_at": "2026-10-10T11:47:51.292433+00:00",
+      "evidence": "the accept queue for port 8098 is empty: every completed connection has been accepted"
+    }
+  }
+}

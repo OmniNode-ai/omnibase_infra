@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-9050
-title: "omnibase_infra pins omnibase_core at 2f90bd814b14 in the handshake workflow"
-summary: The automated pin bump moves the omnibase_core checkout ref in check-handshake.yml to 2f90bd814b140ed8f8dad74cc499b0976807e47d.
+title: "omnibase_infra pins omnibase_core at 16ee7c558552 in the handshake workflow"
+summary: The automated pin bump moves the omnibase_core checkout ref in check-handshake.yml to 16ee7c5585523d8f9e26285a5e6b4ee8cb5c0bab.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -10,13 +10,13 @@ requirements:
     statement: The handshake workflow checks out omnibase_core at the bumped commit.
     acceptance:
       - id: AC1
-        statement: 'AC1: check-handshake.yml pins omnibase_core to 2f90bd814b140ed8f8dad74cc499b0976807e47d -- falsifier: grep -qE "^\s+ref:\s+2f90bd814b140ed8f8dad74cc499b0976807e47d$" .github/workflows/check-handshake.yml'
+        statement: 'AC1: check-handshake.yml pins omnibase_core to 16ee7c5585523d8f9e26285a5e6b4ee8cb5c0bab -- falsifier: grep -qE "^\s+ref:\s+16ee7c5585523d8f9e26285a5e6b4ee8cb5c0bab$" .github/workflows/check-handshake.yml'
 evidence_requirements:
   - kind: command
     description: The checkout ref in the handshake workflow equals the bumped commit.
-    command: 'grep -qE "^\s+ref:\s+2f90bd814b140ed8f8dad74cc499b0976807e47d$" .github/workflows/check-handshake.yml'
+    command: 'grep -qE "^\s+ref:\s+16ee7c5585523d8f9e26285a5e6b4ee8cb5c0bab$" .github/workflows/check-handshake.yml'
   - kind: tests
-    description: The handshake pin test fails on the superseded efba6fb107f4 ref and passes on the bumped one.
+    description: The handshake pin test fails on the superseded 2f90bd814b14 ref and passes on the bumped one.
     command: uv run pytest tests/ci/test_check_handshake_core_pin_omn9050.py -q
 emergency_bypass:
   enabled: false
@@ -28,7 +28,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: 'grep -qE "^\s+ref:\s+2f90bd814b140ed8f8dad74cc499b0976807e47d$" .github/workflows/check-handshake.yml'
+        check_value: 'grep -qE "^\s+ref:\s+16ee7c5585523d8f9e26285a5e6b4ee8cb5c0bab$" .github/workflows/check-handshake.yml'
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_check_handshake_core_pin_omn9050.py -q
