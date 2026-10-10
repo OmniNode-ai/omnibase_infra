@@ -949,6 +949,27 @@ merge-group verdicts for candidates in the watched branch's merge queue.
 Producer: NodeGitHubWebhookIngressEffect
 """
 
+SUFFIX_GITHUB_CHECK_RUN: str = "onex.evt.github.check-run.v1"
+"""Topic suffix for completed, non-passing check runs on a pull request (OMN-20743).
+
+One record per (check run, pull request) whose conclusion is red, carrying the
+check's conclusion, workflow run id and completion time, so a red-CI consumer
+learns of the red when GitHub reports it instead of on a watcher's next poll.
+
+Producer: NodeGitHubWebhookIngressEffect
+Consumer: omnimarket node_pr_state_emit_effect (detect_ci_red_check_run)
+"""
+
+SUFFIX_GITHUB_WORKFLOW_RUN: str = "onex.evt.github.workflow-run.v1"
+"""Topic suffix for workflow runs as they start, run and complete (OMN-20743).
+
+A check-run delivery names its workflow run by id and never by name; this
+carries the name, so a consumer can state which workflow a failed check ran in.
+
+Producer: NodeGitHubWebhookIngressEffect
+Consumer: omnimarket node_pr_state_emit_effect (record_workflow_run)
+"""
+
 SUFFIX_GITHUB_PR_STATUS: str = "onex.evt.github.pr-status.v1"
 """Topic suffix for GitHub PR triage status events (OMN-2656).
 
@@ -1154,6 +1175,23 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
     # Watched branch ref advances and CI verdicts (OMN-19932)
     ModelTopicSpec(
         suffix=SUFFIX_GITHUB_BRANCH_HEAD,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    # Red check runs and workflow runs folded from webhook deliveries (OMN-20743)
+    ModelTopicSpec(
+        suffix=SUFFIX_GITHUB_CHECK_RUN,
+        partitions=1,
+        kafka_config={
+            "retention.ms": "604800000",
+            "cleanup.policy": "delete",
+        },  # 7 days
+    ),
+    ModelTopicSpec(
+        suffix=SUFFIX_GITHUB_WORKFLOW_RUN,
         partitions=1,
         kafka_config={
             "retention.ms": "604800000",
