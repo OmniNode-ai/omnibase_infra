@@ -18,10 +18,13 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+
+from tests.helpers.lane_census_fixtures import NEUTRAL_CONFIG_ROOT, NEUTRAL_MANIFEST
 
 pytestmark = pytest.mark.unit
 
@@ -65,6 +68,14 @@ def _write_units(root: Path) -> Path:
     return units
 
 
+def _write_manifest(root: Path) -> Path:
+    """The neutral lane manifest, where the census reads it under the root (OMN-20934)."""
+    manifest = root / NEUTRAL_MANIFEST.relative_to(NEUTRAL_CONFIG_ROOT)
+    manifest.parent.mkdir(parents=True)
+    shutil.copyfile(NEUTRAL_MANIFEST, manifest)
+    return manifest
+
+
 def test_installer_depends_on_base_unit() -> None:
     """Installer fails fast if the base onex-disk-gc.service is not installed."""
     body = _INSTALLER.read_text(encoding="utf-8")
@@ -98,6 +109,7 @@ def _installer_env(
     if config_root:
         root = tmp_path / "config-root"
         _write_units(root)
+        _write_manifest(root)
         env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(root)
     return env, home
 
@@ -132,6 +144,10 @@ def test_installer_renders_the_dropin_with_broker_and_clone(tmp_path: Path) -> N
     body = (units / "onex-disk-gc.service.d/20-lane-census.conf").read_text()
     assert _MARKER in body, "the drop-in was not read from the private config root"
     assert "Environment=LANE_MEMORY_BROKER_CONTAINER=omnibase-infra-redpanda" in body
+    assert (
+        f"Environment=ONEX_WORKSPACE_CONFIG_ROOT={env['ONEX_WORKSPACE_CONFIG_ROOT']}"
+        in body
+    )
     assert f"ExecStart=-/bin/bash {_REPO}/scripts/lane-census-check.sh" in body
     assert "--snapshot" in body and "--memory" in body
     assert (
@@ -170,6 +186,10 @@ def test_installer_standalone_on_a_host_without_disk_gc(tmp_path: Path) -> None:
         in service
     )
     assert f"ExecStart=/bin/bash {_REPO}/scripts/lane-census-check.sh" in service
+    assert (
+        f"Environment=ONEX_WORKSPACE_CONFIG_ROOT={env['ONEX_WORKSPACE_CONFIG_ROOT']}"
+        in service
+    )
     assert (units / "onex-lane-census.timer").exists()
     assert not (units / "onex-disk-gc.service.d/20-lane-census.conf").exists()
     calls = (tmp_path / "systemctl.log").read_text()
@@ -224,3 +244,27 @@ def test_installer_ships_no_unit_beside_itself() -> None:
     assert not list(beside.rglob("*.service")), list(beside.rglob("*.service"))
     assert not list(beside.rglob("*.timer")), list(beside.rglob("*.timer"))
     assert not list(beside.rglob("*.conf")), list(beside.rglob("*.conf"))
+
+
+# ---------------------------------------------------------------------------
+# OMN-20934 -- the root also holds the lane manifest the census reads
+# ---------------------------------------------------------------------------
+
+
+def test_installer_requires_the_manifest_under_the_config_root(
+    tmp_path: Path,
+) -> None:
+    """A root holding the units but no lane manifest installs nothing."""
+    env, home = _installer_env(tmp_path, config_root=False)
+    root = tmp_path / "units-only-root"
+    _write_units(root)
+    env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(root)
+    units = home / ".config/systemd/user"
+    (units / "onex-disk-gc.service").write_text("[Service]\n")
+    result = _install(
+        env, "--broker-container", "omnibase-infra-redpanda", "--repo-root", str(_REPO)
+    )
+    assert result.returncode == 2, result.stderr
+    assert "lane-manifest.yaml" in result.stderr
+    assert "ONEX_WORKSPACE_CONFIG_ROOT" in result.stderr
+    assert not (units / "onex-disk-gc.service.d/20-lane-census.conf").exists()
