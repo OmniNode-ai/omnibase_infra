@@ -448,6 +448,7 @@ async def test_runtime_delegation_dispatch_port_forwards_response_contract(
             {"response_format": {"type": "json_object"}},
             "response_format",
         ),
+        ({"model": "google/gemini-2.5-flash-lite"}, "model"),
     ],
 )
 async def test_runtime_delegation_dispatch_port_rejects_unsupported_bus_features(
