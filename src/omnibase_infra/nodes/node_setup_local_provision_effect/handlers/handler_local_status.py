@@ -9,7 +9,6 @@ Ticket: OMN-3493
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -22,6 +21,10 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext
+from omnibase_infra.nodes.node_setup_local_provision_effect.handlers.handler_local_provision import (
+    compose_base_command,
+    run_compose,
+)
 from omnibase_infra.nodes.node_setup_local_provision_effect.models.model_local_provision_effect_output import (
     ModelLocalProvisionEffectOutput,
 )
@@ -115,7 +118,9 @@ class HandlerLocalStatus:
             if svc.local is not None
         ]
 
-        if not local_service_names:
+        whole_project = envelope.get("whole_project") is True
+
+        if not local_service_names and not whole_project:
             return ModelHandlerOutput.for_compute(
                 input_envelope_id=uuid4(),
                 correlation_id=corr_id,
@@ -128,29 +133,15 @@ class HandlerLocalStatus:
             )
 
         # Use `docker compose ps --services --filter status=running` to get running services
-        cmd: list[str] = [
-            "docker",
-            "compose",
-            "-f",
-            str(compose_path),
-            "ps",
-            "--services",
-            "--filter",
-            "status=running",
-        ]
+        cmd: list[str] = compose_base_command(
+            compose_path, envelope.get("env_files")
+        ) + ["ps", "--services", "--filter", "status=running"]
 
         logger.info("Running: %s", " ".join(cmd))
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout_bytes, stderr_bytes = await proc.communicate()
-        returncode = proc.returncode
+        returncode, stderr_text, stdout_text = await run_compose(cmd)
 
         if returncode != 0:
-            stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
             logger.error(
                 "docker compose ps failed (rc=%d): %s", returncode, stderr_text
             )
@@ -167,14 +158,16 @@ class HandlerLocalStatus:
                 ),
             )
 
-        running_output = stdout_bytes.decode("utf-8", errors="replace").strip()
         running_names: set[str] = {
-            line.strip() for line in running_output.splitlines() if line.strip()
+            line.strip() for line in stdout_text.splitlines() if line.strip()
         }
 
-        # Intersect with topology service names to return only known services
-        services_running = tuple(
-            name for name in local_service_names if name in running_names
+        # Intersect with topology service names to return only known services;
+        # for the whole project every running service is reported, sorted.
+        services_running = (
+            tuple(sorted(running_names))
+            if whole_project
+            else tuple(name for name in local_service_names if name in running_names)
         )
         logger.info("Services running: %s", services_running)
         return ModelHandlerOutput.for_compute(
