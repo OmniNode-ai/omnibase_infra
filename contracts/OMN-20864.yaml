@@ -1,0 +1,60 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20864
+title: The dev-lane deploy agent no longer takes the lane down over a degraded runtime
+summary: On 2026-10-11 the lab dev-lane deploy agent force-recreated a runtime that was up and answering degraded, the recreate timed out and left the new container Created, and the idle branch then refused every minute for 5h50m. The agent now leaves a running degraded runtime in place (the verdict still fails), cleans up and retries a timed-out recreate once, and restores a lane whose main runtime is absent or stopped; the dev refresh gate waits out the runtime's declared start budget while it says still starting.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20864-no-recreate-answering-degraded
+    statement: Post-deploy verification on the dev lane does not force-recreate a runtime that answers running with its health monitor naming a degraded dimension; it records outcome not_recreated_answering and still fails the verdict, ends the declared-start wait once two consecutive monitor cycles name the same dimensions, and keeps recreating a dead, unhealthy or bus-down runtime.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the replay of job 72e74ec6 issues no compose recreate and records not_recreated_answering, a boot-transient degraded cycle followed by healthy passes, and a refused port is still recreated -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "answering or settled or degraded or boot_transient or dead_port"'
+  - id: req-omn20864-recreate-timeout-cleanup
+    statement: A compose recreate killed at its ceiling has every Created container of the lane's project with the recreate's temporary name removed, scoped to the services it recreated, and is retried once; a second timeout is cleaned up the same way and raised. This holds for the verify recreate, the migration preflight, the onex-api recreate and the runtime compose up.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the leftover removal is scoped to the lane project, the created state, the temporary name and the service; a timed-out recreate is retried once; the 13:50Z and 14:14Z replays leave nothing Created -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "leftover or timeout or times_out or replay_13 or replay_14_14z_the_migration"'
+  - id: req-omn20864-idle-restore
+    statement: An idle dev-lane agent whose main runtime container is absent or stopped runs one runtime rebuild as agent/idle-restore, at most once an hour, never while a job runs, the lane is frozen or the lane was active in the last five minutes, and never on an unreadable docker answer.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: decide_restore and read_runtime_presence cover every verdict, the 14:14Z replay restores instead of idling and does not restore twice in an hour, and a frozen or unreadable lane is not restored -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "restore or presence"'
+  - id: req-omn20864-dev-gate-boot-window
+    statement: The dev refresh health gate does not spend its verdict wait while the runtime answers still starting inside the seconds left of its declared start budget, which refresh_dev_lane.sh reads with the runtime_health_wait.sh helpers and passes to both gate runs.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: the 2026-10-11 replay fails without the window and passes inside it, a runtime that never finishes starting still fails, and the script passes the window to both gates -- falsifier: uv run pytest scripts/runtime_build/tests/test_dev_gate_boot_window_omn20864.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The outage replay and rule tests for the deploy agent.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q
+  - kind: tests
+    description: The dev refresh gate boot-window tests.
+    command: uv run pytest scripts/runtime_build/tests/test_dev_gate_boot_window_omn20864.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20864-agent-outage-rules
+    description: The outage replay and rule tests fail on the merge base, which has no not_recreated_answering outcome, no leftover cleanup and no restore rule, and pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
+      - AC3
+  - id: dod-omn20864-dev-gate-boot-window
+    description: The dev gate boot-window tests pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/runtime_build/tests/test_dev_gate_boot_window_omn20864.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4

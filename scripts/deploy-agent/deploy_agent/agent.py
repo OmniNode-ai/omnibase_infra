@@ -84,13 +84,19 @@ from deploy_agent.idle_converge import (
 )
 from deploy_agent.idle_converge import (
     EnumIdleConvergeVerdict,
+    EnumIdleRestoreVerdict,
+    EnumRuntimePresence,
     ModelIdleConvergeDecision,
     ModelIdleConvergeInputs,
+    ModelIdleRestoreInputs,
     converge_command,
+    decide_restore,
     load_probe_windows,
     probe_blocking,
     read_dev_head,
     read_running_ref,
+    read_runtime_presence,
+    restore_command,
 )
 from deploy_agent.idle_converge import decide as decide_idle_converge
 from deploy_agent.job_state import EnumJobSettlingStage, JobState, JobStore
@@ -419,6 +425,14 @@ class DeployAgent:
             read_running_ref(_runtime_container_for_lane(EnumRuntimeLane.DEV), repo)
         )
         self._idle_read_head_ref: Callable[[str], str | None] = _read_dev_head
+        # OMN-20864: the restore of a lane with no running runtime, and its seams.
+        self._idle_restore_last_attempt: datetime | None = None
+        self._idle_restore_last_verdict: EnumIdleRestoreVerdict | None = None
+        self._idle_read_runtime_presence: Callable[
+            [], tuple[EnumRuntimePresence, str]
+        ] = lambda: read_runtime_presence(
+            _runtime_container_for_lane(EnumRuntimeLane.DEV)
+        )
         self._idle_probe_blocker: Callable[[datetime], str | None] = lambda now: (
             probe_blocking(now, load_probe_windows(AGENT_CLONE_ROOT))
         )
@@ -1055,6 +1069,11 @@ class DeployAgent:
         self._idle_converge_last_check = tick
 
         now = self._idle_converge_now()
+        # OMN-20864: a lane with no running runtime is restored, not followed.
+        # Evaluated first: the converge below reads the running revision out
+        # of that container and can only refuse while it is down.
+        if self._maybe_idle_restore(now):
+            return
         decision: ModelIdleConvergeDecision | None = None
         for repository in IDLE_CONVERGE_REPOSITORIES:
             decision = self._decide_idle_converge(repository, now)
@@ -1090,6 +1109,55 @@ class DeployAgent:
         )
         self.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
         self._execute_command(cmd)
+
+    def _maybe_idle_restore(self, now: datetime) -> bool:
+        """Restore the lane when its main runtime is not running (OMN-20864).
+
+        Returns True when the lane is DOWN, whatever the decision, so the
+        converge rule is not evaluated against a container that is not there.
+        See ``deploy_agent.idle_converge`` (decide_restore) for the rule.
+        """
+        presence, presence_detail = self._idle_read_runtime_presence()
+        decision = decide_restore(
+            ModelIdleRestoreInputs(
+                now=now,
+                presence=presence,
+                presence_detail=presence_detail,
+                job_active=self.job_store.has_active_job(),
+                last_activity=max(
+                    self.job_store.last_completed_at()
+                    or self._idle_converge_started_at,
+                    self._idle_converge_started_at,
+                ),
+                last_attempt=self._idle_restore_last_attempt,
+                frozen_reason=getattr(
+                    self, "_lane_flags", ModelLaneFlags()
+                ).frozen_reason(now),
+            )
+        )
+        if decision.verdict is not self._idle_restore_last_verdict:
+            if decision.verdict is not EnumIdleRestoreVerdict.RESTORE:
+                logger.info(
+                    "idle restore: %s (%s)", decision.verdict.value, decision.detail
+                )
+            self._idle_restore_last_verdict = decision.verdict
+        if presence is not EnumRuntimePresence.DOWN:
+            return False
+        if decision.verdict is not EnumIdleRestoreVerdict.RESTORE:
+            return True
+        if not self._idle_converge_gate_open():
+            return True
+        self._idle_restore_last_attempt = now
+        cmd = restore_command()
+        logger.warning(
+            "idle restore: running %s as %s: %s",
+            cmd.correlation_id,
+            cmd.requested_by,
+            decision.detail,
+        )
+        self.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
+        self._execute_command(cmd)
+        return True
 
     def _decide_idle_converge(
         self, repository: str, now: datetime
