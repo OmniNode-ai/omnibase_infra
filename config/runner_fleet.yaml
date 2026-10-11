@@ -35,9 +35,22 @@ runner_name_prefix: omninode-runner
 # the 60 are SPREAD, not cut. 44 stay here on the primary host and 16 run on
 # .202 as the `omnipc2-ci-runner` pool below, so every required CI context has
 # runners on two hosts and survives either one stopping. The scalars below are
-# the primary host's share; `declared_total("action")` is still 60.
-expected_count: 44
-burst_count: 44
+# the primary host's share; `declared_total("action")` was then 60, and is 26
+# since OMN-19077 below.
+#
+# OMN-19077 (operator consent ROLLING_WORK_LEDGER.md:66460, 2026-10-11, "Yes ...
+# Yes, yes, yes, yes, yes, yes", answering the proposal to cap concurrent CI
+# jobs on the primary host at about 10): its general pool is cut 44 -> 10.
+# Measured on this host 2026-10-11 05:45-11:47Z (ledger MSG
+# 2026-10-11T12:20:47Z): of 413 pytest shards, 0 of 193 run at under 20 busy
+# jobs were cancelled at the 10-minute job limit, against 55 of 95 (58%) at 30
+# or more, and the cancel bursts ran at load5 68-87. The second host's
+# 16-runner pool is unchanged, so the action fleet's declared total is 26. The
+# surplus runners are removed by `deploy-runners.sh --retire-surplus`
+# (idle-checked, one at a time, creds volumes kept), never by a recreate that
+# could kill a job.
+expected_count: 10
+burst_count: 10
 # OMN-17477 — DECLARED HOST INVENTORY.
 #
 # The five scalar fields above describe ONE host, which is what the fleet was
@@ -78,7 +91,7 @@ hosts:
   - host: omninode-pc.tail75df5e.ts.net
     arch: amd64
     runner_name_prefix: omninode-runner
-    expected_count: 44
+    expected_count: 10
     classes: [action]
     # OMN-19895 -- the primary host's other runner families, declared so the
     # fleet probe (runner-pool-spread.yml) counts them toward this host instead
