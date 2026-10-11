@@ -102,9 +102,10 @@ EXIT_USAGE = 5
 
 PHASES = ("snap-pre", "clone", "build", "probe", "tests", "teardown", "snap-post")
 NO_FOCUSED_TESTS_MARKER = "no-focused-tests: the PR changes no test files"
-#: The class prepr_pool_prove.sh appends to a LIVE_GREP term it derives from a
-#: changed node, so node_x is not counted live on node_x_y's lines (OMN-19566).
-LIVE_TERM_BOUNDARY = "[^a-z0-9_]"
+#: The literal dot prepr_pool_prove.sh puts on each side of a LIVE_GREP term it
+#: derives from a changed node (OMN-19566): a runtime logs ``.<node>.`` only once
+#: the node runs (its consumer group, its own loggers), never on discovery.
+LIVE_TERM_DOT = "[.]"
 
 # Prepended to every remote command: a non-login ssh shell on a Docker Desktop
 # Mac has no docker on PATH, and a bare `docker ps` there reads zero containers
@@ -887,7 +888,7 @@ def judge(
     # inventing a pass.
     mentions: dict[str, int] = {}
     for _, name, count in re.findall(r"^\s+(\S+) mentions (\S+): (\d+)$", probe, re.M):
-        name = name.removesuffix(LIVE_TERM_BOUNDARY)
+        name = name.removeprefix(LIVE_TERM_DOT).removesuffix(LIVE_TERM_DOT)
         mentions[name] = mentions.get(name, 0) + int(count)
     if mentions:
         dead = sorted(n for n, c in mentions.items() if c == 0)

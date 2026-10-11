@@ -139,13 +139,18 @@ pr_subject() { # dir repo pr head base
 
 # changed_path_live, when the caller names no LIVE_GREP: one term per node the
 # PR changes (src/<repo>/nodes/<node>/...) that still exists at the head, so a
-# deleted node is not demanded live. The trailing class keeps node_x from
-# matching node_x_y. Printed for the reader; the judge reads the mention lines.
+# deleted node is not demanded live. The term is the node name between dots,
+# which a runtime logs only once the node runs: its consumer group
+# (<lane>.<repo>.<node>.consume, on the Auto-wired subscription and group
+# lines) or its own modules' loggers (<repo>.nodes.<node>.handlers...).
+# Discovery ("Discovered contract: <node> (") and registration lines do not
+# match, so a node that is only discovered is not live, and node_x does not
+# match node_x_y. Printed for the reader; the judge reads the mention lines.
 derive_live_grep() { # repo... (each checked out at the tree under proof in $R)
   local repo n
   for repo in "$@"; do
     for n in $(git -C "$R/$repo" diff --name-only --no-renames origin/dev...HEAD -- "src/$repo/nodes/" | awk -F/ 'NF>=5{print $4}' | sort -u); do
-      [ -f "$R/$repo/src/$repo/nodes/$n/contract.yaml" ] && printf '%s[^a-z0-9_] ' "$n"
+      [ -f "$R/$repo/src/$repo/nodes/$n/contract.yaml" ] && printf '[.]%s[.] ' "$n"
     done
   done
 }

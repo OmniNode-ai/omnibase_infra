@@ -565,7 +565,7 @@ def test_a_node_change_with_no_live_line_is_missing_changed_path_live(
 def test_a_node_change_whose_derived_term_is_live_is_accepted(
     tmp_path: Path,
 ) -> None:
-    term = "node_runtime_error_triage_effect" + pool.LIVE_TERM_BOUNDARY
+    term = pool.LIVE_TERM_DOT + "node_runtime_error_triage_effect" + pool.LIVE_TERM_DOT
     live = (
         f"live-grep derived from the diff: {term} \n"
         f"  omnibase-infra-local-omninode-runtime mentions {term}: 4\n"
@@ -580,7 +580,7 @@ def test_a_node_change_whose_derived_term_is_live_is_accepted(
 def test_a_node_change_whose_derived_term_is_dead_fails_naming_the_node(
     tmp_path: Path,
 ) -> None:
-    term = "node_runtime_error_triage_effect" + pool.LIVE_TERM_BOUNDARY
+    term = pool.LIVE_TERM_DOT + "node_runtime_error_triage_effect" + pool.LIVE_TERM_DOT
     live = (
         f"  omnibase-infra-local-omninode-runtime mentions {term}: 0\n"
         f"  omnibase-infra-local-runtime-effects mentions {term}: 0\n"
@@ -597,7 +597,7 @@ def test_a_node_change_whose_derived_term_is_dead_fails_naming_the_node(
 def test_a_forwarder_change_stays_missing_the_check_no_pool_stack_can_run(
     tmp_path: Path,
 ) -> None:
-    term = "node_bus_forwarder_effect" + pool.LIVE_TERM_BOUNDARY
+    term = pool.LIVE_TERM_DOT + "node_bus_forwarder_effect" + pool.LIVE_TERM_DOT
     live = f"  omnibase-infra-local-runtime-effects mentions {term}: 2\n"
     _, _, events = _infra_run(tmp_path, _infra_clone(FORWARDER_CONTRACT), live)
     assert events[0]["verifier_token"] == "MISSING_MANDATORY_CHECK"
@@ -685,10 +685,16 @@ def test_live_terms_are_derived_from_changed_nodes_that_exist_at_the_head(
         capture_output=True,
         text=True,
     ).stdout
-    assert out.split() == ["node_kept" + pool.LIVE_TERM_BOUNDARY]
-    # the bracket class is a boundary for grep, so node_kept is not live on
-    # node_kept_more's line, and is on its own
-    for line, expected in (("start node_kept_more x", "0"), ("start node_kept x", "1")):
+    assert out.split() == [pool.LIVE_TERM_DOT + "node_kept" + pool.LIVE_TERM_DOT]
+    # live means the node ran (its consumer group, its own logger), never that
+    # it was discovered; and node_kept is not live on node_kept_more's lines
+    for line, expected in (
+        ("Discovered contract: node_kept (EFFECT_GENERIC) from omnibase_infra", "0"),
+        ("contract=node_kept, skipping Kafka subscription for 'node_kept'", "0"),
+        ("consumer_group=local.omnibase_infra.node_kept_more.consume.1.0.0", "0"),
+        ("consumer_group=local.omnibase_infra.node_kept.consume.1.0.0", "1"),
+        ("[INFO] omnibase_infra.nodes.node_kept.handlers.handler_x: ran", "1"),
+    ):
         count = subprocess.run(
             ["grep", "-c", out.split()[0]],
             input=line + "\n",
