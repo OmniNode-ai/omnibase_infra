@@ -120,7 +120,7 @@ class EmbeddingClient:
 
     Args:
         base_url: Full base URL of the embedding service (e.g.
-            ``"http://192.168.86.201:8100"``). Required; must not be empty.
+            ``"http://192.0.2.10:8100"``). Required; must not be empty.
     """
 
     def __init__(self, base_url: str) -> None:

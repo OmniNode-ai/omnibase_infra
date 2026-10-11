@@ -1,6 +1,6 @@
 # linux-server machine-class overlay profile (OMN-8904 — Wave B)
 #
-# Applied by `onex init --profile linux-server` on the .201 Linux AI server (192.168.86.201).
+# Applied by `onex init --profile linux-server` on a Linux AI server.
 # Contains Docker-internal service DNS and container-side addressing for the production
 # infra runtime lane. Services communicate via Docker bridge network, not host-side ports.
 #
