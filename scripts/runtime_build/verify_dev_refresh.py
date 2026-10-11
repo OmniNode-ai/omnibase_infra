@@ -439,6 +439,8 @@ def check_health_with_retry(
     check_interval_seconds: float = 300.0,
     boot_grace_seconds: float = 120.0,
     sleep_fn: Callable[[float], None] | None = None,
+    boot_window_seconds: float = 0.0,
+    clock_fn: Callable[[], float] = time.monotonic,
 ) -> tuple[HealthVerdict, str]:
     """Probe until a monitor verdict exists, for a bounded window (OMN-17624).
 
@@ -482,7 +484,13 @@ def check_health_with_retry(
     # plain sibling name, so its types resolve to Any here and a bare
     # passthrough trips no-any-return. An explicit tuple keeps the
     # annotation honest without a suppression.
-    verdict, described = wait_for_verdict(_probe, bound=bound, sleep_fn=sleep_fn)
+    verdict, described = wait_for_verdict(
+        _probe,
+        bound=bound,
+        sleep_fn=sleep_fn,
+        boot_window_seconds=boot_window_seconds,
+        monotonic_fn=clock_fn,
+    )
     return verdict, described
 
 
@@ -498,6 +506,7 @@ def check_runtime_health_with_retry(
     sleep_fn: Callable[[float], None] | None = None,
     window_seconds: float = MANIFEST_FETCH_WINDOW_SECONDS,
     clock_fn: Callable[[], float] = time.monotonic,
+    boot_window_seconds: float = 0.0,
 ) -> tuple[HealthVerdict, str]:
     """Probe a runtime's ``/health`` for a bounded window (OMN-17427).
 
@@ -518,6 +527,9 @@ def check_runtime_health_with_retry(
         sleep_fn=sleep_fn or time.sleep,
         monotonic_fn=clock_fn,
     )
+    # OMN-20864: ONE deadline for the runtime's declared start budget across
+    # every attempt below, so a refused probe never restarts that clock.
+    boot_deadline = clock_fn() + max(0.0, boot_window_seconds)
     while True:
         budget.attempts_made += 1
         verdict, described = check_health_with_retry(
@@ -528,6 +540,8 @@ def check_runtime_health_with_retry(
             check_interval_seconds=check_interval_seconds,
             boot_grace_seconds=boot_grace_seconds,
             sleep_fn=sleep_fn,
+            boot_window_seconds=max(0.0, boot_deadline - clock_fn()),
+            clock_fn=clock_fn,
         )
         if verdict.ok or verdict.reason != REASON_STATUS_UNREADABLE:
             return (
@@ -612,6 +626,7 @@ def run_health_gate(
     manifest_window_seconds: float = MANIFEST_FETCH_WINDOW_SECONDS,
     manifest_clock_fn: Callable[[], float] = time.monotonic,
     health_reachability_window_seconds: float = MANIFEST_FETCH_WINDOW_SECONDS,
+    boot_window_seconds: float = 0.0,
 ) -> HealthGateReport:
     report = HealthGateReport(
         lane=lane,
@@ -659,6 +674,7 @@ def run_health_gate(
         sleep_fn=sleep_fn,
         window_seconds=health_reachability_window_seconds,
         clock_fn=manifest_clock_fn,
+        boot_window_seconds=boot_window_seconds,
     )
     report.health_ok = health_verdict.ok
     report.health_detail = health_verdict.detail
@@ -681,6 +697,7 @@ def run_health_gate(
         sleep_fn=sleep_fn,
         window_seconds=health_reachability_window_seconds,
         clock_fn=manifest_clock_fn,
+        boot_window_seconds=boot_window_seconds,
     )
     report.effects_health_ok = effects_verdict.ok
     report.effects_health_detail = effects_verdict.detail
@@ -738,6 +755,17 @@ def main(argv: list[str] | None = None) -> int:
         default=True,
         help="Skip the digest-changed requirement (cold-aware branch or post-rollback re-verification).",
     )
+    parser.add_argument(
+        "--boot-window-seconds",
+        type=float,
+        default=0.0,
+        help=(
+            "OMN-20864: seconds left of the runtime's declared start budget "
+            "(start_period + retries x (interval + timeout), less its age). "
+            "While the runtime answers 'still starting' inside it, the verdict "
+            "wait is not spent. 0 keeps the verdict bound alone."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -762,6 +790,7 @@ def main(argv: list[str] | None = None) -> int:
         broker_container=args.broker_container,
         min_contracts=args.min_contracts,
         require_digest_change=args.require_digest_change,
+        boot_window_seconds=max(0.0, args.boot_window_seconds),
     )
 
     if args.json_output:
