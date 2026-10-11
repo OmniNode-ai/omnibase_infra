@@ -322,7 +322,9 @@ FinishJob ==
         /\ passPins' = IF o.v = "PASS" THEN passPins \cup {running} ELSE passPins
         /\ failPins' = IF Attributable(r) THEN failPins \cup {running} ELSE failPins
         /\ lastPass' = IF o.v = "PASS" /\ job.kind # "repro" THEN running ELSE lastPass
-        /\ hpVerified' = (hpVerified \/ (o.v = "PASS" /\ running >= 1))
+        \* R8: only a PASS of the replacing build (a deploy whose pins contain
+        \* the hot-patch source) verifies the replacement.
+        /\ hpVerified' = (hpVerified \/ (o.v = "PASS" /\ job.kind = "deploy" /\ running >= 1))
         /\ IF back /\ gen < MaxGen
            THEN /\ job' = [kind |-> "rollback", tgt |-> lastPass, who |-> "agent"]
                 /\ gen' = gen + 1 /\ comp' = comp + 1
@@ -545,6 +547,7 @@ GEscalate ==
 \* that joins the incident after confirmation does not move them.
 GOpenRevert ==
     /\ gUp /\ inc.st = "confirmed"
+    /\ required   \* F2 / R2: no automatic revert before the hold job is enforced
     /\ RequireAttribution => AttrAt(inc.culprit)
     /\ LET c      == inc.culprit
            exists == pr["rv"].st # "none" /\ pr["rv"].tgt = c   \* open, queued, merged or closed
@@ -702,10 +705,11 @@ LandGroup ==
            prf == {y \in {"rv", "fx"} : pr[y].st = "merged"}
            unchecked == Cardinality(rf) = 2
                         \/ (rf # {} /\ \E y \in prf : ~\E r \in seen : r.pin >= PosOf(y))
-           tags == (IF required /\ (~group.fresh \/ ~group.allAuth
-                                     \/ (held /\ inc.reported /\ ~(group.mem \subseteq auth)))
+           \* R1: the oracle reads the admitting check and the state at landing.
+           tags == (IF required /\ (~group.fresh \/ ~group.allAuth \/ ~hbFresh
+                                     \/ (held /\ ~(group.mem \subseteq auth)))
                     THEN {"NoRuntimeMergeWhileHeldOrGuardStale"} ELSE {})
-                   \cup (IF required /\ unchecked THEN {"NoFixAndRevertBothLandWithoutCheck"} ELSE {})
+                   \cup (IF unchecked THEN {"NoFixAndRevertBothLandWithoutCheck"} ELSE {})
        IN /\ log' = log \o [i \in 1..Len(s) |->
                        [pr |-> s[i], kind |-> PRKind(s[i]), tgt |-> pr[s[i]].tgt, bad |-> pr[s[i]].bad]]
           /\ ghost' = ghost \cup tags

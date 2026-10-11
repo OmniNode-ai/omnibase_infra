@@ -15,7 +15,7 @@
       "summary": "A group built while fresh can land after GCrash and HbExpire without violating the invariant: LandGroup tests group.fresh rather than the current hbFresh. It also exempts unauthorized landings while held is TRUE but inc.reported is FALSE.",
       "suggested_fix": "Evaluate current heartbeat and hold conditions in the landing safety oracle, and expose any resulting design counterexample rather than weakening the property.",
       "resolved": false,
-      "disposition": "open"
+      "disposition": "model changed: the landing oracle reads the heartbeat and the hold at landing; MC_design now fails NoRuntimeMergeWhileHeldOrGuardStale on the design (finding F3: a group built green before the hold lands between the variable write and the queue removal). Open for the plan owner; needs re-review."
     },
     {
       "id": "R2",
@@ -24,7 +24,7 @@
       "summary": "F2 is insufficient: before MakeRequired, the guard can still open a revert, and both fix and revert can queue and land without authorization or intervening proof. LandGroup hides this counterexample by recording NoFixAndRevertBothLandWithoutCheck violations only when required is TRUE.",
       "suggested_fix": "Remove required from the unchecked-landing oracle and explicitly defer automatic revert creation as well as authorization until enforcement is required.",
       "resolved": false,
-      "disposition": "open"
+      "disposition": "model changed: GOpenRevert also requires the hold job to be required, and the unchecked-landing oracle no longer exempts the pre-required window. Needs re-review and a rerun."
     },
     {
       "id": "R3",
@@ -78,7 +78,7 @@
       "summary": "hpVerified permanently latches after any PASS at pin >= 1, including reproduction, recreation, and rollback, without identifying the replacing build or representing the clean tripwire. The invariant means only that some qualifying pin once PASSed, rather than that retirement follows verification of the replacement under the written conditions.",
       "suggested_fix": "Represent replacement-specific verification and tripwire cleanliness and require both under the deployment lock before retirement.",
       "resolved": false,
-      "disposition": "open"
+      "disposition": "model changed: only a PASS of a deploy job (the replacing build) at pin 1 or above verifies the hot-patch replacement; the tripwire stays abstract. Needs re-review and a rerun."
     },
     {
       "id": "R9",
