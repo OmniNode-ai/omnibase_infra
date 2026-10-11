@@ -49,3 +49,13 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
+  - id: dod-omn-20867-ac4-deploy
+    description: The deployed dev lane runtime carries the poller fix, so it has the PR status poll event model and no longer has the poll-cycle summary model.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "import importlib.util as u; from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_pr_status_poll_event import ModelGitHubPrStatusPollEvent; assert u.find_spec('omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_poller_result') is None"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
