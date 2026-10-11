@@ -318,6 +318,7 @@ def _agent(
     executor.rebuild_scope.return_value = ["omninode-runtime"]
     executor.verify.return_value = []
     executor.deploy_and_verify.return_value = []
+    executor.run_lane_mirror.return_value = None
     executor.resolve_stability_ready_digest.return_value = cmd.image_digest
     for name in (
         "container_residue",
