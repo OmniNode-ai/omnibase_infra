@@ -9,12 +9,30 @@ from typing import Any
 
 import pytest
 
+from omnibase_core.enums import EnumNodeKind
+from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutput
 from omnibase_infra.nodes.node_github_pr_poller_effect.handlers.handler_github_api_poll import (
     HandlerGitHubApiPoll,
 )
 from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_poller_config import (
     ModelGitHubPollerConfig,
 )
+from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_pr_status_poll_event import (
+    ModelGitHubPrStatusPollEvent,
+)
+
+# The fields every ModelRuntimeEventBase stamps per instance (ids, clock).
+_PER_INSTANCE_FIELDS = {"event_id", "correlation_id", "timestamp", "source_node_id"}
+
+
+def _published(result: ModelHandlerOutput[None]) -> list[dict[str, object]]:
+    """The wire payloads of the events the runtime will publish."""
+    assert result.node_kind is EnumNodeKind.EFFECT
+    assert result.result is None
+    assert all(isinstance(e, ModelGitHubPrStatusPollEvent) for e in result.events)
+    return [
+        e.model_dump(mode="json", exclude=_PER_INSTANCE_FIELDS) for e in result.events
+    ]
 
 
 class _FakeGitHubClient:
@@ -61,10 +79,10 @@ async def test_handle_uses_github_http_client_adapter() -> None:
 
     result = await handler.handle(config)
 
-    assert result.errors == []
-    assert result.repos_polled == ["OmniNode-ai/omnimarket"]
-    assert result.prs_polled == 1
-    assert result.pending_events == [
+    assert result.logs == ()
+    assert result.metrics["repos_polled"] == 1
+    assert result.metrics["prs_polled"] == 1
+    assert _published(result) == [
         {
             "event_type": "onex.evt.github.pr-status.v1",
             "repo": "OmniNode-ai/omnimarket",
@@ -119,7 +137,7 @@ async def test_handle_publishes_is_draft_true_for_draft_pr() -> None:
 
     result = await handler.handle(config)
 
-    assert result.pending_events == [
+    assert _published(result) == [
         {
             "event_type": "onex.evt.github.pr-status.v1",
             "repo": "OmniNode-ai/omnimarket",
@@ -146,8 +164,54 @@ async def test_handle_surfaces_github_client_initialization_errors() -> None:
 
     result = await handler.handle(config)
 
-    assert result.repos_polled == []
-    assert result.prs_polled == 0
-    assert result.pending_events == []
-    assert len(result.errors) == 1
-    assert "Error initializing GitHub client: RuntimeError" in result.errors[0]
+    assert result.metrics["repos_polled"] == 0
+    assert result.metrics["prs_polled"] == 0
+    assert result.events == ()
+    assert len(result.logs) == 1
+    assert "Error initializing GitHub client: RuntimeError" in result.logs[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_handle_with_no_configured_repos_returns_no_events() -> None:
+    """OMN-20867: repos=[] (the contract default) returns nothing to publish."""
+    created: list[object] = []
+
+    def factory(**kwargs: Any) -> _FakeGitHubClient:
+        client = _FakeGitHubClient(**kwargs)
+        created.append(client)
+        return client
+
+    handler = HandlerGitHubApiPoll(
+        github_client_factory=factory, config=ModelGitHubPollerConfig(repos=[])
+    )
+
+    result = await handler.handle(None)
+
+    assert result.events == ()
+    assert result.result is None
+    assert created == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_handle_inside_poll_interval_returns_no_events() -> None:
+    """A second tick before poll_interval_seconds elapses polls and returns nothing."""
+    created: list[_FakeGitHubClient] = []
+
+    def factory(**kwargs: Any) -> _FakeGitHubClient:
+        client = _FakeGitHubClient(**kwargs)
+        created.append(client)
+        return client
+
+    handler = HandlerGitHubApiPoll(github_client_factory=factory)
+    config = ModelGitHubPollerConfig(
+        repos=["OmniNode-ai/omnimarket"], poll_interval_seconds=60
+    )
+
+    first = await handler.handle(config)
+    second = await handler.handle(config)
+
+    assert len(first.events) == 1
+    assert second.events == ()
+    assert [c.repos for c in created] == [["OmniNode-ai/omnimarket"], []]

@@ -1,0 +1,64 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20830
+title: "exposure-reader-coverage: count omnidash local page readers, accept read_all_rows, advance the omnidash pin"
+summary: The exposure-reader gate counts omnidash local page bindings as readers, takes the backend reader declaration's keys from omnimarket's own reader model (so read_all_rows is accepted), and reads omnidash at a commit that carries today's readers. Every omnimarket contract-pin advance since 10-08 failed this gate on readers that exist.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-exposure-readers-see-existing-readers
+    statement: The exposure-reader gate counts every surface that reads an exposure and accepts every field the reader model declares.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: The gate counts a component in an omnidash local page contract (`src/pages/local/*.contracts.yaml`) whose `data_bindings[].projection_topic` names an exposure as a reader of it, and reports it as a local-page reader.'
+      - id: AC2
+        statement: 'AC2: The gate accepts `read_all_rows` (a boolean) on a `backend_readers` entry and still rejects any other unknown key.'
+      - id: AC3
+        statement: 'AC3: The omnidash sibling pin (`.github/sibling-pins.yaml` and the workflow refs that mirror it) advances to an omnidash dev commit that carries those readers.'
+      - id: AC4
+        statement: 'AC4: Run against omnimarket 33e632965c48 and that omnidash commit, the gate no longer reports metering-summary, usage-by-model-day, tenant-credentials or topic-activity.'
+evidence_requirements:
+  - kind: tests
+    description: Local page readers, model-derived reader keys, the workflow wiring and the omnidash pin.
+    command: uv run pytest tests/unit/validators/test_omn20830_exposure_reader_local_pages.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20830-1
+    description: A local page binding is a reader of the topic it names and only that topic; a missing, empty or unparseable pages directory fails closed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/validators/test_omn20830_exposure_reader_local_pages.py -q -k "local_page or local_pages"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn20830-2
+    description: read_all_rows, a field of ModelProjectionBackendReader, is accepted as a boolean; an undeclared key is still refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/validators/test_omn20830_exposure_reader_local_pages.py -q -k "read_all_rows or does_not_declare"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn20830-3
+    description: The omnidash pin and the workflow checkout moved past cc628179, and the workflow checks out and passes src/pages/local.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/validators/test_omn20830_exposure_reader_local_pages.py -q -k "omnidash_pin or workflow_checks_out"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn20830-4
+    description: The gate counts the readers that omnimarket 33e632965c48 exposures have on omnidash dev (local page and registry), the shape of the real-checkout run recorded on the PR.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/validators/test_omn20830_exposure_reader_local_pages.py -q -k "a_local_page_binding_is_a_reader or read_all_rows_is_a_field"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4

@@ -169,6 +169,32 @@ def _write_omnidash(root: Path) -> tuple[Path, Path]:
     return registry, layouts
 
 
+def _write_local_pages(
+    tmp_path: Path, bindings: dict[str, list[str]] | None = None
+) -> Path:
+    """An omnidash src/pages/local with one page contract (OMN-20830).
+
+    ``bindings`` maps a component id to the topics its data_bindings name; the
+    default page binds nothing, so it adds no reader.
+    """
+    pages = tmp_path / "pages-local"
+    pages.mkdir(parents=True, exist_ok=True)
+    components = [
+        {
+            "component_id": component_id,
+            "data_bindings": [
+                {"binding_id": f"{component_id}-{i}", "projection_topic": topic}
+                for i, topic in enumerate(topics)
+            ],
+        }
+        for component_id, topics in (bindings or {}).items()
+    ]
+    (pages / "overview.contracts.yaml").write_text(
+        json.dumps({"components": components}), encoding="utf-8"
+    )
+    return pages
+
+
 def _argv(contracts: Path, registry: Path, layouts: Path, surface: Path) -> list[str]:
     """Exactly the argument shape the workflow passes."""
     return [
@@ -177,6 +203,8 @@ def _argv(contracts: Path, registry: Path, layouts: Path, surface: Path) -> list
         str(registry),
         "--layouts-dir",
         str(layouts),
+        "--local-pages-dir",
+        str(_write_local_pages(surface.parent)),
         "--backend-reader-surface",
         str(surface),
     ]

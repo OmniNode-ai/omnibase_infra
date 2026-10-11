@@ -27,6 +27,9 @@ pin it along with the producer-side properties that make membership meaningful.
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +53,46 @@ WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
 GATE_CONTEXT = "exposure-reader-coverage"
 GATE_WORKFLOW = "exposure-reader-coverage.yml"
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/exposure_reader_surface_live.json")
+def test_recorded_reader_surface_and_missing_reader(
+    recorded_response: dict[str, Any], tmp_path: Path
+) -> None:
+    """Replay the shipped reader sources, then remove their correlation reader."""
+    for name, content in recorded_response["files"].items():
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+    command = [
+        sys.executable,
+        "-m",
+        "omnibase_infra.validators.bus_backed_exposure_readers",
+        str(tmp_path / "contracts"),
+        "--registry",
+        str(tmp_path / "registry.json"),
+        "--layouts-dir",
+        str(tmp_path / "templates"),
+        "--local-pages-dir",
+        str(tmp_path / "pages"),
+        "--backend-reader-surface",
+        str(tmp_path / "projection"),
+    ]
+    accepted = subprocess.run(
+        command, capture_output=True, text=True, timeout=30, check=False
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    layout = tmp_path / "templates/delegation-evidence.ts"
+    layout.rename(layout.with_suffix(".absent"))
+    registry = json.loads(recorded_response["files"]["registry.json"])
+    registry["components"].pop("delegation-control-plane")
+    (tmp_path / "registry.json").write_text(json.dumps(registry), encoding="utf-8")
+    refused = subprocess.run(
+        command, capture_output=True, text=True, timeout=30, check=False
+    )
+    assert refused.returncode == 1, refused.stderr
+    assert "onex.snapshot.projection.delegation.correlation-trace.v1" in refused.stderr
+    assert "no_reader" in refused.stderr
 
 
 def _workflow(name: str) -> dict[str, Any]:
