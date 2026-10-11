@@ -94,6 +94,11 @@ local:
     - projection-api
     - omnimarket-projection-llm-cost
     - consumer-health-projection
+    # OMN-19972 (T3.6): the runtime kernel under RUNTIME_PROFILE=tenant-projection
+    # (OMN-18114). The usage-by-model-day writer and the other contracts pinned to
+    # that profile are dropped from main and effects, so without it the laptop
+    # discovers them and consumes them with nothing.
+    - tenant-projection-writer
   # OMN-19972: 3002 is the lab lanes' projection API port. The laptop's own API
   # answers on 3102 (loopback, by publish_host above).
   port_overrides:
