@@ -105,7 +105,7 @@ def _load(
 ) -> gateway_forwarder.ModelGatewayForwarderRuntimeConfig:
     return gateway_forwarder.load_gateway_forwarder_runtime_config(
         path,
-        broker_ref_map_path=tmp_path / "absent-broker-ref-map.yaml",
+        broker_ref_map_path=None,
     )
 
 
@@ -202,6 +202,29 @@ def test_loader_refuses_a_config_with_neither_a_cloud_leg_nor_a_mirror_leg(
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
     with pytest.raises(ValueError, match="at least one leg"):
+        _load(path, tmp_path)
+
+
+def test_the_process_parser_takes_a_mirror_only_config_without_a_broker_ref_map(
+    tmp_path: Path,
+) -> None:
+    args = gateway_forwarder._build_parser().parse_args(
+        ["--config", str(tmp_path / "mirror-only.yaml")]
+    )
+
+    assert args.broker_ref_map is None
+
+
+def test_a_cloud_leg_config_refuses_to_load_without_a_broker_ref_map(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "cloud.yaml"
+    path.write_text(
+        yaml.safe_dump({"forwarder": {"cloud_bus": {"cloud_broker_ref": "x"}}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="needs --broker-ref-map"):
         _load(path, tmp_path)
 
 

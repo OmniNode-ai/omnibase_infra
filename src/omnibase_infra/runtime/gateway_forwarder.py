@@ -171,15 +171,17 @@ def load_gateway_forwarder_runtime_config(
     config_path: Path,
     *,
     contract_path: Path = _DEFAULT_GATEWAY_CONTRACT_PATH,
-    broker_ref_map_path: Path,
+    broker_ref_map_path: Path | None,
     lane_credential_map_path: Path | None = None,
 ) -> ModelGatewayForwarderRuntimeConfig:
     """Load and validate one explicit two-leg forwarder configuration.
 
-    ``broker_ref_map_path`` is required (no default): the cloud broker
-    endpoint is resolved from the node contract's ``cloud_broker_ref`` at
-    this effect boundary, never hardcoded into compose or tenant config. See
+    ``broker_ref_map_path`` has no default: the cloud broker endpoint is
+    resolved from the node contract's ``cloud_broker_ref`` at this effect
+    boundary, never hardcoded into compose or tenant config. See
     ``_materialize_cloud_broker_ref`` for the fail-closed resolution rules.
+    ``None`` is accepted only by a mirror-only deployment (OMN-20867), which
+    has no cloud leg to resolve; a config that declares one refuses it.
 
     ``lane_credential_map_path`` is the same idea for the one class of value
     that must never be committed -- a lane broker's SASL credential. It is
@@ -199,6 +201,12 @@ def load_gateway_forwarder_runtime_config(
         _materialize_contract_lane_mirror(raw, contract_path)
         _materialize_lane_broker_credentials(raw, lane_credential_map_path)
         return ModelGatewayForwarderRuntimeConfig.model_validate(raw)
+    if broker_ref_map_path is None:
+        raise ValueError(
+            "this gateway config declares a cloud leg, so the process needs "
+            "--broker-ref-map (fail-closed -- there is no hardcoded fallback "
+            "broker endpoint)"
+        )
     _materialize_contract_mirror_topics(raw, contract_path)
     _materialize_contract_canary_config(raw, contract_path)
     _materialize_contract_lane_mirror(raw, contract_path)
@@ -1879,12 +1887,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--broker-ref-map",
         type=Path,
-        required=True,
+        default=None,
         help=(
             "Path to the operator-supplied broker-ref resolution map (YAML "
             "mapping of contract cloud_broker_ref names to resolved "
             "bootstrap_servers strings). Resolved at the effect boundary; "
-            "required, no default -- the process fails closed without it"
+            "no default -- a config with a cloud leg fails closed without it. "
+            "A mirror-only config has no cloud leg and takes none"
         ),
     )
     parser.add_argument(
