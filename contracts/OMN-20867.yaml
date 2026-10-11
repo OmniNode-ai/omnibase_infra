@@ -11,10 +11,18 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: the dev lane overlay sets the flag on omninode-runtime only and joins the opted-in overlay set -- falsifier: uv run pytest tests/unit/runtime/test_runtime_scheduler_wiring.py -q'
+  - id: req-omn20867-pr-status-poller
+    statement: With the tick on, the GitHub PR poller publishes only PR status events to onex.evt.github.pr-status.v1, and a tick that polls nothing publishes nothing.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the kernel-wired poller publishes no poll-cycle summary; an unconfigured or not-yet-due tick publishes nothing -- falsifier: uv run pytest tests/integration/runtime/test_github_pr_poller_publishes_only_status_events.py -q'
 evidence_requirements:
   - kind: tests
     description: The scheduler wiring test covers the dev lane overlay.
     command: uv run pytest tests/unit/runtime/test_runtime_scheduler_wiring.py -q
+  - kind: tests
+    description: The kernel-wired poller publishes only PR status events.
+    command: uv run pytest tests/integration/runtime/test_github_pr_poller_publishes_only_status_events.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -32,3 +40,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn-20867-ac2
+    description: The kernel-wired GitHub PR poller publishes only PR status events, and nothing on a tick that polls nothing.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_github_pr_poller_publishes_only_status_events.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
