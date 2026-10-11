@@ -1,0 +1,48 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20933
+title: "omnibase_infra lab compose files and host units move to the private overlay (part 1: Infisical stability and DNS canary)"
+summary: docker/docker-compose.infisical-stability.yml and docker/docker-compose.dns-canary.yml leave omnibase_infra; their byte-identical copies live under deploy/lab/compose/ in the operator's private config root (ONEX_WORKSPACE_CONFIG_ROOT). Operators start both stacks by hand with docker compose -f and no shipped code reads either file, so nothing running changes. The runtime change classifier drops its now-dead infisical-stability entry. The rest of the ticket's file set is later work under the same ticket.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20933-part1-compose-out
+    statement: omnibase_infra must carry no copy of docker/docker-compose.infisical-stability.yml or docker/docker-compose.dns-canary.yml, and the runtime change classifier must list no path that no longer exists.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: omnibase_infra at the PR head tracks neither docker/docker-compose.infisical-stability.yml nor docker/docker-compose.dns-canary.yml -- falsifier: the docker/ directory listing of omnibase_infra at the PR head, read through gh api, names either file'
+      - id: AC2
+        statement: 'AC2: every omnibase_infra path the runtime change classifier excludes exists in the tree -- falsifier: uv run pytest tests/scripts/test_trigger_non_runtime_paths_omn19597.py -q fails'
+evidence_requirements:
+  - kind: tests
+    description: The classifier's excluded paths all exist in the tree after the infisical-stability entry is removed.
+    command: uv run pytest tests/scripts/test_trigger_non_runtime_paths_omn19597.py -q --no-cov
+  - kind: manual
+    description: Both private copies render the same compose config as the removed copies, and a run with ONEX_WORKSPACE_CONFIG_ROOT unset refuses; quoted on the Lab line of the PR body.
+    command: docker compose -f "$ONEX_WORKSPACE_CONFIG_ROOT/deploy/lab/compose/docker-compose.infisical-stability.yml" config --no-interpolate
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20933-ac1
+    description: The docker/ directory of omnibase_infra at the PR head, read from GitHub, lists neither removed compose file. It goes red on the merge base, where both files are still tracked.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker?ref=$(git rev-parse HEAD)\" --jq '[.[].name] | (index(\"docker-compose.infisical-stability.yml\") == null and index(\"docker-compose.dns-canary.yml\") == null)' | grep -qx true"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: "test ! -e docker/docker-compose.infisical-stability.yml && test ! -e docker/docker-compose.dns-canary.yml"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20933-ac2
+    description: The runtime change classifier lists no excluded omnibase_infra path that is absent from the tree.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_trigger_non_runtime_paths_omn19597.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
