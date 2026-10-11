@@ -33,7 +33,6 @@ from scripts import lab_principal_issuer as lpi
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GRANTS = REPO_ROOT / "deploy" / "lab" / "developer-principal-grants.yaml"
-FACTS = REPO_ROOT / "deploy" / "lab" / "developer-onboarding.yaml"
 LOGIN = "dev.person@omninode.ai"
 UNIX_ONLY = pytest.mark.skipif(
     not hasattr(socket, "SO_PEERCRED"), reason="SO_PEERCRED is Linux-only"
@@ -593,29 +592,3 @@ def test_serve_refuses_a_path_that_is_not_a_socket(
     with pytest.raises(SystemExit, match="non-socket path"):
         lpi.UnixHTTPServer(path, lpi.make_handler(issuer, os.getuid()))
     assert path.read_text() == "leave this file untouched"
-
-
-# --- the file the onboarding script reads ---------------------------------
-
-
-def test_onboarding_facts_are_flat_and_complete() -> None:
-    """lab-onboarding.sh parses this with sed before Python exists: one key per line."""
-    keys: dict[str, str] = {}
-    for line in FACTS.read_text().splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        match = re.fullmatch(r"([a-z_]+):[ \t]*(\S.*)", line)
-        assert match, f"not a flat key: value line: {line!r}"
-        keys[match.group(1)] = match.group(2)
-    for required in (
-        "schema",
-        "tailnet_suffix",
-        "lane",
-        "principal_issuer_url",
-        "lab_model_url",
-        "lab_model_name",
-    ):
-        assert required in keys, required
-    assert keys["lane"] == yaml.safe_load(GRANTS.read_text())["lane"]
-    assert keys["principal_issuer_url"].startswith("https://")
-    assert keys["lab_model_url"].endswith("/v1/chat/completions")

@@ -291,6 +291,8 @@ migrations:
   forward/nodes/node_projection_intent_classification/0001_intent_classification_agent_source.sql: expand-only
   forward/nodes/node_projection_intent_classification/0002_grant_omninode_runtime_intent_classification_events.sql: expand-only
   forward/nodes/node_projection_intent_classification/0003_grant_omninode_runtime_intent_classification_sequence.sql: expand-only
+  forward/nodes/node_projection_lab_job/0000_create_lab_job.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.lab_job_state)
+  forward/nodes/node_projection_lab_job/0001_grant_omninode_runtime_lab_job.sql: expand-only # additive
   forward/nodes/node_projection_lab_lane_health/0000_create_lab_lane_health.sql: forward-only # ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_lab_lane_health/0001_grant_omninode_runtime_lab_lane_health.sql: expand-only
   forward/nodes/node_projection_lab_proof_receipts/0000_create_lab_proof_receipts.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.lab_proof_receipts)
@@ -348,6 +350,7 @@ migrations:
   forward/nodes/node_projection_metering_summary/0001_grant_tenant_projection_writer_metering_summary.sql: expand-only
   forward/nodes/node_projection_metering_summary/0002_metering_summary_savings_per_measured_run.sql: expand-only
   forward/nodes/node_projection_metering_summary/0003_metering_summary_compression_and_cache_hit.sql: expand-only
+  forward/nodes/node_projection_metering_summary/0004_metering_summary_savings_pct.sql: expand-only
   forward/nodes/node_projection_lab_container_memory/0000_create_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_lab_container_memory/0001_grant_omninode_runtime_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_topic_activity/0000_create_topic_activity.sql: forward-only # ALTER TABLE on the created table

@@ -345,6 +345,47 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
     #
+    # OMN-20604: the two lab job read models, vendored infra-first ahead of
+    # omnimarket#3434. Both carry the source contract's read_write access and
+    # table-name role. Inert, then removable, once the pin advances past that
+    # pull request; the expiry module names both.
+    ContractTableDeclaration(
+        node="legacy_migration:lab_job_state",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_lab_job/"
+            "0000_create_lab_job.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="lab_job_state",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_lab_job/"
+                "0000_create_lab_job.sql"
+            ),
+            access="read_write",
+            role="lab_job_state",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:lab_job_transitions",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_lab_job/"
+            "0000_create_lab_job.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="lab_job_transitions",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_lab_job/"
+                "0000_create_lab_job.sql"
+            ),
+            access="read_write",
+            role="lab_job_transitions",
+        ),
+    ),
+    #
     # OMN-19861: same infra-first window; this repo vendors
     # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
     # package that declares the relation. The source contract declares access

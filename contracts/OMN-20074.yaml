@@ -31,8 +31,15 @@ requirements:
   - id: req-precommit-hooks-from-core-s8
     statement: omnibase_infra must consume the no-hardcoded-topics pre-commit hook from omnibase_core, where it moved from onex_change_control under the same hook id, so the hook no longer pins onex_change_control.
     acceptance:
-      - id: AC-S8H1
-        statement: 'AC-S8H1: no-hardcoded-topics is listed in .pre-commit-config.yaml only under the omnibase_core repo block, pinned to a full commit sha, with require_serial and its exclude carried over -- falsifier: uv run pytest tests/ci/test_precommit_hooks_core_omn20074.py -q fails at the merge base'
+      - id: AC6
+        statement: 'AC6: no-hardcoded-topics is listed in .pre-commit-config.yaml only under the omnibase_core repo block, pinned to a full commit sha, with require_serial and its exclude carried over -- falsifier: uv run pytest tests/ci/test_precommit_hooks_core_omn20074.py -q fails at the merge base'
+  - id: req-contract-validation-core-s8
+    statement: omnibase_infra's contract-validation workflow must validate the branch ticket's contract with omnibase_core's ModelTicketContract at the locked core version instead of the onex_change_control validators, under unchanged workflow and job names.
+    acceptance:
+      - id: AC7
+        statement: 'AC7: .github/workflows/contract-validation.yml names no onex_change_control (no auth preflight, no validator checkout, no validate-yaml), validates with omnibase_core''s ModelTicketContract at the uv.lock core version that carries the binds_ac rules (0.47.39 or later), and keeps its workflow name Contract Validation and its job name contract-validation -- falsifier: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q -k test_workflow_'
+      - id: AC8
+        statement: 'AC8: the contract-validation step''s own run block passes this repository''s branch-ticket contract, skips a branch with no ticket or no contract, and fails a planted binds_ac entry that is not a criterion label, a planted binds_ac item of check_type command_exit_0 and a planted malformed contract, each naming the file, the first two also the rule -- falsifier: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q'
 evidence_requirements:
   - kind: tests
     description: No workflow calls an OCC reusable workflow, waits on occ-preflight or requires an OCC companion context.
@@ -49,6 +56,12 @@ evidence_requirements:
   - kind: tests
     description: no-hardcoded-topics is consumed from the omnibase_core hook block, pinned to a full sha.
     command: uv run pytest tests/ci/test_precommit_hooks_core_omn20074.py -q
+  - kind: tests
+    description: The contract-validation workflow reads no onex_change_control, validates with omnibase_core at the locked core and keeps its names.
+    command: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q -k test_workflow_
+  - kind: tests
+    description: The contract-validation step passes this repository's branch contract and refuses both planted binds_ac shapes and a malformed contract.
+    command: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -99,7 +112,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
-  - id: dod-precommit-hooks-from-core-s8-ac-s8h1
+  - id: dod-precommit-hooks-from-core-s8-ac6
     description: The repository test proves no-hardcoded-topics is taken from the omnibase_core block at a full sha and no longer from onex_change_control.
     source: manual
     checks:
@@ -107,4 +120,22 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_precommit_hooks_core_omn20074.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC-S8H1
+      - AC6
+  - id: dod-contract-validation-core-ac7
+    description: The workflow test proves no onex_change_control reference, the locked core version and the unchanged names.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q -k test_workflow_
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
+  - id: dod-contract-validation-core-ac8
+    description: The step's own run block passes the branch contract and fails each planted shape naming the file.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC8

@@ -1,0 +1,60 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20942
+title: onex local up, down and status run the catalog local bundle through the infra renderer and the local provision node
+summary: The omnibase_infra half. The docker catalog gains one public renderer (write_compose, which the catalog CLI also uses, and render_bundle, which takes an explicit checkout root and names the env files compose interpolates from) and a port bridge from the resolved stack to a LOCAL ModelDeploymentTopology. node_setup_local_provision_effect 1.1.0 gains whole_project, env_files, remove_volumes and an optional build step, all off by default, and a missing docker binary becomes a typed failure. AC3 belongs to the omnimarket half and is not claimed here. The AC4 lab readback (up, status, down with remove_volumes on the lab host, isolated project) is quoted on the Lab line of the PR body.
+is_seam_ticket: false
+interface_change: true
+interfaces_touched:
+  - omnibase_infra.docker.catalog.generator.render_bundle
+  - omnibase_infra.docker.catalog.cli.runtime_image_build_args
+  - node_setup_local_provision_effect input model 1.1.0
+requirements:
+  - id: req-omn20942-renderer-and-bridge
+    statement: A caller outside the omnibase_infra checkout renders a catalog bundle through the one renderer and receives the topology the local provision node takes.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: render_bundle renders the catalog local bundle from a checkout root and bridges every port-publishing service into a LOCAL topology entry at its published host port -- falsifier: uv run pytest tests/unit/infra/test_catalog_render_bundle_omn19972.py -q in omnibase_infra'
+  - id: req-omn20942-whole-project-node
+    statement: The local provision node can run a whole rendered compose project, with its env files, a teardown that keeps volumes unless asked, and a build only when asked.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the local provision node runs the whole compose project, passes the env files, keeps volumes on teardown unless remove_volumes is set, and builds only when asked -- falsifier: uv run pytest tests/unit/nodes/test_node_setup_local_provision_effect/test_whole_project_omn19972.py -q in omnibase_infra'
+evidence_requirements:
+  - kind: tests
+    description: The real local bundle renders through render_bundle, its bridged ports equal the published ones (the projection-api override included), and each refusal names a variable and never a value.
+    command: uv run pytest tests/unit/infra/test_catalog_render_bundle_omn19972.py -q
+  - kind: tests
+    description: The node's whole-project, env-file, build and volume behaviour, and the typed failure without docker.
+    command: uv run pytest tests/unit/nodes/test_node_setup_local_provision_effect/test_whole_project_omn19972.py -q
+  - kind: tests
+    description: The rendered local bundle passes the real docker compose config with the exact flags the node passes (skipped where docker is absent).
+    command: uv run pytest tests/integration/docker/test_render_bundle_compose_config_omn19972.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20942-ac1-render-and-bridge
+    description: render_bundle renders the real local bundle and bridges each published port into the topology.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/infra/test_catalog_render_bundle_omn19972.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/docker/catalog/generator.py?ref=2188dfbb2d12d779394bc8ccd2d1c18f10600201 --jq .content | base64 -d | grep -c 'def topology_from_resolved_stack'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20942-ac2-whole-project-node
+    description: The node runs the whole project with env files, keeps volumes by default, builds only on request, and returns a typed failure without docker.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/test_node_setup_local_provision_effect/test_whole_project_omn19972.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/docker/test_render_bundle_compose_config_omn19972.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

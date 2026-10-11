@@ -19,6 +19,7 @@ from deploy_agent.events import (
     ModelContainerResidue,
     ModelDepsConvergenceFinding,
     ModelHealthCheck,
+    ModelLaneMirrorReceipt,
     ModelOnexApiDelivery,
     ModelRebuildCompleted,
     ModelRecreateSupervision,
@@ -90,6 +91,7 @@ def build_completion_payload(
     compose_invocations: list[ModelComposeInvocation] | None = None,
     verify_recreate: list[ModelVerifyRecreate] | None = None,
     onex_api_delivery: ModelOnexApiDelivery | None = None,
+    lane_mirror: ModelLaneMirrorReceipt | None = None,
 ) -> dict[str, Any]:
     """Build the completion event payload from job state.
 
@@ -187,6 +189,7 @@ def build_completion_payload(
         compose_invocations=list(compose_invocations or []),
         verify_recreate=list(verify_recreate or []),
         onex_api_delivery=onex_api_delivery,
+        lane_mirror=lane_mirror,
     )
     return completed.model_dump(mode="json")
 

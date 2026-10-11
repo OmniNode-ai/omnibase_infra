@@ -389,6 +389,34 @@ run_preflight_required_env() {
         --compose-file "${INFRA_CLONE}/docker/docker-compose.dev-lane.yml"
 }
 
+# OMN-20867: the lane's env fragment from the private deployment overlay clone,
+# overlaid on the operator env sourced above for the keys it sets -- the same
+# fragment, read the same way (the clone's origin/dev, the routing table's
+# default instance), as the deploy agent's compose env, so a warm refresh never
+# undoes what the agent applied. The clone is the one under OMNI_HOME that
+# carries fragments. No clone or no fragment exports nothing; a fragment the
+# reader refuses (a key outside its schema's allowlist, an empty value, two
+# clones that both carry fragments) stops the refresh here, before anything is
+# built.
+LANE_ENV_EXPORTS=""
+if ! LANE_ENV_EXPORTS="$(PYTHONPATH="${REPO_ROOT}/scripts/deploy-agent${PYTHONPATH:+:${PYTHONPATH}}" \
+        run_python -c 'import sys
+from pathlib import Path
+from deploy_agent.instance_lanes import default_instance_lane_env_exports
+sys.stdout.write(default_instance_lane_env_exports(sys.argv[1], Path(sys.argv[2])))' \
+        "${REPO_ROOT}" "${OMNI_HOME}")"; then
+    err "LANE_ENV_FRAGMENT_REFUSED: the lane env fragment could not be applied"
+    err "  (reason above); nothing was built or restarted."
+    exit 64
+fi
+if [[ -n "${LANE_ENV_EXPORTS}" ]]; then
+    # shellcheck source=/dev/null
+    source <(printf '%s' "${LANE_ENV_EXPORTS}")
+    log "lane env fragment applied: $(printf '%s' "${LANE_ENV_EXPORTS}" | sed -e 's/^export //' | tr '\n' ' ')"
+else
+    log "lane env fragment: none"
+fi
+
 INFRA_CLONE="${OMNI_HOME}/omnibase_infra"
 
 # The lane's compose file list, resolved ONCE, here, and used by every compose

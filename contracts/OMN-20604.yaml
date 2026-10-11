@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20604"
+title: "The runtime role may write the lab job read models on every profile"
+summary: "omnibase_infra vendors omnimarket's node_projection_lab_job migrations and grants omninode_runtime SELECT, INSERT and UPDATE on lab_job_state and lab_job_transitions in every shipped topology profile, ahead of the omnimarket pull request that adds the node. Without the grants the runtime refuses to prepare the node's writer."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-lab-job-runtime-grants"
+    statement: "Every shipped topology profile grants the runtime role the two lab job read models, and both node migrations are vendored."
+    acceptance:
+      - id: "AC6"
+        statement: "AC6: every supported topology profile grants omninode_runtime SELECT, INSERT and UPDATE on lab_job_state and lab_job_transitions, and both node_projection_lab_job migrations are vendored -- falsifier: uv run pytest tests/unit/topology/test_lab_job_runtime_grants_omn20604.py -q fails at the merge base, where no profile grants either table"
+evidence_requirements:
+  - kind: "tests"
+    description: "The grant test passes at the head and fails at the merge base."
+    command: "uv run pytest tests/unit/topology/test_lab_job_runtime_grants_omn20604.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20604-ac6-lab-job-runtime-grants"
+    description: "AC6 hosted probe. Every profile grants the runtime role both lab job tables and both migrations are vendored."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/topology/test_lab_job_runtime_grants_omn20604.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC6"]
