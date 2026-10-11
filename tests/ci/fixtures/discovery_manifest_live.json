@@ -24,7 +24,7 @@
         "contract_content_hash": "84ee2efb364d60fa52b9dea8f0548f191865c014cb9963bfafc32b5b52f15a4b",
         "entry_point_name": "node_coding_agent_fsm_reducer",
         "package_name": "omnibase_infra",
-        "package_version": "0.38.70",
+        "package_version": "0.38.71",
         "runtime_profiles": [
           "effects"
         ],
