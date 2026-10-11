@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20870
+title: A PR citing a ticket with no head-side contract is refused before push
+summary: omnibase_infra PRs went red on CI Summary because repo-evidence / dod-verify found no contracts/OMN-n.yaml at the PR head, or a contract check value that is prose. The existing prepush-deploy-scope-dod hook (scripts/ci/check_deploy_scope_dod.py) gains a ticket-contract leg that refuses both before the push. A ticket cited in the branch's commit subjects with no contracts/<ticket>.yaml in the pushed HEAD fails and names the file. A command or test_passes check value that the released verifier's own shape guard (omnimarket node_dod_verify, at the verifier-version call-repo-evidence-gate.yml pins) calls prose fails and names the check. The leg judges shape only and runs no bound check.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-prepush-ticket-contract
+    statement: A new bot or lane PR in omnibase_infra must not reach CI with a cited ticket that has no head-side contract, or with a contract check value the verifier refuses as prose; the existing governed pre-push hook refuses both locally.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the shared cause is fixed at its source so a new bot or lane PR does not repeat it -- falsifier: a planted PR citing a ticket with no head-side contract is refused by a local check before push, with the file named; a contract whose check value is prose is refused locally and names the check'
+evidence_requirements:
+  - kind: tests
+    description: A cited ticket with no contracts/<ticket>.yaml in the pushed HEAD is refused and the file named.
+    command: uv run pytest tests/ci/test_ticket_contract_prepush_omn20870.py -q -k "no_head_contract or uncommitted_contract or recorded_hosted_refusal"
+  - kind: tests
+    description: A prose check value is refused by the released verifier's shape guard and the check named.
+    command: uv run pytest tests/ci/test_ticket_contract_prepush_omn20870.py -q -k "prose_check_value or command_shaped_contract"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-prepush-missing-contract-ac2
+    description: The focused tests prove a cited ticket with no head-side contract is refused before push with contracts/<ticket>.yaml named.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_ticket_contract_prepush_omn20870.py -q -k "no_head_contract or uncommitted_contract or recorded_hosted_refusal"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-prepush-prose-check-ac2
+    description: The focused tests prove a prose check value is refused by the released verifier's shape guard with the check named, and a command-shaped one passes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_ticket_contract_prepush_omn20870.py -q -k "prose_check_value or command_shaped_contract"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
