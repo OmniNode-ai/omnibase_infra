@@ -159,8 +159,9 @@ _IN_REPO_PROVENANCE: dict[str, str] = {
     # runtime-env entry above it (885 -> 891). OMN-20260 shifted it eight more
     # by documenting the loopback-only Redpanda admin publish (891 -> 899).
     # OMN-20867 shifted it eighteen more with the value-less lane act switch
-    # anchor above it (902 -> 920).
-    "omnibase_infra:docker/docker-compose.infra.yml:920": "KC_DB_USERNAME: postgres",
+    # anchor above it (902 -> 920). OMN-20867 shifted it six more by naming
+    # the lane class pass-through entries in that anchor (920 -> 926).
+    "omnibase_infra:docker/docker-compose.infra.yml:926": "KC_DB_USERNAME: postgres",
     "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4": (
         "CREATE DATABASE keycloak"
     ),
@@ -192,7 +193,7 @@ _UNDECLARED_DERIVATION: tuple[UndeclaredDeploymentDatabase, ...] = (
             "four-column checksum ledger"
         ),
         provenance=(
-            "omnibase_infra:docker/docker-compose.infra.yml:920",
+            "omnibase_infra:docker/docker-compose.infra.yml:926",
             "omnibase_infra:docker/postgres/init/02-keycloak-db.sql:4",
             "omninode_infra:k8s/auth/keycloak-values.yaml:32",
             "omninode_infra:scripts/init-databases.sh:603",
