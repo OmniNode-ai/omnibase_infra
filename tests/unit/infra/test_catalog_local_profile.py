@@ -671,17 +671,19 @@ def test_local_render_names_no_lab_host() -> None:
 
 
 def test_lab_host_check_can_fail() -> None:
-    """Positive control: the shared lab-facing render still carries the .201 default."""
-    compose = generate_compose(
-        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["core"])
-    )
-    assert "192.168." in "".join(_lab_host_hits(compose))
+    """Positive control: the lab-host check finds a marker when one is present."""
+    assert _lab_host_hits({"command": f"{_LAB_HOST_MARKERS[0]}1"}) != []
 
 
 @pytest.mark.parametrize("bundle", ["core", "runtime"])
-def test_other_bundles_keep_all_interface_ports_and_the_lab_advertise_default(
+def test_other_bundles_keep_all_interface_ports_and_name_no_lab_host(
     bundle: str,
 ) -> None:
+    """OMN-20931: the shared manifests carry the neutral advertise default.
+
+    A deployment's own env file sets REDPANDA_ADVERTISE_HOST; no render of the
+    shipped catalog names a lab host.
+    """
     compose = generate_compose(
         CatalogResolver(catalog_dir=_CATALOG_DIR).resolve([bundle])
     )
@@ -694,7 +696,8 @@ def test_other_bundles_keep_all_interface_ports_and_the_lab_advertise_default(
     services = compose["services"]
     assert isinstance(services, dict)
     command = " ".join(services["redpanda"]["command"])
-    assert "${REDPANDA_ADVERTISE_HOST:-192.168.86.201}" in command
+    assert "${REDPANDA_ADVERTISE_HOST:-localhost}" in command
+    assert _lab_host_hits(compose) == []
 
 
 # --- OMN-19972 hostile-review follow-ups: env_default_overrides must fail loudly

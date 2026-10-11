@@ -65,12 +65,6 @@ local:
   # the developer happens to be on. The lab lanes render the same manifests
   # without this and stay reachable.
   publish_host: 127.0.0.1
-  # OMN-19972: the shared Redpanda manifest defaults its advertised address to
-  # the lab's LAN IP, which the dev lane on .201 relies on. The laptop render
-  # must name no lab host, so its default is localhost; the env file can still
-  # set REDPANDA_ADVERTISE_HOST.
-  env_default_overrides:
-    REDPANDA_ADVERTISE_HOST: localhost
   services:
     - postgres
     - redpanda
