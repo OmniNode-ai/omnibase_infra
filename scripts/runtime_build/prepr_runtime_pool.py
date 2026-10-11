@@ -77,7 +77,10 @@ import yaml
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT = SCRIPT_DIR.parents[1]
-POOL_CONFIG = REPO_ROOT / "config" / "prepr_runtime_pool.yaml"
+# OMN-20934: the pool names the lab's machines, so it is deployment config and
+# never ships here. Whoever runs the pool supplies it under their workspace
+# config root, resolved by the runtime's workspace config owner resolver.
+POOL_CONFIG_RELATIVE = Path("config") / "lab" / "prepr_runtime_pool.yaml"
 LANE_MANIFEST = REPO_ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
 PROVE_SH = SCRIPT_DIR / "prepr_pool_prove.sh"
 SLOT_POLICY_PY = SCRIPT_DIR / "prepr_slot_policy.py"
@@ -165,7 +168,41 @@ def _slot_policy() -> ModuleType:
     return module
 
 
-def load_pool_config(path: Path = POOL_CONFIG) -> PoolConfig:
+def default_pool_config() -> Path:
+    """The pool table under the workspace config root, or a loud refusal.
+
+    The root is the runtime's workspace config owner for ``$OMNI_HOME``
+    (``workspace_runtime_config_root``: ``$ONEX_WORKSPACE_CONFIG_ROOT`` when set).
+    There is no in-repo fallback: a fork with no overlay is told how to supply
+    one instead of being pointed at our lab.
+    """
+    from omnibase_infra.runtime.service_kernel import (
+        ENV_WORKSPACE_CONFIG_ROOT,
+        workspace_runtime_config_root,
+    )
+
+    configured = os.environ.get(ENV_WORKSPACE_CONFIG_ROOT, "").strip()
+    registry_root = os.environ.get("OMNI_HOME", "").strip()
+    if not configured and not registry_root:
+        raise ValueError(
+            f"the pre-merge runtime pool is not configured: set "
+            f"{ENV_WORKSPACE_CONFIG_ROOT} to the directory that holds "
+            f"{POOL_CONFIG_RELATIVE}, or pass --config <path>"
+        )
+    root = workspace_runtime_config_root(Path(registry_root or "."))
+    path = root / POOL_CONFIG_RELATIVE
+    if not path.is_file():
+        raise ValueError(
+            f"the pre-merge runtime pool is not configured: {path} does not exist; "
+            f"write your lab's pool table there (schema: this script's "
+            f"load_pool_config), set {ENV_WORKSPACE_CONFIG_ROOT} to the directory "
+            f"that holds {POOL_CONFIG_RELATIVE}, or pass --config <path>"
+        )
+    return path
+
+
+def load_pool_config(path: Path | None = None) -> PoolConfig:
+    path = default_pool_config() if path is None else path
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if raw.get("schema_version") != 1:
         raise ValueError(f"{path}: unsupported schema_version")
@@ -1753,7 +1790,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=__doc__.splitlines()[0] if __doc__ else ""
     )
-    parser.add_argument("--config", type=Path, default=POOL_CONFIG)
+    parser.add_argument(
+        "--config",
+        type=Path,
+        help=(
+            "pool table (default: config/lab/prepr_runtime_pool.yaml under the "
+            "workspace config root: $ONEX_WORKSPACE_CONFIG_ROOT, else the "
+            "workspace config owner of $OMNI_HOME)"
+        ),
+    )
     parser.add_argument(
         "--ledger",
         default=os.environ.get("ONEX_LEDGER_PATH"),
