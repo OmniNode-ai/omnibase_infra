@@ -502,6 +502,10 @@ x-runtime-env: &runtime-env
 # inline default is the shipped behaviour, and refuse a set-but-empty value at
 # contract load. A lane's private deployment overlay sets them; this repository
 # names them only and carries no lane's value.
+#
+# The lane class a runtime is an instance of and the class contracts it takes
+# (ONEX_RUNTIME_LANE_CLASS, ONEX_RUNTIME_LANE_CLASS_CONTRACTS; read by the
+# auto-wiring ownership filter). Same rule: the overlay names the instance.
 x-runtime-passthrough-env: &runtime-passthrough-env
   ONEX_PR_LANDING_GITHUB_MODE:
   ONEX_PR_LANDING_ARM_ACTION_MODE:
@@ -509,6 +513,8 @@ x-runtime-passthrough-env: &runtime-passthrough-env
   ONEX_CI_RED_TRIAGE_ACT_PR_OWN:
   ONEX_CI_RED_TRIAGE_ACT_SHARED_CAUSE:
   ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD:
+  ONEX_RUNTIME_LANE_CLASS:
+  ONEX_RUNTIME_LANE_CLASS_CONTRACTS:
 # ==========================================================================
 # Services
 # ==========================================================================

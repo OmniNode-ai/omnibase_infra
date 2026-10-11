@@ -436,6 +436,12 @@ class TestRuntimeLaneActSwitchPassthrough:
             "ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD",
         }
     )
+    # The lane class an instance's runtime borrows contracts from, read by the
+    # auto-wiring ownership filter; the same overlay-only, value-less rule.
+    LANE_CLASS_KEYS: frozenset[str] = frozenset(
+        {"ONEX_RUNTIME_LANE_CLASS", "ONEX_RUNTIME_LANE_CLASS_CONTRACTS"}
+    )
+    PASSTHROUGH_KEYS: frozenset[str] = LANE_ACT_SWITCH_KEYS | LANE_CLASS_KEYS
 
     @pytest.mark.unit
     def test_passthrough_anchor_declares_each_switch_value_less(self) -> None:
@@ -444,17 +450,17 @@ class TestRuntimeLaneActSwitchPassthrough:
         assert isinstance(passthrough, dict), (
             "x-runtime-passthrough-env anchor not found in docker-compose.infra.yml"
         )
-        assert set(passthrough) >= self.LANE_ACT_SWITCH_KEYS
+        assert set(passthrough) >= self.PASSTHROUGH_KEYS
         valued = {k: v for k, v in passthrough.items() if v is not None}
         assert not valued, (
             f"x-runtime-passthrough-env must hold value-less names only: {valued}"
         )
-        assert not self.LANE_ACT_SWITCH_KEYS & _get_runtime_env_keys(data)
+        assert not self.PASSTHROUGH_KEYS & _get_runtime_env_keys(data)
 
     @pytest.mark.unit
     def test_no_switch_is_interpolated_anywhere(self) -> None:
         raw = COMPOSE_PATH.read_text()
-        for key in sorted(self.LANE_ACT_SWITCH_KEYS):
+        for key in sorted(self.PASSTHROUGH_KEYS):
             assert "${" + key not in raw, (
                 f"{key} is interpolated in the compose file; it must only be "
                 "passed through value-less"
@@ -473,9 +479,9 @@ class TestRuntimeLaneActSwitchPassthrough:
         }
         assert merging, "no service merges x-runtime-env (positive control)"
         missing = {
-            name: sorted(self.LANE_ACT_SWITCH_KEYS - set(environment))
+            name: sorted(self.PASSTHROUGH_KEYS - set(environment))
             for name, environment in merging.items()
-            if not set(environment) >= self.LANE_ACT_SWITCH_KEYS
+            if not set(environment) >= self.PASSTHROUGH_KEYS
         }
         assert not missing, (
             f"services merging x-runtime-env without the act switches: {missing}"
