@@ -11,15 +11,23 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: the dev lane overlay sets the flag on omninode-runtime only and joins the opted-in overlay set -- falsifier: uv run pytest tests/unit/runtime/test_runtime_scheduler_wiring.py -q'
+  - id: req-omn20867-tick-slot
+    statement: Each runtime tick carries the epoch-aligned slot it was due on as scheduled_at, and consecutive ticks tile the clock even when a publish runs late or fails.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the tick loop stamps scheduled_at with the slot it was due on and schedules the next tick for the first slot after this tick''s now, so no schedule window is lost to a late tick -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/runtime/test_runtime_scheduler.py tests/integration/runtime/test_runtime_tick_slot_alignment_omn20867.py -q'
   - id: req-omn20867-lane-act-switch-passthrough
     statement: The runtime services that merge the shared runtime environment pass the six per-lane act switches of the landing orchestrator and CI-red triage through value-less, so a host value that is unset stays unset in the container and a host value that is set reaches it verbatim.
     acceptance:
-      - id: AC2
-        statement: 'AC2: x-runtime-passthrough-env names the six act switches with no value, no switch is interpolated, and every service that merges x-runtime-env also merges it -- falsifier: uv run pytest tests/ci/test_runtime_env_anchor.py -q -k RuntimeLaneActSwitchPassthrough'
+      - id: AC3
+        statement: 'AC3: x-runtime-passthrough-env names the six act switches with no value, no switch is interpolated, and every service that merges x-runtime-env also merges it -- falsifier: uv run pytest tests/ci/test_runtime_env_anchor.py -q -k RuntimeLaneActSwitchPassthrough'
 evidence_requirements:
   - kind: tests
     description: The scheduler wiring test covers the dev lane overlay.
     command: uv run pytest tests/unit/runtime/test_runtime_scheduler_wiring.py -q
+  - kind: tests
+    description: The scheduler tests and the lane producer integration test prove each tick carries its slot and the ticks tile the clock under a slow or failed publish.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/unit/runtime/test_runtime_scheduler.py tests/integration/runtime/test_runtime_tick_slot_alignment_omn20867.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -37,6 +45,17 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn-20867-ac2-tick-slot
+    description: The runtime tick carries the slot it was due on; ticks tile the clock when a publish runs late or fails (omnibase_infra#4815).
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/runtime/test_runtime_scheduler.py tests/integration/runtime/test_runtime_tick_slot_alignment_omn20867.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/runtime_scheduler.py?ref=b2a709fc04bddd6aea3cf134b870898ddb71f850' --jq .content | base64 -d | grep -F 'scheduled_at=scheduled_at or tick_time' >/dev/null
+    binds_ac:
+      - AC2
   - id: dod-omn20867-lane-act-switch-passthrough
     description: The anchor test class fails on the merge base's compose file, which has no x-runtime-passthrough-env, and passes at the pull request head.
     source: manual
@@ -45,7 +64,7 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_runtime_env_anchor.py -q -p no:randomly -k RuntimeLaneActSwitchPassthrough
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC2
+      - AC3
   - id: dod-omn20867-lane-act-switch-deploy-probe
     description: Deploy probe. docker/docker-compose.infra.yml at the checked-out commit declares the x-runtime-passthrough-env anchor, the file the deploy agent renders for the runtime services; the probe reads it from GitHub at that commit and exits nonzero on a tree without the anchor. The dev-lane readout after the deploy agent rolls it is the six switch names in the environment of the omninode-runtime container, each unset on a lane that sets none.
     source: manual
