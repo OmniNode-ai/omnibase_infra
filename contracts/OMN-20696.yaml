@@ -1,0 +1,51 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20696
+title: DoD verdict rows name the contract repository and commit they were evaluated at, and the verdict projection rebuilds from replayed events
+summary: The omnibase_infra half of OMN-20696 (split from OMN-20071, plan step S4). omnimarket binds AC1 and AC2 in its own contracts/OMN-20696.yaml; this contract binds AC3, the vendored migration 0004 with its ledger and class rows, and AC4, the property that the change added no non-canonical file.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-vendored-migration-0004
+    statement: omnibase_infra vendors migration 0004 of node_projection_dod_verdict byte-identical to the omnimarket copy with its ledger and class rows, and the change that did so added no non-canonical file.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: omnibase_infra vendors 0004_dod_verify_runs_contract_subject.sql byte-identical to the omnimarket copy with its migration-ledger and migration-class rows -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/integration/migrations/test_dod_verify_runs_omn18900.py -q in omnibase_infra fails'
+      - id: AC4
+        statement: 'AC4: The change adds no new non-canonical file (RULING 2026-10-01T12:36:54Z) -- falsifier: the PR diff adds a script, plugin, allowlist entry or suppression, or grows a baseline'
+evidence_requirements:
+  - kind: tests
+    description: The vendored 0004 file matches the checksum its migration-ledger row records, with the other four files this node vendors.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/integration/migrations/test_dod_verify_runs_omn18900.py -q
+  - kind: tests
+    description: Every migration on the committed tree, 0004 included, carries a declared migration class.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_migration_class_omn19344.py -q -k committed_tree_passes_positive_control
+  - kind: tests
+    description: The recorded paths of the change that vendored 0004 are canonical, and git reads back the same paths.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omn20696_noncanonical_files.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20696-vendored-0004-ac3
+    description: The ledger test proves the vendored 0004 matches its recorded checksum, and the class test proves it has a declared class; the byte identity with the omnimarket copy is the checksum the ledger row records.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/integration/migrations/test_dod_verify_runs_omn18900.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_migration_class_omn19344.py -q -k committed_tree_passes_positive_control
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn20696-no-noncanonical-file-ac4
+    description: The change that vendored 0004 (omnibase_infra#4665) touched four paths, none a script, plugin, allowlist or baseline; planted ones are refused.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omn20696_noncanonical_files.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
