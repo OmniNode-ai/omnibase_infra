@@ -6,11 +6,11 @@ name: "node_setup_local_provision_effect"
 node_type: "EFFECT_GENERIC"
 contract_version:
   major: 1
-  minor: 0
+  minor: 1
   patch: 0
-node_version: "1.0.0"
+node_version: "1.1.0"
 description: >
-  EFFECT node that provisions, tears down, and checks status of local Docker Compose services defined in a ModelDeploymentTopology. Runs docker compose up -d (provision), docker compose down (teardown), and docker compose ps (status). Deduplicates --profile flags across services sharing the same profile. Async-polls ports until healthy or max_wait_seconds is exceeded.
+  EFFECT node that provisions, tears down, and checks status of local Docker Compose services defined in a ModelDeploymentTopology. Runs docker compose up -d (provision, with an optional build first), docker compose down (teardown, optionally with its volumes), and docker compose ps (status), either for the topology's services or for the whole compose project. Deduplicates --profile flags across services sharing the same profile. Async-polls ports until healthy or max_wait_seconds is exceeded.
 
 input_model:
   name: "ModelLocalProvisionEffectInput"
@@ -23,15 +23,15 @@ output_model:
 io_operations:
   - name: "provision_local"
     description: "Start local services via docker compose up -d and poll until healthy."
-    input_fields: ["topology", "compose_file_path", "correlation_id", "max_wait_seconds"]
+    input_fields: ["topology", "compose_file_path", "correlation_id", "max_wait_seconds", "whole_project", "env_files", "build", "build_args"]
     output_fields: ["success", "services_started", "error"]
   - name: "teardown_local"
-    description: "Stop and remove local services via docker compose down."
-    input_fields: ["topology", "compose_file_path", "correlation_id"]
+    description: "Stop and remove local services via docker compose down; remove_volumes also deletes the project's volumes."
+    input_fields: ["topology", "compose_file_path", "correlation_id", "whole_project", "env_files", "remove_volumes"]
     output_fields: ["success", "services_stopped", "error"]
   - name: "status_check"
     description: "Query which local services are currently running."
-    input_fields: ["topology", "compose_file_path", "correlation_id"]
+    input_fields: ["topology", "compose_file_path", "correlation_id", "whole_project", "env_files"]
     output_fields: ["success", "services_running", "error"]
 handler_routing:
   routing_strategy: "operation_match"
