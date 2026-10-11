@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20413
+title: "OCC-writer refresh PRs carry a head-bound contract for the ticket they cite"
+summary: The lane census and omnimarket contract-pin producer workflows render contracts/<ticket>.yaml inline, binding the value each refresh moves, so repo-evidence / dod-verify finds a contract at the bot PR head whose check fails at the merge base.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20413
+    statement: Each in-repo OCC-writer refresh producer commits a contract for its cited ticket that binds the refreshed value.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the contract check each producer workflow renders passes on the refreshed file and fails on the pre-refresh file, and the workflow commits the contract -- falsifier: uv run pytest tests/ci/test_render_bot_refresh_contract.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The rendering lines of both producer workflows run as written against a refreshed and a pre-refresh file.
+    command: uv run pytest tests/ci/test_render_bot_refresh_contract.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20413-ac1
+    description: The rendered contract binds the refreshed value and both producers commit it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_render_bot_refresh_contract.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
