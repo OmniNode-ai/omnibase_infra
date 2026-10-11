@@ -128,7 +128,7 @@ def check_file(path: Path) -> list[str]:
             f"Run the probe command on .201 and add the verified: line in the "
             f"same session before committing. "
             f"Example: 'verified: 2026-06-17T10:00Z via "
-            f"ssh jonah@192.168.86.201 docker ps' "
+            f"ssh <lab-host> docker ps' "
             f"(retro B-6 / OMN-13034 — phantom-lane boilerplate is unwritable)"
         )
 
