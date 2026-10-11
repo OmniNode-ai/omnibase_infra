@@ -1363,10 +1363,62 @@ def _assert_no_undecoded_ansi_c_quoting(env: Mapping[str, str]) -> None:
     )
 
 
+#: OMN-20932: every lane compose file mounts its Bifrost overlay from
+#: ``${ONEX_LANE_OVERLAY_DIR}/${COMPOSE_PROJECT_NAME}.bifrost.yaml``. The overlays
+#: are private deployment config and no longer live in this repository.
+LANE_OVERLAY_DIR_ENV = "ONEX_LANE_OVERLAY_DIR"
+LANE_OVERLAY_RELATIVE_DIR = Path("config") / "lab" / "lane-overlays"
+
+
+def _workspace_config_root(workspace_root: Path) -> Path:
+    """The workspace-config owner, from the runtime's own resolver (OMN-19743).
+
+    ``ONEX_WORKSPACE_CONFIG_ROOT`` when set, otherwise the workspace's sibling
+    operator repository or its developer config. Imported here, not at module
+    load, because the resolver lives in the runtime kernel module.
+    """
+    from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
+
+    return workspace_runtime_config_root(workspace_root)
+
+
+def resolve_lane_overlay_dir(
+    env: Mapping[str, str], repo_dir: str = REPO_DIR
+) -> str | None:
+    """Resolve the private lane-overlay directory every lane compose file mounts.
+
+    ``ONEX_LANE_OVERLAY_DIR`` when it names a directory; otherwise
+    ``config/lab/lane-overlays`` under the workspace-config owner of the
+    workspace that holds this deploy clone (``REPO_DIR/..``). The workspace is
+    derived from the clone, not from ``OMNI_HOME``, because the agent's unit
+    names a different ``OMNI_HOME`` level than its clone's workspace.
+
+    Returns ``None`` when no directory exists. The caller then leaves the
+    variable unset, and compose refuses every lane file with the mount's own
+    message naming both variables: there is no committed overlay to fall back to.
+    """
+    configured = env.get(LANE_OVERLAY_DIR_ENV, "").strip()
+    if configured:
+        return str(Path(configured).resolve()) if Path(configured).is_dir() else None
+    candidate = (
+        _workspace_config_root(Path(repo_dir).parent) / LANE_OVERLAY_RELATIVE_DIR
+    )
+    if candidate.is_dir():
+        return str(candidate.resolve())
+    return None
+
+
 def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ)
     for key, value in _load_runtime_policy_env().items():
         env.setdefault(key, value)
+    # OMN-20932: resolve the private lane-overlay directory every lane compose
+    # file mounts. Left unset when none exists, so compose refuses loudly.
+    lane_overlay_dir = resolve_lane_overlay_dir(env)
+    if lane_overlay_dir is None:
+        env.pop(LANE_OVERLAY_DIR_ENV, None)
+    else:
+        env[LANE_OVERLAY_DIR_ENV] = lane_overlay_dir
     # OMN-18572: `update`, not `setdefault`. The process environment ALREADY
     # carries a value for these keys -- a stale one, resolved at unit start --
     # so a setdefault would read as wired and change nothing.

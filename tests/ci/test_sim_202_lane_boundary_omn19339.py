@@ -30,16 +30,16 @@ from typing import Any
 import pytest
 import yaml
 
-from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
-    EnumBifrostLaneLocale,
-)
-from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
-    ModelBifrostLaneOverlay,
-)
 from scripts.lane_census_plan import build_plan, resolve_host, validate_hosts
 from scripts.preflight_lane_deploy_attribution import (
     GOVERNED_LANES,
     GRANT_INTERLOCK_LANES,
+)
+from tests.helpers.lane_overlay_fixtures import (
+    LANE_OVERLAY_MOUNT,
+    LANE_OVERLAY_TARGET,
+    lane_overlay_mounts,
+    load_compose,
 )
 
 pytestmark = pytest.mark.ci
@@ -47,7 +47,6 @@ pytestmark = pytest.mark.ci
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
 OVERLAY_PATH = ROOT / "docker" / "docker-compose.sim-202.yml"
-BIFROST_OVERLAY_PATH = ROOT / "docker" / "lane-overlays" / "sim-202.bifrost.yaml"
 
 LANE = "sim-202"
 HOST_ID = "lab-202"
@@ -255,18 +254,17 @@ def test_a_201_lane_container_on_202_is_a_finding() -> None:
     ), plan["findings"]
 
 
-def test_sim_202_binds_no_model_server_on_any_lab_host() -> None:
-    """Seam SIM.1: no route to a .201 listener, and none to .202's model server.
-
-    The dogfood overlay binds the .201 model server; this lane mounts its own,
-    cloud-locale overlay with zero local backends, and never the dogfood file.
-    """
-    overlay = ModelBifrostLaneOverlay.model_validate(
-        yaml.safe_load(BIFROST_OVERLAY_PATH.read_text(encoding="utf-8"))
-    )
-    assert overlay.lane == LANE
-    assert overlay.locale is EnumBifrostLaneLocale.CLOUD
-    assert overlay.backends == ()
+def test_sim_202_compose_mounts_only_its_own_overlay() -> None:
+    """Seam SIM.1: compose pins its own private overlay for both runtimes."""
     compose = OVERLAY_PATH.read_text(encoding="utf-8")
     assert "dogfood.bifrost.yaml" not in compose
     assert "192.168." not in compose
+    runtime_services = {"omninode-runtime", "runtime-effects"}
+    assert lane_overlay_mounts(OVERLAY_PATH) == {
+        service: [LANE_OVERLAY_MOUNT] for service in runtime_services
+    }
+    services = load_compose(OVERLAY_PATH)["services"]
+    for service in runtime_services:
+        assert services[service]["environment"]["BIFROST_LANE_OVERLAY_PATH"] == (
+            LANE_OVERLAY_TARGET
+        )

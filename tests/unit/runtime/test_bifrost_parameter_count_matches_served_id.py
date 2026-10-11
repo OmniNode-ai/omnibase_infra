@@ -58,11 +58,12 @@ from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
 
 pytestmark = pytest.mark.unit
 
-_LANE_OVERLAYS = sorted(
-    (Path(__file__).resolve().parents[3] / "docker" / "lane-overlays").glob(
-        "*.bifrost.yaml"
-    )
-)
+_LANE_OVERLAYS = [
+    Path(__file__).resolve().parents[3]
+    / "docker"
+    / "lane-overlays"
+    / "local.bifrost.example.yaml"
+]
 
 
 def _overlay_bindings() -> list[tuple[str, ModelBifrostLaneBackendBinding]]:
