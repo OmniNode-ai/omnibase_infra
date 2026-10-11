@@ -288,7 +288,7 @@ def test_lane_overlay_pin_resolves_from_the_environment(
     # A pinned-but-absent lane file fails naming exactly that lane's file.
     with pytest.raises(
         ProtocolConfigurationError,
-        match=r"overlay not found: .*lakshman\.bifrost\.yaml",
+        match=r"overlay not found: .*lane\.bifrost\.yaml",
     ):
         render_bifrost_delegation_contract(
             source_path=source,
@@ -669,7 +669,7 @@ def test_cloud_overlay_refuses_added_or_base_local_backends(
         )
 
     message = str(excinfo.value)
-    assert "lane 'onex-dev'" in message
+    assert "example-cloud" in message
     assert "locale 'cloud'" in message
     assert backend_id in message
     assert "local" in message
