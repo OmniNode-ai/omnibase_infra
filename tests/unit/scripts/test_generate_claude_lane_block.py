@@ -23,12 +23,16 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.helpers.lane_census_fixtures import NEUTRAL_MANIFEST, NEUTRAL_SNAPSHOT
+
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
 _SCRIPT = _REPO / "scripts" / "generate_claude_lane_block.py"
-_MANIFEST_PATH = _REPO / "deploy" / "lane-census" / "lane-manifest.yaml"
-_SNAPSHOT_PATH = _REPO / "deploy" / "lane-census" / "census-snapshot.json"
+# OMN-20934: the lab's manifest and census are private config; the generator's
+# smoke test reads the neutral pair.
+_MANIFEST_PATH = NEUTRAL_MANIFEST
+_SNAPSHOT_PATH = NEUTRAL_SNAPSHOT
 
 
 def _load_module() -> Any:
@@ -223,13 +227,13 @@ def test_update_claude_md_no_block_returns_false(capsys: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Real manifest + snapshot smoke test
+# Manifest + snapshot smoke test
 # ---------------------------------------------------------------------------
 
 
 def test_real_manifest_generates_valid_block() -> None:
-    """The committed lane-manifest.yaml must produce a valid block."""
-    assert _MANIFEST_PATH.exists(), "deploy/lane-census/lane-manifest.yaml missing"
+    """A manifest and census in the real shape produce a valid block."""
+    assert _MANIFEST_PATH.exists(), f"{_MANIFEST_PATH} missing"
     with open(_MANIFEST_PATH, encoding="utf-8") as fh:
         manifest = yaml.safe_load(fh)
 
@@ -262,14 +266,3 @@ def test_dev_lane_boundary_names_the_protected_delegation_lane() -> None:
     assert "OMN-20594" in boundary
     # The boundary text is rendered into the table row, so a pipe would split it.
     assert "|" not in boundary
-
-
-def test_manifest_dev_entry_declares_the_protected_delegation_lane() -> None:
-    """The desired-state census names the guards beside the lane they guard."""
-    text = _MANIFEST_PATH.read_text(encoding="utf-8")
-    head, _, rest = text.partition("\n  dev:\n")
-    assert rest, "the manifest has no dev lane entry"
-    preceding = head[-3000:]
-    assert "PROTECTED DELEGATION LANE (OMN-20594)" in preceding
-    for guard in ("chain-canary.yml", "delegation_chain_canary", "staging delivery"):
-        assert guard in preceding, f"the dev entry's comment does not name {guard}"

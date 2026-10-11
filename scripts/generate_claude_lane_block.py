@@ -9,8 +9,12 @@ allowed phantom lanes (documented as running when absent) and undocumented
 running lanes (judge was live but absent from the map). This script makes the
 table GENERATED — it derives from:
 
-  1. deploy/lane-census/lane-manifest.yaml  — the desired-state authority
-  2. deploy/lane-census/census-snapshot.json — the last machine-emitted census
+  1. lane-manifest.yaml  — the desired-state authority
+  2. census-snapshot.json — the last machine-emitted census
+
+Both are private deployment config (OMN-20934) in config/lab/lane-census under
+the workspace config root ($ONEX_WORKSPACE_CONFIG_ROOT, else the operator
+repository beside $OMNI_HOME); this repository ships neither.
 
 The generated block is delimited by HTML comments so it can be diffed in CI:
 
@@ -67,9 +71,7 @@ from typing import Any
 
 import yaml
 
-_REPO = Path(__file__).resolve().parent.parent
-_DEFAULT_MANIFEST = _REPO / "deploy" / "lane-census" / "lane-manifest.yaml"
-_DEFAULT_SNAPSHOT = _REPO / "deploy" / "lane-census" / "census-snapshot.json"
+_SCRIPTS = Path(__file__).resolve().parent
 
 # Lane port map — static configuration that doesn't change per census but IS
 # part of the lane definition. Kept here rather than in the manifest because
@@ -425,7 +427,7 @@ def generate_block(
     header_comment = (
         f"{_BEGIN_MARKER}\n"
         f"     generated: {generated_ts}\n"
-        f"     source: deploy/lane-census/lane-manifest.yaml + deploy/lane-census/census-snapshot.json\n"
+        f"     source: config/lab/lane-census/lane-manifest.yaml + census-snapshot.json (workspace config root)\n"
         f"     {verified_line}\n"
         f"-->"
     )
@@ -533,14 +535,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=_DEFAULT_MANIFEST,
-        help="Path to lane-manifest.yaml (default: deploy/lane-census/lane-manifest.yaml)",
+        default=None,
+        help=(
+            "Path to lane-manifest.yaml (default: config/lab/lane-census/"
+            "lane-manifest.yaml under the workspace config root)"
+        ),
     )
     parser.add_argument(
         "--snapshot",
         type=Path,
-        default=_DEFAULT_SNAPSHOT,
-        help="Path to census-snapshot.json (default: deploy/lane-census/census-snapshot.json)",
+        default=None,
+        help=(
+            "Path to census-snapshot.json (default: config/lab/lane-census/"
+            "census-snapshot.json under the workspace config root)"
+        ),
     )
     parser.add_argument(
         "--update-claude-md",
@@ -563,6 +571,25 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+
+    if args.manifest is None or args.snapshot is None:
+        if str(_SCRIPTS) not in sys.path:
+            sys.path.insert(0, str(_SCRIPTS))
+        from lane_census_plan import (
+            SNAPSHOT_NAME,
+            LaneCensusConfigError,
+            default_manifest_path,
+            lane_census_dir,
+        )
+
+        try:
+            if args.manifest is None:
+                args.manifest = default_manifest_path()
+            if args.snapshot is None:
+                args.snapshot = lane_census_dir() / SNAPSHOT_NAME
+        except LaneCensusConfigError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
 
     manifest = _load_manifest(args.manifest)
     snapshot = _load_snapshot(args.snapshot)

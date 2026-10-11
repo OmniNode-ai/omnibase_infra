@@ -12,7 +12,8 @@ same failures kept recurring with zero signal:
   - 2026-06-11: prod runtime containers + broker network silently absent for hours
 
 This module is a *pure* planner: it takes the versioned lane manifest
-(deploy/lane-census/lane-manifest.yaml) as the DESIRED state and a JSON envelope
+(config/lab/lane-census/lane-manifest.yaml under the workspace config root,
+private deployment config since OMN-20934) as the DESIRED state and a JSON envelope
 of the live docker inventory as the ACTUAL state, and emits a deterministic list
 of typed drift findings. It performs NO I/O — the shell driver
 (scripts/lane-census-check.sh) gathers the docker inventory and publishes the
@@ -123,6 +124,11 @@ _AMBIGUOUS_HOST_NAMES = frozenset({"docker-desktop", "localhost"})
 #: are malformed. Distinct from the driver's drift code 30 and its
 #: unobservable-inventory code 4: an unattributable census is neither.
 EXIT_HOST_UNDECLARED = 5
+
+#: Exit status of ``main`` when no lane manifest can be located (OMN-20934).
+#: The driver's "missing dependency" code: the manifest is private config the
+#: host must supply, and without it there is no desired state to compare.
+EXIT_NOT_CONFIGURED = 3
 
 
 class HostDeclarationError(ValueError):
@@ -247,17 +253,82 @@ FINDING_KIND_SEVERITY: dict[str, str] = {
     for spec in (*CENSUS_FINDING_KINDS, *LAB_SYNC_FINDING_KINDS)
 }
 
-_DEFAULT_MANIFEST = (
-    Path(__file__).resolve().parent.parent
-    / "deploy"
-    / "lane-census"
-    / "lane-manifest.yaml"
-)
+#: OMN-20934: the lane manifest and the committed census describe one lab's
+#: hosts, lanes and addresses, so they are private deployment config (operator
+#: RULING 2026-10-10T21:57:38Z) and this repository ships neither. They live in
+#: the workspace config root: ``$ONEX_WORKSPACE_CONFIG_ROOT`` when set,
+#: otherwise the owner the runtime resolves for ``$OMNI_HOME``
+#: (``workspace_runtime_config_root``, the one resolver of that root).
+ENV_WORKSPACE_CONFIG_ROOT = "ONEX_WORKSPACE_CONFIG_ROOT"
+LANE_CENSUS_RELATIVE = Path("config") / "lab" / "lane-census"
+MANIFEST_NAME = "lane-manifest.yaml"
+SNAPSHOT_NAME = "census-snapshot.json"
+
+
+class LaneCensusConfigError(RuntimeError):
+    """The private lane census directory cannot be located."""
+
+
+def _not_configured(reason: str) -> LaneCensusConfigError:
+    return LaneCensusConfigError(
+        f"the lane census is not configured: {reason}; set "
+        f"{ENV_WORKSPACE_CONFIG_ROOT} to the directory that holds "
+        f"{LANE_CENSUS_RELATIVE / MANIFEST_NAME}. This repository ships no "
+        f"lane manifest"
+    )
+
+
+def lane_census_dir() -> Path:
+    """The directory holding the lane manifest and the committed census.
+
+    Fails loud rather than falling back to anything in this repository: a
+    fork with no overlay is told how to supply one, never pointed at our lab.
+    The census driver runs under a bare interpreter on a lab host, where the
+    runtime package is not importable, so there the variable is required.
+    """
+    configured = os.environ.get(ENV_WORKSPACE_CONFIG_ROOT, "").strip()
+    if configured:
+        return Path(configured).resolve() / LANE_CENSUS_RELATIVE
+    registry = os.environ.get("OMNI_HOME", "").strip()
+    if not registry:
+        raise _not_configured(
+            f"neither {ENV_WORKSPACE_CONFIG_ROOT} nor OMNI_HOME is set"
+        )
+    try:
+        from omnibase_infra.runtime.service_kernel import (
+            workspace_runtime_config_root,
+        )
+    except ImportError as exc:
+        raise _not_configured(
+            f"{ENV_WORKSPACE_CONFIG_ROOT} is unset and this interpreter cannot "
+            f"resolve the root from OMNI_HOME ({exc})"
+        ) from exc
+    return workspace_runtime_config_root(Path(registry)) / LANE_CENSUS_RELATIVE
+
+
+def _required_file(name: str) -> Path:
+    path = lane_census_dir() / name
+    if not path.is_file():
+        raise _not_configured(f"{path} does not exist")
+    return path
+
+
+def default_manifest_path() -> Path:
+    """``LANE_MANIFEST`` when set, else the manifest in the lane census dir."""
+    explicit = os.environ.get("LANE_MANIFEST", "").strip()
+    if explicit:
+        return Path(explicit)
+    return _required_file(MANIFEST_NAME)
+
+
+def default_snapshot_path() -> Path:
+    """The committed census in the lane census dir."""
+    return _required_file(SNAPSHOT_NAME)
 
 
 def load_manifest(path: Path | None = None) -> dict[str, Any]:
     """Load the versioned lane manifest (desired state)."""
-    manifest_path = path or _DEFAULT_MANIFEST
+    manifest_path = path or default_manifest_path()
     with open(manifest_path, encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
     if not isinstance(data, dict) or "lanes" not in data:
@@ -792,8 +863,11 @@ def build_plan(envelope: dict[str, Any], manifest: dict[str, Any]) -> dict[str, 
 
 
 def main() -> int:
-    manifest_path = os.environ.get("LANE_MANIFEST")
-    manifest = load_manifest(Path(manifest_path) if manifest_path else None)
+    try:
+        manifest = load_manifest()
+    except LaneCensusConfigError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return EXIT_NOT_CONFIGURED
     envelope = json.load(sys.stdin)
     # OMN-19088: the same host resolution as the driver — LANE_CENSUS_HOST, else
     # this machine's hostname. An envelope that already carries a host (a
@@ -810,8 +884,8 @@ def main() -> int:
     sys.stdout.write("\n")
     # Exit 0 on any plan — the planner reports; the shell driver decides exit
     # policy so the JSON plan is always emittable for dry-run/inspection. The
-    # one non-zero exit is an unattributable host (EXIT_HOST_UNDECLARED), for
-    # which no plan exists to emit.
+    # non-zero exits are an unattributable host (EXIT_HOST_UNDECLARED) and an
+    # absent manifest (EXIT_NOT_CONFIGURED), for which no plan exists to emit.
     return 0
 
 

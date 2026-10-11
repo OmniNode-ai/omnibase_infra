@@ -81,7 +81,9 @@ REPO_ROOT = SCRIPT_DIR.parents[1]
 # never ships here. Whoever runs the pool supplies it under their workspace
 # config root, resolved by the runtime's workspace config owner resolver.
 POOL_CONFIG_RELATIVE = Path("config") / "lab" / "prepr_runtime_pool.yaml"
-LANE_MANIFEST = REPO_ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
+# OMN-20934: the lane manifest is private config too; the census planner owns
+# where it is read from.
+LANE_CENSUS_PLAN_PY = SCRIPT_DIR.parent / "lane_census_plan.py"
 PROVE_SH = SCRIPT_DIR / "prepr_pool_prove.sh"
 SLOT_POLICY_PY = SCRIPT_DIR / "prepr_slot_policy.py"
 # OMN-19566: the receipt module, the fact publisher and the profile registry
@@ -287,13 +289,28 @@ def load_pool_config(path: Path | None = None) -> PoolConfig:
     )
 
 
-def declared_manifest_hosts(path: Path = LANE_MANIFEST) -> set[str]:
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+def _lane_manifest(path: Path | None) -> Path:
+    """``path``, else the lane manifest the census planner resolves."""
+    if path is not None:
+        return path
+    spec = importlib.util.spec_from_file_location(
+        "lane_census_plan", LANE_CENSUS_PLAN_PY
+    )
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot load {LANE_CENSUS_PLAN_PY}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    resolved: Path = module.default_manifest_path()
+    return resolved
+
+
+def declared_manifest_hosts(path: Path | None = None) -> set[str]:
+    raw = yaml.safe_load(_lane_manifest(path).read_text(encoding="utf-8"))
     return set(raw.get("hosts", {}))
 
 
-def declared_lane_projects(path: Path = LANE_MANIFEST) -> set[str]:
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+def declared_lane_projects(path: Path | None = None) -> set[str]:
+    raw = yaml.safe_load(_lane_manifest(path).read_text(encoding="utf-8"))
     return {
         str(lane["compose_project"])
         for lane in raw.get("lanes", {}).values()

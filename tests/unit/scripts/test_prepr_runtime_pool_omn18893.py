@@ -174,6 +174,7 @@ def test_declared_manifest_hosts_reads_the_manifest_host_keys(tmp_path: Path) ->
     assert {h.machine for h in CFG.hosts} - declared == {"pool-d", "pool-e"}
 
 
+@pytest.mark.lab_overlay
 def test_the_slot_project_is_never_a_declared_lane() -> None:
     assert CFG.compose_project not in pool.declared_lane_projects()
     isolated = [h for h in CFG.hosts if h.kind == "isolated"]

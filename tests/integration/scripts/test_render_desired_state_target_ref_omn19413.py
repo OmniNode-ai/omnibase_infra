@@ -4,8 +4,9 @@
 
 The unit suite drives the renderer with hand-written artifacts. This drives the
 real source adapter: ``desired_state.py render --ref`` resolves the commit,
-reads ``deploy/lane-census/lane-manifest.yaml`` and ``uv.lock`` at that commit
-through git, dispatches the contract-declared ``lab_desired_state.render``
+reads ``uv.lock`` at that commit through git and the lane manifest from
+``--manifest`` (the neutral fixture here: the lab's manifest is private config,
+OMN-20934), dispatches the contract-declared ``lab_desired_state.render``
 operation of ``node_lab_proof_plan_compute`` over its private in-memory bus,
 and validates the result against ``lab-desired-state.v1``. The host surface is
 used because it needs no Compose binary; the compose-lane path is the same
@@ -26,6 +27,11 @@ import pytest
 from omnibase_core.validators.no_unguarded_git_subprocess import (
     scrub_git_location_env,
 )
+from tests.helpers.lane_census_fixtures import (
+    NEUTRAL_HOST_ID,
+    NEUTRAL_MANIFEST,
+    NEUTRAL_OPTIONAL_LANE,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT / "scripts/lab_sync"))
@@ -37,8 +43,8 @@ from desired_state import (
 
 pytestmark = pytest.mark.integration
 
-_HOST = "lab-201"
-_LANE = "dev"
+_HOST = NEUTRAL_HOST_ID
+_LANE = NEUTRAL_OPTIONAL_LANE
 
 
 @pytest.fixture(autouse=True)
@@ -73,6 +79,8 @@ def _render_args(output: Path) -> list[str]:
         _LANE,
         "--surface-kind",
         "host",
+        "--manifest",
+        str(NEUTRAL_MANIFEST),
         "--output",
         str(output),
     ]
@@ -115,6 +123,7 @@ def test_captured_inputs_replay_to_the_same_bytes(tmp_path: Path) -> None:
             host=_HOST,
             lane=_LANE,
             surface_kind="host",
+            manifest=NEUTRAL_MANIFEST,
         )
     )
     bundle = tmp_path / "inputs.json"

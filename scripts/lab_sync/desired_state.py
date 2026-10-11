@@ -43,8 +43,10 @@ CLI::
     desired_state.py self-check [--schema PATH] [--fixtures DIR]
                                                  exit 0 OK, 1 refused
 
-``render`` runs in the repository's uv environment. Its source adapter reads
-manifest and lock at the resolved commit, refuses Compose files differing from
+``render`` runs in the repository's uv environment. Its source adapter reads the
+lock at the resolved commit and the lane manifest from ``--manifest`` (default:
+the private lane census directory under the workspace config root, OMN-20934;
+this repository ships no manifest), refuses Compose files differing from
 that ref, and runs only ``compose config --format json`` and ``config --hash``.
 Supply the accepted deploy's environment, exact file order and original project
 directory: Compose includes absolute bind paths in its hash. ``--composition``
@@ -665,7 +667,21 @@ def _capture_render_inputs(args: argparse.Namespace) -> dict[str, Any]:
     def source(path: str) -> str:
         return run(["git", "show", f"{commit}:{path}"])
 
-    manifest = source("deploy/lane-census/lane-manifest.yaml")
+    # OMN-20934: the lane manifest is private config and no longer versioned
+    # with this repository, so it is read from the file the caller names, or
+    # from the lane census directory the census planner resolves.
+    manifest_path = getattr(args, "manifest", None)
+    if manifest_path is None:
+        scripts_dir = str(_REPO_ROOT / "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+        from lane_census_plan import LaneCensusConfigError, default_manifest_path
+
+        try:
+            manifest_path = default_manifest_path()
+        except LaneCensusConfigError as exc:
+            raise ValueError(str(exc)) from exc
+    manifest = Path(manifest_path).read_text(encoding="utf-8")
     inputs: dict[str, Any] = {
         "target_ref": {
             "repo": "OmniNode-ai/omnibase_infra",
@@ -804,6 +820,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     render.add_argument("--output", type=Path)
     render.add_argument("--source-root", type=Path, default=_REPO_ROOT)
+    render.add_argument(
+        "--manifest",
+        type=Path,
+        help="lane manifest (default: the private lane census directory)",
+    )
     render.add_argument("--ref")
     render.add_argument("--kind", choices=["release", "merge"], default="merge")
     render.add_argument(

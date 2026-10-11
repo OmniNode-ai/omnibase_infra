@@ -2123,12 +2123,12 @@ def check_lane_sync(
             result = run(
                 argv,
                 timeout=120,
+                # OMN-20934: no LANE_MANIFEST here. The manifest is private
+                # config the planner resolves from the workspace config root;
+                # absent, the census exits 3 and this check is indeterminate.
                 env={
                     "LANE_CENSUS_HOST": host,
                     "LANE_CENSUS_PYTHON": sys.executable,
-                    "LANE_MANIFEST": str(
-                        repo / "deploy" / "lane-census" / "lane-manifest.yaml"
-                    ),
                     "LANE_CENSUS_LOG_FILE": str(Path(scratch) / "census.log"),
                     "KAFKA_BOOTSTRAP_SERVERS": "",
                 },

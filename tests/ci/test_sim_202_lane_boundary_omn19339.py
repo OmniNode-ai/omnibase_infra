@@ -41,11 +41,12 @@ from scripts.preflight_lane_deploy_attribution import (
     GOVERNED_LANES,
     GRANT_INTERLOCK_LANES,
 )
+from tests.helpers.lane_census_fixtures import LAB_MANIFEST
 
 pytestmark = pytest.mark.ci
 
 ROOT = Path(__file__).resolve().parents[2]
-MANIFEST_PATH = ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
+MANIFEST_PATH = LAB_MANIFEST  # OMN-20934: private config
 OVERLAY_PATH = ROOT / "docker" / "docker-compose.sim-202.yml"
 BIFROST_OVERLAY_PATH = ROOT / "docker" / "lane-overlays" / "sim-202.bifrost.yaml"
 
@@ -105,6 +106,7 @@ def test_sim_202_is_not_in_the_prod_grant_interlock() -> None:
     assert frozenset({"stability-test"}) == GRANT_INTERLOCK_LANES
 
 
+@pytest.mark.lab_overlay
 def test_manifest_declares_sim_202_on_lab_202_only() -> None:
     lane = _manifest()["lanes"][LANE]
     assert lane["hosts"] == [HOST_ID], (
@@ -125,6 +127,7 @@ def test_manifest_declares_sim_202_on_lab_202_only() -> None:
 LANES_ON_202 = ["dev-202", LANE]
 
 
+@pytest.mark.lab_overlay
 def test_lab_202_resolves_from_its_hostname_and_carries_only_its_own_lanes() -> None:
     manifest = _manifest()
     validate_hosts(manifest)
@@ -137,6 +140,7 @@ def test_lab_202_resolves_from_its_hostname_and_carries_only_its_own_lanes() -> 
     )
 
 
+@pytest.mark.lab_overlay
 def test_sim_202_declares_no_forbidden_service() -> None:
     names = [s["name"] for s in _manifest()["lanes"][LANE]["services"]]
     offending = [n for n in names for f in FORBIDDEN_SERVICE_FRAGMENTS if f in n]
@@ -218,6 +222,7 @@ def _plan_on_202(rows: list[dict[str, Any]]) -> dict[str, Any]:
     return build_plan(envelope, _manifest())
 
 
+@pytest.mark.lab_overlay
 def test_census_on_202_reads_sim_202_clean_and_every_other_lane_not_applicable() -> (
     None
 ):
@@ -232,6 +237,7 @@ def test_census_on_202_reads_sim_202_clean_and_every_other_lane_not_applicable()
     assert plan["has_drift"] is False
 
 
+@pytest.mark.lab_overlay
 def test_census_on_202_still_reports_a_stopped_sim_202_runtime() -> None:
     """Negative control: scoping to .202 must not hide a real outage there."""
     rows = [
@@ -245,6 +251,7 @@ def test_census_on_202_still_reports_a_stopped_sim_202_runtime() -> None:
     ), plan["findings"]
 
 
+@pytest.mark.lab_overlay
 def test_a_201_lane_container_on_202_is_a_finding() -> None:
     """A .201 lane running on .202 is the isolation failure, and it is named."""
     rows = [*_healthy_sim_202_rows(), _row("omninode-runtime", "omnibase-infra")]
