@@ -1,10 +1,12 @@
 {
   "_provenance": {
-    "source": "omniintelligence ModelReviewVotersOverlay.model_json_schema() and review_pairing.model_registry_loader.load_review_voters, run from a lab host in a uv sync --locked environment of each listed omniintelligence revision, over the synthetic overlays below",
-    "captured_utc": "2026-10-11T04:46:31Z",
+    "source": "omniintelligence ModelReviewVotersOverlay.model_json_schema() and review_pairing.model_registry_loader.load_review_voters, run from a lab host in a uv sync --locked environment of each listed omniintelligence revision, over the synthetic overlays below; cli_review --help of each listed revision; and the substitute-vote classifier of the pinned and previous revisions over the lost-voter error texts below",
+    "captured_utc": "2026-10-11T07:29:16Z",
+    "control_captured_utc": "2026-10-11T04:46:31Z",
     "ticket": "OMN-20947",
-    "pinned_revision": "f4bf0a1989fc37bd7ad9b4a7ad591f801d2a1070",
+    "pinned_revision": "64b950973a5686d33e0b439fb80749d66362d06d",
     "control_revision": "8782c0507035e2cec20ccacbc404d32f894161b5",
+    "previous_pinned_revision": "f4bf0a1989fc37bd7ad9b4a7ad591f801d2a1070",
     "note": "voter hosts and reviewer logins are synthetic; each overlay is written with schema_version review_voters_overlay.v1 before loading"
   },
   "overlays": {
@@ -120,7 +122,7 @@
     }
   },
   "revisions": {
-    "f4bf0a1989fc37bd7ad9b4a7ad591f801d2a1070": {
+    "64b950973a5686d33e0b439fb80749d66362d06d": {
       "schema": {
         "overlay_properties": [
           "backend_overlay",
@@ -259,6 +261,60 @@
           "overflow_endpoint_count": 0,
           "substitute_reviewer_ids": []
         }
+      }
+    }
+  },
+  "cli_review": {
+    "64b950973a5686d33e0b439fb80749d66362d06d": {
+      "accepts_head_sha": true
+    },
+    "8782c0507035e2cec20ccacbc404d32f894161b5": {
+      "accepts_head_sha": false
+    }
+  },
+  "substitution": {
+    "64b950973a5686d33e0b439fb80749d66362d06d": {
+      "call_timed_out": {
+        "error": "[ONEX_CORE_092_TIMEOUT_ERROR] Request to voter-b timed out after 300.0s (2 attempts)",
+        "substitutable_as": "timed out"
+      },
+      "call_503": {
+        "error": "[ONEX_CORE_205_SERVICE_UNAVAILABLE] Server error (503) from voter-b",
+        "substitutable_as": "was unavailable"
+      },
+      "call_connection_refused": {
+        "error": "[ONEX_CORE_090_NETWORK_ERROR] Connection to voter-b failed after 3 attempts: [Errno 111] Connection refused",
+        "substitutable_as": "was unavailable"
+      },
+      "models_read_503": {
+        "error": "could not read the served model id from http://voter-b.example.invalid:8000/v1/models: HTTP Error 503: Service Unavailable. The review cannot choose a model id without it, and guessing is what OMN-16407/OMN-17786/OMN-18623 each cost a day to undo.",
+        "substitutable_as": "was unavailable"
+      },
+      "call_500": {
+        "error": "[ONEX_CORE_205_SERVICE_UNAVAILABLE] Server error (500) from voter-b",
+        "substitutable_as": null
+      }
+    },
+    "f4bf0a1989fc37bd7ad9b4a7ad591f801d2a1070": {
+      "call_timed_out": {
+        "error": "[ONEX_CORE_092_TIMEOUT_ERROR] Request to voter-b timed out after 300.0s (2 attempts)",
+        "substitutable_as": "timed out"
+      },
+      "call_503": {
+        "error": "[ONEX_CORE_205_SERVICE_UNAVAILABLE] Server error (503) from voter-b",
+        "substitutable_as": null
+      },
+      "call_connection_refused": {
+        "error": "[ONEX_CORE_090_NETWORK_ERROR] Connection to voter-b failed after 3 attempts: [Errno 111] Connection refused",
+        "substitutable_as": null
+      },
+      "models_read_503": {
+        "error": "could not read the served model id from http://voter-b.example.invalid:8000/v1/models: HTTP Error 503: Service Unavailable. The review cannot choose a model id without it, and guessing is what OMN-16407/OMN-17786/OMN-18623 each cost a day to undo.",
+        "substitutable_as": null
+      },
+      "call_500": {
+        "error": "[ONEX_CORE_205_SERVICE_UNAVAILABLE] Server error (500) from voter-b",
+        "substitutable_as": null
       }
     }
   }
