@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""The handshake workflow's omnibase_core pin moved to 2ca615af292a (OMN-9050).
+"""The handshake workflow's omnibase_core pin moved to 60178094be3c (OMN-9050).
 
 The automated pin bump moves the omnibase_core checkout ref in
 check-handshake.yml. The ref must be a full commit sha, the auto-bump comment
-above it must name the same commit, and it must be the bumped 2ca615af292a pin, so a revert of the bump fails here.
+above it must name the same commit, and it must be the bumped 60178094be3c pin, so a revert of the bump fails here.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "check-handshake.yml"
-SUPERSEDED_REF = "16ee7c558552"
-BUMPED_REF = "2ca615af292a52898359d23538299f3bc0880f07"
+SUPERSEDED_REF = "2ca615af292a"
+BUMPED_REF = "60178094be3ca82abb6a64498600f7909e247584"
 
 
 def _core_checkout_ref() -> str:
