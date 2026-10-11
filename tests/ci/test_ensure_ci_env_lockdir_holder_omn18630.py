@@ -24,7 +24,6 @@ pytestmark = pytest.mark.unit
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "ci" / "ensure_ci_env.sh"
 DIGEST = REPO_ROOT / "scripts" / "ci" / "ci_env_digest.py"
-RECORDING = "tests/ci/fixtures/ensure_ci_env_lockdir_timeout_omn18630.json"
 
 LEAKED_HOLDER = "4242 leaked-host 2026-10-11T00:00:00Z"
 INSTALL_ARGS = "--frozen --all-extras --all-groups --no-install-project"
@@ -115,7 +114,9 @@ def test_a_lock_with_no_holder_record_is_named_as_unrecorded(tmp_path: Path) -> 
     assert LEAKED_HOLDER not in str(run["stderr"])
 
 
-@pytest.mark.live_contact(RECORDING)
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/ensure_ci_env_lockdir_timeout_omn18630.json"
+)
 def test_the_run_matches_the_recorded_run(
     tmp_path: Path, recorded_response: dict[str, object]
 ) -> None:
