@@ -6,6 +6,7 @@
     "boundary_parity_source": "omnibase_core.handlers.handler_boundary_parity run with uv run --frozen --no-dev --no-sync from the omnibase_core checkout at 031148215620031436cba30619bbae67c0bb38ad (handler_boundary_parity.py and handler_migration_conflicts.py are byte-identical to the de3398d1fcf7a6f48451f680b74b1a6c6c383b8a copy the action is pinned to) on lab host h201, 2026-10-11T13:55Z, over a scratch repos root holding the registry clones of omniclaude (copy), omniintelligence, omnimarket and onex_change_control; the drifted tree rewrites the CLAUDE_HOOK_EVENT topic string in omniclaude/src/omniclaude/hooks/topics.py so it no longer contains the claude-hook-event segment"
   },
   "response": {
+    "handler_source_pin": "de3398d1fcf7a6f48451f680b74b1a6c6c383b8a",
     "boundary_parity": {
       "clean_tree": {
         "exit_code": 0,

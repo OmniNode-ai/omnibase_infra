@@ -110,7 +110,15 @@ def test_recorded_core_handlers_pass_a_clean_tree_and_fail_a_drifted_one(
     runs = recorded_response["response"]
     parity = runs["boundary_parity"]
     migrations = runs["control_without_warn_only"]
+    called_pins = [
+        s["uses"].split(" ")[0].partition("@")[2]
+        for s in _job()["steps"]
+        if s.get("uses", "").startswith(f"{ACTION}@")
+    ]
 
+    # The recorded handlers are the ones the job calls: the pin ci.yml names is the
+    # pin they were recorded against, so a job still on the retired action fails here.
+    assert called_pins == [runs["handler_source_pin"]]
     assert parity["clean_tree"]["exit_code"] == 0
     assert parity["clean_tree"]["mismatches"] == 0
     assert parity["drifted_topic_tree"]["exit_code"] != 0
