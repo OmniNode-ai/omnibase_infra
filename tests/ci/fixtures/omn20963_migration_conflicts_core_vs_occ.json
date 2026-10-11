@@ -2,9 +2,25 @@
   "_provenance": {
     "source": "omnibase_core.handlers.handler_migration_conflicts (omnibase_core de3398d1, run with uv run --frozen --no-dev --no-sync) and onex_change_control check-migration-conflicts (dev tip 4545200d) run over scratch trees of each registry repo's origin/dev on lab host h201; repos root = omniclaude, omnidash, omniintelligence, omnibase_core, omnimemory, omnimarket, omnibase_infra",
     "captured_utc": "2026-10-11T10:09:52Z",
-    "note": "Output lines are sorted and blank lines and the interpreter's pydantic import warning removed before hashing. The control tree adds docker/migrations/forward/999_zz_conflict_control.sql redefining registration_projections with different columns and is run without --warn-only; the unedited tree also exits 1 without --warn-only."
+    "note": "Output lines are sorted and blank lines and the interpreter's pydantic import warning removed before hashing. The control tree adds docker/migrations/forward/999_zz_conflict_control.sql redefining registration_projections with different columns and is run without --warn-only; the unedited tree also exits 1 without --warn-only.",
+    "boundary_parity_source": "omnibase_core.handlers.handler_boundary_parity run with uv run --frozen --no-dev --no-sync from the omnibase_core checkout at 031148215620031436cba30619bbae67c0bb38ad (handler_boundary_parity.py and handler_migration_conflicts.py are byte-identical to the de3398d1fcf7a6f48451f680b74b1a6c6c383b8a copy the action is pinned to) on lab host h201, 2026-10-11T13:55Z, over a scratch repos root holding the registry clones of omniclaude (copy), omniintelligence, omnimarket and onex_change_control; the drifted tree rewrites the CLAUDE_HOOK_EVENT topic string in omniclaude/src/omniclaude/hooks/topics.py so it no longer contains the claude-hook-event segment"
   },
   "response": {
+    "boundary_parity": {
+      "clean_tree": {
+        "exit_code": 0,
+        "boundaries_total": 6,
+        "boundaries_ok": 6,
+        "mismatches": 0
+      },
+      "drifted_topic_tree": {
+        "exit_code": 1,
+        "boundaries_total": 6,
+        "boundaries_ok": 5,
+        "mismatches": 1,
+        "error": "topic not found in producer: omniclaude/src/omniclaude/hooks/topics.py"
+      }
+    },
     "action_arguments": "--check-columns --warn-only",
     "clean_tree": {
       "omnibase_core": {

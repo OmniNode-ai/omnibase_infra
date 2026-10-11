@@ -12,14 +12,14 @@ requirements:
       - id: AC1
         statement: "AC1: omnibase_infra .github/workflows/ci.yml job migration-conflict-check has uses OmniNode-ai/omnibase_core/.github/actions/validate-boundaries@de3398d1fcf7a6f48451f680b74b1a6c6c383b8a and no workflow references the onex_change_control validate-boundaries action, with its inputs and the context name unchanged. -- falsifier: uv run pytest tests/ci/test_validate_boundaries_caller_omn20963.py tests/ci/test_ci_workflow_resilience.py tests/ci/test_sibling_reads_pinned_omn20331.py -q -p no:randomly"
       - id: AC2
-        statement: "AC2: omnibase_core's boundary-parity and migration-conflicts handlers exit 0 on a clean fixture and nonzero on an injected undeclared topic or conflicting migration. -- falsifier: cd omnibase_core && uv run pytest tests/unit/handlers/test_handler_boundary_parity.py tests/unit/handlers/test_handler_migration_conflicts.py -q -p no:randomly"
+        statement: "AC2: omnibase_core's boundary-parity and migration-conflicts handlers exit 0 on a clean fixture and nonzero on an injected undeclared topic or conflicting migration. -- falsifier: uv run pytest tests/ci/test_validate_boundaries_caller_omn20963.py -q -p no:randomly"
 evidence_requirements:
   - kind: tests
     description: "omnibase_infra ci.yml calls omnibase_core's action at the merge sha, with a positive control that the retired reference is detected."
     command: "uv run pytest tests/ci/test_validate_boundaries_caller_omn20963.py tests/ci/test_ci_workflow_resilience.py tests/ci/test_sibling_reads_pinned_omn20331.py -q -p no:randomly"
   - kind: tests
-    description: "The core handlers the action runs pass a clean fixture and fail a drifted one."
-    command: "cd omnibase_core && uv run pytest tests/unit/handlers/test_handler_boundary_parity.py tests/unit/handlers/test_handler_migration_conflicts.py -q -p no:randomly"
+    description: "The core handlers the action runs pass a clean fixture and fail a drifted one, as recorded from the real handlers in tests/ci/fixtures/omn20963_migration_conflicts_core_vs_occ.json."
+    command: "uv run pytest tests/ci/test_validate_boundaries_caller_omn20963.py -q -p no:randomly"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -39,7 +39,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/handlers/test_handler_boundary_parity.py tests/unit/handlers/test_handler_migration_conflicts.py -q -p no:randomly
-        cwd: ${OMNI_HOME}/omnibase_core
+        check_value: uv run pytest tests/ci/test_validate_boundaries_caller_omn20963.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2

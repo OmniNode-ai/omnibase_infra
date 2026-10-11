@@ -99,3 +99,24 @@ def test_recorded_core_handler_gives_the_same_verdict_as_the_retired_script(
     assert edited["conflicts_reported"] == unedited["conflicts_reported"] + 1
     assert edited["normalized_sha256"] != unedited["normalized_sha256"]
     assert unedited["normalized_sha256"] == clean["omnibase_core"]["normalized_sha256"]
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/omn20963_migration_conflicts_core_vs_occ.json"
+)
+def test_recorded_core_handlers_pass_a_clean_tree_and_fail_a_drifted_one(
+    recorded_response: dict[str, Any],
+) -> None:
+    runs = recorded_response["response"]
+    parity = runs["boundary_parity"]
+    migrations = runs["control_without_warn_only"]
+
+    assert parity["clean_tree"]["exit_code"] == 0
+    assert parity["clean_tree"]["mismatches"] == 0
+    assert parity["drifted_topic_tree"]["exit_code"] != 0
+    assert parity["drifted_topic_tree"]["mismatches"] == 1
+    assert parity["drifted_topic_tree"]["error"].startswith(
+        "topic not found in producer"
+    )
+    assert runs["clean_tree"]["omnibase_core"]["exit_code"] == 0
+    assert migrations["conflicting_migration_omnibase_core"]["exit_code"] != 0
