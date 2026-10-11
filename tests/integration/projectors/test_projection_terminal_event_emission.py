@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
+from aiokafka.structs import ConsumerRecord
 from pydantic import BaseModel
 
 from omnibase_infra.enums.enum_infra_transport_type import EnumInfraTransportType
@@ -49,6 +50,59 @@ SUBSCRIBE_TOPICS = ("onex.evt.omniclaude.task-delegated.v1",)
 
 
 _READBACK_BOOTSTRAP = os.environ.get("PROJECTION_TERMINAL_READBACK_BOOTSTRAP_SERVERS")
+_READBACK_CORRELATION_ID = os.environ.get("PROJECTION_TERMINAL_READBACK_CORRELATION_ID")
+
+
+def _select_readback_record(
+    records: list[ConsumerRecord[bytes, bytes]],
+    correlation_id: uuid.UUID | None,
+) -> ConsumerRecord[bytes, bytes]:
+    if correlation_id is not None:
+        records = [
+            record
+            for record in records
+            if record.value is not None
+            and json.loads(record.value).get("correlation_id") == str(correlation_id)
+        ]
+    assert records, (
+        "The deployed terminal topic must yield the requested terminal record"
+    )
+    return max(records, key=lambda record: record.timestamp)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("requested_present", [True, False])
+def test_readback_does_not_substitute_an_unrelated_terminal(
+    requested_present: bool,
+) -> None:
+    requested = uuid.uuid4()
+    records: list[ConsumerRecord[bytes, bytes]] = []
+    for partition, correlation_id in enumerate((requested, uuid.uuid4())):
+        if partition == 0 and not requested_present:
+            continue
+        value = json.dumps({"correlation_id": str(correlation_id)}).encode()
+        records.append(
+            ConsumerRecord(
+                topic=TERMINAL_TOPIC,
+                partition=partition,
+                offset=0,
+                timestamp=1000 + partition,
+                timestamp_type=0,
+                key=None,
+                value=value,
+                checksum=None,
+                serialized_key_size=-1,
+                serialized_value_size=len(value),
+                headers=(),
+            )
+        )
+    assert _select_readback_record(records, None).partition == 1
+    if requested_present:
+        assert _select_readback_record(records, requested).partition == 0
+    else:
+        with pytest.raises(AssertionError, match="requested terminal record"):
+            _select_readback_record(records, requested)
+
 
 if _READBACK_BOOTSTRAP:
 
@@ -61,6 +115,8 @@ if _READBACK_BOOTSTRAP:
         the usual KAFKA auth variables), so an unconfigured run does not collect it
         as a skip. A configured broker must contain a terminal emitted
         within the last day; unavailable infrastructure or stale records fail.
+        PROJECTION_TERMINAL_READBACK_CORRELATION_ID optionally requires a specific
+        delegation's terminal within the last 100 records per partition.
         """
         from aiokafka import AIOKafkaConsumer
         from aiokafka.admin import AIOKafkaAdminClient
@@ -95,13 +151,20 @@ if _READBACK_BOOTSTRAP:
             assert any(ends.values()), (
                 "The deployed terminal topic must contain records"
             )
+            expected_correlation = (
+                uuid.UUID(_READBACK_CORRELATION_ID)
+                if _READBACK_CORRELATION_ID
+                else None
+            )
+            lookback = 100 if expected_correlation is not None else 1
             for partition, end in ends.items():
-                consumer.seek(partition, max(0, end - 1))
+                consumer.seek(partition, max(0, end - lookback))
 
-            batches = await consumer.getmany(timeout_ms=10000, max_records=100)
+            batches = await consumer.getmany(
+                timeout_ms=10000, max_records=lookback * len(partitions)
+            )
             records = [record for batch in batches.values() for record in batch]
-            assert records, "The deployed terminal topic must yield a terminal record"
-            latest = max(records, key=lambda record: record.timestamp)
+            latest = _select_readback_record(records, expected_correlation)
             age_seconds = datetime.now(UTC).timestamp() - latest.timestamp / 1000
             assert 0 <= age_seconds <= 86400, (
                 "The terminal must have been emitted within the last day"

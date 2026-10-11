@@ -52,6 +52,34 @@ class ModelLocalProvisionEffectInput(BaseModel):
         ge=1,
         description="Maximum seconds to wait for services to become healthy.",
     )
+    whole_project: bool = Field(
+        default=False,
+        description=(
+            "Act on every service in the compose file, not only the topology's "
+            "LOCAL services (OMN-19972). A rendered catalog bundle carries services "
+            "with no published port (migrations, seeds, projection runners) that "
+            "the topology cannot name; the topology still names the ports to poll."
+        ),
+    )
+    env_files: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Env files compose interpolates from, passed as --env-file in order "
+            "(later files win; the process environment wins over all). Paths only."
+        ),
+    )
+    remove_volumes: bool = Field(
+        default=False,
+        description="teardown_local only: also delete the project's volumes (data).",
+    )
+    build: bool = Field(
+        default=False,
+        description="provision_local only: run docker compose build before up.",
+    )
+    build_args: tuple[str, ...] = Field(
+        default=(),
+        description="provision_local only: KEY=VALUE build arguments for the build step.",
+    )
 
 
 __all__: list[str] = ["ModelLocalProvisionEffectInput"]

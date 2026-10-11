@@ -116,6 +116,7 @@ def test_local_bundle_runs_both_runtime_kernels_the_writer_and_the_migration_gat
         "omninode-runtime",
         "projection-api",
         "runtime-effects",
+        "tenant-projection-writer",
     ]
 
 
@@ -248,6 +249,42 @@ def test_local_tenant_credentials_projection_runs_with_its_own_healthcheck() -> 
         "ONEX_TENANT_DB_URL",
         "OMNINODE_INTERNAL_DB_URL",
     }
+
+
+def test_local_bundle_runs_the_tenant_projection_carrier_under_its_own_identity() -> (
+    None
+):
+    """OMN-19972 (T3.6): the usage-by-model writer runs in this kernel.
+
+    ``node_projection_usage_by_model_day`` and the other contracts pinned to
+    ``runtime_profiles: [tenant-projection]`` are dropped from ``main`` and
+    ``effects``; without this process the laptop consumes them with nothing. It
+    must be its own claimant: main's group id or capabilities would put a
+    second owner on main's topics.
+    """
+    resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
+    services = generate_compose(resolved)["services"]
+    assert isinstance(services, dict)
+    carrier = services["tenant-projection-writer"]
+    env = carrier["environment"]
+    assert carrier["image"] == f"{_PROJECT}-runtime:latest"
+    assert env["RUNTIME_PROFILE"] == "tenant-projection"
+    kernels = ("omninode-runtime", "runtime-effects")
+    assert env["ONEX_GROUP_ID"] not in {
+        services[k]["environment"]["ONEX_GROUP_ID"] for k in kernels
+    }
+    assert env["ONEX_RUNTIME_CAPABILITIES"] not in {
+        services[k]["environment"]["ONEX_RUNTIME_CAPABILITIES"] for k in kernels
+    }
+    # The binding the process exists for, as the laptop's own principal.
+    assert env["ONEX_TENANT_DB_URL"].startswith(
+        "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?"
+    )
+    assert env["ONEX_DATABASE_TOPOLOGY_PROFILE"] == "local"
+    # Lab and ops integrations stay off, as on the other two kernels.
+    assert env["KEYCLOAK_ADMIN_URL"] == ""
+    assert "healthcheck" in carrier
+    assert carrier["depends_on"]["migration-gate"] == {"condition": "service_healthy"}
 
 
 def test_the_runtime_family_that_resolves_a_tenant_key_shares_one_credentials_store() -> (
@@ -634,17 +671,19 @@ def test_local_render_names_no_lab_host() -> None:
 
 
 def test_lab_host_check_can_fail() -> None:
-    """Positive control: the shared lab-facing render still carries the .201 default."""
-    compose = generate_compose(
-        CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["core"])
-    )
-    assert "192.168." in "".join(_lab_host_hits(compose))
+    """Positive control: the lab-host check finds a marker when one is present."""
+    assert _lab_host_hits({"command": f"{_LAB_HOST_MARKERS[0]}1"}) != []
 
 
 @pytest.mark.parametrize("bundle", ["core", "runtime"])
-def test_other_bundles_keep_all_interface_ports_and_the_lab_advertise_default(
+def test_other_bundles_keep_all_interface_ports_and_name_no_lab_host(
     bundle: str,
 ) -> None:
+    """OMN-20931: the shared manifests carry the neutral advertise default.
+
+    A deployment's own env file sets REDPANDA_ADVERTISE_HOST; no render of the
+    shipped catalog names a lab host.
+    """
     compose = generate_compose(
         CatalogResolver(catalog_dir=_CATALOG_DIR).resolve([bundle])
     )
@@ -657,7 +696,8 @@ def test_other_bundles_keep_all_interface_ports_and_the_lab_advertise_default(
     services = compose["services"]
     assert isinstance(services, dict)
     command = " ".join(services["redpanda"]["command"])
-    assert "${REDPANDA_ADVERTISE_HOST:-192.168.86.201}" in command
+    assert "${REDPANDA_ADVERTISE_HOST:-localhost}" in command
+    assert _lab_host_hits(compose) == []
 
 
 # --- OMN-19972 hostile-review follow-ups: env_default_overrides must fail loudly

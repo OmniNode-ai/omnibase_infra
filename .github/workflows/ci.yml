@@ -1820,7 +1820,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 8782c0507035e2cec20ccacbc404d32f894161b5 # .github/sibling-pins.yaml
+          ref: 64b950973a5686d33e0b439fb80749d66362d06d # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1909,7 +1909,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 8782c0507035e2cec20ccacbc404d32f894161b5 # .github/sibling-pins.yaml
+          ref: 64b950973a5686d33e0b439fb80749d66362d06d # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -2696,9 +2696,9 @@ jobs:
   # ---------------------------------------------------------------------------
   # Version Pin Compliance Check (OMN-4807)
   # ---------------------------------------------------------------------------
-  # Verifies that this repo's dependency pins are compliant with the shared
-  # version matrix defined in omni_home/standards/version-matrix.yaml.
-  # Depends on OMN-4803 (check_version_pins.py must exist in omni_home main).
+  # Verifies the Dockerfile.runtime plugin pins and the runtime image identity
+  # stamping. OMN-20922: the former shared version matrix step could never find
+  # its script, exited 0 on every run, and was removed.
   version-pin-check:
     name: Version Pin Compliance
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
@@ -2715,33 +2715,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
-      # onexbot-occ-writer App installation token, scoped to the one
-      # sibling repo this job reads.
-      - name: Mint onexbot-occ-writer app token
-        id: app-token
-        continue-on-error: true
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
-          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
-          owner: OmniNode-ai
-          repositories: onex_change_control
-          permission-contents: write
-
-      - name: Checkout onex_change_control standards
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        continue-on-error: true
-        with:
-          repository: OmniNode-ai/onex_change_control
-          ref: 802b5f7101f4c49f8b30e8deda3d4c5d024c5710 # .github/sibling-pins.yaml
-          token: ${{ steps.app-token.outputs.token }}
-          path: onex_change_control
-          sparse-checkout: |
-            standards/
-            scripts/
-          sparse-checkout-cone-mode: false
-
       - name: Setup Python and uv
         uses: ./.github/actions/setup-python-uv
         with:
@@ -2749,19 +2722,6 @@ jobs:
           uv-version: ${{ env.UV_VERSION }}
           cache-version: ${{ env.CACHE_VERSION }}
           cache-enabled: "false"
-
-      - name: Check version pin compliance
-        run: |
-          SCRIPT="onex_change_control/scripts/check_version_pins.py"
-          if [ ! -f "$SCRIPT" ]; then
-            echo "::warning::$SCRIPT not found — skipping version pin check"
-            exit 0
-          fi
-          # The script scans root/*/pyproject.toml — create a temp workspace
-          # with a symlink so the scanner can find this repo's pyproject.toml.
-          WORKSPACE=$(mktemp -d)
-          ln -s "$GITHUB_WORKSPACE" "$WORKSPACE/omnibase_infra"
-          python "$SCRIPT" --root "$WORKSPACE"
 
       - name: Check Dockerfile.runtime plugin pins
         run: |
@@ -4611,7 +4571,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 8782c0507035e2cec20ccacbc404d32f894161b5 # .github/sibling-pins.yaml
+          ref: 64b950973a5686d33e0b439fb80749d66362d06d # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
