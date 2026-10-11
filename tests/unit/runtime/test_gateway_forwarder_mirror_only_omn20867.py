@@ -121,6 +121,29 @@ def test_contract_names_the_two_landing_topic_sets() -> None:
     )
 
 
+def test_contract_names_the_ci_run_failed_topic_set() -> None:
+    """Red triage on a mirror lane needs CI-failed events, and only those."""
+    assert _topic_set("ci_run_failed") == (
+        "onex.evt.omnimarket.ci-run-failed.v1",  # onex-topic-allow: OMN-20867
+    )
+
+
+def test_loader_selects_pr_state_and_ci_run_failed_together(tmp_path: Path) -> None:
+    config = _load(
+        _mirror_only_overlay(
+            tmp_path, topic_sets=["pr_state", "ci_run_failed"], mirror_lanes=["lane-b"]
+        ),
+        tmp_path,
+    )
+
+    lane_mirror = config.forwarder.lane_mirror
+    assert lane_mirror is not None
+    assert set(lane_mirror.topics) == set(_topic_set("pr_state")) | set(
+        _topic_set("ci_run_failed")
+    )
+    assert set(lane_mirror.topics).isdisjoint(_topic_set("lab_capacity"))
+
+
 def test_loader_resolves_a_mirror_only_overlay_without_any_cloud_input(
     tmp_path: Path,
 ) -> None:
