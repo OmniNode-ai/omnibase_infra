@@ -455,6 +455,29 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="budget_applied_events",
         ),
     ),
+    # OMN-19987: run_trace is vendored here first; no pinned omnimarket contract
+    # declares it yet, so the derivation cannot reproduce the shipped writer
+    # grant until omnimarket's node_projection_run_trace lands and the pin
+    # advances past it. The expiry module names the relation so that handover
+    # removes this bridge.
+    ContractTableDeclaration(
+        node="legacy_migration:run_trace",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_run_trace/"
+            "0000_create_run_trace.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="run_trace",
+            database_ref="application",
+            schema="public",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_run_trace/"
+                "0000_create_run_trace.sql"
+            ),
+            access="read_write",
+            role="run_trace",
+        ),
+    ),
     # OMN-18862: migration 089 grants BOTH savings read views to
     # tenant_projection_writer on ADJACENT lines -- projection_delegation_savings
     # at :716 and projection_cost_savings_overview at :717 -- and the OMN-17426
