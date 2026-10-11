@@ -255,10 +255,12 @@ class _RecordingTransport:
         topics: Sequence[str],
         auto_offset_reset: str,
         refused_topic_retry_seconds: float | None = None,
+        consume_only: bool = False,
     ) -> None:
         self.config = config
         self.group = group
         self.topics = tuple(topics)
+        self.consume_only = consume_only
         self.started = False
         self.closed = False
         self.sent: list[tuple[str, bytes | None, bytes]] = []
@@ -394,8 +396,10 @@ async def test_mirror_only_process_republishes_the_selected_set_and_nothing_else
     }
     source = by_group[source_group]
     assert source.topics == (capacity_topic,)
+    assert source.consume_only
     for lane in _MIRROR_LANES:
         producer = by_group[f"tenant-{_TENANT_SLUG}-gateway-lane-mirror-{lane}"]
+        assert not producer.consume_only
         assert [topic for topic, _key, _value in producer.sent] == [capacity_topic]
     # The record outside the selected set is committed past, never republished.
     assert source.committed == [inside, outside]
