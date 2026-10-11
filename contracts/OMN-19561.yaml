@@ -29,3 +29,11 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn-19561-deploy-runtime-wiring-start
+    description: The deployed runtime's stateful dispatch callback starts the completion-bound sweeper at wiring when a loop is running.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "import inspect; from omnibase_infra.runtime.auto_wiring.handler_wiring import _make_stateful_dispatch_callback as f; s = inspect.getsource(f); assert 'asyncio.get_running_loop()' in s and s.count('_ensure_bound_sweeper_started()') >= 3, 'OMN-19561 wiring-time sweeper start is not deployed'"
+    binds_ac:
+      - AC1
