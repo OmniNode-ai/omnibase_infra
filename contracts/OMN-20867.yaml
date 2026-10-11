@@ -14,8 +14,8 @@ requirements:
   - id: req-omn20867-pr-status-poller
     statement: With the tick on, the GitHub PR poller publishes only PR status events to onex.evt.github.pr-status.v1, and a tick that polls nothing publishes nothing.
     acceptance:
-      - id: AC2
-        statement: 'AC2: the kernel-wired poller publishes no poll-cycle summary; an unconfigured or not-yet-due tick publishes nothing -- falsifier: uv run pytest tests/integration/runtime/test_github_pr_poller_publishes_only_status_events.py -q'
+      - id: AC4
+        statement: 'AC4: the kernel-wired poller publishes no poll-cycle summary; an unconfigured or not-yet-due tick publishes nothing -- falsifier: uv run pytest tests/integration/runtime/test_github_pr_poller_publishes_only_status_events.py -q'
 evidence_requirements:
   - kind: tests
     description: The scheduler wiring test covers the dev lane overlay.
@@ -40,7 +40,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
-  - id: dod-omn-20867-ac2
+  - id: dod-omn-20867-ac4
     description: The kernel-wired GitHub PR poller publishes only PR status events, and nothing on a tick that polls nothing.
     source: manual
     checks:
@@ -48,4 +48,4 @@ dod_evidence:
         check_value: uv run pytest tests/integration/runtime/test_github_pr_poller_publishes_only_status_events.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC2
+      - AC4
