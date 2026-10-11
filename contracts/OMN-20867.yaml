@@ -6,6 +6,11 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn20867-lane-env-fragment
+    statement: The deploy agent's compose env and the dev lane's warm refresh overlay the operator env store with the per-lane env fragment read from the deployment overlay clone at origin/dev, and a process with no clone, no fragment, or a fence wider than the dev lane applies none, while a fragment outside the schema's allowlist is refused.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: the fragment reader allows exactly the six act switches, refuses a key outside the allowlist or a malformed fragment by name, reads the ref and not the working tree, and compose env overlays exactly the fragment keys for a dev-fenced agent only -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q'
   - id: req-omn20867-dev-lane-tick
     statement: The dev lane's main runtime opts in to the runtime scheduler and no secondary role on that lane carries the switch.
     acceptance:
@@ -28,6 +33,15 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn20867-lane-env-fragment
+    description: The fragment tests fail on the merge base, which has no fragment reader in deploy_agent.instance_lanes, and pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
   - id: dod-omn-20867-ac1
     description: The dev lane overlay sets ONEX_RUNTIME_SCHEDULER_ENABLED on omninode-runtime only.
     source: manual
