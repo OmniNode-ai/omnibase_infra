@@ -1,0 +1,111 @@
+{
+  "ticket": "OMN-20771",
+  "reviewer": "codex (config default model, model_reasoning_effort=high, read-only sandbox)",
+  "modeller": "claude-opus-5-5 (lane keep4-OMN-20771-2-5d21)",
+  "codex_thread_id": "01a128de-e928-75c2-b0ed-268667c5e6fd",
+  "reviewed_model_sha256": "a291b0fdfe15cbb9e524e4589094c90b495793dcab526004aee06f90736b1862",
+  "model_sha256": "a291b0fdfe15cbb9e524e4589094c90b495793dcab526004aee06f90736b1862",
+  "verdict": "CHANGE",
+  "notes": "Reviewed sections 4.1, 4.2, T2, the complete module, and all MC configurations without running TLC or editing files. Reviewed module SHA-256: a291b0fdfe15cbb9e524e4589094c90b495793dcab526004aee06f90736b1862. All 20 safety mutants and both liveness mutants change exactly one switch relative to their declared base; this establishes configuration isolation, not semantic adequacy or counterexample validity. F1's wait for unauthorized remediation merges, together with its authorization observation barrier, is a sound small strengthening toward the intended invariant, but extends the written authorized-only rule; F2 does not restore its claimed invariant. Both liveness formulas and their fairness removals were inspected, including GenBoundNotReached; non-runtime omission is reasonable for these properties, whereas immutable heads and missing migration compatibility hide required behavior.",
+  "findings": [
+    {
+      "id": "R1",
+      "blocking": true,
+      "where": "LandGroup / NoRuntimeMergeWhileHeldOrGuardStale",
+      "summary": "A group built while fresh can land after GCrash and HbExpire without violating the invariant: LandGroup tests group.fresh rather than the current hbFresh. It also exempts unauthorized landings while held is TRUE but inc.reported is FALSE.",
+      "suggested_fix": "Evaluate current heartbeat and hold conditions in the landing safety oracle, and expose any resulting design counterexample rather than weakening the property.",
+      "resolved": false,
+      "disposition": "open"
+    },
+    {
+      "id": "R2",
+      "blocking": true,
+      "where": "GAuthorize / LandGroup / F2",
+      "summary": "F2 is insufficient: before MakeRequired, the guard can still open a revert, and both fix and revert can queue and land without authorization or intervening proof. LandGroup hides this counterexample by recording NoFixAndRevertBothLandWithoutCheck violations only when required is TRUE.",
+      "suggested_fix": "Remove required from the unchecked-landing oracle and explicitly defer automatic revert creation as well as authorization until enforcement is required.",
+      "resolved": false,
+      "disposition": "open"
+    },
+    {
+      "id": "R3",
+      "blocking": true,
+      "where": "Rcpt / Attributable / NoisyOutcomes / NoRevertOnUnattributableFail",
+      "summary": "Attributable equates any valid assertion-class FAIL with an attributable FAIL, omitting revert_on dimensions, budget-class failures, and mixed failing-check classes. Consequently the property cannot reject the design's explicitly unattributable assertion failure outside boot/readiness.",
+      "suggested_fix": "Represent the attribution-relevant dimensions and error-class combinations and compute attribution from the complete written predicate.",
+      "resolved": false,
+      "disposition": "open"
+    },
+    {
+      "id": "R4",
+      "blocking": true,
+      "where": "Rcpt / RbPassBelow / GConfirm / NoRevertWithoutReproducedDifferential",
+      "summary": "Receipts contain no applied migration fingerprint, and rollback eligibility and differential proof never evaluate RB compatibility despite an active migration-convergence actor. Any retained lower-pin rollback PASS can supply differential evidence across incompatible migration compositions, while the invariant still passes.",
+      "suggested_fix": "Carry composition identities through receipts and require an eligible rollback PASS with matching overlay and equal or RB-compatible migration fingerprint.",
+      "resolved": false,
+      "disposition": "open"
+    },
+    {
+      "id": "R5",
+      "blocking": true,
+      "where": "Decide / FinishJob",
+      "summary": "The independently triggered policy rollback actor is missing: rollback exists only as FinishJob's continuation after deploy FAIL or reproduction. An attributable recreation or migration FAIL does not produce the written ROLLBACK-or-REFUSE decision, and reaching MaxGen also silently suppresses mandatory restoration.",
+      "suggested_fix": "Model the policy's current-failed-composition rollback/refusal decision separately and truncate bounds without converting required restoration into successful job termination.",
+      "resolved": false,
+      "disposition": "open"
+    },
+    {
+      "id": "R6",
+      "blocking": true,
+      "where": "failPins / WatcherTags / NoConvergeToAttributedFail",
+      "summary": "Failure suppression is a permanent blacklist of scalar pins, although candidate keys distinguish migration targets and the design scopes attributable failures to identities in the open incident. The named invariant therefore checks a different rule and can classify a new migration composition as previously failed merely because its pin matches.",
+      "suggested_fix": "Track failed composition identities with incident membership and compare the proposed composition against those identities.",
+      "resolved": false,
+      "disposition": "open"
+    },
+    {
+      "id": "R7",
+      "blocking": true,
+      "where": "auth / GAuthorize / BuildGroup / GroupPassesOnlyWithAllRuntimeMembersAuthorized",
+      "summary": "Authorization contains PR IDs rather than exact heads, and merge groups contain no member-head snapshot or head-update behavior. The written requirement that every runtime member be authorized at the head used to build the group is therefore untested.",
+      "suggested_fix": "Model mutable PR heads, exact-head authorizations, and merge-group member-head snapshots.",
+      "resolved": false,
+      "disposition": "open"
+    },
+    {
+      "id": "R8",
+      "blocking": true,
+      "where": "hpVerified / RetireHotpatch / NoRetireHotpatchBeforeVerifiedReplacement",
+      "summary": "hpVerified permanently latches after any PASS at pin >= 1, including reproduction, recreation, and rollback, without identifying the replacing build or representing the clean tripwire. The invariant means only that some qualifying pin once PASSed, rather than that retirement follows verification of the replacement under the written conditions.",
+      "suggested_fix": "Represent replacement-specific verification and tripwire cleanliness and require both under the deployment lock before retirement.",
+      "resolved": false,
+      "disposition": "open"
+    },
+    {
+      "id": "R9",
+      "blocking": false,
+      "where": "Header abstractions / Pins / NewestRbBelow",
+      "summary": "The single-repository total order does exercise scalar ancestry and merge-count cases, but does not establish coverage of independently advancing repository pin vectors, mixed forward/backward targets, or repository-specific holds. No preservation argument justifies applying those results to every watched repository.",
+      "suggested_fix": "Add a small two-repository instance or document a property-preserving reduction for the omitted cross-repository behaviors.",
+      "resolved": false,
+      "disposition": "open"
+    },
+    {
+      "id": "R10",
+      "blocking": false,
+      "where": "FinishJob / GRead / GEscalate",
+      "summary": "The deadline abstraction changes the design: every completed job necessarily emits a receipt, so terminal-without-receipt incidents cannot open, and undeployed-merge alarms cannot occur without an existing incident. GRead also uses MaxSeenGen instead of the agent's reported current generation when deciding whether a FAIL opens an incident.",
+      "suggested_fix": "Represent terminal events and missing receipts separately, distinguish the two deadlines, and use reported current generation for incident-opening eligibility.",
+      "resolved": false,
+      "disposition": "open"
+    },
+    {
+      "id": "R11",
+      "blocking": false,
+      "where": "Converge / Fairness",
+      "summary": "Converge omits the healthy lane's 16-minute idle condition, and Fairness contains no queue-progress assumption despite its comment claiming that the queue moves. The stated liveness results therefore cannot substantiate those scheduling details.",
+      "suggested_fix": "Represent bounded idle/load delays and declare the intended queue fairness, or narrow the abstraction claims explicitly.",
+      "resolved": false,
+      "disposition": "open"
+    }
+  ]
+}

@@ -416,15 +416,18 @@ GUnch == UNCHANGED <<repoVars, agentVars, cutVars, inWindow, noise>>
 
 EmptyGroup == [mem |-> {}, chk |-> "none", allAuth |-> TRUE, fresh |-> TRUE]
 
-ReproFailed == \E r \in seen : r.kind = "repro" /\ r.pin = FailPin /\ Attributable(r)
-\* Attribution is a property of the FAIL identity the incident acts on: every
-\* retained FAIL receipt of that identity is attributable.
-IncAttr     == \A r \in seen : (r.verdict = "FAIL" /\ r.pin = FailPin) => Attributable(r)
-RbPass(p)   == \E r \in seen : r.kind = "rollback" /\ r.verdict = "PASS" /\ r.valid /\ r.pin = p
-RbPassBelow == \E p \in 0..(FailPin - 1) : RbPass(p)
-NewestRbPin == IF RbPassBelow THEN CHOOSE p \in 0..(FailPin - 1) :
-                   RbPass(p) /\ \A q \in 0..(FailPin - 1) : RbPass(q) => q <= p
-               ELSE 0
+\* Evidence about the FAIL identity p, read from the retained receipts.
+\* Attribution is a property of that identity: every retained FAIL receipt
+\* of it is attributable.
+AttrAt(p)        == \A r \in seen : (r.verdict = "FAIL" /\ r.pin = p) => Attributable(r)
+ReproFailedAt(p) == \E r \in seen : r.kind = "repro" /\ r.pin = p /\ Attributable(r)
+RbPass(p)        == \E r \in seen : r.kind = "rollback" /\ r.verdict = "PASS" /\ r.valid /\ r.pin = p
+RbPassBelow(p)   == \E q \in 0..(p - 1) : RbPass(q)
+NewestRbBelow(p) == IF RbPassBelow(p)
+                    THEN CHOOSE q \in 0..(p - 1) : RbPass(q) /\ \A q2 \in 0..(p - 1) : RbPass(q2) => q2 <= q
+                    ELSE 0
+IncAttr     == AttrAt(FailPin)
+ReproFailed == ReproFailedAt(FailPin)
 
 GInstall ==
     /\ ~installed
@@ -523,9 +526,9 @@ GDecide ==
 GConfirm ==
     /\ gUp /\ inc.st = "repro"
     /\ RequireAttribution => IncAttr
-    /\ RbPassBelow
+    /\ RbPassBelow(FailPin)
     /\ RequireReproduction => ReproFailed
-    /\ RequireSingleCandidate => FailPin - NewestRbPin = 1
+    /\ RequireSingleCandidate => FailPin - NewestRbBelow(FailPin) = 1
     /\ inc' = [inc EXCEPT !.st = "confirmed", !.culprit = FailPin]
     /\ UNCHANGED <<held, auth, seen, inflight, ghost>> /\ GUnchG /\ GUnch
 
@@ -538,16 +541,18 @@ GEscalate ==
 
 \* Open the revert PR (idempotency key: repo, culprit sha). The guard may
 \* crash after the PR exists and before its state is persisted.
+\* The checks are relative to the culprit's own FAIL identity: a later FAIL
+\* that joins the incident after confirmation does not move them.
 GOpenRevert ==
     /\ gUp /\ inc.st = "confirmed"
-    /\ RequireAttribution => IncAttr
+    /\ RequireAttribution => AttrAt(inc.culprit)
     /\ LET c      == inc.culprit
            exists == pr["rv"].st # "none" /\ pr["rv"].tgt = c   \* open, queued, merged or closed
            create == ~(RevertIdempotent /\ exists)
-           tags   == (IF IncAttr THEN {} ELSE {"NoRevertOnUnattributableFail"})
-                     \cup (IF ReproFailed /\ RbPassBelow THEN {}
+           tags   == (IF AttrAt(c) THEN {} ELSE {"NoRevertOnUnattributableFail"})
+                     \cup (IF ReproFailedAt(c) /\ RbPassBelow(c) THEN {}
                            ELSE {"NoRevertWithoutReproducedDifferential"})
-                     \cup (IF RbPassBelow /\ FailPin - NewestRbPin = 1 THEN {}
+                     \cup (IF RbPassBelow(c) /\ c - NewestRbBelow(c) = 1 THEN {}
                            ELSE {"NoRevertOnAmbiguousCulprit"})
        IN /\ pr' = IF create
                    THEN [pr EXCEPT !["rv"] = [st |-> "open", chk |-> "none", bad |-> FALSE, tgt |-> c]]
@@ -564,20 +569,30 @@ GOpenRevert ==
 
 \* At most one authorization live per incident; after an authorized PR
 \* merges, the next waits for a receipt on an identity containing it.
+\* Finding F2 (PR body): the guard authorizes only while its hold job is
+\* required; between T12 and T9 an authorization binds nothing, a fix lands
+\* unheld, and NoFixAndRevertBothLandWithoutCheck fails.
 GAuthorize ==
     /\ gUp /\ inc.st \in {"open", "repro", "confirmed", "remediating"}
+    /\ required
     /\ SingleAuthorization => auth = {}
     /\ WaitAfterAuthorizedMerge => inc.wait = 0
+    /\ WaitAfterAuthorizedMerge => \A y \in {"rv", "fx"} : pr[y].st = "merged" => y \in inc.merged  \* F1
     /\ \E x \in {"rv", "fx"} :
         /\ pr[x].st \in {"open", "queued"} /\ x \notin auth
         /\ x = "rv" => inc.st = "remediating"
         /\ auth' = auth \cup {x}
     /\ UNCHANGED <<held, inc, seen, inflight, ghost>> /\ GUnchG /\ GUnch
 
+\* Finding F1 (PR body): a fix or revert can land unauthorized in the window
+\* between the FAIL and the end of the hold-open invalidation. The wait is
+\* therefore applied to every fix or revert merge the guard observes during
+\* an incident, not only to authorized ones; with the wait applied to
+\* authorized merges only, NoFixAndRevertBothLandWithoutCheck fails.
 GObserveMerge ==
-    /\ gUp
-    /\ \E x \in auth :
-        /\ pr[x].st = "merged"
+    /\ gUp /\ inc.st \in ActiveInc
+    /\ \E x \in {"rv", "fx"} :
+        /\ pr[x].st = "merged" /\ x \notin inc.merged
         /\ auth' = auth \ {x}
         /\ inc' = [inc EXCEPT !.wait = PosOf(x), !.merged = @ \cup {x}]
     /\ UNCHANGED <<held, seen, inflight, ghost>> /\ GUnchG /\ GUnch
@@ -646,10 +661,18 @@ OpenFix ==
         /\ pr' = [pr EXCEPT !["fx"] = [st |-> "open", chk |-> "none", bad |-> b, tgt |-> k]]
     /\ UNCHANGED <<log, group, ciQueue, ghost>> /\ RUnch
 
+\* The hold job runs once per push or rerun; a finished result stays until
+\* the next rerun (the guard's invalidation, or a rerun of a red check).
 RunCheck ==
     \E x \in PRs :
-        /\ pr[x].st = "open" /\ pr[x].chk # HoldJob(x)
+        /\ pr[x].st = "open" /\ pr[x].chk = "none"
         /\ pr' = [pr EXCEPT ![x].chk = HoldJob(x)]
+        /\ UNCHANGED <<log, group, ciQueue, ghost>> /\ RUnch
+
+RerunRed ==
+    \E x \in PRs :
+        /\ pr[x].st = "open" /\ pr[x].chk = "red"
+        /\ pr' = [pr EXCEPT ![x].chk = "none"]
         /\ UNCHANGED <<log, group, ciQueue, ghost>> /\ RUnch
 
 \* The landing controller enqueues a PR whose checks are green.
@@ -701,24 +724,30 @@ GroupFail ==
 -----------------------------------------------------------------------------
 OtherUnch == UNCHANGED <<repoVars, guardVars, inflight, noise>>
 
+\* Each step in full (every variable specified), so it can carry fairness.
+ConsumerA == ConsumerEval /\ UNCHANGED <<guardVars, repoVars, cut, watcherOn, inWindow, inflight, noise>>
+TimerA    == TimerEval /\ UNCHANGED <<guardVars, repoVars, cut, watcherOn, ciQueue, inWindow, inflight, noise>>
+FinishA   == FinishJob /\ UNCHANGED <<guardVars, repoVars, cutVars, inWindow>>
+RestartA  == RestartPrevious /\ UNCHANGED <<guardVars, repoVars, cutVars, inWindow>>
+CutA      == CutStep /\ UNCHANGED <<agentVars, guardVars, repoVars, inWindow, inflight, noise, ghost>>
+WindowA   == WindowStep /\ UNCHANGED <<agentVars, guardVars, repoVars, cutVars, inflight, noise, ghost>>
+
 AgentNext ==
-    \/ ConsumerEval /\ UNCHANGED <<guardVars, repoVars, cut, watcherOn, inWindow, inflight, noise>>
-    \/ TimerEval /\ UNCHANGED <<guardVars, repoVars, cut, watcherOn, ciQueue, inWindow, inflight, noise>>
-    \/ FinishJob /\ UNCHANGED <<guardVars, repoVars, cutVars, inWindow>>
-    \/ (SelfUpdate \/ AgentCrash \/ RestartPrevious) /\ UNCHANGED <<guardVars, repoVars, cutVars, inWindow>>
+    \/ ConsumerA \/ TimerA \/ FinishA \/ RestartA
+    \/ (SelfUpdate \/ AgentCrash) /\ UNCHANGED <<guardVars, repoVars, cutVars, inWindow>>
     \/ (ConsumerFail \/ ConsumerRecover \/ ContainerCrash \/ AdvanceMigration \/ RetireHotpatch)
        /\ UNCHANGED <<guardVars, repoVars, cutVars, inWindow>>
 
 EnvNext ==
-    \/ (CutStep \/ EnableEarly) /\ UNCHANGED <<agentVars, guardVars, repoVars, inWindow, inflight, noise, ghost>>
-    \/ WindowStep /\ UNCHANGED <<agentVars, guardVars, repoVars, cutVars, inflight, noise, ghost>>
+    \/ CutA \/ WindowA
+    \/ EnableEarly /\ UNCHANGED <<agentVars, guardVars, repoVars, inWindow, inflight, noise, ghost>>
 
 GuardNext ==
     \/ GInstall \/ GHeartbeat \/ HbExpire \/ MakeRequired \/ GCrash \/ GRestart
     \/ GRead \/ GHoldOpen \/ GInvalidate \/ GDecide \/ GConfirm \/ GEscalate
     \/ GOpenRevert \/ GAuthorize \/ GObserveMerge \/ GClearWait \/ GCloseRevert \/ GRelease
 
-RepoNext == OpenFeat \/ OpenFix \/ RunCheck \/ Enqueue \/ BuildGroup \/ LandGroup \/ GroupFail
+RepoNext == OpenFeat \/ OpenFix \/ RunCheck \/ RerunRed \/ Enqueue \/ BuildGroup \/ LandGroup \/ GroupFail
 
 Next == AgentNext \/ EnvNext \/ GuardNext \/ RepoNext
 
@@ -728,10 +757,9 @@ Next == AgentNext \/ EnvNext \/ GuardNext \/ RepoNext
 \* while up, and the queue moves. FairHostTimer and FairGuardRestart are the
 \* two assumptions the liveness properties name.
 Fairness ==
-    /\ WF_vars(FinishJob) /\ WF_vars(WindowStep) /\ WF_vars(RestartPrevious)
-    /\ WF_vars(CutStep)
-    /\ WF_vars(ConsumerEval /\ UNCHANGED <<guardVars, repoVars, cut, watcherOn, inWindow, inflight, noise>>)
-    /\ (FairHostTimer => WF_vars(TimerEval /\ UNCHANGED <<guardVars, repoVars, cut, watcherOn, ciQueue, inWindow, inflight, noise>>))
+    /\ WF_vars(FinishA) /\ WF_vars(WindowA) /\ WF_vars(RestartA) /\ WF_vars(CutA)
+    /\ WF_vars(ConsumerA)
+    /\ (FairHostTimer => WF_vars(TimerA))
     /\ (FairGuardRestart => WF_vars(GRestart))
     /\ WF_vars(GInstall) /\ WF_vars(GHeartbeat) /\ WF_vars(MakeRequired)
     /\ WF_vars(GRead) /\ WF_vars(GHoldOpen) /\ WF_vars(GInvalidate) /\ WF_vars(GDecide)
@@ -805,6 +833,11 @@ EveryCompositionChangeInvalidatesProof ==
 (* Liveness.                                                               *)
 (***************************************************************************)
 PinRange == 0..Cardinality(PRs)
+
+\* Checked with the liveness properties: the generation bound never disables
+\* a step (StartJob and the rollback continuation need gen < MaxGen), so no
+\* liveness verdict is an artifact of the bound.
+GenBoundNotReached == gen < MaxGen
 
 \* A lane with a newer watched head converges to it (or past it) or rolls
 \* back off it: an attempt for it ran, or its FAIL bars it.
