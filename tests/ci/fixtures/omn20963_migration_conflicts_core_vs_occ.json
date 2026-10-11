@@ -1,0 +1,44 @@
+{
+  "_provenance": {
+    "source": "omnibase_core.handlers.handler_migration_conflicts (omnibase_core de3398d1, run with uv run --frozen --no-dev --no-sync) and onex_change_control check-migration-conflicts (dev tip 4545200d) run over scratch trees of each registry repo's origin/dev on lab host h201; repos root = omniclaude, omnidash, omniintelligence, omnibase_core, omnimemory, omnimarket, omnibase_infra",
+    "captured_utc": "2026-10-11T10:09:52Z",
+    "note": "Output lines are sorted and blank lines and the interpreter's pydantic import warning removed before hashing. The control tree adds docker/migrations/forward/999_zz_conflict_control.sql redefining registration_projections with different columns and is run without --warn-only; the unedited tree also exits 1 without --warn-only."
+  },
+  "response": {
+    "action_arguments": "--check-columns --warn-only",
+    "clean_tree": {
+      "omnibase_core": {
+        "exit_code": 0,
+        "conflicts_reported": 81,
+        "normalized_lines": 421,
+        "normalized_sha256": "78fc229e93198f2e8a4c1b4b60d21452adfc2f69141cb1256c7bdebf93f66ce2"
+      },
+      "onex_change_control": {
+        "exit_code": 0,
+        "conflicts_reported": 81,
+        "normalized_lines": 421,
+        "normalized_sha256": "78fc229e93198f2e8a4c1b4b60d21452adfc2f69141cb1256c7bdebf93f66ce2"
+      }
+    },
+    "control_without_warn_only": {
+      "unedited_tree_omnibase_core": {
+        "exit_code": 1,
+        "conflicts_reported": 81,
+        "normalized_lines": 421,
+        "normalized_sha256": "78fc229e93198f2e8a4c1b4b60d21452adfc2f69141cb1256c7bdebf93f66ce2"
+      },
+      "conflicting_migration_omnibase_core": {
+        "exit_code": 1,
+        "conflicts_reported": 82,
+        "normalized_lines": 426,
+        "normalized_sha256": "ea6c921811a923707b244f4d4abd400568a652a2d9eaa96ca907c377a29abd87"
+      },
+      "conflicting_migration_onex_change_control": {
+        "exit_code": 1,
+        "conflicts_reported": 82,
+        "normalized_lines": 426,
+        "normalized_sha256": "ea6c921811a923707b244f4d4abd400568a652a2d9eaa96ca907c377a29abd87"
+      }
+    }
+  }
+}
