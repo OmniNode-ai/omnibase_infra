@@ -169,9 +169,19 @@ def test_canonical_shape_hook_and_ci_use_the_exemption_commit() -> None:
     ]
     assert hook_repo["repo"] == "https://github.com/OmniNode-ai/omnibase_core"
     assert hook_repo["rev"] == _caller_sha()
+    (boundary_repo,) = [
+        repo
+        for repo in repos
+        if any(hook["id"] == "check-node-boundary-imports" for hook in repo["hooks"])
+    ]
+    assert boundary_repo["repo"] == hook_repo["repo"]
+    assert boundary_repo["rev"] == _caller_sha()
     jobs = _mapping(WORKFLOWS / "ci.yml")["jobs"]
     assert isinstance(jobs, dict)
     assert jobs["canonical-file-shape"]["env"]["CANONICAL_FILE_SHAPE_CORE"].endswith(
+        f"@{_caller_sha()}"
+    )
+    assert jobs["node-boundary-imports"]["env"]["NODE_BOUNDARY_CORE"].endswith(
         f"@{_caller_sha()}"
     )
 

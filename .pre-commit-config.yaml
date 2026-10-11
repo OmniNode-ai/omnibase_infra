@@ -110,7 +110,7 @@ repos:
   # no suppression marker. CI twin job node-boundary-imports in
   # .github/workflows/ci.yml; keep this rev equal to that job's pin.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24
+    rev: 031148215620031436cba30619bbae67c0bb38ad
     hooks:
       - id: check-node-boundary-imports
         require_serial: true
