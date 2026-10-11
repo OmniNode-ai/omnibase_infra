@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20923"
+title: "No lab or deployment configuration in a shipped repository: the review voter list is a private CI overlay"
+summary: "Operator RULING 2026-10-10T21:57:38Z. The Hostile Reviewer voter list (docker/lane-overlays/hostile-review-voters.yaml, added by omnibase_infra#4817) is removed from this repository. hostile-reviewer.yml fetches the roster at run time from the private node overlay (config/onex/overlays/node_review_voters_overlay_compute/overlay.yaml) of the repository the org Actions variable OMNI_CI_OVERLAY_REPO names; with the variable unset (a fork or customer) the neutral default is 'no review voters configured' and the gate fails closed saying so. The transport CIDR allowlist is derived from the resolved voters' hosts, so the workflow names no network. The quorum rule is unchanged."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-no-voter-roster-in-repo"
+    statement: "This repository carries no review voters overlay and the workflow names no network; the roster is read from the private CI overlay outside the pull request checkout."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: no tracked file declares review_voters_overlay.v1, the workflow names no IP or CIDR, and REVIEW_VOTERS_OVERLAY points at the CI overlay outside the workspace -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'carries_no_review_voters_overlay or names_no_network or outside_the_workspace or org_variable'"
+  - id: "req-neutral-default"
+    statement: "With no CI overlay configured the gate fails closed naming the cause; with one configured it resolves that repository."
+    acceptance:
+      - id: "AC2"
+        statement: "AC2: an unset OMNI_CI_OVERLAY_REPO yields configured=false and 'no review voters configured' before any file is read; a set one yields its name; an owner/name value is refused -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'neutral_default or resolves_the_named'"
+evidence_requirements:
+  - kind: "tests"
+    description: "The overlay and workflow tests pass at the head."
+    command: "uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20923-ac1-no-roster-in-repo"
+    description: "No review voters overlay or network literal ships here; the roster comes from the CI overlay outside the checkout."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'carries_no_review_voters_overlay or names_no_network or outside_the_workspace or org_variable'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn20923-ac2-neutral-default"
+    description: "A fork with no CI overlay gets the neutral default and the gate fails closed naming it."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'neutral_default or resolves_the_named'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
