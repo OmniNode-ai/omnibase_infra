@@ -39,14 +39,14 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-omn-20915-deploy-probe
-    description: "Deploy probe. The two moved nodes' contracts exist in omnimarket's dev branch, so omnibase_infra stops shipping them only once omnimarket does; the probe reads omnimarket's dev branch from GitHub and exits nonzero while either contract is absent there, so it fails at the merge base and until the omnimarket receive pull request is merged."
+    description: "Package and runtime-discovery probe for the omnibase_infra deletion half only. The moved and dead node directories, entry points, adapter and source imports are absent, and the runtime's real contract discovery and profile filter find none of the removed nodes. These checks fail against the merge-base source tree with this head's tests overlaid. The receiving nodes' deployment remains the omnimarket receiving pull request's proof; this item does not claim that they are deployed or that the complete move is finished."
     source: manual
     checks:
-      - check_type: command
-        check_value: "gh api \"repos/OmniNode-ai/omnimarket/contents/src/omnimarket/nodes/node_github_pr_poller_effect/contract.yaml?ref=dev\" --jq .path"
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q -p no:randomly"
         cwd: ${OMNI_HOME}/omnibase_infra
-      - check_type: command
-        check_value: "gh api \"repos/OmniNode-ai/omnimarket/contents/src/omnimarket/nodes/node_github_webhook_ingress_effect/contract.yaml?ref=dev\" --jq .path"
+      - check_type: test_passes
+        check_value: "uv run pytest tests/integration/test_omn20915_github_scm_nodes_absent_from_discovery.py -q -p no:randomly"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn-20915-ac3-adapter-removed
     description: "AC3: the GitHub HTTP adapter is gone and nothing in omnibase_infra's source imports it."

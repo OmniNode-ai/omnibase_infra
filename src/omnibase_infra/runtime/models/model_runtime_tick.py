@@ -81,7 +81,9 @@ class ModelRuntimeTick(BaseModel):
                         Provides ordering guarantees and restart-safety detection.
                         Resets to 0 on runtime restart.
         scheduled_at: When this tick was scheduled to occur. May differ from `now`
-                     if there was processing delay or clock skew.
+                     if there was processing delay or clock skew. The runtime
+                     scheduler's tick loop sets it to the epoch-aligned slot the
+                     tick was due on (OMN-20867).
         correlation_id: Correlation ID for distributed tracing. All downstream
                        operations triggered by this tick share this ID.
         scheduler_id: Identifies the runtime scheduler instance that emitted this tick.
@@ -155,7 +157,9 @@ class ModelRuntimeTick(BaseModel):
         ...,
         description=(
             "When this tick was scheduled to occur. May differ from `now` "
-            "if there was processing delay or clock skew."
+            "if there was processing delay or clock skew. The runtime "
+            "scheduler's tick loop sets it to the epoch-aligned slot the tick "
+            "was due on."
         ),
     )
 

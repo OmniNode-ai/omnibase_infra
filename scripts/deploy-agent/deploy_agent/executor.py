@@ -45,6 +45,7 @@ from deploy_agent.events import (
     DEV_LANE_ONLY_MIGRATION_SERVICES,
     GATEWAY_COMPOSE_PROJECT,
     BuildSource,
+    EnumLaneMirrorOutcome,
     EnumRecreateOutcome,
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
@@ -53,6 +54,7 @@ from deploy_agent.events import (
     ModelContainerResidue,
     ModelDepsConvergenceFinding,
     ModelHealthCheck,
+    ModelLaneMirrorReceipt,
     ModelRebuildRequested,
     ModelRecreateSupervision,
     ModelVerifyRecreate,
@@ -68,11 +70,20 @@ from deploy_agent.gateway_budget import (
     derive_gateway_deploy_budget,
 )
 from deploy_agent.host_conditions import probe_host_conditions
-from deploy_agent.instance_lanes import ModelInstanceLane, load_instance_lanes
+from deploy_agent.instance_lanes import (
+    LANE_MIRROR_CREDENTIAL_MAP_KEY,
+    ModelInstanceLane,
+    ModelLaneMirrorRequest,
+    handle_lane_mirror,
+    load_instance_lanes,
+    load_instance_runtime_lanes,
+    read_lane_env_fragment,
+)
 from deploy_agent.lane_lock_client import (
     DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
     lane_lock,
 )
+from deploy_agent.lane_policy import ENV_ALLOWED_LANES, parse_allowed_lanes
 from deploy_agent.loaded_code import loaded_code_sha
 from deploy_agent.reconcile_host_lock import hold_reconcile_host_lock
 from deploy_agent.recreate_supervisor import (
@@ -743,6 +754,12 @@ DEV_INSTANCE_LANE_CONFIGS: dict[str, ModelLaneConfig] = build_dev_instance_lane_
     load_instance_lanes(AGENT_CLONE_ROOT)
 )
 
+#: OMN-20867. Each dev instance's runtime lane id (its ``verify.receipt_lane``),
+#: the name its env fragment is read under in the deployment overlay clone.
+DEV_INSTANCE_RUNTIME_LANES: dict[str, str] = load_instance_runtime_lanes(
+    AGENT_CLONE_ROOT
+)
+
 
 class _DevInstanceSelection:
     """The process's selected dev instance; one attribute, set once at start."""
@@ -1265,6 +1282,56 @@ def _repointed_pin_env() -> dict[str, str]:
     }
 
 
+class _LaneOverlayClone:
+    """The host's deployment overlay clone, set once by the agent at start."""
+
+    path: Path | None = None
+
+
+def set_lane_overlay_clone(path: Path) -> None:
+    """Name the deployment overlay clone the lane env fragment is read from.
+
+    The agent passes the clone its lab-overlay apply archives from, so both read
+    one clone. A process that never sets it (a script importing this module, a
+    unit test) reads no fragment.
+    """
+    _LaneOverlayClone.path = path
+
+
+def _lane_env_overlay() -> dict[str, str]:
+    """This agent's lane env fragment, or nothing (OMN-20867).
+
+    Only a process fenced to the dev lane alone reads one: ``_compose_env``
+    serves every lane, and a deploy of any other lane must never take a dev
+    lane's settings. The fragment is the active dev instance's, read from
+    the overlay clone at its ``origin/dev`` on every call, so a merged overlay
+    change reaches the next compose command without an agent restart.
+    """
+    clone = _LaneOverlayClone.path
+    raw = os.environ.get(ENV_ALLOWED_LANES, "").strip()
+    if clone is None or not raw:
+        return {}
+    if parse_allowed_lanes(raw) != frozenset({EnumRuntimeLane.DEV}):
+        return {}
+    lane_id = DEV_INSTANCE_RUNTIME_LANES[active_dev_instance()]
+    overlay = read_lane_env_fragment(clone, lane_id)
+    if overlay != _LaneEnvOverlayLog.last:
+        logger.info(
+            "lane env fragment for %s from %s: %s",
+            lane_id,
+            clone,
+            ", ".join(f"{k}={v}" for k, v in sorted(overlay.items())) or "none",
+        )
+        _LaneEnvOverlayLog.last = dict(overlay)
+    return overlay
+
+
+class _LaneEnvOverlayLog:
+    """The fragment last logged, so a change is logged once, not per command."""
+
+    last: dict[str, str] | None = None
+
+
 def _load_dotenv_file(env_path: Path) -> dict[str, str]:
     """Parse one committed dotenv file with shell-compatible quoting."""
     if not env_path.exists():
@@ -1371,6 +1438,11 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     # carries a value for these keys -- a stale one, resolved at unit start --
     # so a setdefault would read as wired and change nothing.
     env.update(_repointed_pin_env())
+    # OMN-20867: `update`, not `setdefault`. The lane's own fragment in the
+    # private deployment overlay is the source for the keys it sets, over any
+    # value the operator store holds for them; a key it leaves out keeps
+    # whatever the store says, or stays unset.
+    env.update(_lane_env_overlay())
     # OMN-18073: refuse before compose interpolation writes a provably-mangled
     # value into every container this deploy creates. Deliberately AFTER the
     # re-read above, so a mangled value arriving from the store is refused on
@@ -2148,6 +2220,58 @@ class DeployExecutor:
         self.deps_convergence = []
         self.compose_invocations = []
         self.health_checks = []
+
+    def run_lane_mirror(
+        self, *, lane: EnumRuntimeLane, materialize_root: Path
+    ) -> ModelLaneMirrorReceipt | None:
+        """Bring the lane's mirror forwarders up on its runtime image (OMN-20867).
+
+        Runs after verification, on the dev lane of a process fenced to it
+        alone and only once the agent has named the overlay clone -- the same
+        fence and the same clone as the lane env fragment, so a host has one
+        answer to which deployment overlay it deploys. Returns ``None`` when
+        the fence excludes it; otherwise the receipt, which never changes the
+        job's verdict and is logged at ERROR when it is a failure.
+
+        The credential map path is operator-held. It is re-read from the
+        operator env store on every call, like the repointed pins, so adding
+        it there reaches the next deploy without an agent restart.
+        """
+        clone = _LaneOverlayClone.path
+        raw = os.environ.get(ENV_ALLOWED_LANES, "").strip()
+        if (
+            lane is not EnumRuntimeLane.DEV
+            or clone is None
+            or not raw
+            or parse_allowed_lanes(raw) != frozenset({EnumRuntimeLane.DEV})
+        ):
+            return None
+        env = _compose_env()
+        store = _operator_env_file()
+        if store is not None and store.is_file():
+            declared = _load_dotenv_file(store).get(LANE_MIRROR_CREDENTIAL_MAP_KEY)
+            if declared:
+                env[LANE_MIRROR_CREDENTIAL_MAP_KEY] = declared
+        receipt = handle_lane_mirror(
+            ModelLaneMirrorRequest(
+                clone=clone,
+                runtime_container=lane_config_for(lane).main_runtime_container,
+                materialize_root=materialize_root,
+                compose_env=env,
+            )
+        )
+        if receipt.outcome is EnumLaneMirrorOutcome.FAILED:
+            logger.error(
+                "lane mirror FAILED: %s; forwarders: %s friction_type=lane_mirror_failed",
+                receipt.detail,
+                ", ".join(
+                    f"{f.container}={f.state}/{f.health}" for f in receipt.forwarders
+                )
+                or "none",
+            )
+        else:
+            logger.info("lane mirror %s: %s", receipt.outcome.value, receipt.detail)
+        return receipt
 
     def _record_container_residue(
         self, stuck: list[str], *, lane: EnumRuntimeLane

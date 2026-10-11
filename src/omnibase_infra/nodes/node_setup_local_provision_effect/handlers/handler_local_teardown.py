@@ -9,7 +9,6 @@ Ticket: OMN-3493
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -22,6 +21,10 @@ from omnibase_infra.enums import (
     EnumInfraTransportType,
 )
 from omnibase_infra.errors import ModelInfraErrorContext
+from omnibase_infra.nodes.node_setup_local_provision_effect.handlers.handler_local_provision import (
+    compose_base_command,
+    run_compose,
+)
 from omnibase_infra.nodes.node_setup_local_provision_effect.models.model_local_provision_effect_output import (
     ModelLocalProvisionEffectOutput,
 )
@@ -108,6 +111,8 @@ class HandlerLocalTeardown:
                 corr_id, "topology must be a ModelDeploymentTopology"
             )
         topology: ModelDeploymentTopology = topology_raw
+        whole_project = envelope.get("whole_project") is True
+        remove_volumes = envelope.get("remove_volumes") is True
 
         profiles: set[str] = set()
         local_service_names: list[str] = []
@@ -118,7 +123,7 @@ class HandlerLocalTeardown:
                     profiles.add(svc.local.compose_profile)
                 local_service_names.append(svc.local.compose_service)
 
-        if not local_service_names:
+        if not local_service_names and not whole_project:
             return ModelHandlerOutput.for_compute(
                 input_envelope_id=uuid4(),
                 correlation_id=corr_id,
@@ -133,25 +138,22 @@ class HandlerLocalTeardown:
         profile_flags: list[str] = [
             item for p in sorted(profiles) for item in ["--profile", p]
         ]
+        # whole_project: a plain `down` removes every container and the
+        # project network; named services would leave both behind (OMN-19972).
+        # Volumes are kept unless remove_volumes asks for them.
         cmd: list[str] = (
-            ["docker", "compose", "-f", str(compose_path)]
+            compose_base_command(compose_path, envelope.get("env_files"))
             + profile_flags
             + ["down"]
-            + local_service_names
+            + (["--volumes"] if remove_volumes else [])
+            + ([] if whole_project else local_service_names)
         )
 
         logger.info("Running: %s", " ".join(cmd))
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _stdout_bytes, stderr_bytes = await proc.communicate()
-        returncode = proc.returncode
+        returncode, stderr_text, _ = await run_compose(cmd)
 
         if returncode != 0:
-            stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
             logger.error(
                 "docker compose down failed (rc=%d): %s", returncode, stderr_text
             )

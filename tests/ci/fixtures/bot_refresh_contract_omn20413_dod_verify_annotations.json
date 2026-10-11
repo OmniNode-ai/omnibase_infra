@@ -1,0 +1,58 @@
+{
+  "_provenance": {
+    "source": "GitHub REST check-runs/{job}/annotations for repo-evidence / dod-verify on OmniNode-ai/omnibase_infra",
+    "captured_utc": "2026-10-10T19:41:25Z"
+  },
+  "response": {
+    "omnibase_infra#4772": {
+      "run_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/38016442615/job/114107652556",
+      "annotations": [
+        {
+          "annotation_level": "failure",
+          "message": "Process completed with exit code 1."
+        },
+        {
+          "annotation_level": "notice",
+          "message": "Include contracts/OMN-18606.yaml at this PR head; a later companion merge cannot supply evidence for this head."
+        },
+        {
+          "annotation_level": "failure",
+          "message": "pull request cites OMN-18606 but carries no contracts/OMN-18606.yaml"
+        },
+        {
+          "annotation_level": "notice",
+          "message": "OCC writer app is not exempt: release cut requires root CHANGELOG.md; dependency-pin-only: changed path is not a dependency manifest or lockfile: deploy/lane-census/census-snapshot.json (OMN-17427); the evidence gate continues."
+        },
+        {
+          "annotation_level": "notice",
+          "message": "\"The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748\""
+        }
+      ]
+    },
+    "omnibase_infra#4816": {
+      "run_url": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/38076558665/job/114284654111",
+      "annotations": [
+        {
+          "annotation_level": "failure",
+          "message": "Process completed with exit code 1."
+        },
+        {
+          "annotation_level": "notice",
+          "message": "Include contracts/OMN-17292.yaml at this PR head; a later companion merge cannot supply evidence for this head."
+        },
+        {
+          "annotation_level": "failure",
+          "message": "pull request cites OMN-17292 but carries no contracts/OMN-17292.yaml"
+        },
+        {
+          "annotation_level": "notice",
+          "message": "OCC writer app is not exempt: release cut requires root CHANGELOG.md; dependency-pin-only: changed path is not a dependency manifest or lockfile: .github/omnimarket-contract-pin.yaml (OMN-17427); the evidence gate continues."
+        },
+        {
+          "annotation_level": "notice",
+          "message": "\"The ubuntu-latest label will migrate to Ubuntu 26 beginning October 19, 2026. For more information, see https://github.com/actions/runner-images/issues/14748\""
+        }
+      ]
+    }
+  }
+}

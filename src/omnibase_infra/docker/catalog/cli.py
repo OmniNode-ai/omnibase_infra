@@ -23,11 +23,12 @@ import os
 import subprocess
 import sys
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 
 import yaml
 
-from omnibase_infra.docker.catalog.generator import generate_compose
+from omnibase_infra.docker.catalog.generator import write_compose
 from omnibase_infra.docker.catalog.resolver import CatalogResolver
 from omnibase_infra.docker.catalog.validator import validate_env
 from omnibase_infra.docker.catalog.validator_healthcheck_semantic_probe import (
@@ -162,18 +163,20 @@ def _refuse_host_port_clashes(bundles: list[str]) -> int:
 
 
 def _resolve_and_generate(bundles: list[str], output: str) -> int:
-    """Resolve bundles, generate compose, write to output path."""
+    """Resolve bundles, generate compose, write to output path.
+
+    The render itself is ``write_compose``, the one renderer the ``onex local``
+    shim also reaches through ``render_bundle`` (OMN-19972).
+    """
     rc = _refuse_host_port_clashes(bundles)
     if rc != 0:
         return rc
-    resolver = CatalogResolver(catalog_dir=_CATALOG_DIR)
-    resolved = resolver.resolve(bundles=bundles)
-    compose = generate_compose(resolved, environment=os.environ)
-
-    Path(output).parent.mkdir(parents=True, exist_ok=True)
-    with open(output, "w") as f:
-        yaml.dump(compose, f, default_flow_style=False, sort_keys=False)
-
+    resolved = write_compose(
+        bundles,
+        catalog_dir=Path(_CATALOG_DIR),
+        output_path=Path(output),
+        environment=os.environ,
+    )
     print(f"Generated compose with {len(resolved.manifests)} entries -> {output}")
     return 0
 
@@ -318,10 +321,15 @@ def _run_seed() -> int:
 
 def _current_git_sha() -> str:
     """Return the current git SHA for the omnibase_infra repo (OMN-9330)."""
+    return _git_sha_at(_REPO_ROOT)
+
+
+def _git_sha_at(repo_root: Path) -> str:
+    """Return the HEAD git SHA of the checkout at ``repo_root``, or ``unknown``."""
     try:
         proc = subprocess.run(
             ["git", "rev-parse", "HEAD"],
-            cwd=str(_REPO_ROOT),
+            cwd=str(repo_root),
             capture_output=True,
             text=True,
             check=True,
@@ -339,7 +347,12 @@ def _runtime_version() -> str:
     default (``0.1.0``). Fails fast if the version cannot be resolved so a build
     never silently stamps a placeholder identity (OMN-12965).
     """
-    pyproject = _REPO_ROOT / "pyproject.toml"
+    return _runtime_version_at(_REPO_ROOT)
+
+
+def _runtime_version_at(repo_root: Path) -> str:
+    """Return the package version in ``repo_root/pyproject.toml``, failing fast."""
+    pyproject = repo_root / "pyproject.toml"
     try:
         data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
         version = str(data["project"]["version"]).strip()
@@ -370,25 +383,40 @@ def _image_identity_build_args() -> list[str]:
     SHA + image digest are required citations in accepted evidence). This is the
     enforcement point for OMN-12965 — never stamp a placeholder identity.
     """
-    git_sha = _current_git_sha()
+    pairs = _identity_pairs(_current_git_sha(), _runtime_version, _REPO_ROOT)
+    return [item for pair in pairs for item in ("--build-arg", pair)]
+
+
+def runtime_image_build_args(infra_root: Path) -> tuple[str, ...]:
+    """The runtime image identity quad, as ``KEY=VALUE``, for a build at ``infra_root``.
+
+    Public for callers outside this checkout (the ``onex local up --build``
+    shim, OMN-19972), which pass the checkout they build from. The same
+    fail-fast as ``_image_identity_build_args`` applies (OMN-12965).
+    """
+    return _identity_pairs(
+        _git_sha_at(infra_root), lambda: _runtime_version_at(infra_root), infra_root
+    )
+
+
+def _identity_pairs(
+    git_sha: str, version: Callable[[], str], repo_root: Path
+) -> tuple[str, ...]:
+    """``GIT_SHA``/``VCS_REF``/``RUNTIME_VERSION``/``BUILD_DATE`` pairs, refusing an unknown sha."""
     if not git_sha or git_sha == "unknown":
         raise RuntimeError(
             "Cannot resolve git revision for the runtime image build. A blank or "
             "'unknown' org.opencontainers.image.revision degrades every proof "
             "packet (OMN-12965). Run the build from a clean git checkout of "
-            f"{_REPO_ROOT}."
+            f"{repo_root}."
         )
     build_date = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return [
-        "--build-arg",
+    return (
         f"GIT_SHA={git_sha}",
-        "--build-arg",
         f"VCS_REF={git_sha}",
-        "--build-arg",
-        f"RUNTIME_VERSION={_runtime_version()}",
-        "--build-arg",
+        f"RUNTIME_VERSION={version()}",
         f"BUILD_DATE={build_date}",
-    ]
+    )
 
 
 def cmd_seed(_args: list[str]) -> int:

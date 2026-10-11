@@ -44,7 +44,9 @@ def _load(name: str, path: Path) -> Any:
 
 
 pool = _load("prepr_runtime_pool", POOL_PY)
-CFG = pool.load_pool_config()
+# OMN-20934: a synthetic pool; a lab's own table lives under its workspace config root.
+POOL_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "prepr_runtime_pool.yaml"
+CFG = pool.load_pool_config(POOL_FIXTURE)
 NOW = dt.datetime(2026, 9, 27, 14, 30, tzinfo=dt.UTC)
 
 GOOD = {
@@ -159,9 +161,17 @@ def _lease(holder: str, until: dt.datetime) -> str:
 # ------------------------------------------------------------------ config
 
 
-def test_every_pool_host_is_declared_in_the_lane_manifest() -> None:
-    declared = pool.declared_manifest_hosts()
-    assert {h.machine for h in CFG.hosts} <= declared
+def test_declared_manifest_hosts_reads_the_manifest_host_keys(tmp_path: Path) -> None:
+    # That our pool's machines are declared in our manifest is checked against
+    # our lab's own pool table on the lab (OMN-20934); here, the reader.
+    manifest = tmp_path / "lane-manifest.yaml"
+    manifest.write_text(
+        yaml.safe_dump({"hosts": {m: {} for m in ("pool-a", "pool-b", "pool-c")}}),
+        encoding="utf-8",
+    )
+    declared = pool.declared_manifest_hosts(manifest)
+    assert declared == {"pool-a", "pool-b", "pool-c"}
+    assert {h.machine for h in CFG.hosts} - declared == {"pool-d", "pool-e"}
 
 
 def test_the_slot_project_is_never_a_declared_lane() -> None:
@@ -170,21 +180,63 @@ def test_the_slot_project_is_never_a_declared_lane() -> None:
     assert {h.compose_project for h in isolated} == {CFG.compose_project}
 
 
-def test_every_lab_machine_takes_part_and_every_exclusion_states_a_reason() -> None:
-    # Operator ruling 2026-09-27T20:20:42Z: ".105, .201 and .202 are available,
-    # what do you mean only 1 lab host?" Every lab machine has a pool member.
+def test_the_loader_reads_members_and_their_exclusion_reasons() -> None:
+    # Which lab machines take part is our lab's policy, checked beside our lab's
+    # table under the workspace config root (OMN-20934); here, the loader's reading.
     in_pool = {h.machine for h in CFG.hosts if h.status == "pool"}
-    # Operator 2026-10-01: .105 is out of the mix (taken to tech week).
-    assert in_pool == {"lab-101", "lab-200", "lab-201", "lab-202"}
-    assert CFG.host("lab-105").status == "excluded"
-    assert CFG.host("lab-202").status == "pool"
-    assert CFG.host("lab-202").positive_control == "omnibase-infra-dev-202"
+    assert in_pool == {"pool-a", "pool-b", "pool-c", "pool-d"}
+    assert CFG.host("pool-e").status == "excluded"
+    assert CFG.host("pool-d").positive_control == "omnibase-infra-lane-d"
+    assert CFG.host(CFG.host("pool-a").ssh_target).name == "pool-a"
     assert all(h.reason for h in CFG.hosts if h.status == "excluded")
 
 
+def test_without_an_overlay_the_pool_refuses_and_names_how_to_supply_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("OMNI_HOME", raising=False)
+    with pytest.raises(
+        ValueError, match="not configured: set ONEX_WORKSPACE_CONFIG_ROOT"
+    ):
+        pool.load_pool_config()
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path))
+    with pytest.raises(ValueError, match="does not exist"):
+        pool.load_pool_config()
+    # the driver turns the refusal into its usage exit and names no lab host
+    assert pool.main(["status"]) == pool.EXIT_USAGE
+
+
+def test_the_pool_resolves_under_the_workspace_config_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owner = tmp_path / "owner"
+    (owner / "config" / "lab").mkdir(parents=True)
+    shutil.copyfile(POOL_FIXTURE, owner / "config" / "lab" / "prepr_runtime_pool.yaml")
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(owner))
+    assert (
+        pool.default_pool_config()
+        == (owner / "config" / "lab" / "prepr_runtime_pool.yaml").resolve()
+    )
+    assert pool.load_pool_config() == CFG
+    # with the override unset, the runtime's config owner of $OMNI_HOME owns it
+    from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
+
+    monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT")
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("OMNI_HOME", str(home))
+    expected = workspace_runtime_config_root(home) / pool.POOL_CONFIG_RELATIVE
+    with pytest.raises(ValueError, match=re.escape(str(expected))):
+        pool.load_pool_config()
+    expected.parent.mkdir(parents=True)
+    shutil.copyfile(POOL_FIXTURE, expected)
+    assert pool.load_pool_config() == CFG
+
+
 def test_201_takes_part_only_through_its_pre_pr_slots() -> None:
-    on_201 = [h for h in CFG.hosts if h.machine == "lab-201"]
-    assert CFG.host("lab-201").status == "excluded"
+    on_201 = [h for h in CFG.hosts if h.machine == "pool-c"]
+    assert CFG.host("pool-c").status == "excluded"
     members = sorted((h for h in on_201 if h.status == "pool"), key=lambda h: h.slot)
     assert [h.kind for h in members] == ["prepr-slot", "prepr-slot"]
     assert [h.compose_project for h in members] == [
@@ -215,7 +267,7 @@ def test_201_takes_part_only_through_its_pre_pr_slots() -> None:
 def test_a_member_outside_the_slot_policy_is_refused(
     tmp_path: Path, edit: dict[str, Any], match: str
 ) -> None:
-    raw = yaml.safe_load(pool.POOL_CONFIG.read_text(encoding="utf-8"))
+    raw = yaml.safe_load(POOL_FIXTURE.read_text(encoding="utf-8"))
     raw["hosts"][0].update(edit)
     bad = tmp_path / "pool.yaml"
     bad.write_text(yaml.safe_dump(raw), encoding="utf-8")
@@ -223,12 +275,8 @@ def test_a_member_outside_the_slot_policy_is_refused(
         pool.load_pool_config(bad)
 
 
-def test_model_endpoint_is_not_the_202_server() -> None:
-    assert "192.168.86.202" not in CFG.model_endpoint  # onex-allow-internal-ip
-
-
 def test_an_exclusion_without_a_reason_is_refused(tmp_path: Path) -> None:
-    raw = yaml.safe_load(pool.POOL_CONFIG.read_text(encoding="utf-8"))
+    raw = yaml.safe_load(POOL_FIXTURE.read_text(encoding="utf-8"))
     next(h for h in raw["hosts"] if h["status"] == "excluded").pop("reason")
     bad = tmp_path / "pool.yaml"
     bad.write_text(yaml.safe_dump(raw), encoding="utf-8")
@@ -265,15 +313,15 @@ def test_probe_waits_for_the_runtimes_before_reading_health() -> None:
 
 def test_live_surface_holds_respects_until_and_release() -> None:
     rows = [
-        "2026-09-27T14:00:00Z | HOLD | lane=a | id=2026-09-27T14:00:00Z-a | surface=101-runtime | until=2026-09-27T15:00:00Z | x",
-        "2026-09-27T13:00:00Z | HOLD | lane=b | id=2026-09-27T13:00:00Z-b | surface=105-runtime | until=2026-09-27T14:00:00Z | x",
-        "2026-09-27T14:10:00Z | HOLD | lane=c | id=2026-09-27T14:10:00Z-c | surface=200-runtime | until=2026-09-27T16:00:00Z | x",
-        "2026-09-27T14:20:00Z | RELEASE | lane=c | re=2026-09-27T14:10:00Z-c | surface=200-runtime | result=PASS | restored=yes",
+        "2026-09-27T14:00:00Z | HOLD | lane=a | id=2026-09-27T14:00:00Z-a | surface=a-runtime | until=2026-09-27T15:00:00Z | x",
+        "2026-09-27T13:00:00Z | HOLD | lane=b | id=2026-09-27T13:00:00Z-b | surface=e-runtime | until=2026-09-27T14:00:00Z | x",
+        "2026-09-27T14:10:00Z | HOLD | lane=c | id=2026-09-27T14:10:00Z-c | surface=b-runtime | until=2026-09-27T16:00:00Z | x",
+        "2026-09-27T14:20:00Z | RELEASE | lane=c | re=2026-09-27T14:10:00Z-c | surface=b-runtime | result=PASS | restored=yes",
         "2026-09-27T14:21:00Z | HOLD | lane=d | id=2026-09-27T14:21:00Z-d | to=all | pr=omnimarket#1 | until=2026-09-27T20:00:00Z | not a surface",
     ]
     live = pool.live_surface_holds(rows, NOW)
-    assert set(live) == {"101-runtime"}
-    assert live["101-runtime"][1] == "a"
+    assert set(live) == {"a-runtime"}
+    assert live["a-runtime"][1] == "a"
 
 
 # ------------------------------------------------------------------ survey and pick
@@ -324,89 +372,89 @@ def test_survey_probes_concurrently_and_preserves_host_order() -> None:
 
 def test_pick_takes_the_least_loaded_free_host_and_never_an_excluded_one() -> None:
     hosts = {
-        "lab-101": FakeHost(load=6.0),
-        "lab-200": FakeHost(cores=24, load=3.0),
-        "lab-201": FakeHost(),
-        "lab-202": FakeHost(cores=10, load=1.0),
+        "pool-a": FakeHost(load=6.0),
+        "pool-b": FakeHost(cores=24, load=3.0),
+        "pool-c": FakeHost(),
+        "pool-d": FakeHost(cores=10, load=1.0),
     }
     states = _survey(hosts)
     verdicts = {s.host.name: s.verdict for s in states}
-    assert verdicts["lab-201"] == "EXCLUDED"
-    assert verdicts["lab-105"] == "EXCLUDED"
-    assert verdicts["lab-202"] == "FREE"
-    assert pool.pick(states).host.name == "lab-202"
+    assert verdicts["pool-c"] == "EXCLUDED"
+    assert verdicts["pool-e"] == "EXCLUDED"
+    assert verdicts["pool-d"] == "FREE"
+    assert pool.pick(states).host.name == "pool-d"
 
 
 def test_offline_overloaded_leased_held_and_occupied_hosts_are_not_free() -> None:
     hosts = {
-        "lab-101": FakeHost(),
-        "lab-202": FakeHost(online=False),
-        "lab-200": FakeHost(cores=24, load=74.0),
+        "pool-a": FakeHost(),
+        "pool-d": FakeHost(online=False),
+        "pool-b": FakeHost(cores=24, load=74.0),
     }
-    hosts["lab-101"].lease = _lease("other-lane", NOW + dt.timedelta(minutes=30))
+    hosts["pool-a"].lease = _lease("other-lane", NOW + dt.timedelta(minutes=30))
     v = {s.host.name: s for s in _survey(hosts)}
-    assert v["lab-101"].verdict == "BUSY" and "other-lane" in v["lab-101"].detail
-    assert v["lab-202"].verdict == "OFFLINE"
-    assert v["lab-200"].verdict == "OVERLOADED"
+    assert v["pool-a"].verdict == "BUSY" and "other-lane" in v["pool-a"].detail
+    assert v["pool-d"].verdict == "OFFLINE"
+    assert v["pool-b"].verdict == "OVERLOADED"
     assert pool.pick(list(v.values())) is None
 
     held = {
-        "lab-101": FakeHost(),
-        "lab-202": FakeHost(slot=3),
-        "lab-200": FakeHost(listen=1),
+        "pool-a": FakeHost(),
+        "pool-d": FakeHost(slot=3),
+        "pool-b": FakeHost(listen=1),
     }
     v2 = {
         s.host.name: s
         for s in _survey(
-            held, holds={"101-runtime": ("id1", "peer", "2026-09-27T15:00:00Z")}
+            held, holds={"a-runtime": ("id1", "peer", "2026-09-27T15:00:00Z")}
         )
     }
-    assert v2["lab-101"].verdict == "BUSY" and "HOLD id1" in v2["lab-101"].detail
+    assert v2["pool-a"].verdict == "BUSY" and "HOLD id1" in v2["pool-a"].detail
     assert (
-        v2["lab-202"].verdict == "BUSY" and "containers present" in v2["lab-202"].detail
+        v2["pool-d"].verdict == "BUSY" and "containers present" in v2["pool-d"].detail
     )
-    assert v2["lab-200"].verdict == "BUSY" and "listeners" in v2["lab-200"].detail
+    assert v2["pool-b"].verdict == "BUSY" and "listeners" in v2["pool-b"].detail
 
 
 def test_own_hold_and_expired_lease_do_not_block() -> None:
-    hosts = {"lab-101": FakeHost()}
-    hosts["lab-101"].lease = _lease("gone-lane", NOW - dt.timedelta(minutes=1))
+    hosts = {"pool-a": FakeHost()}
+    hosts["pool-a"].lease = _lease("gone-lane", NOW - dt.timedelta(minutes=1))
     v = {
         s.host.name: s
-        for s in _survey(hosts, holds={"101-runtime": ("id", "me", "x")}, me="me")
+        for s in _survey(hosts, holds={"a-runtime": ("id", "me", "x")}, me="me")
     }
-    assert v["lab-101"].verdict == "FREE"
+    assert v["pool-a"].verdict == "FREE"
 
 
 # ------------------------------------------------------------------ lease
 
 
 def test_lease_is_exclusive_and_only_its_holder_releases_it() -> None:
-    hosts = {"lab-101": FakeHost()}
+    hosts = {"pool-a": FakeHost()}
     tp = FakeTransport(hosts)
-    h = CFG.host("lab-101")
+    h = CFG.host("pool-a")
     until = NOW + dt.timedelta(minutes=60)
     assert pool.acquire_lease(CFG, tp, h, "me", until, NOW)[0]
     ok, why = pool.acquire_lease(CFG, tp, h, "peer", until, NOW)
     assert not ok and "held by me" in why
     assert not pool.release_lease(CFG, tp, h, "peer")[0]
     assert pool.release_lease(CFG, tp, h, "me")[0]
-    assert hosts["lab-101"].lease is None
+    assert hosts["pool-a"].lease is None
 
 
 def test_expired_lease_is_broken() -> None:
-    hosts = {"lab-101": FakeHost()}
-    hosts["lab-101"].lease = _lease("gone-lane", NOW - dt.timedelta(seconds=1))
+    hosts = {"pool-a": FakeHost()}
+    hosts["pool-a"].lease = _lease("gone-lane", NOW - dt.timedelta(seconds=1))
     ok, why = pool.acquire_lease(
         CFG,
         FakeTransport(hosts),
-        CFG.host("lab-101"),
+        CFG.host("pool-a"),
         "me",
         NOW + dt.timedelta(hours=1),
         NOW,
     )
     assert ok and "gone-lane" in why
-    assert json.loads(hosts["lab-101"].lease)["holder"] == "me"
+    assert json.loads(hosts["pool-a"].lease)["holder"] == "me"
 
 
 # ------------------------------------------------------------------ judge
@@ -707,9 +755,9 @@ def test_the_probe_compares_every_repo_under_test_in_both_runtimes() -> None:
 
 def test_run_pass_end_to_end_prints_a_citable_readback(tmp_path: Path) -> None:
     hosts = {
-        "lab-101": FakeHost(load=5.0),
-        "lab-105": FakeHost(online=False),
-        "lab-200": FakeHost(cores=24, load=60.0),
+        "pool-a": FakeHost(load=5.0),
+        "pool-e": FakeHost(online=False),
+        "pool-b": FakeHost(cores=24, load=60.0),
     }
     code, text = pool.run_proof(
         CFG,
@@ -723,18 +771,17 @@ def test_run_pass_end_to_end_prints_a_citable_readback(tmp_path: Path) -> None:
         log=lambda s: None,
     )
     assert code == pool.EXIT_PASS, text
-    assert text.startswith("LAB PROOF PASS: omnibase_infra#4210 head abc on lab-101")
+    assert text.startswith("LAB PROOF PASS: omnibase_infra#4210 head abc on pool-a")
     assert (
-        "restored=yes" in text
-        and "surface=101-runtime result=PASS restored=yes" in text
+        "restored=yes" in text and "surface=a-runtime result=PASS restored=yes" in text
     )
-    assert hosts["lab-101"].ran == list(pool.PHASES)
-    assert hosts["lab-101"].lease is None
+    assert hosts["pool-a"].ran == list(pool.PHASES)
+    assert hosts["pool-a"].lease is None
 
 
 def test_failed_build_still_tears_down_and_releases(tmp_path: Path) -> None:
-    hosts = {"lab-101": FakeHost()}
-    hosts["lab-101"].phases["build"] = "build rc=1\nup rc=1"
+    hosts = {"pool-a": FakeHost()}
+    hosts["pool-a"].phases["build"] = "build rc=1\nup rc=1"
     tp = FakeTransport(hosts)
 
     def run(host: Any, command: str, timeout: float) -> tuple[int, str]:
@@ -748,26 +795,26 @@ def test_failed_build_still_tears_down_and_releases(tmp_path: Path) -> None:
         _params(tmp_path),
         "me",
         60,
-        "lab-101",
+        "pool-a",
         [],
         now_fn=lambda: NOW,
         log=lambda s: None,
     )
     assert code == pool.EXIT_INCONCLUSIVE
-    assert hosts["lab-101"].ran == [
+    assert hosts["pool-a"].ran == [
         "snap-pre",
         "clone",
         "build",
         "teardown",
         "snap-post",
     ]
-    assert hosts["lab-101"].lease is None
+    assert hosts["pool-a"].lease is None
 
 
 def test_run_refuses_when_no_host_is_free(tmp_path: Path) -> None:
     hosts = {
-        "lab-101": FakeHost(cores=12, load=40.0),
-        "lab-200": FakeHost(slot=9),
+        "pool-a": FakeHost(cores=12, load=40.0),
+        "pool-b": FakeHost(slot=9),
     }
     code, text = pool.run_proof(
         CFG,
@@ -782,31 +829,31 @@ def test_run_refuses_when_no_host_is_free(tmp_path: Path) -> None:
     )
     assert code == pool.EXIT_NO_FREE_HOST
     assert (
-        "lab-101 OVERLOADED" in text
-        and "lab-105 EXCLUDED" in text
-        and "lab-201 EXCLUDED" in text
-        and "lab-202 OFFLINE" in text
+        "pool-a OVERLOADED" in text
+        and "pool-e EXCLUDED" in text
+        and "pool-c EXCLUDED" in text
+        and "pool-d OFFLINE" in text
     )
 
 
 def test_run_refuses_a_host_under_a_peer_ledger_hold(tmp_path: Path) -> None:
     rows = [
-        "2026-09-27T14:00:00Z | HOLD | lane=peer | id=2026-09-27T14:00:00Z-peer | surface=101-runtime | until=2026-09-27T15:00:00Z | x"
+        "2026-09-27T14:00:00Z | HOLD | lane=peer | id=2026-09-27T14:00:00Z-peer | surface=a-runtime | until=2026-09-27T15:00:00Z | x"
     ]
-    hosts = {"lab-101": FakeHost()}
+    hosts = {"pool-a": FakeHost()}
     code, text = pool.run_proof(
         CFG,
         FakeTransport(hosts),
         _params(tmp_path),
         "me",
         60,
-        "lab-101",
+        "pool-a",
         rows,
         now_fn=lambda: NOW,
         log=lambda s: None,
     )
     assert code == pool.EXIT_NO_FREE_HOST and "peer" in text
-    assert hosts["lab-101"].ran == []
+    assert hosts["pool-a"].ran == []
 
 
 # ------------------------------------------------------------------ base control
@@ -851,23 +898,23 @@ def test_a_missing_failed_contracts_line_is_an_unread_log_not_a_clean_one() -> N
 
 
 def test_base_control_runs_on_the_same_lease_only_when_needed(tmp_path: Path) -> None:
-    hosts = {"lab-101": FakeHost()}
-    hosts["lab-101"].phases["probe"] = DEV_FAILS
-    hosts["lab-101"].base_phases["probe"] = DEV_FAILS
+    hosts = {"pool-a": FakeHost()}
+    hosts["pool-a"].phases["probe"] = DEV_FAILS
+    hosts["pool-a"].base_phases["probe"] = DEV_FAILS
     code, text = pool.run_proof(
         CFG,
         FakeTransport(hosts),
         _params(tmp_path),
         "me",
         90,
-        "lab-101",
+        "pool-a",
         [],
         now_fn=lambda: NOW,
         log=lambda s: None,
         with_base_control=True,
     )
     assert code == pool.EXIT_PASS, text
-    ran = hosts["lab-101"].ran
+    ran = hosts["pool-a"].ran
     assert ran[: len(pool.PHASES)] == list(pool.PHASES)
     assert ran[len(pool.PHASES) :] == [
         "base:snap-pre",
@@ -878,22 +925,22 @@ def test_base_control_runs_on_the_same_lease_only_when_needed(tmp_path: Path) ->
         "base:snap-post",
     ]
     assert "base control run at dev" in text
-    assert hosts["lab-101"].lease is None
+    assert hosts["pool-a"].lease is None
 
-    clean = {"lab-101": FakeHost()}
+    clean = {"pool-a": FakeHost()}
     pool.run_proof(
         CFG,
         FakeTransport(clean),
         _params(tmp_path),
         "me",
         90,
-        "lab-101",
+        "pool-a",
         [],
         now_fn=lambda: NOW,
         log=lambda s: None,
         with_base_control=True,
     )
-    assert not any(r.startswith("base:") for r in clean["lab-101"].ran)
+    assert not any(r.startswith("base:") for r in clean["pool-a"].ran)
 
 
 def test_params_keep_a_quote_that_belongs_to_the_value(tmp_path: Path) -> None:
@@ -962,15 +1009,15 @@ def test_a_new_contract_failing_for_a_different_reason_is_the_prs() -> None:
 def test_an_inconclusive_run_is_released_as_aborted(tmp_path: Path) -> None:
     # The ledger grammar takes PASS, FAIL or ABORTED on a surface RELEASE
     # (MSG 2026-09-27T16:25:02Z-drain-runtime-token-83).
-    hosts = {"lab-101": FakeHost()}
-    hosts["lab-101"].phases["build"] = "build rc=1"
+    hosts = {"pool-a": FakeHost()}
+    hosts["pool-a"].phases["build"] = "build rc=1"
     code, text = pool.run_proof(
         CFG,
         FakeTransport(hosts),
         _params(tmp_path),
         "me",
         60,
-        "lab-101",
+        "pool-a",
         [],
         now_fn=lambda: NOW,
         log=lambda s: None,
@@ -990,16 +1037,16 @@ def test_a_failed_build_exits_the_phase_non_zero() -> None:
 def test_the_keychain_host_builds_with_an_isolated_docker_config(
     tmp_path: Path,
 ) -> None:
-    assert CFG.host("lab-200").docker_config == "isolated"
-    assert CFG.host("lab-101").docker_config == "host"
-    hosts = {"lab-200": FakeHost(cores=24, load=2.0)}
+    assert CFG.host("pool-b").docker_config == "isolated"
+    assert CFG.host("pool-a").docker_config == "host"
+    hosts = {"pool-b": FakeHost(cores=24, load=2.0)}
     pool.run_proof(
         CFG,
         FakeTransport(hosts),
         _params(tmp_path),
         "me",
         60,
-        "lab-200",
+        "pool-b",
         [],
         now_fn=lambda: NOW,
         log=lambda s: None,
@@ -1067,33 +1114,34 @@ class RecordingTransport(FakeTransport):
 
 
 def test_a_slot_is_probed_on_its_own_project_ports_and_lease() -> None:
-    hosts = {"lab-201-prepr-1": FakeHost(cores=32, load=10.0)}
+    hosts = {"pool-c-slot-1": FakeHost(cores=32, load=10.0)}
     tp = RecordingTransport(hosts)
     states = pool.survey(CFG, tp, {}, NOW)
     by = {s.host.name: s for s in states}
-    assert by["lab-201-prepr-1"].verdict == "FREE"
-    probe = next(c for n, c in tp.commands if n == "lab-201-prepr-1")
+    assert by["pool-c-slot-1"].verdict == "FREE"
+    probe = next(c for n, c in tp.commands if n == "pool-c-slot-1")
     assert "com.docker.compose.project=omnibase-infra-prepr-1 " in probe
     assert ":(28085|28086|28090|23002)" in probe
     assert ".onex-prepr-pool/lease-prepr-1/lease.json" in probe
     assert "8085|" not in probe.replace("28085|", "")
 
-    busy = {"lab-201-prepr-2": FakeHost(cores=32, load=10.0, slot=12)}
+    busy = {"pool-c-slot-2": FakeHost(cores=32, load=10.0, slot=12)}
     s2 = {s.host.name: s for s in pool.survey(CFG, FakeTransport(busy), {}, NOW)}
-    assert s2["lab-201-prepr-2"].verdict == "BUSY"
-    assert "omnibase-infra-prepr-2 containers present" in s2["lab-201-prepr-2"].detail
+    assert s2["pool-c-slot-2"].verdict == "BUSY"
+    slot2 = CFG.host("pool-c-slot-2")
+    assert f"{slot2.compose_project} containers present" in s2[slot2.name].detail
 
 
 def test_a_slot_run_passes_end_to_end_with_the_slot_ports(tmp_path: Path) -> None:
-    hosts = {"lab-201-prepr-1": FakeHost(cores=32, load=10.0)}
-    hosts["lab-201-prepr-1"].phases = dict(SLOT_GOOD)
+    hosts = {"pool-c-slot-1": FakeHost(cores=32, load=10.0)}
+    hosts["pool-c-slot-1"].phases = dict(SLOT_GOOD)
     code, text = pool.run_proof(
         CFG,
         FakeTransport(hosts),
         _params(tmp_path),
         "me",
         150,
-        "lab-201-prepr-1",
+        "pool-c-slot-1",
         [],
         now_fn=lambda: NOW,
         log=lambda s: None,
@@ -1101,7 +1149,7 @@ def test_a_slot_run_passes_end_to_end_with_the_slot_ports(tmp_path: Path) -> Non
     assert code == pool.EXIT_PASS, text
     assert "pre-PR slot project omnibase-infra-prepr-1" in text
     assert "ok   health_28085" in text and "ok   health_28086" in text
-    assert "surface=prepr-1-201 result=PASS restored=yes" in text
+    assert "surface=c-slot-1 result=PASS restored=yes" in text
     env = next(tmp_path.glob("*.resolved.env")).read_text(encoding="utf-8")
     for line in (
         "SLOT_KIND=prepr-slot",
@@ -1112,7 +1160,7 @@ def test_a_slot_run_passes_end_to_end_with_the_slot_ports(tmp_path: Path) -> Non
         "POSITIVE_CONTROL=omnibase-infra",
     ):
         assert line in env.splitlines(), line
-    assert hosts["lab-201-prepr-1"].lease is None
+    assert hosts["pool-c-slot-1"].lease is None
 
 
 def test_a_params_file_cannot_move_a_run_onto_another_project(tmp_path: Path) -> None:
@@ -1124,11 +1172,11 @@ def test_a_params_file_cannot_move_a_run_onto_another_project(tmp_path: Path) ->
     )
     pool.run_proof(
         CFG,
-        FakeTransport({"lab-101": FakeHost()}),
+        FakeTransport({"pool-a": FakeHost()}),
         p,
         "me",
         60,
-        "lab-101",
+        "pool-a",
         [],
         now_fn=lambda: NOW,
         log=lambda s: None,
@@ -1196,7 +1244,7 @@ def test_the_prove_script_refuses_a_project_it_did_not_derive(
 
 
 def test_the_slot_publishes_the_port_its_effects_runtime_listens_on() -> None:
-    # Found live (omnibase_infra#4180 on lab-201-prepr-1, 2026-09-27): the slot
+    # Found live (omnibase_infra#4180 on pool-c-slot-1, 2026-09-27): the slot
     # published 28086 onto container port 8086, where nothing listens, so its
     # effects runtime was healthy inside and unreachable from the host.
     docker = REPO_ROOT / "docker"
@@ -1211,7 +1259,7 @@ def test_the_slot_publishes_the_port_its_effects_runtime_listens_on() -> None:
 
 def test_one_holder_on_both_slots_gets_two_work_directories(tmp_path: Path) -> None:
     works = []
-    for name in ("lab-201-prepr-1", "lab-201-prepr-2"):
+    for name in ("pool-c-slot-1", "pool-c-slot-2"):
         hosts = {name: FakeHost(cores=32, load=4.0)}
         hosts[name].phases = dict(SLOT_GOOD)
         d = tmp_path / name
@@ -1234,13 +1282,13 @@ def test_one_holder_on_both_slots_gets_two_work_directories(tmp_path: Path) -> N
 
 def test_a_slot_is_picked_only_when_every_isolated_member_is_taken() -> None:
     hosts = {
-        "lab-101": FakeHost(cores=12, load=11.0),
-        "lab-201-prepr-1": FakeHost(cores=32, load=1.0),
-        "lab-201-prepr-2": FakeHost(cores=32, load=1.0),
+        "pool-a": FakeHost(cores=12, load=11.0),
+        "pool-c-slot-1": FakeHost(cores=32, load=1.0),
+        "pool-c-slot-2": FakeHost(cores=32, load=1.0),
     }
-    assert pool.pick(_survey(hosts)).host.name == "lab-101"
-    hosts["lab-101"].online = False
-    assert pool.pick(_survey(hosts)).host.name == "lab-201-prepr-1"
+    assert pool.pick(_survey(hosts)).host.name == "pool-a"
+    hosts["pool-a"].online = False
+    assert pool.pick(_survey(hosts)).host.name == "pool-c-slot-1"
 
 
 # ------------------------------------------------------------------ group proof
@@ -1339,7 +1387,7 @@ def test_group_readback_names_every_member_and_group() -> None:
     )
     text = pool.render_readback(
         rb,
-        CFG.host("lab-101"),
+        CFG.host("pool-a"),
         {"INFRA_GROUP": GROUP_SPEC},
         "2026-09-28T10:00:00Z",
         "2026-09-28T10:30:00Z",
@@ -1348,7 +1396,7 @@ def test_group_readback_names_every_member_and_group() -> None:
     assert lines[0].startswith(
         "LAB PROOF PASS: omnibase_infra#4134 head fdd93c786c + "
         "omnibase_infra#4198 head e812bfd787 + "
-        "omnibase_infra#4214 head 0ba71c9566 on lab-101"
+        "omnibase_infra#4214 head 0ba71c9566 on pool-a"
     )
     assert any(line.startswith("  group: 3 member(s)") for line in lines)
 
@@ -1363,7 +1411,7 @@ def test_market_group_readback_names_every_member() -> None:
     )
     text = pool.render_readback(
         rb,
-        CFG.host("lab-101"),
+        CFG.host("pool-a"),
         {"MARKET_GROUP": GROUP_SPEC},
         "2026-09-28T10:00:00Z",
         "2026-09-28T10:30:00Z",
@@ -1371,7 +1419,7 @@ def test_market_group_readback_names_every_member() -> None:
     assert text.splitlines()[0].startswith(
         "LAB PROOF PASS: omnimarket#4134 head fdd93c786c + "
         "omnimarket#4198 head e812bfd787 + "
-        "omnimarket#4214 head 0ba71c9566 on lab-101"
+        "omnimarket#4214 head 0ba71c9566 on pool-a"
     )
 
 

@@ -3,12 +3,12 @@
 """OMN-20422: the Hostile Reviewer's second voter is the Studio's one served model.
 
 RULING 2026-10-09T04:15:56Z keeps Codex out of CI. RULING 2026-10-10T16:28:58Z puts one
-model on the Mac Studio and retires the :8131 Qwen3.6-35B-A3B reviewer seat, so the
-local-studio-planner key takes its URL from the repository variable
-``LLM_LOCAL_STUDIO_PLANNER_URL``, set to the Studio's port 8130, which serves Qwen3.8-27B.
-That is the same model qwen3-review serves on its own host: the two voters are distinct
-endpoints, which is what the quorum's identity rule counts, and not distinct models. These tests pin that state honestly so a later change
-to a distinct second voter (OMN-20889) has to update them on purpose.
+model on the Mac Studio; the recording below is its port 8130 serving Qwen3.8-27B, the
+same model the first voter serves on its own host. Since OMN-20910 the workflow names no
+voter URL or model: the voters, and which endpoint each reads, are declared in a
+review voters overlay that, since OMN-20923, is a private CI overlay and not part of
+this repository (see test_hostile_reviewer_voters_overlay_omn20910.py); a distinct
+second voter (OMN-20889) is an edit to that overlay.
 """
 
 from __future__ import annotations
@@ -22,11 +22,6 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/hostile-reviewer.yml"
 FIRST_VOTER_MODEL = "Qwen3.8-27B"
-
-
-def _job_env() -> dict[str, str]:
-    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    return cast("dict[str, str]", workflow["jobs"]["hostile-review"]["env"])
 
 
 @pytest.mark.live_contact(
@@ -43,18 +38,6 @@ def test_second_voter_endpoint_is_the_studio_single_served_model(
     # One model on the Studio, and it is the first voter's model on another host.
     assert served == [FIRST_VOTER_MODEL]
     assert recording["completion"]["finish_reason"] == "stop"
-    # The review comment the workflow posts names the model the recording shows.
-    workflow_text = WORKFLOW.read_text(encoding="utf-8")
-    assert f"local-studio-planner ({served[0]})" in workflow_text
-    assert "Qwen3.6-35B-A3B" not in workflow_text
-
-
-def test_review_and_preflight_share_one_second_voter_url_from_a_variable() -> None:
-    """One job-level value feeds both steps; no lab address is written in this public file."""
-    assert (
-        _job_env()["LLM_LOCAL_STUDIO_PLANNER_URL"]
-        == "${{ vars.LLM_LOCAL_STUDIO_PLANNER_URL }}"
-    )
 
 
 def test_the_review_gate_waits_on_the_review_alone() -> None:
@@ -62,10 +45,3 @@ def test_the_review_gate_waits_on_the_review_alone() -> None:
     jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
     assert "needs" not in jobs["hostile-review"]
     assert jobs["hostile-review-gate"]["needs"] == "hostile-review"
-
-
-def test_the_quorum_keys_are_unchanged() -> None:
-    text = WORKFLOW.read_text(encoding="utf-8")
-    assert "--model qwen3-review" in text
-    assert "--model local-studio-planner" in text
-    assert 'REVIEW_MODEL_KEYS: "qwen3-review local-studio-planner"' in text

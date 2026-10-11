@@ -491,6 +491,24 @@ x-runtime-env: &runtime-env
   # OTEL_SERVICE_NAME is set per-service (see individual service blocks below).
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://phoenix:6006"
   OTEL_TRACES_EXPORTER: "otlp"
+# Value-less pass-through names (OMN-20867). Each is listed with no value, so
+# compose hands the container the host's value when one is set and leaves the
+# variable unset in the container when it is not. They are not in x-runtime-env,
+# which holds no null value; never write them as ${VAR:-}, which would turn an
+# unset host value into an empty string.
+#
+# The per-lane act switches of omnimarket's landing orchestrator and CI-red
+# triage. Their contracts read them through ${env.VAR:default} references whose
+# inline default is the shipped behaviour, and refuse a set-but-empty value at
+# contract load. A lane's private deployment overlay sets them; this repository
+# names them only and carries no lane's value.
+x-runtime-passthrough-env: &runtime-passthrough-env
+  ONEX_PR_LANDING_GITHUB_MODE:
+  ONEX_PR_LANDING_ARM_ACTION_MODE:
+  ONEX_CI_RED_TRIAGE_ACT_RUNNER:
+  ONEX_CI_RED_TRIAGE_ACT_PR_OWN:
+  ONEX_CI_RED_TRIAGE_ACT_SHARED_CAUSE:
+  ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD:
 # ==========================================================================
 # Services
 # ==========================================================================
@@ -1146,7 +1164,7 @@ services:
       valkey:
         condition: service_healthy
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omninode-runtime-main}
       RUNTIME_PROFILE: main
       ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_MAIN_CAPABILITIES}
@@ -1242,7 +1260,7 @@ services:
       redpanda:
         condition: service_healthy
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omninode-runtime-effects
       RUNTIME_PROFILE: effects
       ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_EFFECTS_CAPABILITIES}
@@ -1348,7 +1366,7 @@ services:
         condition: service_healthy
     command: ["omnimarket-projection-api"]
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omnimarket-projection-api
       RUNTIME_PROFILE: projection-api
       # Projection API serves materialized read models and has no runtime data
@@ -1416,7 +1434,7 @@ services:
       redpanda:
         condition: service_healthy
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omninode-runtime-worker
       RUNTIME_PROFILE: workers
       ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_WORKER_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_WORKER_CAPABILITIES}
@@ -1515,7 +1533,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omnimarket-tenant-projection-writer
       RUNTIME_PROFILE: tenant-projection
       ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_TENANT_PROJECTION_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_TENANT_PROJECTION_CAPABILITIES}
@@ -1850,7 +1868,7 @@ services:
       - --workers
       - "1"
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omninode-contract-resolver
       # Contract resolver does not mount /app/data, so it must not render the
       # Bifrost delegation contract into the shared runtime data path.
