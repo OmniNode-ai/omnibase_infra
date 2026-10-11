@@ -1,0 +1,59 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20922
+title: omnibase_infra's Version Pin Compliance job drops its no-op onex_change_control step
+summary: The version-pin-check job's onex_change_control step looked for scripts/check_version_pins.py, a path that does not exist at the pinned onex_change_control sha, printed "not found - skipping version pin check" and exited 0 on every run. The app-token mint, the onex_change_control checkout and that step are deleted; the job name, the Dockerfile.runtime plugin pin check and the runtime image identity check are unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20922
+    statement: omnibase_infra's version-pin-check job must not check out onex_change_control, and its Dockerfile pin and image identity steps must keep running unchanged under the same job name.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the version-pin-check job block in .github/workflows/ci.yml contains no onex_change_control, check_version_pins or app-token string, and the scan is not vacuous -- falsifier: uv run pytest tests/ci/test_version_pin_check_noop_dropped_omn20922.py -q -p no:randomly -k "block_names or forbidden_token"'
+      - id: AC2
+        statement: 'AC2: the deleted step was a no-op on dev: a recorded dev run log (tests/ci/fixtures/version_pin_check_noop_run_omn20922.json) shows the skip warning and the onex_change_control tree at 802b5f71 without scripts/check_version_pins.py, the step that skipped itself when its script was absent is gone from the job, and the PR body quotes the "not found - skipping version pin check" warning from a dev run of Version Pin Compliance and the git ls-tree of onex_change_control at 802b5f71 showing no scripts/check_version_pins.py -- falsifier: uv run pytest tests/ci/test_version_pin_check_noop_dropped_omn20922.py -q -p no:randomly -k "skip_when_script_missing or recorded_dev_run"'
+      - id: AC3
+        statement: 'AC3: the job keeps its name, its checkout and Python/uv setup steps, and the Dockerfile.runtime plugin pin and runtime image identity steps verbatim, and scripts/check_dockerfile_pins.py passes -- falsifier: uv run pytest tests/ci/test_version_pin_check_noop_dropped_omn20922.py -q -p no:randomly -k "job_name or kept_verbatim or sets_up_uv"'
+evidence_requirements:
+  - kind: tests
+    description: The version-pin-check job block names no onex_change_control, check_version_pins or app-token string, and the scan flags a planted step.
+    command: uv run pytest tests/ci/test_version_pin_check_noop_dropped_omn20922.py -q -p no:randomly -k "block_names or forbidden_token"
+  - kind: tests
+    description: The self-skipping step is gone from the job, and the recorded dev run log shows it skipped itself.
+    command: uv run pytest tests/ci/test_version_pin_check_noop_dropped_omn20922.py -q -p no:randomly -k "skip_when_script_missing or recorded_dev_run"
+  - kind: tests
+    description: The job name and the kept steps are unchanged.
+    command: uv run pytest tests/ci/test_version_pin_check_noop_dropped_omn20922.py -q -p no:randomly -k "job_name or kept_verbatim or sets_up_uv"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20922-ac1
+    description: The workflow test proves the job block names no onex_change_control, check_version_pins or app-token string, with a planted-step positive control.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_version_pin_check_noop_dropped_omn20922.py -q -p no:randomly -k "block_names or forbidden_token"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20922-ac2
+    description: The workflow tests prove the self-skipping step is gone from the job and that the recorded dev run log shows it skipped itself against a script the pin does not contain.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_version_pin_check_noop_dropped_omn20922.py -q -p no:randomly -k "skip_when_script_missing or recorded_dev_run"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-20922-ac3
+    description: The workflow test proves the job name and the kept steps are unchanged.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_version_pin_check_noop_dropped_omn20922.py -q -p no:randomly -k "job_name or kept_verbatim or sets_up_uv"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
