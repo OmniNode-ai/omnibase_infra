@@ -14,7 +14,8 @@
 #     --env-file <the operator env file> up -d --build
 #   tailscale serve --bg --https=8443 "unix:$(docker volume inspect -f '{{.Mountpoint}}' omnibase-infra-principal-issuer_principal-issuer-socket)/issuer.sock"
 #
-# The URL developer machines use is declared in deploy/lab/developer-onboarding.yaml.
+# The URL developer machines use is deployment configuration, kept with the
+# operator's private lab config rather than in this repository (OMN-20931).
 # The issuer authenticates to the broker as the lane's superuser principal, from
 # the same operator env file the dev lane's one-shots read, never inlined here.
 name: omnibase-infra-principal-issuer

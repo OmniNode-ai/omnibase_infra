@@ -34,7 +34,7 @@ class ModelLlmProviderConfig(BaseModel):
     Attributes:
         provider_name: Provider identifier (e.g. 'openai-compatible', 'ollama').
         api_key: API key for authentication. None for local providers.
-        base_url: Base URL for API calls (e.g. 'http://192.168.86.201:8000').
+        base_url: Base URL for API calls (e.g. 'http://192.0.2.10:8000').
         default_model: Default model identifier to use when not specified per-request.
         connection_timeout: Connection timeout in seconds.
         max_retries: Maximum retry attempts on transient failures.
@@ -43,7 +43,7 @@ class ModelLlmProviderConfig(BaseModel):
     Example:
         >>> config = ModelLlmProviderConfig(
         ...     provider_name="openai-compatible",
-        ...     base_url="http://192.168.86.201:8000",
+        ...     base_url="http://192.0.2.10:8000",
         ...     default_model="qwen2.5-coder-14b",
         ... )
         >>> config.provider_type

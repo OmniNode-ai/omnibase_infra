@@ -8,9 +8,10 @@ way ``make up-local`` does, with an env file built from the laptop template, and
 reads the compose file it wrote: that file is what ``docker compose`` runs.
 
 The ``core`` render is the control. The lab lanes render the same shared
-manifests and must keep publishing on every interface with the lab's
-advertised broker address, so a render that bound loopback everywhere, or
-that stripped the lab default everywhere, fails here.
+manifests and must keep publishing on every interface, so a render that bound
+loopback everywhere fails here. Since OMN-20931 no render of the shipped
+catalog names a lab host: the advertised broker address defaults to
+localhost and a deployment sets its own in its env file.
 """
 
 from __future__ import annotations
@@ -102,7 +103,7 @@ def test_cli_local_render_binds_loopback_and_names_no_lab_host(tmp_path: Path) -
 
 
 @pytest.mark.integration
-def test_cli_core_render_keeps_all_interface_ports_and_the_lab_default(
+def test_cli_core_render_keeps_all_interface_ports_and_names_no_lab_host(
     tmp_path: Path,
 ) -> None:
     compose, rendered = _render("core", tmp_path)
@@ -110,8 +111,8 @@ def test_cli_core_render_keeps_all_interface_ports_and_the_lab_default(
     ports = _published_ports(compose)
     assert ports
     assert all(p.count(":") == 1 for p in ports), ports
-    # Positive control for the lab-host check above: the shared manifest's
-    # lab default is still in a lab-facing render.
-    assert "${REDPANDA_ADVERTISE_HOST:-192.168.86.201}" in rendered
+    assert "${REDPANDA_ADVERTISE_HOST:-localhost}" in rendered
+    assert [m for m in _LAB_HOST_MARKERS if m in rendered] == []
     # Positive control for the generic private-host check above.
-    assert "192.168.86.201" in _PRIVATE_IPV4_HOST.findall(rendered)
+    lab_host = f"{_LAB_HOST_MARKERS[0]}1"
+    assert _PRIVATE_IPV4_HOST.findall(f"external://{lab_host}:19092") == [lab_host]

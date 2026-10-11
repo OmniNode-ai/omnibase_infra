@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20947"
+title: "The Hostile Reviewer pins an omniintelligence revision whose overlay schema accepts substitute votes and overflow endpoints"
+summary: "omnibase_infra moves its omniintelligence pin from 8782c050 to f4bf0a19 at six workflow sites and in .github/sibling-pins.yaml. The review voters overlay model forbids unknown keys, so at 8782c050 an overlay that sets substitute_votes or a voter's overflow_endpoint_urls is refused and the Hostile Reviewer fails closed. This is a CI-workflow pin with no runtime effect."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-hostile-reviewer-omniintelligence-pin"
+    statement: "Every workflow site that clones omniintelligence names the sibling pin, and the pinned revision's overlay schema accepts substitute votes and overflow endpoints where the previous pin refuses them."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: every workflow clone of omniintelligence names the .github/sibling-pins.yaml revision, and the recorded overlay schema at that revision accepts substitute_votes and overflow endpoints that the control revision refuses -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q fails over the merge base's pin 8782c050, where the recorded pinned revision differs from the sibling pin"
+evidence_requirements:
+  - kind: "tests"
+    description: "The pin test passes at the head and fails over the merge base's pin."
+    command: "uv run pytest tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20947-ac1-omniintelligence-pin"
+    description: "AC1 hosted probe. Every omniintelligence clone in the workflows names the sibling pin, and the recorded schema at the pin accepts substitute votes and overflow endpoints."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
