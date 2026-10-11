@@ -6,8 +6,9 @@ OMN-15736 — the runner fleet's local caching DNS resolver (unbound) recorded
 as fleet config source-of-truth. This is a shovel-ready/inert record:
 ``active`` stays ``False`` until the operator-gated rollout stands up the
 cache (``docker/docker-compose.dns-cache.yml``) and wires a canary subset of
-runners' ``dns:`` directive (``docker/docker-compose.dns-canary.yml``).
-Recording the endpoint here does not activate it.
+runners' ``dns:`` directive through a canary override the operator supplies
+from the private config root (``ONEX_WORKSPACE_CONFIG_ROOT``); this repository
+ships no such override. Recording the endpoint here does not activate it.
 """
 
 from __future__ import annotations
