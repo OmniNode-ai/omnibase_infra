@@ -43,6 +43,7 @@ from deploy_agent.idle_converge import (
     IDLE_CONVERGE_REQUESTER,
     PROBE_MARGIN,
     EnumIdleConvergeVerdict,
+    EnumRuntimePresence,
     ModelIdleConvergeInputs,
     converge_command,
     decide,
@@ -315,6 +316,11 @@ def _agent(
     agent._idle_converge_started_at = QUIET - timedelta(hours=1)
     agent._idle_converge_now = lambda: QUIET
     agent._idle_read_running_ref = lambda repo: RUNNING
+    # OMN-20864: the lane's runtime is running, so the restore rule stays out.
+    agent._idle_read_runtime_presence = lambda: (
+        EnumRuntimePresence.RUNNING,
+        "omninode-runtime is running",
+    )
     agent._idle_read_head_ref = lambda repo: HEAD
     agent._idle_probe_blocker = lambda now: None
     # The committed table freezes dev-201 until 2026-10-19 (lane flags), which
