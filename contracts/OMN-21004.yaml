@@ -29,7 +29,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
+        check_value: uv run pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0 -k 'caller_uses_core or canonical_shape'
     binds_ac:
       - AC1
   - id: dod-omn21004-ac2-own-shrink-only-allowlist
@@ -37,7 +37,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
+        check_value: uv run pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0 -k 'own_allowlist or core_ratchet'
     binds_ac:
       - AC2
   - id: dod-omn21004-ac3-live-guard-refusal
@@ -45,6 +45,6 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
+        check_value: uv run pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0 -k core_guard
     binds_ac:
       - AC3
