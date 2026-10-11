@@ -261,6 +261,17 @@ def test_the_image_is_pinned_by_digest() -> None:
     )
 
 
+def test_harness_pulls_from_the_vendor_registry() -> None:
+    """Boundary jobs must not depend on Docker Hub's shared anonymous quota."""
+    assert harness.REDPANDA_IMAGE.startswith(
+        "docker.redpanda.com/redpandadata/redpanda:"
+    )
+    workflow = (REPO_ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    for job in ("customer-path-boundary", "bus-acl-boundary"):
+        job_body = workflow.split(f"\n  {job}:\n", 1)[1].split("\n  #", 1)[0]
+        assert f"docker pull {harness.REDPANDA_IMAGE}" in job_body
+
+
 # ---------------------------------------------------------------------------
 # Readiness must be proven on the CLIENT path, and fail loudly
 # ---------------------------------------------------------------------------

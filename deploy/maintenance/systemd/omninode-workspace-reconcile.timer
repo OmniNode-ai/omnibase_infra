@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20805: this schedule ran from /etc/cron.d, which records a start and no end.
+# As a oneshot service under a timer, the journal records every run's start, end and
+# exit status. Installed and enabled by deploy/maintenance/omninode-host-maintenance-sync.sh.
+# Minute :19 is chosen, not arbitrary: it sits clear of the */15 system report and
+# the :37 maintenance sync. Hourly rather than every 15 minutes: a reconcile does
+# real work (fetch across five clones, and a uv sync when the lock moved).
+
+[Unit]
+Description=Schedule: Reconcile the deploy-source clones and host venvs (OMN-17311)
+
+[Timer]
+OnCalendar=*-*-* *:19:00
+AccuracySec=1s
+Unit=omninode-workspace-reconcile.service
+
+[Install]
+WantedBy=timers.target

@@ -16,8 +16,9 @@ here via a new ``/lab-overlay-latest`` agent endpoint and the same GitHub
 compare-API ancestry resolution `check_dev_lane_staleness.py` already uses.
 
 Hermetic: `resolve_relation` and `resolve_via_latest` are driven over fixtures
-with `compare`/`fetch` stand-ins. No network, no `gh` subprocess, no deploy
-agent.
+with `compare`/`fetch` stand-ins. A recorded persistent-agent response also
+exercises the reader and receipt emitter without a replaced seam. No network
+or `gh` subprocess runs during these tests.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from collections.abc import Callable
 import pytest
 
 from scripts.ci import fetch_lab_overlay_record as reader
+from scripts.ci import lab_pass_receipt as lab
 
 pytestmark = pytest.mark.unit
 
@@ -39,6 +41,35 @@ ANCESTOR_SHA = "3" * 40
 UNRELATED_SHA = "4" * 40
 
 VALID_CHECKS = [{"name": "lab_overlay_applied", "ok": True, "evidence": "applied"}]
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/ci_live_contact/persistent_lab_overlay.json"
+)
+def test_recorded_persistent_lab_evidence_survives_receipt_emission(
+    recorded_response,
+) -> None:
+    """Replay the real persistent agent record through the reader and emitter."""
+    record = recorded_response["response"]
+    source = recorded_response["_provenance"]["source"]
+    sha = "8f2274e0b221c0f6060a2c327e7e18cd10227660"
+    assert record["sha"] == sha
+    assert source == f"http://omninode-pc:8098/lab-overlay/{sha}"
+    assert record["checks"][0]["name"] == "deployed_image"
+    checks = reader.checks_from_record(record, sha=sha, url=source)
+    emitted = lab.build_receipt(
+        sha=sha,
+        lane=lab.EnumLabLane.ONEX_LAB_K3S,
+        started_at="2026-10-08T17:00:00Z",
+        finished_at="2026-10-08T17:00:01Z",
+        checks=[lab.ModelLabPassCheck(**check) for check in checks],
+        agent_command_id=None,
+    )
+    assert emitted.result is lab.EnumLabPassResult.PASS
+    assert emitted.checks[0].name == reader.RECORD_CHECK
+    assert source in emitted.checks[0].evidence
+    assert sha in emitted.checks[0].evidence
+    assert emitted.checks[1] == lab.ModelLabPassCheck(**record["checks"][0])
 
 
 class TestResolveRelation:
@@ -236,7 +267,10 @@ class TestPollFallsBackOnTimeout:
             now=iter([0.0, 0.0]).__next__,
             resolve_latest=_resolve_latest,
         )
-        assert result == VALID_CHECKS
+        assert result[1:] == VALID_CHECKS
+        assert result[0]["name"] == reader.RECORD_CHECK
+        assert result[0]["ok"] is True
+        assert "http://agent:8098/lab-overlay/" in result[0]["evidence"]
         assert calls == []
 
     def test_timeout_falls_back_to_the_latest_record(

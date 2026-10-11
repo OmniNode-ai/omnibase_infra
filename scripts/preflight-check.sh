@@ -75,7 +75,7 @@ PARENT_DIR="$(dirname "${REPO_ROOT}")"
 if [[ ! -d "${PARENT_DIR}/contracts" ]]; then
   echo "PREFLIGHT WARNING: ../contracts not found relative to repo root (${PARENT_DIR}/contracts)"
   echo "  The bind-mount ../contracts:/app/contracts:ro will fail or mount empty dir."
-  echo "  Ensure deploy-runtime.sh rsync has run before containers start."
+  echo "  Ensure onex-runtime-deploy rsync has run before containers start."
   WARNINGS+=("VirtioFS-contracts-missing")
 fi
 

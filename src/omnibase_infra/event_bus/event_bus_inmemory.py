@@ -32,6 +32,9 @@ does not yet provide:
 4. ``get_consumer_groups()`` — part of ``ProtocolEventBusLike`` (alongside
    ``EventBusKafka``) and consumed by ``ServiceRuntimeHealthMonitor``; absent
    on the pinned core bus.
+5. ``declare_consume_concurrency()`` — records the contract-declared upper
+   bound per topic/group for runtime wiring and readback. Inline dispatch
+   stays unchanged; recording a bound does not enable concurrent dispatch.
 
 Everything else — ``subscribe``/``unsubscribe``, history, offsets, lifecycle,
 the circuit-breaker manager methods — is inherited unchanged from the core
@@ -122,6 +125,32 @@ class EventBusInmemory(_CoreEventBusInmemory):
             max_history=max_history,
             circuit_breaker_threshold=circuit_breaker_threshold,
         )
+        self._consume_concurrency: dict[tuple[str, str], int] = {}
+
+    def declare_consume_concurrency(
+        self,
+        *,
+        topic: str,
+        group_id: str,
+        max_in_flight_records: int,
+    ) -> None:
+        """Record a subscription's declared upper bound before subscribing.
+
+        Implements ``ProtocolConsumeConcurrencyDeclarer`` for the existing
+        inline transport. A positive bound is recorded for observability;
+        dispatch remains serial rather than starting a concurrent consume loop.
+        """
+        if max_in_flight_records < 1:
+            raise ValueError(
+                f"max_in_flight_records must be >= 1, got {max_in_flight_records} "
+                f"for topic={topic} group={group_id}"
+            )
+        self._consume_concurrency[(topic, group_id)] = max_in_flight_records
+
+    @property
+    def consume_concurrency(self) -> dict[tuple[str, str], int]:
+        """Snapshot of declared bounds keyed by canonical topic and group id."""
+        return dict(self._consume_concurrency)
 
     @property
     def adapter(self) -> EventBusInmemory:

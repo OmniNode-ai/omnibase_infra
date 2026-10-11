@@ -20,7 +20,7 @@ erodes the premise every live grant rests on. Two occurrences make this a
 mechanism gap, not an incident — a rule is not a mechanism.
 
 This module is that mechanism. It is a **pre-mutation preflight** invoked from
-the sanctioned deploy path (``scripts/deploy-runtime.sh`` and the lane refresh
+the sanctioned deploy path (``onex-runtime-deploy`` and the lane refresh
 tooling in ``scripts/runtime_build/``) BEFORE anything is tagged, built,
 recreated, or restarted. It enforces two rules:
 
@@ -63,13 +63,13 @@ real ``@main`` dependency (faithful dependency substitution, not mocks).
 
 Usage::
 
-    # From deploy-runtime.sh / refresh_stability_lane.sh, before any mutation:
+    # From onex-runtime-deploy / refresh_stability_lane.sh, before any mutation:
     ONEX_DEPLOY_REASON="OMN-15181 prod bootstrap rehearsal" \\
       uv run python scripts/preflight_lane_deploy_attribution.py \\
         --lane stability-test \\
         --compose-project omnibase-infra-stability-test \\
-        --source deploy-runtime.sh \\
-        --invoking-command "deploy-runtime.sh --execute --force --restart"
+        --source onex-runtime-deploy \\
+        --invoking-command "onex-runtime-deploy --execute --force --restart"
 
     # Evaluate without writing the durable record (dry-run/preview):
     ... --check-only
@@ -252,7 +252,7 @@ def lane_from_compose_project(compose_project: str) -> str:
     """Derive the lane name from a compose project name.
 
     ``omnibase-infra`` -> ``dev``; ``omnibase-infra-<lane>`` -> ``<lane>``.
-    Mirrors the derivation deploy-runtime.sh uses for its overlay and hot-patch
+    Mirrors the derivation onex-runtime-deploy uses for its overlay and hot-patch
     gates so one deploy cannot be attributed to two different lane names.
     """
     lane = compose_project.removeprefix("omnibase-infra").removeprefix("-")

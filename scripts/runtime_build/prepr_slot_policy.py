@@ -222,7 +222,7 @@ def assert_target_is_a_pool_slot(compose_project: str) -> SlotPolicy:
             f"This entrypoint builds pre-PR verify SLOTS only and accepts no "
             f"lane argument at all. It cannot be pointed at a declared lane, "
             f"which is the entire reason it exists as a separate entrypoint "
-            f"rather than a flag on scripts/deploy-runtime.sh.",
+            f"rather than a flag on onex-runtime-deploy.",
         )
     for policy in SLOTS.values():
         if policy.compose_project == compose_project:

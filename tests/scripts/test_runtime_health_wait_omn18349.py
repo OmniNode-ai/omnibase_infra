@@ -5,7 +5,7 @@
 
 Measured defect (OMN-18349, .201, 2026-09-23T21:33Z): a governed
 ``refresh_stability_lane.sh --ref origin/dev --execute`` recreated the
-stability-test runtime on 0.38.57. ``deploy-runtime.sh`` then polled
+stability-test runtime on 0.38.57. ``onex-runtime-deploy`` then polled
 ``/health`` 15 times 4 s apart, about 60 s, while the runtime took about 73 s
 to boot (``/health`` 503 at 21:34:13Z, docker ``healthy`` at 21:34:33Z). The
 deploy declared the lane dead, re-tagged every image back to its pre-build id
@@ -214,7 +214,9 @@ def test_keep_waiting_only_while_the_container_is_still_starting(
 def test_deploy_runtime_consults_the_container_before_giving_up() -> None:
     """The verify loop sources the helper and uses it; the fixed 15 x 4 s is a
     floor, no longer the whole wait."""
-    script = (REPO_ROOT / "scripts" / "deploy-runtime.sh").read_text(encoding="utf-8")
+    script = (
+        REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+    ).read_text(encoding="utf-8")
 
     assert "runtime_build/runtime_health_wait.sh" in script
     assert "runtime_health_keep_waiting" in script

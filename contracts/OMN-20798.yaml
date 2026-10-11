@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20798
+title: Lane census fails loud when it cannot publish drift; nightly sweep unit waits for its broker
+summary: lane-census-check.sh exits 8 when a drift event is not published (30 only for published drift), and onex-nightly-sweep.service carries the publish mechanism with a bounded broker-health wait.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-census-fails-loud
+    statement: The lane census must not report drift it did not publish, and the nightly sweep unit must publish through a healthy broker or fail.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the census exits non-zero when its drift cannot be published -- falsifier: uv run pytest tests -q -k lane_census_unpublishable_drift_fails'
+      - id: AC2
+        statement: 'AC2: the nightly sweep unit fails before publishing when the broker is unhealthy, bounds its start, and fails when the produce fails -- falsifier: uv run pytest tests/unit/scripts/test_onex_nightly_sweep_unit_omn20798.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The census exits 8 for each unpublishable-drift case and 30 for published drift.
+    command: uv run pytest tests/unit/scripts/test_lane_census_unpublishable_drift_omn20798.py tests/unit/scripts/test_lane_census_dry_run.py -q
+  - kind: tests
+    description: The nightly sweep unit waits for the broker, is time-bounded and fails on a failed produce.
+    command: uv run pytest tests/unit/scripts/test_onex_nightly_sweep_unit_omn20798.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-lane-census-unpublishable-drift-ac1
+    description: The census tests prove exit 8 when drift cannot be published and exit 30 only when it was.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_lane_census_unpublishable_drift_omn20798.py tests/unit/scripts/test_lane_census_dry_run.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-nightly-sweep-unit-ac2
+    description: The unit tests prove the broker-health wait, the start bound and the failed-produce failure.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_onex_nightly_sweep_unit_omn20798.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

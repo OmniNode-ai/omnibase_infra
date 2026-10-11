@@ -94,8 +94,7 @@ def test_the_gate_does_not_run_on_a_cancelled_run() -> None:
 
     assert "always()" not in normalised, (
         f"{GATE_JOB} is guarded by always(), which is TRUE on a cancelled run. "
-        "On every superseded push this job executes, reads "
-        "needs.occ-preflight.result == 'cancelled', and posts a hard failure "
+        "On every superseded push this job executes and posts a hard failure "
         "for a run that never produced a verdict (OMN-18793). Use "
         "!cancelled() so a cancelled run skips the gate instead."
     )
@@ -107,22 +106,9 @@ def test_the_gate_does_not_run_on_a_cancelled_run() -> None:
     )
 
 
-def test_a_real_preflight_failure_still_fails_the_gate_closed() -> None:
-    """Positive control: the OCC-preflight refusal branch survives the fix.
-
-    The cheapest wrong way to clear the red measured above is to stop failing
-    on a bad preflight. That would convert a noisy gate into a silent one.
-    """
-    body = _gate_step_run()
-    assert "needs.occ-preflight.result" in body, (
-        "the gate no longer reads the OCC preflight result, so a genuinely "
-        "failed preflight would pass unremarked."
-    )
-    assert '!= "success"' in body, (
-        "the gate no longer refuses a non-success OCC preflight. Narrowing "
-        "this to an equality against 'failure' would let a preflight that "
-        "died for any other reason through."
-    )
+def test_the_gate_no_longer_reads_occ_preflight() -> None:
+    """OMN-20074: the retired OCC result cannot influence the verdict."""
+    assert "needs.occ-preflight.result" not in _gate_step_run()
 
 
 def test_a_reviewer_pipeline_failure_still_fails_the_gate_closed() -> None:
@@ -136,11 +122,8 @@ def test_a_reviewer_pipeline_failure_still_fails_the_gate_closed() -> None:
         "the gate no longer reads the reviewer job result, so a pipeline "
         "error in the adversarial review would pass unremarked."
     )
-    assert body.count("exit 1") >= 2, (
-        "the gate must retain both fail-closed branches -- the OCC-preflight "
-        "one and the reviewer-pipeline one. OMN-18793 changes WHEN the job "
-        "runs, never WHAT it refuses."
-    )
+    assert '[ "$RESULT" = "failure" ]' in body
+    assert "exit 1" in body, "a reviewer pipeline failure must still block"
 
 
 def test_the_workflow_still_cancels_superseded_runs() -> None:

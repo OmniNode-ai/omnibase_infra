@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# OMN-20805: this schedule ran from /etc/cron.d, which records a start and no end.
+# As a oneshot service under a timer, the journal records every run's start, end and
+# exit status. Installed and enabled by deploy/maintenance/omninode-host-maintenance-sync.sh.
+# Hourly at :37 to stay off the */15 system-report boundary and the :19 workspace
+# reconcile (the slot the cron unit held before OMN-20805).
+#
+# Runs as root: /data/maintenance/bin and /etc/systemd/system are root-owned and the
+# script drops privilege itself for the one write that touches the operator-owned
+# clone (OMN-17443). --converge, not --check: a detector with no repair attached is
+# the OMN-17898 condition.
+
+[Unit]
+Description=Schedule: Converge the lab host's maintenance artifacts onto origin/dev (OMN-15525, OMN-17898)
+
+[Timer]
+OnCalendar=*-*-* *:37:00
+AccuracySec=1s
+Unit=omninode-host-maintenance-sync.service
+
+[Install]
+WantedBy=timers.target

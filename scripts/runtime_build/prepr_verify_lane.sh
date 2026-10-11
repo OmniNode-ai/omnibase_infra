@@ -29,7 +29,7 @@
 # no --force and no --skip. The compose project is DERIVED from the slot
 # number, so there is no argument through which a caller could aim this script
 # at a governed lane. That is the whole reason this is a separate entrypoint
-# rather than a flag on scripts/deploy-runtime.sh: a pool arm there would put a
+# rather than a flag on onex-runtime-deploy: a pool arm there would put a
 # branch workspace build one argument away from every governed lane.
 #
 # WHY NOT stage_workspace.sh
@@ -118,11 +118,10 @@ required:
                       refused exactly as a stability-test build is.
 
 options:
-  --with-gateway      also start the slot's onex-api container. OFF by default:
-                      onex-api is image-referenced rather than lane-built, and a
-                      tag predating OMN-18891 carries no topic-namespace surface,
-                      so starting it would publish UNPREFIXED into the dev lane's
-                      topics. Pinning that image is Task 5 (OMN-18894).
+  --with-gateway      start the slot's onex-api and mint its tenant. The image
+                      is pinned to its local digest and its topic-namespace
+                      transform is verified before tenant bootstrap. Enabled
+                      by default; this flag remains accepted for old callers.
   --descriptor-out <path>
                       where to write the slot descriptor JSON. Default:
                       .onex_state/prepr/slot-<n>/descriptor.json under the repo.
@@ -145,7 +144,7 @@ USAGE
 SLOT=""
 WORKTREE=""
 REASON="${ONEX_DEPLOY_REASON:-}"
-WITH_GATEWAY=0
+WITH_GATEWAY=1
 DESCRIPTOR_OUT=""
 STAGING_ROOT=""
 BUILD_TIMEOUT=3600
@@ -401,6 +400,8 @@ fi
 # isolated snapshot exists to remove.
 # -----------------------------------------------------------------------------
 log "staging a slot-private snapshot into ${STAGING_ROOT} ..."
+[[ ! -f "${TENANT_STATE_DIR}/credential.env" ]] \
+    || fail "${EXIT_PROVENANCE_MISMATCH}" "the prior slot tenant must be offboarded by teardown before rebuilding."
 rm -rf "${STAGING_ROOT}"
 mkdir -p "${STAGING_ROOT}" "${SLOT_ENV_DIR}" "${TENANT_STATE_DIR}"
 chmod 700 "${SLOT_ENV_DIR}"
@@ -532,7 +533,7 @@ log "snapshot staged; target content digest ${TARGET_SNAPSHOT_DIGEST:0:16}..."
 # -----------------------------------------------------------------------------
 # 6. THE OPERATOR ENVIRONMENT, SOURCED BEFORE BOTH THE PROVISIONER AND THE SLOT.
 #
-# Same two files scripts/deploy-runtime.sh and refresh_dev_lane.sh source, in
+# Same two files onex-runtime-deploy and refresh_dev_lane.sh source, in
 # the same order, under `set -a`: the rendered runtime policy and the operator
 # env file. Compose then reads the process environment, and no `--env-file` is
 # passed -- the stale-snapshot copy that used to live at docker/.env was
@@ -689,12 +690,43 @@ export EXPECTED_BUILD_SOURCE=workspace
 export OMNI_HOME="${OMNI_HOME_RESOLVED}"
 export GIT_SHA="${TARGET_COMMIT}"
 
+if [[ "${WITH_GATEWAY}" == "1" ]]; then
+    # These sentinels belong to this compose project only. They never rotate
+    # a provider credential or change the dev gateway's admin gate.
+    "${PY}" - "${COMPOSE_ENV}" <<'PYSENTINELS'
+import pathlib, secrets, sys
+with pathlib.Path(sys.argv[1]).open("a", encoding="utf-8") as stream:
+    for name in ("TENANT_BOOTSTRAP_ADMIN_SECRET", "TENANT_OFFBOARD_ADMIN_SECRET"):
+        stream.write(f"{name}={secrets.token_hex(32)}\n")
+PYSENTINELS
+fi
+
 # The slot's own credentials, exported for the same precedence reason. Read
 # from the 0600 file rather than passed on any command line.
 set -a
 # shellcheck disable=SC1090
 source "${COMPOSE_ENV}"
 set +a
+
+if [[ "${WITH_GATEWAY}" == "1" ]]; then
+    # Resolve the operator's tag once. All subsequent compose calls use the
+    # same immutable local image even if a shared tag moves during the build.
+    ONEX_API_IMAGE="$(docker image inspect --format '{{.Id}}' "${ONEX_API_IMAGE:?ONEX_API_IMAGE must be set}")" \
+        || fail "${EXIT_PROVENANCE_MISMATCH}" "the gateway image is not present locally."
+    [[ "${ONEX_API_IMAGE}" =~ ^sha256:[0-9a-f]{64}$ ]] \
+        || fail "${EXIT_PROVENANCE_MISMATCH}" "the gateway image did not resolve to an immutable digest."
+    export ONEX_API_IMAGE
+    docker run --rm --network none -i -e KAFKA_TOPIC_NAMESPACE \
+        --entrypoint python3 "${ONEX_API_IMAGE}" - <<'PYIMAGE' \
+        || fail "${EXIT_PROVENANCE_MISMATCH}" "the pinned gateway image lacks the slot's namespace transform."
+import os
+from topic_namespace import apply_topic_namespace, strip_topic_namespace
+topic = "onex.cmd.omnimarket.delegation-requested.v1"
+physical = apply_topic_namespace(topic)
+assert physical == os.environ["KAFKA_TOPIC_NAMESPACE"] + "." + topic
+assert strip_topic_namespace(physical) == topic
+PYIMAGE
+fi
 
 SNAPSHOT_DOCKER="${STAGING_ROOT}/repo/docker"
 COMPOSE_FILES=(
@@ -862,6 +894,14 @@ if ! compose --profile prepr-migrate run --rm --no-deps intelligence-migration; 
   test this is a FINDING. Record it as the slot's verdict."
 fi
 
+if [[ "${WITH_GATEWAY}" == "1" ]]; then
+    log "applying the gateway's existing cloud migration corpus to the slot database ..."
+    compose --profile prepr-migrate run --rm --no-deps cloud-migration-files \
+        || fail "${EXIT_PROVISION_FAILED}" "the slot cloud migration corpus could not be staged."
+    compose --profile prepr-migrate run --rm --no-deps cloud-migration \
+        || fail "${EXIT_PROVISION_FAILED}" "the slot cloud migration failed."
+fi
+
 log "starting the slot's services ..."
 # --no-build: every image was built in step 8 with the workspace args. A
 # service `up` finds unbuilt is a defect in that list, and building it here
@@ -884,6 +924,23 @@ while [[ $(date +%s) -lt ${deadline} ]]; do
 done
 [[ "${ready}" == "1" ]] || fail "${EXIT_BOOT_FAILED}" \
     "the slot runtime did not become ready on port ${MAIN_PORT} within ${BOOT_TIMEOUT}s."
+
+if [[ "${WITH_GATEWAY}" == "1" ]]; then
+    # Probe the gateway's own transform, using the same environment it serves
+    # requests with. An old image must fail before bootstrap emits any event.
+    docker exec -i "onex-api-prepr-${SLOT}" python3 - <<'PYNAMESPACE' \
+        || fail "${EXIT_PROVENANCE_MISMATCH}" "the gateway image does not implement this slot's topic namespace."
+import os
+from topic_namespace import apply_topic_namespace, strip_topic_namespace
+topic = "onex.cmd.omnimarket.delegation-requested.v1"
+physical = apply_topic_namespace(topic)
+assert physical == os.environ["KAFKA_TOPIC_NAMESPACE"] + "." + topic
+assert strip_topic_namespace(physical) == topic
+PYNAMESPACE
+    COMPOSE_PROJECT="${COMPOSE_PROJECT}" LAB_TENANT_SLUG="onex-${DB_SLOT}" \
+        bash "${REPO_ROOT}/scripts/smoke/smoke_delegation.sh" --target compose --tenant-lifecycle mint \
+        || fail "${EXIT_BOOT_FAILED}" "the slot gateway did not mint its tenant."
+fi
 
 RUNNING_IMAGE_DIGEST="$(docker inspect --format '{{index .Image}}' \
     "omninode-prepr-${SLOT}-runtime" 2>/dev/null || echo "")"
@@ -920,6 +977,7 @@ mkdir -p "$(dirname "${DESCRIPTOR_OUT}")"
     printf '  "ports": {"runtime_main": %s, "runtime_effects": %s, "gateway": %s, "projection_api": %s},\n' \
         "${MAIN_PORT}" "${EFFECTS_PORT}" "${GATEWAY_PORT}" "${PROJECTION_API_PORT}"
     printf '  "gateway_started": %s,\n' "$([[ "${WITH_GATEWAY}" == "1" ]] && echo true || echo false)"
+    printf '  "gateway_image_digest": "%s",\n' "${ONEX_API_IMAGE}"
     printf '  "staging_root": "%s",\n' "${STAGING_ROOT}"
     printf '  "reason": %s\n' "$("${PY}" -c 'import json,sys;print(json.dumps(sys.argv[1]))' "${REASON}")"
     printf '}\n'

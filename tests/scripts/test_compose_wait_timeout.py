@@ -313,7 +313,7 @@ def test_default_timeout_is_positive_and_overridable(
 
 @pytest.mark.unit
 def test_sourcing_twice_is_safe(fake_docker_env: dict[str, str]) -> None:
-    """Both deploy-runtime.sh and refresh_stability_lane.sh source this file;
+    """Both onex-runtime-deploy and refresh_stability_lane.sh source this file;
     a test harness sourcing both must not double-define anything badly."""
     result = _run_bash(
         f'source "{LIB_SCRIPT}"; source "{LIB_SCRIPT}"; compose_up_bounded 5 true',

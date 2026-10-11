@@ -1,0 +1,89 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# OMN-18648: a cheap body-edit trigger avoids restarting the full CI matrix.
+name: CI Live Contact
+on:
+  pull_request:
+    branches: [dev, main]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+  push:
+    branches: [dev, main]
+  merge_group:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  admission:
+    name: CI Live Contact (OMN-18648)
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: '3.12'
+          install-args: --frozen
+          cache-enabled: 'false'
+          shared-env-enabled: 'false'
+      - name: Execute the admission gate's refusing and accepting pair
+        run: uv run --frozen pytest tests/ci/test_ci_live_contact.py -q
+      - name: Admit the exact PR diff through the canonical bus runtime
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          from pathlib import Path
+          Path('ci-live-contact-input.json').write_text(json.dumps({
+              'repository': '.', 'base_ref': os.environ['BASE_SHA'],
+              'head_ref': os.environ['HEAD_SHA'], 'pr_body': os.environ['PR_BODY'],
+          }))
+          PYCODE
+          uv run --frozen onex node node_ci_live_contact_effect \
+            --input ci-live-contact-input.json --backend event_bus=inmemory \
+            --state-root .onex_state/ci-live-contact
+      - name: Execute changed live-contact tests
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python3 - <<'PYCODE'
+          import ast, os, subprocess
+          import xml.etree.ElementTree as ET
+          from pathlib import Path
+          paths = subprocess.check_output([
+              'git', 'diff', '--name-only', '--diff-filter=ACMRT', '-z',
+              os.environ['BASE_SHA'] + '...' + os.environ['HEAD_SHA'], '--', 'tests/',
+          ]).decode().split('\0')
+          marked = []
+          for path in paths:
+              if not (Path(path).name.startswith('test_') and path.endswith('.py')):
+                  continue
+              tree = ast.parse(Path(path).read_text())
+              if any(isinstance(n, ast.Call) and ast.unparse(n.func) == 'pytest.mark.live_contact' for n in ast.walk(tree)):
+                  marked.append(path)
+          if marked:
+              subprocess.run(['uv', 'run', '--frozen', 'pytest', '-m', 'live_contact', *marked, '-q', '--junitxml=ci-live-contact-junit.xml'], check=True)
+              cases = ET.parse('ci-live-contact-junit.xml').findall('.//testcase')
+              if not cases or any(case.find('skipped') is not None for case in cases):
+                  raise SystemExit('Live-contact evidence must execute; empty or skipped tests are refused')
+          else:
+              print('No marked tests: the admission decision states the explicit exception or out-of-scope diff.')
+          PYCODE

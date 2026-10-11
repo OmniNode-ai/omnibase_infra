@@ -165,6 +165,20 @@ def test_a_new_bare_occurrence_is_refused_and_the_governed_form_is_not(
     )
 
 
+def test_mkdir_dash_p_is_not_a_lock_acquisition(tmp_path: Path) -> None:
+    """OMN-18630: `mkdir -p` succeeds on an existing directory, so it excludes nobody."""
+    policy = gate.load_policy(POLICY_PATH)
+    empty = gate.Baseline(entries=())
+
+    (tmp_path / "mk.sh").write_text('mkdir -p "${lock_dir}"\n', encoding="utf-8")
+    assert gate.scan(policy, empty, tmp_path, ["mk.sh"]).new == []
+
+    # POSITIVE CONTROL: the same path without -p is still refused.
+    (tmp_path / "mk.sh").write_text('mkdir "${lock_dir}"\n', encoding="utf-8")
+    refused = gate.scan(policy, empty, tmp_path, ["mk.sh"])
+    assert [f.pair_id for f in refused.new] == ["lock-without-holder-record"]
+
+
 def test_the_refusal_names_the_file_the_line_the_pair_and_the_helper(
     tmp_path: Path,
 ) -> None:
@@ -196,7 +210,7 @@ def test_a_baseline_entry_without_a_ticket_is_refused(tmp_path: Path) -> None:
                 "entries": [
                     {
                         "pair": "lock-without-holder-record",
-                        "path": "scripts/deploy-runtime.sh",
+                        "path": "src/omnibase_infra/handlers/handler_runtime_deploy.sh",
                         "line_sha256_12": "0" * 12,
                         "occurrences": 1,
                         "ticket": "",
@@ -209,13 +223,36 @@ def test_a_baseline_entry_without_a_ticket_is_refused(tmp_path: Path) -> None:
     with pytest.raises(gate.PolicyError) as excinfo:
         gate.load_baseline(path)
     assert "ticket" in str(excinfo.value)
-    assert "scripts/deploy-runtime.sh" in str(excinfo.value)
+    assert "src/omnibase_infra/handlers/handler_runtime_deploy.sh" in str(excinfo.value)
 
 
 def test_every_shipped_baseline_entry_cites_a_ticket() -> None:
     """AC3 on the committed artifact, not only on a fixture."""
     for entry in gate.load_baseline(BASELINE_PATH).entries:
         assert re.fullmatch(r"OMN-\d+", entry.ticket), entry
+
+
+def test_every_interpreter_baseline_entry_carries_a_verdict() -> None:
+    """OMN-18632: a retained interpreter site says why it is not yet converted.
+
+    The five sites left are host maintenance scripts whose systemd unit PATH has
+    no ``uv``. The other four were converted or deleted, so none of them may
+    reappear in the baseline.
+    """
+    raw = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    interpreter = [
+        e for e in raw["entries"] if e["pair"] == "interpreter-without-project-venv"
+    ]
+    for entry in interpreter:
+        verdict = entry.get("verdict")
+        assert verdict in gate.VERDICTS, entry
+        assert "RETAIN: " in entry["verdict_reason"], entry
+    retired = {
+        "scripts/deploy-runtime.sh",
+        "scripts/run-forward-migrations.sh",
+        "scripts/validate-pr-deploy-required.sh",
+    }
+    assert retired.isdisjoint({e["path"] for e in interpreter})
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +295,8 @@ def test_the_checker_honours_no_annotation_and_no_environment_override() -> None
 def test_the_gate_is_wired_as_a_precommit_hook() -> None:
     config = (REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
     assert "id: governed-helper-primitive" in config
+    # The ratchet half: a commit may not widen the baseline against HEAD.
+    assert "governed_helper_gate.py --base-ref HEAD" in config
 
 
 def test_the_gate_is_wired_as_a_ci_workflow() -> None:
@@ -267,6 +306,7 @@ def test_the_gate_is_wired_as_a_ci_workflow() -> None:
     assert workflow.is_file()
     body = workflow.read_text(encoding="utf-8")
     assert "governed_helper_gate.py" in body
+    assert '--base-ref "$BASE_REF"' in body
     # No conditional on the gating step, and no skip input: an `if:` on the
     # enforcing step is how a required context quietly stops reporting.
     assert "continue-on-error" not in body
@@ -300,6 +340,8 @@ def test_a_second_identical_occurrence_in_a_baselined_file_is_refused(
                 line_sha256_12=gate.line_digest(line.strip()),
                 occurrences=1,
                 ticket="OMN-18608",
+                verdict="defect",
+                verdict_reason="fixture",
             ),
         )
     )
@@ -325,6 +367,8 @@ def test_a_baseline_entry_the_scanner_no_longer_matches_is_refused(
                 line_sha256_12=gate.line_digest(line.strip()),
                 occurrences=1,
                 ticket="OMN-18608",
+                verdict="defect",
+                verdict_reason="fixture",
             ),
         )
     )
@@ -332,6 +376,143 @@ def test_a_baseline_entry_the_scanner_no_longer_matches_is_refused(
     assert findings.new == []
     assert len(findings.stale) == 1
     assert "lockme.sh" in gate.render(findings)
+
+
+def _baseline_file(entries: list[dict[str, object]]) -> str:
+    return json.dumps({"contract_version": "1.0.0", "entries": entries})
+
+
+def _entry(path: str, occurrences: int = 1) -> dict[str, object]:
+    return {
+        "pair": "lock-without-holder-record",
+        "path": path,
+        "line_sha256_12": "a" * 12,
+        "occurrences": occurrences,
+        "ticket": "OMN-18630",
+        "verdict": "defect",
+        "verdict_reason": "fixture",
+    }
+
+
+def _repo_with_baseline_at_head(root: Path, entries: list[dict[str, object]]) -> None:
+    target = root / "config" / "governed_helper_baseline.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(_baseline_file(entries), encoding="utf-8")
+    for argv in (
+        ["git", "init", "-q"],
+        ["git", "add", "-A"],
+        [
+            "git",
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "base",
+        ],
+    ):
+        subprocess.run(argv, cwd=root, check=True, capture_output=True)
+
+
+def test_a_baseline_entry_without_a_verdict_is_refused(tmp_path: Path) -> None:
+    """AC7's falsifier: a baselined site that was never judged is a bare match."""
+    entry = _entry("scripts/a.sh")
+    del entry["verdict"]
+    path = tmp_path / "baseline.json"
+    path.write_text(_baseline_file([entry]), encoding="utf-8")
+    with pytest.raises(gate.PolicyError) as excinfo:
+        gate.load_baseline(path)
+    assert "verdict" in str(excinfo.value)
+    assert "scripts/a.sh" in str(excinfo.value)
+
+    entry["verdict"] = "fine"
+    path.write_text(_baseline_file([entry]), encoding="utf-8")
+    with pytest.raises(gate.PolicyError):
+        gate.load_baseline(path)
+
+
+def test_a_baseline_entry_without_a_verdict_reason_is_refused(tmp_path: Path) -> None:
+    entry = _entry("scripts/a.sh")
+    entry["verdict_reason"] = " "
+    path = tmp_path / "baseline.json"
+    path.write_text(_baseline_file([entry]), encoding="utf-8")
+    with pytest.raises(gate.PolicyError) as excinfo:
+        gate.load_baseline(path)
+    assert "verdict_reason" in str(excinfo.value)
+
+
+def test_every_shipped_baseline_entry_carries_a_verdict_and_a_reason() -> None:
+    """AC7 on the committed artifact: all 12 remaining baselined sites are judged."""
+    baseline = gate.load_baseline(BASELINE_PATH)
+    assert sum(entry.occurrences for entry in baseline.entries) == 12
+    for entry in baseline.entries:
+        assert entry.verdict in gate.VERDICTS, entry
+        assert entry.verdict_reason.strip(), entry
+
+
+def test_the_baseline_may_not_widen_against_the_base_ref(tmp_path: Path) -> None:
+    """AC6's falsifier: a new key, or a larger count, citing a real ticket."""
+    _repo_with_baseline_at_head(tmp_path, [_entry("scripts/a.sh", 2)])
+    base = gate.load_baseline_counts_at_ref("HEAD", tmp_path)
+
+    def widened(entries: list[dict[str, object]]) -> list[str]:
+        path = tmp_path / "candidate.json"
+        path.write_text(_baseline_file(entries), encoding="utf-8")
+        return [e.path for e in gate.widened_against(gate.load_baseline(path), base)]
+
+    assert widened([_entry("scripts/a.sh", 2)]) == []
+    assert widened([_entry("scripts/a.sh", 1)]) == []
+    assert widened([]) == []
+    assert widened([_entry("scripts/a.sh", 3)]) == ["scripts/a.sh"]
+    assert widened([_entry("scripts/a.sh", 2), _entry("scripts/b.sh")]) == [
+        "scripts/b.sh"
+    ]
+
+
+def test_a_widened_baseline_fails_the_gate_and_names_the_entry(
+    tmp_path: Path,
+) -> None:
+    _repo_with_baseline_at_head(tmp_path, [])
+    candidate = gate.Baseline(
+        entries=(
+            gate.BaselineEntry(
+                pair="lock-without-holder-record",
+                path="scripts/b.sh",
+                line_sha256_12="b" * 12,
+                occurrences=1,
+                ticket="OMN-18630",
+                verdict="defect",
+                verdict_reason="fixture",
+            ),
+        )
+    )
+    findings = gate.Findings(
+        widened=gate.widened_against(
+            candidate, gate.load_baseline_counts_at_ref("HEAD", tmp_path)
+        )
+    )
+    assert not findings.clean
+    assert "scripts/b.sh" in gate.render(findings)
+
+
+def test_an_unresolvable_base_ref_is_a_refusal_not_a_pass(tmp_path: Path) -> None:
+    _repo_with_baseline_at_head(tmp_path, [])
+    with pytest.raises(gate.PolicyError):
+        gate.load_baseline_counts_at_ref("no-such-ref", tmp_path)
+
+
+def test_the_committed_baseline_does_not_widen_against_its_own_head() -> None:
+    """The CLI path the hook runs: --base-ref HEAD over the committed baseline."""
+    result = subprocess.run(
+        [sys.executable, str(GATE_MODULE), "--base-ref", "HEAD"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
 
 
 def test_the_committed_baseline_matches_the_committed_tree_exactly() -> None:
@@ -397,156 +578,3 @@ def test_the_gate_excludes_only_its_own_surfaces() -> None:
     for path in gate.ALWAYS_EXCLUDED:
         assert "governed_helper" in path or "omn18629" in path, path
         assert (REPO_ROOT / path).is_file(), f"{path} is excluded but does not exist"
-
-
-# ---------------------------------------------------------------------------
-# OMN-18630 — every baselined lock site carries a verdict, and it is checked
-# ---------------------------------------------------------------------------
-
-LOCK_PAIR = "lock-without-holder-record"
-LOCK_LINE = 'if mkdir "${LOCK_DIR}" 2>/dev/null; then\n'
-HOLDER_WRITE = '  printf "%s\\n" "$$" > "${LOCK_DIR}/holder"\n'
-
-
-def _lock_entry(**overrides: str) -> gate.BaselineEntry:
-    fields: dict[str, str] = {
-        "verdict": "compliant",
-        "verdict_reason": "records the holder",
-    }
-    fields.update(overrides)
-    return gate.BaselineEntry(
-        pair=LOCK_PAIR,
-        path="lockme.sh",
-        line_sha256_12=gate.line_digest(LOCK_LINE.strip()),
-        occurrences=1,
-        ticket="OMN-18630",
-        verdict=fields["verdict"],
-        verdict_reason=fields["verdict_reason"],
-    )
-
-
-def _judge(tmp_path: Path, body: str, entry: gate.BaselineEntry) -> gate.Findings:
-    (tmp_path / "lockme.sh").write_text(body, encoding="utf-8")
-    return gate.scan(
-        gate.load_policy(POLICY_PATH),
-        gate.Baseline(entries=(entry,)),
-        tmp_path,
-        ["lockme.sh"],
-    )
-
-
-def test_every_shipped_lock_entry_carries_an_accepted_verdict() -> None:
-    """The acceptance on the committed artifact: no baselined lock is unjudged."""
-    entries = [
-        e for e in gate.load_baseline(BASELINE_PATH).entries if e.pair == LOCK_PAIR
-    ]
-    assert entries, "the lock pair has baselined sites; the test would be vacuous"
-    for entry in entries:
-        assert entry.verdict in gate.VERDICTS, entry
-        assert entry.verdict_reason, entry
-
-
-def test_a_compliant_verdict_with_a_holder_write_is_accepted(tmp_path: Path) -> None:
-    findings = _judge(tmp_path, LOCK_LINE + HOLDER_WRITE + "fi\n", _lock_entry())
-    assert findings.clean, gate.render(findings)
-
-
-def test_a_compliant_verdict_without_a_holder_write_is_refused(
-    tmp_path: Path,
-) -> None:
-    """The verdict is checked against the tree, not believed."""
-    findings = _judge(tmp_path, LOCK_LINE + "fi\n", _lock_entry())
-    assert findings.new == []
-    assert len(findings.unjudged) == 1
-    rendered = gate.render(findings)
-    assert "lockme.sh:1" in rendered
-    assert "writes no holder record" in rendered
-
-
-def test_a_holder_write_beyond_the_window_does_not_count(tmp_path: Path) -> None:
-    window = gate.load_policy(POLICY_PATH).pairs[0].holder_record_window
-    body = LOCK_LINE + ("  :\n" * window) + HOLDER_WRITE
-    findings = _judge(tmp_path, body, _lock_entry())
-    assert len(findings.unjudged) == 1
-
-
-@pytest.mark.parametrize(
-    ("overrides", "needle"),
-    [
-        ({"verdict": ""}, "is not one of"),
-        ({"verdict": "fine"}, "is not one of"),
-        ({"verdict_reason": ""}, "verdict_reason is empty"),
-    ],
-    ids=["missing", "unknown", "unreasoned"],
-)
-def test_a_lock_entry_without_an_acceptable_verdict_is_refused(
-    tmp_path: Path, overrides: dict[str, str], needle: str
-) -> None:
-    findings = _judge(tmp_path, LOCK_LINE + HOLDER_WRITE, _lock_entry(**overrides))
-    assert len(findings.unjudged) == 1
-    assert needle in gate.render(findings)
-
-
-def test_a_convert_verdict_with_a_reason_is_accepted(tmp_path: Path) -> None:
-    """`convert` owes work, so it is not checked against the tree."""
-    findings = _judge(tmp_path, LOCK_LINE + "fi\n", _lock_entry(verdict="convert"))
-    assert findings.clean, gate.render(findings)
-
-
-def test_a_pair_that_does_not_require_verdicts_is_not_asked_for_them(
-    tmp_path: Path,
-) -> None:
-    """Scope: OMN-18631 and OMN-18632 entries are untouched by this change."""
-    policy = gate.load_policy(POLICY_PATH)
-    required = {p.id for p in policy.pairs if p.verdict_required}
-    assert required == {LOCK_PAIR}
-
-
-def test_mkdir_dash_p_is_not_a_lock_acquisition(tmp_path: Path) -> None:
-    """`mkdir -p` succeeds on an existing directory, so it excludes nobody."""
-    (tmp_path / "mk.sh").write_text('mkdir -p "${lock_dir}"\n', encoding="utf-8")
-    findings = gate.scan(
-        gate.load_policy(POLICY_PATH), gate.Baseline(entries=()), tmp_path, ["mk.sh"]
-    )
-    assert findings.new == []
-
-
-def test_a_verdict_requiring_pair_must_name_its_evidence(tmp_path: Path) -> None:
-    policy = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
-    for pair in policy["pairs"]:
-        if pair["id"] == LOCK_PAIR:
-            del pair["holder_record_pattern"]
-    bad = tmp_path / "policy.json"
-    bad.write_text(json.dumps(policy), encoding="utf-8")
-    with pytest.raises(gate.PolicyError, match="holder_record_pattern"):
-        gate.load_policy(bad)
-
-
-def test_the_verdict_is_one_field_read_as_verdict_colon_reason(
-    tmp_path: Path,
-) -> None:
-    def load(verdict: str) -> gate.BaselineEntry:
-        path = tmp_path / "baseline.json"
-        path.write_text(
-            json.dumps(
-                {
-                    "entries": [
-                        {
-                            "pair": LOCK_PAIR,
-                            "path": "lockme.sh",
-                            "line_sha256_12": "0" * 12,
-                            "occurrences": 1,
-                            "ticket": "OMN-18630",
-                            "verdict": verdict,
-                        }
-                    ]
-                }
-            ),
-            encoding="utf-8",
-        )
-        return gate.load_baseline(path).entries[0]
-
-    judged = load("compliant: writes the holder, and says why: here")
-    assert judged.verdict == "compliant"
-    assert judged.verdict_reason == "writes the holder, and says why: here"
-    assert load("compliant").verdict_reason == ""

@@ -21,7 +21,7 @@ dev-lane deploy, so the old name means exactly one thing instead of "whichever
 lane wrote last".
 
 These tests execute the REAL `write_registry()` and the REAL
-`lane_registry_file()` extracted from `scripts/deploy-runtime.sh`.
+`lane_registry_file()` extracted from `src/omnibase_infra/handlers/handler_runtime_deploy.sh`.
 """
 
 from __future__ import annotations
@@ -35,7 +35,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 
 DEV_PROJECT = "omnibase-infra"
 STABILITY_PROJECT = "omnibase-infra-stability-test"
@@ -56,7 +58,7 @@ def _extract_function(name: str) -> str:
         DEPLOY_SCRIPT.read_text(encoding="utf-8"),
         re.DOTALL | re.MULTILINE,
     )
-    assert match is not None, f"could not extract {name}() from deploy-runtime.sh"
+    assert match is not None, f"could not extract {name}() from onex-runtime-deploy"
     return match.group(0)
 
 

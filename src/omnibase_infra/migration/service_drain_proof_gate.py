@@ -33,6 +33,7 @@ from omnibase_infra.migration.models.model_consumer_group_lag import (
 from omnibase_infra.migration.service_consumer_lag_observer import (
     ServiceConsumerLagObserver,
 )
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 logger = logging.getLogger(__name__)
 
@@ -101,11 +102,14 @@ class ServiceDrainProofGate:
             )
 
         lag: ModelConsumerGroupLag = await self._observer.observe(old_group)
-        residual = lag.lag_for_topic(old_topic)
+        # Broker offsets carry physical names; the decision keeps the contract's
+        # canonical name on every return path.
+        physical_old_topic = apply_topic_namespace(old_topic)
+        residual = lag.lag_for_topic(physical_old_topic)
 
         # Drain evidence must be per-topic: the group may commit offsets on other
         # topics, so global non-emptiness is not proof the OLD topic was drained.
-        if not lag.has_partitions_for_topic(old_topic):
+        if not lag.has_partitions_for_topic(physical_old_topic):
             return ModelDrainProofDecision(
                 migration_ticket=contract.ticket,
                 old_consumer_group=old_group,

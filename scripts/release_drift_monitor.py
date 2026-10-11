@@ -15,7 +15,7 @@ by ``node_friction_triage_orchestrator`` -> Linear) and exits non-zero so a
 scheduled run goes RED.
 
 This is a **standalone monitor** (RT-7 seam): it does not modify
-``stage_workspace.sh``, ``deploy-runtime.sh``, ``release.yml``, or the trigger
+``stage_workspace.sh``, ``onex-runtime-deploy``, ``release.yml``, or the trigger
 scripts. It reuses the existing friction substrate -- it does NOT build a new
 store (design §4 RT-7). The friction-emit shape mirrors
 ``node_env_sync_alert_effect``, the platform's existing scheduled drift ->

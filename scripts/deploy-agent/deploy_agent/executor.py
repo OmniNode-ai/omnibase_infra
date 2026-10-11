@@ -68,11 +68,17 @@ from deploy_agent.gateway_budget import (
     derive_gateway_deploy_budget,
 )
 from deploy_agent.host_conditions import probe_host_conditions
-from deploy_agent.instance_lanes import ModelInstanceLane, load_instance_lanes
+from deploy_agent.instance_lanes import (
+    ModelInstanceLane,
+    load_instance_lanes,
+    load_instance_runtime_lanes,
+    read_lane_env_fragment,
+)
 from deploy_agent.lane_lock_client import (
     DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
     lane_lock,
 )
+from deploy_agent.lane_policy import ENV_ALLOWED_LANES, parse_allowed_lanes
 from deploy_agent.loaded_code import loaded_code_sha
 from deploy_agent.reconcile_host_lock import hold_reconcile_host_lock
 from deploy_agent.recreate_supervisor import (
@@ -115,7 +121,7 @@ DEPLOY_AGENT_DIR = os.environ.get(
     "DEPLOY_AGENT_DIR", "/data/omninode/omnibase_infra/scripts/deploy-agent"
 )
 # The TRACKED compose base every deploy path layers its lane overlay on:
-# this agent, scripts/deploy-runtime.sh, and
+# this agent, onex-runtime-deploy, and
 # scripts/runtime_build/refresh_stability_lane.sh alike. Its only writer is git.
 COMPOSE_FILE = f"{REPO_DIR}/docker/docker-compose.infra.yml"
 # OMN-17291: where the catalog render lands. A BUILD ARTIFACT, gitignored, never
@@ -296,7 +302,7 @@ VERIFY_RECREATE_POLL_SECONDS = 10
 # number, so the subprocess ceiling and the client's own ceiling cannot drift.
 RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS = 10
 
-# OMN-19374: the helpers deploy-runtime.sh already uses to honour a runtime
+# OMN-19374: the helpers onex-runtime-deploy already uses to honour a runtime
 # container's DECLARED start budget (OMN-18349). Verification sources the same
 # file rather than restating the budget arithmetic and the state vocabulary in
 # Python, so the two deploy paths cannot disagree about when a runtime is still
@@ -614,7 +620,7 @@ _PROD_OVERLAY = f"{REPO_DIR}/docker/docker-compose.prod.yml"
 # forward-migration override inherits the base ``environment:`` block wholesale.
 # Unset indicator = FULL fence, so this list is fail-closed on omission.
 # Must stay matched with ``resolve_compose_file_args`` in
-# ``scripts/deploy-runtime.sh``.
+# ``onex-runtime-deploy``.
 _DEV_LANE_OVERLAY = f"{REPO_DIR}/docker/docker-compose.dev-lane.yml"
 
 # OMN-15181 round 3 (Finding 9): maps each prod runtime service to the compose
@@ -741,6 +747,12 @@ def build_dev_instance_lane_configs(
 #: same copy the router reads identity from, so the two cannot disagree.
 DEV_INSTANCE_LANE_CONFIGS: dict[str, ModelLaneConfig] = build_dev_instance_lane_configs(
     load_instance_lanes(AGENT_CLONE_ROOT)
+)
+
+#: OMN-20867. Each dev instance's runtime lane id (its ``verify.receipt_lane``),
+#: the name its env fragment is read under in the deployment overlay clone.
+DEV_INSTANCE_RUNTIME_LANES: dict[str, str] = load_instance_runtime_lanes(
+    AGENT_CLONE_ROOT
 )
 
 
@@ -1265,6 +1277,56 @@ def _repointed_pin_env() -> dict[str, str]:
     }
 
 
+class _LaneOverlayClone:
+    """The host's deployment overlay clone, set once by the agent at start."""
+
+    path: Path | None = None
+
+
+def set_lane_overlay_clone(path: Path) -> None:
+    """Name the deployment overlay clone the lane env fragment is read from.
+
+    The agent passes the clone its lab-overlay apply archives from, so both read
+    one clone. A process that never sets it (a script importing this module, a
+    unit test) reads no fragment.
+    """
+    _LaneOverlayClone.path = path
+
+
+def _lane_env_overlay() -> dict[str, str]:
+    """This agent's lane env fragment, or nothing (OMN-20867).
+
+    Only a process fenced to the dev lane alone reads one: ``_compose_env``
+    serves every lane, and a deploy of any other lane must never take a dev
+    lane's settings. The fragment is the active dev instance's, read from
+    the overlay clone at its ``origin/dev`` on every call, so a merged overlay
+    change reaches the next compose command without an agent restart.
+    """
+    clone = _LaneOverlayClone.path
+    raw = os.environ.get(ENV_ALLOWED_LANES, "").strip()
+    if clone is None or not raw:
+        return {}
+    if parse_allowed_lanes(raw) != frozenset({EnumRuntimeLane.DEV}):
+        return {}
+    lane_id = DEV_INSTANCE_RUNTIME_LANES[active_dev_instance()]
+    overlay = read_lane_env_fragment(clone, lane_id)
+    if overlay != _LaneEnvOverlayLog.last:
+        logger.info(
+            "lane env fragment for %s from %s: %s",
+            lane_id,
+            clone,
+            ", ".join(f"{k}={v}" for k, v in sorted(overlay.items())) or "none",
+        )
+        _LaneEnvOverlayLog.last = dict(overlay)
+    return overlay
+
+
+class _LaneEnvOverlayLog:
+    """The fragment last logged, so a change is logged once, not per command."""
+
+    last: dict[str, str] | None = None
+
+
 def _load_dotenv_file(env_path: Path) -> dict[str, str]:
     """Parse one committed dotenv file with shell-compatible quoting."""
     if not env_path.exists():
@@ -1310,7 +1372,7 @@ def _undecoded_ansi_c_quoted_names(env: Mapping[str, str]) -> list[str]:
     env-file parser does not implement bash ANSI-C ``$'...'`` quoting.** Given
     a line written in that form it keeps the literal ``$'`` and ``'`` wrapper
     and drops every backslash escape, so each ``\\n`` collapses to the bare
-    letter ``n``. ``deploy-runtime.sh`` bash-``source``s the very same file and
+    letter ``n``. ``onex-runtime-deploy`` bash-``source``s the very same file and
     decodes it correctly, which is why only the agent path is affected.
 
     Measured on the lab host 2026-09-09 with a synthetic, non-secret value of
@@ -1371,6 +1433,11 @@ def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     # carries a value for these keys -- a stale one, resolved at unit start --
     # so a setdefault would read as wired and change nothing.
     env.update(_repointed_pin_env())
+    # OMN-20867: `update`, not `setdefault`. The lane's own fragment in the
+    # private deployment overlay is the source for the keys it sets, over any
+    # value the operator store holds for them; a key it leaves out keeps
+    # whatever the store says, or stays unset.
+    env.update(_lane_env_overlay())
     # OMN-18073: refuse before compose interpolation writes a provably-mangled
     # value into every container this deploy creates. Deliberately AFTER the
     # re-read above, so a mangled value arriving from the store is refused on
@@ -3057,7 +3124,7 @@ class DeployExecutor:
            the tracked file does not -- the ``runtime`` bundle pulls in
            runtime-integrations (docker/catalog/bundles.yaml) -- and 31 required
            ``${VAR:?}`` names against the tracked file's 50, nine of which
-           ``scripts/deploy-runtime.sh`` and
+           ``onex-runtime-deploy`` and
            ``scripts/runtime_build/refresh_stability_lane.sh`` cannot supply. So
            once the render had replaced the tracked file, the sanctioned deploy
            scripts failed compose validation and auto-restored -- the dev and
@@ -5351,7 +5418,7 @@ class DeployExecutor:
         compose-dev receipt's ``probe_generation_bound`` read.
 
         The readings come from ``RUNTIME_HEALTH_WAIT_HELPERS``, the helpers
-        ``deploy-runtime.sh`` waits on (OMN-18349), so both deploy paths share
+        ``onex-runtime-deploy`` waits on (OMN-18349), so both deploy paths share
         one budget and one state vocabulary. Waiting continues ONLY while docker
         reports the container ``starting`` and the helper's own
         ``runtime_health_keep_waiting`` agrees. Anything else -- unhealthy, not

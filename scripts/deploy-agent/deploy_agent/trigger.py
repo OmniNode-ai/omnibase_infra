@@ -96,6 +96,7 @@ from deploy_agent.tracking_ref import (
     ENV_TRACKING_REF,
     load_tracking_remote_ref_from_env,
 )
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,7 @@ def publish_signed_command(
     )
     try:
         producer.send(
-            TOPIC_REBUILD_REQUESTED,
+            apply_topic_namespace(TOPIC_REBUILD_REQUESTED),
             key=f"manual-{correlation_id}",
             value=envelope,
         )

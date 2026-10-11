@@ -1,0 +1,11 @@
+{
+  "_provenance": {
+    "source": "uv 0.12.24 (uv tool run --from uv==0.12.24 uv lock --upgrade-package omnimarket) run in an omnibase_infra worktree at b47a6a897e4e5528b61c10a36add10999640ec3c; git diff -- uv.lock afterwards",
+    "captured_utc": "2026-10-09"
+  },
+  "uv_version": "0.12.24",
+  "committed_lock_writer_range": "uv 0.8.22 through 0.12.10 leave this lock at revision 3",
+  "numstat": "1\t1\tuv.lock",
+  "removed_line": "revision = 3",
+  "added_line": "revision = 5"
+}

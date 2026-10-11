@@ -242,6 +242,12 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
         # unqualified search_path read). The same absence of an accepting
         # qualification form applies; the ownership check still applies.
         Path("docker/migrations/forward/108_create_pr_landing_workflow_state.sql"),
+        # OMN-17427: 110 alters the verification ledger created by 105 in
+        # the omnibase_infra SERVICE database, whose declared schema is public.
+        # Like 106 below, this is existing service authority, not a new
+        # application relation. Keep the exact-path exemption: created-object
+        # ownership validation still runs unconditionally.
+        Path("docker/migrations/forward/110_add_ledger_chain_chain_state.sql"),
         # OMN-18172: 106 alters the existing delegation_workflow_state relation
         # created by 090 in the omnibase_infra SERVICE database. That database
         # has exactly one declared schema, public, while StateStoreAdapter and

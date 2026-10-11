@@ -185,7 +185,7 @@ def _compose_config_json() -> dict[str, Any]:
 def _layered_compose_config_json() -> dict[str, Any]:
     """Render the DEPLOYED shape: base infra compose + judge overlay.
 
-    deploy-runtime.sh (resolve_compose_file_args, OMN-13581) layers
+    onex-runtime-deploy (resolve_compose_file_args, OMN-13581) layers
     docker-compose.judge.yml ON TOP of docker-compose.infra.yml on the .201
     host — the standalone render alone cannot catch base<->overlay merge
     defects (OMN-13772: plain-list networks:/ports: union-merged with the base,
@@ -367,7 +367,7 @@ def test_judge_lane_delegation_routing_tiers_path_binding() -> None:
 
     The judge lane's own ``x-judge-runtime-env`` anchor does not declare this
     key, so a *standalone* judge.yml render omits it — only the layered
-    base+overlay render (``deploy-runtime.sh``'s actual deployed shape) proves
+    base+overlay render (``onex-runtime-deploy``'s actual deployed shape) proves
     the base file's ``x-runtime-env`` anchor binding survives into this lane.
     See ``test_dev_lane_delegation_routing_tiers_path_binding`` in
     ``test_dev_runtime_compose_render.py`` for the full seam citation.

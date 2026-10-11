@@ -142,6 +142,14 @@ class _Fake:
                     }
                 ]
             }
+        if path.endswith("/actions/workflows/runner-routing-audit.yml"):
+            return {
+                "id": 12,
+                "path": ".github/workflows/runner-routing-audit.yml",
+                "state": "active",
+            }
+        if "/actions/workflows/12/runs" in path:
+            return {"workflow_runs": []}
         if "/actions/workflows/11/runs" in path:
             conclusion = "failure" if f"/{self.red_repo}/" in path else "success"
             return {

@@ -70,12 +70,7 @@
         "acquisition. The one baselined hit that had it (scripts/ci/ensure_ci_env.sh,",
         "creating the directory that HOLDS the locks) was a false positive; the",
         "pattern is corrected here, where the change is reviewable, and the entry",
-        "is gone from the baseline.",
-        "",
-        "Every baselined site of this pair carries a verdict (OMN-18630). The",
-        "holder_record_pattern is what a `compliant` verdict is checked against:",
-        "a line writing the holder record, within holder_record_window lines at",
-        "or after the baselined mkdir."
+        "is gone from the baseline."
       ],
       "bare_pattern": "\\bmkdir\\s+[\"']?\\$?\\{?[A-Za-z_]*(?:LOCK|lock)",
       "governed_helper": "scripts/deploy-agent/deploy_agent/reconcile_host_lock.py (holder protocol)",
@@ -83,10 +78,7 @@
       "scope_globs": ["*.sh", "*.bash"],
       "exclude_globs": [],
       "governed_prefix_pattern": null,
-      "established_by": "OMN-18608",
-      "verdict_required": true,
-      "holder_record_pattern": ">\\s*\"[^\"]*(?:holder|pid_file)[^\"]*\"",
-      "holder_record_window": 30
+      "established_by": "OMN-18608"
     },
     {
       "id": "kafka-consumer-commit-unbounded",

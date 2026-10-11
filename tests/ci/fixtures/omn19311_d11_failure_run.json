@@ -1,0 +1,27 @@
+{
+  "_provenance": {
+    "source": "https://github.com/OmniNode-ai/omnimarket/actions/runs/35832924275",
+    "source_commit": "26c7b650f71e6026fc3255217374a3e171a49173",
+    "source_path": "tests/ci/test_workflow_verdict_omn_d11.py",
+    "source_sha256": "b8b0739662d630caaf9bb3f3e893668e44059052fb8bb80258dbeea3c5e7afdd",
+    "note": "Reuses the trimmed live API response already recorded in the source test at source_commit; this is an incident replay, not a new live capture. Synthetic green dispatch controls are constructed by the test and are not part of this recording."
+  },
+  "response": {
+    "workflow_runs": [
+      {
+        "conclusion": "failure",
+        "created_at": "2026-09-23T07:40:13Z",
+        "run_started_at": "2026-09-23T07:40:13Z",
+        "run_attempt": 1,
+        "display_title": "Delegation Regression (nightly)",
+        "event": "schedule",
+        "head_branch": "dev",
+        "head_sha": "03d2ad0fdf9fdcc19de6badc35b1abe922ffe384",
+        "html_url": "https://github.com/OmniNode-ai/omnimarket/actions/runs/35832924275",
+        "id": 35832924275,
+        "status": "completed",
+        "updated_at": "2026-09-23T08:18:14Z"
+      }
+    ]
+  }
+}

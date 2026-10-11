@@ -55,10 +55,19 @@ if [ -n "$ONEX_DB_SLOT" ]; then
     echo "[intelligence-migration] slot_fence_refusal: ONEX_DB_SLOT '${ONEX_DB_SLOT}' is malformed (expected ^[a-z][a-z0-9]{0,11}\$)" >&2
     exit 3
   fi
+  if [ "$PGUSER" != "role_omniintelligence_${ONEX_DB_SLOT}" ]; then
+    echo "[intelligence-migration] slot_fence_refusal: a slot migration must authenticate as role_omniintelligence_${ONEX_DB_SLOT}, never a shared principal" >&2
+    exit 4
+  fi
   INTEL_DB="omniintelligence_${ONEX_DB_SLOT}"
   echo "[intelligence-migration] pre-PR verify slot '${ONEX_DB_SLOT}' active: targeting ${INTEL_DB}"
 fi
 # ---- END pre-PR verify slot (OMN-19404) ----
+
+# The slot cannot connect to the maintenance database. Its own already
+# provisioned database serves both readiness and shared-catalog discovery.
+CATALOG_DB="postgres"
+[ -z "$ONEX_DB_SLOT" ] || CATALOG_DB="$INTEL_DB"
 
 # ---------------------------------------------------------------------------
 # 0. Wait for Postgres to accept connections (first-boot initdb race guard)
@@ -90,11 +99,11 @@ fi
 # entire runtime tier behind a container that had already given up. The documented
 # workaround was "run `up -d` a second time"; this removes the need for it.
 #
-# Probes `postgres` (the always-present maintenance database), not
-# `omniintelligence`, which section 1 may still have to create.
+# Governed lanes probe the maintenance database before creating intelligence.
+# A slot probes its own provisioned database, since maintenance is out of scope.
 echo "[intelligence-migration] Waiting for Postgres to accept connections..."
 retries=0
-until psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres -c "SELECT 1" >/dev/null 2>&1; do
+until psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$CATALOG_DB" -c "SELECT 1" >/dev/null 2>&1; do
   retries=$((retries + 1))
   if [ "$retries" -ge "$PG_WAIT_RETRIES" ]; then
     echo "[intelligence-migration] ERROR: Postgres not ready after ${PG_WAIT_RETRIES} retries. Aborting." >&2
@@ -105,12 +114,24 @@ until psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres -c "SELECT 1" >/de
 done
 echo "[intelligence-migration] Postgres is ready."
 
+if [ -n "$ONEX_DB_SLOT" ]; then
+  slot_identity_safe="$(psql -X -qAt -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$INTEL_DB" \
+    -v ON_ERROR_STOP=1 -c "SELECT current_user = '${PGUSER}'
+      AND NOT rolsuper AND NOT rolbypassrls AND NOT rolcreaterole
+      AND NOT rolcreatedb AND NOT rolreplication
+      FROM pg_roles WHERE rolname = current_user")" || slot_identity_safe=""
+  if [ "$slot_identity_safe" != "t" ]; then
+    echo "[intelligence-migration] slot_fence_refusal: unsafe or unreadable migration identity in ${INTEL_DB}" >&2
+    exit 4
+  fi
+fi
+
 # ---------------------------------------------------------------------------
 # 1. Create the omniintelligence database if it does not exist
 # ---------------------------------------------------------------------------
 echo "[intelligence-migration] Ensuring ${INTEL_DB} database exists..."
 
-DB_EXISTS=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres \
+DB_EXISTS=$(psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$CATALOG_DB" \
   -tAc "SELECT 1 FROM pg_database WHERE datname = '${INTEL_DB}'" 2>/dev/null || true)
 
 if [ "$DB_EXISTS" != "1" ] && [ -n "$ONEX_DB_SLOT" ]; then

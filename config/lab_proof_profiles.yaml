@@ -53,7 +53,7 @@ registry_repos:
   - OmniNode-ai/omninode_infra
   - OmniNode-ai/onex_change_control
   - OmniNode-ai/omni_home
-  - OmniNode-ai/knowledge-base
+  - OmniNode-ai/knowledge_base
   - OmniNode-ai/knowledge-base-internal
   # Added to the omni_home registry 2026-09-24, after plan section 5 was
   # written; listed so its absence from the plan is visible, not silent.
@@ -479,7 +479,7 @@ profiles:
         execution: none
   - profile_key: knowledge_base.exempt
     profile_version: 1
-    repo: OmniNode-ai/knowledge-base
+    repo: OmniNode-ai/knowledge_base
     exempt_classes: [docs_only]
     docs_globs: ["**"]
     enforce: false

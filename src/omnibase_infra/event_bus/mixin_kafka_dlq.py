@@ -828,6 +828,7 @@ class MixinKafkaDlq:
         dlq_topic: str | None = None,
         failure_class: str | None = None,
         validation_detail: str | None = None,
+        require_declared_topic: bool = False,
     ) -> bool:
         """Publish raw Kafka message to DLQ when deserialization fails.
 
@@ -855,6 +856,10 @@ class MixinKafkaDlq:
             validation_detail: Optional real pydantic ``ValidationError``
                 detail (OMN-14492) for the ``publisher_malformed`` case,
                 carried as its own structured field.
+            require_declared_topic: When True, ``dlq_topic`` is the contract's
+                authoritative destination. Bus defaults and category fallback
+                cannot replace it; only an acknowledgment on that topic is
+                success. Requires a non-empty ``dlq_topic``.
 
         Returns:
             ``True`` if the DLQ message was actually published (producer
@@ -892,9 +897,15 @@ class MixinKafkaDlq:
         # the replay engine's header name exactly.
         replay_count = _extract_replay_count_from_raw_headers(raw_msg)
 
-        # Explicit bus configuration wins; otherwise use caller-provided
-        # category routing before falling back to the default intents DLQ.
-        resolved_dlq_topic = self._resolve_dlq_topic(dlq_topic)
+        # OMN-18879: a contract sink is authoritative when explicitly required.
+        # Other callers preserve bus configuration and category routing.
+        if require_declared_topic:
+            if not dlq_topic or not dlq_topic.strip():
+                logger.error("DLQ publish rejected: declared topic is empty")
+                return False
+            resolved_dlq_topic = dlq_topic
+        else:
+            resolved_dlq_topic = self._resolve_dlq_topic(dlq_topic)
 
         # Sanitize error message
         sanitized_failure_reason = sanitize_error_message(error)
@@ -1109,7 +1120,11 @@ class MixinKafkaDlq:
         # let that unroutable target eat the record, fall back once to the
         # realm-agnostic, already-provisioned category topic derived from
         # original_topic (e.g. "onex.dlq.omnibase-infra.commands.v1").
-        if not success and not is_dlq_topic(original_topic):
+        if (
+            not success
+            and not require_declared_topic
+            and not is_dlq_topic(original_topic)
+        ):
             # OMN-18084: the fallback must not fire for a record consumed FROM a
             # dead-letter sink -- ``get_dlq_topic_for_original`` resolves a
             # ``onex.dlq.*`` name to itself, so the "already-provisioned category

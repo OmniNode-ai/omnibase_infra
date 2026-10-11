@@ -25,6 +25,9 @@ lane is not serving. So it is gated on the dimensions that say whether the lane
 is serving --
 
 * ``health_ok``      -- the runtime's own ``/health`` verdict,
+* ``effects_health_ok`` -- the effects runtime's own ``/health`` verdict, for a
+  gate that reports one (the dev gate does, OMN-17427; the stability gate has
+  no such leg and its decision is unchanged),
 * ``manifest_ok``    -- the contract manifest is being served above its floor,
 * ``cluster_healthy``-- the broker is up,
 * ``core_services_running`` -- every core container exists and is ``running``,
@@ -145,6 +148,11 @@ def health_dimension_failures(gate: Mapping[str, Any]) -> tuple[str, ...]:
     failures: list[str] = []
     if not _flag(gate, "health_ok"):
         failures.append("health_ok=false")
+    # OMN-17427: present only in a gate that probes the effects runtime. Its
+    # presence is the gate's own declaration that it has the leg, and a gate
+    # that has it and reports it false is a lane that is not serving.
+    if "effects_health_ok" in gate and not _flag(gate, "effects_health_ok"):
+        failures.append("effects_health_ok=false")
     if not _flag(gate, "manifest_ok"):
         failures.append("manifest_ok=false")
     if not _flag(gate, "cluster_healthy"):

@@ -1015,6 +1015,37 @@ def load_policy(path: Path) -> dict[str, Any]:
             "fleet_repos; a repository outside the fleet list has no governed "
             "scheduled evaluator"
         )
+    # OMN-18780: an individual detector can require a stricter threshold,
+    # never a looser one. An invalid declaration refuses the whole policy.
+    thresholds = block.get("scheduled_workflow_thresholds", {})
+    if not isinstance(thresholds, dict):
+        raise ValueError(f"{path} scheduled_workflow_thresholds must be a mapping")
+    for repo, workflows in thresholds.items():
+        if repo not in fleet:
+            raise ValueError(
+                f"{path} scheduled_workflow_thresholds names ungoverned repo {repo}"
+            )
+        if not isinstance(workflows, dict) or not workflows:
+            raise ValueError(
+                f"{path} scheduled_workflow_thresholds[{repo}] must be a non-empty mapping"
+            )
+        for workflow, threshold_pct in workflows.items():
+            if not isinstance(workflow, str) or not workflow.startswith(
+                ".github/workflows/"
+            ):
+                raise ValueError(
+                    f"{path} scheduled_workflow_thresholds has invalid workflow {workflow!r}"
+                )
+            if (
+                isinstance(threshold_pct, bool)
+                or not isinstance(threshold_pct, (int, float))
+                or not 0
+                <= threshold_pct
+                <= float(block["scheduled_failure_threshold_pct"])
+            ):
+                raise ValueError(
+                    f"{path} scheduled_workflow_thresholds[{repo}][{workflow}] must tighten the general threshold"
+                )
     return block
 
 
@@ -1163,6 +1194,9 @@ def main(argv: list[str] | None = None) -> int:
                 all_alerts=all_alerts,
                 all_scheduled_alerts=all_scheduled_alerts,
                 report=report,
+                scheduled_workflow_thresholds=policy.get(
+                    "scheduled_workflow_thresholds", {}
+                ),
             )
         except Exception as exc:  # noqa: BLE001 -- see _evaluate_one_repo's docstring
             unreadable.append(repo)
@@ -1272,6 +1306,7 @@ def _evaluate_one_repo(
     all_alerts: list[Alert],
     all_scheduled_alerts: list[ScheduledAlert],
     report: dict[str, Any],
+    scheduled_workflow_thresholds: dict[str, dict[str, float]] | None = None,
 ) -> None:
     """One repository's evaluation, extracted so ONE can fail without the rest.
 
@@ -1314,14 +1349,38 @@ def _evaluate_one_repo(
 
     scheduled_report: dict[str, Any] = {}
     workflows_iter = active_workflows(slug, token) if scheduled else []
+    repo_thresholds = (scheduled_workflow_thresholds or {}).get(repo, {})
+    if scheduled:
+        # OMN-18780: the fleet's discovery reads one page of active workflows.
+        # A declared detector must not disappear beyond that page. Read its
+        # metadata explicitly when discovery did not return it, and refuse an
+        # unreadable/disabled detector instead of reporting a clean sweep.
+        discovered = {workflow.get("path") for workflow in workflows_iter}
+        for workflow_path in repo_thresholds:
+            if workflow_path in discovered:
+                continue
+            filename = workflow_path.rsplit("/", 1)[-1]
+            metadata = _gh_object(f"repos/{slug}/actions/workflows/{filename}", token)
+            if (
+                metadata.get("state") != "active"
+                or metadata.get("path") != workflow_path
+                or not isinstance(metadata.get("id"), int)
+            ):
+                raise RuntimeError(
+                    f"declared scheduled detector {slug}/{workflow_path} is not readable and active"
+                )
+            workflows_iter.append(metadata)
     for workflow in workflows_iter:
         workflow_id = workflow.get("id")
         workflow_path = str(workflow.get("path") or workflow.get("name") or "")
         if not isinstance(workflow_id, int) or not workflow_path:
             continue
         runs = scheduled_runs_for_workflow(slug, workflow_id, scheduled_since, token)
+        # OMN-18780: use the existing scheduled alert route for an actionable
+        # routing failure even when its rate is below the fleet noise floor.
+        workflow_threshold = repo_thresholds.get(workflow_path, scheduled_threshold_pct)
         scheduled_alert = evaluate_scheduled(
-            slug, workflow_path, runs, scheduled_threshold_pct
+            slug, workflow_path, runs, workflow_threshold
         )
         if runs:
             failing = sum(

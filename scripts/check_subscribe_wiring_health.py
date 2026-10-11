@@ -4,7 +4,7 @@
 """Subscribe-topic wiring health check.
 
 Static analysis that verifies every contract-declared subscribe_topic has
-at least one matching publish_topic from another contract. Detects "dead
+at least one matching publisher in a contract or runtime topics manifest. Detects "dead
 letter" subscriptions where a node declares it consumes from a topic but
 no node in the system publishes to it.
 
@@ -48,6 +48,9 @@ _SRC_DIR = _REPO_ROOT / "src"
 if _SRC_DIR.is_dir() and str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
+from omnibase_infra.tools.contract_topic_extractor import (
+    ContractTopicExtractor as CanonicalContractTopicExtractor,
+)
 from omnibase_infra.topics.contract_topic_extractor import ContractTopicExtractor
 
 # ---------------------------------------------------------------------------
@@ -440,6 +443,8 @@ def check_allowlist_hygiene(
 def check_wiring_health(
     contracts_dirs: list[Path],
     verbose: bool = False,
+    *,
+    publisher_manifest_roots: list[Path] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Check subscribe/publish topic wiring across all contracts.
 
@@ -451,6 +456,9 @@ def check_wiring_health(
     Args:
         contracts_dirs: Directories to scan for contract.yaml files.
         verbose: Print detailed output.
+        publisher_manifest_roots: Producer-owned topics.yaml inventories. Defaults
+            to the runtime inventory only when scanning this repository's full
+            node directory; partial scans must supply their own inventories.
 
     Returns:
         Tuple of (errors, warnings).
@@ -478,6 +486,22 @@ def check_wiring_health(
             for topic in node_topics.publish_topics:
                 if not _is_infrastructure_topic(topic):
                     all_publish[topic].append(node_name)
+
+    # OMN-18648: RuntimeLocal publishes the initial command on behalf of the
+    # generic node CLI. Read the same runtime publisher inventory as topic
+    # codegen instead of inventing a node publisher or expanding an allowlist.
+    if publisher_manifest_roots is None:
+        nodes_dir = (_SRC_DIR / "omnibase_infra" / "nodes").resolve()
+        publisher_manifest_roots = (
+            [_SRC_DIR / "omnibase_infra" / "runtime"]
+            if any(directory.resolve() == nodes_dir for directory in contracts_dirs)
+            else []
+        )
+    publisher_extractor = CanonicalContractTopicExtractor()
+    for root in publisher_manifest_roots:
+        for entry in publisher_extractor.extract_from_skill_manifests(root):
+            if not _is_infrastructure_topic(entry.topic):
+                all_publish[entry.topic].append(f"{root.name}/topics.yaml")
 
     if verbose:
         print(f"Scanned: {sum(1 for d in contracts_dirs if d.exists())} directories")
@@ -507,7 +531,7 @@ def check_wiring_health(
         if topic not in all_publish:
             errors.append(
                 f"DEAD_LETTER: {topic} subscribed by [{', '.join(subscribers)}] "
-                f"but no contract publishes to it"
+                f"but no contract or runtime manifest publishes to it"
             )
         elif verbose:
             publishers = all_publish[topic]
@@ -547,6 +571,13 @@ def main() -> int:
         help="Additional contract directories (e.g., cross-repo nodes)",
     )
     parser.add_argument(
+        "--publisher-manifests-dir",
+        type=Path,
+        action="append",
+        default=None,
+        help="Producer topics.yaml inventory (default: runtime inventory for the full repository scan)",
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
@@ -555,7 +586,11 @@ def main() -> int:
     args = parser.parse_args()
 
     dirs = [args.contracts_dir] + args.extra_contracts_dir
-    errors, warnings = check_wiring_health(dirs, verbose=args.verbose)
+    errors, warnings = check_wiring_health(
+        dirs,
+        verbose=args.verbose,
+        publisher_manifest_roots=args.publisher_manifests_dir,
+    )
 
     # OMN-16795: the allowlists themselves must stay honest. Run this only here,
     # against the REAL contract tree — a caller scanning a partial/synthetic
@@ -583,9 +618,11 @@ def main() -> int:
         print(f"{'=' * 60}")
         for e in errors:
             print(f"  - {e}")
-        print("\nDEAD_LETTER: a contract declares a subscription but no contract in")
-        print("the system publishes to that topic. Fix: add the topic to a")
-        print("publisher's publish_topics, or allowlist it if the publisher is")
+        print("\nDEAD_LETTER: a contract declares a subscription but no contract or")
+        print("runtime manifest declares its publisher. Fix: declare the topic in")
+        print(
+            "the actual publisher's contract or topics.yaml inventory, or allowlist it if the publisher is"
+        )
         print("external (webhook, CLI, cross-repo).")
         print("\nEXPIRED / MALFORMED / STALE: an allowlist entry is no longer honest")
         print("(OMN-16795). Fix the underlying gap, renew with a FRESH reason and")

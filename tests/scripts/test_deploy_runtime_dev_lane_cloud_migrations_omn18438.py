@@ -5,7 +5,7 @@
 ``docker/docker-compose.dev-lane.yml`` declares ``cloud-migration-files`` and
 ``cloud-migration`` (OMN-17530, ``omnibase_infra#3332``). They apply the
 ``omninode_cloud`` corpus that ``onex-api`` owns ``tenants`` and
-``tenant_api_keys`` in. Nothing ran them: ``scripts/deploy-runtime.sh`` excluded
+``tenant_api_keys`` in. Nothing ran them: ``src/omnibase_infra/handlers/handler_runtime_deploy.sh`` excluded
 them from every refresh set because the RT-6 readback resolved a RUNNING
 container and a one-shot has already exited by then. ``omnibase_infra#3330``
 closed that blocker with a one-shot-aware readback, but no refresh set gained
@@ -35,7 +35,9 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-DEPLOY_RUNTIME = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_RUNTIME = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 DEV_LANE_COMPOSE = REPO_ROOT / "docker" / "docker-compose.dev-lane.yml"
 
 CLOUD_ONESHOTS = ("cloud-migration-files", "cloud-migration")

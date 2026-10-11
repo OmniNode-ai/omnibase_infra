@@ -11,12 +11,12 @@
 # stood up by hand-copying docker/docker-compose.gateway.yml and
 # docker/gateway/beta-gateway-canary.yaml into a root-owned directory and
 # building/running compose there directly. That left the lane invisible to
-# deploy-runtime.sh (whose -p omnibase-infra scope never touches it), stamped
+# onex-runtime-deploy (whose -p omnibase-infra scope never touches it), stamped
 # with no org.opencontainers.image.revision / com.omninode.build_source
 # labels, and with no recorded rollback target.
 #
 # This script builds the gateway-forwarder image FROM THIS REPO CHECKOUT (the
-# same src/omnibase_infra/ tree deploy-runtime.sh's dev lane builds from -- pull
+# same src/omnibase_infra/ tree onex-runtime-deploy's dev lane builds from -- pull
 # to the merged-dev tip first), stamps the same OCI provenance labels every
 # omnibase-infra runtime container carries, pins the running container to the
 # resulting image DIGEST (never a moving :latest tag -- the existing systemd
@@ -112,7 +112,7 @@ Builds the gateway-forwarder image from THIS repo checkout, stamps OCI
 provenance labels, pins the running container to the resulting image digest,
 and records a rollback target. Run from the canonical omnibase_infra clone on
 the host where the lane's containers live (.201) -- same convention as
-scripts/deploy-runtime.sh and scripts/runtime_build/refresh_stability_lane.sh.
+onex-runtime-deploy and scripts/runtime_build/refresh_stability_lane.sh.
 
 USAGE
     ${SCRIPT_NAME} [OPTIONS]
@@ -142,7 +142,7 @@ REQUIRED ENVIRONMENT (--execute only)
     and is not a value this script or the repo hardcodes.
 
     BUILD_SOURCE=workspace additionally requires OMNI_HOME to be set (same
-    convention as deploy-runtime.sh) so sibling repos can be staged from the
+    convention as onex-runtime-deploy) so sibling repos can be staged from the
     operator's local clones before the build; the default BUILD_SOURCE=release
     does not stage anything.
 
@@ -154,7 +154,7 @@ WHAT --execute DOES, IN ORDER
        build tag onto the new image (a bare env-file digest is never used --
        it can go stale relative to what is actually running).
     3. If BUILD_SOURCE=workspace: stage workspace/sibling-repos/ from OMNI_HOME
-       (same scripts/runtime_build/stage_workspace.sh deploy-runtime.sh uses)
+       (same scripts/runtime_build/stage_workspace.sh onex-runtime-deploy uses)
        and run the OMN-12987 sibling lock-pin preflight -- skipped entirely in
        the default BUILD_SOURCE=release mode.
     4. Build the image with the same OCI provenance build-args every
@@ -207,7 +207,7 @@ ROLLBACK
     start on the next restart/reboot.
 
     (mirrors the omnibase-infra lane's manual rollback-via-registry.json
-    pattern -- deploy-runtime.sh has no automated --rollback flag either.)
+    pattern -- onex-runtime-deploy has no automated --rollback flag either.)
     Full procedure: knowledge-base-internal:runbooks/omnibase-infra-gateway-lane-deploy.md
 
 EXAMPLES
@@ -339,7 +339,7 @@ read_git_sha() {
 }
 
 read_repo_ref_or_main() {
-    # Same helper as deploy-runtime.sh's read_repo_ref_or_main (OMN-15521
+    # Same helper as onex-runtime-deploy's read_repo_ref_or_main (OMN-15521
     # remediation): resolve a full git SHA for a sibling workspace repo when
     # available, falling back to "main" (or the repo's own default via the
     # Dockerfile ARG default) when OMNI_HOME or the sibling clone is absent.
@@ -383,8 +383,8 @@ resolve_build_args() {
         non_main_lineage="true"
     fi
     # OMN-15521 remediation: these sibling-ref build-args are NOT optional
-    # extras -- deploy-runtime.sh's build_images() passes them unconditionally
-    # on every build_source (scripts/deploy-runtime.sh resolve+pass at
+    # extras -- onex-runtime-deploy's build_images() passes them unconditionally
+    # on every build_source (onex-runtime-deploy resolve+pass at
     # build_images()). Omitting them silently falls back to the Dockerfile's
     # hardcoded ARG defaults (OMNIBASE_COMPAT_REF=v0.5.5, OMNIMARKET_REF=dev),
     # which is how the gateway image previously drifted from the
@@ -445,7 +445,7 @@ print_compose_commands() {
     # Portable stand-in for bash 4's `readarray`/`mapfile` (unavailable on
     # macOS's shipped /bin/bash 3.2 -- Apple has not updated it past 3.2 since
     # bash moved to GPLv3, and this script must run there like
-    # scripts/deploy-runtime.sh and its runtime_build siblings do). Namerefs
+    # onex-runtime-deploy and its runtime_build siblings do). Namerefs
     # (`local -n`, bash 4.3+) are equally unavailable, so this loop is
     # inlined at each call site rather than factored into a helper.
     local repo_root="$1" git_sha="$2" version="$3"
@@ -519,12 +519,12 @@ resolve_image_digest() {
 # resolve_build_args() already honours BUILD_SOURCE=workspace for the label
 # values (promotion_class/non_main_lineage), but a prior version of this
 # script never actually populated workspace/sibling-repos/ -- unlike
-# scripts/deploy-runtime.sh's build_images(), which always calls
+# onex-runtime-deploy's build_images(), which always calls
 # stage_workspace_if_needed() first. docker/Dockerfile.runtime unconditionally
 # COPYs workspace/sibling-repos/, so an unstaged workspace build silently used
 # the committed placeholder (or whatever stale staging happened to be sitting
 # in the checkout) while still stamping workspace-provenance labels. This is
-# the same helper deploy-runtime.sh uses -- same underlying
+# the same helper onex-runtime-deploy uses -- same underlying
 # scripts/runtime_build/stage_workspace.sh and
 # scripts/runtime_build/check_sibling_lock_pins.py, invoked the same way, not
 # reimplemented -- adapted only to this script's own build-source resolution
@@ -562,7 +562,7 @@ stage_workspace_if_needed() {
 }
 
 check_sibling_lock_pins() {
-    # Fail-fast preflight (OMN-12987, same guard deploy-runtime.sh runs): every
+    # Fail-fast preflight (OMN-12987, same guard onex-runtime-deploy runs): every
     # vendored sibling's version/SHA must match the consuming repo's
     # (omnimarket) uv.lock pin. A stale vendored sibling produced the
     # 2026-06-11 stability crash; this guard refuses to build against one.
@@ -602,12 +602,12 @@ check_sibling_lock_pins() {
         # check_sibling_lock_pins.py's DEFAULT_PACKAGE_REPO_DIRS no longer
         # carries "onex-change-control" and argparse REJECTS it outright:
         #   error: argument --repo: unknown package 'onex-change-control'
-        # deploy-runtime.sh's copy of this argv was updated in that PR; this
+        # onex-runtime-deploy's copy of this argv was updated in that PR; this
         # one was not, which made every BUILD_SOURCE=workspace gateway deploy
         # exit 1 in the preflight, before the build. Measured on .201
         # 2026-09-06 while deploying omnibase_infra#3221 to unwedge the
         # forwarder's outbound leg (OMN-17201). Keep this list identical to
-        # deploy-runtime.sh's check_sibling_lock_pins() guard_args.
+        # onex-runtime-deploy's check_sibling_lock_pins() guard_args.
         --output "${provenance_out}"
         --build-source workspace
     )

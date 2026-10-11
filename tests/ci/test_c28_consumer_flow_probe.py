@@ -173,6 +173,10 @@ def test_the_green_observation_passes_on_every_clause() -> None:
     assert rec.verdict == "pass", rec.failures
     assert rec.exit_code == probe.EXIT_OK
     assert {c.clause for c in rec.checks} == {"kinds", "negative", "cursor", "boot"}
+    marker_check = next(
+        c for c in rec.checks if c.name == "injected_marker_durably_on_the_dlq"
+    )
+    assert marker_check.evidence == f"{probe.SEAM_DLQ} messages carrying the marker: 1"
 
 
 def test_an_empty_observation_cannot_pass() -> None:
@@ -587,3 +591,86 @@ def test_the_workflow_runs_the_probe_beside_the_resolved_lane() -> None:
     ]
     assert uploads and uploads[0]["with"]["name"] == "c28-consumer-flow"
     assert uploads[0].get("if") == "always()"
+
+
+class _RecordedSeamDlqLane:
+    def __init__(self, recorded_response: dict[str, Any]) -> None:
+        self.recorded_response = recorded_response
+
+    def logs(self, container: str, *, since: str) -> list[str]:
+        return self.recorded_response["runtime_log_lines"][container]
+
+    def high_watermark(self, topic: str) -> int:
+        if topic != probe.SEAM_DLQ:
+            raise AssertionError(f"Unexpected high-watermark topic: {topic}")
+        return self.recorded_response["recorded_seam_dlq_hwm"][1]
+
+    def rpk(self, *args: str, stdin: str | None = None, timeout: float = 60.0) -> str:
+        if (
+            args
+            != (
+                "topic",
+                "consume",
+                probe.SEAM_DLQ,
+                "-o",
+                "7:8",
+                "-f",
+                "%o\\t%v\\n",
+            )
+            or stdin is not None
+        ):
+            raise AssertionError(f"Unexpected rpk invocation: {args}")
+        record = self.recorded_response["seam_dlq_record"]
+        return f"{record['offset']}\t{record['value']}\n"
+
+    def monotonic(self) -> float:
+        return 0.0
+
+    def sleep(self, _: float) -> None:
+        raise AssertionError("The recorded replay must finish on the first pass")
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/c28_seam_dlq_marker_omn17427.json")
+@pytest.mark.parametrize("collector", ["script", "node"])
+def test_recorded_dev_lane_marker_is_counted_on_the_seam_dlq(
+    recorded_response: dict[str, Any], collector: str
+) -> None:
+    from omnibase_infra.nodes.node_board_probe_effect.handlers import (
+        _consumer_flow_collection,
+    )
+
+    # OMN-17427: replay the seam DLQ marker missed by C28 run 37903397118.
+    recorded_injection = recorded_response["recorded_injection"]
+    assert recorded_injection["dlq_copies"] == 0
+    boundary_line = next(
+        line
+        for line in recorded_response["runtime_log_lines"]["omninode-runtime"]
+        if "metric_name=boundary_swallow_prevented" in line
+    )
+    assert f"dlq_topic={probe.SEAM_DLQ}" in boundary_line
+    assert f"correlation_id={recorded_injection['correlation_id']}" in boundary_line
+
+    lane = _RecordedSeamDlqLane(recorded_response)
+    injection_subset = {
+        key: recorded_injection[key]
+        for key in ("marker", "correlation_id", "published_at", "offset")
+    }
+    observe_injection = {
+        "script": probe.observe_injection,
+        "node": _consumer_flow_collection.observe_injection,
+    }[collector]
+    result = observe_injection(
+        lane,
+        injection_subset,
+        recorded_response["recorded_seam_dlq_hwm"][0],
+        wait_seconds=0,
+    )
+    assert result["dlq_copies"] == 1
+    assert (
+        result["validation_errors_after"]
+        == recorded_injection["validation_errors_after"]
+        == 2
+    )
+    assert result["boundary_lines"] == recorded_injection["boundary_lines"] == 1
+    assert result["seam_dlq_before"] == 7
+    assert result["seam_dlq_after"] == 8

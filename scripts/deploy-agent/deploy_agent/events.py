@@ -141,7 +141,7 @@ SCOPE_SERVICES: dict[Scope, list[str]] = {
         "omninode-runtime",
         "runtime-effects",
         "runtime-worker",
-        # OMN-18387: was missing here while scripts/deploy-runtime.sh's
+        # OMN-18387: was missing here while onex-runtime-deploy's
         # RUNTIME_SERVICES has always carried it. A re-publish through the
         # deploy agent built a fresh projection-api image and reported the
         # runtime phase SUCCESS end to end, but neither the up-target list
@@ -174,7 +174,7 @@ SCOPE_SERVICES: dict[Scope, list[str]] = {
 #
 # WHY THIS IS DECLARED HERE AND NOT PARSED FROM THE SHELL SCRIPT
 # --------------------------------------------------------------
-# ``scripts/deploy-runtime.sh`` carries the same eight names in its
+# ``onex-runtime-deploy`` carries the same eight names in its
 # ``DEV_LANE_ONLY_RUNTIME_SERVICES`` array, and three existing tests parse that
 # hand-written literal out of the script by regex. Reshaping the array into a
 # file both sides read would break those tests and edit the sanctioned deploy
@@ -195,9 +195,9 @@ SCOPE_SERVICES: dict[Scope, list[str]] = {
 #
 # THE SAME DEFECT AS OMN-18108, ONE LAYER OVER. omnibase_infra#3636 put
 # `cloud-migration-files` and `cloud-migration` into
-# DEV_LANE_ONLY_MIGRATION_SERVICES in scripts/deploy-runtime.sh and wired them
+# DEV_LANE_ONLY_MIGRATION_SERVICES in onex-runtime-deploy and wired them
 # into that script's migration preflight. They still never ran, because THIS
-# AGENT DOES NOT INVOKE THAT SCRIPT -- every mention of deploy-runtime.sh in
+# AGENT DOES NOT INVOKE THAT SCRIPT -- every mention of onex-runtime-deploy in
 # this package is a comment. An array expanded only inside that script is
 # unreachable from the path that actually deploys the dev lane.
 #
@@ -223,7 +223,7 @@ SCOPE_SERVICES: dict[Scope, list[str]] = {
 # --no-deps, which is exactly what switches compose's depends_on off, so this
 # sequence is the only thing sequencing the copy before the apply.
 #
-# ONE tuple here where bash carries two arrays: deploy-runtime.sh separates
+# ONE tuple here where bash carries two arrays: onex-runtime-deploy separates
 # services from one-shots because its lane-agnostic set mixes in a keepalive
 # (migration-gate). Every member of the dev-lane set is a one-shot, so a
 # second tuple would be a second thing to drift rather than a distinction --
@@ -233,7 +233,7 @@ SCOPE_SERVICES: dict[Scope, list[str]] = {
 # Bound to the bash declaration by
 # tests/unit/test_dev_lane_cloud_migrations_omn18438.py
 # ::test_python_declaration_equals_the_bash_array, which PARSES the array out
-# of deploy-runtime.sh rather than restating it, and carries a positive control
+# of onex-runtime-deploy rather than restating it, and carries a positive control
 # so an empty parse cannot read as agreement.
 DEV_LANE_ONLY_MIGRATION_SERVICES: tuple[str, ...] = (
     "cloud-migration-files",

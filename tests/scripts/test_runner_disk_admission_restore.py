@@ -32,6 +32,7 @@ pause markers remain, proving:
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import time
@@ -74,7 +75,7 @@ def _write_pause_marker(pause_dir: Path, runner: str, paused_at: str) -> None:
 
 def _tick(
     *,
-    avail_kb: int,
+    avail_kb: int | None,
     pause_dir: Path,
     state_file: Path,
     docker_bin_dir: Path,
@@ -82,9 +83,16 @@ def _tick(
     restore_floor_gb: int = 40,
     climb_ticks_required: int = 2,
     batch_sizes: str = "10 20 20 20",
+    docker_probe_container: str = "",
+    mount: str = "",
+    dry_run: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
-    env["RUNNER_DISK_GUARD_AVAIL_KB_OVERRIDE"] = str(avail_kb)
+    env["HOME"] = str(state_file.parent)
+    if avail_kb is None:
+        env.pop("RUNNER_DISK_GUARD_AVAIL_KB_OVERRIDE", None)
+    else:
+        env["RUNNER_DISK_GUARD_AVAIL_KB_OVERRIDE"] = str(avail_kb)
     env["RUNNER_DISK_GUARD_DOCKER_BIN"] = str(docker_bin_dir / "docker")
     env["RUNNER_DISK_GUARD_CRITICAL_FLOOR_GB"] = str(critical_floor_gb)
     env["RUNNER_DISK_GUARD_RESTORE_FLOOR_GB"] = str(restore_floor_gb)
@@ -99,6 +107,13 @@ def _tick(
             str(pause_dir),
             "--state-file",
             str(state_file),
+            *(["--mount", mount] if mount else []),
+            *(["--dry-run"] if dry_run else []),
+            *(
+                ["--docker-probe-container", docker_probe_container]
+                if docker_probe_container
+                else []
+            ),
         ],
         env=env,
         capture_output=True,
@@ -339,3 +354,136 @@ def test_marker_only_cleared_on_verified_running_status(tmp_path: Path) -> None:
     assert (pause_dir / "omninode-runner-1").exists(), (
         "marker must survive an unverified (non-running) start attempt"
     )
+
+
+@pytest.mark.parametrize(
+    "probe_result",
+    [
+        "healthy",
+        "custom-mount",
+        "low",
+        "failed",
+        "malformed",
+        "inspect-failed",
+        "dry-run",
+    ],
+)
+def test_docker_desktop_restore_uses_vm_disk_not_host_disk(
+    tmp_path: Path, probe_result: str
+) -> None:
+    """A stopped runner can be measured without restarting its listener."""
+    pause_dir = tmp_path / "pause"
+    runner = "omninode-air-runner-1"
+    _write_pause_marker(pause_dir, runner, "2026-09-23T18:29:00Z")
+    docker_bin = tmp_path / "bin"
+    docker_bin.mkdir()
+    docker_log = tmp_path / "docker_calls.log"
+    df_log = tmp_path / "host_df_calls.log"
+    reading = docker_bin / "avail_kb"
+    reading.write_text(str(45 * GB_KB))
+    # The host looks healthy and climbing. It must never be consulted in VM mode.
+    (docker_bin / "df").write_text(
+        f"#!/usr/bin/env bash\necho host-df >> '{df_log}'\n"
+        "echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n"
+        "echo '/host 1000000000 0 1000000000 0% /'\n"
+    )
+    (docker_bin / "df").chmod(0o755)
+    (docker_bin / "docker").write_text(
+        "#!/usr/bin/env bash\n"
+        f"printf '%s\\n' \"$*\" >> '{docker_log}'\n"
+        'if [[ "$1" == inspect && "$3" == "{{.Image}}" ]]; then\n'
+        + (
+            "  echo inspect-unavailable >&2; exit 1\n"
+            if probe_result == "inspect-failed"
+            else "  echo sha256:runner-image; exit 0\n"
+        )
+        + 'elif [[ "$1" == run ]]; then\n'
+        + (
+            {
+                "failed": "  echo vm-df-unavailable >&2; exit 1\n",
+                "dry-run": "  echo vm-df-unavailable >&2; exit 1\n",
+                "malformed": "  echo 'unreadable disk'; exit 0\n",
+                "low": "  echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'; echo '/vm 100000000 99000000 1048576 99% /'; exit 0\n",
+            }.get(
+                probe_result,
+                "  echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n"
+                f"  echo \"/vm 100000000 0 $(cat '{reading}') 0% /\"; exit 0\n",
+            )
+        )
+        + 'elif [[ "$1" == start ]]; then\n  exit 0\n'
+        + 'elif [[ "$1" == inspect ]]; then\n  echo running; exit 0\nfi\nexit 1\n'
+    )
+    (docker_bin / "docker").chmod(0o755)
+    state_file = tmp_path / "state.json"
+    previous_state = json.dumps({"avail_kb": 44 * GB_KB, "climb_streak": 1})
+    if probe_result in {"failed", "malformed", "inspect-failed", "dry-run"}:
+        state_file.write_text(previous_state)
+    mount = "/custom workspace" if probe_result == "custom-mount" else ""
+    for gb in (45, 60):
+        reading.write_text(str(gb * GB_KB))
+        result = _tick(
+            avail_kb=None,
+            pause_dir=pause_dir,
+            state_file=state_file,
+            docker_bin_dir=docker_bin,
+            docker_probe_container=runner,
+            mount=mount,
+            dry_run=probe_result == "dry-run",
+        )
+        assert result.returncode == 0, result.stderr
+    calls = docker_log.read_text().splitlines()
+    assert not df_log.exists(), "host free space cannot release a VM-paused runner"
+    host_df = subprocess.run(
+        [str(docker_bin / "df"), "-Pk", "/host"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    assert host_df.returncode == 0, host_df.stderr
+    assert df_log.read_text().splitlines() == ["host-df"], (
+        "df sentinel positive control"
+    )
+    if probe_result in {"healthy", "custom-mount"}:
+        assert f"start {runner}" in calls
+        assert not (pause_dir / runner).exists()
+        probes = [call for call in calls if call.startswith("run ")]
+        assert len(probes) == 2
+        for call in probes:
+            assert "--pull never" in call
+            assert "--network none" in call
+            assert "--read-only" in call
+            assert f"--volumes-from {runner}:ro" in call
+            assert (
+                f"--entrypoint df sha256:runner-image -Pk {mount or '/home/runner/actions-runner'}"
+                in call
+            )
+        assert "RESTORED" in result.stderr
+    else:
+        assert not any(call.startswith("start ") for call in calls)
+        assert (pause_dir / runner).exists()
+        if probe_result == "dry-run":
+            assert state_file.read_text() == previous_state
+        if probe_result in {"failed", "malformed", "inspect-failed"}:
+            assert "no restore action" in result.stderr
+            assert not state_file.exists(), (
+                "a failed probe must not advance the slope window"
+            )
+            if probe_result == "failed":
+                assert "vm-df-unavailable" in result.stderr
+            if probe_result == "inspect-failed":
+                assert "inspect-unavailable" in result.stderr
+                assert not any(call.startswith("run ") for call in calls)
+
+
+@pytest.mark.parametrize("value", [[], [""], ["--dry-run"]])
+def test_docker_probe_requires_a_container_name(value: list[str]) -> None:
+    result = subprocess.run(
+        ["bash", str(RESTORE_SCRIPT), "--docker-probe-container", *value],
+        capture_output=True,
+        text=True,
+        timeout=5,
+        check=False,
+    )
+    assert result.returncode == 2
+    assert "requires a container name" in result.stderr

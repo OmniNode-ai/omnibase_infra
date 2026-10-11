@@ -8,7 +8,7 @@
 #
 #
 # Usage (prefer `make up` / `make up-runtime` from the repo root, or
-# scripts/deploy-runtime.sh -- see knowledge-base-internal:runbooks/omnibase-infra-docker-deployment.md Quick Start):
+# onex-runtime-deploy -- see knowledge-base-internal:runbooks/omnibase-infra-docker-deployment.md Quick Start):
 #   # Core infrastructure -- postgres, valkey, redpanda, keycloak, infisical.
 #   # Infisical is always-on (OMN-5831), not a separate profile: INFISICAL_ENCRYPTION_KEY
 #   # and INFISICAL_AUTH_SECRET must be set in .env before this succeeds.
@@ -148,7 +148,7 @@ x-runtime-env: &runtime-env
   # OMN-13220: per-consumer Kafka consumer-start budget. On a fully-cold lane the
   # kernel joins a consumer group per subscribed topic; with 1300+ topics on a
   # freshly-provisioned broker the default 30s blew on the slow group-coordinator
-  # tail and the kernel recycled before reaching healthy. deploy-runtime.sh
+  # tail and the kernel recycled before reaching healthy. onex-runtime-deploy
   # exports a raised COLD_START_KAFKA_TIMEOUT_SECONDS before the restart; the
   # :-30 default preserves the prior steady-state value when the var is unset
   # (e.g. a plain `docker compose up` outside the deploy script). Mapped to
@@ -491,6 +491,24 @@ x-runtime-env: &runtime-env
   # OTEL_SERVICE_NAME is set per-service (see individual service blocks below).
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://phoenix:6006"
   OTEL_TRACES_EXPORTER: "otlp"
+# Value-less pass-through names (OMN-20867). Each is listed with no value, so
+# compose hands the container the host's value when one is set and leaves the
+# variable unset in the container when it is not. They are not in x-runtime-env,
+# which holds no null value; never write them as ${VAR:-}, which would turn an
+# unset host value into an empty string.
+#
+# The per-lane act switches of omnimarket's landing orchestrator and CI-red
+# triage. Their contracts read them through ${env.VAR:default} references whose
+# inline default is the shipped behaviour, and refuse a set-but-empty value at
+# contract load. A lane's private deployment overlay sets them; this repository
+# names them only and carries no lane's value.
+x-runtime-passthrough-env: &runtime-passthrough-env
+  ONEX_PR_LANDING_GITHUB_MODE:
+  ONEX_PR_LANDING_ARM_ACTION_MODE:
+  ONEX_CI_RED_TRIAGE_ACT_RUNNER:
+  ONEX_CI_RED_TRIAGE_ACT_PR_OWN:
+  ONEX_CI_RED_TRIAGE_ACT_SHARED_CAUSE:
+  ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD:
 # ==========================================================================
 # Services
 # ==========================================================================
@@ -644,7 +662,7 @@ services:
       # REDPANDA_MEMORY. Three lanes -- dev (this file), stability-test
       # (docker-compose.stability-test.yml) and judge (docker-compose.judge.yml)
       # -- all read REDPANDA_MEMORY, and the value that actually takes effect
-      # comes from the host-global operator env file that deploy-runtime.sh
+      # comes from the host-global operator env file that onex-runtime-deploy
       # resolves via OMNIBASE_OPERATOR_ENV_FILE. So there was no way to change
       # the dev broker's reservation without also changing the other two at
       # their next recreate. lakshman, dogfood, prod and ci-bus already have
@@ -685,7 +703,7 @@ services:
       - "${REDPANDA_SCHEMA_REGISTRY_PORT:-18081}:18081"
       # Admin API, published on the host loopback ONLY (OMN-20260).
       # admin_api_require_auth is false on this broker (the healthcheck, the
-      # deploy-runtime.sh broker probe and the rpk one-shots call it with no
+      # onex-runtime-deploy broker probe and the rpk one-shots call it with no
       # credentials), so an all-interfaces publish let any LAN or tailnet host
       # create SCRAM users and rewrite cluster config, undoing per-developer
       # and per-tenant broker isolation. Every in-network consumer uses
@@ -728,11 +746,11 @@ services:
     image: redpandadata/redpanda:v24.2.7
     container_name: omnibase-infra-redpanda-partition-cap
     entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        set -eu
-        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_partitions_per_shard 7000
-        /usr/bin/rpk -X brokers=redpanda:9092 -X admin.hosts=redpanda:9644 cluster config set topic_memory_per_partition 1048576
+    extends:
+      file: docker-compose.broker-profile.yml
+      service: redpanda-settings
+    environment:
+      REDPANDA_PROFILE_MEMORY: ${DEV_REDPANDA_MEMORY:-12G}
     depends_on:
       redpanda:
         condition: service_healthy
@@ -950,7 +968,7 @@ services:
     # carrying the lane prefix, so it collided across compose projects on the
     # same host (e.g. a leftover dev-lane container blocked a stability rebuild).
     # Lane overlays append their lane segment, yielding the derivable form
-    # <compose-project>-forward-migration that deploy-runtime.sh waits on (OMN-12987).
+    # <compose-project>-forward-migration that onex-runtime-deploy waits on (OMN-12987).
     container_name: omnibase-infra-forward-migration
     profiles: ["runtime", "full"]
     depends_on:
@@ -1146,7 +1164,7 @@ services:
       valkey:
         condition: service_healthy
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omninode-runtime-main}
       RUNTIME_PROFILE: main
       ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_MAIN_CAPABILITIES}
@@ -1242,7 +1260,7 @@ services:
       redpanda:
         condition: service_healthy
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omninode-runtime-effects
       RUNTIME_PROFILE: effects
       ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_EFFECTS_CAPABILITIES}
@@ -1348,7 +1366,7 @@ services:
         condition: service_healthy
     command: ["omnimarket-projection-api"]
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omnimarket-projection-api
       RUNTIME_PROFILE: projection-api
       # Projection API serves materialized read models and has no runtime data
@@ -1397,7 +1415,7 @@ services:
   # lane-prefixed fail-closed form but left this base line bare, so the dev lane
   # (which has no overlay — this file IS the dev lane) still resolved to 0: a plain
   # `up -d --no-deps runtime-worker` exited 0 creating nothing, while
-  # deploy-runtime.sh's RUNTIME_SERVICES / RT-6 deploy readback requires a running
+  # onex-runtime-deploy's RUNTIME_SERVICES / RT-6 deploy readback requires a running
   # container, aborting and auto-restoring every dev-lane deploy. deploy.replicas
   # below is now lane-prefixed and fail-closed, exactly like the sibling
   # DEV_RUNTIME_WORKER_* vars in this same service block.
@@ -1416,7 +1434,7 @@ services:
       redpanda:
         condition: service_healthy
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omninode-runtime-worker
       RUNTIME_PROFILE: workers
       ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_WORKER_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_WORKER_CAPABILITIES}
@@ -1515,7 +1533,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omnimarket-tenant-projection-writer
       RUNTIME_PROFILE: tenant-projection
       ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_TENANT_PROJECTION_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_TENANT_PROJECTION_CAPABILITIES}
@@ -1850,7 +1868,7 @@ services:
       - --workers
       - "1"
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omninode-contract-resolver
       # Contract resolver does not mount /app/data, so it must not render the
       # Bifrost delegation contract into the shared runtime data path.

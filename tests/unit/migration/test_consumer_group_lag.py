@@ -275,3 +275,97 @@ async def test_gate_allows_when_drain_proof_opted_out() -> None:
     )
     decision = await gate.evaluate(contract)
     assert decision.retirement_allowed is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("offsets", "drain_required", "allowed", "residual", "reason"),
+    [
+        pytest.param(
+            (("prepr1.onex.evt.orders.order-placed.v1", 0, 5, 5),),
+            True,
+            True,
+            0,
+            "fully drained",
+            id="namespaced-drained",
+        ),
+        pytest.param(
+            (
+                ("prepr1.onex.evt.orders.order-placed.v1", 0, 5, 5),
+                ("prepr1.onex.evt.orders.order-placed.v1", 1, 2, 5),
+            ),
+            True,
+            False,
+            3,
+            "still has",
+            id="namespaced-residual-lag",
+        ),
+        pytest.param((), True, False, 0, "no committed offsets", id="no-evidence"),
+        pytest.param((), False, True, 0, "explicit opt-out", id="opted-out"),
+        pytest.param(
+            (("onex.evt.orders.order-placed.v1", 0, 5, 5),),
+            True,
+            False,
+            0,
+            "no committed offsets",
+            id="unprefixed-drain-is-not-slot-evidence",
+        ),
+        pytest.param(
+            (
+                ("onex.evt.orders.order-placed.v1", 0, 5, 5),
+                ("prepr1.onex.evt.orders.order-placed.v1", 0, 2, 5),
+            ),
+            True,
+            False,
+            3,
+            "still has",
+            id="unprefixed-drain-cannot-mask-slot-lag",
+        ),
+        pytest.param(
+            (
+                ("onex.evt.orders.order-placed.v1", 0, 2, 5),
+                ("prepr1.onex.evt.orders.order-placed.v1", 0, 5, 5),
+            ),
+            True,
+            True,
+            0,
+            "fully drained",
+            id="unprefixed-lag-does-not-block-slot-drain",
+        ),
+        pytest.param(
+            (("prepr2.onex.evt.orders.order-placed.v1", 0, 5, 5),),
+            True,
+            False,
+            0,
+            "no committed offsets",
+            id="other-slot-is-not-drain-evidence",
+        ),
+    ],
+)
+async def test_gate_namespaced_lag_preserves_canonical_decision(
+    monkeypatch: pytest.MonkeyPatch,
+    offsets: tuple[tuple[str, int, int, int], ...],
+    drain_required: bool,
+    allowed: bool,
+    residual: int,
+    reason: str,
+) -> None:
+    """OMN-18917: compare physical lag keys and report the contract's topic."""
+    monkeypatch.setenv("KAFKA_TOPIC_NAMESPACE", "prepr1")
+    committed = {
+        _FakeTopicPartition(topic, partition): committed_offset
+        for topic, partition, committed_offset, _ in offsets
+    }
+    end = {
+        _FakeTopicPartition(topic, partition): end_offset
+        for topic, partition, _, end_offset in offsets
+    }
+    contract = _migration_contract(drain_required=drain_required)
+    gate = ServiceDrainProofGate(_observer(committed=committed, end=end))
+
+    decision = await gate.evaluate(contract)
+
+    assert decision.old_topic == contract.old_binding.topic
+    assert decision.retirement_allowed is allowed
+    assert decision.residual_lag == residual
+    assert reason in decision.reason

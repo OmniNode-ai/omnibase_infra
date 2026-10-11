@@ -19,14 +19,16 @@
 # in CI booted a runtime for it. A pytest exit code of 0 cannot tell "the
 # projection arrived" from "the suite never ran".
 silent_skip_allowed: false
-# INFORMATIONAL — the gate keys on junit skip reasons, not on this list. Kept in
-# sync with the "Run the runtime-backed suites" step in reusable-runtime-boot.yml.
+# OMN-18811: require executed tests from EACH named module in the same JUnit
+# report. An aggregate count can hide a suite dropped from collection.
+require_each_curated_module: true
+# Kept in sync with the "Run the runtime-backed suites" step in
+# reusable-runtime-boot.yml; this list also owns the per-module execution proof.
 curated_test_paths:
   - "tests/integration/test_runtime_consumes_build_loop_terminal_event.py"
   - "tests/integration/registration/e2e/test_runtime_e2e.py"
-# The floor is 1, not 0, and deliberately low: this is the first run these two
-# suites have ever had in CI, so the honest floor is "something executed".
-# Raise it once the executed count is known from a real run.
+# The aggregate floor remains 1; the per-module check above independently
+# requires at least one executed test from each runtime-backed suite.
 require_executed_min: 1
 required_services:
   runtime:

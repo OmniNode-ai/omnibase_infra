@@ -8,6 +8,7 @@ import asyncio
 import io
 import json
 import subprocess
+import urllib.error
 from pathlib import Path
 from typing import Any
 
@@ -101,13 +102,68 @@ class FakeIO:
             self.envelope = json.loads(kwargs["input"])
             out = "Produced to partition 0 at offset 42"
         elif "consume" in argv:
-            if script.GENERIC_DLQ in argv:
+            if script.SEAM_DLQ in argv:
                 out = json.dumps(self.envelope)
             else:
                 out = json.dumps({"value": json.dumps({"payload": {}}), "offset": 10})
         else:
             raise AssertionError(argv)
         return subprocess.CompletedProcess(argv, 0, out, "")
+
+
+@pytest.mark.parametrize("collector", ["node", "script"])
+def test_marker_count_uses_seam_dlq_when_generic_dlq_also_advances(
+    collector: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_collection import (
+        observe_lane,
+    )
+    from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_lane import (
+        ConsumerFlowLane,
+    )
+
+    # OMN-17427: the subscriber's declared DLQ owns the malformed marker.
+    monkeypatch.setattr(script.time, "sleep", lambda _: None)
+    fake = FakeIO()
+    generic_dlq = "onex.dlq.omnibase-infra.events.v1"
+    watermarks = {script.SEAM_DLQ: 6, generic_dlq: 100}
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        proc = fake.run(argv, **kwargs)
+        if "produce" in argv:
+            watermarks[script.SEAM_DLQ] += 1
+            watermarks[generic_dlq] += 2
+        elif "describe" in argv and argv[-1] in watermarks:
+            proc.stdout = f"PARTITION HIGH-WATERMARK\n0 {watermarks[argv[-1]]}\n"
+        elif "consume" in argv and generic_dlq in argv:
+            proc.stdout = '100\t{"unrelated": 1}\n101\t{"unrelated": 2}\n'
+        return proc
+
+    lane = ConsumerFlowLane(
+        docker="fake-docker",
+        base_url="http://projection.test",
+        runner=run,
+        urlopen=fake.http,
+        sleep=lambda _: None,
+    )
+    collect = observe_lane if collector == "node" else script.observe_lane
+    observed = collect(lane, samples=2, interval=0, settle_seconds=0, injection_wait=0)
+
+    injection = observed["boot"]["injection"]
+    assert watermarks[generic_dlq] == 102
+    assert injection["dlq_copies"] == 1
+    assert injection["seam_dlq_before"] == 6
+    assert injection["seam_dlq_after"] == 7
+    assert observed["boot"]["seam_dlq_hwm"] == [6, 7]
+    consumes = [argv for argv, _ in fake.calls if "consume" in argv]
+    marker_consumes = [argv for argv in consumes if script.SEAM_DLQ in argv]
+    assert len(marker_consumes) == 1
+    assert marker_consumes[0][marker_consumes[0].index("-o") + 1] == "6:7"
+    assert all(generic_dlq not in argv for argv in consumes)
+    assert (
+        sum("describe" in argv and script.SEAM_DLQ in argv for argv, _ in fake.calls)
+        == 3
+    )
 
 
 def test_full_collection_uses_bounded_io_and_restores_mutations(tmp_path: Path) -> None:
@@ -324,6 +380,154 @@ def test_boot_change_retries_the_whole_observation(
     if always_changes:
         assert "replaced during the run" in observed.read_error
         assert not any(argv[0] == "fake-pytest" for argv, _ in fake.calls)
+
+
+@pytest.mark.parametrize("refused_gets", [1, 2])
+@pytest.mark.parametrize(
+    "identity_change", ["replaced", "restarted", "stopped", "unreadable"]
+)
+def test_mid_run_redeploy_retries_after_connection_refused(
+    tmp_path: Path, refused_gets: int, identity_change: str
+) -> None:
+    target = tmp_path / script.WIRING_MODULE
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        "\n".join(
+            f'def {f}():\n    flow_counters.register("group")\n'
+            for f in script.BRANCHES.values()
+        )
+    )
+    fake = FakeIO()
+    failures = 0
+    identity_reread_pending = False
+
+    def http(url: str, **kwargs: Any) -> io.BytesIO:
+        nonlocal failures, identity_reread_pending
+        if failures < refused_gets:
+            failures += 1
+            identity_reread_pending = True
+            raise urllib.error.URLError(
+                ConnectionRefusedError(111, "Connection refused")
+            )
+        return fake.http(url, **kwargs)
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal identity_reread_pending
+        proc = fake.run(argv, **kwargs)
+        if argv[1] == "inspect" and failures:
+            body = json.loads(proc.stdout)
+            if identity_change in ("replaced", "restarted"):
+                body[0]["State"]["StartedAt"] = f"2026-10-08T00:59:{failures:02d}Z"
+                if identity_change == "replaced":
+                    body[0]["Id"] = f"new-{failures}-{argv[-1]}"
+            elif identity_reread_pending:
+                identity_reread_pending = False
+                if identity_change == "unreadable":
+                    return subprocess.CompletedProcess(argv, 1, "", "container missing")
+                body[0]["State"]["Status"] = "exited"
+            proc.stdout = json.dumps(body)
+        return proc
+
+    adapter = HandlerDockerConsumerFlowTarget(
+        runner=run, urlopen=http, sleep=lambda _: None, repo_root=tmp_path
+    )
+    request = ModelConsumerFlowRequest(
+        subject_lane="dev",
+        docker_bin="fake-docker",
+        samples=2,
+        sample_interval=0,
+        settle_seconds=0,
+        injection_wait=0,
+        attempts=3,
+        pytest_cmd="fake-pytest",
+        scratch=tmp_path,
+    )
+    observed = asyncio.run(adapter.observe(request))
+    assert observed.read_ok, observed.read_error
+    assert failures == refused_gets
+    assert grade_consumer_flow(request, observed).outcome == "PASS"
+    assert sum(
+        argv[1] == "logs" and "--since" not in argv for argv, _ in fake.calls
+    ) == (refused_gets + 1) * len(script.RUNTIME_CONTAINERS)
+    assert any(argv[0] == "fake-pytest" for argv, _ in fake.calls)
+
+
+def test_connection_refused_with_unchanged_running_identity_stays_unreadable(
+    tmp_path: Path,
+) -> None:
+    fake = FakeIO()
+    gets = 0
+
+    def http(url: str, **kwargs: Any) -> io.BytesIO:
+        nonlocal gets
+        gets += 1
+        raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+
+    adapter = HandlerDockerConsumerFlowTarget(
+        runner=fake.run, urlopen=http, sleep=lambda _: None, repo_root=tmp_path
+    )
+    request = ModelConsumerFlowRequest(
+        subject_lane="dev",
+        docker_bin="fake-docker",
+        settle_seconds=0,
+        pytest_cmd="fake-pytest",
+        scratch=tmp_path,
+    )
+    observed = asyncio.run(adapter.observe(request))
+    assert not observed.read_ok
+    assert "Connection refused" in observed.read_error
+    assert "replaced during the run" not in observed.read_error
+    assert "ConsumerFlowBootChangedError" not in observed.read_error
+    assert grade_consumer_flow(request, observed).outcome == "INDETERMINATE"
+    assert gets == 1
+    assert not any(argv[0] == "fake-pytest" for argv, _ in fake.calls)
+
+
+@pytest.mark.parametrize("attempts", [1, 3])
+def test_repeated_mid_run_redeploy_exhausts_attempts(
+    tmp_path: Path, attempts: int
+) -> None:
+    fake = FakeIO()
+    inspections = 0
+    gets = 0
+
+    def http(url: str, **kwargs: Any) -> io.BytesIO:
+        nonlocal gets
+        gets += 1
+        raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        nonlocal inspections
+        proc = fake.run(argv, **kwargs)
+        if argv[1] == "inspect":
+            inspections += 1
+            body = json.loads(proc.stdout)
+            revision = (inspections - 1) // len(script.BOOT_CONTAINERS)
+            body[0]["Id"] = str(revision)
+            body[0]["State"]["StartedAt"] = f"2026-10-08T00:59:{revision:02d}Z"
+            proc.stdout = json.dumps(body)
+        return proc
+
+    adapter = HandlerDockerConsumerFlowTarget(
+        runner=run, urlopen=http, sleep=lambda _: None, repo_root=tmp_path
+    )
+    request = ModelConsumerFlowRequest(
+        subject_lane="dev",
+        docker_bin="fake-docker",
+        settle_seconds=0,
+        attempts=attempts,
+        pytest_cmd="fake-pytest",
+        scratch=tmp_path,
+    )
+    observed = asyncio.run(adapter.observe(request))
+    assert not observed.read_ok
+    assert "replaced during the run" in observed.read_error
+    assert "first read error:" in observed.read_error
+    assert "Connection refused" in observed.read_error
+    assert grade_consumer_flow(request, observed).outcome == "INDETERMINATE"
+    assert gets == request.attempts
+    assert inspections == 2 * request.attempts * len(script.BOOT_CONTAINERS)
+    assert not any(argv[0] == "fake-pytest" for argv, _ in fake.calls)
 
 
 def test_negative_timeout_restores_the_exact_original_bytes(tmp_path: Path) -> None:

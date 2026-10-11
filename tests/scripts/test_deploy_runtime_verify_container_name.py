@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""deploy-runtime.sh verify_deployment must probe the lane-scoped runtime container.
+"""onex-runtime-deploy verify_deployment must probe the lane-scoped runtime container.
 
 OMN-13826: verify_deployment() resolved the runtime container by the HARDCODED dev
 name ``omninode-runtime`` -- an anchored ``docker ps --filter name=^/omninode-runtime$``
@@ -40,7 +40,13 @@ from pathlib import Path
 
 import pytest
 
-DEPLOY_SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    Path(__file__).resolve().parents[2]
+    / "src"
+    / "omnibase_infra"
+    / "handlers"
+    / "handler_runtime_deploy.sh"
+)
 
 
 def _script_text() -> str:
@@ -56,7 +62,7 @@ def _extract_function(name: str) -> str:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, (
-        f"could not extract function {name}() from deploy-runtime.sh"
+        f"could not extract function {name}() from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -90,7 +96,7 @@ def test_defines_lane_runtime_container_name_resolver() -> None:
     text = _script_text()
     assert re.search(
         r"^resolve_lane_runtime_container_name\s*\(\)", text, re.MULTILINE
-    ), "deploy-runtime.sh must define resolve_lane_runtime_container_name()"
+    ), "onex-runtime-deploy must define resolve_lane_runtime_container_name()"
 
 
 @pytest.mark.unit

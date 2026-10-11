@@ -558,7 +558,9 @@ def _resolve(
             # Keep the real tests/unit/ coverage that read this config.
             selected.add(TEST_UNIT_PREFIX)
 
-        if path.startswith(SCRIPTS_PREFIX):
+        if path.startswith(SCRIPTS_PREFIX) or path == (
+            "src/omnibase_infra/handlers/handler_runtime_deploy.sh"
+        ):
             # OMN-15245: scripts/ holds deploy-path and governance-guard code
             # whose tests live in tests/scripts/ and tests/unit/scripts/. Before
             # this mapping a scripts/ change reached neither: it produced no

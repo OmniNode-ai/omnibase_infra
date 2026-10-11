@@ -36,6 +36,17 @@
 #   ./scripts/runner-disk-admission-restore.sh --dry-run         # print, don't act
 #   ./scripts/runner-disk-admission-restore.sh --mount /data
 #   ./scripts/runner-disk-admission-restore.sh --pause-dir /path/to/state/disk-admission-pause
+#   ./scripts/runner-disk-admission-restore.sh --docker-probe-container omninode-air-runner-1
+#
+# OMN-19084: Docker Desktop hosts must measure the VM filesystem, not the
+# macOS host disk. --docker-probe-container uses the existing runner image
+# (by immutable image ID) and read-only mounts to run only df in a disposable
+# container, even while the runner is stopped. It does not start the listener.
+# --mount then names the in-container admission mount (defaults to the hook
+# default, /home/runner/actions-runner). --pause-dir still names the HOST
+# bind-mount source. Run ticks from the host scheduler; floor, positive-slope
+# streak and canary batching are unchanged. An unreadable VM probe resets
+# the observation window and never falls back to host df.
 #
 # Exit codes: 0 always on a clean tick (including "nothing to do"); 2 bad args;
 # 3 missing deps. A restore batch failing to bring a runner back logs loudly
@@ -53,6 +64,8 @@ PAUSE_DIR="${SCRIPT_DIR}/../docker/state/disk-admission-pause"
 STATE_FILE="${HOME}/.local/state/onex/runner-disk-admission-restore-state.json"
 LOG_FILE="${HOME}/.local/log/onex/runner-disk-admission-restore.log"
 DRY_RUN=false
+DOCKER_PROBE_CONTAINER=""
+MOUNT_EXPLICIT=false
 
 # Below this floor, do nothing at all — paused runners stay paused. This must
 # stay comfortably below RESTORE_FLOOR_GB so a hovering-near-critical disk
@@ -70,7 +83,13 @@ DOCKER_BIN="${RUNNER_DISK_GUARD_DOCKER_BIN:-docker}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --mount) MOUNT="$2"; shift 2 ;;
+    --mount) MOUNT="$2"; MOUNT_EXPLICIT=true; shift 2 ;;
+    --docker-probe-container)
+      if [[ $# -lt 2 || -z "$2" || "$2" == --* ]]; then
+        echo "ERROR: --docker-probe-container requires a container name" >&2
+        exit 2
+      fi
+      DOCKER_PROBE_CONTAINER="$2"; shift 2 ;;
     --pause-dir) PAUSE_DIR="$2"; shift 2 ;;
     --state-file) STATE_FILE="$2"; shift 2 ;;
     --dry-run) DRY_RUN=true; shift ;;
@@ -78,6 +97,10 @@ while [[ $# -gt 0 ]]; do
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
+
+if [[ -n "$DOCKER_PROBE_CONTAINER" && "$MOUNT_EXPLICIT" != true ]]; then
+  MOUNT="/home/runner/actions-runner"
+fi
 
 mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$STATE_FILE")"
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] [runner-disk-guard] $*" | tee -a "$LOG_FILE" >&2; }
@@ -90,6 +113,26 @@ command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 not found" >&2; exi
 # ---------------------------------------------------------------------------
 if [[ -n "${RUNNER_DISK_GUARD_AVAIL_KB_OVERRIDE:-}" ]]; then
   avail_kb="${RUNNER_DISK_GUARD_AVAIL_KB_OVERRIDE}"
+elif [[ -n "$DOCKER_PROBE_CONTAINER" ]]; then
+  # A paused runner cannot answer docker exec. Its locally installed image
+  # and volumes can still measure the same VM-backed admission filesystem.
+  # Never pull an image or run the runner entrypoint as part of recovery.
+  if ! probe_image="$("$DOCKER_BIN" inspect --format '{{.Image}}' "$DOCKER_PROBE_CONTAINER")" || [[ -z "$probe_image" ]]; then
+    log "ERROR: cannot resolve image for ${DOCKER_PROBE_CONTAINER}; no restore action this tick."
+    if [[ "$DRY_RUN" != true ]]; then
+      rm -f "$STATE_FILE"
+    fi
+    exit 0
+  fi
+  if ! probe_df="$("$DOCKER_BIN" run --rm --pull never --network none --read-only \
+    --volumes-from "${DOCKER_PROBE_CONTAINER}:ro" --entrypoint df "$probe_image" -Pk "$MOUNT")"; then
+    log "ERROR: cannot read VM free space on ${MOUNT}; no restore action this tick."
+    if [[ "$DRY_RUN" != true ]]; then
+      rm -f "$STATE_FILE"
+    fi
+    exit 0
+  fi
+  avail_kb="$(printf '%s\n' "$probe_df" | awk 'NR==2 {print $4}')"
 else
   target="$MOUNT"
   df -P "$target" >/dev/null 2>&1 || target="/"
@@ -98,6 +141,9 @@ fi
 
 if ! [[ "$avail_kb" =~ ^[0-9]+$ ]]; then
   log "ERROR: could not read free space on ${MOUNT}; skipping this tick (fail-safe: no restore action)."
+  if [[ -n "$DOCKER_PROBE_CONTAINER" && "$DRY_RUN" != true ]]; then
+    rm -f "$STATE_FILE"
+  fi
   exit 0
 fi
 avail_gb="$(( avail_kb / 1024 / 1024 ))"

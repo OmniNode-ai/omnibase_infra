@@ -18,7 +18,7 @@ asserts it equals the intended ref. Two facts are checked, either or both:
    container (``uv pip show``) must equal the expected release versions — the
    Train-2 (release) fact.
 
-Called as the deploy's TERMINAL step by ``scripts/deploy-runtime.sh``
+Called as the deploy's TERMINAL step by ``onex-runtime-deploy``
 (``readback_deployed_ref``), not an optional flag.
 
 Usage:

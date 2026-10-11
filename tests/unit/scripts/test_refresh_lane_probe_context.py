@@ -22,7 +22,7 @@ Three legs, each guarded here against silent reversion:
    RUN) is reported as "unreachable from this probe context", distinct from
    the observed-unhealthy STOP; the "may be UNHEALTHY" claim is reserved for
    a gate that actually ran and failed.
-3. Operator-env provisioning: deploy-runtime.sh and both refresh scripts
+3. Operator-env provisioning: onex-runtime-deploy and both refresh scripts
    honor OMNIBASE_OPERATOR_ENV_FILE, and the runner compose bind-mounts the
    host operator env read-only at a neutral path. Root-phase init copies it
    into runner-owned credentials storage before job steps run (never under
@@ -43,7 +43,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_BUILD = REPO_ROOT / "scripts" / "runtime_build"
 STABILITY_SCRIPT = RUNTIME_BUILD / "refresh_stability_lane.sh"
 DEV_SCRIPT = RUNTIME_BUILD / "refresh_dev_lane.sh"
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.runners.yml"
 
 # OMN-14984: the manifest/health default URLs no longer interpolate a

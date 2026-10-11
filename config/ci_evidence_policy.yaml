@@ -190,15 +190,15 @@ evidence_artifacts:
   # so the uploader is satisfied. Rule 24(b) fails staging delivery closed on a
   # missing receipt for a sha, so a receipt that exists and says nothing is the
   # worst of the three states -- it passes the uploader and fails the reader.
-  - id: lab-pass-receipt-onex-lab
+  - id: candidate-boot-receipt
     workflow: .github/workflows/deliver-dev-candidate-to-staging.yml
     job: candidate-boot-gate
-    producer_step: "Emit the onex-lab lab-pass receipt"
-    artifact_name: lab-pass-receipt-onex-lab-${{ github.sha }}
+    producer_step: "Emit the candidate render/wiring smoke receipt"
+    artifact_name: candidate-boot-receipt-${{ github.sha }}
     required_paths:
-      - /tmp/lab-pass-receipt/receipt.json
+      - /tmp/candidate-boot-receipt/receipt.json
     rationale: >-
-      The onex-lab lab pass for the delivered sha. deliver-dev-candidate-to- staging.yml's lab-pass-gate job refuses the staging announcement without a PASS receipt for the exact sha (rule 24(b)).
+      The ephemeral kind candidate render/wiring smoke receipt for the delivered sha. Its absence remains fatal to candidate-boot-gate, but it cannot satisfy the persistent lab-pass gate.
   # OMN-19233: the staging delivery gate's own verdict, one per run attempt.
   # The compose-dev emitter's re-run selector (runtime-rebuild-trigger.yml,
   # job rerun-refused-deliveries) reads it to decide whether a refused delivery
@@ -297,17 +297,3 @@ evidence_artifacts:
       - zombie-detector-report.json
     rationale: >-
       The per-run record of which repos the zombie detector read (runs read and active pull-request runs per repo), what it would or did force-cancel, and every read or cancel error. A blind detector and a quiet one look identical from a green run without it.
-  # --- Contract Compliance Check's deferral record (OMN-20135) ------------
-  #
-  # CI Summary judges the deferred test_passes DoD items from this record.
-  # A success of Contract Compliance Check with no record fails CI Summary, so
-  # the record's existence is itself the claim that the DoD items were read.
-  - id: contract-compliance-deferred
-    workflow: .github/workflows/ci.yml
-    job: contract-compliance
-    producer_step: "Run DoD contract compliance against the product tree (OMN-20135)"
-    artifact_name: contract-compliance-deferred
-    required_paths:
-      - contract-compliance-deferred/record.json
-    rationale: >-
-      The list of test_passes DoD items the Contract Compliance Check deferred to CI Summary, one per item with the PR and repo it names, or an empty list when none applied or the declared dependency-bot exemption ran. An absent record beside a green compliance job would let CI Summary pass without judging items it was handed.

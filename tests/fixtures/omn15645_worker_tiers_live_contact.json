@@ -1,0 +1,22 @@
+{
+  "tiers_path": "/app/config/delegation/routing_tiers.yaml",
+  "file_sha256": "5a54e42d851e911275a58e7f7177990db2f03aa838cabf0533a6b5b7886689da",
+  "packaged_sha256": "5a54e42d851e911275a58e7f7177990db2f03aa838cabf0533a6b5b7886689da",
+  "loader_type": "ModelDelegationConfig",
+  "omnimarket_version": "0.4.307",
+  "runtime_profile": "workers",
+  "_provenance": {
+    "source": "h201:docker exec omnibase-infra-runtime-worker-1; inherited deployment environment; real _get_config() and packaged file hashes",
+    "captured_utc": "2026-10-09T06:20:30.031922+00:00",
+    "lane": "lab-fill-omn15645-10090550",
+    "ticket": "OMN-15645",
+    "command": [
+      "docker",
+      "exec",
+      "omnibase-infra-runtime-worker-1",
+      "python",
+      "-c",
+      "import hashlib,importlib.metadata,json,os,pathlib\nfrom omnimarket.nodes.node_delegation_routing_reducer.handlers.handler_delegation_routing import _get_config\np=pathlib.Path(os.environ[\"DELEGATION_ROUTING_TIERS_PATH\"])\nd=importlib.metadata.distribution(\"omnimarket\")\nq=pathlib.Path(d.locate_file(\"omnimarket/configs/routing_tiers.yaml\"))\na=hashlib.sha256(p.read_bytes()).hexdigest()\nb=hashlib.sha256(q.read_bytes()).hexdigest()\nassert a == b\nconfig=_get_config()\nprint(json.dumps({\"tiers_path\":str(p),\"file_sha256\":a,\"packaged_sha256\":b,\"loader_type\":type(config).__name__,\"omnimarket_version\":d.version,\"runtime_profile\":os.environ[\"RUNTIME_PROFILE\"]}))\n"
+    ]
+  }
+}

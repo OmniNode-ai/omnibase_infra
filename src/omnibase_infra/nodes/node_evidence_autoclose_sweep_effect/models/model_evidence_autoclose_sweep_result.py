@@ -71,6 +71,11 @@ class ModelEvidenceAutocloseSweepResult(BaseModel):
     bindings_extracted: int = Field(default=0, ge=0)
     tickets_flipped: int = Field(default=0, ge=0)
     tickets_gap_posted: int = Field(default=0, ge=0)
+    tickets_ticked_open: int = Field(
+        default=0,
+        ge=0,
+        description="Started candidates with all task-list boxes ticked, never flipped.",
+    )
     tickets_skipped: int = Field(default=0, ge=0)
     tickets_errored: int = Field(default=0, ge=0)
     # OMN-18336. How many of this run's candidates were candidates because a

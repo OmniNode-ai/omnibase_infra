@@ -1,19 +1,42 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-nightly-sweep.service — publish the nightly build-loop-start command to
+# the dev lane broker (OMN-20798).
+#
+# This unit used to run ~/.local/bin/onex-nightly-sweep-trigger.sh, which was
+# host state no repo tracked, so the host-drift check compared the installed
+# unit with a tracked file that said something else. It piped one command into
+# `docker exec -i omnibase-infra-redpanda rpk topic produce` and nothing more:
+#   * it did not wait for the container, so a run during a lane rebuild died
+#     with `OCI runtime exec failed: ... setns process: exit status 1`;
+#   * it had no timeout, so the 2026-10-07 03:00 run hung until 2026-10-09 10:01;
+#   * it spoke no SASL, which the dev broker's listener requires;
+#   * it sent one fixed correlation id every night.
+# The mechanism now lives here, in the file that is tracked and compared.
+#
+# ExecStartPre fails the unit, loudly, when the broker container is not healthy
+# after two minutes; nothing is published then. The SASL pair is expanded INSIDE
+# the broker container (rpk reads RPK_USER / RPK_PASS), so no credential value
+# reaches this host's argv or journal. TimeoutStartSec bounds the whole start.
+# The `$$` and `%%` below are systemd's escapes for a literal `$` and `%`; the
+# `\'` is a literal single quote inside the quoted script.
+
 [Unit]
-Description=ONEX Nightly Sweep — publishes sweep-requested event to Kafka
-Documentation=https://github.com/OmniNode-ai/omnibase_infra/blob/main/systemd/onex-nightly-sweep.service
-After=network-online.target
+Description=ONEX Nightly Sweep — publishes build-loop-start to the dev lane broker
+Documentation=https://github.com/OmniNode-ai/omnibase_infra/blob/main/scripts/systemd/onex-nightly-sweep.service
+After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=jonah
-Environment=KAFKA_BOOTSTRAP_SERVERS=localhost:19092
-ExecStart=/bin/bash -c '\
-  rpk topic produce onex.cmd.verification.sweep-requested.v1 <<< \
-  "{\"correlation_id\":\"timer-nightly-sweep-$(date +%%Y%%m%%dT%%H%%M%%S)\",\"requested_by\":\"systemd-timer\",\"scope\":\"full\"}"'
+TimeoutStartSec=300
+Environment=ONEX_SWEEP_BROKER_CONTAINER=omnibase-infra-redpanda
+ExecStartPre=/bin/bash -c 'for i in $$(seq 1 60); do if [ "$$(docker inspect -f "{{.State.Health.Status}}" "$$1")" = healthy ]; then exit 0; fi; sleep 2; done; echo "onex-nightly-sweep: broker container $$1 is not healthy after 120s - NOT publishing" >&2; exit 1' sweep ${ONEX_SWEEP_BROKER_CONTAINER}
+ExecStart=/bin/bash -c 'set -euo pipefail; id=$$(cat /proc/sys/kernel/random/uuid); ts=$$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ); printf \'{"event_type":"omnibase-infra.build-loop-start","correlation_id":"%%s","payload":{"correlation_id":"%%s","max_cycles":1,"skip_closeout":false,"dry_run":false,"requested_at":"%%s"}}\\n\' "$$id" "$$id" "$$ts" | docker exec -i "$$1" sh -c \'RPK_USER="$${DEV_KAFKA_SASL_USERNAME}" RPK_PASS="$${DEV_KAFKA_SASL_PASSWORD}" RPK_SASL_MECHANISM=SCRAM-SHA-256 rpk topic produce onex.cmd.omnibase-infra.build-loop-start.v1\'; echo "onex-nightly-sweep: build-loop-start $$id published via $$1"' sweep ${ONEX_SWEEP_BROKER_CONTAINER}
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=onex-nightly-sweep
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target

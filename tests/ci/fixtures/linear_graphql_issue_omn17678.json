@@ -1,0 +1,29 @@
+{
+  "_provenance": {
+    "source": "Linear GraphQL issue query via AdapterLinearGraphQLProjectTracker.post_graphql",
+    "captured_utc": "2026-10-08T12:29:57.596230+00:00",
+    "source_sha256": "3ba51c39711832c10f610ebb739b5dc6407b489b9aff37a15ce08e6ffea5b704",
+    "query": "query RecordedIssue($id: String!) { issue(id: $id) { id identifier title url priority createdAt updatedAt state { name type } } }",
+    "variables": {
+      "id": "OMN-17678"
+    },
+    "http_status": 200
+  },
+  "response": {
+    "data": {
+      "issue": {
+        "id": "91584acf-d9b2-4f66-9ee1-910d8385ccb9",
+        "identifier": "OMN-17678",
+        "title": "P4-7: consolidate the nine api.linear.app call sites in omnibase_infra onto AdapterLinearGraphQLProjectTracker",
+        "url": "https://linear.app/omninode/issue/OMN-17678",
+        "priority": 0,
+        "createdAt": "2026-09-03T00:45:53.060Z",
+        "updatedAt": "2026-09-03T00:45:53.060Z",
+        "state": {
+          "name": "Backlog",
+          "type": "backlog"
+        }
+      }
+    }
+  }
+}

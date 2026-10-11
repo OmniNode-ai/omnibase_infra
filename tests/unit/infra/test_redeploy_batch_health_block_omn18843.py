@@ -4,7 +4,7 @@
 
 The defect this ratchets, measured twice on the .201 dev lane:
 
-``deploy-runtime.sh`` ``restart_services()`` force-recreates the WHOLE lane
+``onex-runtime-deploy`` ``restart_services()`` force-recreates the WHOLE lane
 runtime set in a single ``docker compose up -d --no-deps --force-recreate
 <service>...`` call. ``--no-deps`` skips STARTING dependencies that were not
 named, but it does not suppress a condition between two services that ARE both
@@ -43,12 +43,14 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DOCKER_DIR = REPO_ROOT / "docker"
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 BASE_FILE = DOCKER_DIR / "docker-compose.infra.yml"
 DEV_LANE_FILE = DOCKER_DIR / "docker-compose.dev-lane.yml"
 CATALOG_SERVICES_DIR = DOCKER_DIR / "catalog" / "services"
 
-# The arrays in deploy-runtime.sh whose union is recreated in ONE compose call
+# The arrays in onex-runtime-deploy whose union is recreated in ONE compose call
 # on the dev lane. Named rather than globbed so a new array is a deliberate
 # addition here and not a silent widening of what this test covers.
 BATCH_ARRAYS = (
@@ -107,7 +109,7 @@ def _merged_dev_lane_services() -> dict[str, dict]:
 
 
 def _batch_services() -> set[str]:
-    """Union of the dev-lane restart arrays, parsed out of deploy-runtime.sh.
+    """Union of the dev-lane restart arrays, parsed out of onex-runtime-deploy.
 
     Read from the script rather than restated here so the test cannot drift
     away from what the deploy agent actually names in its compose call.
@@ -195,7 +197,7 @@ def test_deploy_script_still_recreates_the_batch_in_one_call() -> None:
         source,
         re.MULTILINE | re.DOTALL,
     )
-    assert match is not None, "restart_services() not found in deploy-runtime.sh"
+    assert match is not None, "restart_services() not found in onex-runtime-deploy"
     body = match.group(0)
     assert "up -d --no-deps --force-recreate" in body, (
         "restart_services() no longer force-recreates with --no-deps; the "

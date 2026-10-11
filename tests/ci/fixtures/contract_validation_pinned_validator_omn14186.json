@@ -1,0 +1,38 @@
+{
+  "_provenance": {
+    "source": "Real runs of the onex_change_control validate-yaml entry point, built with uv sync --no-group dev from git archive of each commit, against this PR's contracts/OMN-14186.yaml (which carries binds_ac), on lab host h202; not a hosted-runner capture",
+    "captured_utc": "2026-10-09T06:51:45.423223+00:00",
+    "source_sha256": "e0e67476dcd89b9c86f6e9da304d3ab55903da123b6446eaf203ad9087ce281e",
+    "ticket": "OMN-14186",
+    "command": "validate-yaml contracts/OMN-14186.yaml"
+  },
+  "response": {
+    "pinned": {
+      "onex_change_control_sha": "802b5f7101f4c49f8b30e8deda3d4c5d024c5710",
+      "exit_code": 0,
+      "output": [
+        "[INFO] Validating 1 file(s)...",
+        "",
+        "[OK] contracts/OMN-14186.yaml (ticket_contract)",
+        "",
+        "[OK] All 1 file(s) valid"
+      ]
+    },
+    "main": {
+      "onex_change_control_sha": "a89a6f30fabf74189195f57b57fcc5d4751f4c48",
+      "exit_code": 1,
+      "output": [
+        "[INFO] Validating 1 file(s)...",
+        "",
+        "",
+        "[ERROR] Validation failed for 'contracts/OMN-14186.yaml' (ticket_contract):",
+        "Validation errors:",
+        "  - dod_evidence.0.binds_ac: Extra inputs are not permitted [extra_forbidden]",
+        "    Input: ['AC1']",
+        "  - dod_evidence.1.binds_ac: Extra inputs are not permitted [extra_forbidden]",
+        "    Input: ['AC2']",
+        "[ERROR] 1/1 file(s) invalid"
+      ]
+    }
+  }
+}

@@ -5,16 +5,17 @@ contract_name: "node_contract_validate_compute"
 node_name: "node_contract_validate_compute"
 contract_version:
   major: 1
-  minor: 0
+  minor: 1
   patch: 0
 node_version:
   major: 1
-  minor: 0
+  minor: 1
   patch: 0
 node_type: "COMPUTE_GENERIC"
+runtime_profiles: [main]
 status: "active"
 description: >
-  Compute node for ONEX contract validation and AST-based Pydantic model compliance scoring. Provides the runtime node boundary for the legacy ServiceContractValidator API while CI callers migrate.
+  Compute node for ONEX contract validation, model compliance scoring and consumer topic namespace validation. The topic naming CI gate invokes this contract over the event bus to refuse half-namespaced consumer declarations.
 
 input_model:
   name: "ModelContractValidateInput"
@@ -31,7 +32,20 @@ handler_routing:
       handler:
         name: "HandlerContractValidate"
         module: "omnibase_infra.nodes.node_contract_validate_compute.handlers.handler_contract_validate"
-      description: "Validate contract YAML, contract files, or model compliance inputs."
+      event_type: "omnibase-infra.contract-validation-requested"
+      message_category: "command"
+      description: "Validate contracts, model compliance or consumer namespaces."
+terminal_event: "onex.evt.omnibase-infra.contract-validation-completed.v1"
+event_bus:
+  subscribe_topics:
+    - "onex.cmd.omnibase-infra.contract-validation-requested.v1"
+  # The existing CI caller publishes requests under this contract; the runtime
+  # result applier publishes the terminal response. Both topics are owned here.
+  publish_topics:
+    - "onex.cmd.omnibase-infra.contract-validation-requested.v1"
+    - "onex.evt.omnibase-infra.contract-validation-completed.v1"
+  dlq_topics:
+    - "onex.dlq.omnibase-infra.contract-validation-requested.v1"
 io_operations:
   - operation: "validate_contract"
     description: "Run contract validation or model compliance scoring."
@@ -49,6 +63,16 @@ io_operations:
       - violations
       - warnings
       - suggestions
+  - operation: "validate_consumer_topics"
+    description: "Validate one topic set or statically resolvable Python consumer declarations."
+    input_model: "ModelContractValidateInput"
+    output_model: "ModelContractValidationResult"
+    input_fields:
+      - consumer_topics
+      - consumer_source
+    output_fields:
+      - is_valid
+      - violations
 dependencies:
   - name: "contract_validator"
     type: "library"

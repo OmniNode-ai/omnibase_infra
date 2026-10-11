@@ -94,7 +94,7 @@ def _operator_env_display_path() -> str:
 
     Never interpolated into a committed default — an absolute home path in
     source is a portability bug (Operating Rule 6). This resolves the same knob
-    deploy-runtime.sh and refresh_dev_lane.sh resolve.
+    onex-runtime-deploy and refresh_dev_lane.sh resolve.
     """
     explicit = os.environ.get("OMNIBASE_OPERATOR_ENV_FILE")
     if explicit:

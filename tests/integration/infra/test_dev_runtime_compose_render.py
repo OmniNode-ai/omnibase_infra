@@ -13,7 +13,7 @@ off-host client (CI runner, another machine).
 OMN-14968 (`DEV_WORKER_REPLICAS`): the `runtime-worker` deploy block resolved a
 BARE `${WORKER_REPLICAS:-0}` that no surface exported, so the dev lane rendered
 `replicas: 0`. `docker compose up -d --no-deps runtime-worker` then exited 0
-creating NOTHING, while `deploy-runtime.sh`'s `RUNTIME_SERVICES` / RT-6 deploy
+creating NOTHING, while `onex-runtime-deploy`'s `RUNTIME_SERVICES` / RT-6 deploy
 readback requires a running container — so every dev-lane deploy aborted at the
 readback and auto-restored. The lane-prefixed value is the ledgered policy
 contract's (`DEV_WORKER_REPLICAS=1`, rendered from
@@ -39,7 +39,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
 # OMN-17448: the dev lane's SECOND `-f` file. `resolve_compose_file_args()` in
-# scripts/deploy-runtime.sh appends this for the bare `omnibase-infra` project
+# src/omnibase_infra/handlers/handler_runtime_deploy.sh appends this for the bare `omnibase-infra` project
 # and never for a lane with its own overlay, so a service declared here reaches
 # the dev lane and provably no other.
 DEV_LANE_OVERLAY = REPO_ROOT / "docker" / "docker-compose.dev-lane.yml"
@@ -47,7 +47,7 @@ _DEFAULT_POLICY_ENV_FILE = "docker/runtime-policy.env"
 POLICY_ENV_PATH = REPO_ROOT / "docker" / "runtime-policy.env"
 
 # NOTE: docker-compose.infra.yml (bare, no overlay) is the dev lane's own
-# compose file (scripts/deploy-runtime.sh: "Dev lane: infra.yml alone"). A
+# compose file (src/omnibase_infra/handlers/handler_runtime_deploy.sh: "Dev lane: infra.yml alone"). A
 # `docker compose config` render interpolates every service's env block
 # regardless of --profile, so every other :?-required var in the file must
 # still be supplied here even though this suite only cares about
@@ -314,7 +314,7 @@ def test_dev_lane_renders_one_runtime_worker_replica() -> None:
     The value is the ledgered policy contract's `DEV_WORKER_REPLICAS`, supplied
     by `docker/runtime-policy.env`. A render of 0 reproduces the defect: compose
     creates no container, `up` exits 0 with no output, and the RT-6 deploy
-    readback in `scripts/deploy-runtime.sh` then fails closed on an in-scope
+    readback in `src/omnibase_infra/handlers/handler_runtime_deploy.sh` then fails closed on an in-scope
     service it can never resolve.
     """
     env = _render_env(DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST)
@@ -1201,3 +1201,183 @@ def test_trajectory_backend_is_isolated_to_dev(overlay: str | None) -> None:
     if overlay is None:
         for key in ("DHARMA_API_KEY", "DHARMA_ORG_ID"):
             assert services["runtime-effects"]["environment"][key] == ""
+
+
+# OMN-17427. omnimarket's morning nodes read a deployment overlay named by
+# ONEX_SKILL_OVERLAY_ROOTS. The overlay is private deployment content, so the
+# compose file carries only the mount and the variable that names it; the host
+# directory comes from the operator env (DEV_LANE_SKILL_OVERLAY_ROOTS_DIR) and is
+# never packaged here. With no overlay the node refuses a RUN, and the runtime
+# still boots (omnimarket handlers read the overlay on first use).
+_SKILL_OVERLAY_ROOTS_ENV = "ONEX_SKILL_OVERLAY_ROOTS"
+_SKILL_OVERLAY_ROOTS_TARGET = "/etc/onex/skill-overlays"
+_SKILL_OVERLAY_ROOTS_HOST_VAR = "DEV_LANE_SKILL_OVERLAY_ROOTS_DIR"
+
+
+@pytest.mark.integration
+def test_dev_lane_runtime_effects_mounts_the_operator_named_skill_overlay_roots() -> (
+    None
+):
+    """The host directory is whatever the operator env names, read-only."""
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
+        **{_SKILL_OVERLAY_ROOTS_HOST_VAR: "/srv/operator/skill-overlays"},
+    )
+    result = _run_compose_config(env, profile="runtime", with_dev_lane_overlay=True)
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    effects = yaml.safe_load(result.stdout)["services"]["runtime-effects"]
+
+    assert (
+        effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV)
+        == _SKILL_OVERLAY_ROOTS_TARGET
+    )
+    mounts = _mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET)
+    assert len(mounts) == 1, f"expected one overlay-roots mount, got {mounts!r}"
+    (mount,) = mounts
+    assert mount.get("type") == "bind"
+    assert mount.get("read_only") is True
+    assert mount["source"] == "/srv/operator/skill-overlays"
+
+
+@pytest.mark.integration
+def test_dev_lane_skill_overlay_roots_render_without_the_operator_variable() -> None:
+    """Unset, the lane still renders and mounts an empty default: no overlay, so
+    a morning run is refused, and every other node's runtime is untouched. A `:?`
+    here would also break every lane that layers this file."""
+    services = _render_dev_lane_services()
+    effects = services["runtime-effects"]
+    assert (
+        effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV)
+        == _SKILL_OVERLAY_ROOTS_TARGET
+    )
+    assert len(_mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET)) == 1
+
+
+@pytest.mark.integration
+def test_only_runtime_effects_carries_the_skill_overlay_roots() -> None:
+    """The morning nodes run in runtime-effects; nothing else gets the mount."""
+    services = _render_dev_lane_services()
+    carriers = {
+        name
+        for name, service in services.items()
+        if _SKILL_OVERLAY_ROOTS_ENV in (service.get("environment") or {})
+        or _mounts_at(service, _SKILL_OVERLAY_ROOTS_TARGET)
+    }
+    assert carriers == {"runtime-effects"}
+
+
+@pytest.mark.integration
+def test_no_private_overlay_content_is_packaged_in_the_compose_tree() -> None:
+    """The overlay's content never lives in this repo, only the mount does."""
+    docker_dir = REPO_ROOT / "docker"
+    offenders = sorted(
+        str(path.relative_to(REPO_ROOT))
+        for path in docker_dir.rglob("*")
+        if path.is_file()
+        and path.parent.name
+        in {
+            "node_morning_ground_state_orchestrator",
+            "node_morning_friction_sweep_orchestrator",
+        }
+    )
+    assert offenders == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("overlay", sorted(_BORROWER_OVERLAYS))
+def test_lanes_layering_the_dev_overlay_carry_no_skill_overlay_roots(
+    overlay: str,
+) -> None:
+    """These lanes replace runtime-effects' volumes, so the mount the variable
+    names is gone. Each blanks the variable instead of naming a directory that
+    does not exist in its container."""
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST, **_PREPR_SLOT_RENDER_ENV
+    )
+    result = _run_compose_config(
+        env,
+        profile=_BORROWER_OVERLAYS[overlay],
+        with_dev_lane_overlay=True,
+        borrower_overlay=REPO_ROOT / "docker" / overlay,
+    )
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    effects = yaml.safe_load(result.stdout)["services"]["runtime-effects"]
+
+    # Positive control: the dev-lane overlay really was layered.
+    assert effects["environment"].get("KAFKA_SASL_MECHANISM") == "SCRAM-SHA-256"
+
+    assert str(effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV, "")).strip() == ""
+    assert _mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET) == []
+
+
+# OMN-20867. omnimarket's landing orchestrator and CI-red triage read six
+# per-lane act switches through contract ``${env.VAR:default}`` references. The
+# contract's inline default is today's behaviour, and a set-but-empty value is
+# refused at contract load, so compose must pass each name through value-less:
+# unset on the host stays unset in the container, set passes verbatim. Never the
+# ``${VAR:-}`` form, which would turn unset into the empty string the contract
+# refuses.
+_LANE_ACT_SWITCH_VALUES: dict[str, str] = {
+    "ONEX_PR_LANDING_GITHUB_MODE": "dry_run",
+    "ONEX_PR_LANDING_ARM_ACTION_MODE": "report_only",
+    "ONEX_CI_RED_TRIAGE_ACT_RUNNER": "false",
+    "ONEX_CI_RED_TRIAGE_ACT_PR_OWN": "false",
+    "ONEX_CI_RED_TRIAGE_ACT_SHARED_CAUSE": "false",
+    "ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD": "false",
+}
+_LANE_ACT_SWITCH_SERVICES = ("omninode-runtime", "runtime-effects")
+
+
+def _render_lane_runtime_services(
+    overlay: str | None, **switches: str
+) -> dict[str, Any]:
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
+        **(_PREPR_SLOT_RENDER_ENV if overlay else {}),
+        **switches,
+    )
+    for key in _LANE_ACT_SWITCH_VALUES:
+        if key not in switches:
+            env.pop(key, None)
+    result = _run_compose_config(
+        env,
+        profile=_BORROWER_OVERLAYS[overlay] if overlay else "runtime",
+        with_dev_lane_overlay=True,
+        borrower_overlay=(REPO_ROOT / "docker" / overlay) if overlay else None,
+    )
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+    assert isinstance(services, dict)
+    return services
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("overlay", [None, *sorted(_BORROWER_OVERLAYS)])
+def test_lane_act_switches_stay_unset_when_the_host_leaves_them_unset(
+    overlay: str | None,
+) -> None:
+    services = _render_lane_runtime_services(overlay)
+    for name in _LANE_ACT_SWITCH_SERVICES:
+        environment = services[name]["environment"]
+        # Positive control: the runtime anchor really was merged here.
+        assert "ONEX_CONTRACTS_DIR" in environment
+        for key in _LANE_ACT_SWITCH_VALUES:
+            # Listed (so a set host value would reach the container) and
+            # value-less (so compose passes nothing, not "").
+            assert key in environment, f"{name} does not pass {key} through"
+            assert environment[key] is None, (
+                f"{name} renders {key}={environment[key]!r} with the host value "
+                "unset; it must stay unset in the container"
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("overlay", [None, *sorted(_BORROWER_OVERLAYS)])
+def test_lane_act_switches_pass_a_set_host_value_through(overlay: str | None) -> None:
+    services = _render_lane_runtime_services(overlay, **_LANE_ACT_SWITCH_VALUES)
+    for name in _LANE_ACT_SWITCH_SERVICES:
+        environment = services[name]["environment"]
+        for key, value in _LANE_ACT_SWITCH_VALUES.items():
+            assert environment.get(key) == value, (
+                f"{name} renders {key}={environment.get(key)!r}, not the host's {value!r}"
+            )

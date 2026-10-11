@@ -1,14 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Behavioral tests for deploy-runtime.sh's operator-env preflight (OMN-14958).
+"""Behavioral tests for onex-runtime-deploy's operator-env preflight (OMN-14958).
 
 Live failure being eliminated: deploy run 29977968728 (release-train-lab.yml,
 job `Deploy triggering tag to its lane`) died inside the containerized
-omninode-deploy-runner at deploy-runtime.sh's `source ~/.omnibase/.env` with
+omninode-deploy-runner at onex-runtime-deploy's `source ~/.omnibase/.env` with
 bash's bare
 
-    deploy-runtime.sh: line 38: /home/runner/.omnibase/.env: No such file or
+    onex-runtime-deploy: line 38: /home/runner/.omnibase/.env: No such file or
     directory
 
 -- an unnamed crash, before any build/compose action, because the runner
@@ -30,7 +30,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 
 
 def _run(
@@ -47,8 +49,16 @@ def _run(
     env["HOME"] = str(tmp_home)
     if extra_env:
         env.update(extra_env)
+    env["ONEX_DEPLOY_REPOSITORY_ROOT"] = str(REPO_ROOT)
     return subprocess.run(
-        ["bash", str(DEPLOY_SCRIPT), *(args or ["--help"])],
+        [
+            "bash",
+            "-c",
+            'source "$1"; shift; main "$@"',
+            "onex-runtime-deploy",
+            str(DEPLOY_SCRIPT),
+            *(args or ["--help"]),
+        ],
         env=env,
         capture_output=True,
         text=True,

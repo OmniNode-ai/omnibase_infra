@@ -58,7 +58,6 @@ from omnibase_infra.protocols.protocol_dispatch_deadline_source import (
     ProtocolDispatchDeadlineSource,
 )
 from omnibase_infra.runtime.health.projection_apply_flow import (
-    FALLBACK_IMMUTABLE_GRAIN_PROJECTIONS,
     describe_projection_apply_divergence,
     describe_projection_delta_dropped,
     evaluate_projection_apply_flow,
@@ -1138,12 +1137,6 @@ class ServiceRuntimeHealthMonitor:
             registered_projections=apply_counters.registered_projections(),
             immutable_grain_projections=apply_counters.immutable_grain_projections(),
             grain_unresolved_projections=apply_counters.grain_unresolved_projections(),
-            # OMN-19081, operator ruling 2026-09-21. Consulted ONLY where the
-            # contract resolved nothing, which is the window in which a
-            # deployed runtime predates the key_grain declaration. Deleting
-            # the literal outright was measured on dogfood-101 to turn the two
-            # content-addressed exposures DEGRADED on healthy behaviour.
-            fallback_immutable_projections=FALLBACK_IMMUTABLE_GRAIN_PROJECTIONS,
         )
         dimensions.append(
             ModelRuntimeHealthDimension(

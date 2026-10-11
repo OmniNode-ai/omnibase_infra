@@ -10,7 +10,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from omnibase_core.models.delegation.wire import ModelDelegationProvenance
+from omnibase_core.models.delegation.wire import (
+    EnumDelegationTerminalFailureCause,
+    ModelDelegationProvenance,
+)
 from omnibase_core.models.dispatch.model_dispatch_bus_command import (
     ModelDispatchBusCommand,
 )
@@ -200,6 +203,13 @@ def _normalize_result_payload(
         }
 
     normalized["status"] = status
+    # OMN-19558: the broker can exhaust its terminal wait without receiving a
+    # payload. Carry that timeout as a typed cause so the delegate-skill handler
+    # does not infer a provider error from the broker's diagnostic text.
+    if status == "timeout" and normalized.get("terminal_failure_cause") is None:
+        normalized["terminal_failure_cause"] = (
+            EnumDelegationTerminalFailureCause.TIMEOUT.value
+        )
     if error_message:
         normalized["error_message"] = error_message
     normalized.setdefault("model_name", normalized.get("model_used", ""))
@@ -286,6 +296,7 @@ class RuntimeDelegationDispatchPort:
         temperature: float | None = None,
         response_format: dict[str, object] | None = None,
         attribution: Mapping[str, str] | None = None,
+        model: str | None = None,
     ) -> dict[str, object]:
         """Dispatch a request; guard OMN-18931 faults, pass OMN-19124 routing pins.
 
@@ -307,6 +318,9 @@ class RuntimeDelegationDispatchPort:
             ("system_prompt", system_prompt),
             ("temperature", temperature),
             ("response_format", response_format),
+            # OMN-20844: the customer's model choice runs only on omnimarket's
+            # in-process BYOK route; the bus wire does not carry it.
+            ("model", model),
         ):
             if feature_value is not None:
                 raise NotImplementedError(

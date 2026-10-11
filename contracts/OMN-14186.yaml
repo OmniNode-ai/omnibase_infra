@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-14186
+title: contract-validation reads the onex_change_control validators at the sibling pin, not the floating main
+summary: contract-validation.yml called validate-contract@main, so it validated against OCC main, whose schema predates binds_ac; it now checks the validators out at the onex_change_control sibling pin and runs them inline.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn14186
+    statement: contract-validation.yml reads onex_change_control at the sha in .github/sibling-pins.yaml and no longer calls validate-contract@main.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: contract-validation.yml is a pinned workflow with no sibling action addressed by branch and its onex_change_control checkout is the pin -- falsifier: uv run pytest tests/ci/test_sibling_reads_pinned_omn20331.py -q'
+      - id: AC2
+        statement: 'AC2: the validator at the pin admits a contract carrying binds_ac that the validator at OCC main refuses, recorded from real runs -- falsifier: uv run pytest tests/ci/test_contract_validation_pinned_validator_omn14186.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The sibling-pin tests cover contract-validation.yml.
+    command: uv run pytest tests/ci/test_sibling_reads_pinned_omn20331.py -q
+  - kind: tests
+    description: The recorded validator runs show the pinned schema admits binds_ac and main refuses it.
+    command: uv run pytest tests/ci/test_contract_validation_pinned_validator_omn14186.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-14186-ac1
+    description: The sibling-pin tests cover contract-validation.yml and fail while it calls validate-contract@main.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_sibling_reads_pinned_omn20331.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-14186-ac2
+    description: The recorded validator runs show the pinned schema admits binds_ac and main refuses it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_validation_pinned_validator_omn14186.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

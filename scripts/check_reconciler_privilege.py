@@ -95,7 +95,13 @@ RECONCILER_GLOBS = ("scripts/reconcile*.sh", "scripts/**/reconcile*.sh")
 # Cron units this repo ships for the `.201` host, and the manifest that maps the
 # paths they invoke back to the repo files those paths are installed from.
 CRON_UNIT_GLOB = "deploy/**/cron.d/*"
+# OMN-20805: the root schedules moved from cron.d to systemd timers. What the
+# gate scans follows the INVOCATION, so a scheduled command is in scope whether a
+# cron line or a service unit's ExecStart runs it; dropping the service glob would
+# have silently un-scanned every script the timers now run.
+SERVICE_UNIT_GLOB = "deploy/**/systemd/*.service"
 HOST_ARTIFACT_MANIFEST = "deploy/maintenance/omninode-host-maintenance-sync.sh"
+HOST_ARTIFACT_DIR = "/data/maintenance/"
 
 # A crontab command line: five schedule fields, a user, then the command.
 # The user field is captured but NOT filtered on. The defect is "a scheduled job
@@ -105,6 +111,9 @@ HOST_ARTIFACT_MANIFEST = "deploy/maintenance/omninode-host-maintenance-sync.sh"
 _CRON_COMMAND = re.compile(
     r"^\s*(?:@\w+|(?:[-\dA-Za-z*/,]+\s+){5})(?P<user>[A-Za-z_][-\w]*)\s+(?P<command>\S+)"
 )
+
+# A service unit's start line: the command is the first token after `ExecStart=`.
+_EXEC_START = re.compile(r"^ExecStart=[-@+!:]*(?P<command>\S+)")
 
 # A `relpath|hostpath|mode` row of the host-artifact MANIFEST array.
 _MANIFEST_ENTRY = re.compile(r'"([^"|]+)\|([^"|]+)\|[0-7]{3,4}"')
@@ -253,6 +262,39 @@ def discover_scheduled_host_scripts(repo_root: Path) -> tuple[list[Path], list[s
                     f"{rel_unit}:{number}: {command} maps to {relpath}, which does not "
                     "exist in this repository. The mapping must resolve to something "
                     "this gate can actually read."
+                )
+                continue
+            found.add(target)
+
+    for unit in sorted(p for p in repo_root.glob(SERVICE_UNIT_GLOB) if p.is_file()):
+        rel_unit = unit.relative_to(repo_root)
+        for number, raw in enumerate(
+            unit.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            match = _EXEC_START.match(raw.strip())
+            if not match:
+                continue
+            command = match.group("command")
+            relpath = mapping.get(command)
+            if relpath is None:
+                # A system tool (find, rm) is not a repo script and has no file
+                # to open. What stays a FAILURE is a command under the host
+                # artifact directory that no manifest entry maps: that is the
+                # unlisted-script-on-a-schedule hole OMN-17443 closed.
+                if not command.startswith(HOST_ARTIFACT_DIR):
+                    continue
+                failures.append(
+                    f"{rel_unit}:{number}: runs {command}, but no entry in "
+                    f"{HOST_ARTIFACT_MANIFEST} maps that path to a repo file. An "
+                    "unmapped host artifact is neither installed by a sanctioned "
+                    "path nor scanned by this gate (OMN-17443)."
+                )
+                continue
+            target = repo_root / relpath
+            if not target.is_file():
+                failures.append(
+                    f"{rel_unit}:{number}: {command} maps to {relpath}, which does not "
+                    "exist in this repository."
                 )
                 continue
             found.add(target)

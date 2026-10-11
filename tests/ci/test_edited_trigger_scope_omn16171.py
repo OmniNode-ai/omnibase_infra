@@ -9,9 +9,7 @@ whenever a PR's title, body, or base branch changes -- with no new head SHA and
 therefore no new source to inspect. That is correct and load-bearing for gates
 that PARSE the PR body/title/base (the Receipt Gate's ``OMN-XXXX`` citation, the
 skip-token scan that root CLAUDE.md rule 10 depends on, the base-retarget
-guards) and for every ``occ-preflight`` eval-path caller, whose stale FAILURE
-must be cleared by a post-open ``Evidence-Source:`` stamp (OMN-14241,
-guarded separately by ``test_occ_eval_path_trigger_coverage.py``).
+guards).
 
 It is pure waste for a gate that only reads source at the head SHA: the verdict
 on an unchanged SHA is identical every time, so each edit re-queues the whole
@@ -67,26 +65,16 @@ MUST_NOT_LIST_EDITED: tuple[str, ...] = (
     "canonical-inference-gate.yml",
     "duplication-sweep.yml",
     "url-authority-gate.yml",
+    "hostile-reviewer.yml",
 )
 
-# Gates whose verdict depends on the PR body, title, or base branch, or which
-# call `occ-preflight` and must self-heal a post-open evidence stamp. Losing
+# Gates whose verdict depends on the PR body, title, or base branch. Losing
 # `edited` here is the dangerous direction -- it is silent.
 MUST_LIST_EDITED: tuple[str, ...] = (
     "pr-title-check.yml",
-    "call-receipt-gate.yml",
     "call-reject-skip.yml",
     "main-target-guard.yml",
     "non-dev-base-guard.yml",
-    # `ci.yml` is deliberately absent from BOTH lists. It is an occ-preflight
-    # eval-path caller, so it needs a self-heal for a post-open Evidence-Source
-    # stamp -- but as of OMN-16171 that heal comes from `occ-preflight-heal.yml`
-    # re-running the failed jobs in place, not from an `edited` trigger that
-    # re-ran its whole ~48-job matrix. Requiring `edited` here would contradict
-    # that; forbidding it here would duplicate a rule that
-    # test_occ_eval_path_trigger_coverage.py already owns, with a better
-    # question (does a self-heal path EXIST) than this module's.
-    "hostile-reviewer.yml",
 )
 
 
@@ -133,32 +121,6 @@ def test_body_reading_gate_still_fires_on_edited(workflow_name: str) -> None:
         f"PR body, title, or base branch, so without this trigger a post-open "
         f"edit leaves the previous run's result standing forever -- and the "
         f"failure mode is silence, not a red check."
-    )
-
-
-@pytest.mark.unit
-def test_narrowed_gates_declare_no_occ_preflight_job() -> None:
-    """A narrowed gate must not be an occ-preflight eval-path caller.
-
-    Those callers need `edited` to clear a stale `occ-preflight / eligibility`
-    FAILURE after an `Evidence-Source:` stamp (OMN-14241). If one ever acquires
-    an `occ-preflight` job it must leave MUST_NOT_LIST_EDITED in the same
-    commit, so this fails closed rather than degrading quietly.
-    """
-    offenders = []
-    for workflow_name in MUST_NOT_LIST_EDITED:
-        data = yaml.safe_load(
-            (WORKFLOWS_DIR / workflow_name).read_text(encoding="utf-8")
-        )
-        for job_id, job in (data.get("jobs") or {}).items():
-            uses = (job or {}).get("uses")
-            if job_id == "occ-preflight" or (
-                isinstance(uses, str) and "occ-preflight.yml" in uses
-            ):
-                offenders.append(f"{workflow_name}:{job_id}")
-    assert not offenders, (
-        f"these narrowed gates now call occ-preflight and so need `edited` "
-        f"back: {offenders}"
     )
 
 

@@ -38,9 +38,10 @@ Why the two exemptions are exclusions and not thresholds
 fixed source coordinate and are CORRECT to do so. Both key on a
 content-addressed, immutable grain, so the serving cache only ever compares a
 key against a delta derived from the same source event, and the drop is the
-intended idempotence rather than lost data. They are enumerated and excluded by
-name rather than thresholded over, because a threshold wide enough to cover
-them is wide enough to hide the defect.
+intended idempotence rather than lost data. The exposure's contract declares
+that grain (``key_grain: immutable``) and the declaration is the only thing
+that excludes it; it is excluded rather than thresholded over, because a
+threshold wide enough to cover them is wide enough to hide the defect.
 
 Shape
 -----
@@ -109,44 +110,6 @@ DELTA_DROP_MIN_RISING_WINDOWS: int = 2
 #: healthy projection degraded.
 DELTA_DROP_MIN_ACCUMULATION: int = 10
 
-#: The interim fallback exemption set, consulted ONLY for an exposure whose
-#: contract resolves no key grain (OMN-19081, operator ruling 2026-09-21).
-#:
-#: The contract declaration is the source of truth and WINS wherever it
-#: answers; this list is not a second opinion, it is what covers the window in
-#: which a deployed runtime carries an omnimarket older than the one that
-#: introduced ``key_grain``.
-#:
-#: THIS EXISTS BECAUSE A PRE-PR PROOF FAILED, and the measurement is worth
-#: keeping next to the constant. Deleting the literal outright and reading the
-#: contract alone was measured on dogfood-101 against a runtime carrying
-#: omnimarket 0.4.178: the declaration landed in 0.4.181, none of that image's
-#: 409 contracts carried the field, so both content-addressed exposures became
-#: unresolved, their intended idempotence graded as loss, and
-#: ``projection_delta_dropped`` went DEGRADED on healthy behaviour. On a lane
-#: whose container probe runs with ``--degraded-policy fail`` that is not a
-#: false alarm, it is an outage.
-#:
-#: The two alternatives were refused for stated reasons: refusing to grade
-#: below a version floor is a gate blinding itself, and exempting every
-#: unresolved exposure exempts ALL of them on a pre-0.4.181 runtime, so the
-#: dimension would grade nothing for the whole window.
-#:
-#: Both identity forms are listed because the projection identity recorded at
-#: dispatch is the handler class name while the contract and every ticket name
-#: the node. Matching is EXACT: a substring rule would exempt the next handler
-#: whose name happens to contain one of these.
-#:
-#: DELETION IS TRIGGERED BY A READING, not by a date: the deployed dev-lane
-#: omnimarket at or above 0.4.181, read from inside the runtime container
-#: rather than from a pin. Tracked in the follow-up on OMN-19081.
-FALLBACK_IMMUTABLE_GRAIN_PROJECTIONS: tuple[str, ...] = (
-    "HandlerProjectionSessionReplay",
-    "HandlerProjectionWorkEvents",
-    "node_projection_session_replay",
-    "node_projection_work_events",
-)
-
 #: Cap on names rendered into a dimension detail. The detail rides every
 #: ``/health`` response and every health event; a fleet-wide breakage must not
 #: turn it into a log dump. Mirrors ``projection_liveness.MAX_NAMED_PROJECTIONS``.
@@ -164,9 +127,8 @@ OUTCOME_DROP_GAUGE_NONMONOTONIC: str = "apply_flow_drop_gauge_nonmonotonic"
 #: The outcome token for a registered projection whose contract-declared key
 #: grain could not be resolved (OMN-19081). Such a projection is never
 #: exempted on the strength of the missing declaration itself -- that would
-#: hide a real accumulation behind a missing field. It is graded unless the
-#: interim FALLBACK_IMMUTABLE_GRAIN_PROJECTIONS list covers it, and it is
-#: named under this token either way so a reader can tell it from
+#: hide a real accumulation behind a missing field. It is graded, and it is
+#: named under this token so a reader can tell it from
 #: one that genuinely declares a mutable grain. The remedies differ: one is a
 #: contract edit, the other is a real investigation.
 OUTCOME_KEY_GRAIN_UNRESOLVED: str = "apply_flow_key_grain_unresolved"
@@ -186,7 +148,6 @@ def evaluate_projection_apply_flow(
     registered_projections: Iterable[str],
     immutable_grain_projections: Iterable[str] = (),
     grain_unresolved_projections: Iterable[str] = (),
-    fallback_immutable_projections: Iterable[str] = (),
 ) -> ModelProjectionApplyFlowVerdict:
     """Grade consume-versus-write and drop accumulation over the closed windows.
 
@@ -218,19 +179,10 @@ def evaluate_projection_apply_flow(
     registered = tuple(sorted({p for p in registered_projections if p}))
     declared_immutable = frozenset(p for p in immutable_grain_projections if p)
     unresolved = frozenset(p for p in grain_unresolved_projections if p)
-    fallback = frozenset(p for p in fallback_immutable_projections if p)
-    # RESOLUTION ORDER, and the order is the whole design. The contract wins
-    # wherever it answers -- a projection the contract declares MUTABLE is
-    # graded even if it appears in the fallback, so the literal can never
-    # override a live declaration. The fallback is reached only where the
-    # contract resolved nothing, which is the deployed-version window.
-    fallback_exempt = frozenset(p for p in unresolved if p in fallback)
-    # .union() rather than the | operator: the repository non-optional-union
-    # ratchet counts this line as a TYPE union and trips on it, which is a
-    # miscount rather than a finding. Written the explicit way instead of
-    # raising the ratchet, because raising a gate to fit a false positive
-    # is how the gate stops meaning anything.
-    exempt = declared_immutable.union(fallback_exempt)
+    # The contract declaration is the only source of an exemption. A
+    # projection whose grain did not resolve is graded and named, never
+    # exempted on the strength of the missing declaration itself.
+    exempt = declared_immutable
 
     consumed_by: dict[str, int] = dict.fromkeys(registered, 0)
     upserted_by: dict[str, int] = dict.fromkeys(registered, 0)
@@ -296,7 +248,6 @@ def evaluate_projection_apply_flow(
         indeterminate_drop_projections=tuple(indeterminate),
         excluded_immutable_grain=tuple(sorted(exempt & set(in_scope))),
         grain_unresolved_projections=tuple(sorted(unresolved & set(in_scope))),
-        fallback_exempted_projections=tuple(sorted(fallback_exempt & set(in_scope))),
         total_consumed=sum(consumed_by.values()),
         total_upserted=sum(upserted_by.values()),
         total_refused_by_guard=sum(refused_by.values()),
@@ -427,19 +378,9 @@ def describe_projection_delta_dropped(verdict: ModelProjectionApplyFlowVerdict) 
         unresolved = (
             f" ({OUTCOME_KEY_GRAIN_UNRESOLVED}: "
             f"{len(verdict.grain_unresolved_projections)} projection(s) "
-            "declare no resolvable key grain. Each is graded unless the "
-            "interim fallback below covers it, and none is exempted on the "
-            "strength of the missing declaration alone: "
+            "declare no resolvable key grain. Each is graded, and none is "
+            "exempted on the strength of the missing declaration alone: "
             f"{_name_list(verdict.grain_unresolved_projections)})"
-        )
-    fallback_note = ""
-    if verdict.fallback_exempted_projections:
-        fallback_note = (
-            f" [{len(verdict.fallback_exempted_projections)} of those "
-            "exemptions came from the INTERIM fallback list rather than from "
-            "a contract declaration, because this runtime carries an "
-            "omnimarket predating key_grain: "
-            f"{_name_list(verdict.fallback_exempted_projections)}]"
         )
     indeterminate = ""
     if verdict.indeterminate_drop_projections:
@@ -454,7 +395,7 @@ def describe_projection_delta_dropped(verdict: ModelProjectionApplyFlowVerdict) 
         return (
             f"No projection's discarded-delta count rose across "
             f"{verdict.observed_window_count} apply window(s)"
-            f"{indeterminate}{unresolved}{exempted}{fallback_note}"
+            f"{indeterminate}{unresolved}{exempted}"
         )
     return (
         f"{len(verdict.drop_accumulating_projections)} projection(s) discarded "
@@ -462,13 +403,12 @@ def describe_projection_delta_dropped(verdict: ModelProjectionApplyFlowVerdict) 
         f"window(s) — the serving cache consumed them and kept nothing, which "
         f"reads as fresh at zero lag: "
         f"{_name_list(verdict.drop_accumulating_projections)}"
-        f"{indeterminate}{unresolved}{exempted}{fallback_note}"
+        f"{indeterminate}{unresolved}{exempted}"
     )
 
 
 __all__: list[str] = [
     "APPLY_DIVERGENCE_MIN_CONSUMED",
-    "FALLBACK_IMMUTABLE_GRAIN_PROJECTIONS",
     "DELTA_DROP_MIN_ACCUMULATION",
     "DELTA_DROP_MIN_RISING_WINDOWS",
     "MAX_NAMED_PROJECTIONS",

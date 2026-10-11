@@ -1,0 +1,14 @@
+{
+  "_provenance": {
+    "source": "Real Git CLI reproduction of the autoclose historical-control shared-clone checkout sequence on h202; temporary two-commit repository, not a hosted sweep capture",
+    "captured_utc": "2026-10-08T12:32:07.647700+00:00",
+    "source_sha256": "6f334d4eaf59d4cb2be5a3721823606b5ce6e1d95b81466d5f1449cc00ca49f4",
+    "git_version": "git version 2.43.0",
+    "earlier_commit": "fa69b8e9d9962e3e12192a34e64d3c09b3d1c970",
+    "command": "git checkout --quiet --detach <pre-change sha> after shallow clone, historical fetch, and shared clone"
+  },
+  "response": {
+    "returncode": 128,
+    "stderr_template": "fatal: reference is not a tree: <pre-change sha>\n"
+  }
+}

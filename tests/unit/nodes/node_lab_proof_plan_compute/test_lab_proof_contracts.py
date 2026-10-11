@@ -29,6 +29,7 @@ EXPECTED = {
         "COMPUTE_GENERIC",
         {
             "lab_proof.plan": "HandlerLabProofPlan",
+            "lab_desired_state.render": "HandlerLabProofPlan",
             "lab_proof.verdict": "HandlerLabProofVerdict",
         },
     ),

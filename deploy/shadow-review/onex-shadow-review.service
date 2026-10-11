@@ -1,0 +1,79 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# onex-shadow-review.service — one tick of the pre-registered shadow PR reviewer
+# experiment, on a lab host (OMN-20422).
+#
+# A systemd USER unit (NOT a lane container, NOT a CI runner). One-shot,
+# triggered by onex-shadow-review.timer.
+#
+# WHY A LAB-HOST TIMER. Arm A1 is Codex, which runs on the operator's Codex
+# login; that login stays out of CI (operator ruling 2026-10-09T04:15:56Z), so
+# the runner cannot be a GitHub workflow. Arm A2 is GLM 5.3 through the
+# claude-glm harness, also a host tool. The tick therefore runs where both tools
+# and the canonical clones are, and writes only to the experiment store on this
+# host's disk.
+#
+# WHAT IT RUNS: omnimarket's node_shadow_review_effect (one tick):
+#   python -m omnimarket.nodes.node_shadow_review_effect \
+#       --watcher-state $SHADOW_REVIEW_WATCHER_STATE --store $SHADOW_REVIEW_STORE
+# It reviews each in-scope PR created at or after SHADOW_REVIEW_WINDOW_START
+# once, at the first head it observes, until 60 public PRs are in the store.
+# It never posts a comment, creates a check or blocks a PR. With no window
+# start set it reviews nothing.
+#
+# FRESHNESS GATE. The PR list comes from a PR watcher state file
+# (schema 1). ExecStartPre fails the tick when that file is missing or older
+# than SHADOW_REVIEW_MAX_STATE_AGE_S, so a stale feed shows in
+# `systemctl --user --failed` instead of reading as a quiet day.
+#
+# HOST-LOCAL CONFIGURATION (never committed): ~/.config/onex/shadow-review.env,
+# from deploy/shadow-review/shadow-review.env.example. Required there:
+# OMNI_HOME, SHADOW_REVIEW_OMNIMARKET_DIR (the omnimarket clone that holds the
+# node), SHADOW_REVIEW_WATCHER_STATE, SHADOW_REVIEW_HARNESS_SCRIPT, and
+# SHADOW_REVIEW_WINDOW_START (T1, the stamp of the ledger STATUS row that
+# starts the runner).
+#
+# ESCAPING. systemd expands $VAR and %-specifiers in ExecStart before bash sees
+# it, so the shell's own `$` and `%` are doubled below ($$ and %%).
+#
+# Install (user scope, no sudo; run from a clone of omnibase_infra):
+#   mkdir -p ~/.config/systemd/user ~/.config/onex
+#   cp deploy/shadow-review/onex-shadow-review.service deploy/shadow-review/onex-shadow-review.timer ~/.config/systemd/user/
+#   [ -e ~/.config/onex/shadow-review.env ] || install -m 600 deploy/shadow-review/shadow-review.env.example ~/.config/onex/shadow-review.env
+#   $EDITOR ~/.config/onex/shadow-review.env
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now onex-shadow-review.timer
+#
+# Run once by hand, then read the store:
+#   systemctl --user start onex-shadow-review.service
+#   tail -n 3 "$SHADOW_REVIEW_STORE/ticks.jsonl"
+#   journalctl --user -u onex-shadow-review.service -n 40
+
+[Unit]
+Description=ONEX shadow PR reviewer experiment tick (OMN-20422)
+
+[Service]
+Type=oneshot
+TimeoutStartSec=50min
+
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="SHADOW_REVIEW_OMNIMARKET_DIR=%h/Code/omni_home/omnimarket"
+Environment="SHADOW_REVIEW_STORE=%h/.local/share/onex/shadow-review/OMN-20422"
+Environment="SHADOW_REVIEW_MAX_STATE_AGE_S=900"
+Environment="SHADOW_REVIEW_MAX_REVIEWS=2"
+EnvironmentFile=%h/.config/onex/shadow-review.env
+
+ExecStartPre=/bin/mkdir -p ${SHADOW_REVIEW_STORE}
+
+ExecStartPre=/bin/bash -c '\
+    f="$$SHADOW_REVIEW_WATCHER_STATE"; \
+    [ -n "$$f" ] && [ -f "$$f" ] || { echo "SHADOW-REVIEW UNREAD watcher state missing: $$f"; exit 3; }; \
+    age=$$(( $$(date +%%s) - $$(stat -c %%Y "$$f") )); \
+    [ "$$age" -le "$$SHADOW_REVIEW_MAX_STATE_AGE_S" ] || { echo "SHADOW-REVIEW UNREAD watcher state is $${age}s old"; exit 3; }'
+
+ExecStart=/usr/bin/env -u PYTHONPATH uv run --frozen --project ${SHADOW_REVIEW_OMNIMARKET_DIR} python -m omnimarket.nodes.node_shadow_review_effect --watcher-state ${SHADOW_REVIEW_WATCHER_STATE} --store ${SHADOW_REVIEW_STORE} --max-reviews ${SHADOW_REVIEW_MAX_REVIEWS}
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=onex-shadow-review

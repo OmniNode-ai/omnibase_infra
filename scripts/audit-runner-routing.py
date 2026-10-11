@@ -41,6 +41,15 @@ FORK_PR_PREDICATE = (
     "github.event.pull_request.head.repo.full_name!=github.repository"
 )
 DEV_BASE_SHORTCUT = "github.event_name=='pull_request'&&github.base_ref=='dev'"
+# OMN-20074: the base-branch pull request trigger is banned in every workflow
+# (OMN-15699: untrusted fork code must never reach self-hosted runners). The
+# policy file may name ONE workflow as the exception, by exact path, citing the
+# operator ruling that admitted it; a glob, a directory or a list is refused.
+PULL_REQUEST_TARGET_TRIGGER = "pull_request_target"
+PULL_REQUEST_TARGET_EXCEPTION_KEY = "pull_request_target_exception"
+EXCEPTION_PATH_RE = re.compile(r"^\.github/workflows/[A-Za-z0-9._-]+\.ya?ml$")
+PINNED_REUSABLE_RE = re.compile(r"^[^@\s]+/\.github/workflows/[^@\s]+@[0-9a-f]{40}$")
+READ_ONLY_PERMISSION_LEVELS = frozenset({"read", "none"})
 # OMN-18031: the per-run routing consumer shape. A job whose runs-on resolves
 # from a route job's output rather than from the seam expression directly.
 # A routed job reads either output name. `labels` is what the pilot shipped;
@@ -477,11 +486,16 @@ def _live_repository_visibility(org: str = ORG) -> list[tuple[str, bool]]:
     # (not "all"), and omitting the flag already returns every repository the
     # token can see, of any visibility -- exactly the universe this check needs
     # since it filters on the returned `isPrivate` field itself.
+    # OMN-18780: --no-archived, because GitHub runs no workflows in an archived
+    # repository, so its stale ubuntu-latest pins can never place a job. With
+    # this pass now a merge gate, counting them reddened every PR on 95 dead
+    # pins across nine archived repositories nobody can push a fix to.
     result = _run_gh(
         [
             "repo",
             "list",
             org,
+            "--no-archived",
             "--limit",
             "500",
             "--json",
@@ -596,17 +610,127 @@ def audit_private_repo_hosted_placement(
     return findings
 
 
+def _pull_request_target_exception(
+    policy: dict[str, Any],
+) -> tuple[str | None, list[Finding]]:
+    """The one workflow path the policy exempts from the trigger ban, if valid.
+
+    An invalid entry grants no exemption and is itself a finding, so a typo or
+    a broad pattern fails closed: the ban then applies to the named file too.
+    """
+    if PULL_REQUEST_TARGET_EXCEPTION_KEY not in policy:
+        return None, []
+    scope = f"{DEFAULT_POLICY.as_posix()}:{PULL_REQUEST_TARGET_EXCEPTION_KEY}"
+    entry = policy[PULL_REQUEST_TARGET_EXCEPTION_KEY]
+    if not isinstance(entry, dict):
+        return None, [
+            Finding(
+                scope,
+                f"{PULL_REQUEST_TARGET_EXCEPTION_KEY} must be a single mapping "
+                "with path, ruling and reason, not a list or a scalar",
+            )
+        ]
+    path = entry.get("path")
+    if not isinstance(path, str) or not EXCEPTION_PATH_RE.fullmatch(path):
+        return None, [
+            Finding(
+                scope,
+                f"{PULL_REQUEST_TARGET_EXCEPTION_KEY}.path must be the exact path "
+                "of one workflow file under .github/workflows/, never a pattern",
+            )
+        ]
+    for field in ("ruling", "reason"):
+        value = entry.get(field)
+        if not isinstance(value, str) or not value.strip():
+            return None, [
+                Finding(
+                    scope,
+                    f"{PULL_REQUEST_TARGET_EXCEPTION_KEY}.{field} must be a "
+                    "non-empty string citing the operator ruling",
+                )
+            ]
+    return path, []
+
+
+def _audit_pull_request_target_caller(rel: str, workflow: Any) -> list[Finding]:
+    """Hold the exempted workflow to the shape that makes the exception safe.
+
+    The trigger runs the workflow definition from the base branch, with the
+    base repository's token, on pull request content. That is acceptable only
+    for a file that does nothing but call a pinned reusable workflow with
+    read-only permissions and no secrets: no checkout, no inline steps.
+    """
+    findings: list[Finding] = []
+    if not isinstance(workflow, dict):
+        return [Finding(rel, "exempted workflow is not a mapping")]
+    triggers = workflow.get("on", workflow.get(True))
+    if not isinstance(triggers, dict) or set(triggers) != {PULL_REQUEST_TARGET_TRIGGER}:
+        findings.append(
+            Finding(
+                rel,
+                f"the exempted workflow must declare only the {PULL_REQUEST_TARGET_TRIGGER} trigger",
+            )
+        )
+    permission_blocks = [("workflow", workflow.get("permissions"))]
+    jobs = workflow.get("jobs", {})
+    if not isinstance(jobs, dict) or not jobs:
+        return [*findings, Finding(rel, "the exempted workflow declares no jobs")]
+    for job_name, job in jobs.items():
+        if not isinstance(job, dict):
+            findings.append(Finding(f"{rel}:{job_name}", "job is not a mapping"))
+            continue
+        permission_blocks.append((f"job {job_name}", job.get("permissions")))
+        uses = job.get("uses")
+        if (
+            not isinstance(uses, str)
+            or not PINNED_REUSABLE_RE.fullmatch(uses)
+            or "steps" in job
+            or "runs-on" in job
+        ):
+            findings.append(
+                Finding(
+                    f"{rel}:{job_name}",
+                    "the exempted workflow may only call a reusable workflow "
+                    "pinned by full-SHA, with no inline steps or runner",
+                )
+            )
+        if "secrets" in job:
+            findings.append(
+                Finding(
+                    f"{rel}:{job_name}",
+                    "the exempted workflow must not pass or inherit secrets",
+                )
+            )
+    for owner, permissions in permission_blocks:
+        if permissions is None and owner == "workflow":
+            findings.append(
+                Finding(rel, "the exempted workflow must declare read-only permissions")
+            )
+        elif isinstance(permissions, dict) and not all(
+            level in READ_ONLY_PERMISSION_LEVELS for level in permissions.values()
+        ):
+            findings.append(Finding(rel, f"{owner} permissions must be read-only"))
+        elif permissions is not None and not isinstance(permissions, dict):
+            findings.append(
+                Finding(rel, f"{owner} permissions must be an explicit read-only map")
+            )
+    return findings
+
+
 def audit_local_workflows(policy: dict[str, Any], repo_root: Path) -> list[Finding]:
     allowlist = {
         str(item["path"])
         for item in policy.get("hosted_runner_allowlist", [])
         if isinstance(item, dict) and "path" in item
     }
-    findings: list[Finding] = []
+    exempt_path, findings = _pull_request_target_exception(policy)
     for path in _workflow_paths(repo_root):
         rel = path.relative_to(repo_root).as_posix()
         text = path.read_text(encoding="utf-8")
-        if "pull_request_target" in text:
+        workflow = yaml.safe_load(text)
+        if rel == exempt_path:
+            findings.extend(_audit_pull_request_target_caller(rel, workflow))
+        elif PULL_REQUEST_TARGET_TRIGGER in text:
             findings.append(
                 Finding(
                     rel,
@@ -614,7 +738,6 @@ def audit_local_workflows(policy: dict[str, Any], repo_root: Path) -> list[Findi
                 )
             )
 
-        workflow = yaml.safe_load(text)
         jobs = workflow.get("jobs", {}) if isinstance(workflow, dict) else {}
         if not isinstance(jobs, dict):
             continue

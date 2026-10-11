@@ -42,6 +42,7 @@ for a in "$@"; do
 done
 printf '%s\\n' "$db" >> "$STUB_LOG"
 case "$*" in
+  *"rolsuper"*) echo t ;;
   *"FROM pg_database WHERE datname"*) [ "$STUB_DB_EXISTS" = "1" ] && echo 1 ;;
   *"CREATE DATABASE"*) echo "CREATE DATABASE $db" >> "$STUB_LOG" ;;
 esac
@@ -69,6 +70,7 @@ def _run(
     }
     if slot is not None:
         env["ONEX_DB_SLOT"] = slot
+        env["POSTGRES_USER"] = f"role_omniintelligence_{slot}"
     proc = subprocess.run(
         ["sh", str(RUNNER)], capture_output=True, text=True, check=False, env=env
     )
@@ -88,7 +90,7 @@ def test_under_a_slot_every_statement_targets_the_slot_database(tmp_path: Path) 
     code, targets, out = _run(tmp_path, slot="prepr1", db_exists=True)
     assert code == 0, out
     assert "omniintelligence_prepr1" in targets
-    assert set(targets) <= {"postgres", "omniintelligence_prepr1"}, targets
+    assert set(targets) == {"omniintelligence_prepr1"}, targets
 
 
 def test_under_a_slot_an_absent_database_is_refused_not_created(tmp_path: Path) -> None:

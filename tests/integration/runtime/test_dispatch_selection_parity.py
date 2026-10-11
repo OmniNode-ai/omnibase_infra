@@ -14,7 +14,7 @@ implementation so Mode B is a fixture addition, not a rewrite:
 
 * **Mode A — regression pin (ACTIVE NOW).** Regenerate the live engine's selection
   in-process and assert every probe's equivalence tuple (design D2) equals the
-  committed ``baseline-selection-v2.json`` oracle. Valuable from day one; satisfies
+  committed ``selection-oracle-v2.json`` oracle. Valuable from day one; satisfies
   the S0-gate-before-S0-seam ordering.
 * **Mode B — dual-implementation parity (LIVE as of OMN-12549).** The same probe
   corpus driven through both ``MessageDispatchEngine`` and ``MixinNodeDispatch``
@@ -53,7 +53,7 @@ _FIXTURE_PATH = (
     Path(__file__).resolve().parents[2]
     / "fixtures"
     / "dispatch_parity"
-    / "baseline-selection-v2.json"
+    / "selection-oracle-v2.json"
 )
 
 
@@ -128,7 +128,7 @@ def test_corpus_slice_matches_committed_fixture(
     assert set(live_pkgs) == set(committed_pkgs), (
         "Corpus package set drifted from the committed fixture. "
         f"live={sorted(live_pkgs)} committed={sorted(committed_pkgs)}. "
-        "Regenerate baseline-selection-v2.json if the dependency closure changed."
+        "Regenerate selection-oracle-v2.json if the dependency closure changed."
     )
 
 
@@ -183,7 +183,7 @@ def test_mode_a_selection_parity_against_committed_oracle(
     assert not missing and not added, (
         "Probe set drifted from the committed oracle. "
         f"missing_from_live={missing[:20]} added_in_live={added[:20]}. "
-        "Regenerate baseline-selection-v2.json (and review the diff) if this is "
+        "Regenerate selection-oracle-v2.json (and review the diff) if this is "
         "an intentional corpus/probe change."
     )
 

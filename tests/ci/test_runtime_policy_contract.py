@@ -289,7 +289,7 @@ def test_runtime_worker_replicas_are_fail_fast_not_silent_default() -> None:
     by no surface in this repo, so it always took the ``0`` branch — and the base
     file with no overlay IS the dev lane, so the dev lane rendered a
     zero-container worker, `up` created nothing, and the RT-6 deploy readback in
-    ``scripts/deploy-runtime.sh`` (whose ``RUNTIME_SERVICES`` includes
+    ``src/omnibase_infra/handlers/handler_runtime_deploy.sh`` (whose ``RUNTIME_SERVICES`` includes
     ``runtime-worker``) failed closed on every dev-lane deploy. OMN-14968 closed
     it with the lane-prefixed ``${DEV_WORKER_REPLICAS:?...}`` form used by the
     sibling ``DEV_RUNTIME_WORKER_*`` vars in the same service block.

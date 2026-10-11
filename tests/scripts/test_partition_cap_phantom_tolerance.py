@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""Live-execution coverage for deploy-runtime.sh's partition-cap warmup
+"""Live-execution coverage for onex-runtime-deploy's partition-cap warmup
 phantom tolerance (OMN-16110).
 
 Real defect this closes: refresh_dev_lane.sh --ref origin/dev --execute
-(2026-08-24, .201 dev lane) died in deploy-runtime.sh's "Broker
+(2026-08-24, .201 dev lane) died in onex-runtime-deploy's "Broker
 Topic-Provisioning Warmup" step. A stale daemon-phantom container record for
 ``redpanda-partition-cap`` (listed ``Dead`` by ``docker ps -a``, but "No such
 container" on both ``docker inspect`` and ``docker rm -f``, with no backing
@@ -28,7 +28,7 @@ already checks immediately afterward, is. The ``up`` becomes best-effort
 OMN-15718 bounded deadline.
 
 These tests execute the REAL ``warm_broker_topic_provisioning`` function
-extracted from scripts/deploy-runtime.sh as a bash subprocess (not string
+extracted from src/omnibase_infra/handlers/handler_runtime_deploy.sh as a bash subprocess (not string
 assertions on the script source), with the real ``compose_up_bounded`` from
 scripts/runtime_build/compose_wait_timeout.sh and a fake ``docker`` stand-in,
 so no live Docker daemon is required.
@@ -45,7 +45,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_RUNTIME = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_RUNTIME = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 LIB_SCRIPT = REPO_ROOT / "scripts" / "runtime_build" / "compose_wait_timeout.sh"
 
 _FAKE_DOCKER = """#!/usr/bin/env bash
@@ -95,9 +97,9 @@ esac
 
 
 def _extract_function(name: str) -> str:
-    """Extract one top-level bash function body from deploy-runtime.sh.
+    """Extract one top-level bash function body from onex-runtime-deploy.
 
-    deploy-runtime.sh executes ``main "$@"`` at load time, so it cannot be
+    onex-runtime-deploy executes ``main "$@"`` at load time, so it cannot be
     sourced whole; extract just the function under test instead.
     """
     source = DEPLOY_RUNTIME.read_text(encoding="utf-8")
@@ -129,7 +131,7 @@ resolve_compose_file_args() {
 }
 assert_broker_reachable() { return 0; }
 source "${FUNC_FILE}"
-# Deliberately UNGUARDED, exactly like the live call site (deploy-runtime.sh
+# Deliberately UNGUARDED, exactly like the live call site (onex-runtime-deploy
 # main -> warm_broker_topic_provisioning under `set -euo pipefail`): guarding
 # it with `|| rc=$?` here would suspend errexit inside the function body and
 # mask the very unguarded-compose_up_bounded abort this fix removes.

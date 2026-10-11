@@ -31,7 +31,9 @@ pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DOCKERFILE = _REPO_ROOT / "docker" / "Dockerfile.runtime"
-_DEPLOY_SCRIPT = _REPO_ROOT / "scripts" / "deploy-runtime.sh"
+_DEPLOY_SCRIPT = (
+    _REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 
 
 @pytest.fixture(scope="module")

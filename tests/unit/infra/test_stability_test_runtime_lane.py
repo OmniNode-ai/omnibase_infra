@@ -21,7 +21,7 @@ RUNTIME_POLICY_ENV_FILE = REPO_ROOT / "docker" / "runtime-policy.env"
 # stability-test has historically accumulated ~4x dev's topic count with no
 # retirement process, and a cap raised only via a live `rpk cluster config
 # set` does NOT survive this lane's redeploys (warm_broker_topic_provisioning()
-# in deploy-runtime.sh force-recreates the redpanda-partition-cap one-shot on
+# in onex-runtime-deploy force-recreates the redpanda-partition-cap one-shot on
 # every redeploy, re-running whatever value is hardcoded in the compose
 # override below). Both belts that declare this value in
 # docker-compose.stability-test.yml -- the `redpanda` service's `--set
@@ -360,7 +360,13 @@ def test_stability_lane_sets_redpanda_partition_capacity_before_runtime() -> Non
     overlay = _load_overlay()
     services = overlay["services"]
     partition_cap_service = services["redpanda-partition-cap"]
-    command = partition_cap_service["command"][0]
+    command = yaml.safe_load(
+        (REPO_ROOT / "docker/docker-compose.broker-profile.yml").read_text()
+    )["services"]["redpanda-settings"]["command"][0]
+    command = command.replace(
+        '"$$REDPANDA_PARTITIONS_PER_SHARD"',
+        str(partition_cap_service["environment"]["REDPANDA_PARTITIONS_PER_SHARD"]),
+    )
 
     assert partition_cap_service["container_name"] == (
         "omnibase-infra-stability-test-redpanda-partition-cap"
@@ -392,16 +398,17 @@ def test_stability_lane_redpanda_startup_flag_matches_partition_cap_service() ->
     overlay = _load_overlay()
     services = overlay["services"]
     redpanda_command = services["redpanda"]["command"]
-    partition_cap_command = services["redpanda-partition-cap"]["command"][0]
+    partition_cap_value = int(
+        services["redpanda-partition-cap"]["environment"][
+            "REDPANDA_PARTITIONS_PER_SHARD"
+        ]
+    )
 
     assert (
         _extract_partition_cap_set_flag_value(redpanda_command)
         == STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD
     )
-    assert (
-        _extract_partition_cap_value(partition_cap_command)
-        == STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD
-    )
+    assert partition_cap_value == STABILITY_TEST_TOPIC_PARTITIONS_PER_SHARD
     assert (
         services["omninode-runtime"]["depends_on"]["redpanda-partition-cap"][
             "condition"

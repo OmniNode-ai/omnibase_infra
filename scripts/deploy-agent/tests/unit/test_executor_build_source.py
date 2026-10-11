@@ -112,7 +112,7 @@ def test_deploy_agent_build_provenance_matches_canonical_deploy_contract(
     promotion_class: str,
     non_main_lineage: str,
 ) -> None:
-    """Agent and deploy-runtime.sh must stamp the same promotion metadata."""
+    """Agent and onex-runtime-deploy must stamp the same promotion metadata."""
     env = {"OMNI_HOME": "/data/omninode/omni_home"}
 
     build_args = _build_source_build_args(build_source, env=env)

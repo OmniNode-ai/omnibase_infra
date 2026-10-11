@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""deploy-runtime.sh must not write-ahead deployment state (OMN-15352).
+"""onex-runtime-deploy must not write-ahead deployment state (OMN-15352).
 
 Defect: `write_registry()` ran at Phase 9, BEFORE Phase 10 (`build_images`) and
 every phase downstream of it (migration preflight, restart, RT-6 readback) that
@@ -55,7 +55,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 
 FAKE_SERVICES = ["fake-svc-a", "fake-svc-b"]
 
@@ -65,7 +67,7 @@ def _script_text() -> str:
 
 
 def _script_noncomment() -> str:
-    """deploy-runtime.sh with comment-only lines stripped (see sibling tests)."""
+    """onex-runtime-deploy with comment-only lines stripped (see sibling tests)."""
     lines = [
         line
         for line in _script_text().splitlines()
@@ -82,7 +84,7 @@ def _extract_function(name: str) -> str:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, (
-        f"could not extract function {name}() from deploy-runtime.sh"
+        f"could not extract function {name}() from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -350,7 +352,7 @@ def _build_harness(tmp_path: Path) -> tuple[str, dict[str, str]]:
             "LANE_LOCK_TIMEOUT_SECONDS=900",
             'DEPLOY_STARTED_AT="2026-01-01T00:00:00Z"',
             'LOCK_DIR="${DEPLOY_ROOT}/.deploy.lock"',
-            'SCRIPT_NAME="deploy-runtime.sh"',
+            'SCRIPT_NAME="onex-runtime-deploy"',
             f"RUNTIME_BUILD_SERVICES=({services_literal})",
             'MIGRATION_TREE_REL_PATH="docker/migrations/forward"',
             'DEPLOY_DIR_TO_CLEANUP=""',

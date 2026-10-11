@@ -101,7 +101,7 @@
 #
 # This unit deliberately declares NO EnvironmentFile=. ExecStart runs
 # deploy/deploy-agent-launch.sh, which bash-`source`s the operator env store
-# and then execs the interpreter -- exactly what scripts/deploy-runtime.sh has
+# and then execs the interpreter -- exactly what onex-runtime-deploy has
 # always done.
 #
 # Why: systemd's env-file parser does not implement bash ANSI-C $'...' quoting.

@@ -12,10 +12,10 @@ starts the consume loop, and the capability is tested structurally.
 
 The method name is deliberately distinctive. ``@runtime_checkable`` checks
 member PRESENCE and not signatures, so a protocol declaring only ``subscribe``
-would match every bus in the repo -- including ``EventBusInmemory``, which has
-no poll loop to bound -- and the narrowing would be a lie that fails at the
-call. Exactly one class implements ``declare_consume_concurrency``, so
-``isinstance`` against this protocol is a genuine capability test.
+would match every bus in the repo. Kafka uses the declared bound to limit its
+consume loop; the infra in-memory adapter records it while keeping inline
+dispatch. Both implement ``declare_consume_concurrency`` explicitly, so the
+structural check distinguishes them from buses without the capability.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ __all__ = ["ProtocolConsumeConcurrencyDeclarer"]
 
 @runtime_checkable
 class ProtocolConsumeConcurrencyDeclarer(Protocol):
-    """A bus whose consume loop can hold more than one record in flight."""
+    """A bus that accepts and records a per-subscription in-flight upper bound."""
 
     def declare_consume_concurrency(
         self,
@@ -46,6 +46,6 @@ class ProtocolConsumeConcurrencyDeclarer(Protocol):
             group_id: The consumer group id the subscription resolves to --
                 the same value ``subscribe`` keys its consumer by.
             max_in_flight_records: 1 keeps the inline serial path unchanged;
-                greater than 1 dispatches under a semaphore.
+                greater than 1 permits concurrency where the transport supports it.
         """
         ...

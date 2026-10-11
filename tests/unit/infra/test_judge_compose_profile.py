@@ -145,7 +145,7 @@ def test_judge_profile_omits_keycloak_and_infisical_dependencies() -> None:
 def test_judge_overlay_networks_and_ports_carry_override_tag() -> None:
     """Every service-level `networks:` / `ports:` key must be `!override`-tagged.
 
-    deploy-runtime.sh layers this file on docker-compose.infra.yml (OMN-13581
+    onex-runtime-deploy layers this file on docker-compose.infra.yml (OMN-13581
     resolve_compose_file_args). A plain list SEQUENCE-MERGES (union) with the
     base file, attaching every judge service to BOTH the judge and dev networks
     and double-publishing dev+judge host ports (OMN-13772: valkey collided on
@@ -164,7 +164,7 @@ def test_judge_overlay_networks_and_ports_carry_override_tag() -> None:
     assert not violations, (
         "docker-compose.judge.yml has plain-list networks:/ports: keys that "
         "will union-merge with docker-compose.infra.yml when layered by "
-        f"deploy-runtime.sh — tag them `!override` (OMN-13772): {violations}"
+        f"onex-runtime-deploy — tag them `!override` (OMN-13772): {violations}"
     )
 
 

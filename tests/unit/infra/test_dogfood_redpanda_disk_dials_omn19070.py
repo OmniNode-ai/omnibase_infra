@@ -47,13 +47,12 @@ volume predates the change.
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+import shlex
+from functools import lru_cache
 
 import pytest
-import yaml
 
-_COMPOSE = Path(__file__).resolve().parents[3] / "docker" / "docker-compose.dogfood.yml"
+from tests.unit.infra.test_broker_profile_omn19419 import _render
 
 _EXPECTED = {
     "segment_fallocation_step": 1048576,
@@ -62,39 +61,22 @@ _EXPECTED = {
 }
 
 
-def _construct_compose_value(loader: yaml.SafeLoader, node: yaml.Node) -> object:
-    """Passthrough constructor for Docker Compose `!override` / `!reset` tags."""
-    if isinstance(node, yaml.SequenceNode):
-        return loader.construct_sequence(node)
-    if isinstance(node, yaml.MappingNode):
-        return loader.construct_mapping(node)
-    assert isinstance(node, yaml.ScalarNode)
-    return loader.construct_scalar(node)
-
-
-class _ComposeLoader(yaml.SafeLoader):
-    """SafeLoader that unwraps compose override tags."""
-
-
-_ComposeLoader.add_constructor("!override", _construct_compose_value)
-_ComposeLoader.add_constructor("!reset", _construct_compose_value)
-
-
+@lru_cache(maxsize=1)
 def _init_settings() -> dict[str, str]:
-    # _ComposeLoader extends SafeLoader; the extra constructors only unwrap
-    # compose override tags.
-    compose: dict[str, Any] = yaml.load(
-        _COMPOSE.read_text(encoding="utf-8"),
-        Loader=_ComposeLoader,  # noqa: S506
-    )
-    script = "\n".join(
-        str(c) for c in compose["services"]["redpanda-partition-cap"]["command"]
-    )
+    service = _render("dogfood")["services"]["redpanda-partition-cap"]
+    script = "\n".join(service["command"]).replace("$$", "$")
+    for key, value in service["environment"].items():
+        script = script.replace(f"${key}", str(value))
     settings: dict[str, str] = {}
     for line in script.splitlines():
-        parts = line.split()
-        if "cluster" in parts and "config" in parts and "set" in parts:
-            key, value = parts[parts.index("set") + 1 : parts.index("set") + 3]
+        if (
+            not line.strip().startswith("/usr/bin/rpk")
+            or "cluster config set" not in line
+        ):
+            continue
+        parts = shlex.split(line)
+        if parts[:4] == ["/usr/bin/rpk", "cluster", "config", "set"]:
+            key, value = parts[4:6]
             settings[key] = value
     return settings
 

@@ -26,6 +26,10 @@ production incidents in a single day on 2026-07-30:
 
 Both passed every gate, because no gate checked reachability.
 
+Scanned surfaces include workflow ``uses:`` and sibling ref inputs, literal
+``git+https`` pins in any workflow string, pre-commit ``repos[].rev`` pins,
+and git dependencies in ``pyproject.toml`` and ``uv.lock``.
+
 Why "reachable from a PROTECTED branch", not "reachable at all"
 ---------------------------------------------------------------
 The pre-existing platform check (``omnimarket/scripts/ci/
@@ -236,6 +240,9 @@ _PEP508_GIT_RE = re.compile(
     + _ORG
     + r"/(?P<repo>[\w.-]+?)(?:\.git)?@(?P<ref>[^\s#\]]+)"
 )
+_WORKFLOW_GIT_RE = re.compile(
+    r"git\+https://github\.com/OmniNode-ai/(?P<repo>[\w.-]+?)(?:\.git)?@(?P<ref>[\w./-]+)"
+)
 # uv.lock: `git = "https://github.com/OmniNode-ai/<repo>.git?rev=<ref>#<resolved>"`
 _UV_LOCK_GIT_RE = re.compile(
     r"https://github\.com/"
@@ -306,15 +313,74 @@ def _is_literal(value: object) -> bool:
     return isinstance(value, str) and "${{" not in value
 
 
+def extract_precommit_pins(path: Path) -> list[PinRef]:
+    """Extract literal OmniNode-ai ``repos[].rev`` pins from pre-commit YAML."""
+    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        return []
+    repos = loaded.get("repos")
+    if not isinstance(repos, list):
+        return []
+    pins: list[PinRef] = []
+    for index, entry in enumerate(repos):
+        if not isinstance(entry, dict):
+            continue
+        repo_url = entry.get("repo")
+        ref = entry.get("rev")
+        if not isinstance(repo_url, str) or not isinstance(ref, str) or not ref:
+            continue
+        if not _is_literal(ref):
+            continue
+        match = _SOURCE_URL_RE.match(repo_url)
+        if match is None:
+            continue
+        pins.append(
+            PinRef(
+                source=str(path),
+                locus=f"repos[{index}].rev",
+                kind="precommit-rev",
+                repo=match["repo"],
+                ref=ref,
+            )
+        )
+    return pins
+
+
+def _workflow_git_pins(path: Path, value: object, locus: str = "") -> list[PinRef]:
+    """Walk workflow string values for literal ``git+https`` refs."""
+    pins: list[PinRef] = []
+    if isinstance(value, str):
+        for match in _WORKFLOW_GIT_RE.finditer(value):
+            pins.append(
+                PinRef(
+                    source=str(path),
+                    locus=locus,
+                    kind="workflow-git-pin",
+                    repo=match["repo"],
+                    ref=match["ref"],
+                )
+            )
+    elif isinstance(value, dict):
+        for key, child in value.items():
+            child_locus = f"{locus}.{key}" if locus else str(key)
+            pins.extend(_workflow_git_pins(path, child, child_locus))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            pins.extend(_workflow_git_pins(path, child, f"{locus}[{index}]"))
+    return pins
+
+
 def extract_workflow_pins(path: Path) -> list[PinRef]:
     """Extract cross-repo pins from one GitHub Actions workflow file.
 
-    Covers three surfaces:
+    Covers four surfaces:
 
     * ``jobs.<id>.uses`` -- reusable-workflow pins (the OMN-15536 shape),
     * ``jobs.<id>.steps[i].uses`` -- step-level action pins,
     * ``jobs.<id>.with.<key>`` -- any 40-hex literal input on a job that calls
       a cross-repo reusable workflow, attributed to that same repo.
+    * Literal ``git+https`` refs in every string value, including ``env:``,
+      ``run:`` scripts and ``with:`` values.
 
     That third surface is why this is not just a ``uses:`` checker: the wedging
     infra job pinned the identical dead SHA **twice**, once as ``uses:`` and
@@ -330,11 +396,11 @@ def extract_workflow_pins(path: Path) -> list[PinRef]:
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(loaded, dict):
         return []
+    pins = _workflow_git_pins(path, loaded)
     jobs = loaded.get("jobs")
     if not isinstance(jobs, dict):
-        return []
+        return pins
 
-    pins: list[PinRef] = []
     for job_id, job in jobs.items():
         if not isinstance(job, dict):
             continue
@@ -526,13 +592,17 @@ def extract_uv_lock_pins(path: Path) -> list[PinRef]:
 
 
 def _expand_targets(paths: Sequence[Path]) -> list[Path]:
-    """Expand directories to the pin-bearing files inside them."""
+    """Expand directories to YAML, pre-commit, pyproject and uv.lock files."""
     expanded: list[Path] = []
     for path in paths:
         if path.is_dir():
             expanded.extend(sorted(path.glob("*.yml")))
-            expanded.extend(sorted(path.glob("*.yaml")))
-            for name in ("pyproject.toml", "uv.lock"):
+            expanded.extend(
+                candidate
+                for candidate in sorted(path.glob("*.yaml"))
+                if candidate.name != ".pre-commit-config.yaml"
+            )
+            for name in (".pre-commit-config.yaml", "pyproject.toml", "uv.lock"):
                 candidate = path / name
                 if candidate.is_file():
                     expanded.append(candidate)
@@ -542,7 +612,7 @@ def _expand_targets(paths: Sequence[Path]) -> list[Path]:
 
 
 def extract_pins(paths: Iterable[Path]) -> list[PinRef]:
-    """Extract every cross-repo pin from the given files/directories."""
+    """Extract workflow, pre-commit and dependency pins from files/directories."""
     pins: list[PinRef] = []
     for path in _expand_targets(list(paths)):
         name = path.name
@@ -550,6 +620,8 @@ def extract_pins(paths: Iterable[Path]) -> list[PinRef]:
             pins.extend(extract_pyproject_pins(path))
         elif name == "uv.lock":
             pins.extend(extract_uv_lock_pins(path))
+        elif name == ".pre-commit-config.yaml":
+            pins.extend(extract_precommit_pins(path))
         elif path.suffix in {".yml", ".yaml"}:
             pins.extend(extract_workflow_pins(path))
     return pins
@@ -882,11 +954,12 @@ _FIX_GUIDANCE = """
 
 
 def _default_targets(root: Path) -> list[Path]:
+    """Select workflows, pre-commit config and dependency files under root."""
     targets: list[Path] = []
     workflows = root / ".github" / "workflows"
     if workflows.is_dir():
         targets.append(workflows)
-    for name in ("pyproject.toml", "uv.lock"):
+    for name in (".pre-commit-config.yaml", "pyproject.toml", "uv.lock"):
         candidate = root / name
         if candidate.is_file():
             targets.append(candidate)
@@ -906,7 +979,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help=(
             "Files or directories to scan. Defaults to .github/workflows/, "
-            "pyproject.toml and uv.lock under --root."
+            ".pre-commit-config.yaml, pyproject.toml and uv.lock under --root."
         ),
     )
     parser.add_argument(

@@ -102,8 +102,8 @@ def test_runtime_boot_merge_group_absent_never_passes() -> None:
 def test_runtime_boot_merge_group_caller_skipped_never_passes() -> None:
     """A skipped caller leaves only the bare caller row, so the gate reads absent.
 
-    The caller skips on merge_group only when occ-preflight or tests-gate did
-    not succeed, and both are STRICT, so that run already fails; alone, the
+    The caller skips on merge_group only when tests-gate did not succeed,
+    and that gate is STRICT, so that run already fails; alone, the
     skip holds CI Summary PENDING into the deadline, never SUCCESS.
     """
     code, report = _merge_group(_gates_green() + [_job(CALLER, "skipped")])

@@ -67,6 +67,7 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import subprocess
@@ -78,6 +79,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from scripts.ci.lab_pass_receipt import ModelLabPassCheck
 
 # Sibling module in this same directory. These verifiers are executed as
 # scripts (``python scripts/runtime_build/verify_*.py`` or ``uv run python
@@ -105,6 +110,7 @@ from health_payload import (
     default_max_verdict_age,
     derive_verdict_wait_bound,
     evaluate_health_body,
+    http_error_verdict,
     unreachable_verdict,
     wait_for_verdict,
 )
@@ -116,6 +122,18 @@ from manifest_fetch import (
     count_manifest_contracts,
     fetch_manifest_with_budget,
 )
+
+# OMN-19417: share the receipt's census probe, including its fail-closed transport.
+# The operational scripts are run from a checkout rather than installed modules.
+_LAB_PASS_SPEC = importlib.util.spec_from_file_location(
+    "stability_lab_pass_receipt",
+    Path(__file__).resolve().parents[1] / "ci" / "lab_pass_receipt.py",
+)
+assert _LAB_PASS_SPEC is not None and _LAB_PASS_SPEC.loader is not None
+_lab_pass = importlib.util.module_from_spec(_LAB_PASS_SPEC)
+sys.modules[_LAB_PASS_SPEC.name] = _lab_pass
+_LAB_PASS_SPEC.loader.exec_module(_lab_pass)
+check_lane_sync = _lab_pass.check_lane_sync
 
 # OCI label stamped from VCS_REF/GIT_SHA at build time (Dockerfile.runtime).
 _REVISION_LABEL = "org.opencontainers.image.revision"
@@ -133,7 +151,7 @@ DEFAULT_MIN_DERIVED_COVERAGE = 0.90
 # Bounded re-read window after a --force-recreate: a consumer's Kafka client
 # needs a few seconds to rejoin its group, so an immediately-observed absence is
 # not yet a finding. Same shape as ``assert_broker_reachable()`` in
-# deploy-runtime.sh -- bounded attempts at a fixed interval, never a poll.
+# onex-runtime-deploy -- bounded attempts at a fixed interval, never a poll.
 DEFAULT_GROUP_AUDIT_ATTEMPTS = 10
 DEFAULT_GROUP_AUDIT_INTERVAL_SECONDS = 3.0
 # OMN-14013: fraction of topic_partitions_per_shard in use that triggers a
@@ -259,6 +277,7 @@ class HealthGateReport:
     cluster_detail: str | None = None
     group_audit: ConsumerGroupAudit | None = None
     partition_headroom: PartitionHeadroomCheck | None = None
+    lane_sync: ModelLabPassCheck | None = None
     errors: list[str] = field(default_factory=list)
     require_digest_change: bool = True
 
@@ -332,6 +351,8 @@ class HealthGateReport:
             and self.groups_stable
             and self.revisions_match
             and self.partition_headroom_ok
+            and self.lane_sync is not None
+            and self.lane_sync.ok
         ):
             return "PASS"
         return "FAIL"
@@ -339,6 +360,9 @@ class HealthGateReport:
     def to_dict(self) -> dict[str, object]:
         return {
             "lane": self.lane,
+            "lane_sync": self.lane_sync.to_dict()
+            if self.lane_sync is not None
+            else None,
             "require_digest_change": self.require_digest_change,
             "digest_changed": self.digests_changed,
             "manifest_count": self.manifest_count,
@@ -553,6 +577,15 @@ def check_health(
         with open_fn(health_url, timeout=10) as resp:  # type: ignore[operator]
             status_code = getattr(resp, "status", 200)
             raw = resp.read()
+    except urllib.error.HTTPError as exc:
+        # OMN-17427: a non-2xx still carries the runtime's body. A 503 that
+        # says "still starting" is waitable; anything else stays terminal.
+        try:
+            error_body = exc.read()
+        except (OSError, AttributeError, ValueError):
+            # An HTTPError built without a file object has no body to read.
+            error_body = b""
+        return http_error_verdict(exc.code, error_body)
     except (urllib.error.URLError, OSError) as exc:
         return unreachable_verdict(f"health fetch failed: {exc}")
     if status_code and status_code != 200:
@@ -1061,6 +1094,24 @@ def run_health_gate(
         require_digest_change=require_digest_change,
     )
 
+    def census_runner(
+        argv: Sequence[str], *, timeout: float, env: dict[str, str] | None = None
+    ) -> subprocess.CompletedProcess[str]:
+        if runner is None:
+            return _lab_pass._run_read_only(argv, timeout=timeout, env=env)
+        return runner(
+            list(argv),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+            env=env,
+        )
+
+    def finish_census() -> HealthGateReport:
+        report.lane_sync = check_lane_sync(lane=lane, runner=census_runner)
+        return report
+
     for service, container in CORE_SERVICES.items():
         report.services.append(
             check_service_digest(
@@ -1158,7 +1209,7 @@ def run_health_gate(
         # Fail CLOSED and name the cause. Falling back to the retired static
         # list is exactly the behaviour OMN-15837 removes.
         report.errors.append(f"declared consumer-group derivation failed: {exc}")
-        return report
+        return finish_census()
 
     report.group_audit = run_consumer_group_audit(
         broker_container,
@@ -1180,7 +1231,7 @@ def run_health_gate(
         for dimension in report.health_dimensions
     ]
 
-    return report
+    return finish_census()
 
 
 # ─── Receipt ─────────────────────────────────────────────────────────────────

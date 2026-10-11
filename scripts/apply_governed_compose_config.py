@@ -42,7 +42,7 @@ with sorted keys and compact separators; ``sha256:`` + hex of that. Path
 resolution is off so the digest does not depend on where the checkout lives.
 Interpolation is on, so the digest binds the env values the apply will use;
 the rendered text is hashed and never printed. The env inputs are the same ones
-``deploy-runtime.sh`` interpolates with: the grant's repo env files (normally
+``onex-runtime-deploy`` interpolates with: the grant's repo env files (normally
 ``docker/runtime-policy.env``), then the operator env file
 (``$OMNIBASE_OPERATOR_ENV_FILE``, default ``~/.omnibase/.env``), which lives
 outside the repo and is never named in a public grant. Run both ``digest`` and
@@ -246,7 +246,7 @@ def checkout_refusals(repo_root: Path, entry: dict[str, Any]) -> list[str]:
 
 
 def operator_env_file() -> Path:
-    """The operator env deploy-runtime.sh sources; required, never defaulted away."""
+    """The operator env onex-runtime-deploy sources; required, never defaulted away."""
     raw = os.environ.get("OMNIBASE_OPERATOR_ENV_FILE", "").strip()
     path = Path(raw) if raw else Path.home() / ".omnibase" / ".env"
     if not path.is_file():

@@ -5,7 +5,7 @@
 The drift this closes
 ---------------------
 ``refresh_dev_lane.sh`` exports ``RUNTIME_BUILD_SERVICES_OVERRIDE``, and
-``deploy-runtime.sh`` treats an explicit override as an instruction to touch
+``onex-runtime-deploy`` treats an explicit override as an instruction to touch
 ONLY the named services — ``resolve_lane_runtime_services()`` deliberately does
 not widen it, because a scoped build is an operator decision rather than a
 default.

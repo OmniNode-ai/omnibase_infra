@@ -36,9 +36,7 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 # script runs as bare `python3` inside `Application Database Domain Enforcement
 # (OMN-15361)` roughly seventy lines BEFORE that job's `Setup Python and uv`
 # step, because the omnimarket ref it emits is what the very next step checks
-# out. The runners' ambient python3 has no PyYAML -- proven in this same
-# workflow, whose contract-compliance job carries an explicit
-# `python3 -m pip install --quiet --user pyyaml` step for exactly that reason.
+# out. The runners' ambient python3 cannot be assumed to have PyYAML.
 # A `import yaml` here would therefore ImportError on every PR and take the
 # required check down repo-wide: precisely the org-wide red OMN-17292 exists to
 # remove, self-inflicted. The pin file's two fields are a fixed `key: value`

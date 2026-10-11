@@ -14,7 +14,7 @@
 #   (b) engages RT-1's clean-ref checkout + vendored-SHA assertion by exporting
 #       DEPLOY_REF (or DEPLOY_HOTPATCH) into the workspace build, and
 #   (c) builds + deploys the resulting image to the target lab lane via
-#       deploy-runtime.sh.
+#       onex-runtime-deploy.
 #
 # Supports --ref <branch|tag|sha> and --hotpatch (deploy a dirty tree
 # deliberately, LABELLED as such in the manifest -- a hot-patch is labelled, never
@@ -36,9 +36,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-# Overridable so an operator can point at a relocated deploy-runtime.sh (and so
-# the execute path is exercisable in tests without a real Docker deploy).
-DEPLOY_RUNTIME="${DEPLOY_RUNTIME:-${REPO_ROOT}/scripts/deploy-runtime.sh}"
+# DEPLOY_RUNTIME stays overridable so an operator can point at a relocated
+# onex-runtime-deploy (and so the execute path is exercisable in tests without a
+# real Docker deploy); unset, resolve_runtime_deploy finds it (OMN-20687).
 
 # The repos --cut-tag tags: SIBLING_LAB_TAG_REPOS from sibling_clone_manifest.sh,
 # which is every clone the sibling-pin preflight reads (SIBLING_CLONE_MANIFEST,
@@ -93,7 +93,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# --- lane -> compose project (mirrors deploy-runtime.sh lane mapping) ------
+# --- lane -> compose project (mirrors onex-runtime-deploy lane mapping) ------
 DEPLOY_PROFILE_ARGS=()
 case "${LANE}" in
     dev)
@@ -240,6 +240,7 @@ cut_lab_tags() {
 }
 
 # --- build the plan -------------------------------------------------------
+resolve_runtime_deploy
 log "lane            : ${LANE} (compose project ${COMPOSE_PROJECT})"
 if [[ "${HOTPATCH}" == true ]]; then
     log "ref             : <hotpatch: current HEAD, dirty tree deployed AS-IS>"
@@ -277,8 +278,8 @@ if [[ "${MODE}" != "execute" ]]; then
 fi
 
 # --- execute --------------------------------------------------------------
-if [[ ! -x "${DEPLOY_RUNTIME}" && ! -f "${DEPLOY_RUNTIME}" ]]; then
-    err "deploy-runtime.sh not found at ${DEPLOY_RUNTIME}"
+if ! command -v "${DEPLOY_RUNTIME}" >/dev/null 2>&1; then
+    err "onex-runtime-deploy not found; looked in: ${DEPLOY_RUNTIME_TRIED}"
     exit 1
 fi
 
@@ -294,18 +295,18 @@ if [[ "${HOTPATCH}" != true ]]; then
     export DEPLOY_REF="${REF}"
 fi
 
-log "executing deploy-runtime.sh ..."
+log "executing onex-runtime-deploy ..."
 # --force: the lab fast lane redeploys the SAME package version at new SHAs
-# constantly (version bumps are infrequent/manual), so deploy-runtime.sh's
+# constantly (version bumps are infrequent/manual), so onex-runtime-deploy's
 # version-directory collision guard ("Deployment directory already exists")
 # fires on nearly every lab redeploy -- and it fires BEFORE the RT-1 clean-ref
 # checkout even runs, so the checkout this whole wrapper exists for never
 # happens (OMN-14562). A same-version overwrite is the expected happy path
-# for this wrapper; deploy-runtime.sh's --force already backs up the existing
+# for this wrapper; onex-runtime-deploy's --force already backs up the existing
 # deployment dir and restores it on failure, so this is a safe, reversible
 # overwrite of the lab lane's OWN deployed/{version}/ staging dir -- it does
 # not touch prod, other lanes, or running containers beyond the lane's own
 # rebuild. Prod/release deploys never go through this wrapper (Train 2 is
 # grant-gated and refuses here -- see the lane case above), so the guard
 # stays fully intact for that path.
-exec bash "${DEPLOY_RUNTIME}" --execute --force "${BRINGUP}" "${DEPLOY_PROFILE_ARGS[@]}"
+exec "${DEPLOY_RUNTIME}" --repository-root "${REPO_ROOT}" --execute --force "${BRINGUP}" "${DEPLOY_PROFILE_ARGS[@]}"

@@ -13,12 +13,23 @@
 #   drift — a finding, not a root entry. Fix or delete it; do not
 #     add it here.
 #
-# mode: report — the gate records every finding with a per-class count and
-# exits 0. It flips to enforce when the residue is FIXED, never by moving the
+# mode: report — the gate records every finding with a per-class count. It
+# flips to whole-tree enforce when the residue is FIXED, never by moving the
 # residue into this file: that is the recurrence mechanism the OMN-17992
 # programme exists to remove.
+#
+# enforce_scope / enforce_classes (OMN-20782, the OMN-19835 mechanism): the five
+# content classes below fail the run, in CI and in the pre-commit hook, on the
+# lines a change ADDS. The whole-tree residue stays reported on every run.
 mode: report
 suppression_registry: ".public-repo-hygiene-suppressions.yaml"
+enforce_scope: added-lines
+enforce_classes:
+  - "private-repo-name"
+  - "internal-kb-prose"
+  - "lab-config"
+  - "person-name"
+  - "private-network"
 allowed_top_level:
   - ".claude"
   - ".env.example"

@@ -58,9 +58,10 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import KafkaError
 from pydantic import ValidationError
 
@@ -81,6 +82,9 @@ from omnibase_infra.topics.topic_namespace import apply_topic_namespace_all
 # validation. OMN-5737 proposed moving the schemas to a shared package and was
 # CANCELED; nothing here is pending.
 
+
+if TYPE_CHECKING:
+    from aiokafka.structs import ConsumerRecord
 
 logger = logging.getLogger(__name__)
 
@@ -596,7 +600,7 @@ class SessionEventConsumer(MixinConsumerHealth):
 
                     if success:
                         # Commit offset after successful processing
-                        await self._consumer.commit()
+                        await self._commit_through(message)
                         await self.metrics.record_processed()
                         await self._record_success()
 
@@ -613,7 +617,7 @@ class SessionEventConsumer(MixinConsumerHealth):
                     else:
                         # Processing returned False (rejected, duplicate, etc.)
                         # Still commit to avoid reprocessing
-                        await self._consumer.commit()
+                        await self._commit_through(message)
                         await self.metrics.record_skipped()
 
                         logger.debug(
@@ -628,7 +632,7 @@ class SessionEventConsumer(MixinConsumerHealth):
                 except ValidationError as e:
                     # Schema validation error - skip and commit
                     # These messages are malformed and will never succeed
-                    await self._consumer.commit()
+                    await self._commit_through(message)
                     await self.metrics.record_skipped()
 
                     logger.warning(
@@ -688,6 +692,19 @@ class SessionEventConsumer(MixinConsumerHealth):
                     "correlation_id": str(correlation_id),
                 },
             )
+
+    async def _commit_through(self, message: ConsumerRecord[object, object]) -> None:
+        """Commit the record's own partition, one past the record itself.
+
+        A bare ``commit()`` commits the consumer's position for every assigned
+        partition; this commits only the coordinate of the record just handled
+        (OMN-18631), so it can never mark a record this loop has not seen as done.
+        """
+        if self._consumer is None:
+            raise RuntimeError("Consumer not started. Call start() first.")
+        await self._consumer.commit(
+            {TopicPartition(message.topic, message.partition): message.offset + 1}
+        )
 
     # =========================================================================
     # Message Processing

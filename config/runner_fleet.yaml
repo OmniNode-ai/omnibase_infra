@@ -242,7 +242,7 @@ git_mirror:
     - omniweb
     - omnimemory
     - omnibase_compat
-    - knowledge-base
+    - knowledge_base
     - knowledge-base-internal
   # Space-separated RUNNER_NAME allowlist consumed by the pre-seed, or ALL.
   # Narrowed on the deployed copy of the hook during canary; the committed
@@ -268,7 +268,7 @@ tool_cache:
   durable: false
   snapshot_root: /home/jonah/.omnibase/runners/toolcache-seed
   seed_script: docker/runners/toolcache-seed.sh
-  recreate_procedure: knowledge-base:runbooks/c2-git-mirror-egress-rollout.md
+  recreate_procedure: knowledge_base:runbooks/c2-git-mirror-egress-rollout.md
 # OMN-15736 — local caching DNS resolver (unbound) endpoint. Scaling
 # precondition #1 (capacity probe: [mergesweep-0808-capacity]). STATUS:
 # pending-activation / INERT — the cache service

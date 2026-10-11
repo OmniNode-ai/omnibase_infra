@@ -1,0 +1,18 @@
+{
+  "_provenance": {
+    "source": "http://omninode-pc:8098/lab-overlay/8f2274e0b221c0f6060a2c327e7e18cd10227660",
+    "captured_utc": "2026-10-08T17:16:21Z",
+    "source_sha256": "e52f9c3c4b097a585124907c78e9545e284cc7fa0f7167e6fe5ec37e10a974bb",
+    "note": "Recorded persistent deploy-agent HTTP 200 response. Projection retains the exact sha and deployed_image check only; other apply checks and command metadata are omitted. This replay proves reader/emitter provenance, not the complete apply verdict."
+  },
+  "response": {
+    "sha": "8f2274e0b221c0f6060a2c327e7e18cd10227660",
+    "checks": [
+      {
+        "evidence": "1 Running omninode-runtime pod(s); expected onex-lab/omninode-runtime:20261008T151042Z-8f2274e0; every pod runs it. Content digests recorded, not compared: applied pin carries sha256:987945048889c7db545... in the k3s content store; pods report omninode-runtime-854dd4c69d-8r5fw=sha256:015ddfcb50c7...",
+        "name": "deployed_image",
+        "ok": true
+      }
+    ]
+  }
+}

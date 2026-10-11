@@ -1,0 +1,15 @@
+{
+  "_provenance": {
+    "source": "omniclaude scripts/public_repo_hygiene_gate.py at 6e47aa311ac5d177d116d9597b07966a233d2463, run by the exported public-repo-hygiene pre-commit hook over a staged planted lab-config literal in this repository",
+    "captured_utc": "2026-10-09T18:07:47Z"
+  },
+  "response": {
+    "gate_rev": "6e47aa311ac5d177d116d9597b07966a233d2463",
+    "command": "pre-commit run public-repo-hygiene --files tests/planted_omn20782_probe.txt",
+    "exit_code": 1,
+    "enforce_scope_line": "ENFORCE SCOPE: added lines (index over 73f2a806510d). 1 enforced finding(s) on lines this change adds fail the run; 14956 other finding(s) are reported only.",
+    "added_findings": [
+      "ADDED tests/planted_omn20782_probe.txt:1: lab-config"
+    ]
+  }
+}

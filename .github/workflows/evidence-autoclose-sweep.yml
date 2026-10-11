@@ -547,7 +547,9 @@ jobs:
       - name: Checkout omnibase_infra
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: 1
+          # OMN-16106: dod_verify's must-fail control checks out earlier code
+          # in a shared clone. A shallow source cannot supply that history.
+          fetch-depth: 0
 
       # OMN-16845. `EvidenceCollector._resolve_cwd` (omnimarket) renders
       # `${OMNI_HOME}` from the process environment and requires the result to
@@ -704,7 +706,7 @@ jobs:
           path: .omnimarket-src
           token: ${{ steps.app-token.outputs.token }}
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 0
 
       # The composition rule is OMN-13829's, applied to an EPHEMERAL job venv:
       # omnimarket is a runtime PROVIDER, never a build/lock dependency, because
@@ -921,9 +923,9 @@ jobs:
       #   OMN-16757 against a real OCC -> total_checks=14 verified=12 failed=2
       #                                   (superseded=1, occ_refresh=fetched)
       #
-      # depth-1 is correct here: the collector reads `contracts/<ticket>.yaml`
-      # AT a resolved ref, it does not walk ancestry. (The main-vs-dev ancestry
-      # caveat about shallow OCC clones does not apply to this read path.)
+      # OMN-16106: this checkout also seeds OCC-homed behaviour checks below.
+      # Their must-fail controls need history even though the contract read
+      # itself only needs the resolved ref.
       - name: Checkout onex_change_control (the contracts dod_verify verifies against)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -932,7 +934,7 @@ jobs:
           path: .occ-src
           token: ${{ steps.app-token.outputs.token }}
           persist-credentials: false
-          fetch-depth: 1
+          fetch-depth: 0
 
       # Assert the exact read the collector performs, before the sweep runs.
       # Without this the failure mode is silent and mis-labelled: it does not
@@ -992,7 +994,7 @@ jobs:
       # dropped. A silently discarded cwd is indistinguishable from a
       # satisfied one, and that indistinguishability is the whole defect class.
       #
-      # Cost note, recorded rather than hidden: this adds N shallow clones and
+      # Cost note, recorded rather than hidden: this adds N full-history clones and
       # N `uv sync`es to every scheduled run. It is bounded by the derived set
       # (7 dests across ~4600 contracts as of this commit), each repo is cloned
       # once and copied to its dests, and worktree-shaped dests are deliberately
@@ -1379,7 +1381,10 @@ jobs:
             elif [ "${repo}" = "omnimarket" ] && [ -d "${GITHUB_WORKSPACE}/.omnimarket-src" ]; then
               cp -a "${GITHUB_WORKSPACE}/.omnimarket-src" "${src}"
               status="REUSED_OMNIMARKET_CHECKOUT"
-            elif git clone --quiet --depth 1 --branch "${branch}" \
+            # OMN-16106: keep the chosen branch's history for must-fail controls.
+            # Fetching an old SHA into a shallow source does not make its
+            # shared clone able to check out that commit.
+            elif git clone --quiet --single-branch --branch "${branch}" \
                  "https://github.com/OmniNode-ai/${repo}.git" "${src}" \
                  2> "${RUNNER_TEMP}/clone-${repo}.err"; then
               status="CLONED_DEFAULT_BRANCH"

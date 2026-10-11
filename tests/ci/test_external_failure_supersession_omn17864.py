@@ -64,7 +64,6 @@ from scripts.ci.ci_summary_gate import (
     EXIT_FAILURE,
     EXIT_PENDING,
     EXIT_SUCCESS,
-    EXPECTED_EXTERNAL_CONTEXTS,
     EXTERNAL_FAILURE_SUPERSESSION_GRACE_S,
     SKIPPABLE_GATE_JOBS,
     STRICT_GATE_JOBS,
@@ -205,13 +204,17 @@ class TestCapturesAreTheIncident:
 
 
 class TestTheTransientRedIsNotATerminalVerdict:
-    """AC-1 — the incident head must not be failed while its replacement is due."""
+    """Replay historical layer-4 resolution independently of today's inventory.
+
+    The receipt context is no longer required. Supplying the captured context
+    explicitly tests the still-live grace rule; layer 5 has separate coverage.
+    """
 
     def test_the_gate_does_not_fail_the_head_at_the_failing_poll(self) -> None:
         """REGRESSION: this is the exact snapshot the shipped gate failed on."""
         failed_at = _poller_failed_at()
         failures, unresolved = evaluate_external_contexts(
-            _as_seen_at(failed_at), EXPECTED_EXTERNAL_CONTEXTS, now=failed_at
+            _as_seen_at(failed_at), (RECEIPT_GATE,), now=failed_at
         )
         assert RECEIPT_GATE not in failures
         assert RECEIPT_GATE in unresolved
@@ -220,7 +223,8 @@ class TestTheTransientRedIsNotATerminalVerdict:
         code, report = evaluate(
             _all_gates_green(),
             check_runs=_as_seen_at(_poller_failed_at()),
-            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            external_contexts=(RECEIPT_GATE,),
+            sweep_external=False,
             now=_poller_failed_at(),
         )
         assert code == EXIT_PENDING, report
@@ -229,7 +233,7 @@ class TestTheTransientRedIsNotATerminalVerdict:
         """No change to the PR — only the replacement row — clears it."""
         instant = _poller_failed_at() + _THREE_MINUTES_LATER
         failures, unresolved = evaluate_external_contexts(
-            _as_seen_at(instant), EXPECTED_EXTERNAL_CONTEXTS, now=instant
+            _as_seen_at(instant), (RECEIPT_GATE,), now=instant
         )
         assert failures == []
         assert RECEIPT_GATE not in unresolved
@@ -239,7 +243,8 @@ class TestTheTransientRedIsNotATerminalVerdict:
         _, report = evaluate(
             _all_gates_green(),
             check_runs=_as_seen_at(failed_at),
-            external_contexts=EXPECTED_EXTERNAL_CONTEXTS,
+            external_contexts=(RECEIPT_GATE,),
+            sweep_external=False,
             now=failed_at,
         )
         assert RECEIPT_GATE in report

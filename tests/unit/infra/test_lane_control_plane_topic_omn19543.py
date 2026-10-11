@@ -13,9 +13,10 @@ consumer subscribe does not create one. So ``projection-tenant-registry-writer``
 subscribed to a topic that did not exist, and it was unhealthy on dev-200 and
 restarting on dev-202 (dev-200-lane TERMINAL, omni_home ledger 2026-09-25).
 
-The fix creates the topic in the dev lane's override of
-``redpanda-partition-cap``. That one-shot runs on a cold ``up`` through
-depends_on and on every warm redeploy (scripts/deploy-runtime.sh
+The fix creates the topic in ``redpanda-partition-cap``: the shared broker
+profile (OMN-19419) creates ``REDPANDA_CONTROL_PLANE_TOPIC`` and the dev lane
+sets it to the topic. That one-shot runs on a cold ``up`` through
+depends_on and on every warm redeploy (src/omnibase_infra/handlers/handler_runtime_deploy.sh
 warm_broker_topic_provisioning). Every instance overlay inherits the command,
 because none of them overrides it. These tests run the real script against a
 fake ``rpk`` and pin:
@@ -32,7 +33,6 @@ fake ``rpk`` and pin:
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -40,6 +40,8 @@ from typing import Any
 
 import pytest
 import yaml
+
+from tests.unit.infra.test_broker_profile_omn19419 import _render
 
 pytestmark = pytest.mark.unit
 
@@ -60,6 +62,8 @@ case "$1 $2" in
       get)
         case "$4" in
           enable_sasl) echo false ;;
+          topic_partitions_per_shard) echo 7000 ;;
+          topic_memory_per_partition) echo 1048576 ;;
           segment_fallocation_step) echo 1048576 ;;
           log_segment_ms) echo 86400000 ;;
           retention_bytes) echo 1073741824 ;;
@@ -119,19 +123,15 @@ def _services(path: Path) -> dict[str, Any]:
 def _run_oneshot(
     tmp_path: Path, existing: list[str], **env_flags: str
 ) -> tuple[subprocess.CompletedProcess[str], list[str], list[str]]:
-    command = _services(_DEV_LANE)[_ONESHOT]["command"]
+    # OMN-19419: the script lives in the shared broker profile; the dev lane
+    # supplies the topic through the environment, so run the rendered service.
+    service = _render("dev")["services"][_ONESHOT]
     # Compose turns `$$` into a literal `$` before the shell sees it.
-    script = "\n".join(str(c) for c in command).replace("$$", "$")
-    # OMN-19731: the oneshot's scratch files (/tmp/topics.txt, /tmp/cfg.txt)
-    # are fixed /tmp paths, private inside its container but shared by every
-    # xdist worker on a CI host, so parallel tests read each other's listing.
-    # Rewrite these first because tmp_path may itself be under /tmp.
-    # Give each test its own copy of every one.
-    # The /tmp literals below MATCH the script's paths; nothing opens them.
-    container_tmp = r"/tmp/([A-Za-z0-9_.-]+)"  # noqa: S108
-    script = re.sub(container_tmp, lambda m: str(tmp_path / m.group(1)), script)
-    leftover = script.replace(str(tmp_path), "")
-    assert "/tmp/" not in leftover, (  # noqa: S108
+    script = "\n".join(str(c) for c in service["command"]).replace("$$", "$")
+    # OMN-19731: a fixed /tmp scratch path is shared by every xdist worker on a
+    # CI host, so parallel tests would read each other's listing. The script
+    # takes its scratch directory from mktemp, which honours TMPDIR below.
+    assert "/tmp/" not in script, (  # noqa: S108
         "oneshot script still uses a fixed /tmp path shared across xdist workers"
     )
     fake = tmp_path / "rpk"
@@ -145,11 +145,11 @@ def _run_oneshot(
     sh = shutil.which("sh")
     assert sh is not None
     env = {
+        **{key: str(value) for key, value in service["environment"].items()},
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "TMPDIR": str(tmp_path),
         "FAKE_RPK_STATE": str(state),
         "FAKE_RPK_LOG": str(log),
-        "DEV_KAFKA_SASL_USERNAME": "unused",
-        "DEV_KAFKA_SASL_PASSWORD": "unused",
         **env_flags,
     }
     result = subprocess.run(

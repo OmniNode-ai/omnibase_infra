@@ -53,7 +53,7 @@ class ModelLlmInferenceRequest(BaseModel):
             performs no URL construction and appends no path. Required for every
             inference call; the routing authority resolves it complete.
         base_url: Routing/observability label for the LLM endpoint host (e.g.
-            ``"http://192.168.86.201:8000"``). It is NOT used to construct the POST
+            ``"http://192.0.2.10:8000"``). It is NOT used to construct the POST
             URL — the handler posts ``endpoint_url`` verbatim. Retained as the
             required routing/metrics field consumed by the metrics publisher.
         operation_type: Type of LLM operation to perform.
@@ -90,7 +90,7 @@ class ModelLlmInferenceRequest(BaseModel):
 
     Example:
         >>> req = ModelLlmInferenceRequest(
-        ...     base_url="http://192.168.86.201:8000",
+        ...     base_url="http://192.0.2.10:8000",
         ...     operation_type=EnumLlmOperationType.CHAT_COMPLETION,
         ...     model="qwen2.5-coder-14b",
         ...     messages=[{"role": "user", "content": "Hello"}],

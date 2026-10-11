@@ -92,7 +92,7 @@ ENV OMNI_CI_ENV_ROOT=${OMNI_CI_ENV_ROOT}
 # Ubuntu 22.04 does not pull it in transitively; without it every node-based
 # action fails with "node: libatomic.so.1: cannot open shared object file".
 # rsync (OMN-15103): the omnibase-deploy runner (omninode-deploy-runner,
-# see docker-compose.runners.yml) invokes scripts/deploy-runtime.sh's
+# see docker-compose.runners.yml) invokes onex-runtime-deploy's
 # BUILD_SOURCE=workspace path, whose sync_files() stages the deploy target
 # via ~10 `rsync -a --delete` calls. The shared omnibase-ci fleet's jobs
 # (build/test) never exercise that path, so the gap went unnoticed until

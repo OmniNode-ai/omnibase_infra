@@ -7,6 +7,7 @@ Includes:
 - Lifecycle hook models: hook config, results, handshake, quarantine (OMN-7655, OMN-7657)
 """
 
+from omnibase_infra.models.model_discovery_skip import ModelDiscoverySkip
 from omnibase_infra.runtime.auto_wiring.models.enum_handshake_failure_reason import (
     HandshakeFailureReason,
 )
@@ -64,6 +65,7 @@ __all__ = [
     "ModelContractVersion",
     "ModelDiscoveredContract",
     "ModelDiscoveryError",
+    "ModelDiscoverySkip",
     "ModelEventBusWiring",
     "ModelHandlerRef",
     "ModelHandlerRouting",

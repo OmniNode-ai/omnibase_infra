@@ -63,6 +63,9 @@ from uuid import uuid4
 import httpx
 import yaml
 
+from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
+    AdapterLinearGraphQLProjectTracker,
+)
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_in_progress_probe_hygiene_effect.models.enum_probe_hygiene_decision import (
     EnumProbeHygieneDecision,
@@ -80,9 +83,6 @@ from omnibase_infra.utils.util_error_sanitization import sanitize_error_message
 
 logger = logging.getLogger(__name__)
 
-_LINEAR_API_URL: Final[str] = (
-    "https://api.linear.app/graphql"  # url-authority-ok: fixed public GraphQL API, no ONEX routing authority
-)
 
 #: The marker that makes this sweep's comment identifiable by a LATER run. It
 #: must be stable across every wording change below it, because it is the only
@@ -274,14 +274,12 @@ class LinearHygieneTransport:
         if not self._api_key:
             self.last_error = "LINEAR_API_KEY is not set."
             return None
-        headers = {"Authorization": self._api_key, "Content-Type": "application/json"}
-        payload = {"query": query, "variables": variables}
         for attempt_index in range(self._max_attempts):
             try:
-                async with httpx.AsyncClient(timeout=self._timeout) as client:
-                    response = await client.post(
-                        _LINEAR_API_URL, json=payload, headers=headers
-                    )
+                async with AdapterLinearGraphQLProjectTracker.graphql_transport(
+                    api_key=self._api_key, timeout_seconds=self._timeout
+                ) as transport:
+                    response = await transport.post_graphql(query, variables)
                 status = response.status_code
                 if status == _HTTP_TOO_MANY_REQUESTS or status >= _HTTP_SERVER_ERROR:
                     self.last_error = f"Linear API returned HTTP {status}."

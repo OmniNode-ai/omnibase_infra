@@ -76,13 +76,13 @@ jobs:
 
       - name: Run canonical-inference gate (full-repo, against frozen baseline)
         run: |
-          uv run --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core.git@940d2f2ab44d2f455a607926674b90ecbc9b74ba" \
+          uv run --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core.git@422e207e953841b11b7ae4919bd486f8c84b8c24" \
             python -m omnibase_core.validation.validator_canonical_inference \
             --all --repo omnibase_infra --repo-root .
 
       - name: Assert baseline did not grow (anti-gaming)
         run: |
-          uv run --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core.git@940d2f2ab44d2f455a607926674b90ecbc9b74ba" python - <<'PY'
+          uv run --with "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core.git@422e207e953841b11b7ae4919bd486f8c84b8c24" python - <<'PY'
           import json
           import subprocess
           import sys

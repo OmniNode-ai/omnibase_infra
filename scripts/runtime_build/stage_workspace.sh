@@ -331,11 +331,11 @@ fi
 # drift condition; the check never ran far enough to do the comparison.
 #
 # Verified live on the deploy runner (2026-07-25): the repo's own
-# .venv/bin/python (built by deploy-runtime.sh's own `uv sync` earlier in
+# .venv/bin/python (built by onex-runtime-deploy's own `uv sync` earlier in
 # the same job) and `uv run python` both have pydantic installed; bare
-# python3 does not. This script runs with cwd == repo_root (deploy-runtime.sh
+# python3 does not. This script runs with cwd == repo_root (onex-runtime-deploy
 # invokes it via `cd "${repo_root}" && bash stage_workspace.sh`), so
-# ".venv/bin/python" resolves to the same venv deploy-runtime.sh's own
+# ".venv/bin/python" resolves to the same venv onex-runtime-deploy's own
 # check_sibling_lock_pins() bash function already prefers for this exact
 # script (see resolve logic there) -- this mirrors that precedence order
 # instead of duplicating a second, divergent one.

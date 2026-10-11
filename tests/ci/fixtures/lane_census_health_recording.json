@@ -1,0 +1,29 @@
+{
+  "_provenance": {
+    "source": "Read-only .201 Docker Engine API inventory via lane_census_inventory.py; selected runtime health fields and stability network",
+    "captured_utc": "2026-10-08T20:31:44.188656+00:00",
+    "source_sha256": "dccf5e57534cb39e3a297fe4c4a32ac0dee52d7586814669516ee3e924623a5c",
+    "projection": "Only the stability runtime health readings and its network are retained. Labels, paths, unrelated containers and networks are omitted."
+  },
+  "response": {
+    "lane": "stability-test",
+    "host": "omninode-pc",
+    "containers": [
+      {
+        "Names": "omninode-stability-test-runtime",
+        "State": "running",
+        "Status": "Up 5 days (healthy)",
+        "Health": {
+          "Status": "healthy",
+          "FailingStreak": 0
+        },
+        "HealthcheckIntervalSeconds": 30.0,
+        "RestartCount": 0
+      }
+    ],
+    "networks": [
+      "omnibase-infra-stability-test-network"
+    ],
+    "runtime_tag": null
+  }
+}

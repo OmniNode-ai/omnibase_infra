@@ -113,7 +113,8 @@ class TestPushRunIsGreenCapable:
         by its own guard, so the event gate bought nothing and cost the whole
         push lane.
         """
-        condition = str(_load_workflow(CI_WORKFLOW)["jobs"]["contract-sync-gate"]["if"])
+        job = _load_workflow(CI_WORKFLOW)["jobs"]["contract-sync-gate"]
+        condition = str(job.get("if", ""))
         assert "github.event_name" not in condition, (
             "contract-sync-gate is event-gated again. On a push event it will "
             "report `skipped`, and `detect-changes` needs it with no `if:`, so "

@@ -3397,7 +3397,15 @@ def _run_convergence_mode(args: argparse.Namespace) -> int:
         ]
         if result.initial_revision and result.initial_revision not in backfill.backfill:
             pending.append((result.initial_revision, True))
-        candidates = bind_reemission_candidates(args, lane.revision, pending)
+        # OMN-18976: the primary receipt is keyed by the expected merge, even
+        # when containment converges at a newer lane revision. That merge can
+        # appear in the window, durable backfill or lower endpoint; re-keying
+        # its primary receipt onto itself is refused by the emitter.
+        candidates = bind_reemission_candidates(
+            args,
+            lane.revision,
+            [(sha, endpoint) for sha, endpoint in pending if sha != expected],
+        )
     _write_output("reemit_candidates", json.dumps(candidates))
 
     # OMN-18143. Read AFTER the wait, because the agent folds a command when it

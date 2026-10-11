@@ -1411,7 +1411,7 @@ def test_only_the_dev_lane_overlay_carries_the_indicator() -> None:
 def test_dev_lane_overlay_is_wired_into_both_lane_mappings() -> None:
     """Two files own lane -> compose-file mapping; both must layer the overlay.
 
-    ``scripts/deploy-runtime.sh`` is what actually brings the ``.201`` lab lane
+    ``src/omnibase_infra/handlers/handler_runtime_deploy.sh`` is what actually brings the ``.201`` lab lane
     up, and ``deploy_agent.executor._LANE_CONFIGS`` is the tested mapping the
     deploy agent uses. They are already required to agree (the comment in
     ``resolve_compose_file_args`` says so); a release wired into only one of
@@ -1419,17 +1419,17 @@ def test_dev_lane_overlay_is_wired_into_both_lane_mappings() -> None:
     """
     overlay_filename = Path(DEV_LANE_OVERLAY_RELPATH).name
 
-    # OMN-16729: resolve_compose_file_args() moved out of deploy-runtime.sh into
-    # scripts/runtime_build/compose_files.sh, which deploy-runtime.sh and both
+    # OMN-16729: resolve_compose_file_args() moved out of onex-runtime-deploy into
+    # scripts/runtime_build/compose_files.sh, which onex-runtime-deploy and both
     # lane-refresh wrappers now source. Both halves are asserted: the resolver
-    # layers the overlay, AND deploy-runtime.sh actually loads the file that
+    # layers the overlay, AND onex-runtime-deploy actually loads the file that
     # defines it -- a lib nobody sources brings the lane up with no indicator
     # just as surely as a resolver that omits the overlay.
-    deploy_runtime = (REPO_ROOT / "scripts" / "deploy-runtime.sh").read_text(
-        encoding="utf-8"
-    )
+    deploy_runtime = (
+        REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+    ).read_text(encoding="utf-8")
     assert "runtime_build/compose_files.sh" in deploy_runtime, (
-        "deploy-runtime.sh does not source the shared compose-file resolver, so "
+        "onex-runtime-deploy does not source the shared compose-file resolver, so "
         "it has no lane -> compose-file mapping at all"
     )
     compose_files = (
@@ -1445,7 +1445,7 @@ def test_dev_lane_overlay_is_wired_into_both_lane_mappings() -> None:
     )
     assert overlay_filename in resolver.group(0), (
         f"resolve_compose_file_args() does not layer {overlay_filename} for the "
-        "dev lane, so `deploy-runtime.sh` brings the lab lane up with no lane "
+        "dev lane, so `onex-runtime-deploy` brings the lab lane up with no lane "
         "indicator and the registration trio stays fenced there"
     )
 

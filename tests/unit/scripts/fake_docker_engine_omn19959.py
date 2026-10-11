@@ -71,7 +71,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
-        by_id = {c.cid: c for c in self.server.containers}
+        by_id = {key: c for c in self.server.containers for key in (c.cid, c.name)}
         if path == "/containers/json":
             rows = [
                 {
@@ -96,11 +96,13 @@ class _Handler(BaseHTTPRequestHandler):
             container = by_id[parts[1]]
             if parts[2] == "json":
                 detail = {
+                    "RestartCount": 0,
+                    "Config": {},
                     "State": {
                         "Running": True,
                         "Pid": container.pid,
                         "StartedAt": container.started_at,
-                    }
+                    },
                 }
                 self._send(200, json.dumps(detail).encode())
                 return

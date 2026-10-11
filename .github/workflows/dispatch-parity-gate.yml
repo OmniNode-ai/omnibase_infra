@@ -5,7 +5,7 @@
 #
 # Pins the CURRENT behavior of the live MessageDispatchEngine selection (design D1:
 # warts included) against a committed fixture (tests/fixtures/dispatch_parity/
-# baseline-selection-v2.json). Any PR that drifts dispatch-selection semantics fails
+# selection-oracle-v2.json). Any PR that drifts dispatch-selection semantics fails
 # this check.
 #
 # Enforcement, not detection (CLAUDE.md Rule 5): wired as a CI job in the same PR as
@@ -112,15 +112,15 @@ jobs:
           import json, sys
           from tests.fixtures.dispatch_parity.harness import strip_volatile_header_fields
           committed = strip_volatile_header_fields(
-              json.load(open("tests/fixtures/dispatch_parity/baseline-selection-v2.json"))
+              json.load(open("tests/fixtures/dispatch_parity/selection-oracle-v2.json"))
           )
           live = strip_volatile_header_fields(json.load(open("/tmp/parity-live.json")))
           if json.dumps(committed, sort_keys=True) != json.dumps(live, sort_keys=True):
               print(
-                  "::error::Committed baseline-selection-v2.json is STALE vs the live "
+                  "::error::Committed selection-oracle-v2.json is STALE vs the live "
                   "engine. Regenerate with: uv run python -m "
                   "tests.fixtures.dispatch_parity.harness --out "
-                  "tests/fixtures/dispatch_parity/baseline-selection-v2.json",
+                  "tests/fixtures/dispatch_parity/selection-oracle-v2.json",
                   file=sys.stderr,
               )
               sys.exit(1)

@@ -116,7 +116,7 @@ services:
       # OMN-19494 (LO4): this lane's own id. The dogfood file under this
       # overlay declares `dogfood`, and an environment key survives a layer
       # that does not repeat it, so without this line the simulation stack
-      # would name itself as the dogfood lane. Literal, main runtime only.
+      # would name itself as the dogfood lane. Literal, main and effects runtimes.
       ONEX_RUNTIME_LANE: "sim-202"
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/sim-202.bifrost.yaml
       OTEL_SERVICE_NAME: omninode-sim-202-runtime-main
@@ -140,6 +140,8 @@ services:
     container_name: omninode-sim-202-runtime-effects
     image: *sim-202-runtime-image
     environment:
+      # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
+      ONEX_RUNTIME_LANE: "sim-202"
       ONEX_BOX_ID: omnipc2
       ONEX_RUNTIME_ADDRESS: runtime://omnipc2/dogfood/effects
       BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/sim-202.bifrost.yaml

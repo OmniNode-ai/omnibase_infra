@@ -1,0 +1,201 @@
+TLC2 Version 2026.09.23.154203 (rev: 4260e47)
+Running breadth-first search Model-Checking with fp 23 and seed 7600759035102512199 with 2 workers on 24 cores with 27300MB heap and 64MB offheap memory [pid: 99794] (Mac OS X 26.6.2 aarch64, Homebrew 23.0.2 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file LabReconcile.tla
+Parsing file Naturals.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file Sequences.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file FiniteSets.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file _TLCTrace.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file TLC.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file TLCExt.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file Integers.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Integers
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module LabReconcile
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module LabReconcile
+Starting... (2026-09-24 13:21:00)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-24 13:21:00.
+Error: Invariant NoWindowCollision is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ nMerge = 0
+/\ running = [dev |-> 0, stab |-> 0]
+/\ mut = << [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ] >>
+/\ now = 0
+/\ nextId = 1
+/\ desired = [dev |-> 0, stab |-> 0]
+/\ nRel = 0
+/\ pendingStab = 0
+/\ agentQueue = 0
+/\ receipts = <<<<>>, <<>>, <<>>>>
+/\ nHand = [dev |-> 0, stab |-> 0]
+/\ rolledBack = [dev |-> FALSE, stab |-> FALSE]
+
+State 2: <Tick line 109, col 5 to line 113, col 65 of module LabReconcile>
+/\ nMerge = 0
+/\ running = [dev |-> 0, stab |-> 0]
+/\ mut = << [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ] >>
+/\ now = 1
+/\ nextId = 1
+/\ desired = [dev |-> 0, stab |-> 0]
+/\ nRel = 0
+/\ pendingStab = 0
+/\ agentQueue = 0
+/\ receipts = <<<<>>, <<>>, <<>>>>
+/\ nHand = [dev |-> 0, stab |-> 0]
+/\ rolledBack = [dev |-> FALSE, stab |-> FALSE]
+
+State 3: <RuntimeMerge line 128, col 5 to line 134, col 94 of module LabReconcile>
+/\ nMerge = 1
+/\ running = [dev |-> 0, stab |-> 0]
+/\ mut = << [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ] >>
+/\ now = 1
+/\ nextId = 1
+/\ desired = [dev |-> 1, stab |-> 0]
+/\ nRel = 0
+/\ pendingStab = 0
+/\ agentQueue = 1
+/\ receipts = <<<<>>, <<>>, <<>>>>
+/\ nHand = [dev |-> 0, stab |-> 0]
+/\ rolledBack = [dev |-> FALSE, stab |-> FALSE]
+
+State 4: <Tick line 109, col 5 to line 113, col 65 of module LabReconcile>
+/\ nMerge = 1
+/\ running = [dev |-> 0, stab |-> 0]
+/\ mut = << [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ] >>
+/\ now = 2
+/\ nextId = 1
+/\ desired = [dev |-> 1, stab |-> 0]
+/\ nRel = 0
+/\ pendingStab = 0
+/\ agentQueue = 1
+/\ receipts = <<<<>>, <<>>, <<>>>>
+/\ nHand = [dev |-> 0, stab |-> 0]
+/\ rolledBack = [dev |-> FALSE, stab |-> FALSE]
+
+State 5: <AgentStart line 154, col 5 to line 159, col 98 of module LabReconcile>
+/\ nMerge = 1
+/\ running = [dev |-> 0, stab |-> 0]
+/\ mut = << [ proj |-> "dev",
+     actor |-> "agent",
+     target |-> 1,
+     prior |-> 0,
+     start |-> 2,
+     deadline |-> 4,
+     status |-> "forward" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ],
+   [ proj |-> "none",
+     actor |-> "none",
+     target |-> 0,
+     prior |-> 0,
+     start |-> 0,
+     deadline |-> 0,
+     status |-> "none" ] >>
+/\ now = 2
+/\ nextId = 2
+/\ desired = [dev |-> 1, stab |-> 0]
+/\ nRel = 0
+/\ pendingStab = 0
+/\ agentQueue = 0
+/\ receipts = <<<<>>, <<>>, <<>>>>
+/\ nHand = [dev |-> 0, stab |-> 0]
+/\ rolledBack = [dev |-> FALSE, stab |-> FALSE]
+
+62 states generated, 49 distinct states found, 28 states left on queue.
+The depth of the complete state graph search is 6.
+Finished in 00s at (2026-09-24 13:21:00)
+Trace exploration spec path: ./LabReconcile_TTrace_1790270460.tla
+$J -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -deadlock -workers 2 -config  1.49s user 0.31s system 351% cpu 0.514 total

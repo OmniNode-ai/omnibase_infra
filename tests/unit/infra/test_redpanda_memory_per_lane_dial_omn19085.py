@@ -5,7 +5,7 @@
 Why this exists. Three lanes -- dev (docker-compose.infra.yml), stability-test
 and judge -- all read the same ``REDPANDA_MEMORY``, and the value that actually
 takes effect comes from the host-global operator env file that
-``deploy-runtime.sh`` resolves via ``OMNIBASE_OPERATOR_ENV_FILE``. There was
+``onex-runtime-deploy`` resolves via ``OMNIBASE_OPERATOR_ENV_FILE``. There was
 therefore no way to change one lane's broker reservation without changing the
 others at their next recreate, and nothing in the repository said so. That
 coupling is invisible in any single file, which is exactly the kind of thing a

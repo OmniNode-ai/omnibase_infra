@@ -26,7 +26,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import stat
+import subprocess
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -281,7 +285,7 @@ class TestLiveState:
             "omnibase_compat is excluded by operator ruling and must not appear"
         )
 
-    def test_exactly_the_three_reviewed_repos_are_armed_to_cut(self) -> None:
+    def test_exactly_the_five_reviewed_repos_are_armed_to_cut(self) -> None:
         """Arming a repo is one field, and this test is what keeps it a
         deliberate, visible act rather than a side effect of another change.
 
@@ -298,6 +302,11 @@ class TestLiveState:
         sharing a name, then a fetch that projected away the timestamps the fix
         ordered on. Both are corrected and pinned by their own tests, and every
         required context on that repo's gating commit reports success.
+
+        omnimarket was armed by operator ruling 2026-10-08T03:53:23Z
+        (OMN-20715) after release-on-merge.yml was retired (omnimarket#3037,
+        2026-09-28), leaving nothing releasing it. Its premise is a lab receipt,
+        not green CI alone.
         """
         policies = rt.load_policy(_POLICY)
         armed = sorted(
@@ -307,6 +316,7 @@ class TestLiveState:
             "omnibase_core",
             "omnibase_infra",
             "omnibase_spi",
+            "omnimarket",
             "omnimemory",
         ]
 
@@ -430,6 +440,184 @@ class TestCutPath:
             is rt.EnumTrainReason.UNRELEASED_WORK_NO_LAB_SURFACE_DECLARED
         )
         assert "no lab lane" in decision.detail
+
+
+# --------------------------------------------------------------------------- #
+# omnimarket is armed on the lab premise its shipped row already declares.     #
+# --------------------------------------------------------------------------- #
+class TestOmnimarketIsArmedOnItsLabPremise:
+    def test_the_shipped_row_is_cut_on_its_existing_lab_premise(self) -> None:
+        policy = rt.load_policy(_POLICY)["omnimarket"]
+        assert policy.mode is rt.EnumTrainMode.CUT
+        assert policy.lab_evidence is rt.EnumLabEvidence.COMPOSE_DEV_OR_INSTANCE
+        assert policy.release_relevant_paths == ("src", "pyproject.toml")
+
+    def test_the_note_no_longer_claims_release_on_merge_races_the_train(
+        self,
+    ) -> None:
+        """A retired cutter cannot remain the reason this reader holds a repo.
+
+        The pre-fix text is the positive control: an absence is only evidence
+        when the same markers find the claim this test was written against.
+        """
+        markers = (
+            "release-on-merge.yml already releases this repo on every "
+            "source-touching merge to dev (OMN-18010)",
+            "A second cutter would race it",
+        )
+        pre_fix_note = (
+            "release-on-merge.yml already releases this repo on every "
+            "source-touching merge to dev (OMN-18010). "
+            "A second cutter would race it"
+        )
+        for marker in markers:
+            assert marker in pre_fix_note, (
+                f"positive control failed: {marker!r} is not in the pre-fix note"
+            )
+
+        note = rt.load_policy(_POLICY)["omnimarket"].mode_note
+        for marker in markers:
+            assert marker not in note, (
+                f"omnimarket's mode_note still carries {marker!r}; the cutter "
+                "it describes was retired on 2026-09-28"
+            )
+        assert "omnimarket#3037" in note
+        assert "workflow_dispatch" in note
+        assert "chore: release" in note
+
+    def test_unreleased_source_work_with_a_pass_premise_opens_a_release_pr_decision(
+        self,
+    ) -> None:
+        """A dev version level with the tag needs the next patch, and a bump."""
+        decision = rt.decide(
+            policy=rt.load_policy(_POLICY)["omnimarket"],
+            facts=_facts(
+                repo="omnimarket",
+                latest_tag="v0.4.302",
+                dev_version="0.4.302",
+                unreleased_count=17,
+                dev_head_sha=_RECEIPTED_SHA,
+            ),
+            **_lab_seam(
+                artifacts=[{"id": 1, "created_at": "2026-10-07T23:00:00Z"}],
+                receipt=_receipt(
+                    _RECEIPTED_SHA, rt.lab_pass_receipt.EnumLabPassResult.PASS
+                ),
+            ),
+        )
+        assert decision.verdict is rt.EnumTrainVerdict.CUT
+        assert decision.reason is rt.EnumTrainReason.UNRELEASED_WORK_LAB_PROVEN
+        assert decision.candidate_version == "0.4.303"
+        assert decision.needs_bump is True
+        assert decision.candidate_sha == _RECEIPTED_SHA
+        assert decision.to_dict()["base_branch"] == "dev"
+
+    def test_the_same_inputs_without_unreleased_source_work_do_not_cut(self) -> None:
+        """One input flipped. The shipped cut mode does not invent work."""
+        decision = rt.decide(
+            policy=rt.load_policy(_POLICY)["omnimarket"],
+            facts=_facts(
+                repo="omnimarket",
+                latest_tag="v0.4.302",
+                dev_version="0.4.302",
+                unreleased_count=0,
+                dev_head_sha=_RECEIPTED_SHA,
+            ),
+            **_lab_seam(
+                artifacts=[{"id": 1, "created_at": "2026-10-07T23:00:00Z"}],
+                receipt=_receipt(
+                    _RECEIPTED_SHA, rt.lab_pass_receipt.EnumLabPassResult.PASS
+                ),
+            ),
+        )
+        assert decision.verdict is rt.EnumTrainVerdict.SKIP
+        assert decision.reason is rt.EnumTrainReason.NO_UNRELEASED_RELEASE_RELEVANT_WORK
+
+    def test_the_same_inputs_with_a_failing_receipt_do_not_cut(self) -> None:
+        decision = rt.decide(
+            policy=rt.load_policy(_POLICY)["omnimarket"],
+            facts=_facts(
+                repo="omnimarket",
+                latest_tag="v0.4.302",
+                dev_version="0.4.302",
+                unreleased_count=17,
+                dev_head_sha=_RECEIPTED_SHA,
+            ),
+            **_lab_seam(
+                artifacts=[{"id": 1, "created_at": "2026-10-07T23:00:00Z"}],
+                receipt=_receipt(
+                    _RECEIPTED_SHA, rt.lab_pass_receipt.EnumLabPassResult.FAIL
+                ),
+            ),
+        )
+        assert decision.verdict is rt.EnumTrainVerdict.SKIP
+        assert decision.reason is rt.EnumTrainReason.LAB_RECEIPT_FAIL
+
+    def test_the_same_inputs_without_receipt_artifacts_do_not_cut(self) -> None:
+        """Green CI alone does not satisfy the shipped row's lab premise."""
+        decision = rt.decide(
+            policy=rt.load_policy(_POLICY)["omnimarket"],
+            facts=_facts(
+                repo="omnimarket",
+                latest_tag="v0.4.302",
+                dev_version="0.4.302",
+                unreleased_count=17,
+                dev_head_sha=_RECEIPTED_SHA,
+            ),
+            **_lab_seam(
+                artifacts=[],
+                receipt=_receipt(
+                    _RECEIPTED_SHA, rt.lab_pass_receipt.EnumLabPassResult.PASS
+                ),
+            ),
+        )
+        assert decision.verdict is rt.EnumTrainVerdict.SKIP
+        assert decision.reason is rt.EnumTrainReason.LAB_RECEIPT_ABSENT
+
+    def test_the_same_inputs_with_report_only_mode_do_not_cut(self) -> None:
+        """The mode field arms the repo; a PASS does not arm it by itself."""
+        policy = rt.load_policy(_POLICY)["omnimarket"]
+        decision = rt.decide(
+            policy=replace(policy, mode=rt.EnumTrainMode.REPORT_ONLY),
+            facts=_facts(
+                repo="omnimarket",
+                latest_tag="v0.4.302",
+                dev_version="0.4.302",
+                unreleased_count=17,
+                dev_head_sha=_RECEIPTED_SHA,
+            ),
+            **_lab_seam(
+                artifacts=[{"id": 1, "created_at": "2026-10-07T23:00:00Z"}],
+                receipt=_receipt(
+                    _RECEIPTED_SHA, rt.lab_pass_receipt.EnumLabPassResult.PASS
+                ),
+            ),
+        )
+        assert decision.verdict is rt.EnumTrainVerdict.SKIP
+        assert decision.reason is rt.EnumTrainReason.MODE_REPORT_ONLY
+
+    def test_the_report_for_the_shipped_omnimarket_row_is_a_cut(self) -> None:
+        decision = rt.decide(
+            policy=rt.load_policy(_POLICY)["omnimarket"],
+            facts=_facts(
+                repo="omnimarket",
+                latest_tag="v0.4.302",
+                dev_version="0.4.302",
+                unreleased_count=17,
+                dev_head_sha=_RECEIPTED_SHA,
+            ),
+            **_lab_seam(
+                artifacts=[{"id": 1, "created_at": "2026-10-07T23:00:00Z"}],
+                receipt=_receipt(
+                    _RECEIPTED_SHA, rt.lab_pass_receipt.EnumLabPassResult.PASS
+                ),
+            ),
+        )
+        payload = json.loads(rt.render_report_json([decision]))
+        assert any(
+            row["repo"] == "omnimarket" and row["verdict"] == "CUT"
+            for row in payload["decisions"]
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -763,6 +951,116 @@ class TestWorkflowShape:
         )
         assert decision.verdict is rt.EnumTrainVerdict.CUT
         assert decision.to_dict()["base_branch"] == "trunk"
+
+
+# --------------------------------------------------------------------------- #
+# The duplicate guard is executed before branch creation, not merely present. #
+# --------------------------------------------------------------------------- #
+class TestTheDuplicateGuardHolds:
+    """An open train release PR must stop a second cut of the same branch.
+
+    Run the shipped shell up to branch creation. A sentinel at that boundary
+    proves the empty result proceeds and the occupied result actually stops.
+    """
+
+    WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "release-train-nightly.yml"
+
+    @staticmethod
+    def _run_guard(
+        tmp_path: Path, open_count: int
+    ) -> tuple[subprocess.CompletedProcess[str], Path, str]:
+        import yaml as _yaml
+
+        parsed = _yaml.safe_load(
+            TestTheDuplicateGuardHolds.WORKFLOW.read_text(encoding="utf-8")
+        )
+        steps = [
+            step
+            for step in parsed["jobs"]["cut"]["steps"]
+            if step.get("name") == "Open the release pull request"
+        ]
+        assert len(steps) == 1, "the cut job must declare exactly one release PR step"
+        step = steps[0]
+        run: str = step["run"]
+        branch_creation = 'git checkout -b "${branch}"'
+        assert run.count(branch_creation) == 1, (
+            "the guard boundary must appear exactly once in the shipped step"
+        )
+        lines = run.splitlines()
+        boundary = [
+            i for i, line in enumerate(lines) if line.strip() == branch_creation
+        ]
+        assert len(boundary) == 1, "branch creation must be its own shell line"
+        script = "\n".join(lines[: boundary[0]]) + "\necho REACHED_BRANCH_CREATION\n"
+
+        (tmp_path / "_target").mkdir()
+        bin_path = tmp_path / "bin"
+        bin_path.mkdir()
+        gh = bin_path / "gh"
+        gh.write_text(
+            "#!/bin/sh\n"
+            'printf \'%s\\n\' "$*" >> "$FAKE_GH_LOG"\n'
+            'if [ "$1" = "pr" ] && [ "$2" = "list" ]; then\n'
+            "  printf '%s\\n' \"$FAKE_GH_OPEN_COUNT\"\n"
+            "else\n"
+            "  exit 1\n"
+            "fi\n",
+            encoding="utf-8",
+        )
+        gh.chmod(gh.stat().st_mode | stat.S_IXUSR)
+        log = tmp_path / "gh.log"
+        env = {
+            **os.environ,
+            **dict.fromkeys(step["env"], "unused"),
+            "TARGET_REPO": "omnimarket",
+            "VERSION": "0.4.303",
+            "FAKE_GH_LOG": str(log),
+            "FAKE_GH_OPEN_COUNT": str(open_count),
+            "PATH": f"{bin_path}{os.pathsep}{os.environ['PATH']}",
+        }
+        result = subprocess.run(
+            ["bash", "-c", script],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        return result, log, run
+
+    def test_an_open_release_pr_for_the_branch_stops_the_cut(
+        self, tmp_path: Path
+    ) -> None:
+        result, _, _ = self._run_guard(tmp_path, open_count=1)
+        assert result.returncode == 0, result.stderr
+        assert "not opening a second" in result.stdout
+        assert "REACHED_BRANCH_CREATION" not in result.stdout
+
+    def test_no_open_release_pr_lets_the_cut_proceed(self, tmp_path: Path) -> None:
+        """One input flipped. An unoccupied branch reaches the cut boundary."""
+        result, _, _ = self._run_guard(tmp_path, open_count=0)
+        assert result.returncode == 0, result.stderr
+        assert "REACHED_BRANCH_CREATION" in result.stdout
+        assert "not opening a second" not in result.stdout
+
+    def test_the_guard_asks_about_the_exact_branch_the_cut_would_create(
+        self, tmp_path: Path
+    ) -> None:
+        result, log, run = self._run_guard(tmp_path, open_count=1)
+        assert result.returncode == 0, result.stderr
+        calls = [
+            line.split()
+            for line in log.read_text(encoding="utf-8").splitlines()
+            if line.split()[:2] == ["pr", "list"]
+        ]
+        assert len(calls) == 1, "the guard must ask about open release PRs once"
+        argv = calls[0]
+        assert argv[argv.index("--head") + 1] == "automation/release-0.4.303-omn-18595"
+        assert argv[argv.index("--state") + 1] == "open"
+        assert argv[argv.index("--repo") + 1] == "OmniNode-ai/omnimarket"
+        assert 'git checkout -b "${branch}"' in run
+        assert 'branch="automation/release-${VERSION}-omn-18595"' in run
 
 
 # --------------------------------------------------------------------------- #

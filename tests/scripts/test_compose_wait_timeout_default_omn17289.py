@@ -125,7 +125,7 @@ def test_default_remains_operator_overridable() -> None:
 
 @pytest.mark.unit
 def test_failed_deploy_fails_the_refresh() -> None:
-    """A non-zero deploy-runtime.sh must end the refresh, not fall through.
+    """A non-zero onex-runtime-deploy must end the refresh, not fall through.
 
     Static guard on the source: the health-gate answers "is something healthy?",
     never "is the build I just asked for the one running?", so continuing past a

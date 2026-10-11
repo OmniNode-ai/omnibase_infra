@@ -62,6 +62,8 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -468,7 +470,9 @@ async def _emit_to_kafka(
             "correlation_id": payload.get("snapshot_id", str(uuid4())),
         }
         body = json.dumps(envelope, default=str).encode("utf-8")
-        await producer.send_and_wait(_TOPIC_BASELINES_COMPUTED, body)
+        await producer.send_and_wait(
+            apply_topic_namespace(_TOPIC_BASELINES_COMPUTED), body
+        )
         logger.info(
             "Emitted baselines-computed snapshot to %s (snapshot_id=%s, "
             "comparisons=%d, trend=%d, breakdown=%d)",

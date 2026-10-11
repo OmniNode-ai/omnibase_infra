@@ -9,7 +9,7 @@ store carries ``ONEXBOT_OCC_PRIVATE_KEY`` in exactly that form, and the agent
 hands ``dict(os.environ)`` to ``docker compose``, whose interpolation wrote the
 mangled key into every dev-lane container it created.
 
-``scripts/deploy-runtime.sh`` bash-``source``s the very same file on the very
+``src/omnibase_infra/handlers/handler_runtime_deploy.sh`` bash-``source``s the very same file on the very
 same host and decodes it correctly. These tests pin the unit onto that same
 transport and prove, with a throwaway generated key, that the two parsers really
 do disagree -- the positive control without which "the launcher works" is an

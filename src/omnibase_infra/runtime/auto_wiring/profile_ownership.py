@@ -243,6 +243,7 @@ def filter_manifest_for_runtime_profile(
         manifest=ModelAutoWiringManifest(
             contracts=tuple(owned_contracts),
             errors=(*manifest.errors, *lane_errors),
+            skips=manifest.skips,
         ),
         skipped_contracts=tuple(skipped_contracts),
         runtime_lane=runtime_lane,

@@ -67,6 +67,7 @@ from typing import Any
 import pytest
 
 from scripts.ci.lab_pass_receipt import (
+    ANY_OF_DEFAULT_LANES,
     EnumLabLane,
     ModelLabPassCheck,
     artifact_name,
@@ -133,7 +134,7 @@ class _SurfaceFromCapture:
 def _run(surface: _SurfaceFromCapture, monkeypatch: Any) -> tuple[int, str]:
     monkeypatch.setattr("scripts.ci.lab_pass_receipt._gh_api", surface)
     out = io.StringIO()
-    code = evaluate_gate(REPO, ANNOUNCED_SHA, list(EnumLabLane), out)
+    code = evaluate_gate(REPO, ANNOUNCED_SHA, list(ANY_OF_DEFAULT_LANES), out)
     return code, out.getvalue()
 
 

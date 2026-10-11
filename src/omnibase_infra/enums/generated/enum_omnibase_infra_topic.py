@@ -25,6 +25,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_CODING_AGENT_INVOKE_V1 = "onex.cmd.omnibase-infra.coding-agent-invoke.v1"  # onex.cmd.omnibase-infra.coding-agent-invoke.v1
     CMD_CODING_AGENT_WORKSPACE_VALIDATE_V1 = "onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1"  # onex.cmd.omnibase-infra.coding-agent-workspace-validate.v1
     CMD_CONSUMER_RESTART_V1 = "onex.cmd.omnibase-infra.consumer-restart.v1"  # onex.cmd.omnibase-infra.consumer-restart.v1
+    CMD_CONTRACT_VALIDATION_REQUESTED_V1 = "onex.cmd.omnibase-infra.contract-validation-requested.v1"  # onex.cmd.omnibase-infra.contract-validation-requested.v1
     CMD_DELEGATION_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-request.v1"  # onex.cmd.omnibase-infra.delegation-request.v1
     CMD_DELEGATION_ROUTING_REQUEST_V1 = "onex.cmd.omnibase-infra.delegation-routing-request.v1"  # onex.cmd.omnibase-infra.delegation-routing-request.v1
     CMD_FAULT_INJECT_FIXTURE_V1 = "onex.cmd.omnibase-infra.fault-inject-fixture.v1"  # onex.cmd.omnibase-infra.fault-inject-fixture.v1
@@ -47,6 +48,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     CMD_VALIDATION_LEDGER_APPEND_V1 = "onex.cmd.omnibase-infra.validation-ledger-append.v1"  # onex.cmd.omnibase-infra.validation-ledger-append.v1
     CMD_VECTOR_STORE_REQUEST_V1 = "onex.cmd.omnibase-infra.vector-store-request.v1"  # onex.cmd.omnibase-infra.vector-store-request.v1
     DLQ_COMMANDS_V1 = "onex.dlq.omnibase-infra.commands.v1"  # onex.dlq.omnibase-infra.commands.v1
+    DLQ_CONTRACT_VALIDATION_REQUESTED_V1 = "onex.dlq.omnibase-infra.contract-validation-requested.v1"  # onex.dlq.omnibase-infra.contract-validation-requested.v1
     DLQ_EVENTS_V1 = "onex.dlq.omnibase-infra.events.v1"  # onex.dlq.omnibase-infra.events.v1
     DLQ_INTENTS_V1 = "onex.dlq.omnibase-infra.intents.v1"  # onex.dlq.omnibase-infra.intents.v1
     DLQ_OMNIBASE_INFRA_V1 = "onex.dlq.omnibase-infra.omnibase-infra.v1"  # onex.dlq.omnibase-infra.omnibase-infra.v1
@@ -71,6 +73,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_CODING_AGENT_INVOKE_FAILED_V1 = "onex.evt.omnibase-infra.coding-agent-invoke-failed.v1"  # onex.evt.omnibase-infra.coding-agent-invoke-failed.v1
     EVT_CODING_AGENT_WORKSPACE_VALIDATED_V1 = "onex.evt.omnibase-infra.coding-agent-workspace-validated.v1"  # onex.evt.omnibase-infra.coding-agent-workspace-validated.v1
     EVT_CONSUMER_HEALTH_V1 = "onex.evt.omnibase-infra.consumer-health.v1"  # onex.evt.omnibase-infra.consumer-health.v1
+    EVT_CONTRACT_VALIDATION_COMPLETED_V1 = "onex.evt.omnibase-infra.contract-validation-completed.v1"  # onex.evt.omnibase-infra.contract-validation-completed.v1
     EVT_DB_ERROR_V1 = "onex.evt.omnibase-infra.db-error.v1"  # onex.evt.omnibase-infra.db-error.v1
     EVT_EVENT_FORWARDED_V1 = "onex.evt.omnibase-infra.event-forwarded.v1"  # onex.evt.omnibase-infra.event-forwarded.v1
     EVT_FAULT_INJECT_FIXTURE_COMPLETED_V1 = "onex.evt.omnibase-infra.fault-inject-fixture-completed.v1"  # onex.evt.omnibase-infra.fault-inject-fixture-completed.v1

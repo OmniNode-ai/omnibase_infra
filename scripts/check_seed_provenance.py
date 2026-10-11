@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Advisory lint: check that seed/demo scripts set data_provenance in event payloads.
+"""Check that seed/demo publishers declare data_provenance (OMN-18786).
 
 Scans scripts/ for Python files that both:
   1. Match seed/demo naming patterns (heuristic: filename contains 'seed' or 'demo'),
   2. Publish Kafka events (heuristic: contain publish/produce/send_event/emit patterns).
 
-For each matched script, warns if the word ``data_provenance`` does not appear
-anywhere in the file content.
+For each matched script, fail if the word ``data_provenance`` does not appear
+anywhere in the file content. This is a source heuristic, not payload dataflow
+analysis or proof that every runtime seed producer is covered.
 
-This is ADVISORY — exit 0 always. CI uses ``continue-on-error: true``.
+Retained because projection models and contract persistence still distinguish
+seeded data from measured data using provenance. Findings and scan errors fail
+the gate; a clean scan passes. CI and pre-commit enforce the same scan.
 
 Usage:
     uv run python scripts/check_seed_provenance.py [--scripts-dir <path>]
 
-OMN-11208
 """
 
 from __future__ import annotations
@@ -46,29 +48,34 @@ def _has_provenance(content: str) -> bool:
 
 
 def check_scripts(scripts_dir: Path) -> list[str]:
-    """Return list of warning strings for scripts missing provenance."""
-    warnings: list[str] = []
+    """Return provenance violations and errors that prevent a complete scan."""
+    findings: list[str] = []
 
+    if not scripts_dir.is_dir():
+        return [f"ERROR: {scripts_dir} is not a scripts directory."]
     candidates = sorted(scripts_dir.rglob("*.py"))
+    if not candidates:
+        return [f"ERROR: {scripts_dir} contains no Python scripts to check."]
     for path in candidates:
         if not _is_seed_or_demo(path):
             continue
         try:
             content = path.read_text(encoding="utf-8")
-        except OSError:
+        except (OSError, UnicodeError) as exc:
+            findings.append(f"ERROR: cannot read {path}: {exc}")
             continue
 
         if not _publishes_events(content):
             continue
 
         if not _has_provenance(content):
-            warnings.append(
-                f"WARNING: {path.name} publishes events but does not set "
-                "data_provenance in any payload. "
-                'Consider adding data_provenance="demo_seeded" to event payloads.'
+            findings.append(
+                f"ERROR: {path} publishes events but has no data_provenance "
+                "declaration. "
+                'Add data_provenance="demo_seeded" to event payloads.'
             )
 
-    return warnings
+    return findings
 
 
 def main() -> int:
@@ -81,20 +88,17 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    warnings = check_scripts(args.scripts_dir)
+    findings = check_scripts(args.scripts_dir)
 
-    if warnings:
-        print("=== Seed Provenance Advisory Check ===")
-        for w in warnings:
-            print(w)
-        print(
-            f"\n{len(warnings)} script(s) may be missing data_provenance. "
-            "This is advisory — no action required to pass CI."
-        )
+    if findings:
+        print("=== Seed Provenance Check: FAIL ===")
+        for finding in findings:
+            print(finding)
+        print(f"\n{len(findings)} finding(s); seed provenance check failed.")
     else:
-        print("=== Seed Provenance Advisory Check: clean ===")
+        print("=== Seed Provenance Check: clean ===")
 
-    return 0
+    return int(bool(findings))
 
 
 if __name__ == "__main__":

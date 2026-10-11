@@ -34,6 +34,11 @@ from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from omnibase_core.types import JsonType
+from omnibase_infra.topics.topic_namespace import (
+    apply_topic_namespace,
+    apply_topic_namespace_all,
+    namespace_consumer_group_id,
+)
 from scripts.edge_delegation_worker.models import ModelDelegationEnvelope
 from scripts.edge_delegation_worker.topic_constants import INBOUND_TOPICS
 
@@ -183,7 +188,9 @@ class AiokafkaDelegationChannel:
             "event_type": event_type,
             "payload": payload,
         }
-        await self._producer.send_and_wait(topic, json.dumps(body).encode("utf-8"))
+        await self._producer.send_and_wait(
+            apply_topic_namespace(topic), json.dumps(body).encode("utf-8")
+        )
 
     async def ack(self, envelope: ModelDelegationEnvelope) -> None:
         """Commit only the claimed record, never the consumer's fetch position.
@@ -230,9 +237,9 @@ def build_kafka_channel(
     )  # local import: see docstring
 
     consumer = AIOKafkaConsumer(
-        *INBOUND_TOPICS,
+        *apply_topic_namespace_all(INBOUND_TOPICS),
         bootstrap_servers=brokers,
-        group_id=consumer_group,
+        group_id=namespace_consumer_group_id(consumer_group),
         enable_auto_commit=False,
         auto_offset_reset="latest",
     )

@@ -206,6 +206,9 @@ from omnibase_core.handlers.handler_done_write_receipt_gate import (
 from omnibase_core.handlers.handler_done_write_receipt_gate import (
     live_acceptance_criteria_items as _live_acceptance_criteria_items,
 )
+from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
+    AdapterLinearGraphQLProjectTracker,
+)
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.gate_binding import (
     EnumGateBindingProbe,
@@ -323,7 +326,6 @@ _DOD_VERIFY_NON_PROBATIVE_KEY = "non_probative_count"
 _CONTRACT_FILE_RE = re.compile(r"^contracts/(OMN-\d+)\.yaml$")
 _TITLE_EVIDENCE_RE = re.compile(r"evidence\((OMN-\d+)\)", re.IGNORECASE)
 
-_LINEAR_API_URL = "https://api.linear.app/graphql"  # url-authority-ok: fixed public GraphQL API, no ONEX routing authority
 
 # OMN-17664. THE IDENTITY THE CLOSER WRITES AS.
 #
@@ -1351,6 +1353,7 @@ def _extract_ticket_binding(title: str, files: list[str]) -> tuple[str | None, b
 # Deliberately not scoped to an acceptance-criteria section: an unchecked box
 # is an author's own "not done yet" marker wherever it appears.
 _UNCHECKED_TASK_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[[ \t]\][ \t]*(.*)$", re.MULTILINE)
+_CHECKED_TASK_RE = re.compile(r"^[ \t]*[-*+][ \t]+\[[xX]\][ \t]*(.*)$", re.MULTILINE)
 
 
 # -- the gate probe a ticket names for itself (OMN-16106, OMN-18414) --------
@@ -2525,18 +2528,13 @@ class _LinearClient:
         auth_header = await self._resolve_auth_header()
         if auth_header is None:
             return None
-        headers = {
-            "Authorization": auth_header,
-            "Content-Type": "application/json",
-        }
-        payload = {"query": query, "variables": variables}
         for attempt_index in range(self._max_attempts):
             retry_after: float | None = None
             try:
-                async with httpx.AsyncClient(timeout=self._timeout) as client:
-                    response = await client.post(
-                        _LINEAR_API_URL, json=payload, headers=headers
-                    )
+                async with AdapterLinearGraphQLProjectTracker.graphql_transport(
+                    api_key=auth_header, timeout_seconds=self._timeout
+                ) as transport:
+                    response = await transport.post_graphql(query, variables)
                 status = response.status_code
                 if status == _HTTP_TOO_MANY_REQUESTS or status >= _HTTP_SERVER_ERROR:
                     self.last_error = f"Linear API returned HTTP {status}."
@@ -3601,6 +3599,7 @@ class HandlerEvidenceAutocloseSweep:
                 # evidence base, exactly like GAP_AC_COVERAGE beside it, and
                 # not a statement about whether the mechanism may act.
                 EnumEvidenceAutocloseDecision.GAP_AC_UNBOUND,
+                EnumEvidenceAutocloseDecision.GAP_TICKED_OPEN,
             )
         )
         skipped = sum(
@@ -3738,6 +3737,10 @@ class HandlerEvidenceAutocloseSweep:
             bindings_extracted=bindings_extracted,
             tickets_flipped=flipped,
             tickets_gap_posted=gap_posted,
+            tickets_ticked_open=sum(
+                o.decision == EnumEvidenceAutocloseDecision.GAP_TICKED_OPEN
+                for o in outcomes
+            ),
             tickets_skipped=skipped,
             tickets_errored=errored,
             tickets_closer_flip_reverted=closer_flips_reverted,
@@ -4402,6 +4405,46 @@ class HandlerEvidenceAutocloseSweep:
                     "own decomposition is open, and dod_verify cannot see a "
                     "child's acceptance criteria — they are not in this "
                     "ticket's contract."
+                ),
+            )
+
+        # OMN-18490 AC1–AC4. Ticked boxes are an author's assertion, not a
+        # verifier verdict. Name this started candidate before any flip path;
+        # the ordinary exclusions and child gate above still take precedence.
+        description_raw = issue.get("description")
+        description = description_raw if isinstance(description_raw, str) else ""
+        checked = tuple(
+            match.group(1).strip() for match in _CHECKED_TASK_RE.finditer(description)
+        )
+        if (
+            state_type == "started"
+            and checked
+            and _UNCHECKED_TASK_RE.search(description) is None
+        ):
+            reason = (
+                f"{ticket_id} is still started with all {len(checked)} task-list "
+                "checkbox(es) ticked. This is the author's assertion, not "
+                "receipt-proven acceptance. Human closeout review is needed; "
+                "the sweep does not flip Done on this basis."
+            )
+            logger.info("%s %s — %s", "gap_ticked_open", ticket_id, reason)
+            return await self._emit_gap_comment(
+                base=ModelEvidenceAutocloseOutcome(
+                    ticket_id=ticket_id,
+                    companion_pr_number=companion_pr_number,
+                    companion_pr_url=companion_pr_url,
+                    decision=EnumEvidenceAutocloseDecision.GAP_TICKED_OPEN,
+                    reason=reason,
+                ),
+                apply=apply_writes,
+                issue_id=issue_id,
+                marker=_sweep_comment_marker(
+                    EnumEvidenceAutocloseDecision.GAP_TICKED_OPEN, checked
+                ),
+                comment_body=(
+                    "Ticked but still open (OMN-18490 evidence autoclose sweep).\n\n"
+                    f"Merged evidence companion: {companion_pr_url}\n"
+                    f"{reason}"
                 ),
             )
 

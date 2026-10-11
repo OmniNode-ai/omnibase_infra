@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.models.model_discovery_skip import ModelDiscoverySkip
 from omnibase_infra.runtime.auto_wiring.models.model_discovered_contract import (
     ModelDiscoveredContract,
 )
@@ -35,7 +36,7 @@ def _unbound_build_sha() -> ModelRuntimeBuildSha:
 class ModelAutoWiringManifest(BaseModel):
     """Complete manifest produced by contract auto-discovery.
 
-    Contains all successfully discovered contracts and any errors
+    Contains successfully discovered contracts, errors and policy skips
     encountered during scanning, plus the runtime build identity (OMN-10856)
     that binds this reported topology to a specific deployed process:
     which runtime profile produced it, and which image/deployment build it
@@ -52,6 +53,10 @@ class ModelAutoWiringManifest(BaseModel):
     errors: tuple[ModelDiscoveryError, ...] = Field(
         default_factory=tuple,
         description="Errors encountered during discovery",
+    )
+    skips: tuple[ModelDiscoverySkip, ...] = Field(
+        default_factory=tuple,
+        description="Parsed contracts excluded by runtime policy, separate from errors",
     )
     runtime_profile: str = Field(
         default="",
@@ -83,6 +88,10 @@ class ModelAutoWiringManifest(BaseModel):
     @property
     def total_errors(self) -> int:
         return len(self.errors)
+
+    @property
+    def total_skips(self) -> int:
+        return len(self.skips)
 
     def get_by_node_type(self, node_type: str) -> tuple[ModelDiscoveredContract, ...]:
         """Filter discovered contracts by node type."""

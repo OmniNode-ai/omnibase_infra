@@ -45,7 +45,9 @@ REFRESH_STABILITY = (
     REPO_ROOT / "scripts" / "runtime_build" / "refresh_stability_lane.sh"
 )
 COMPOSE_FILES_SH = REPO_ROOT / "scripts" / "runtime_build" / "compose_files.sh"
-DEPLOY_RUNTIME = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_RUNTIME = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "runtime_build"))
 
@@ -79,6 +81,8 @@ def _print_rollback_cmd(tmp_path: Path) -> list[str]:
     """
     env = dict(os.environ)
     env["OMNI_HOME"] = str(tmp_path)
+    # This is a print-only fixture; its deployment command is never executed.
+    env["DEPLOY_RUNTIME"] = "true"
     env.pop("OMNIBASE_INFRA_COMPOSE_PROJECT", None)
     # The script requires docker/git/curl/jq on PATH before it will print.
     result = subprocess.run(
@@ -417,6 +421,7 @@ def test_gate_passes_when_every_core_service_is_running() -> None:
     ]
     report.manifest_ok = True
     report.health_ok = True
+    report.effects_health_ok = True
     report.cluster_healthy = True
 
     assert report.core_services_running is True

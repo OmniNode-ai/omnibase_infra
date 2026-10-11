@@ -24,6 +24,7 @@ from omnibase_infra.nodes.node_delegation_chain_ledger_effect.chain_replay impor
     assemble_replay_and_verify,
 )
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models import (
+    EnumLedgerChainState,
     ModelDeclaredChainHop,
     ModelDelegationTerminalPayload,
     ModelLedgerChainRow,
@@ -41,7 +42,8 @@ SELECT
     topic,
     envelope_id::text AS envelope_id,
     onex_headers ->> 'parent_message_id' AS parent_envelope_id,
-    correlation_id::text AS correlation_id
+    correlation_id::text AS correlation_id,
+    COALESCE(source, onex_headers ->> 'source', '') AS source
 FROM public.event_ledger
 WHERE correlation_id = $1::uuid
   AND topic = ANY($2::text[])
@@ -60,8 +62,9 @@ INSERT INTO public.ledger_chain (
     parent_envelope_id,
     replay_detail,
     verifier_detail,
+    chain_state,
     recorded_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
 ON CONFLICT (correlation_id, hop_index) DO UPDATE SET
     hop = EXCLUDED.hop,
     replay_green = EXCLUDED.replay_green,
@@ -71,6 +74,7 @@ ON CONFLICT (correlation_id, hop_index) DO UPDATE SET
     parent_envelope_id = EXCLUDED.parent_envelope_id,
     replay_detail = EXCLUDED.replay_detail,
     verifier_detail = EXCLUDED.verifier_detail,
+    chain_state = EXCLUDED.chain_state,
     recorded_at = NOW()
 """
 
@@ -156,7 +160,9 @@ def _parse_declared_topology(
     return tuple(hops)
 
 
-def _load_contract_settings() -> tuple[tuple[ModelDeclaredChainHop, ...], int, float]:
+def _load_contract_settings() -> tuple[
+    tuple[ModelDeclaredChainHop, ...], int, float, tuple[str, ...]
+]:
     """Load the declared topology and bounded settle policy from the contract."""
     try:
         raw = yaml.safe_load(  # yaml-safe-load-ok: trusted package contract
@@ -168,6 +174,29 @@ def _load_contract_settings() -> tuple[tuple[ModelDeclaredChainHop, ...], int, f
         raise RuntimeError("chain-writer contract root must be a mapping")
 
     topology = _parse_declared_topology(raw.get("chain_topology"))
+    states = raw.get("chain_states")
+    if (
+        not isinstance(states, list)
+        or not all(isinstance(state, str) for state in states)
+        or set(states) != {state.value for state in EnumLedgerChainState}
+    ):
+        raise RuntimeError(
+            "chain_states must exactly match EnumLedgerChainState values"
+        )
+    terminal_only = raw.get("in_process_terminal_only")
+    sources = (
+        terminal_only.get("terminal_sources")
+        if isinstance(terminal_only, Mapping)
+        else None
+    )
+    if (
+        not isinstance(sources, list)
+        or not sources
+        or any(not isinstance(source, str) or not source.strip() for source in sources)
+    ):
+        raise RuntimeError(
+            "in_process_terminal_only.terminal_sources must be non-empty strings"
+        )
 
     writer_raw = raw.get("writer")
     writer = writer_raw if isinstance(writer_raw, Mapping) else {}
@@ -177,7 +206,7 @@ def _load_contract_settings() -> tuple[tuple[ModelDeclaredChainHop, ...], int, f
         raise RuntimeError("writer.settle_attempts must be a positive integer")
     if not isinstance(delay_raw, int) or delay_raw < 0:
         raise RuntimeError("writer.settle_delay_ms must be a non-negative integer")
-    return topology, attempts_raw, delay_raw / 1000
+    return topology, attempts_raw, delay_raw / 1000, tuple(sources)
 
 
 class HandlerDelegationChainLedger:
@@ -189,14 +218,22 @@ class HandlerDelegationChainLedger:
         db_dsn: str | None = None,
         *,
         declared_chain: Sequence[ModelDeclaredChainHop] | None = None,
+        in_process_terminal_sources: Sequence[str] | None = None,
         settle_attempts: int | None = None,
         settle_delay_seconds: float | None = None,
     ) -> None:
-        contract_chain, contract_attempts, contract_delay = _load_contract_settings()
+        contract_chain, contract_attempts, contract_delay, contract_sources = (
+            _load_contract_settings()
+        )
         self._db_handler = HandlerDb(container)
         self._db_dsn = db_dsn.strip() if db_dsn else ""
         self._declared_chain = (
             contract_chain if declared_chain is None else tuple(declared_chain)
+        )
+        self._in_process_terminal_sources = (
+            contract_sources
+            if in_process_terminal_sources is None
+            else tuple(in_process_terminal_sources)
         )
         self._settle_attempts = settle_attempts or contract_attempts
         self._settle_delay_seconds = (
@@ -264,13 +301,18 @@ class HandlerDelegationChainLedger:
         for attempt in range(self._settle_attempts):
             observed = await self._read_observed(correlation_id)
             observed_topics = {hop.topic for hop in observed}
-            if self._observation_is_settled(observed_topics):
+            if self._observation_is_settled(
+                observed_topics
+            ) or self._terminal_is_rootless(observed):
                 break
             if attempt + 1 < self._settle_attempts and self._settle_delay_seconds:
                 await asyncio.sleep(self._settle_delay_seconds)
 
         rows = assemble_replay_and_verify(
-            correlation_id, observed, self._declared_chain
+            correlation_id,
+            observed,
+            self._declared_chain,
+            self._in_process_terminal_sources,
         )
         if not rows:
             # OMN-18398: `_persist_rows` is a loop over `rows`, so an empty row
@@ -337,6 +379,24 @@ class HandlerDelegationChainLedger:
             for hop in self._declared_chain
         )
 
+    def _terminal_is_rootless(self, observed: Sequence[ModelObservedHop]) -> bool:
+        """Does a terminal record no parent despite declaring one?
+
+        OMN-17427: a terminal that records no parent claims to be a chain
+        head. Its declared edge to its parent can never be re-derived, and
+        no later read can change that, so waiting is pure head-of-line delay
+        for every terminal queued behind it. On the .201 dev lane,
+        2026-10-08, about 270 such terminals in the 17:32Z--17:44Z burst
+        delayed the canary's write until 18:09:58Z, past its 120 s window.
+        """
+        if not self._declared_chain:
+            return False
+        terminal = self._declared_chain[-1]
+        return terminal.parent is not None and any(
+            hop.topic in terminal.topics and hop.parent_envelope_id is None
+            for hop in observed
+        )
+
     async def _read_observed(
         self, correlation_id: UUID
     ) -> tuple[ModelObservedHop, ...]:
@@ -358,6 +418,7 @@ class HandlerDelegationChainLedger:
             )
         return tuple(
             ModelObservedHop(
+                source=str(row.get("source") or ""),
                 topic=self._required_text(row, "topic"),
                 envelope_id=self._required_uuid(
                     row.get("envelope_id"), "event_ledger.envelope_id"
@@ -390,6 +451,7 @@ class HandlerDelegationChainLedger:
                             ),
                             row.replay_detail,
                             row.verifier_detail,
+                            row.chain_state.value,
                         ],
                     },
                     "correlation_id": str(row.correlation_id),

@@ -1,33 +1,20 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-19494 (LO4): every main-profile compose runtime names its lane.
+"""OMN-19494 / OMN-19812: every profile owning lane-scoped contracts names its lane.
 
-A node contract may declare ``runtime_lanes`` (OMN-19408). The auto-wiring
-ownership filter attaches it only on a runtime whose ``ONEX_RUNTIME_LANE`` is in
-that scope, and a runtime that declares no lane gets a discovery error per
-lane-scoped contract, which the health monitor reports as a DEGRADED
-``discovery_errors`` dimension. Every lane-scoped contract in omnimarket today
-is owned by profile ``main`` (the filter in
-``runtime/auto_wiring/profile_ownership.py`` gives a contract with no
-``runtime_profiles`` to ``main`` and nothing to any other profile), so the
-runtimes that need a lane are the ``RUNTIME_PROFILE: main`` ones.
+A node contract may declare ``runtime_lanes`` (OMN-19408). A runtime that owns
+it by profile but declares no lane fails closed with a discovery error, which
+health reports as DEGRADED. omnimarket#3547 added the first effects-owned
+lane-scoped contract, so both ``main`` and ``effects`` need placement identity.
 
-This module renders each lane's compose stack the way the lane is deployed
-(the base file layered with its overlay, in order) and asserts that every
-main-profile service in it carries the lane the lane's own table row names.
-It is a render-time check: it reads YAML and resolves compose interpolation, it
-starts no container and touches no running lane.
+Render each deployed stack in file order and check every runtime in those
+profiles. Environment keys survive layers that do not repeat them: prepr slots
+must override the dev lane, and sim-202 must override dogfood. This reads YAML
+and resolves compose interpolation; it starts no container.
 
-Why the layering matters and not only the file: an ``environment`` key survives
-a layer that does not repeat it. The pre-PR slot overlay layers over the dev
-lane, which declares ``compose-dev``; the sim-202 overlay layers over the
-dogfood file. A layer that forgot its own line would name itself as the lane
-beneath it, and a slot would key its health verdict onto the dev lane's lab
-lane-health row (OMN-19144).
-
-``OMN-19144``'s ``test_omn19144_dev_lane_runtime_lane_identity`` keeps the
-one-speaker rule for the dev lane (only ``omninode-runtime`` declares it); this
-module holds the same shape for every other lane.
+``test_omn19144_dev_lane_runtime_lane_identity`` independently holds the dev
+lane's one-health-speaker rule. Effects declares placement identity while
+``ONEX_RUNTIME_LANE_HEALTH_SPEAKER=false`` keeps its health unkeyed (OMN-19812).
 """
 
 from __future__ import annotations
@@ -49,17 +36,18 @@ DOCKER_DIR = REPO_ROOT / "docker"
 
 LANE_VARIABLE = "ONEX_RUNTIME_LANE"
 PROFILE_VARIABLE = "RUNTIME_PROFILE"
-MAIN_PROFILE = "main"
+# omnimarket#3547 added effects-owned lane-scoped contracts (OMN-19812).
+LANE_SCOPED_PROFILES = frozenset({"main", "effects"})
 
 _VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-|:\?|\?|-)([^{}]*))?\}")
 
 
 class _Stack:
-    """One lane's deployed compose stack and the lane its main runtime must name.
+    """One lane's deployed compose stack and the lane its runtimes must name.
 
     ``files`` are layered in order, exactly as the lane's deploy path layers
-    them. ``lane`` is the literal each main-profile service must resolve to, or
-    ``env`` is the invoking environment the lane's interpolation reads.
+    them. ``lane`` is the value each service owning lane-scoped contracts must
+    resolve to. ``env`` supplies the lane's compose interpolation.
     """
 
     def __init__(
@@ -67,16 +55,16 @@ class _Stack:
         *,
         files: tuple[str, ...],
         lane: str,
-        main_services: frozenset[str],
+        lane_naming_services: frozenset[str],
         env: Mapping[str, str] | None = None,
     ) -> None:
         self.files = files
         self.lane = lane
-        self.main_services = main_services
+        self.lane_naming_services = lane_naming_services
         self.env: Mapping[str, str] = env or {}
 
 
-_MAIN = frozenset({"omninode-runtime"})
+_LANE_NAMING_SERVICES = frozenset({"omninode-runtime", "runtime-effects"})
 
 #: Compose project -> stack. The layering is the one
 #: ``scripts/runtime_build/compose_files.sh`` and each file's own header give.
@@ -87,7 +75,7 @@ STACKS: dict[str, _Stack] = {
     "dev": _Stack(
         files=("docker-compose.infra.yml", "docker-compose.dev-lane.yml"),
         lane="compose-dev",
-        main_services=_MAIN,
+        lane_naming_services=_LANE_NAMING_SERVICES,
     ),
     "dev-105": _Stack(
         files=(
@@ -96,7 +84,7 @@ STACKS: dict[str, _Stack] = {
             "docker-compose.dev-105.yml",
         ),
         lane="compose-dev-105",
-        main_services=_MAIN,
+        lane_naming_services=_LANE_NAMING_SERVICES,
     ),
     "dev-200": _Stack(
         files=(
@@ -105,7 +93,7 @@ STACKS: dict[str, _Stack] = {
             "docker-compose.dev-200.yml",
         ),
         lane="compose-dev-200",
-        main_services=_MAIN,
+        lane_naming_services=_LANE_NAMING_SERVICES,
     ),
     "dev-202": _Stack(
         files=(
@@ -114,32 +102,32 @@ STACKS: dict[str, _Stack] = {
             "docker-compose.dev-202.yml",
         ),
         lane="compose-dev-202",
-        main_services=_MAIN,
+        lane_naming_services=_LANE_NAMING_SERVICES,
     ),
     "stability-test": _Stack(
         files=("docker-compose.infra.yml", "docker-compose.stability-test.yml"),
         lane="stability-test",
-        main_services=_MAIN,
+        lane_naming_services=_LANE_NAMING_SERVICES,
     ),
     "judge": _Stack(
         files=("docker-compose.infra.yml", "docker-compose.judge.yml"),
         lane="judge",
-        main_services=_MAIN,
+        lane_naming_services=_LANE_NAMING_SERVICES,
     ),
     "lakshman": _Stack(
         files=("docker-compose.infra.yml", "docker-compose.lakshman.yml"),
         lane="lakshman",
-        main_services=_MAIN,
+        lane_naming_services=_LANE_NAMING_SERVICES,
     ),
     "dogfood": _Stack(
         files=("docker-compose.dogfood.yml",),
         lane="dogfood",
-        main_services=_MAIN,
+        lane_naming_services=_LANE_NAMING_SERVICES,
     ),
     "sim-202": _Stack(
         files=("docker-compose.dogfood.yml", "docker-compose.sim-202.yml"),
         lane="sim-202",
-        main_services=_MAIN,
+        lane_naming_services=_LANE_NAMING_SERVICES,
     ),
     "prepr-1": _Stack(
         files=(
@@ -148,7 +136,7 @@ STACKS: dict[str, _Stack] = {
             "docker-compose.prepr.yml",
         ),
         lane="prepr-1",
-        main_services=_MAIN,
+        lane_naming_services=_LANE_NAMING_SERVICES,
         env={"ONEX_PREPR_SLOT": "1"},
     ),
     "prepr-2": _Stack(
@@ -158,14 +146,14 @@ STACKS: dict[str, _Stack] = {
             "docker-compose.prepr.yml",
         ),
         lane="prepr-2",
-        main_services=_MAIN,
+        lane_naming_services=_LANE_NAMING_SERVICES,
         env={"ONEX_PREPR_SLOT": "2"},
     ),
 }
 
 #: Compose files that are not a deployed lane stack of their own. A file in
-#: this set must define no service that runs the ``main`` profile, and the
-#: reason it needs no lane is what the value says.
+#: this set must define no service whose profile owns lane-scoped contracts.
+#: The value records why it needs no lane.
 NOT_A_LANE_STACK: dict[str, str] = {
     "docker-compose.prod.yml": (
         "the retired .201 prod compose project: production is the AWS onex-prod "
@@ -177,7 +165,7 @@ NOT_A_LANE_STACK: dict[str, str] = {
     "docker-compose.e2e.yml": (
         "an ephemeral CI stack whose runtime sets no RUNTIME_PROFILE, so it "
         "resolves to the `default` profile (runtime_profile.py), which owns no "
-        "main-profile lane-scoped contract"
+        "main- or effects-owned lane-scoped contract"
     ),
     "docker-compose.ci-bus.yml": "a broker, not a runtime (plan section 3.4)",
     "docker-compose.gateway.yml": "runs onex-gateway-forwarder, not the kernel",
@@ -215,12 +203,12 @@ def _service_environment(service: object) -> dict[str, str]:
     return {}
 
 
-def _merged_main_environments(stack: _Stack) -> dict[str, dict[str, str]]:
+def _merged_lane_scoped_environments(stack: _Stack) -> dict[str, dict[str, str]]:
     """Merge each service's ``environment`` across the stack, later file wins.
 
     Compose merges an ``environment`` mapping by key across layered files, so a
     key a later file does not repeat keeps the earlier file's value. Returns
-    only services whose merged ``RUNTIME_PROFILE`` is ``main``.
+    only services whose merged profile owns lane-scoped contracts.
     """
     merged: dict[str, dict[str, str]] = {}
     for compose_file in stack.files:
@@ -230,7 +218,7 @@ def _merged_main_environments(stack: _Stack) -> dict[str, dict[str, str]]:
     return {
         name: env
         for name, env in merged.items()
-        if env.get(PROFILE_VARIABLE) == MAIN_PROFILE
+        if env.get(PROFILE_VARIABLE) in LANE_SCOPED_PROFILES
     }
 
 
@@ -255,28 +243,28 @@ def _stack_ids() -> list[str]:
 
 
 @pytest.mark.parametrize("stack_id", _stack_ids())
-def test_every_main_profile_runtime_of_the_stack_is_the_expected_set(
+def test_every_lane_scoped_profile_runtime_of_the_stack_is_the_expected_set(
     stack_id: str,
 ) -> None:
-    """Positive control: the render finds the main runtimes before absence proves anything."""
+    """Positive control: find every runtime that needs a lane before checking it."""
     stack = STACKS[stack_id]
-    found = frozenset(_merged_main_environments(stack))
+    found = frozenset(_merged_lane_scoped_environments(stack))
 
-    assert found == stack.main_services, (
-        f"stack {stack_id} ({' + '.join(stack.files)}) renders main-profile services "
-        f"{sorted(found)}, expected {sorted(stack.main_services)}. A new main-profile "
-        f"runtime needs its own {LANE_VARIABLE} line and an entry in STACKS."
+    assert found == stack.lane_naming_services, (
+        f"stack {stack_id} ({' + '.join(stack.files)}) renders main/effects services "
+        f"{sorted(found)}, expected {sorted(stack.lane_naming_services)}. A new "
+        f"main/effects runtime needs its own {LANE_VARIABLE} line and an entry in STACKS."
     )
 
 
 @pytest.mark.parametrize("stack_id", _stack_ids())
-def test_every_main_profile_runtime_declares_its_lane(stack_id: str) -> None:
+def test_every_lane_scoped_profile_runtime_declares_its_lane(stack_id: str) -> None:
     stack = STACKS[stack_id]
 
-    for name, environment in sorted(_merged_main_environments(stack).items()):
+    for name, environment in sorted(_merged_lane_scoped_environments(stack).items()):
         raw = environment.get(LANE_VARIABLE)
         assert raw is not None, (
-            f"stack {stack_id}: main-profile service {name} declares no "
+            f"stack {stack_id}: main/effects service {name} declares no "
             f"{LANE_VARIABLE}, so every lane-scoped node contract fails closed on "
             "it and the runtime reads DEGRADED (OMN-19494)."
         )
@@ -344,19 +332,23 @@ def test_the_prepr_overlay_does_not_inherit_the_dev_lane_declaration() -> None:
     """The sharp edge: a slot layered over the dev lane must not read `compose-dev`."""
     for slot, lane in (("1", "prepr-1"), ("2", "prepr-2")):
         stack = STACKS[f"prepr-{slot}"]
-        environment = _merged_main_environments(stack)["omninode-runtime"]
-        assert _interpolate(environment[LANE_VARIABLE], stack.env) == lane
-        assert lane != "compose-dev"
+        for name in stack.lane_naming_services:
+            environment = _merged_lane_scoped_environments(stack)[name]
+            assert _interpolate(environment[LANE_VARIABLE], stack.env) == lane
+            assert lane != "compose-dev"
 
 
 def test_sim_202_does_not_inherit_the_dogfood_declaration() -> None:
     stack = STACKS["sim-202"]
-    environment = _merged_main_environments(stack)["omninode-runtime"]
-    assert environment[LANE_VARIABLE] == "sim-202"
+    for name in stack.lane_naming_services:
+        environment = _merged_lane_scoped_environments(stack)[name]
+        assert environment[LANE_VARIABLE] == "sim-202"
 
 
-def test_every_compose_file_is_a_lane_stack_member_or_runs_no_main_runtime() -> None:
-    """A new compose file with a main-profile runtime fails here until it is placed."""
+def test_every_compose_file_is_a_lane_stack_member_or_runs_no_lane_scoped_profile_runtime() -> (
+    None
+):
+    """A new compose file with a main/effects runtime fails here until it is placed."""
     in_a_stack = {name for stack in STACKS.values() for name in stack.files}
     # The overlays that only exist inside a stack have no RUNTIME_PROFILE of
     # their own, so the stack renders above are what covers them.
@@ -365,13 +357,14 @@ def test_every_compose_file_is_a_lane_stack_member_or_runs_no_main_runtime() -> 
         if name in in_a_stack:
             continue
         services = _load(name).get("services") or {}
-        main_services = sorted(
+        lane_naming_services = sorted(
             service_name
             for service_name, service in services.items()
-            if _service_environment(service).get(PROFILE_VARIABLE) == MAIN_PROFILE
+            if _service_environment(service).get(PROFILE_VARIABLE)
+            in LANE_SCOPED_PROFILES
         )
-        assert not main_services, (
-            f"{name} defines main-profile service(s) {main_services} but is in no "
+        assert not lane_naming_services, (
+            f"{name} defines main/effects service(s) {lane_naming_services} but is in no "
             "lane stack in STACKS, so nothing proves it declares its lane "
             "(OMN-19494). Add its stack, or give it no RUNTIME_PROFILE."
         )
@@ -383,16 +376,17 @@ def test_the_unclassified_files_have_a_recorded_reason() -> None:
         assert reason
     e2e_services = _load("docker-compose.e2e.yml").get("services") or {}
     assert PROFILE_VARIABLE not in _service_environment(e2e_services["runtime"]), (
-        "the e2e runtime now sets RUNTIME_PROFILE; if it is `main` it needs its own "
-        "stack entry and a lane"
+        "the e2e runtime now sets RUNTIME_PROFILE; if it is `main` or `effects` "
+        "it needs its own stack entry and a lane"
     )
 
 
 def test_the_render_has_positive_controls() -> None:
     """The zero in every absence above is only evidence if the render finds rows."""
-    dev = _merged_main_environments(STACKS["dev"])["omninode-runtime"]
-    assert dev[LANE_VARIABLE] == "compose-dev"
-    assert len(dev) > 10, "the dev main runtime's environment did not merge"
+    dev = _merged_lane_scoped_environments(STACKS["dev"])
+    for name in STACKS["dev"].lane_naming_services:
+        assert dev[name][LANE_VARIABLE] == "compose-dev"
+        assert len(dev[name]) > 10, f"the dev {name} environment did not merge"
     assert _interpolate("prepr-${ONEX_PREPR_SLOT:?x}", {"ONEX_PREPR_SLOT": "2"}) == (
         "prepr-2"
     )

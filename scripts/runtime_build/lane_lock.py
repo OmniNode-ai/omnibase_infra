@@ -5,10 +5,10 @@
 
 Why this exists
 ---------------
-``scripts/deploy-runtime.sh``, ``scripts/runtime_build/refresh_dev_lane.sh``
+``onex-runtime-deploy``, ``scripts/runtime_build/refresh_dev_lane.sh``
 and ``scripts/runtime_build/refresh_stability_lane.sh`` all mutate ONE lane --
 a compose project -- and until this module none of them took a host-level lock
-over the whole build/gate/readback critical section. ``deploy-runtime.sh``'s
+over the whole build/gate/readback critical section. ``onex-runtime-deploy``'s
 own ``.deploy.lock`` is host-WIDE (it serialises unrelated lanes against each
 other) and, decisively, it is scoped to that script alone: a refresh wrapper
 holds nothing while it captures pre-state, health-gates, and reads back, which
@@ -79,7 +79,7 @@ EXIT_USAGE = 3
 DEFAULT_TIMEOUT_SECONDS = 900.0
 POLL_SECONDS = 0.5
 
-# Same character class deploy-runtime.sh's resolve_compose_project() enforces.
+# Same character class onex-runtime-deploy's resolve_compose_project() enforces.
 # Enforced here too so a compose-project string can never traverse out of the
 # lock directory.
 PROJECT_RE = re.compile(r"^[A-Za-z0-9_-]+$")

@@ -187,7 +187,7 @@ def _parse_skill_args(
             raise click.ClickException(
                 f"Skill '{mapping.skill_name}' requires {label}."
             )
-        if spec.arg_type is EnumSkillArgType.BOOLEAN:
+        if spec.arg_type is EnumSkillArgType.BOOLEAN and spec.default is not None:
             payload.setdefault(spec.payload_field, bool(spec.default))
         elif spec.default is not None:
             payload[spec.payload_field] = spec.default

@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""deploy-runtime.sh must pass PROMOTION_CLASS + NON_MAIN_LINEAGE build-args (OMN-13669).
+"""onex-runtime-deploy must pass PROMOTION_CLASS + NON_MAIN_LINEAGE build-args (OMN-13669).
 
 The Dockerfile.runtime guard (OMN-13656 / #2116) exits 64 when a workspace build
 does not stamp PROMOTION_CLASS=stability-candidate + NON_MAIN_LINEAGE=true.
-Before OMN-13669, deploy-runtime.sh only passed BUILD_SOURCE/EXPECTED_BUILD_SOURCE
+Before OMN-13669, onex-runtime-deploy only passed BUILD_SOURCE/EXPECTED_BUILD_SOURCE
 and never set the two provenance args, so every workspace redeploy failed the
 Dockerfile guard immediately.
 
@@ -27,7 +27,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 
 
 def _script_text() -> str:
@@ -41,19 +43,19 @@ def _script_text() -> str:
 
 @pytest.mark.unit
 def test_resolve_promotion_class_function_defined() -> None:
-    """deploy-runtime.sh must define resolve_promotion_class()."""
+    """onex-runtime-deploy must define resolve_promotion_class()."""
     text = _script_text()
     assert re.search(r"^resolve_promotion_class\s*\(\)", text, re.MULTILINE), (
-        "deploy-runtime.sh must define resolve_promotion_class()"
+        "onex-runtime-deploy must define resolve_promotion_class()"
     )
 
 
 @pytest.mark.unit
 def test_resolve_non_main_lineage_function_defined() -> None:
-    """deploy-runtime.sh must define resolve_non_main_lineage()."""
+    """onex-runtime-deploy must define resolve_non_main_lineage()."""
     text = _script_text()
     assert re.search(r"^resolve_non_main_lineage\s*\(\)", text, re.MULTILINE), (
-        "deploy-runtime.sh must define resolve_non_main_lineage()"
+        "onex-runtime-deploy must define resolve_non_main_lineage()"
     )
 
 
@@ -196,6 +198,7 @@ def test_print_compose_cmd_workspace_yields_stability_candidate(
     home, bin_dir = _setup_home_env(tmp_path)
 
     env = os.environ.copy()
+    env["ONEX_DEPLOY_REPOSITORY_ROOT"] = str(REPO_ROOT)
     env.update(
         {
             "BUILD_SOURCE": "workspace",
@@ -208,7 +211,14 @@ def test_print_compose_cmd_workspace_yields_stability_candidate(
     env.pop("EXPECTED_BUILD_SOURCE", None)
 
     result = subprocess.run(
-        ["bash", str(DEPLOY_SCRIPT), "--print-compose-cmd"],
+        [
+            "bash",
+            "-c",
+            'source "$1"; shift; main "$@"',
+            "onex-runtime-deploy",
+            str(DEPLOY_SCRIPT),
+            "--print-compose-cmd",
+        ],
         cwd=REPO_ROOT,
         env=env,
         check=True,
@@ -234,6 +244,7 @@ def test_print_compose_cmd_release_yields_clean_main(
     home, bin_dir = _setup_home_env(tmp_path)
 
     env = os.environ.copy()
+    env["ONEX_DEPLOY_REPOSITORY_ROOT"] = str(REPO_ROOT)
     env.update(
         {
             "BUILD_SOURCE": "release",
@@ -246,7 +257,14 @@ def test_print_compose_cmd_release_yields_clean_main(
     env.pop("OMNI_HOME", None)
 
     result = subprocess.run(
-        ["bash", str(DEPLOY_SCRIPT), "--print-compose-cmd"],
+        [
+            "bash",
+            "-c",
+            'source "$1"; shift; main "$@"',
+            "onex-runtime-deploy",
+            str(DEPLOY_SCRIPT),
+            "--print-compose-cmd",
+        ],
         cwd=REPO_ROOT,
         env=env,
         check=True,

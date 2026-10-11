@@ -15,12 +15,14 @@ that would have got this muted, and muting is how the nine-day freeze
 
 from __future__ import annotations
 
+import copy
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -46,6 +48,8 @@ from scripts.lab_alarm import (
     GroupLagReader,
     GroupNeverCommittedError,
     LaneCredentialError,
+    LedgerAppender,
+    LedgerAppendError,
     ModelAlarm,
     ModelAlarmConfig,
     ModelAlarmRun,
@@ -60,6 +64,7 @@ from scripts.lab_alarm import (
     evaluate_stale_indeterminate,
     evaluate_work_ledger_projection_stale,
     expand_env,
+    make_ledger_appender,
     make_runner,
     read_chain_canary_verdict,
     read_ledger_newest_canonical_row,
@@ -673,6 +678,8 @@ def _run(
     lag: int,
     ledger: Path,
     canary: tuple[int, str] = (0, CANARY_GREEN),
+    appender: LedgerAppender | None = None,
+    clock: Callable[[], str] | None = None,
 ) -> ModelAlarmRun:
     config = ModelAlarmConfig(
         repo="o/r",
@@ -688,6 +695,8 @@ def _run(
         work_ledger_db_container="pg",
         work_ledger_database="analytics",
         work_ledger_max_lag=timedelta(minutes=30),
+        ledger_row_ticket="OMN-20769",
+        ledger_dedupe_window=timedelta(hours=6),
     )
     # The work-ledger condition reads --ledger too: give it one canonical row,
     # appended below any consent row so cited line numbers do not move, and a
@@ -704,6 +713,8 @@ def _run(
             return _completed("2026-10-01 03:00:00+00\n")
         return _completed(restarts)
 
+    if not (tmp_path / "lane-census.json").exists():
+        _lane_drift_fixture(tmp_path)
     return run_once(
         config,
         state_dir=tmp_path,
@@ -718,7 +729,422 @@ def _run(
         canary_reader=lambda repo, workflow, branch, max_age_hours: canary,
         posting_channel=CHANNEL,
         env_file=tmp_path / "absent.env",
+        ledger_appender=appender if appender is not None else _recording_appender([]),
+        **({} if clock is None else {"clock": clock}),
     )
+
+
+def _recording_appender(rows: list[str]) -> LedgerAppender:
+    """A LedgerAppender that records each row instead of writing a ledger."""
+
+    def append(row: str) -> None:
+        rows.append(row)
+
+    return append
+
+
+def _lane_drift_fixture(tmp_path: Path, *kinds: str) -> None:
+    """Inject the producer's census document through the alarm state directory."""
+    from scripts.lane_census_event import build_event
+
+    event = build_event(
+        host="lab-fixture",
+        plan={
+            "host": "lab-fixture",
+            "lanes_checked": ["dev"],
+            "findings": [
+                {
+                    "lane": "dev",
+                    "kind": kind,
+                    "container": f"runtime-{index}",
+                    "detail": f"fixture {kind}",
+                    "severity": "critical",
+                }
+                for index, kind in enumerate(kinds)
+            ],
+        },
+    )
+    (tmp_path / "lane-census.json").write_text(json.dumps(event), encoding="utf-8")
+
+
+@pytest.mark.unit
+def test_lane_drift_posts_once_and_again_when_the_finding_set_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """OMN-19418 AC1: drive the existing run and delivery path, including A-B-A."""
+    from scripts import lab_alarm
+
+    posts: list[ModelAlarm] = []
+    monkeypatch.setattr(
+        lab_alarm, "post_alarm", lambda alarm, **kw: posts.append(alarm) or "ts"
+    )
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+    for kinds in (
+        ("revision_mismatch",),
+        ("revision_mismatch",),
+        ("revision_mismatch", "config_hash_mismatch"),
+        ("revision_mismatch",),
+    ):
+        _lane_drift_fixture(tmp_path, *kinds)
+        _run(
+            tmp_path,
+            result=EnumLabPassResult.PASS,
+            restarts="0 running",
+            lag=0,
+            ledger=ledger,
+        )
+    assert [alarm.condition.value for alarm in posts] == ["lane_drift"] * 3
+    assert posts[0].subject == posts[2].subject
+    assert posts[0].subject != posts[1].subject
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("kind", "condition"),
+    [
+        ("revision_mismatch", "lane_drift"),
+        ("container_unhealthy", "container_unhealthy"),
+    ],
+)
+def test_lane_drift_recovery_posts_once_and_allows_a_new_episode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str, condition: str
+) -> None:
+    from scripts import lab_alarm
+
+    posts: list[ModelAlarm] = []
+    recoveries: list[ModelRecoveryNotice] = []
+    monkeypatch.setattr(
+        lab_alarm, "post_alarm", lambda alarm, **kw: posts.append(alarm) or "ts"
+    )
+    monkeypatch.setattr(
+        lab_alarm,
+        "post_recovery",
+        lambda notice, **kw: recoveries.append(notice) or "recovery-ts",
+    )
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+    for kinds in ((kind,), (kind,), (), (), (kind,)):
+        _lane_drift_fixture(tmp_path, *kinds)
+        _run(
+            tmp_path,
+            result=EnumLabPassResult.PASS,
+            restarts="0 running",
+            lag=0,
+            ledger=ledger,
+        )
+    assert [alarm.condition.value for alarm in posts] == [condition, condition]
+    assert [notice.condition.value for notice in recoveries] == [condition]
+
+
+@pytest.mark.unit
+def test_lane_drift_unreadable_census_preserves_the_episode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import lab_alarm
+
+    posts: list[ModelAlarm] = []
+    recoveries: list[ModelRecoveryNotice] = []
+    monkeypatch.setattr(
+        lab_alarm, "post_alarm", lambda alarm, **kw: posts.append(alarm) or "ts"
+    )
+    monkeypatch.setattr(
+        lab_alarm,
+        "post_recovery",
+        lambda notice, **kw: recoveries.append(notice) or "ts",
+    )
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+    _lane_drift_fixture(tmp_path, "revision_mismatch")
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    (tmp_path / "lane-census.json").write_text("{broken", encoding="utf-8")
+    unreadable = _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    census_reports = [
+        r
+        for r in unreadable.reports
+        if r.condition.value in ("lane_drift", "container_unhealthy")
+    ]
+    assert len(census_reports) == 2
+    assert all(r.outcome is EnumConditionOutcome.INDETERMINATE for r in census_reports)
+    assert recoveries == []
+    _lane_drift_fixture(tmp_path, "revision_mismatch")
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    assert [a.condition.value for a in posts] == ["lane_drift"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "corruption", ["stale", "future", "key", "count", "kind", "missing"]
+)
+def test_lane_drift_rejects_invalid_or_stale_census(
+    tmp_path: Path, corruption: str
+) -> None:
+    from scripts.lab_alarm import evaluate_lane_census
+
+    _lane_drift_fixture(tmp_path, "revision_mismatch")
+    path = tmp_path / "lane-census.json"
+    census = json.loads(path.read_text(encoding="utf-8"))
+    now = datetime.now(UTC)
+    if corruption == "stale":
+        census["emitted_at"] = (now - timedelta(hours=3)).isoformat()
+    elif corruption == "future":
+        census["emitted_at"] = (now + timedelta(hours=1)).isoformat()
+    elif corruption == "key":
+        census["alert_key"] = "incorrect"
+    elif corruption == "count":
+        census["drift_count"] = 0
+    elif corruption == "kind":
+        census["findings"][0]["kind"] = "unknown"
+    else:
+        del census["findings"]
+    path.write_text(json.dumps(census), encoding="utf-8")
+    reports = evaluate_lane_census(
+        state_dir=tmp_path,
+        command=(),
+        runner=_docker_runner({}),
+        now=now.isoformat(),
+        max_age=timedelta(hours=2),
+    )
+    assert len(reports) == 2
+    assert all(
+        report.outcome is EnumConditionOutcome.INDETERMINATE for report in reports
+    )
+
+
+@pytest.mark.unit
+def test_lane_drift_reads_the_live_snapshot_through_the_declared_command(
+    tmp_path: Path,
+) -> None:
+    from scripts.lab_alarm import evaluate_lane_census
+
+    _lane_drift_fixture(tmp_path, "container_unhealthy", "revision_mismatch")
+    path = tmp_path / "lane-census.json"
+    raw = path.read_text(encoding="utf-8")
+    path.unlink()
+    seen: list[tuple[str, ...]] = []
+
+    def reader(
+        argv: Sequence[str], *, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        seen.append(tuple(argv))
+        return _completed(raw)
+
+    command = ("ssh", "fixture-host", "cat", ".local/state/onex/census-snapshot.json")
+    reports = evaluate_lane_census(
+        state_dir=tmp_path,
+        command=command,
+        runner=reader,
+        now=datetime.now(UTC).isoformat(),
+        max_age=timedelta(hours=2),
+    )
+    assert seen == [command]
+    assert [r.outcome for r in reports] == [EnumConditionOutcome.ALARM] * 2
+    assert reports[0].alarms[0].subject == reports[1].alarms[0].subject
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/lab_census_snapshot_omn19418.json")
+@pytest.mark.parametrize("age_hours", [0, 3])
+def test_lane_drift_recorded_live_snapshot_replays_declared_reader(
+    recorded_response: dict[str, Any], tmp_path: Path, age_hours: int
+) -> None:
+    from scripts.lab_alarm import evaluate_lane_census
+
+    event = recorded_response["event"]
+    snapshot = tmp_path / "census-snapshot.json"
+    snapshot.write_text(json.dumps(event), encoding="utf-8")
+    observed_at = datetime.fromisoformat(event["emitted_at"])
+    reports = evaluate_lane_census(
+        state_dir=tmp_path / "alarm",
+        command=("cat", str(snapshot)),
+        runner=make_runner(("docker",)),
+        now=(observed_at + timedelta(hours=age_hours)).isoformat(),
+        max_age=timedelta(hours=2),
+    )
+    expected = (
+        EnumConditionOutcome.OK
+        if age_hours == 0
+        else EnumConditionOutcome.INDETERMINATE
+    )
+    assert [r.condition for r in reports] == [
+        EnumAlarmCondition.LANE_DRIFT,
+        EnumAlarmCondition.CONTAINER_UNHEALTHY,
+    ]
+    assert [r.outcome for r in reports] == [expected, expected]
+    assert all(not r.alarms for r in reports)
+    if age_hours == 0:
+        assert all(event["alert_key"] in r.evidence for r in reports)
+    else:
+        assert all("census snapshot age" in r.evidence for r in reports)
+
+
+@pytest.mark.unit
+def test_lane_drift_shuffled_findings_do_not_raise_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import lab_alarm
+
+    posts: list[ModelAlarm] = []
+    monkeypatch.setattr(
+        lab_alarm, "post_alarm", lambda alarm, **kw: posts.append(alarm) or "ts"
+    )
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+    _lane_drift_fixture(tmp_path, "revision_mismatch", "config_hash_mismatch")
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    path = tmp_path / "lane-census.json"
+    census = json.loads(path.read_text(encoding="utf-8"))
+    census["findings"].reverse()
+    path.write_text(json.dumps(census), encoding="utf-8")
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    assert [a.condition.value for a in posts] == ["lane_drift"]
+
+
+@pytest.mark.unit
+def test_lane_drift_can_continue_while_container_health_recovers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import lab_alarm
+
+    posts: list[ModelAlarm] = []
+    recoveries: list[ModelRecoveryNotice] = []
+    monkeypatch.setattr(
+        lab_alarm, "post_alarm", lambda alarm, **kw: posts.append(alarm) or "ts"
+    )
+    monkeypatch.setattr(
+        lab_alarm,
+        "post_recovery",
+        lambda notice, **kw: recoveries.append(notice) or "ts",
+    )
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+    for kinds in (("revision_mismatch", "container_unhealthy"), ("revision_mismatch",)):
+        _lane_drift_fixture(tmp_path, *kinds)
+        _run(
+            tmp_path,
+            result=EnumLabPassResult.PASS,
+            restarts="0 running",
+            lag=0,
+            ledger=ledger,
+        )
+    assert [a.condition.value for a in posts] == [
+        "lane_drift",
+        "container_unhealthy",
+        "lane_drift",
+    ]
+    assert [n.condition.value for n in recoveries] == ["container_unhealthy"]
+
+
+@pytest.mark.unit
+def test_lane_drift_unreadable_census_feeds_the_existing_stale_alarm(
+    tmp_path: Path,
+) -> None:
+    from scripts.lab_alarm import evaluate_lane_census
+
+    state = ModelAlarmState()
+    now = datetime.now(UTC)
+    reports = evaluate_lane_census(
+        state_dir=tmp_path,
+        command=(),
+        runner=_docker_runner({}),
+        now=now.isoformat(),
+        max_age=timedelta(hours=2),
+    )
+    first = evaluate_stale_indeterminate(reports, state, now=now.isoformat())
+    assert first.outcome is EnumConditionOutcome.OK
+    stale = evaluate_stale_indeterminate(
+        reports, state, now=(now + STALE_INDETERMINATE_AFTER).isoformat()
+    )
+    assert {alarm.subject for alarm in stale.alarms} == {
+        "lane_drift",
+        "container_unhealthy",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("recovery", [False, True])
+def test_lane_drift_failed_delivery_is_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recovery: bool
+) -> None:
+    from scripts import lab_alarm
+
+    attempts: list[str] = []
+
+    def deliver(value: ModelAlarm | ModelRecoveryNotice, **kw: object) -> str:
+        attempts.append(value.condition.value)
+        if len(attempts) == 1:
+            raise lab_alarm.PostingError("fixture delivery refused")
+        return "ts"
+
+    monkeypatch.setattr(lab_alarm, "post_alarm", lambda *a, **kw: "ts")
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(_CONSENT + "\n", encoding="utf-8")
+    _lane_drift_fixture(tmp_path, "revision_mismatch")
+    if recovery:
+        _run(
+            tmp_path,
+            result=EnumLabPassResult.PASS,
+            restarts="0 running",
+            lag=0,
+            ledger=ledger,
+        )
+        _lane_drift_fixture(tmp_path)
+    monkeypatch.setattr(
+        lab_alarm, "post_recovery" if recovery else "post_alarm", deliver
+    )
+    failed = _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    assert "FAILED" in failed.posting
+    assert lab_alarm.exit_code(failed) == lab_alarm.EXIT_ALARM
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=0,
+        ledger=ledger,
+    )
+    assert attempts == ["lane_drift", "lane_drift"]
 
 
 @pytest.mark.unit
@@ -880,6 +1306,7 @@ def test_a_run_that_skipped_a_condition_cannot_be_constructed() -> None:
             ),
             raised=(),
             posting="disabled",
+            ledger="none",
         )
 
 
@@ -1433,7 +1860,7 @@ def test_stale_indeterminate_never_reads_indeterminate_about_itself() -> None:
 # ---------------------------------------------------------------------------
 
 _CONSENT = (
-    '2026-09-21T00:00Z | OPERATOR-CONSENT | lane=x | "go ahead" | '
+    '2026-09-21T00:00Z | OPERATOR-CONSENT | lane=x | approved_by=operator | "go ahead" | '
     "APPROVED SCOPE: post lab alarms to #omninode-notifications | "
     "OUT OF SCOPE: every other channel | durable authorization evidence"
 )
@@ -1493,6 +1920,165 @@ def test_a_consent_row_for_another_channel_does_not_resolve(tmp_path: Path) -> N
     ledger = tmp_path / "ledger.md"
     ledger.write_text(_CONSENT + "\n", encoding="utf-8")
     assert resolve_posting_consent(ledger, channel="#some-other-channel") is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("suffix", ["-sandbox", "_sandbox"])
+def test_consent_for_a_channel_with_the_same_prefix_does_not_resolve(
+    tmp_path: Path, suffix: str
+) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(
+        _CONSENT.replace(CHANNEL, CHANNEL + suffix) + "\n", encoding="utf-8"
+    )
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+
+
+@pytest.mark.unit
+def test_consent_for_landing_alerts_does_not_authorize_lab_alarms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import lab_alarm
+
+    ledger = tmp_path / "ROLLING_WORK_LEDGER.md"
+    ledger.write_text(
+        '2026-09-27T12:38:41Z | OPERATOR-CONSENT | approved_by=operator | "yes" | '
+        "APPROVED SCOPE: the landing controller posts failure alerts to "
+        "#omninode-notifications | OUT OF SCOPE: any message other than "
+        "landing-process failure alerts\n",
+        encoding="utf-8",
+    )
+    sent: list[str] = []
+    monkeypatch.setattr(
+        lab_alarm, "post_alarm", lambda *a, **k: sent.append("sent") or "ts"
+    )
+    run = _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+    )
+    assert len(run.raised) == 1
+    assert run.raised[0].subject == SHA
+    assert sent == []
+    assert run.posting.startswith("disabled")
+
+
+@pytest.mark.unit
+def test_archived_alarm_consent_delivers_once_and_cites_the_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts import lab_alarm
+
+    ledger = tmp_path / "ROLLING_WORK_LEDGER.md"
+    ledger.write_text("# current ledger\n", encoding="utf-8")
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    rolled = archive / "ROLLING_WORK_LEDGER_2026-09-24-split.md"
+    rolled.write_text("# archived ledger\n" + _CONSENT + "\n", encoding="utf-8")
+    posts: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        lab_alarm,
+        "post_alarm",
+        lambda alarm, **k: posts.append((alarm.subject, k["consent"].citation)) or "ts",
+    )
+
+    first = _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+    )
+    repeat = _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+    )
+    assert posts == [(SHA, f"{rolled}:2")]
+    assert "delivered 1/1" in first.posting
+    assert "nothing new to deliver" in repeat.posting
+    assert resolve_posting_consent(ledger, channel="#some-other-channel") is None
+
+    # Consent is re-read on every run, so removing the archived grant disables it.
+    rolled.write_text("# grant removed\n", encoding="utf-8")
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+
+
+@pytest.mark.unit
+def test_archive_consent_requires_a_readable_live_ledger(tmp_path: Path) -> None:
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "ROLLING_WORK_LEDGER_2026-09-24-split.md").write_text(
+        _CONSENT + "\n", encoding="utf-8"
+    )
+    assert (
+        resolve_posting_consent(tmp_path / "ROLLING_WORK_LEDGER.md", channel=CHANNEL)
+        is None
+    )
+
+
+@pytest.mark.unit
+def test_consent_in_an_unrelated_archive_file_is_ignored(tmp_path: Path) -> None:
+    ledger = tmp_path / "ROLLING_WORK_LEDGER.md"
+    ledger.write_text("# current ledger\n", encoding="utf-8")
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    (archive / "notes.md").write_text(_CONSENT + "\n", encoding="utf-8")
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("row_type", ["MSG", "CLAIM", "STATUS"])
+def test_a_message_quoting_alarm_consent_is_not_authority(
+    tmp_path: Path, row_type: str
+) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(
+        f"2026-09-21T00:00Z | {row_type} | lane=x | quoted: " + _CONSENT + "\n",
+        encoding="utf-8",
+    )
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+
+
+@pytest.mark.unit
+def test_ruling_consent_for_another_purpose_is_not_alarm_authority(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(
+        "2026-09-21T00:00Z | RULING | OPERATOR-CONSENT Slack channel | "
+        "landing controller may post to #omninode-notifications; "
+        "no new Slack app | approved_by=operator\n",
+        encoding="utf-8",
+    )
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+
+
+@pytest.mark.unit
+def test_lab_alarms_only_in_the_excluded_scope_do_not_resolve(tmp_path: Path) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(
+        "2026-09-21T00:00Z | OPERATOR-CONSENT | approved_by=operator | "
+        "APPROVED SCOPE: landing alerts to #omninode-notifications | "
+        "OUT OF SCOPE: lab alarms\n",
+        encoding="utf-8",
+    )
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
+
+
+@pytest.mark.unit
+def test_labelled_alarm_consent_without_an_approver_does_not_resolve(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text(
+        _CONSENT.replace("approved_by=operator | ", "") + "\n", encoding="utf-8"
+    )
+    assert resolve_posting_consent(ledger, channel=CHANNEL) is None
 
 
 @pytest.mark.unit
@@ -1714,6 +2300,427 @@ def test_a_repeat_of_the_same_condition_delivers_nothing(
     assert posts.count(SHA) == 1
 
 
+# ---------------------------------------------------------------------------
+# A raised alarm reaches the ledger (OMN-20794)
+# ---------------------------------------------------------------------------
+#
+# MEASURED 2026-10-09: the lab alarm raised container_restarts for
+# omninode-runtime-effects at 10:25:05Z and delivered it to Slack only. The
+# rolling ledger held no lab-alarm row, so the orchestrator learned of the
+# crash 15 minutes later from a stale projection. A raised alarm now appends
+# ONE FRICTION row through the ledger's own append, independent of whether the
+# Slack channel is consented, configured or reachable.
+
+#: The ISO form ``_now`` produces, so a replayed clock is indistinguishable from
+#: the real one.
+_T0 = datetime(2026, 10, 9, 9, 25, 5, tzinfo=UTC)
+
+
+def _at(moment: datetime) -> Callable[[], str]:
+    return lambda: moment.isoformat(timespec="seconds")
+
+
+def _ledger_cells(row: str) -> dict[str, str]:
+    """Every ``key=value`` pipe cell of a ledger row."""
+    cells: dict[str, str] = {}
+    for cell in row.split(" | ")[2:]:
+        key, sep, value = cell.partition("=")
+        if sep:
+            cells[key.strip()] = value.strip()
+    return cells
+
+
+def _assert_row_satisfies_the_friction_guard(row: str) -> None:
+    """The obligations omnibase_internal's friction guard enforces, spelled here.
+
+    The guard lives in another repository, so a test that imported it would
+    skip wherever that clone is absent (the skip-count ratchet refuses that).
+    These are its three obligations for a FRICTION row, stated locally.
+    """
+    assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z \| FRICTION \| ", row)
+    cells = _ledger_cells(row)
+    assert cells["lane"] == "lab-alarm"
+    assert re.search(r"\bOMN-\d+\b", cells["existing"])
+    assert re.search(r"\d", cells["cost"])
+    assert "\n" not in row
+
+
+@pytest.mark.unit
+def test_lab_alarm_appends_ledger_row_once_per_raise(tmp_path: Path) -> None:
+    """AC1: one row for a raise, none for a re-raise inside the dedupe window."""
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("| none |\n", encoding="utf-8")
+    rows: list[str] = []
+    appender = _recording_appender(rows)
+
+    first = _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=appender,
+        clock=_at(_T0),
+    )
+    assert [alarm.subject for alarm in first.raised] == ["savings-writer"]
+    assert len(rows) == 1, rows
+    _assert_row_satisfies_the_friction_guard(rows[0])
+    cells = _ledger_cells(rows[0])
+    assert cells["condition"] == "container_restarts"
+    assert cells["subject"] == "savings-writer"
+    assert "restarted 9 times" in cells["detail"]
+    assert "restart counts read: savings-writer=9/2 restarting" in cells["evidence"]
+    assert first.ledger.startswith("appended 1/1")
+
+    # Still bad on the next tick: edge-triggering raises nothing, so no row.
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=appender,
+        clock=_at(_T0 + timedelta(hours=1)),
+    )
+    assert len(rows) == 1
+
+    # Recovers, then re-raises one hour later: a NEW raise, inside the window.
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+        appender=appender,
+        clock=_at(_T0 + timedelta(hours=2)),
+    )
+    reraised = _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=appender,
+        clock=_at(_T0 + timedelta(hours=3)),
+    )
+    assert [alarm.subject for alarm in reraised.raised] == ["savings-writer"]
+    assert len(rows) == 1, "a re-raise inside the dedupe window appended a row"
+    assert "dedupe" in reraised.ledger
+
+    # Recovers and re-raises after the window has passed: a new row.
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="0 running",
+        lag=1,
+        ledger=ledger,
+        appender=appender,
+        clock=_at(_T0 + timedelta(hours=4)),
+    )
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=appender,
+        clock=_at(_T0 + timedelta(hours=10)),
+    )
+    assert len(rows) == 2
+
+
+@pytest.mark.unit
+def test_lab_alarm_appends_ledger_row_without_a_consented_channel(
+    tmp_path: Path,
+) -> None:
+    """The ledger row does not wait on Slack consent, which is absent here."""
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("| no consent row |\n", encoding="utf-8")
+    rows: list[str] = []
+    run = _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=_recording_appender(rows),
+    )
+    assert run.posting.startswith("disabled")
+    assert len(rows) == 1
+
+
+@pytest.mark.unit
+def test_lab_alarm_appends_ledger_row_one_per_alarm_not_per_run(
+    tmp_path: Path,
+) -> None:
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("| none |\n", encoding="utf-8")
+    rows: list[str] = []
+    run = _run(
+        tmp_path,
+        result=EnumLabPassResult.FAIL,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=_recording_appender(rows),
+    )
+    assert len(run.raised) == 2
+    assert sorted(_ledger_cells(row)["condition"] for row in rows) == [
+        "container_restarts",
+        "lab_pass_receipt",
+    ]
+
+
+@pytest.mark.unit
+def test_lab_alarm_ledger_row_cells_cannot_break_the_row(tmp_path: Path) -> None:
+    """A pipe or newline in a detail would split the row into other cells."""
+    from scripts.lab_alarm import render_ledger_row
+
+    alarm = ModelAlarm(
+        condition=EnumAlarmCondition.CONTAINER_RESTARTS,
+        subject="a|b",
+        detail="line one\nline two | TERMINAL | lane=other",
+    )
+    row = render_ledger_row(
+        alarm,
+        evidence="e | f",
+        stamp="2026-10-09T10:25:05Z",
+        raised_at="2026-10-09T10:25:05+00:00",
+        ticket="OMN-20769",
+    )
+    assert "\n" not in row
+    assert row.count(" | ") == len(_ledger_cells(row)) + 1 + 1  # stamp, type, cells
+    assert _ledger_cells(row)["lane"] == "lab-alarm"
+
+
+@pytest.mark.unit
+def test_lab_alarm_failed_ledger_append_is_loud_and_retried(tmp_path: Path) -> None:
+    """An alarm that believes it recorded and did not is this ticket's defect."""
+    from scripts.lab_alarm import EXIT_ALARM, exit_code
+
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("| none |\n", encoding="utf-8")
+    rows: list[str] = []
+
+    def broken(row: str) -> None:
+        raise LedgerAppendError("onex-ledger exited 75: lock timeout")
+
+    failed = _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=broken,
+        clock=_at(_T0),
+    )
+    assert "FAILED" in failed.ledger and "lock timeout" in failed.ledger
+    assert exit_code(failed) == EXIT_ALARM
+    assert rows == []
+
+    # The alarm is still active, so edge-triggering raises nothing new, yet the
+    # unwritten row is retried on the next tick and written exactly once.
+    healed = _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=_recording_appender(rows),
+        clock=_at(_T0 + timedelta(hours=1)),
+    )
+    assert healed.raised == ()
+    assert len(rows) == 1
+    assert _ledger_cells(rows[0])["raised_at"] == _T0.isoformat(timespec="seconds")
+    _run(
+        tmp_path,
+        result=EnumLabPassResult.PASS,
+        restarts="9 restarting",
+        lag=1,
+        ledger=ledger,
+        appender=_recording_appender(rows),
+        clock=_at(_T0 + timedelta(hours=2)),
+    )
+    assert len(rows) == 1
+
+
+@pytest.mark.unit
+def test_lab_alarm_ledger_appender_runs_the_ledger_tool_without_a_shell(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[list[str], float]] = []
+
+    def runner(
+        argv: Sequence[str], *, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append((list(argv), timeout))
+        return _completed("")
+
+    append = make_ledger_appender(
+        ("onex-ledger-bin", "--flag"), tmp_path / "ledger.md", runner=runner
+    )
+    append("2026-10-09T10:25:05Z | FRICTION | lane=lab-alarm")
+    assert calls[0][0] == [
+        "onex-ledger-bin",
+        "--flag",
+        str(tmp_path / "ledger.md"),
+        "--timeout",
+        "60s",
+        "--append",
+        "2026-10-09T10:25:05Z | FRICTION | lane=lab-alarm",
+    ]
+
+    def refusing(
+        argv: Sequence[str], *, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        return _completed("", 2, "refused: FRICTION row carries no cost")
+
+    with pytest.raises(LedgerAppendError, match=r"exited 2.*no cost"):
+        make_ledger_appender(("x",), tmp_path / "ledger.md", runner=refusing)("row")
+
+    def hung(
+        argv: Sequence[str], *, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(list(argv), timeout)
+
+    with pytest.raises(LedgerAppendError, match="timed out"):
+        make_ledger_appender(("x",), tmp_path / "ledger.md", runner=hung)("row")
+
+
+@pytest.mark.unit
+def test_lab_alarm_shipped_config_declares_the_ledger_append(tmp_path: Path) -> None:
+    payload = json.loads(CONFIG.read_text(encoding="utf-8"))
+    command = payload["ledger_append_command"]
+    assert isinstance(command, list) and command[-1] == "onex-ledger"
+    assert re.fullmatch(r"OMN-\d+", payload["ledger_row_ticket"])
+    assert int(payload["ledger_dedupe_window_minutes"]) > 0
+
+
+#: The crash window of 2026-10-09, replayed. The hourly timer fires at :25, so
+#: three ticks bracket it: one before the crash loop began (~10:16Z), the one
+#: that raised it live (10:25:05Z), and the next. The restart counts are
+#: reconstructions of a loop that restarts every few minutes against the
+#: manifest's bound of 5: the facts established by the incident are the tick
+#: time, the container and that Slack was the only record.
+_CRASH_WINDOW_TICKS: tuple[tuple[str, str], ...] = (
+    ("2026-10-09T09:25:05+00:00", "0 running"),
+    ("2026-10-09T10:25:05+00:00", "7 restarting"),
+    ("2026-10-09T11:25:05+00:00", "19 restarting"),
+)
+
+
+@pytest.mark.unit
+def test_crash_loop_reaches_ledger_replay(tmp_path: Path) -> None:
+    """AC2: replaying 10:16Z to 10:40Z puts the crash loop in the ledger before 10:30Z."""
+    ledger = tmp_path / "ledger.md"
+    ledger.write_text("| none |\n", encoding="utf-8")
+    rows: list[str] = []
+    appender = _recording_appender(rows)
+    config_bounds = {"omninode-runtime-effects": 5, "omninode-runtime": 5}
+
+    for tick, status in _CRASH_WINDOW_TICKS:
+        container_table = {
+            name: _completed(
+                status if name == "omninode-runtime-effects" else "0 running"
+            )
+            for name in config_bounds
+        }
+        _replay_tick(
+            tmp_path,
+            ledger=ledger,
+            bounds=config_bounds,
+            table=container_table,
+            tick=tick,
+            appender=appender,
+        )
+
+    window_start = datetime(2026, 10, 9, 10, 16, tzinfo=UTC)
+    window_end = datetime(2026, 10, 9, 10, 40, tzinfo=UTC)
+    in_window = [
+        row
+        for row in rows
+        if window_start
+        <= datetime.strptime(row.split(" | ", 1)[0], "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=UTC
+        )
+        <= window_end
+    ]
+    # The row the changed alarm appends for the crash, quoted by lab proof runs
+    # (pytest -rP) so a reader sees the text and not only the assertions.
+    print(rows[0] if rows else "NO ROW")
+    assert len(rows) == 1, "exactly one row for the one raise across the whole replay"
+    assert in_window == rows
+    stamp = rows[0].split(" | ", 1)[0]
+    assert stamp < "2026-10-09T10:30:00Z", stamp
+    _assert_row_satisfies_the_friction_guard(rows[0])
+    cells = _ledger_cells(rows[0])
+    assert cells["condition"] == "container_restarts"
+    assert cells["subject"] == "omninode-runtime-effects"
+    assert "restarted 7 times" in cells["detail"]
+    assert "omninode-runtime-effects=7/5 restarting" in cells["evidence"]
+
+
+def _replay_tick(
+    tmp_path: Path,
+    *,
+    ledger: Path,
+    bounds: dict[str, int],
+    table: dict[str, subprocess.CompletedProcess[str]],
+    tick: str,
+    appender: LedgerAppender,
+) -> ModelAlarmRun:
+    """One real ``run_once`` tick over recorded docker readings at *tick*."""
+    config = ModelAlarmConfig(
+        repo="o/r",
+        lane=EnumLabLane.COMPOSE_DEV,
+        ready_url="http://lane/ready",
+        agent_url="http://lane:8098",
+        kafka_bootstrap_servers="lab-host:19092",
+        docker_command=("docker",),
+        container_restart_bounds=bounds,
+        consumer_groups=("savings",),
+        effects_group_prefix="group-",
+        effects_group_suffix="",
+        work_ledger_db_container="pg",
+        work_ledger_database="analytics",
+        work_ledger_max_lag=timedelta(minutes=30),
+        ledger_row_ticket="OMN-20769",
+        ledger_dedupe_window=timedelta(hours=6),
+    )
+    docker = _docker_runner(table)
+
+    def runner(
+        argv: Sequence[str], *, timeout: float
+    ) -> subprocess.CompletedProcess[str]:
+        if "psql" in argv:
+            return _completed("2026-10-01 03:00:00+00\n")
+        return docker(argv, timeout=timeout)
+
+    fresh_row = "2026-10-01T03:00:00Z | STATUS | lane=fixture | projection fresh"
+    if fresh_row not in ledger.read_text(encoding="utf-8"):
+        with ledger.open("a", encoding="utf-8") as handle:
+            handle.write(fresh_row + "\n")
+    if not (tmp_path / "lane-census.json").exists():
+        _lane_drift_fixture(tmp_path)
+    return run_once(
+        config,
+        state_dir=tmp_path,
+        ledger_path=ledger,
+        sha=SHA,
+        receipt_reader=lambda repo, lane, sha: _receipt(
+            EnumLabPassResult.PASS, ok=True
+        ),
+        runner=runner,
+        lag_reader=_lag_reader({"savings": 1}),
+        effects_reader=_effects_reader(),
+        canary_reader=lambda repo, workflow, branch, max_age_hours: (0, CANARY_GREEN),
+        posting_channel=CHANNEL,
+        env_file=tmp_path / "absent.env",
+        ledger_appender=appender,
+        clock=lambda: tick,
+    )
+
+
 @pytest.mark.unit
 def test_the_token_is_never_taken_on_a_command_line() -> None:
     """A token on argv reaches every process listing on the host.
@@ -1781,7 +2788,10 @@ def test_the_shipped_config_hardcodes_no_machine_address() -> None:
     assert "${ONEX_INFRA_HOST}" in payload["ready_url"]
     # The container that crash-looped unobserved for nine days carries the
     # tightest bound, so the alarm is actually armed against its own case.
-    bounds = payload["container_restart_bounds"]
+    assert "container_restart_bounds" not in payload
+    from scripts.lane_census_plan import load_manifest, restart_bounds_for_lane
+
+    bounds = restart_bounds_for_lane(load_manifest(), payload["census_lane"])
     assert (
         bounds["omnimarket-projection-savings-writer"]
         < bounds["omnibase-infra-redpanda"]
@@ -1815,6 +2825,54 @@ def test_the_shipped_config_loads_and_declares_every_condition_a_subject(
         / "actions"
         / "deploy-gate"
         / "validate_pr_deploy_required.py"
+    )
+
+
+@pytest.mark.unit
+def test_alarm_and_detector_read_changed_manifest_restart_bound(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import yaml
+
+    from scripts.lane_census_plan import build_plan, load_manifest
+
+    monkeypatch.setenv("ONEX_INFRA_HOST", "lab.invalid")
+    monkeypatch.setenv("ONEX_RUNTIME_SSH_HOST", "user@lab.invalid")
+    monkeypatch.setenv("OMNI_HOME", str(tmp_path))
+    manifest = load_manifest()
+    for service in manifest["lanes"]["dev"]["services"]:
+        if service["name"] == "omnimarket-projection-savings-writer":
+            service["restart_bound"] = 1
+    manifest_path = tmp_path / "manifest.yaml"
+    manifest_path.write_text(yaml.safe_dump(manifest))
+    payload = json.loads(CONFIG.read_text())
+    payload["lane_manifest"] = str(manifest_path)
+    config_path = tmp_path / "alarm.json"
+    config_path.write_text(json.dumps(payload))
+    config = ModelAlarmConfig.load(config_path)
+    assert config.container_restart_bounds["omnimarket-projection-savings-writer"] == 1
+    report = evaluate_container_restarts(
+        {
+            "omnimarket-projection-savings-writer": config.container_restart_bounds[
+                "omnimarket-projection-savings-writer"
+            ]
+        },
+        runner=_docker_runner(
+            {"omnimarket-projection-savings-writer": _completed("2 running")}
+        ),
+    )
+    assert report.outcome is EnumConditionOutcome.ALARM
+    fixture = json.loads(
+        (REPO_ROOT / "tests/fixtures/lab_sync/inventory_clean.json").read_text()
+    )
+    for row in fixture["envelope"]["containers"]:
+        if row["Names"] == "omnimarket-projection-savings-writer":
+            row["RestartCount"] = 2
+    findings = build_plan(fixture["envelope"], load_manifest(manifest_path))["findings"]
+    assert any(
+        f["kind"] == "container_restart_loop"
+        and f["container"] == "omnimarket-projection-savings-writer"
+        for f in findings
     )
 
 
@@ -2267,3 +3325,39 @@ def test_the_shipped_config_declares_the_protected_lanes_chain_canary(
         "chain_canary_max_age_minutes",
     ):
         assert any(k.startswith("_comment_") and key in v for k, v in payload.items())
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/lane_census_health_recording.json")
+def test_recorded_manifest_unhealthy_runtime_readings_replay_census_threshold(
+    recorded_response: dict[str, Any],
+) -> None:
+    """Replay the captured healthy runtime, then vary only its health readings."""
+    from scripts.lane_census_plan import build_plan, load_manifest
+
+    manifest = load_manifest(REPO_ROOT / "deploy/lane-census/lane-manifest.yaml")
+    envelope = copy.deepcopy(recorded_response["response"])
+    runtime = envelope["containers"][0]
+    assert runtime["Health"] == {"Status": "healthy", "FailingStreak": 0}
+    assert runtime["HealthcheckIntervalSeconds"] == 30.0
+    assert runtime["RestartCount"] == 0
+    assert not any(
+        finding["kind"] == "container_unhealthy"
+        for finding in build_plan(envelope, manifest)["findings"]
+    )
+
+    # This is a synthetic control over recorded input, not a runtime mutation.
+    runtime["Health"] = {"Status": "unhealthy", "FailingStreak": 59}
+    assert not any(
+        finding["kind"] == "container_unhealthy"
+        for finding in build_plan(envelope, manifest)["findings"]
+    )
+    runtime["Health"]["FailingStreak"] = 60
+    unhealthy = [
+        finding
+        for finding in build_plan(envelope, manifest)["findings"]
+        if finding["kind"] == "container_unhealthy"
+    ]
+    assert len(unhealthy) == 1
+    assert unhealthy[0]["container"] == runtime["Names"]
+    assert unhealthy[0]["severity"] == "critical"
+    assert "1800s" in unhealthy[0]["detail"]

@@ -669,7 +669,7 @@ def test_lint_declares_the_needs_edge_its_expression_requires() -> None:
     """
     lint = _workflow("ci.yml")["jobs"]["lint"]
     assert "route" in lint["needs"]
-    assert "occ-preflight" in lint["needs"], "the pre-existing OCC edge was dropped"
+    assert "occ-preflight" not in lint["needs"]
 
 
 def test_lint_carries_the_v2_selector_marker() -> None:

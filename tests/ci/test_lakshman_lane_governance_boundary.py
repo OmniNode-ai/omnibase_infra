@@ -62,7 +62,9 @@ pytestmark = pytest.mark.ci
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT / "contracts" / "services" / "runtime_policy.contract.yaml"
 MANIFEST_PATH = ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
-DEPLOY_RUNTIME_PATH = ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_RUNTIME_PATH = (
+    ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 DEPLOY_AGENT_EVENTS_PATH = (
     ROOT / "scripts" / "deploy-agent" / "deploy_agent" / "events.py"
 )
@@ -200,7 +202,7 @@ def test_compose_file_publishes_only_the_reserved_port_block() -> None:
 
 
 def test_sanctioned_deploy_script_refuses_the_collaborator_lane() -> None:
-    """``deploy-runtime.sh`` must not learn this lane.
+    """``onex-runtime-deploy`` must not learn this lane.
 
     ``resolve_lane_overlay_filename`` fails closed on an unknown lane. That is
     the correct behaviour here and not an oversight to fix: the collaborator lane

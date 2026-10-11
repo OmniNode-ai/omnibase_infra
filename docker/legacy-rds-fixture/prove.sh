@@ -17,6 +17,29 @@ fail() {
   exit 1
 }
 
+# The image entrypoint restarts postgres after init seeding, so a host can
+# answer pg_isready from the init server and then drop the connection.
+# Require three consecutive successful queries before proving.
+wait_stable() {
+  host="$1"
+  port="$2"
+  stable=0
+  attempts=0
+  while [ "$stable" -lt 3 ]; do
+    if psql -X -qAt -h "$host" -p "$port" -U postgres -d postgres -c "SELECT 1" >/dev/null 2>&1; then
+      stable=$((stable + 1))
+    else
+      stable=0
+    fi
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt 120 ] || fail "$host:$port did not become stably reachable"
+    sleep 1
+  done
+}
+
+wait_stable "$FRESH_HOST" "$FRESH_PORT"
+wait_stable "$LEGACY_HOST" "$LEGACY_PORT"
+
 sql_value() {
   host="$1"
   database="$2"

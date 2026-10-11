@@ -394,7 +394,9 @@ def test_ci_bus_topics_are_exactly_the_ci_bus_set(ci_bus: dict[str, Any]) -> Non
     same broker and is provisioned with them. Eleven lab-work bus topics cover
     lab-work units, host capacity, focused test runs and push validation (OMN-20213),
     and two more carry merge events and each host's canonical-clone refresh receipt
-    (OMN-20496).
+    (OMN-20496). OMN-20604 adds the lab job supervisor's submitted command topic,
+    and OMN-20682 adds the operator-host PR watcher's four topics, for eighteen
+    lab topics in total.
     """
     expected = {
         "onex.cmd.omnimarket.occ-autobind.v1",  # onex-topic-allow: OMN-18691 CI-bus provisioning set
@@ -415,10 +417,15 @@ def test_ci_bus_topics_are_exactly_the_ci_bus_set(ci_bus: dict[str, Any]) -> Non
         "onex.dlq.omnimarket.push-validation.v1",  # onex-topic-allow: OMN-20213
         "onex.evt.omnimarket.repo-merged.v1",  # onex-topic-allow: OMN-20496
         "onex.evt.omnimarket.canonical-clone-refreshed.v1",  # onex-topic-allow: OMN-20496
+        "onex.cmd.omnimarket.lab-job-submitted.v1",  # onex-topic-allow: OMN-20604
+        "onex.cmd.omnibase_internal.pr-watcher-tick-requested.v1",  # onex-topic-allow: OMN-20682
+        "onex.evt.omnibase_internal.pr-watcher-tick-completed.v1",  # onex-topic-allow: OMN-20682
+        "onex.evt.omnibase_internal.pr-watcher-tick-failed.v1",  # onex-topic-allow: OMN-20682
+        "onex.evt.omnimarket.pr-state-observed.v1",  # onex-topic-allow: OMN-20682
     }
 
     raw = CI_BUS_COMPOSE.read_text(encoding="utf-8")
-    found = set(re.findall(r"onex\.[a-z]+\.[a-z0-9.-]+\.v\d+", raw))
+    found = set(re.findall(r"onex\.[a-z]+\.[a-z0-9._-]+\.v\d+", raw))
     assert found == expected, (
         "the CI-bus bring-up one-shot provisions a different topic set than this "
         f"test pins: compose-only={sorted(found - expected)}, "
@@ -429,8 +436,9 @@ def test_ci_bus_topics_are_exactly_the_ci_bus_set(ci_bus: dict[str, Any]) -> Non
     )
 
     # Cross-check the one name this repo owns a canonical constant for. The other
-    # seventeen are declared in omnimarket's topic registry, which this repo does not
-    # import -- stated rather than left as an apparent omission.
+    # twenty-two are declared in omnimarket's and omnibase_internal's topic
+    # registries, which this repo does not import -- stated rather than left as
+    # an apparent omission.
     from omnibase_infra.topics.platform_topic_suffixes import SUFFIX_GITHUB_PR_MERGED
 
     assert SUFFIX_GITHUB_PR_MERGED in expected, (
@@ -470,14 +478,44 @@ def test_ci_bus_labwork_principal_is_scoped_not_superuser(
     lab_topics = re.search(r'LAB_TOPICS="([^"]+)"', command)
     assert lab_topics is not None, "the lab-work ACL grant set must be explicit"
     granted = lab_topics.group(1).split()
-    assert len(granted) == 13
+    assert len(granted) == 18
     assert '--resource-pattern-type literal --topic "$$t"' in command
     topics_command = "\n".join(services["ci-bus-topics"]["command"])
-    declared = set(re.findall(r"onex\.[a-z]+\.[a-z0-9.-]+\.v\d+", topics_command))
+    declared = set(re.findall(r"onex\.[a-z]+\.[a-z0-9._-]+\.v\d+", topics_command))
     assert set(granted) <= declared, "every lab-work grant must name a declared topic"
     # Include any separately added literal grant, not just the LAB_TOPICS loop.
-    referenced = set(re.findall(r"onex\.[a-z]+\.[a-z0-9.-]+\.v\d+", command))
+    referenced = set(re.findall(r"onex\.[a-z]+\.[a-z0-9._-]+\.v\d+", command))
     assert referenced <= declared, "lab-work ACLs and controls must use declared topics"
+
+
+def test_ci_bus_labwork_grants_the_pr_watcher_group_and_counts_match(
+    ci_bus: dict[str, Any],
+) -> None:
+    """OMN-20682: the PR watcher serve process subscribes with the contract group_id
+    onex.omnibase_internal.node_pr_watcher_effect, which EventBusKafka suffixes
+    with .__t.<topic>, so the lab-work login needs that prefix; the readback echoes
+    must state the real counts.
+    """
+    services = ci_bus.get("services") or {}
+    command = "\n".join(services["ci-bus-labwork-user"]["command"])
+    topics_command = "\n".join(services["ci-bus-topics"]["command"])
+    prefixes = re.search(r'GROUP_PREFIXES="([^"]+)"', command)
+    assert prefixes is not None
+    assert "onex.omnibase_internal.node_pr_watcher_effect." in prefixes.group(1).split()
+
+    words = {18: "eighteen", 23: "twenty-three"}
+    lab_topics = re.search(r'LAB_TOPICS="([^"]+)"', command)
+    assert lab_topics is not None
+    granted = lab_topics.group(1).split()
+    assert f"ACL readback confirms all {words[len(granted)]} lab topics" in command
+
+    ci_topics = re.search(r'CI_TOPICS="([^"]+)"', topics_command)
+    lab = re.search(r'LAB_TOPICS="([^"]+)"', topics_command)
+    assert ci_topics is not None
+    assert lab is not None
+    total = len(ci_topics.group(1).split()) + len(lab.group(1).split())
+    assert total == 23
+    assert f"readback confirms all {words[total]} topics exist" in topics_command
 
 
 def test_ci_bus_topics_one_shot_authenticates_once_sasl_is_on(
@@ -493,7 +531,12 @@ def test_ci_bus_topics_one_shot_authenticates_once_sasl_is_on(
     assert 'ADMIN="-X admin.hosts=redpanda:9644"' in command
     assert "cluster config get enable_sasl $$ADMIN" in command
     assert 'if [ "$$SASL_ENABLED" = true ]; then' in command
-    assert "sasl.mechanism=SCRAM-SHA-256" in command
+    # The publisher principal reaches rpk through RPK_* in the environment, never a -X
+    # flag: argv is readable by every user on the host (OMN-17427).
+    assert 'export RPK_USER="$$CI_BUS_KAFKA_SASL_USERNAME"' in command
+    assert 'RPK_PASS="$$CI_BUS_KAFKA_SASL_PASSWORD"' in command
+    assert "RPK_SASL_MECHANISM=SCRAM-SHA-256" in command
+    assert "-X pass" not in command
 
 
 def test_ci_bus_topics_are_created_explicitly_not_auto(

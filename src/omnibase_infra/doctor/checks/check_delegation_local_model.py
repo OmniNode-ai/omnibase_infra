@@ -174,11 +174,15 @@ class CheckDelegationLocalModel(DoctorCheckBase):
         except (ValueError, TypeError, json.JSONDecodeError):
             return self._unknown("the models response was unreadable or invalid")
 
-        if status != 200:
+        if status != 200 or not served_models:
             return (
                 ModelDelegationDiagnosis(
                     fault=EnumDelegationDoctorFault.LOCAL_MODEL_NOT_SERVING,
-                    detail=f"The local model server returned HTTP {status}.",
+                    detail=(
+                        f"The local model server returned HTTP {status}."
+                        if status != 200
+                        else f"The local model server at {origin} reports no served model ids."
+                    ),
                     fix=f"Start the model server at {origin}.",
                 ),
                 True,

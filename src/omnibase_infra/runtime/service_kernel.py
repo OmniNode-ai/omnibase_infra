@@ -257,6 +257,12 @@ TIER0_RUNTIME_CONFIG_RESOURCE = "tier0_runtime_config.yaml"
 # not hardcoded in the product every customer runs (OMN-19184).
 WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH = Path("config") / "onex"
 
+# Bootstrap location for the workspace's tier-1 config owner.
+ENV_WORKSPACE_CONFIG_ROOT = "ONEX_WORKSPACE_CONFIG_ROOT"
+# OMN-20700: public lab-onboarding.sh phase 2 writes developer tier-1 config
+# here, relative to the workspace root.
+DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH = Path(".onex") / "workspace-config"
+
 # Environment variable name for contracts directory
 ENV_CONTRACTS_DIR = "ONEX_CONTRACTS_DIR"
 # Marketplace package skill-manifest root.
@@ -1330,17 +1336,33 @@ def _load_tier0_runtime_config(
         ) from e
 
 
+class WorkspaceRuntimeConfigMissingError(ProtocolConfigurationError):
+    """OMN-19193 refusal of a bound workspace root with no tier-1 config anywhere.
+
+    Typed so callers and tests can distinguish this refusal (OMN-20700).
+    """
+
+
 def workspace_runtime_config_root(workspace_root: Path) -> Path:
     """Resolve the config owner, independently of the registry's state root.
 
     ONEX_WORKSPACE_CONFIG_ROOT is a bootstrap location, never a transport
-    selector. Registry installs use the sibling operator repository. Developer
-    installs can name their own config directory. There is no retiring-root read.
+    selector. Resolution order is a non-blank environment override, the sibling
+    ``../omnibase_internal`` if it is a directory, then ``.onex/workspace-config``
+    if it is a directory, otherwise the sibling path for the caller to refuse.
+    All results are resolved. A developer install never needs a private
+    repository (OMN-20700). There is no retiring-root read.
     """
-    configured = os.environ.get("ONEX_WORKSPACE_CONFIG_ROOT", "").strip()
-    return (
-        Path(configured) if configured else workspace_root / ".." / "omnibase_internal"
-    ).resolve()
+    configured = os.environ.get(ENV_WORKSPACE_CONFIG_ROOT, "").strip()
+    if configured:
+        return Path(configured).resolve()
+    sibling = workspace_root / ".." / "omnibase_internal"
+    if sibling.is_dir():
+        return sibling.resolve()
+    developer = workspace_root / DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH
+    if developer.is_dir():
+        return developer.resolve()
+    return sibling.resolve()
 
 
 def resolve_embedded_runtime_config(
@@ -1375,7 +1397,8 @@ def resolve_embedded_runtime_config(
        working-tree config under the owning config root
        answers (OMN-19193). This is the tier-1 overlay the OMN-17304 ruling
        composes on top of tier-0. The file belongs to the config owner, selected by
-       ``ONEX_WORKSPACE_CONFIG_ROOT`` or the sibling operator repository,
+       ``ONEX_WORKSPACE_CONFIG_ROOT``, the sibling operator repository, or the
+       developer workspace's ``.onex/workspace-config`` (OMN-20700),
        never to this package. The retiring registry root is never read. A bound
        root with neither copy is REFUSED rather than
        answered with tier-0: binding a workspace root is a claim to be a
@@ -1398,7 +1421,8 @@ def resolve_embedded_runtime_config(
     Raises:
         ProtocolConfigurationError: the pointed-at, workspace or shipped
             config exists but fails validation (e.g. a lane-profile config
-            declaring the in-memory bus), or a workspace root is bound and
+            declaring the in-memory bus).
+        WorkspaceRuntimeConfigMissingError: a workspace root is bound and
             declares no runtime config.
     """
     pointer = os.environ.get(ENV_CONTRACTS_DIR, "").strip()
@@ -1471,7 +1495,21 @@ def resolve_embedded_runtime_config(
             / MATERIALIZED_CONTRACTS_RELATIVE_PATH
             / DEFAULT_RUNTIME_CONFIG
         )
-        raise ProtocolConfigurationError(
+        missing_owner_details = ""
+        if not os.environ.get(ENV_WORKSPACE_CONFIG_ROOT, "").strip():
+            sibling = (workspace_root / ".." / "omnibase_internal").resolve()
+            developer_config = (
+                workspace_root.resolve()
+                / DEVELOPER_WORKSPACE_CONFIG_RELATIVE_PATH
+                / WORKSPACE_RUNTIME_CONTRACTS_RELATIVE_PATH
+                / DEFAULT_RUNTIME_CONFIG
+            )
+            missing_owner_details = (
+                f" {ENV_WORKSPACE_CONFIG_ROOT} is unset; the sibling operator "
+                f"repository path is {sibling} and the developer config path "
+                f"is {developer_config}."
+            )
+        raise WorkspaceRuntimeConfigMissingError(
             f"workspace root {workspace_root} is bound but has no materialised "
             f"runtime config at {materialized_config} (the copy comes from "
             f"{SOURCE_REF} of the config owner) and declares no working-tree runtime "
@@ -1482,7 +1520,12 @@ def resolve_embedded_runtime_config(
             f"(OMN-19193). Run `onex delegate` again so the materialiser can "
             f"refresh it / declare the config in the config owner, or select a "
             f"transport explicitly (onex delegate --bus inmemory runs "
-            f"offline on purpose).",
+            f"offline on purpose)."
+            f"{missing_owner_details}"
+            f" On a developer machine, phase 2 of the public onboarding script "
+            f"(bash lab-onboarding.sh) writes that file; or set "
+            f"ONEX_WORKSPACE_CONFIG_ROOT to the directory that holds "
+            f"config/onex/runtime/runtime_config.yaml.",
             context=ModelInfraErrorContext(
                 transport_type=EnumInfraTransportType.RUNTIME,
                 operation="resolve_workspace_runtime_config",

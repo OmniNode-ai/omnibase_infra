@@ -1,0 +1,53 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20767
+title: Auto-wiring derives dispatch route ids within the ModelDispatchRoute limits
+summary: Route and dispatcher ids derived by auto-wiring are returned unchanged within the 200-character ModelDispatchRoute limits and bounded with a SHA-256 digest of the full natural id beyond them, so the omnimarket 0.4.308 judged nodes wire on the dev lane.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-bounded-dispatch-identifiers
+    statement: Every legal node name yields a valid, unique and deterministic auto-wired route id and dispatcher id.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the route ids derived for the two real omnimarket 0.4.308 contracts are at most 200 characters and construct a ModelDispatchRoute without a validation error -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_route_id_bounded.py -q fails at the merge base'
+      - id: AC2
+        statement: 'AC2: two long natural ids that share their first 200 characters derive distinct bounded ids, and the same inputs derive the same id twice -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_route_id_bounded.py -k distinct -q'
+      - id: AC3
+        statement: 'AC3: an id within the limit is returned unchanged, so no existing route id changes -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_route_id_bounded.py -k unchanged -q'
+evidence_requirements:
+  - kind: tests
+    description: Unit tests pin the bounded form for the two real omnimarket contracts, prefix-sharing long names and ids within the limit.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_route_id_bounded.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20767-ac1
+    description: The two real omnimarket 0.4.308 contracts derive route ids within 200 characters that construct a ModelDispatchRoute.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_route_id_bounded.py -q -k real_omnimarket
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20767-ac2
+    description: Long ids sharing a prefix derive distinct, deterministic bounded ids.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_route_id_bounded.py -q -k distinct
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-20767-ac3
+    description: Ids within the limit are unchanged.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_route_id_bounded.py -q -k unchanged
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

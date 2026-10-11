@@ -28,6 +28,7 @@ from deploy_agent.events import (
 from deploy_agent.job_state import JobState
 from deploy_agent.kafka_config import ModelDeployAgentKafkaConfig
 from deploy_agent.tracking_ref import load_tracking_remote_ref_from_env
+from omnibase_infra.topics.topic_namespace import apply_topic_namespace
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,7 @@ def publish_result(
         )
         correlation_id = payload.get("correlation_id", "")
         producer.send(
-            TOPIC_REBUILD_COMPLETED,
+            apply_topic_namespace(TOPIC_REBUILD_COMPLETED),
             key=f"deploy-result/{correlation_id}",
             value=payload,
         )

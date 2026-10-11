@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -21,6 +23,186 @@ from scripts.validation.lint_topic_names import (
     lint_topic,
     scan_contracts,
 )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        "AIOKafkaConsumer(*TOPICS)",
+        "KafkaTransport(config=config, topics=TOPICS)",
+        "consumer.subscribe(topics=TOPICS)",
+    ],
+)
+def test_mixed_consumer_namespace_fails_naming_both(
+    tmp_path: Path,
+    declaration: str,
+) -> None:
+    """P3's falsifier exercises the same CLI used by the blocking gate."""
+    bare = "onex.evt.platform.node-registration.v1"
+    prefixed = f"tenant-a.{bare}"
+    source = tmp_path / "consumer.py"
+    source.write_text(
+        f"TOPICS = ({prefixed!r}, {bare!r})\n{declaration}\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/validation/lint_topic_names.py",
+            "--scan-python",
+            str(source),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "mixed consumer topic namespace" in result.stderr
+    assert prefixed in result.stderr
+    assert bare in result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "source",
+    [
+        "AIOKafkaConsumer('onex.evt.platform.node-registration.v1', 'onex.cmd.platform.request-introspection.v1')",
+        "AIOKafkaConsumer('tenant-a.onex.evt.platform.node-registration.v1', 'tenant-a.onex.cmd.platform.request-introspection.v1')",
+        "KafkaTransport(config=config, topics=())",
+        "AIOKafkaConsumer('tenant-a.onex.evt.platform.node-registration.v1')\nAIOKafkaConsumer('onex.evt.platform.node-registration.v1')",
+        "PUBLISH_TOPICS = ('tenant-a.onex.evt.platform.node-registration.v1', 'onex.evt.platform.node-registration.v1')",
+    ],
+)
+def test_consistent_or_separate_consumer_sets_pass(tmp_path: Path, source: str) -> None:
+    from scripts.validation.lint_topic_names import scan_python
+
+    fixture = tmp_path / "consumer.py"
+    fixture.write_text(source, encoding="utf-8")
+    assert scan_python(fixture) == []
+
+
+@pytest.mark.unit
+def test_consumer_namespace_resolves_local_constants_and_aliases(
+    tmp_path: Path,
+) -> None:
+    from scripts.validation.lint_topic_names import scan_python
+
+    fixture = tmp_path / "consumer.py"
+    fixture.write_text(
+        "from aiokafka import AIOKafkaConsumer as Consumer\n"
+        "BARE = 'onex.evt.platform.node-registration.v1'\n"
+        "PREFIXED = 'tenant-a.' + BARE\n"
+        "def make_consumer():\n"
+        "    topics: tuple[str, ...] = (PREFIXED, BARE)\n"
+        "    return Consumer(*topics)\n",
+        encoding="utf-8",
+    )
+    violations = scan_python(fixture)
+    assert any("mixed consumer topic namespace" in v for v in violations)
+
+
+@pytest.mark.unit
+def test_contract_mixed_consumer_namespace_names_both(tmp_path: Path) -> None:
+    bare = "onex.evt.platform.node-registration.v1"
+    prefixed = f"tenant-a.{bare}"
+    fixture = tmp_path / "contract.yaml"
+    fixture.write_text(
+        yaml.safe_dump({"event_bus": {"subscribe_topics": [prefixed, bare]}})
+    )
+    violations = scan_contracts(tmp_path)
+    assert any(
+        "mixed consumer topic namespace" in v and prefixed in v and bare in v
+        for v in violations
+    )
+
+
+@pytest.mark.unit
+def test_namespace_refusal_cannot_be_suppressed_by_naming_baseline(
+    tmp_path: Path,
+) -> None:
+    bare = "onex.evt.platform.node-registration.v1"
+    prefixed = f"tenant-a.{bare}"
+    fixture = tmp_path / "consumer.py"
+    fixture.write_text(f"AIOKafkaConsumer({prefixed!r}, {bare!r})\n")
+    baseline = tmp_path / "baseline.txt"
+    baseline.write_text(f"{bare}\n")
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/validation/lint_topic_names.py",
+            "--scan-python",
+            str(fixture),
+            "--baseline",
+            str(baseline),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "mixed consumer topic namespace" in result.stderr
+
+
+@pytest.mark.unit
+def test_missing_validation_response_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from scripts.validation.lint_topic_names import EventBusInmemory, scan_python
+
+    async def drop_request(
+        self: EventBusInmemory,
+        envelope: object,
+        topic: str,
+        *,
+        key: bytes | None = None,
+    ) -> None:
+        return None
+
+    fixture = tmp_path / "consumer.py"
+    fixture.write_text("AIOKafkaConsumer('onex.evt.platform.node-registration.v1')\n")
+    monkeypatch.setattr(EventBusInmemory, "publish_envelope", drop_request)
+    with pytest.raises(ValueError, match="Consumer validation returned no result"):
+        scan_python(fixture)
+
+
+@pytest.mark.unit
+def test_unparseable_consumer_source_fails_closed(tmp_path: Path) -> None:
+    from scripts.validation.lint_topic_names import scan_python
+
+    fixture = tmp_path / "consumer.py"
+    fixture.write_text("AIOKafkaConsumer(\n")
+    assert any(
+        "could not parse consumer declarations" in v for v in scan_python(fixture)
+    )
+
+
+@pytest.mark.unit
+def test_namespace_check_is_in_blocking_ci_and_precommit() -> None:
+    from scripts.ci.ci_summary_gate import STRICT_GATE_JOBS
+
+    root = Path(__file__).resolve().parents[4]
+    workflow = yaml.safe_load((root / ".github/workflows/ci.yml").read_text())
+    job = workflow["jobs"]["topic-naming-lint"]
+    assert job["name"] in STRICT_GATE_JOBS
+    assert not job.get("continue-on-error", False)
+    runs = [step.get("run", "") for step in job["steps"]]
+    assert any(
+        "lint_topic_names.py --scan-python src/omnibase_infra" in run for run in runs
+    )
+    assert any("test_lint_topic_names.py" in run for run in runs)
+    config = yaml.safe_load((root / ".pre-commit-config.yaml").read_text())
+    hook = next(
+        hook
+        for repo in config["repos"]
+        for hook in repo["hooks"]
+        if hook["id"] == "topic-naming-lint"
+    )
+    assert hook["entry"] == "bash scripts/validation/run_topic_lint.sh"
+    assert (
+        "--scan-python" in (root / "scripts/validation/run_topic_lint.sh").read_text()
+    )
+
 
 # ---------------------------------------------------------------------------
 # Helpers

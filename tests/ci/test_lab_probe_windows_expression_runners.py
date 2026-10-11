@@ -307,6 +307,87 @@ def test_4233_a_job_placed_by_a_needs_output_fails_naming_the_job(
 # The unlisted direction sees a customer-machine job placed by a variable.
 # --------------------------------------------------------------------------- #
 
+
+@pytest.mark.unit
+@pytest.mark.live_contact("tests/fixtures/omn19412/c13-probe-window-contact.json")
+@pytest.mark.parametrize("pool", [VERIFY_POOL, '["self-hosted","customer-proof"]'])
+def test_unlisted_1725_c13_is_refused_after_its_pool_moves(
+    tmp_path: Path, pool: str, recorded_response: dict[str, object]
+) -> None:
+    provenance = recorded_response["_provenance"]
+    assert isinstance(provenance, dict)
+    source = REPO_ROOT / provenance["source_file"]
+    assert source == C13_1725
+    root = _root(tmp_path, "omninode_infra", {C13_PATH: source})
+    variables = _placements("omninode_infra", CUSTOMER_MACHINE_RUNS_ON_JSON=pool)
+    lane = next(label for label in json.loads(pool) if label != "self-hosted")
+    assert plw.check([_c13(lane)], {"omninode_infra": root}, variables) == []
+    errors = plw.check([], {"omninode_infra": root}, variables)
+    assert len(errors) == 1, errors
+    assert errors[0].startswith(f"unlisted probe omninode_infra:{C13_PATH}")
+    assert "29 4,16 * * *" in errors[0]
+    assert lane in errors[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("runs_on", "value"),
+    [
+        ("${{ fromJSON(vars.CUSTOMER_MACHINE_RUNS_ON_JSON) }}", VERIFY_POOL),
+        ("${{ vars.CUSTOMER_MACHINE_RUNS_ON_JSON }}", "omnibase-verify"),
+        (
+            '${{ fromJSON(vars.CUSTOMER_MACHINE_RUNS_ON_JSON || \'["self-hosted","omnibase-verify"]\') }}',
+            None,
+        ),
+    ],
+)
+def test_unlisted_probe_pool_workflow_without_a_lane_title_is_refused(
+    tmp_path: Path, runs_on: str, value: str | None
+) -> None:
+    workflow = NOT_A_PROBE.replace("runs-on: ubuntu-latest", f"runs-on: {runs_on}")
+    root = _root(tmp_path, "omnibase_infra", {".github/workflows/probe.yml": workflow})
+    variables = _placements(
+        "omnibase_infra",
+        CUSTOMER_MACHINE_RUNS_ON_JSON=value,
+    )
+    errors = plw.check([], {"omnibase_infra": root}, variables)
+    assert len(errors) == 1, errors
+    assert errors[0].startswith(
+        "unlisted probe omnibase_infra:.github/workflows/probe.yml"
+    )
+    assert "omnibase-verify" in errors[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", ["not JSON", None])
+def test_unlisted_probe_pool_with_an_unreadable_value_fails_naming_the_job(
+    tmp_path: Path, value: str | None
+) -> None:
+    root = _root(tmp_path, "omninode_infra", {C13_PATH: C13_1725})
+    errors = plw.check(
+        [],
+        {"omninode_infra": root},
+        _placements("omninode_infra", CUSTOMER_MACHINE_RUNS_ON_JSON=value),
+    )
+    assert len(errors) == 1, errors
+    assert "cannot be classified" in errors[0]
+    assert "job 'c13-customer-local'" in errors[0]
+    assert "CUSTOMER_MACHINE_RUNS_ON_JSON" in errors[0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("name", ["LANE_CENSUS_RUNS_ON_JSON", "LAB_PROBE_RUNS_ON_JSON"])
+def test_unlisted_nonprobe_variable_on_the_same_verify_pool_is_not_a_probe(
+    tmp_path: Path, name: str
+) -> None:
+    workflow = NOT_A_PROBE.replace(
+        "runs-on: ubuntu-latest", "runs-on: ${{ fromJSON(vars." + name + ") }}"
+    )
+    root = _root(tmp_path, "omnibase_infra", {".github/workflows/audit.yml": workflow})
+    variables = _placements("omnibase_infra", **{name: VERIFY_POOL})
+    assert plw.check([], {"omnibase_infra": root}, variables) == []
+
+
 CUSTOMER_BY_VARIABLE = textwrap.dedent(
     """\
     name: customer runner smoke

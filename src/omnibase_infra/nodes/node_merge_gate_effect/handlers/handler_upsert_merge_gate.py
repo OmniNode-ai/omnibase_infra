@@ -39,8 +39,9 @@ import logging
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-import httpx
-
+from omnibase_infra.adapters.project_tracker.linear_graphql_project_tracker_adapter import (
+    AdapterLinearGraphQLProjectTracker,
+)
 from omnibase_infra.enums import (
     EnumHandlerType,
     EnumHandlerTypeCategory,
@@ -91,7 +92,6 @@ RETURNING (xmax = 0) AS was_insert;
 # Linear GraphQL
 # =============================================================================
 
-LINEAR_GRAPHQL_URL = "https://api.linear.app/graphql"
 
 LINEAR_CREATE_ISSUE_MUTATION = """
 mutation CreateQuarantineIssue($title: String!, $teamId: String!, $description: String!, $priority: Int!) {
@@ -313,21 +313,16 @@ class HandlerUpsertMergeGate(MixinPostgresOpExecutor):
         )
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(
-                    LINEAR_GRAPHQL_URL,
-                    headers={
-                        "Authorization": api_key,
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "query": LINEAR_CREATE_ISSUE_MUTATION,
-                        "variables": {
-                            "title": title,
-                            "teamId": team_id,
-                            "description": description,
-                            "priority": 1,  # Urgent
-                        },
+            async with AdapterLinearGraphQLProjectTracker.graphql_transport(
+                api_key=api_key, timeout_seconds=15.0
+            ) as transport:
+                resp = await transport.post_graphql(
+                    LINEAR_CREATE_ISSUE_MUTATION,
+                    {
+                        "title": title,
+                        "teamId": team_id,
+                        "description": description,
+                        "priority": 1,  # Urgent
                     },
                 )
                 resp.raise_for_status()

@@ -81,7 +81,7 @@ async def _projection_terminal(
 async def _ledger_verified(
     source: str, correlation_id: str, timeout_s: float
 ) -> tuple[tuple[str, ...], bool, str, str]:
-    return _FULL_CHAIN, True, "pass", ""
+    return _FULL_CHAIN, True, "pass", "complete", ""
 
 
 def _ledger_dsn_lookup(name: str) -> str:

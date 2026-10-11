@@ -302,8 +302,6 @@ PREPUSH_200_HOSTNAME="${PREPUSH_200_HOSTNAME:-stickybeatz-studio}"
 # happened -- assumed headroom that was not there. "Neither host reachable"
 # refuses; it does not skip the check.
 PREPUSH_201_GATE_RUNNER_HOSTNAME="${PREPUSH_201_GATE_RUNNER_HOSTNAME:-gate-runner-201}"
-PREPUSH_200_SSH_TARGET="${PREPUSH_200_SSH_TARGET:-jonah@stickybeatz-studio.tail75df5e.ts.net}"  # onex-allow-internal-ip OMN-16295 reason="pre-push guard needs the real host target to probe live load"
-PREPUSH_201_SSH_TARGET="${PREPUSH_201_SSH_TARGET:-jonah@192.168.86.201}"  # onex-allow-internal-ip OMN-16295 reason="pre-push guard needs the real host target to probe live load" # fallback-ok: real .201 host target, not a dev/local placeholder
 # load1/cores at or under this ratio counts as "fit". 1.0 == "not
 # oversubscribed" (a standard load-average heuristic); correctly reads the
 # observed-fit `.201` snapshot (~0.4x, 2026-08-20) as fit and both observed

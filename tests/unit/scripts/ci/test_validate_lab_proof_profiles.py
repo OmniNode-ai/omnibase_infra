@@ -95,8 +95,8 @@ def test_committed_registry_has_the_two_exempt_documentation_repos() -> None:
         if all(variant.proof_kind == "exempt" for variant in profile.variants)
     )
     assert exempt == [
-        "OmniNode-ai/knowledge-base",
         "OmniNode-ai/knowledge-base-internal",
+        "OmniNode-ai/knowledge_base",
     ]
 
 

@@ -128,8 +128,8 @@ class TypedDictConsumerFlowInjection(TypedDict, total=False):
     validation_errors_after: JsonValue
     boundary_lines: JsonValue
     dlq_copies: JsonValue
-    generic_dlq_before: int
-    generic_dlq_after: int
+    seam_dlq_before: int
+    seam_dlq_after: int
 
 
 @with_config(ConfigDict(extra="allow"))

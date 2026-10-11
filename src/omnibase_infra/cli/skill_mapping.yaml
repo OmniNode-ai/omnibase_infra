@@ -483,9 +483,9 @@ skills:
     result_model: omnimarket.nodes.node_linear_triage.models.model_linear_triage_state.ModelLinearTriageResult
     args:
       - {name: threshold-days, payload_field: threshold_days, arg_type: integer}
-      - {name: flag-only, payload_field: flag_only, arg_type: boolean, default: false}
+      - {name: flag-only, payload_field: flag_only, arg_type: boolean}
       - {name: team, payload_field: team, arg_type: string}
-      - {name: dry-run, payload_field: dry_run, arg_type: boolean, default: false}
+      - {name: dry-run, payload_field: dry_run, arg_type: boolean}
   - skill_name: merge_sweep
     node_name: node_pr_lifecycle_orchestrator
     result_model: omnimarket.nodes.node_pr_lifecycle_orchestrator.handlers.handler_pr_lifecycle_orchestrator.ModelPrLifecycleResult

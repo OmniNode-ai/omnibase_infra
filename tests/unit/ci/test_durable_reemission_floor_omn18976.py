@@ -26,8 +26,10 @@ WHAT THIS PINS
 
 from __future__ import annotations
 
+import io
 import json
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -327,6 +329,126 @@ class TestCrossRepoConvergenceOnANonRuntimeMerge:
         values = self._outputs(outputs)
         assert values["reemit_candidates"] == "[]"
         assert values["probe_lane"] == "false"
+
+
+class TestContainmentDoesNotReemitTheRunsOwnReceipt:
+    @pytest.mark.parametrize(
+        "initial", [_A, _N2, _N1], ids=["window", "floor", "endpoint"]
+    )
+    def test_only_other_queued_shas_are_rekeyed(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, initial: str
+    ) -> None:
+        from scripts.ci.lab_pass_receipt import (
+            EnumLabLane,
+            EnumLabPassResult,
+            ModelLabPassReceipt,
+            evaluate_gate,
+            reemit_receipt,
+        )
+        from tests.scripts.ci._lab_pass_fixtures import REPO, FakeSurface, receipt
+
+        # This run writes N1's own receipt, but the lane contains it at R.
+        # Q still needs its automatic receipt. N1 can reach the candidate
+        # list through the live window, durable floor or lower endpoint.
+        outputs = TestCrossRepoConvergenceOnANonRuntimeMerge._wire(
+            monkeypatch,
+            tmp_path,
+            queue=TestCrossRepoConvergenceOnANonRuntimeMerge._IDLE,
+            receipted={_A},
+        )
+        monkeypatch.setattr(
+            guard,
+            "load_runtime_affecting_predicate",
+            lambda *_a: lambda s: s in {_Q, _N1},
+        )
+        monkeypatch.setattr(
+            guard,
+            "read_contained_commits",
+            lambda _repo, previous, _converged: _HISTORY_OLDEST_FIRST[
+                _HISTORY_OLDEST_FIRST.index(previous) + 1 :
+            ],
+        )
+        monkeypatch.setattr(
+            guard,
+            "run_convergence_wait",
+            lambda **_k: guard.ModelConvergenceResult(
+                outcome=guard.EnumConvergenceOutcome.OK,
+                reason="",
+                lane=guard.LaneRevision(
+                    _R, guard.DEV_LANE_COMPOSE_PROJECT, "supplied", "running"
+                ),
+                ancestry=guard.Ancestry("descendant", 2, True, "dev"),
+                budget=guard.ModelConvergenceBudget(
+                    1500, 1620, None, "not needed: already converged"
+                ),
+                waited=timedelta(0),
+                finished_at=datetime(2026, 10, 8, tzinfo=UTC),
+                initial_revision=initial,
+            ),
+        )
+        monkeypatch.setattr(
+            guard,
+            "read_agent_supersession",
+            lambda **_k: guard.ModelSupersessionProbe(),
+        )
+        assert (
+            guard.main(
+                [
+                    "--expect-revision",
+                    _N1,
+                    "--deployed-revision",
+                    _R,
+                    "--runtime-path-validator",
+                    "validator.py",
+                ]
+            )
+            == 0
+        )
+        values = TestCrossRepoConvergenceOnANonRuntimeMerge._outputs(outputs)
+        assert values["emit_receipt"] == "true"
+        candidates = json.loads(values["reemit_candidates"])
+        assert _Q in [c["sha"] for c in candidates]
+        assert _N1 not in [c["sha"] for c in candidates], (
+            "the primary receipt is keyed by the expected merge, not the lane's newer revision"
+        )
+
+        source = receipt(_N1, EnumLabLane.COMPOSE_DEV)
+        surface = FakeSurface()
+        monkeypatch.setattr("scripts.ci.lab_pass_receipt._gh_api", surface)
+        for candidate in candidates:
+            recovered = reemit_receipt(
+                source, candidate["sha"], converged_via=candidate["converged_via"]
+            )
+            path = tmp_path / f"{candidate['sha']}.json"
+            path.write_text(recovered.to_json(), encoding="utf-8")
+            assert (
+                ModelLabPassReceipt.from_json(path.read_text()).result
+                is EnumLabPassResult.PASS
+            )
+            surface.receipts = [recovered]
+            assert (
+                evaluate_gate(
+                    REPO,
+                    candidate["sha"],
+                    [],
+                    io.StringIO(),
+                    required=[EnumLabLane.COMPOSE_DEV],
+                )
+                == 0
+            )
+            failed = reemit_receipt(receipt(_N1, outcome="fail"), candidate["sha"])
+            assert failed.result is EnumLabPassResult.FAIL
+            surface.receipts = [failed]
+            assert (
+                evaluate_gate(
+                    REPO,
+                    candidate["sha"],
+                    [],
+                    io.StringIO(),
+                    required=[EnumLabLane.COMPOSE_DEV],
+                )
+                == 1
+            )
 
 
 class TestNoReceiptEverIsBounded:

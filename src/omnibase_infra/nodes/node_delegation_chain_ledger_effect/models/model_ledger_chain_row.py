@@ -21,6 +21,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.enum_ledger_chain_state import (
+    EnumLedgerChainState,
+)
 from omnibase_infra.nodes.node_delegation_chain_ledger_effect.models.enum_tier_two_verdict import (
     EnumTierTwoVerdict,
 )
@@ -31,6 +34,9 @@ class ModelLedgerChainRow(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    chain_state: EnumLedgerChainState = Field(
+        description="Chain-level state, identical on every row of one chain.",
+    )
     correlation_id: UUID = Field(
         description=(
             "The chain this hop belongs to. Typed here; persisted as TEXT — "

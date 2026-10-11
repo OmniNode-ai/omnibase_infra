@@ -15,7 +15,7 @@ plain 2s ``AdminClient.list_topics`` timeout against a healthy broker) to
 ``REACHABLE``, that second mapping made the resolved transport a coin flip:
 20 consecutive ``resolve_default_bus()`` calls with an unchanged environment
 and a healthy broker returned kafka 14x / inmemory 6x
-(``OmniNode-ai/knowledge-base#59``).
+(``OmniNode-ai/knowledge_base#59``).
 
 These tests pin the fix, as amended by OMN-17304:
 

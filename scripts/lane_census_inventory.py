@@ -193,6 +193,62 @@ def normalize_cli_networks(text: str) -> list[str]:
     return sorted({line.strip() for line in text.splitlines() if line.strip()})
 
 
+def _inspect_readings(payload: dict[str, Any]) -> dict[str, Any]:
+    """OMN-19416: keep only health counters, interval and restarts, never env/logs."""
+    state = payload.get("State")
+    config = payload.get("Config")
+    if not isinstance(state, dict) or not isinstance(config, dict):
+        raise InventoryProbeError("container inspect missing or invalid State/Config")
+    health = state.get("Health")
+    healthcheck = config.get("Healthcheck") or {}
+    if not isinstance(healthcheck, dict):
+        raise InventoryProbeError("container inspect invalid Healthcheck")
+    if health is not None and (
+        not isinstance(health, dict)
+        or health.get("Status") not in {"healthy", "unhealthy", "starting"}
+        or type(health.get("FailingStreak")) is not int
+        or health["FailingStreak"] < 0
+    ):
+        raise InventoryProbeError("container inspect invalid Health")
+    count = payload.get("RestartCount")
+    if type(count) is not int or count < 0:
+        raise InventoryProbeError("container inspect missing or invalid RestartCount")
+    interval_ns = healthcheck.get("Interval")
+    interval_seconds = None
+    if health is not None:
+        # Docker's zero/omitted interval means its 30 s default.
+        interval_ns = interval_ns or 30_000_000_000
+        if (
+            not isinstance(interval_ns, int)
+            or isinstance(interval_ns, bool)
+            or interval_ns <= 0
+        ):
+            raise InventoryProbeError("container inspect invalid healthcheck Interval")
+        interval_seconds = interval_ns / 1_000_000_000
+    return {
+        "Health": (
+            {
+                "Status": health.get("Status"),
+                "FailingStreak": health.get("FailingStreak"),
+            }
+            if isinstance(health, dict)
+            else None
+        ),
+        "HealthcheckIntervalSeconds": interval_seconds,
+        "RestartCount": count,
+    }
+
+
+_CLI_INSPECT_FORMAT = (
+    '{"Names":{{json .Name}},"State":{"Health":'
+    '{{if .State.Health}}{"Status":{{json .State.Health.Status}},'
+    '"FailingStreak":{{json .State.Health.FailingStreak}}}{{else}}null{{end}}},'
+    '"Config":{"Healthcheck":{{if .Config.Healthcheck}}'
+    '{"Interval":{{json .Config.Healthcheck.Interval}}}{{else}}null{{end}}},'
+    '"RestartCount":{{json .RestartCount}}}'
+)
+
+
 def _run_cli(args: list[str], timeout_s: float) -> str:
     """Run a docker CLI command under an explicit bound. Raises on any failure.
 
@@ -254,6 +310,17 @@ def collect_inventory(
         networks = normalize_api_networks(
             api_get(socket_path, API_NETWORKS_PATH, api_timeout_s)
         )
+        for row in containers:
+            inspect = api_get(
+                socket_path,
+                f"/containers/{urllib.parse.quote(str(row['Names']), safe='')}/json",
+                api_timeout_s,
+            )
+            if not isinstance(inspect, dict):
+                raise InventoryProbeError(
+                    f"{row['Names']}: container inspect is not an object"
+                )
+            row.update(_inspect_readings(inspect))
         return containers, networks, "engine_api", warnings
     except (OSError, InventoryProbeError, ValueError) as exc:
         warnings.append(
@@ -269,6 +336,33 @@ def collect_inventory(
     networks = normalize_cli_networks(
         _run_cli(["docker", "network", "ls", "--format", "{{.Name}}"], cli_timeout_s)
     )
+    if containers:
+        readings = _run_cli(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                _CLI_INSPECT_FORMAT,
+                *(str(row["Names"]) for row in containers),
+            ],
+            cli_timeout_s,
+        )
+        inspected = {}
+        for line in readings.splitlines():
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            if not isinstance(payload, dict) or not isinstance(
+                payload.get("Names"), str
+            ):
+                raise InventoryProbeError("container inspect returned an invalid name")
+            inspected[payload["Names"].lstrip("/")] = _inspect_readings(payload)
+        for row in containers:
+            if row["Names"] not in inspected:
+                raise InventoryProbeError(
+                    f"{row['Names']}: container inspect returned no reading"
+                )
+            row.update(inspected[row["Names"]])
     return containers, networks, "docker_cli", warnings
 
 

@@ -1,0 +1,41 @@
+TLC2 Version 2026.09.23.154203 (rev: 4260e47)
+Running breadth-first search Model-Checking with fp 86 and seed 1877484610467490560 with 2 workers on 24 cores with 27300MB heap and 64MB offheap memory [pid: 16165] (Mac OS X 26.6.2 aarch64, Homebrew 23.0.2 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file LabReconcile.tla
+Parsing file Naturals.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file Sequences.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file FiniteSets.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file _TLCTrace.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file TLC.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file TLCExt.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file Integers.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Integers
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module LabReconcile
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module LabReconcile
+Starting... (2026-09-24 13:21:27)
+Implied-temporal checking--satisfiability problem has 3 branches.
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-24 13:21:27.
+Checking 3 branches of temporal properties for the current state space with 100302 total distinct states at (2026-09-24 13:21:30)
+Finished checking temporal properties in 00s at 2026-09-24 13:21:31
+Progress(13) at 2026-09-24 13:21:31: 83,196 states generated (83,196 s/min), 33,434 distinct states found (33,434 ds/min), 14,540 states left on queue.
+Progress(25) at 2026-09-24 13:22:05: 1,004,670 states generated, 421,992 distinct states found, 0 states left on queue.
+Checking 3 branches of temporal properties for the complete state space with 1265976 total distinct states at (2026-09-24 13:22:05)
+Finished checking temporal properties in 14s at 2026-09-24 13:22:20
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.3E-8
+  based on the actual fingerprints:  val = 4.3E-9
+1004670 states generated, 421992 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 25.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 10 and the 95th percentile is 4).
+Finished in 53s at (2026-09-24 13:22:20)
+$J -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -deadlock -workers 2 -config  76.98s user 21.08s system 183% cpu 53.297 total

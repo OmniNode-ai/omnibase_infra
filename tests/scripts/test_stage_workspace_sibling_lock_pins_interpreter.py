@@ -22,11 +22,11 @@ misreported downstream as a lock-drift condition (OMN-12977 wording); it is
 not -- the check never ran far enough to compare a single pin.
 
 Verified on the same container: both the repo's own
-``.venv/bin/python`` (built by deploy-runtime.sh's own ``uv sync`` earlier in
+``.venv/bin/python`` (built by onex-runtime-deploy's own ``uv sync`` earlier in
 the job) and ``uv run python`` have pydantic (2.13.4) importable. Only bare
 ``python3`` does not.
 
-The fix mirrors the interpreter-resolution precedence deploy-runtime.sh's own
+The fix mirrors the interpreter-resolution precedence onex-runtime-deploy's own
 ``check_sibling_lock_pins()`` bash function already uses for this exact
 script (repo-venv python -> uv run -> bare python3, hard-failing only if none
 resolve) instead of introducing a second, divergent resolution order.

@@ -1,0 +1,35 @@
+TLC2 Version 2026.09.23.154203 (rev: 4260e47)
+Running breadth-first search Model-Checking with fp 93 and seed -2035148397016650723 with 2 workers on 24 cores with 27300MB heap and 64MB offheap memory [pid: 86179] (Mac OS X 26.6.2 aarch64, Homebrew 23.0.2 64bit, MSBDiskFPSet, DiskStateQueue).
+Parsing file LabReconcile.tla
+Parsing file Naturals.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file Sequences.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Parsing file FiniteSets.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file _TLCTrace.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/_TLCTrace.tla)
+Parsing file TLC.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file TLCExt.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/TLCExt.tla)
+Parsing file Integers.tla (jar:file:tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Integers
+Semantic processing of module TLCExt
+Semantic processing of module _TLCTrace
+Semantic processing of module LabReconcile
+Linting of module TLCExt
+Linting of module _TLCTrace
+Linting of module LabReconcile
+Starting... (2026-09-24 13:20:34)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-09-24 13:20:34.
+Progress(18) at 2026-09-24 13:20:37: 301,069 states generated (301,069 s/min), 118,951 distinct states found (118,951 ds/min), 23,385 states left on queue.
+Model checking completed. No error has been found.
+  Estimates of the probability that TLC did not check all reachable states
+  because two distinct states had the same fingerprint:
+  calculated (optimistic):  val = 1.3E-8
+  based on the actual fingerprints:  val = 9.4E-9
+1004670 states generated, 421992 distinct states found, 0 states left on queue.
+The depth of the complete state graph search is 25.
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 10 and the 95th percentile is 4).
+Finished in 08s at (2026-09-24 13:20:42)
+$J -XX:+UseParallelGC -cp tla2tools.jar tlc2.TLC -deadlock -workers 2 -config  14.21s user 1.19s system 172% cpu 8.924 total

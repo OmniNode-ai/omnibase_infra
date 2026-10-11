@@ -581,7 +581,7 @@ def test_deploy_runtime_cannot_resolve_a_pool_project(slot: int) -> None:
         check=False,
     )
     assert result.returncode != 0, (
-        f"scripts/deploy-runtime.sh can resolve an overlay for {project} "
+        f"src/omnibase_infra/handlers/handler_runtime_deploy.sh can resolve an overlay for {project} "
         f"(stdout={result.stdout!r}). The governed deploy path must not be "
         f"able to target a pool slot; the pool has its own entrypoint."
     )

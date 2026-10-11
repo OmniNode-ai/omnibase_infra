@@ -47,7 +47,6 @@ def test_compose_dev_202_is_not_in_the_any_of_default_lanes() -> None:
     assert LANE not in ANY_OF_DEFAULT_LANES
     assert (
         EnumLabLane.COMPOSE_DEV,
-        EnumLabLane.ONEX_LAB,
         EnumLabLane.ONEX_LAB_K3S,
     ) == ANY_OF_DEFAULT_LANES, "adding the lane must not widen the any-of premise"
 
@@ -101,7 +100,7 @@ def test_compose_dev_202_pass_satisfies_a_gate_that_requires_it(
 ) -> None:
     """Positive control: the lane is readable when a caller names it."""
     surface = FakeSurface()
-    surface.add(receipt(SHA_4ACA, LANE), receipt(SHA_4ACA, EnumLabLane.ONEX_LAB))
+    surface.add(receipt(SHA_4ACA, LANE), receipt(SHA_4ACA, EnumLabLane.ONEX_LAB_K3S))
     code, output = _gate(surface, monkeypatch, required=[LANE])
     assert code == 0, output
 

@@ -44,7 +44,7 @@ is refused, every such variable is named in one message, and no value is ever
 printed.
 
 Callers, both before any container starts:
-  - ``scripts/deploy-runtime.sh`` (``guard_password_contract``)
+  - ``onex-runtime-deploy`` (``guard_password_contract``)
   - ``scripts/preflight_required_compose_env.py`` (the deploy agent and
     ``refresh_dev_lane.sh`` run it before compose validation)
 

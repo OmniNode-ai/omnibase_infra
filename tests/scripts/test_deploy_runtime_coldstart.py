@@ -10,7 +10,7 @@ are OMN-13220 (crash-loop); fix 3 is OMN-13594 (migration/postgres ordering).
    ``intelligence-migration: condition: service_completed_successfully``, but
    restart_services() uses ``up -d --no-deps`` which bypasses depends_on. On a
    fresh-DB lane that left public.db_metadata for omniintelligence unstamped, so
-   the runtime crash-looped. deploy-runtime.sh's migration preflight must run
+   the runtime crash-looped. onex-runtime-deploy's migration preflight must run
    intelligence-migration (and ``docker wait`` on it as a one-shot).
 
 2. Cold-start consumer-timeout crash-loop. On a fully-cold lane the kernel joins
@@ -31,7 +31,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 COMPOSE_FILE = REPO_ROOT / "docker" / "docker-compose.infra.yml"
 
 
@@ -40,7 +42,7 @@ def _deploy_script_text() -> str:
 
 
 def _deploy_script_noncomment() -> str:
-    """deploy-runtime.sh with comment-only lines stripped.
+    """onex-runtime-deploy with comment-only lines stripped.
 
     Assertions about *active* behavior must not be satisfied by a comment that
     merely mentions the token, so the active-code checks run against this view.

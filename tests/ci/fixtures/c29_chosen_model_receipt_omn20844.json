@@ -1,0 +1,36 @@
+{
+  "_provenance": {
+    "source": "onex delegate --json --task-type document on a lab host, as a provider-only customer in an isolated HOME, after onex models add openrouter --model google/gemini-2.5-flash-lite registered the lab store's OpenRouter key (omnibase-infra 0.38.69; omnimarket OMN-20844 branch head 86917ed0). Kept: the receipt fields the C29 grader reads.",
+    "captured_utc": "2026-10-10T02:39:14Z",
+    "run_id": "5d9b6b77-e8b5-4caf-800b-65fa1e31ecbb"
+  },
+  "receipt": {
+    "status": "success",
+    "backend_id": "byok-openrouter",
+    "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+    "model": "google/gemini-2.5-flash-lite",
+    "routing_tier": "cheap_frontier",
+    "receipt": {
+      "result": {
+        "status": "completed",
+        "model_name": "google/gemini-2.5-flash-lite",
+        "provider": "https://openrouter.ai/api/v1/chat/completions",
+        "response": "The OpenRouter key answered.",
+        "attempts": [
+          {
+            "tier": "cheap_frontier",
+            "backend_id": "byok-openrouter",
+            "model_id": "google/gemini-2.5-flash-lite",
+            "acceptance_decision": "accept",
+            "acceptance_reason": "quality_bar_met",
+            "host": "openrouter.ai",
+            "http_status": 200,
+            "provider_id": "openrouter",
+            "quality_gate_passed": true,
+            "finish_reason": "stop"
+          }
+        ]
+      }
+    }
+  }
+}

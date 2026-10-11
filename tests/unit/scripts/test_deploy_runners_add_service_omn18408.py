@@ -267,6 +267,7 @@ def test_add_does_not_reinstall_the_fleet_crons(stub_bin: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert "prune cron" not in result.stdout
     assert "monitor cron" not in result.stdout
+    assert "monitor timers" not in result.stdout
 
 
 def test_add_exports_the_deploy_runner_registration_variable() -> None:
@@ -278,10 +279,10 @@ def test_add_exports_the_deploy_runner_registration_variable() -> None:
     """
     text = SCRIPT.read_text(encoding="utf-8")
     assert "DEPLOY_RUNNER_TOKEN" in text
-    # Control: the rolling path deliberately exports an EMPTY RUNNER_TOKEN,
-    # because a recreate restores cached creds. If that disappears, this
-    # assertion is reading a different script than the one documented.
-    assert "export RUNNER_TOKEN=''" in text
+    # Control: since OMN-18877 the rolling path also passes the supplied
+    # registration token rather than an EMPTY RUNNER_TOKEN, because a cache
+    # directory alone is not proof the recreate can restore a registration.
+    assert "export RUNNER_TOKEN=''" not in text
 
 
 def test_help_documents_the_additive_mode(stub_bin: Path) -> None:

@@ -1,0 +1,13 @@
+{
+  "_provenance": {
+    "source": "psql -d omnibase_infra, run through docker exec in the omnibase-infra-postgres container of the .201 dev lane (192.168.86.201): one read-only SELECT over information_schema.tables, information_schema.columns and pg_namespace",
+    "captured_utc": "2026-10-08T21:22:53Z",
+    "note": "Live read-only capture for OMN-17427, before migration 110 was applied anywhere. It records where the relation migration 110 alters physically lives: public.ledger_chain, in the omnibase_infra service database, and nowhere else. The reply holds no credential."
+  },
+  "response": {
+    "current_database": "omnibase_infra",
+    "ledger_chain_schemas": ["public"],
+    "ledger_chain_columns": ["correlation_id", "hop_index", "hop", "replay_green", "verifier_verdict", "observed_topic", "envelope_id", "parent_envelope_id", "replay_detail", "verifier_detail", "recorded_at"],
+    "non_system_schemas": ["omninode_internal", "public"]
+  }
+}

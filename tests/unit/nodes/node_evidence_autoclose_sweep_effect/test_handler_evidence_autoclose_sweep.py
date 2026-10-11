@@ -1185,18 +1185,19 @@ class TestAcCoverageGuard:
         assert linear.state_updates == []
         assert len(outcome.uncovered_acceptance_criteria) == 4
 
-    async def test_fully_covered_ticket_still_flips(self):
+    async def test_fully_covered_ticket_without_checkboxes_still_flips(self):
         """The guard must not be a blanket hold: a description whose ACs are
-        all checked and match the check count flips exactly as before."""
+        bound and match the check count flips exactly as before. OMN-18490
+        separately names started tickets with every task-list box ticked."""
         linear = FakeLinearClient(
             issues={
                 "OMN-9999": _issue(
                     issue_id="issue-ok",
                     description=(
                         "## Acceptance Criteria\n"
-                        "- [x] AC1: alpha\n"
-                        "- [x] AC2: beta\n"
-                        "- [x] AC3: gamma\n"
+                        "- AC1: alpha\n"
+                        "- AC2: beta\n"
+                        "- AC3: gamma\n"
                     ),
                 )
             }

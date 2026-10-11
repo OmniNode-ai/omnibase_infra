@@ -53,7 +53,6 @@ KINDS: Final[tuple[tuple[str, str, str, str], ...]] = (
 )
 
 APPLIED_TOPIC: Final[str] = _contract_topic("applied")
-GENERIC_DLQ: Final[str] = "onex.dlq.omnibase-infra.events.v1"
 SEAM_DLQ: Final[str] = "onex.dlq.omnimarket.consumer-flow-stall-alert-malformed.v1"
 
 RUNTIME_CONTAINERS: Final[tuple[str, ...]] = (

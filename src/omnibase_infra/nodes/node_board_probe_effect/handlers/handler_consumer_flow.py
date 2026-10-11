@@ -20,10 +20,10 @@ from omnibase_infra.nodes.node_board_probe_effect.handlers._consumer_flow_consta
     APPLIED_TOPIC,
     AST_GATE_TEST,
     BRANCHES,
-    GENERIC_DLQ,
     KINDS,
     LIVE_WINDOW_MINUTES,
     RUNTIME_CONTAINERS,
+    SEAM_DLQ,
     WIRING_MODULE,
 )
 from omnibase_infra.nodes.node_board_probe_effect.models import (
@@ -347,7 +347,7 @@ def grade_boot(
         "boot",
         "injected_marker_durably_on_the_dlq",
         _is_int(dlq_copies := inj.get("dlq_copies")) and dlq_copies > 0,
-        f"{GENERIC_DLQ} messages carrying the marker: {inj.get('dlq_copies')}",
+        f"{SEAM_DLQ} messages carrying the marker: {inj.get('dlq_copies')}",
     )
 
 

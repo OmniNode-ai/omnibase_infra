@@ -10,6 +10,8 @@ required_env:
   - ONEX_SERVICE_CLIENT_SECRET
   - ONEX_REGISTRATION_AUTO_ACK
 hardcoded_env:
+  # OMN-15645: pin the image's packaged tiers, as on the other runtime kernels.
+  DELEGATION_ROUTING_TIERS_PATH: /app/config/delegation/routing_tiers.yaml
   OMNIBASE_INFRA_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omnibase_infra'
   OMNIINTELLIGENCE_DB_URL: 'postgresql://postgres:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}@postgres:5432/omniintelligence'
   KAFKA_BOOTSTRAP_SERVERS: redpanda:9092

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 #
 # compose_wait_timeout.sh -- OMN-15718: bounded-deadline + stranded-container
-# reconciliation helpers shared by deploy-runtime.sh and
+# reconciliation helpers shared by onex-runtime-deploy and
 # refresh_stability_lane.sh.
 #
 # Background: refresh_stability_lane.sh --ref origin/dev --execute (2026-08-05,
@@ -48,7 +48,7 @@
 #                                         it had to be torn down.
 
 # Include guard -- this file may be sourced by more than one caller in the
-# same process (e.g. a test harness sourcing both deploy-runtime.sh helpers
+# same process (e.g. a test harness sourcing both onex-runtime-deploy helpers
 # and this file directly). This file is SOURCED ONLY (see header); it is
 # never executed directly, so a plain `return` here is always valid.
 if [[ -n "${__OMNIBASE_COMPOSE_WAIT_TIMEOUT_SH_SOURCED:-}" ]]; then

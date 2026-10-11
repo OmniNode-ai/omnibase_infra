@@ -128,6 +128,47 @@ class TestWiringHealthWithSyntheticContracts:
         assert errors == []
         assert warnings == []
 
+    def test_runtime_manifest_declares_a_publisher(self, tmp_path: Path) -> None:
+        """Read the runtime publisher inventory without exempting other topics."""
+        topic = "onex.cmd.platform.ci-live-contact-check.v1"
+        self._write_contract(
+            tmp_path,
+            "consumer",
+            subscribe=[topic, "onex.cmd.test.unpublished.v1"],
+        )
+        runtime = tmp_path / "runtime"
+        runtime.mkdir()
+        (runtime / "topics.yaml").write_text(yaml.safe_dump({"topics": [topic]}))
+        errors, _warnings = check_wiring_health(
+            [tmp_path], publisher_manifest_roots=[runtime]
+        )
+        assert len(errors) == 1
+        assert "onex.cmd.test.unpublished.v1" in errors[0]
+
+    def test_missing_runtime_manifest_does_not_supply_a_publisher(
+        self, tmp_path: Path
+    ) -> None:
+        self._write_contract(
+            tmp_path, "consumer", subscribe=["onex.cmd.test.unpublished.v1"]
+        )
+        errors, _warnings = check_wiring_health(
+            [tmp_path], publisher_manifest_roots=[tmp_path / "missing"]
+        )
+        assert len(errors) == 1
+        assert "DEAD_LETTER" in errors[0]
+
+    def test_partial_scan_does_not_borrow_the_repository_runtime_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        self._write_contract(
+            tmp_path,
+            "consumer",
+            subscribe=["onex.cmd.platform.ci-live-contact-check.v1"],
+        )
+        errors, _warnings = check_wiring_health([tmp_path])
+        assert len(errors) == 1
+        assert "DEAD_LETTER" in errors[0]
+
     def test_skips_missing_directory(self, tmp_path: Path) -> None:
         """Non-existent directories should be skipped gracefully."""
         errors, _warnings = check_wiring_health([tmp_path / "nonexistent"])

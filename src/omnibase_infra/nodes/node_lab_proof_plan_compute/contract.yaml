@@ -36,7 +36,7 @@ node_name: "node_lab_proof_plan_compute"
 contract_version:
   major: 1
   minor: 0
-  patch: 0
+  patch: 1
 node_version:
   major: 1
   minor: 0
@@ -56,6 +56,8 @@ output_model:
 capabilities:
   - name: "lab_proof.plan"
     description: "Render one lab proof run"
+  - name: "lab_desired_state.render"
+    description: "Render lab-desired-state.v1 from target-ref source artifacts (OMN-19413)"
   - name: "lab_proof.verdict"
     description: "Decide one lab proof run's outcome"
 handler_routing:
@@ -72,6 +74,18 @@ handler_routing:
         name: "ModelLabProofPlanRequest"
         module: "omnibase_infra.lab_proof.model_lab_proof_plan_request"
         description: "Input for one plan."
+    - operation: "lab_desired_state.render"
+      handler:
+        name: "HandlerLabProofPlan"
+        module: "omnibase_infra.nodes.node_lab_proof_plan_compute.handlers.handler_lab_proof_plan"
+      description: "Target-ref manifest, lock, Compose hashes and broker/fleet declarations to canonical desired state"
+      supported_operations: ["lab_desired_state.render"]
+      input_model:
+        name: "ModelLabDesiredStateRenderRequest"
+        module: "omnibase_infra.nodes.node_lab_proof_plan_compute.models.model_lab_desired_state_render_request"
+      output_model:
+        name: "ModelLabDesiredStateRenderResult"
+        module: "omnibase_infra.nodes.node_lab_proof_plan_compute.models.model_lab_desired_state_render_result"
     - operation: "lab_proof.verdict"
       handler:
         name: "HandlerLabProofVerdict"

@@ -26,11 +26,15 @@ from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
+import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_core.models.container.model_onex_container import ModelONEXContainer
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts
+from omnibase_infra.runtime.auto_wiring.discovery import (
+    discover_contracts,
+    discover_contracts_cache_clear,
+)
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
@@ -183,7 +187,10 @@ def test_real_manifest_discovery_has_no_errors() -> None:
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_real_manifest_wiring_has_no_failures() -> None:
+@pytest.mark.parametrize("portable", [False, True])
+async def test_real_manifest_wiring_has_no_failures(
+    portable: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """wire_from_manifest() against the real onex.nodes manifest must produce zero failures.
 
     This is the non-strict wiring-phase gate: every handler module must be
@@ -201,6 +208,10 @@ async def test_real_manifest_wiring_has_no_failures() -> None:
     A real dispatch engine and container avoid mock auto-attribute resolution;
     event_bus=None skips topic subscriptions so the test runs fully offline.
     """
+    # OMN-18843: both safe parsers must wire the real contracts and handlers.
+    if portable:
+        monkeypatch.delattr(yaml, "CSafeLoader")
+    discover_contracts_cache_clear()
     manifest = discover_contracts()
 
     # Mirror the kernel derivation: every contract that declares an intent routing

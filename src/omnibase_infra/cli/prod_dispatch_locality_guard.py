@@ -11,9 +11,9 @@ via ``onex skill redeploy --lane prod ...`` from this Mac and HARD-FAILED
 closed after two identical ``Kafka flush timed out`` errors. Live-verified
 root cause (read-only ssh probes, ledger 2026-07-26T09:05Z / 09:25Z): the
 prod redpanda broker's external ``advertised_kafka_api`` listener is a raw
-LAN address (``192.168.86.201:49092``) that only routes from clients
-physically on that LAN segment -- ``nc -zv 192.168.86.201 49092`` succeeds
-when run *on* ``omninode-pc`` itself and fails from this Mac / ``.200`` over
+LAN address (``<lab-host>:49092``) that only routes from clients
+physically on that LAN segment -- ``nc -zv <lab-host> 49092`` succeeds
+when run *on* the broker host itself and fails from other hosts over
 Tailscale-only routes. The bootstrap metadata fetch (via MagicDNS) succeeds
 regardless, which is what makes the failure mode a silent produce-path
 leader-reconnect timeout rather than an upfront connection error -- the

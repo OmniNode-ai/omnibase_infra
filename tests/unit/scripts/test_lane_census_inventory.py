@@ -83,6 +83,103 @@ def test_engine_api_path_never_requests_size(inventory: Any) -> None:
         )
 
 
+def test_collector_inspects_health_and_restarts(
+    inventory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def read(socket: str, path: str, timeout: float) -> Any:
+        if path == inventory.API_CONTAINERS_PATH:
+            return [
+                {"Names": ["/runtime"], "State": "running", "Status": "Up (unhealthy)"}
+            ]
+        if path == inventory.API_NETWORKS_PATH:
+            return []
+        assert path == "/containers/runtime/json"
+        return {
+            "State": {
+                "Health": {"Status": "unhealthy", "FailingStreak": 61, "Log": []}
+            },
+            "Config": {
+                "Healthcheck": {"Interval": 30_000_000_000},
+                "Env": ["SECRET=private"],
+            },
+            "RestartCount": 6,
+        }
+
+    monkeypatch.setattr(inventory, "api_get", read)
+    rows, _, source, _ = inventory.collect_inventory(
+        socket_path="unused", api_timeout_s=1, cli_timeout_s=1
+    )
+    assert source == "engine_api"
+    assert rows[0]["Health"] == {"Status": "unhealthy", "FailingStreak": 61}
+    assert rows[0]["HealthcheckIntervalSeconds"] == 30
+    assert rows[0]["RestartCount"] == 6
+    assert "SECRET" not in json.dumps(rows)
+
+
+def test_collector_cli_fallback_reads_same_health_fields(
+    inventory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(*args: Any) -> Any:
+        raise inventory.InventoryProbeError("socket unreadable")
+
+    def cli(argv: list[str], timeout: float) -> str:
+        if argv[1] == "ps":
+            return "runtime\trunning\tUp (unhealthy)\timage:tag\t\n"
+        if argv[1] == "network":
+            return "network\n"
+        assert argv[1] == "inspect"
+        assert argv[-1] == "runtime"
+        assert ".Config.Env" not in argv[3]
+        return json.dumps(
+            {
+                "Names": "/runtime",
+                "State": {"Health": {"Status": "unhealthy", "FailingStreak": 60}},
+                "Config": {"Healthcheck": {"Interval": 30_000_000_000}},
+                "RestartCount": 3,
+            }
+        )
+
+    monkeypatch.setattr(inventory, "api_get", fail)
+    monkeypatch.setattr(inventory, "_run_cli", cli)
+    rows, networks, source, warnings = inventory.collect_inventory(
+        socket_path="unused", api_timeout_s=1, cli_timeout_s=1
+    )
+    assert source == "docker_cli"
+    assert networks == ["network"]
+    assert warnings
+    assert rows[0]["HealthcheckIntervalSeconds"] == 30
+    assert rows[0]["Health"]["FailingStreak"] == 60
+    assert rows[0]["RestartCount"] == 3
+
+
+def test_missing_cli_inspect_reading_is_not_a_clean_inventory(
+    inventory: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail(*args: Any) -> Any:
+        raise inventory.InventoryProbeError("socket unreadable")
+
+    def cli(argv: list[str], timeout: float) -> str:
+        return "runtime\trunning\tUp\timage:tag\t\n" if argv[1] == "ps" else ""
+
+    monkeypatch.setattr(inventory, "api_get", fail)
+    monkeypatch.setattr(inventory, "_run_cli", cli)
+    with pytest.raises(inventory.InventoryProbeError, match="no reading"):
+        inventory.collect_inventory(
+            socket_path="unused", api_timeout_s=1, cli_timeout_s=1
+        )
+
+
+def test_inspect_uses_docker_default_interval_when_zero(inventory: Any) -> None:
+    readings = inventory._inspect_readings(
+        {
+            "State": {"Health": {"Status": "unhealthy", "FailingStreak": 60}},
+            "Config": {"Healthcheck": {"Interval": 0}},
+            "RestartCount": 0,
+        }
+    )
+    assert readings["HealthcheckIntervalSeconds"] == 30
+
+
 def test_cli_fallback_format_is_not_json_dot(inventory: Any) -> None:
     """`{{json .}}` emits a Size field and silently opts into size=1."""
     fmt = inventory.CLI_CONTAINER_FORMAT
@@ -319,12 +416,16 @@ def _fake_docker_socket(tmp_path: Path, containers: list[dict[str, Any]]) -> Pat
         "srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\n"
         "srv.bind(sock_path)\n"
         "srv.listen(8)\n"
-        "for _ in range(2):\n"
+        "for _ in range(2 + len(payload['containers'])):\n"
         "    conn, _addr = srv.accept()\n"
         "    req = conn.recv(65536).decode('utf-8', 'replace')\n"
-        "    body = json.dumps(\n"
-        "        payload['containers'] if '/containers/json' in req else payload['networks']\n"
-        "    ).encode()\n"
+        "    if '/containers/json' in req:\n"
+        "        result = payload['containers']\n"
+        "    elif '/networks' in req:\n"
+        "        result = payload['networks']\n"
+        "    else:\n"
+        "        result = {'State': {'Health': None}, 'Config': {}, 'RestartCount': 0}\n"
+        "    body = json.dumps(result).encode()\n"
         "    conn.sendall(\n"
         "        b'HTTP/1.1 200 OK\\r\\nContent-Type: application/json\\r\\n'\n"
         "        b'Content-Length: ' + str(len(body)).encode() + b'\\r\\n\\r\\n' + body\n"

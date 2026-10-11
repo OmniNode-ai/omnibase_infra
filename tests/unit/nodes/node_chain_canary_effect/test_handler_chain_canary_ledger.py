@@ -218,9 +218,9 @@ class _LedgerReplay:
 
     async def __call__(
         self, source: str, correlation_id: str, timeout_s: float
-    ) -> tuple[tuple[str, ...] | None, bool, str, str]:
+    ) -> tuple[tuple[str, ...] | None, bool, str, str, str]:
         self.calls.append(correlation_id)
-        return self.hops, self.replay_green, self.verifier_verdict, self.error
+        return self.hops, self.replay_green, self.verifier_verdict, "", self.error
 
 
 def _handler(ledger: _LedgerReplay | None = None) -> HandlerChainCanary:
@@ -550,15 +550,24 @@ async def test_close_failure_does_not_replace_the_replay_result(
     and took the terminal, quarantine and projection legs down with it.
     """
     rows: list[dict[str, object]] = [
-        {"hop": hop, "replay_green": True, "verifier_verdict": "pass"}
+        {
+            "hop": hop,
+            "replay_green": True,
+            "verifier_verdict": "pass",
+            "chain_state": "complete",
+        }
         for hop in _FULL_CHAIN
     ]
     connection = _FakeConnection(rows=rows, close_raises=True)
     monkeypatch.setitem(sys.modules, "asyncpg", _FakeAsyncpg(connection))
 
-    hops, replay_green, verdict, error = await _replay_ledger_chain_via_asyncpg(
-        _LEDGER_SOURCE_ENV, str(uuid4()), 5.0
-    )
+    (
+        hops,
+        replay_green,
+        verdict,
+        _chain_state,
+        error,
+    ) = await _replay_ledger_chain_via_asyncpg(_LEDGER_SOURCE_ENV, str(uuid4()), 5.0)
 
     assert hops == _FULL_CHAIN
     assert replay_green is True
@@ -583,9 +592,13 @@ async def test_connect_and_query_share_one_deadline(
     )
 
     started = time.monotonic()
-    hops, _replay_green, _verdict, error = await _replay_ledger_chain_via_asyncpg(
-        _LEDGER_SOURCE_ENV, str(uuid4()), 0.3
-    )
+    (
+        hops,
+        _replay_green,
+        _verdict,
+        _chain_state,
+        error,
+    ) = await _replay_ledger_chain_via_asyncpg(_LEDGER_SOURCE_ENV, str(uuid4()), 0.3)
     elapsed = time.monotonic() - started
 
     assert hops is None
@@ -627,11 +640,11 @@ class _LateLedgerReplay:
 
     async def __call__(
         self, source: str, correlation_id: str, timeout_s: float
-    ) -> tuple[tuple[str, ...] | None, bool, str, str]:
+    ) -> tuple[tuple[str, ...] | None, bool, str, str, str]:
         self.calls.append(correlation_id)
         if len(self.calls) <= self._absent_reads:
-            return (), False, "", ""
-        return self._hops, True, "pass", ""
+            return (), False, "", "", ""
+        return self._hops, True, "pass", "complete", ""
 
 
 @pytest.fixture(autouse=True)

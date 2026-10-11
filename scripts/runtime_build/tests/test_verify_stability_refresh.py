@@ -531,8 +531,22 @@ def _full_pass_runner():
     + N consumer-group describe calls."""
     calls: list[list[str]] = []
 
-    def _run(cmd, capture_output=True, text=True, timeout=30, check=False):
+    def _run(cmd, capture_output=True, text=True, timeout=30, check=False, env=None):
         calls.append(cmd)
+        if cmd[:2] == ["docker", "info"]:
+            return _completed(stdout="omninode-runtime-host\n")
+        if cmd[0] == "bash":
+            assert "--lane" in cmd and "stability-test" in cmd
+            return _completed(
+                stdout=json.dumps(
+                    {
+                        "host": "lab-201",
+                        "lanes_checked": ["stability-test"],
+                        "findings": [],
+                        "has_drift": False,
+                    }
+                )
+            )
         if cmd[:2] == ["docker", "inspect"]:
             fmt = cmd[-1]
             if "Image" in fmt:
@@ -597,7 +611,9 @@ def test_health_gate_overall_pass():
 def test_health_gate_overall_fail_when_a_group_is_dead():
     pre_image_ids = dict.fromkeys(CORE_SERVICES, "sha256:old-image")
 
-    def runner(cmd, capture_output=True, text=True, timeout=30, check=False):
+    def runner(cmd, capture_output=True, text=True, timeout=30, check=False, env=None):
+        if cmd[:2] == ["docker", "info"] or cmd[0] == "bash":
+            return _full_pass_runner()(cmd, env=env)
         if cmd[:2] == ["docker", "inspect"]:
             fmt = cmd[-1]
             if "Image" in fmt:
@@ -786,7 +802,9 @@ def test_health_gate_overall_fail_when_partition_cap_reached():
     alone would have missed)."""
     pre_image_ids = dict.fromkeys(CORE_SERVICES, "sha256:old-image")
 
-    def runner(cmd, capture_output=True, text=True, timeout=30, check=False):
+    def runner(cmd, capture_output=True, text=True, timeout=30, check=False, env=None):
+        if cmd[:2] == ["docker", "info"] or cmd[0] == "bash":
+            return _full_pass_runner()(cmd, env=env)
         if cmd[:2] == ["docker", "inspect"]:
             fmt = cmd[-1]
             if "Image" in fmt:
@@ -853,7 +871,9 @@ def test_health_gate_overall_pass_when_partition_headroom_only_crosses_warn():
     only -- it must NOT retroactively fail an otherwise-healthy refresh."""
     pre_image_ids = dict.fromkeys(CORE_SERVICES, "sha256:old-image")
 
-    def runner(cmd, capture_output=True, text=True, timeout=30, check=False):
+    def runner(cmd, capture_output=True, text=True, timeout=30, check=False, env=None):
+        if cmd[:2] == ["docker", "info"] or cmd[0] == "bash":
+            return _full_pass_runner()(cmd, env=env)
         if cmd[:2] == ["docker", "inspect"]:
             fmt = cmd[-1]
             if "Image" in fmt:
@@ -967,6 +987,9 @@ def test_receipt_success_when_gate_passes():
         )
     ]
     passing.group_audit = _passing_audit()
+    passing.lane_sync = _mod._lab_pass.ModelLabPassCheck(
+        name="lane_sync", ok=True, evidence="clean stability census"
+    )
     assert passing.overall == "PASS"
 
     receipt = build_receipt(
@@ -1027,6 +1050,9 @@ def test_receipt_rollback_reverified_success():
         )
     ]
     passing_rollback_gate.group_audit = _passing_audit()
+    passing_rollback_gate.lane_sync = _mod._lab_pass.ModelLabPassCheck(
+        name="lane_sync", ok=True, evidence="clean rollback census"
+    )
     assert passing_rollback_gate.overall == "PASS"
 
     receipt = build_receipt(
@@ -1063,6 +1089,83 @@ def test_receipt_rollback_still_unhealthy_is_failed_not_masked():
         rollback_gate=still_failing_rollback_gate,
     )
     assert receipt["result"] == "FAILED"
+
+
+@pytest.mark.parametrize(
+    "kind", ["container_unhealthy", "undeclared_container", "future_finding"]
+)
+def test_lane_sync_finding_makes_stability_receipt_failed(kind):
+    plan = {
+        "host": "lab-201",
+        "lanes_checked": ["stability-test"],
+        "findings": [
+            {
+                "kind": kind,
+                "lane": "stability-test",
+                "container": "bad-worker",
+                "detail": "known-bad fixture",
+                "severity": "warning",
+            }
+        ],
+        "has_drift": True,
+    }
+    healthy_runner = _full_pass_runner()
+
+    def runner(cmd, **kwargs):
+        if cmd[0] == "bash":
+            assert cmd[-3:] == ["--lane", "stability-test", "--json"]
+            return subprocess.CompletedProcess(cmd, 30, json.dumps(plan), "")
+        return healthy_runner(cmd, **kwargs)
+
+    def opener(url, timeout=10):
+        body = (
+            _manifest_payload(DEFAULT_MIN_CONTRACTS)
+            if "manifest" in url
+            else {
+                "status": "healthy",
+                "details": {
+                    "runtime_health": {"status": "HEALTHY", "age_seconds": 1.0}
+                },
+            }
+        )
+        return _FakeHTTPResponse(json.dumps(body).encode())
+
+    gate = run_health_gate(
+        lane="stability-test",
+        pre_image_ids=dict.fromkeys(CORE_SERVICES, "sha256:old-image"),
+        expected_revision="newrevision1234",
+        manifest_url="http://x/manifest",
+        health_url="http://x/health",
+        broker_container="redpanda-container",
+        min_contracts=DEFAULT_MIN_CONTRACTS,
+        declared_groups_file=_DECLARED_GROUPS_FILE,
+        runner=runner,
+        opener=opener,
+        sleep_fn=lambda _: None,
+    )
+    assert gate.digests_changed and gate.revisions_match and gate.core_services_running
+    assert (
+        gate.manifest_ok
+        and gate.health_ok
+        and gate.cluster_healthy
+        and gate.groups_stable
+    )
+    assert gate.partition_headroom_ok and not gate.errors
+    assert gate.overall == "FAIL"
+    receipt = build_receipt(
+        lane="stability-test",
+        prior_refs={},
+        new_refs={},
+        ancestry_ok=True,
+        ancestry_commands=[],
+        build_scope=[],
+        gate=gate,
+        rollback_triggered=False,
+        rollback_gate=None,
+    )
+    assert receipt["result"] == "FAILED"
+    assert receipt["health_gate"]["lane_sync"]["ok"] is False
+    assert kind in receipt["health_gate"]["lane_sync"]["evidence"]
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@
 # ZERO LOCAL BACKENDS, BY DESIGN, for the dev-202 overlay's reason: the lane's
 # only tie to .201 is the deploy agent's read of the dev control topic, and the
 # dev lane this stack is layered on binds its local rungs to the .201 model
-# server. It also binds nothing on .200's own gpt-oss planner (:8130), which
+# server. It also binds nothing on .200's own Qwen3.8-27B planner (:8130), which
 # serves the orchestrating sessions on that host.
 #
 # `locale: cloud` states "no lab backend is reachable from this lane"

@@ -4,17 +4,14 @@
 
 WHY THIS EXISTS
 ---------------
-Two CI gates in this repo read a trailer out of a pull-request body and treat
+A CI gate in this repo reads a trailer out of a pull-request body and treats
 the value as authority:
 
 * ``scripts/resolve_node_migration_source_ref.py`` -- ``Omnimarket-Source-Ref:``
   chooses which omnimarket tree the required *Application Database Domain
   Enforcement (OMN-15361)* job derives its TABLE grants from.
-* ``scripts/ci/check_occ_companion_merged.py`` -- ``Evidence-Source:`` names
-  the onex_change_control companion whose merge state the STRICT
-  ``CI Summary`` gate proves durable.
 
-Both previously walked the body as flat lines and honoured the FIRST match
+It previously walked the body as flat lines and honoured the FIRST match
 anywhere in it. A PR body does not have to *declare* a trailer to contain one:
 runbook excerpts, pasted CI logs, a diff of another PR's body, and
 "the trailer looks like this" examples all put the literal text in the body,
@@ -24,15 +21,15 @@ first.
 
 This is the OMN-15345 matcher class (table names matched inside SQL comments)
 applied to PR bodies: structured text read as flat lines. The failure is
-silent and in the dangerous direction -- neither gate errors, both derive
+silent and in the dangerous direction -- the gate does not error, it derives
 confidently from the wrong source.
 
 WHAT COUNTS AS A TRAILER HERE
 -----------------------------
 1. **Column 0 only.** Git trailer semantics put the block at the left margin,
    and four-space indentation is a markdown code block. An indented line is
-   never a trailer. (``check_occ_companion_merged`` already required this;
-   the ref resolver did not, and its ``.strip()`` honoured indented code.)
+   never a trailer. (The ref resolver did not require this, and its
+   ``.strip()`` honoured indented code.)
 2. **Outside fenced code blocks.** ``` ``` ``` and ``~~~`` fences are tracked
    per CommonMark: a fence opens at indent <= 3, and closes on a fence of the
    same character, at least as long, carrying no info string. An unterminated
@@ -49,7 +46,7 @@ WHAT COUNTS AS A TRAILER HERE
 
 This module is deliberately dependency-free and importable both as
 ``scripts.ci.pr_trailers`` (tests, ``python -m``) and from a script executed
-directly by path, which is how CI invokes both consumers.
+directly by path, which is how CI invokes its consumer.
 """
 
 from __future__ import annotations

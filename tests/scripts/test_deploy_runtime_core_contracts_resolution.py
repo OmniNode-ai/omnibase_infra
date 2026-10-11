@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 
-"""deploy-runtime.sh step 3b must resolve omnibase_core runtime contracts from the
+"""onex-runtime-deploy step 3b must resolve omnibase_core runtime contracts from the
 OMNI_HOME sibling clone's real source-tree path, not only from a pip-installed
 omnibase_core (OMN-15122).
 
@@ -49,7 +49,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 
 _EXPECTED_RUNTIME_YAML_NAMES = (
     "contract_loader_effect.yaml",
@@ -89,7 +91,7 @@ def _extract_function(name: str) -> str:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, (
-        f"could not extract function {name}() from deploy-runtime.sh"
+        f"could not extract function {name}() from onex-runtime-deploy"
     )
     return match.group(0)
 
@@ -136,7 +138,7 @@ def _run_resolver(
 def test_defines_resolve_core_contracts_dir_function() -> None:
     text = _script_text()
     assert re.search(r"^resolve_core_contracts_dir\s*\(\)", text, re.MULTILINE), (
-        "deploy-runtime.sh must define resolve_core_contracts_dir()"
+        "onex-runtime-deploy must define resolve_core_contracts_dir()"
     )
 
 

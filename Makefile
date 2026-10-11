@@ -15,10 +15,10 @@
 #     make up              # Start core infra bundle (postgres, redpanda, valkey, infisical)
 #     make up-auth         # Start the auth bundle (keycloak)
 #     make up-runtime      # Start the runtime bundle (depends on core)
-#     make down            # Stop the core bundle ONLY (auth/runtime stay running)
-#     make down-auth       # Stop the auth bundle
-#     make down-runtime    # Stop the runtime bundle
-#     make down-all        # Stop runtime, then auth, then core (full teardown)
+#     make down            # Stop the last generated compose project (keeps volumes)
+#     make down-auth       # Stop the last generated compose project (bundle argument ignored; keeps volumes)
+#     make down-runtime    # Stop the last generated compose project (bundle argument ignored; keeps volumes)
+#     make down-all        # Stop the last generated compose project (keeps volumes; repeats down for legacy arguments)
 #     make status          # Show running omnibase-infra containers
 #     make seed-keycloak   # Reconcile Keycloak clients from desired-clients.json
 #     make seed-infisical  # Seed Infisical from ONEX contracts (writes with --execute)
@@ -42,6 +42,8 @@
 #
 # All `up*` targets delegate to the catalog CLI documented in CLAUDE.md:
 #     uv run python -m omnibase_infra.docker.catalog.cli up <bundle>
+# All non-local `down*` targets stop the whole last generated compose project;
+# cmd_down ignores bundle arguments and keeps volumes unless --volumes is passed.
 # `seed-keycloak` delegates to scripts/seed-keycloak.sh (PR #1500).
 # `seed-infisical` delegates to scripts/seed-infisical.py.
 
@@ -74,26 +76,26 @@ up-runtime: _check-docker ## Start the full runtime bundle (extends core)
 	@echo "==> Starting runtime bundle..."
 	$(ONEX_CLI) up runtime
 
-down: _check-docker ## Stop the core bundle ONLY (use down-all for full teardown)
-	@echo "==> Stopping core infrastructure bundle..."
+down: _check-docker ## Stop the last generated compose project (keeps volumes)
+	@echo "==> Stopping the last generated compose project (keeps volumes)..."
 	$(ONEX_CLI) down core
 
-down-auth: _check-docker ## Stop the auth bundle (keycloak)
-	@echo "==> Stopping auth (keycloak) bundle..."
+down-auth: _check-docker ## Stop the last generated compose project (bundle argument ignored; keeps volumes)
+	@echo "==> Stopping the last generated compose project (keeps volumes)..."
 	$(ONEX_CLI) down auth
 
-down-runtime: _check-docker ## Stop the runtime bundle
-	@echo "==> Stopping runtime bundle..."
+down-runtime: _check-docker ## Stop the last generated compose project (bundle argument ignored; keeps volumes)
+	@echo "==> Stopping the last generated compose project (keeps volumes)..."
 	$(ONEX_CLI) down runtime
 
-down-all: _check-docker ## Stop runtime, then auth, then core (full teardown)
-	@echo "==> Stopping runtime bundle (if running)..."
+down-all: _check-docker ## Stop the last generated compose project (keeps volumes; repeats down for legacy arguments)
+	@echo "==> Stopping the last generated compose project (legacy runtime argument)..."
 	-$(ONEX_CLI) down runtime
-	@echo "==> Stopping auth bundle (if running)..."
+	@echo "==> Stopping the last generated compose project (legacy auth argument)..."
 	-$(ONEX_CLI) down auth
-	@echo "==> Stopping core bundle (if running)..."
+	@echo "==> Stopping the last generated compose project (legacy core argument)..."
 	-$(ONEX_CLI) down core
-	@echo "==> Done. All omnibase-infra bundles stopped."
+	@echo "==> Done. Last generated compose project stopped; volumes kept."
 
 status: _check-docker ## Show running omnibase-infra containers
 	@docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' \

@@ -16,10 +16,16 @@ from pathlib import Path
 
 import pytest
 
+from omnibase_core.validators.no_unguarded_git_subprocess import scrub_git_location_env
+from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
+    load_runner_fleet_config,
+)
+
 SCRIPTS_DIR = Path(__file__).resolve().parents[3] / "scripts"
 PULL_ALL = SCRIPTS_DIR / "pull-all.sh"
 PLIST = SCRIPTS_DIR / "ai.omninode.bare-clone-sync.plist"
 INSTALL_SCRIPT = SCRIPTS_DIR / "install-bare-clone-sync.sh"
+RUNNER_FLEET = SCRIPTS_DIR.parent / "config" / "runner_fleet.yaml"
 
 # OMN-15590: the caller-checkable terminal completion signal. A caller must be
 # able to distinguish {clean, drift-timeout, drift-fail} runs from ONE
@@ -72,7 +78,7 @@ def _git(args: list[str], *, cwd: Path) -> None:
     subprocess.run(
         ["git", "-C", str(target), *args],
         check=True,
-        env=_hermetic_git_env(),
+        env=scrub_git_location_env(),
     )
 
 
@@ -400,19 +406,34 @@ class TestPullAllScript:
         assert result.returncode == 0, result.stderr
         assert "left on dev" in result.stdout
         current_branch = subprocess.check_output(
-            ["git", "branch", "--show-current"], cwd=omniclaude, text=True
+            ["git", "branch", "--show-current"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
         main_sha = subprocess.check_output(
-            ["git", "rev-parse", "main"], cwd=omniclaude, text=True
+            ["git", "rev-parse", "main"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
         origin_main_sha = subprocess.check_output(
-            ["git", "rev-parse", "origin/main"], cwd=omniclaude, text=True
+            ["git", "rev-parse", "origin/main"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
         dev_sha = subprocess.check_output(
-            ["git", "rev-parse", "dev"], cwd=omniclaude, text=True
+            ["git", "rev-parse", "dev"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
         origin_dev_sha = subprocess.check_output(
-            ["git", "rev-parse", "origin/dev"], cwd=omniclaude, text=True
+            ["git", "rev-parse", "origin/dev"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
 
         assert current_branch == "dev"
@@ -465,7 +486,10 @@ class TestPullAllScript:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "left on dev" in result.stdout
         current_branch = subprocess.check_output(
-            ["git", "branch", "--show-current"], cwd=omniclaude, text=True
+            ["git", "branch", "--show-current"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
         assert current_branch == "dev"
         # And the sanctioned path refused nothing, so it recorded nothing: a
@@ -475,7 +499,10 @@ class TestPullAllScript:
         # (OMN-18358) would show here as staged paths.
         assert (
             subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=omniclaude, text=True
+                ["git", "status", "--porcelain"],
+                cwd=omniclaude,
+                text=True,
+                env=scrub_git_location_env(),
             )
             == ""
         )
@@ -506,7 +533,10 @@ test_untracked_files_do_not_refuse_the_sync`, which is the other half of the
         assert "dirty worktree" in result.stdout
         assert dirty_file.read_text() == "do not lose this\n"
         current_branch = subprocess.check_output(
-            ["git", "branch", "--show-current"], cwd=omniclaude, text=True
+            ["git", "branch", "--show-current"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
         assert current_branch == "main"
 
@@ -580,7 +610,7 @@ test_untracked_files_do_not_refuse_the_sync`, which is the other half of the
                 ["git", "init", "--bare", str(repo_path)],
                 capture_output=True,
                 check=True,
-                env=_hermetic_git_env(),
+                env=scrub_git_location_env(),
             )
 
             result = subprocess.run(
@@ -637,15 +667,24 @@ class TestMainOnlyRepo:
         assert "FAILED" not in result.stdout
 
         current_branch = subprocess.check_output(
-            ["git", "branch", "--show-current"], cwd=repo, text=True
+            ["git", "branch", "--show-current"],
+            cwd=repo,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
         assert current_branch == "main"
 
         main_sha = subprocess.check_output(
-            ["git", "rev-parse", "main"], cwd=repo, text=True
+            ["git", "rev-parse", "main"],
+            cwd=repo,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
         origin_main_sha = subprocess.check_output(
-            ["git", "rev-parse", "origin/main"], cwd=repo, text=True
+            ["git", "rev-parse", "origin/main"],
+            cwd=repo,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
         assert main_sha == origin_main_sha
 
@@ -654,6 +693,7 @@ class TestMainOnlyRepo:
             ["git", "show-ref", "--verify", "--quiet", "refs/heads/dev"],
             cwd=repo,
             check=False,
+            env=scrub_git_location_env(),
         )
         assert dev_ref.returncode != 0, (
             "no local dev branch should exist for a main-only repo"
@@ -768,7 +808,10 @@ class TestPluginCacheRefresh:
         cache = _make_versioned_cache(fake_home)
 
         expected_commit = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=omniclaude, text=True
+            ["git", "rev-parse", "HEAD"],
+            cwd=omniclaude,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
 
         result = _run_pull_all(omni_home, fake_home)
@@ -1632,15 +1675,24 @@ class TestMainConvergeWiring:
 
         # main converged, dev pulled, repo left on dev, OK line says what happened
         main_sha = subprocess.check_output(
-            ["git", "rev-parse", "main"], cwd=repo, text=True
+            ["git", "rev-parse", "main"],
+            cwd=repo,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
         origin_main_sha = subprocess.check_output(
-            ["git", "rev-parse", "origin/main"], cwd=repo, text=True
+            ["git", "rev-parse", "origin/main"],
+            cwd=repo,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
         assert main_sha == origin_main_sha
         assert (
             subprocess.check_output(
-                ["git", "branch", "--show-current"], cwd=repo, text=True
+                ["git", "branch", "--show-current"],
+                cwd=repo,
+                text=True,
+                env=scrub_git_location_env(),
             ).strip()
             == "dev"
         )
@@ -1714,7 +1766,10 @@ class TestMainConvergeWiring:
         _git(["push", "-q", "origin", "dev"], cwd=writer)
 
         local_dev_before = subprocess.check_output(
-            ["git", "rev-parse", "dev"], cwd=repo, text=True
+            ["git", "rev-parse", "dev"],
+            cwd=repo,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
 
         result = _run_pull_all(
@@ -1731,7 +1786,10 @@ class TestMainConvergeWiring:
             assert "--branch dev" not in calls_log.read_text()
         # and local dev must be exactly where the user left it
         local_dev_after = subprocess.check_output(
-            ["git", "rev-parse", "dev"], cwd=repo, text=True
+            ["git", "rev-parse", "dev"],
+            cwd=repo,
+            text=True,
+            env=scrub_git_location_env(),
         ).strip()
         assert local_dev_after == local_dev_before
 
@@ -2031,7 +2089,7 @@ class TestWrongBranchConvergeWiring:
         branch = subprocess.check_output(
             ["git", "-C", str(repo), "branch", "--show-current"],
             text=True,
-            env=_hermetic_git_env(),
+            env=scrub_git_location_env(),
         ).strip()
         assert branch in {"main", "dev"}, f"left on {branch!r}"
 
@@ -2039,7 +2097,7 @@ class TestWrongBranchConvergeWiring:
             return subprocess.check_output(
                 ["git", "-C", str(repo), "rev-parse", ref],
                 text=True,
-                env=_hermetic_git_env(),
+                env=scrub_git_location_env(),
             ).strip()
 
         # Returning to a tracking branch is only half the repair: the clone
@@ -2144,7 +2202,7 @@ class TestKnowledgeBaseClonesInRegistry:
 
     ``knowledge-base-internal`` is where every lane's tracking artifacts,
     plans, reports and ``beta/GOAL.md`` live (omni_home/CLAUDE.md rule 20), and
-    ``knowledge-base`` is the public book. Both are canonical clones under
+    ``knowledge_base`` is the public book. Both are canonical clones under
     ``$OMNI_HOME``, and neither was in the registry -- so a bare
     ``pull-all.sh`` never fetched either one, and neither was covered by the
     registry-wide ``core.bare`` corruption scan.
@@ -2154,7 +2212,13 @@ class TestKnowledgeBaseClonesInRegistry:
         body = PULL_ALL.read_text()
         repos_block = body.split("REPOS=(", 1)[1].split(")", 1)[0]
         listed = repos_block.split()
-        for name in ("knowledge-base", "knowledge-base-internal"):
+        fleet = load_runner_fleet_config(RUNNER_FLEET)
+        assert fleet.git_mirror is not None
+        knowledge_bases = [
+            r for r in fleet.git_mirror.repos if r.startswith("knowledge")
+        ]
+        assert len(knowledge_bases) == 2, knowledge_bases
+        for name in knowledge_bases:
             assert name in listed, (
                 f"{name} is a canonical clone under $OMNI_HOME that lanes read, "
                 f"but a bare pull-all.sh never syncs it; REPOS={listed}"

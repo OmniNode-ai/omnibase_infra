@@ -64,7 +64,12 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 def _omniclaude_repo() -> dict[str, Any]:
     repos = _load_yaml(PRECOMMIT_CONFIG)["repos"]
-    matches = [repo for repo in repos if repo.get("repo") == OMNICLAUDE_REPO]
+    matches = [
+        repo
+        for repo in repos
+        if repo.get("repo") == OMNICLAUDE_REPO
+        and any(hook.get("id") == "anti-growth-baseline" for hook in repo["hooks"])
+    ]
     assert len(matches) == 1
     return matches[0]
 

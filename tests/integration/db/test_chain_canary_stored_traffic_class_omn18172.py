@@ -353,7 +353,7 @@ async def _terminal_present(
 async def _ledger_verified(
     source: str, correlation_id: str, timeout_s: float
 ) -> tuple[tuple[str, ...], bool, str, str]:
-    return _FULL_CHAIN, True, "pass", ""
+    return _FULL_CHAIN, True, "pass", "complete", ""
 
 
 async def _run_canary(

@@ -38,7 +38,7 @@ leave the lane recoverable (a re-run rsyncs over it) instead of converting a
 recoverable partial deploy into a poisoned lane.
 
 These tests drive the ACTUAL script seam per ``feedback_test_the_artifact_that_
-runs``: ``cleanup_on_exit()`` is extracted VERBATIM from deploy-runtime.sh and
+runs``: ``cleanup_on_exit()`` is extracted VERBATIM from onex-runtime-deploy and
 executed under bash, with only the true I/O boundary (``docker``) replaced by a
 file-backed fake that answers ``ps``/``inspect`` from a fixture describing which
 containers are running and what they have mounted.
@@ -55,7 +55,9 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEPLOY_SCRIPT = REPO_ROOT / "scripts" / "deploy-runtime.sh"
+DEPLOY_SCRIPT = (
+    REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 
 
 def _script_text() -> str:
@@ -69,7 +71,7 @@ def _extract_function(name: str) -> str:
         re.DOTALL | re.MULTILINE,
     )
     assert match is not None, (
-        f"could not extract function {name}() from deploy-runtime.sh"
+        f"could not extract function {name}() from onex-runtime-deploy"
     )
     return match.group(0)
 

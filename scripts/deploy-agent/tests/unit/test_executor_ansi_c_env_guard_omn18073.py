@@ -6,7 +6,7 @@ The deploy agent runs as a systemd user unit whose ``EnvironmentFile=`` points
 at the operator env store. systemd's env-file parser does not implement bash
 ANSI-C ``$'...'`` quoting: it keeps the literal ``$'``/``'`` wrapper and drops
 every backslash escape, so a ``\\n`` becomes the bare letter ``n``.
-``deploy-runtime.sh`` bash-``source``s the same file and decodes it correctly,
+``onex-runtime-deploy`` bash-``source``s the same file and decodes it correctly,
 which is why only the agent path produced broken containers.
 
 ``_compose_env()`` hands its result straight to ``docker compose``, whose

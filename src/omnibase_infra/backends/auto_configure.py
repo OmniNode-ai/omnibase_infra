@@ -92,7 +92,7 @@ class EventBusResolutionAmbiguousError(RuntimeError):
     auth failure, or a missing client library). Selecting a transport from that
     state is a coin flip: measured over 20 consecutive calls with an unchanged
     environment and a healthy broker, the same probe produced ``kafka`` 14
-    times and ``inmemory`` 6 times (``OmniNode-ai/knowledge-base#59``), because
+    times and ``inmemory`` 6 times (``OmniNode-ai/knowledge_base#59``), because
     a transient ``AdminClient.list_topics`` timeout degrades to ``REACHABLE``.
 
     Failing here — naming the ambiguity and the deterministic remedies — is the
@@ -188,7 +188,7 @@ def resolve_bus_type(
          state a transient 2s ``list_topics`` timeout against a *healthy*
          broker lands in, and mapping it to a transport is what made
          resolution non-repeatable (14 kafka / 6 inmemory over 20 calls,
-         unchanged env — ``OmniNode-ai/knowledge-base#59``).
+         unchanged env — ``OmniNode-ai/knowledge_base#59``).
 
     **``ONEX_EVENT_BUS_TYPE`` holds NO tier (OMN-17304).** The pre-ruling
     ladder ranked it above config, which made one line in an operator's shell

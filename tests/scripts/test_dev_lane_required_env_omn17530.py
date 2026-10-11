@@ -4,7 +4,7 @@
 
 OMN-17530. The dev lane brings up two compose files, not one --
 ``docker/docker-compose.infra.yml`` plus ``docker/docker-compose.dev-lane.yml``
-(``resolve_compose_file_args`` in ``scripts/deploy-runtime.sh``, and
+(``resolve_compose_file_args`` in ``src/omnibase_infra/handlers/handler_runtime_deploy.sh``, and
 ``_LANE_CONFIGS[DEV].compose_files`` in the deploy agent) -- and a ``${VAR:?}``
 in either file is a hard requirement of the deploy.
 
@@ -53,7 +53,9 @@ _DEV_LANE_MANIFEST = _REPO_ROOT / "docker" / "dev-lane-required-env.manifest.txt
 
 _CHECK_SCRIPT = _REPO_ROOT / "scripts" / "check_required_env_vars.py"
 _PREFLIGHT_SCRIPT = _REPO_ROOT / "scripts" / "preflight_required_compose_env.py"
-_DEPLOY_RUNTIME = _REPO_ROOT / "scripts" / "deploy-runtime.sh"
+_DEPLOY_RUNTIME = (
+    _REPO_ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
+)
 _REFRESH_DEV_LANE = _REPO_ROOT / "scripts" / "runtime_build" / "refresh_dev_lane.sh"
 _EXECUTOR = _REPO_ROOT / "scripts" / "deploy-agent" / "deploy_agent" / "executor.py"
 
