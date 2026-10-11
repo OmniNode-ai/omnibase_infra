@@ -116,7 +116,7 @@ def produce(
     if not bootstrap_servers:
         raise click.ClickException(
             "KAFKA_BOOTSTRAP_SERVERS is not set. "
-            "Set it to your Redpanda address, e.g. 192.168.86.201:19092"  # kafka-fallback-ok: example in error message, not used as default
+            "Set it to your Redpanda address, e.g. 192.0.2.10:19092"  # kafka-fallback-ok: example in error message, not used as default
         )
 
     async def _publish() -> None:

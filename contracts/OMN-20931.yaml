@@ -1,0 +1,68 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20931
+title: omnibase_infra lab address defaults and lab examples leave shipped source
+summary: Lab addresses stop being defaults in shipped source. onex env render-settings refuses when OMNI_INFRA_HOST is unset instead of falling back to a lab host; the redpanda catalog service advertises localhost unless REDPANDA_ADVERTISE_HOST is supplied; deploy-push-lanes.sh requires its host argument; the unused prepush SSH target defaults are deleted. Docstring and error-message examples use RFC 5737 documentation addresses, and the lab onboarding table deploy/lab/developer-onboarding.yaml leaves the repository.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20931-no-lab-defaults
+    statement: Shipped source names no lab address as a default value; an unconfigured install gets a neutral value or a loud refusal that names the setting to supply.
+    acceptance:
+      - id: AC1
+        statement: "AC1: with OMNI_INFRA_HOST unset, onex env render-settings refuses with an error naming OMNI_INFRA_HOST, and with it set the rendered settings carry that host -- falsifier: uv run pytest tests/unit/cli/test_cli_env_infra_host_required.py -q"
+      - id: AC2
+        statement: "AC2: the redpanda catalog service, [deploy-push-lanes.sh](<http://deploy-push-lanes.sh>) and the prepush SSH targets carry no lab address default and refuse loudly when unset -- falsifier: uv run pytest tests/unit/docker/test_redpanda_advertise_host_required.py -q"
+      - id: AC3
+        statement: "AC3: docstring and error-message examples in the listed source files use RFC 5737 documentation addresses -- falsifier: git grep -nE '192\\[.\\]168\\[.\\]86\\[.\\]' on the listed files returns no line"
+evidence_requirements:
+  - kind: tests
+    description: render-settings refuses without OMNI_INFRA_HOST and carries the supplied host with it.
+    command: uv run pytest tests/unit/cli/test_cli_env_infra_host_required.py tests/integration/test_env_render_settings_cli.py -q -p no:randomly
+  - kind: tests
+    description: The redpanda catalog service and deploy-push-lanes.sh carry no lab address default.
+    command: uv run pytest tests/unit/docker/test_redpanda_advertise_host_required.py -q -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20931-ac1-infra-host
+    description: render-settings refuses without OMNI_INFRA_HOST and renders the supplied host with it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_cli_env_infra_host_required.py tests/integration/test_env_render_settings_cli.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_env.py?ref=4204d73268a2d754c2edc1ef93971d502283d34c --jq .content | base64 -d | grep -c 'def _infra_env'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20931-ac2-no-lab-default
+    description: The redpanda catalog service, deploy-push-lanes.sh and the prepush hook carry no lab address default.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/docker/test_redpanda_advertise_host_required.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-20931-ac3-doc-addresses
+    description: The listed source files name no lab address.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "! git grep -nE '192[.]168[.]86[.]' -- src/omnibase_infra/cli/cli_env.py src/omnibase_infra/cli/cli_kafka.py src/omnibase_infra/cli/delegate_lane.py src/omnibase_infra/cli/prod_dispatch_locality_guard.py src/omnibase_infra/adapters/llm/model_llm_provider_config.py src/omnibase_infra/mixins/mixin_llm_http_transport.py src/omnibase_infra/nodes/node_llm_embedding_effect/__init__.py src/omnibase_infra/nodes/node_llm_embedding_effect/models/model_llm_embedding_request.py src/omnibase_infra/nodes/node_llm_inference_effect/handlers/bifrost/model_bifrost_config.py src/omnibase_infra/nodes/node_llm_inference_effect/models/model_llm_inference_request.py src/omnibase_infra/services/session_registry/decision_embedder.py src/omnibase_infra/services/session_registry/decision_search.py docker/catalog/services/redpanda.yaml scripts/push_lanes/deploy-push-lanes.sh"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-20931-ac4-onboarding-table-gone
+    description: The lab onboarding table is absent from omnibase_infra.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: test ! -e deploy/lab/developer-onboarding.yaml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
