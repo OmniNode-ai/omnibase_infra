@@ -501,12 +501,21 @@ class EnumVerifyRecreateOutcome(StrEnum):
       mid-recreate is the shape that removed a lane on 2026-09-18 (OMN-18692),
       and reading it as a plain non-zero exit is what cost that incident its
       diagnosis.
+    * ``not_recreated_answering`` -- NOT recreated (OMN-20864): the runtime
+      answered ``/health`` running and reporting ``degraded``, which is its
+      health monitor naming a data-plane dimension. A recreate cannot clear
+      such a finding, and the runtime's own contract keeps a degraded runtime
+      in service rather than restarting it. The verdict still fails; the lane
+      is left running. On 2026-10-11 the recreate this replaced timed out and
+      left the lab dev lane down for 5h50m over a finding the replaced
+      container had carried for more than an hour before the deploy.
     """
 
     RECOVERED = "recovered"
     STILL_FAILING = "still_failing"
     RECREATE_FAILED = "recreate_failed"
     RECREATE_TIMED_OUT = "recreate_timed_out"
+    NOT_RECREATED_ANSWERING = "not_recreated_answering"
 
 
 class ModelComposeInvocation(BaseModel):
@@ -625,8 +634,13 @@ class ModelVerifyRecreate(BaseModel):
 
     def describe(self) -> str:
         """One-line, log-ready statement of what was recreated and how it ended."""
+        verb = (
+            "left running"
+            if self.outcome == EnumVerifyRecreateOutcome.NOT_RECREATED_ANSWERING
+            else "recreated"
+        )
         line = (
-            f"{self.service} on {self.compose_project} recreated after "
+            f"{self.service} on {self.compose_project} {verb} after "
             f"{self.endpoint} failed: {self.outcome.value}"
         )
         if self.outcome == EnumVerifyRecreateOutcome.RECOVERED:
