@@ -38,3 +38,10 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn-19561-wiring-start-deploy-probe
+    description: Deploy probe. The handler wiring module at the checked-out commit carries the wiring-time sweeper start this change adds; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base. The readout after the deploy agent rolls the image is the runtime's stateful dispatch callback source calling asyncio.get_running_loop() at wiring.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/auto_wiring/handler_wiring.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'at wiring when a loop runs, else on dispatch.'
+        cwd: ${OMNI_HOME}/omnibase_infra
