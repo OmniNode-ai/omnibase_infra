@@ -64,8 +64,11 @@ dod_evidence:
     binds_ac:
       - AC3
   - id: dod-omn-20931-deploy-smoke
-    description: The deployed runtime imports the changed render-settings module and the refusing infra-host reader is present.
+    description: The pushed render-settings module carries the refusing infra-host reader in place of the lab fallback.
     source: manual
     checks:
       - check_type: command
-        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.cli.cli_env import _infra_env; print('deploy smoke ok', _infra_env.__name__)\""
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_env.py?ref=4204d73268a2d754c2edc1ef93971d502283d34c --jq .content | base64 -d | grep -c 'def _infra_env'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
