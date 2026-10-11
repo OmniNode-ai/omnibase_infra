@@ -16,7 +16,7 @@
 # in the params file. Every other project on the host (a dogfood lane, a runner,
 # a declared lane) is read for a positive control and never written.
 #
-# Two kinds of member (config/prepr_runtime_pool.yaml):
+# Two kinds of member (config/lab/prepr_runtime_pool.yaml under the workspace config root):
 #   isolated    the laptop-bundle project omnibase-infra-local, with its own
 #               Postgres, Redpanda and Valkey on the fixed ports.
 #   prepr-slot  a numbered .201 pre-PR slot (omnibase-infra-prepr-N), brought up
@@ -281,7 +281,7 @@ build)
     --repo-ref omnimarket="$(git -C "$R/omnimarket" rev-parse HEAD)" 2>&1 | tail -5
   echo "stage rc=${PIPESTATUS[0]} $(ts)"
   make local-env LOCAL_ENV_FILE="$W/local.env" LOCAL_OVERLAY_FILE="$W/local.bifrost.yaml" 2>&1 | tail -2
-  # the model rung comes from the pool config (config/prepr_runtime_pool.yaml)
+  # the model rung comes from the pool config (config/lab/prepr_runtime_pool.yaml under the workspace config root)
   : "${MODEL_ENDPOINT:?MODEL_ENDPOINT is required}"
   sed -i.bak -E "s|endpoint_url: &model_endpoint \"[^\"]*\"|endpoint_url: \\&model_endpoint \"${MODEL_ENDPOINT}\"|" "$W/local.bifrost.yaml"
   grep -n 'model_endpoint "' "$W/local.bifrost.yaml"
