@@ -31,7 +31,7 @@ contract_version:
   patch: 1
 node_version: "0.1.1"
 description: >
-  Consumes signed GitHub webhook deliveries from onex.cmd.github.webhook-delivery.v1, re-verifies the X-Hub-Signature-256 HMAC over the exact received bytes in constant time, refuses (typed error, dead-lettered) any delivery it cannot verify or parse, and folds pull_request, pull_request_review and summary check_run deliveries into partial PR-state observations on onex.evt.github.pr-status.v1 plus one merged event per merge on onex.evt.github.pr-merged.v1. Push and summary check_run deliveries also produce watched branch ref advances, branch-head CI verdicts and distinct merge-group verdicts on onex.evt.github.branch-head.v1. Refuses every delivery when no webhook secret is configured.
+  Consumes signed GitHub webhook deliveries from onex.cmd.github.webhook-delivery.v1, re-verifies the X-Hub-Signature-256 HMAC over the exact received bytes in constant time, refuses (typed error, dead-lettered) any delivery it cannot verify or parse, and folds pull_request, pull_request_review and summary check_run deliveries into partial PR-state observations on onex.evt.github.pr-status.v1 plus one merged event per merge on onex.evt.github.pr-merged.v1. Push and summary check_run deliveries also produce watched branch ref advances, branch-head CI verdicts and distinct merge-group verdicts on onex.evt.github.branch-head.v1. Any completed check_run with a red conclusion also yields one observation per pull request on onex.evt.github.check-run.v1, and workflow_run deliveries yield run-id-to-workflow-name observations on onex.evt.github.workflow-run.v1. Refuses every delivery when no webhook secret is configured.
 
 input_model:
   name: "ModelGitHubWebhookDelivery"
@@ -48,6 +48,8 @@ event_bus:
     - "onex.evt.github.pr-status.v1"
     - "onex.evt.github.pr-merged.v1"
     - "onex.evt.github.branch-head.v1"
+    - "onex.evt.github.check-run.v1"
+    - "onex.evt.github.workflow-run.v1"
     - "onex.evt.github.webhook-delivery-refused.v1"
 consumed_events:
   - topic: "onex.cmd.github.webhook-delivery.v1"
@@ -67,6 +69,12 @@ published_events:
   - topic: "onex.evt.github.branch-head.v1"
     event_type: "GitHubBranchHeadObservation"
     description: "Watched branch ref advances, branch-head summary CI verdicts and separate merge-group CI verdicts."
+  - topic: "onex.evt.github.check-run.v1"
+    event_type: "GitHubCheckRunObservation"
+    description: "A completed check run with a red conclusion (any check, not only the summary), once per pull request the run names: conclusion, workflow run id and completion time (OMN-20743)."
+  - topic: "onex.evt.github.workflow-run.v1"
+    event_type: "GitHubWorkflowRunObservation"
+    description: "A workflow run's id and workflow name as it is requested, runs and completes, which no check-run delivery names (OMN-20743)."
 # The FAILURE terminal. A refused delivery raises a typed error; the consume
 # boundary dead-letters the command and publishes its failure terminal HERE.
 # Without this declaration the boundary answers at the first output topic of
@@ -112,6 +120,8 @@ capabilities:
     description: "Constant-time HMAC-SHA256 verification of X-Hub-Signature-256 over the raw body."
   - name: "github_pr_state_fold"
     description: "Fold pull_request, pull_request_review and summary check_run deliveries into pr_state observations."
+  - name: "github_red_check_run_fold"
+    description: "Fold any red check_run conclusion, and workflow_run names, into observations a red-CI consumer reads when GitHub reports them (OMN-20743)."
   - name: "github_pr_merged_all_repos"
     description: "Emit one pr-merged event per merge for every installed repository."
 metadata:

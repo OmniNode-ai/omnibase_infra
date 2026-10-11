@@ -876,6 +876,10 @@ def test_checked_in_manifest_is_exact_and_all_blockers_are_explicit() -> None:
     # manifest_paths), so this is a second, independent read of the same tree.
     # OMN-17887 (node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql)
     # is covered by this live derivation and needs no paragraph or literal here.
+    # 296 -> 298 for OMN-20604: node_projection_lab_job/0000 creates the
+    # lab_job_state and lab_job_transitions read models and 0001 grants the
+    # runtime role on both. Vendored FIRST ahead of omnimarket#3434; the live
+    # count below includes both declarations.
     live_node_sql_count = len(list((MIGRATIONS_DIR / "nodes").glob("*/*.sql")))
     assert len(result.declarations) + len(result.blocked) == live_node_sql_count
     assert result.blocked == ()

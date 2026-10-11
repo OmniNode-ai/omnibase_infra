@@ -1,0 +1,41 @@
+# OMN-20743 contract file for omnibase_infra (slice S1, webhook ingress half).
+schema_version: "1.0.0"
+ticket_id: OMN-20743
+title: "S1: The PR-state event carries per-check facts, and red reaches the bus within the bound"
+summary: "The GitHub webhook ingress folds any completed check_run with a red conclusion into one observation per pull request on onex.evt.github.check-run.v1 (check, conclusion, workflow run id from details_url, head sha, base ref, completed_at), and folds workflow_run deliveries into run-id-to-workflow-name observations on onex.evt.github.workflow-run.v1. This is the infra producer half of AC1; the ci-run-failed consumer is in omnimarket. AC1's live event on the dev lane bus and AC2's 24h lag bound are pending and not claimed here."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20743
+    statement: "The PR-state path carries per-check facts for every red check, so a consumer can name run id, workflow and completed_at for each failing check."
+    acceptance:
+      - id: AC1
+        statement: "AC1: a ci-run-failed event names run id, workflow and completed_at for every failing check -- falsifier: one live event on the dev lane bus without them"
+evidence_requirements:
+  - kind: tests
+    description: "In-process webhook fold and wired-handler tests: a red check_run yields an observation with run id and completed_at per pull request; a workflow_run yields the workflow name for its run id; passing, cancelled and in-progress runs say nothing; the observations carry the check-run and workflow-run topics."
+    command: "uv run pytest tests/unit/nodes/node_github_webhook_ingress_effect/test_webhook_fold_red_checks.py tests/integration/nodes/node_github_webhook_ingress_effect/test_check_run_workflow_run_observations_omn20743.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn-20743-ac1-red-check-fold
+    description: "In-process evidence for the infra half of AC1: every red conclusion folds to a check-run observation carrying run id and completed_at, and workflow_run deliveries name the workflow of a run id. The live dev-lane bus event named in AC1's falsifier is pending and not claimed here."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/node_github_webhook_ingress_effect/test_webhook_fold_red_checks.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20743-ac1-wired-handler
+    description: "The wired handler verifies a signed red check_run and a signed workflow_run and returns their observations on onex.evt.github.check-run.v1 and onex.evt.github.workflow-run.v1, the workflow observation naming the workflow of the run id."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/integration/nodes/node_github_webhook_ingress_effect/test_check_run_workflow_run_observations_omn20743.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

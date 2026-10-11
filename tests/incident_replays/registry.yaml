@@ -80,7 +80,6 @@ scope:
     - scripts/check_terminal_cost_completeness.py
     - scripts/check_test_failure_ratchet.py
     - scripts/check_topic_drift.py
-    - scripts/check_version_pins.py
     - scripts/ci/build_runner_image.sh
     - scripts/ci/canonical_handler_shape_baseline.py
     - scripts/ci/check_deploy_scope_dod.py

@@ -22,6 +22,13 @@ What each GitHub event contributes (``None`` = "says nothing"):
   on a watched branch also yields branch-head-status; a run on
   gh-readonly-queue/<watched>/... yields merge-group-status instead, never a
   branch-head verdict.
+  Any check run, summary or not, that completes red also yields one check-run
+  observation per PR the run names (OMN-20743): its conclusion, workflow run
+  id (parsed from ``details_url``; none for a check another app posted) and
+  completion time. A red is a conclusion in ``RED_CHECK_CONCLUSIONS``, the set
+  a PR-state watcher counts; a cancelled run has no verdict.
+- ``workflow_run``: one workflow-run observation carrying the run id and the
+  workflow's name, which no check-run delivery names (OMN-20743).
 - ``push``: branch-ref-advanced for a watched refs/heads/<branch>, excluding
   deletions. Branch observations are published on the branch-head topic.
 - anything else (ping, check_suite, status, ...): nothing.
@@ -40,19 +47,34 @@ import re
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel
 
 from omnibase_infra.nodes.node_github_webhook_ingress_effect.models import (
     ModelGitHubBranchHeadObservation,
+    ModelGitHubCheckRunObservation,
     ModelGitHubPrMergedObservation,
     ModelGitHubPrStateObservation,
+    ModelGitHubWorkflowRunObservation,
 )
 
 _SIGNATURE_PREFIX = "sha256="
 _TICKET_RE = re.compile(r"\b(OMN-\d+)\b", re.IGNORECASE)
 _MERGED_EVENT_NAMESPACE = uuid.UUID("5b0d6c1e-8f3a-4f5e-9c2d-14375a192490")
+_RUN_ID_RE = re.compile(r"/actions/runs/(\d+)")
+# The conclusions a PR-state watcher counts as red. A cancelled run has no verdict.
+RED_CHECK_CONCLUSIONS = frozenset(
+    {"failure", "timed_out", "action_required", "startup_failure", "stale"}
+)
+_WORKFLOW_RUN_STATUSES: Mapping[
+    str, Literal["requested", "in_progress", "completed"]
+] = {
+    "requested": "requested",
+    "in_progress": "in_progress",
+    "completed": "completed",
+}
 _NEW_HEAD_ACTIONS = frozenset({"opened", "reopened", "synchronize"})
 _QUEUE_ACTIONS: Mapping[str, str] = {
     "enqueued": "QUEUED",
@@ -100,9 +122,36 @@ def fold_delivery(
         return _fold_check_run(
             delivery_id, payload, received_at, summary_check_names, watched_branches
         )
+    if event == "workflow_run":
+        return _fold_workflow_run(delivery_id, payload, received_at)
     if event == "push":
         return _fold_push(delivery_id, payload, received_at, watched_branches)
     return ()
+
+
+def _fold_workflow_run(
+    delivery_id: UUID, payload: Mapping[str, object], received_at: datetime
+) -> tuple[BaseModel, ...]:
+    run = _mapping(payload.get("workflow_run"), "workflow_run")
+    name = _str(run.get("name"))
+    head_sha = _str(run.get("head_sha"))
+    status = _WORKFLOW_RUN_STATUSES.get(_str(payload.get("action")) or "")
+    if name is None or head_sha is None or status is None:
+        return ()
+    repo = _repo(payload)
+    run_id = _int(run.get("id"), "workflow_run.id")
+    return (
+        ModelGitHubWorkflowRunObservation(
+            repo=repo,
+            run_id=run_id,
+            workflow=name,
+            head_sha=head_sha,
+            status=status,
+            delivery_id=delivery_id,
+            github_event="workflow_run",
+            as_of=_time(run.get("updated_at")) or received_at,
+        ),
+    )
 
 
 def _fold_push(
@@ -279,17 +328,28 @@ def _fold_check_run(
     watched_branches: frozenset[str],
 ) -> tuple[BaseModel, ...]:
     run = _mapping(payload.get("check_run"), "check_run")
-    if _str(run.get("name")) not in summary_check_names:
-        return ()
-    repo = _repo(payload)
+    name = _str(run.get("name"))
     status = _str(run.get("status"))
     conclusion = _str(run.get("conclusion"))
-    verdict = conclusion.upper() if status == "completed" and conclusion else "PENDING"
-    as_of = (
-        _time(run.get("completed_at")) or _time(run.get("started_at")) or received_at
+    completed_at = _time(run.get("completed_at"))
+    red = (
+        status == "completed"
+        and conclusion is not None
+        and conclusion.lower() in RED_CHECK_CONCLUSIONS
+        and name is not None
+        and completed_at is not None
     )
+    if not red and name not in summary_check_names:
+        return ()
+    repo = _repo(payload)
+    as_of = completed_at or _time(run.get("started_at")) or received_at
     prs = run.get("pull_requests")
     out: list[BaseModel] = []
+    if red and name is not None and completed_at is not None:
+        out.extend(_red_check_runs(delivery_id, repo, run, completed_at))
+    if name not in summary_check_names:
+        return tuple(out)
+    verdict = conclusion.upper() if status == "completed" and conclusion else "PENDING"
     for item in prs if isinstance(prs, list) else []:
         if not isinstance(item, Mapping):
             continue
@@ -346,6 +406,40 @@ def _fold_check_run(
     return tuple(out)
 
 
+def _red_check_runs(
+    delivery_id: UUID, repo: str, run: Mapping[str, object], completed_at: datetime
+) -> list[BaseModel]:
+    head_sha = _str(run.get("head_sha"))
+    if head_sha is None:
+        raise WebhookFoldError("check_run.head_sha missing or not a non-empty string")
+    found = _RUN_ID_RE.search(_str(run.get("details_url")) or "")
+    prs = run.get("pull_requests")
+    observations: list[BaseModel] = []
+    for item in prs if isinstance(prs, list) else []:
+        if not isinstance(item, Mapping):
+            continue
+        number = item.get("number")
+        if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+            continue
+        base = item.get("base")
+        observations.append(
+            ModelGitHubCheckRunObservation(
+                repo=repo,
+                pr_number=number,
+                delivery_id=delivery_id,
+                github_event="check_run",
+                as_of=completed_at,
+                head_sha=head_sha,
+                base_ref=_str(base.get("ref")) if isinstance(base, Mapping) else None,
+                check=_str(run.get("name")) or "",
+                conclusion=(_str(run.get("conclusion")) or "").lower(),
+                run_id=int(found.group(1)) if found else None,
+                completed_at=completed_at,
+            )
+        )
+    return observations
+
+
 def _repo(payload: Mapping[str, object]) -> str:
     repository = _mapping(payload.get("repository"), "repository")
     name = _str(repository.get("full_name"))
@@ -381,6 +475,7 @@ def _time(value: object) -> datetime | None:
 
 
 __all__: list[str] = [
+    "RED_CHECK_CONCLUSIONS",
     "WebhookFoldError",
     "fold_delivery",
     "verify_signature",
