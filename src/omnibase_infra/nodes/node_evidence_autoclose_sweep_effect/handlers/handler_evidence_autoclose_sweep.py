@@ -2216,8 +2216,7 @@ class _LinearClient:
     """Minimal Linear GraphQL client scoped to this sweep's needs.
 
     Reads ``LINEAR_API_KEY`` from the environment when not passed
-    explicitly (mirrors ``GitHubTransport.__init__``'s ``GH_PAT`` fallback
-    in ``omnibase_infra.adapters.github.adapter_github_client``).
+    explicitly.
 
     TRANSIENT-FAILURE RETRY (OMN-16106)
     -----------------------------------
