@@ -56,11 +56,11 @@ dod_evidence:
     binds_ac:
       - AC1
   - id: dod-omn-20933-deploy-private-unit-resolver
-    description: No lane is redeployed by this change. Read the changed installer from the immutable PR revision through the repository contents API and require its private-unit resolver. The same content probe fails at merge base d44bbab6390e831c4efe85c426f7e4b5a03cda13, whose installer has no resolver.
+    description: No lane is redeployed by this change. Read the changed installer at the checked-out revision through the repository contents API and require its private-unit resolver. The count form of grep reads all of its input, so no writer in the pipe is cut off by a closed pipe. The same content probe fails at merge base d44bbab6390e831c4efe85c426f7e4b5a03cda13, whose installer has no resolver.
     source: manual
     checks:
       - check_type: command
-        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/deploy/lane-census/install-lane-census.sh?ref=772bbdacd1f63241a812bc96a18ae1e1f99ecd6c' --jq .content | base64 -d | grep -Fq 'resolve_unit_dir() {'
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/deploy/lane-census/install-lane-census.sh?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -Fc 'resolve_unit_dir() {'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
