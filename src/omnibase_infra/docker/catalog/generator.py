@@ -5,13 +5,33 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+
+import yaml
+
+from omnibase_core.enums.enum_deployment_mode import EnumDeploymentMode
+from omnibase_core.models.core.model_deployment_topology import ModelDeploymentTopology
+from omnibase_core.models.core.model_deployment_topology_local_config import (
+    ModelDeploymentTopologyLocalConfig,
+)
+from omnibase_core.models.core.model_deployment_topology_service import (
+    ModelDeploymentTopologyService,
+)
 
 # Compose YAML values are heterogeneous dicts. We use dict[str, object]
 # instead of dict[str, Any] to satisfy the ONEX Any-type ban.
 from omnibase_infra.docker.catalog.enum_infra_layer import EnumInfraLayer
-from omnibase_infra.docker.catalog.resolver import DEFAULT_PROJECT, ResolvedStack
+from omnibase_infra.docker.catalog.resolver import (
+    DEFAULT_PROJECT,
+    CatalogResolver,
+    ResolvedStack,
+)
+from omnibase_infra.docker.catalog.validator_host_ports import (
+    find_duplicate_host_ports,
+)
+from omnibase_infra.errors import ProtocolConfigurationError
+from omnibase_infra.models.docker.model_rendered_bundle import ModelRenderedBundle
 
 _RUNTIME_IMAGE_BUILD_SERVICE = "omninode-runtime"
 _RUNTIME_IMAGE = "runtime:latest"
@@ -393,3 +413,171 @@ def generate_compose(
         }
 
     return compose
+
+
+# ---------------------------------------------------------------------------
+# Public bundle renderer (OMN-19972)
+#
+# One renderer for every caller: the catalog CLI (``make up-local``) and the
+# ``onex local up|down|status`` shim both reach compose through
+# ``write_compose``. ``render_bundle`` adds what a caller outside this checkout
+# needs: paths taken from an explicit checkout root (an installed wheel does not
+# carry ``docker/catalog``), the env files compose must interpolate from, and the
+# port bridge into a ``ModelDeploymentTopology`` for the local provision node.
+# Nothing here reads the process environment; a caller passes it in.
+# ---------------------------------------------------------------------------
+
+CATALOG_RELPATH = Path("docker") / "catalog"
+COMPOSE_OUTPUT_RELPATH = Path("docker") / "docker-compose.generated.yml"
+RUNTIME_POLICY_ENV_RELPATH = Path("docker") / "runtime-policy.env"
+TEMPLATE_PLACEHOLDER_PREFIX = "__REPLACE_WITH_"
+_TOPOLOGY_SCHEMA_VERSION = "1.0.0"
+
+
+def read_env_file(env_file: Path) -> dict[str, str]:
+    """Parse one ``KEY=VALUE`` env file the way the catalog CLI loads it.
+
+    Blank lines, comments and lines without ``=`` are skipped, an ``export``
+    prefix is dropped and one layer of surrounding quotes is stripped. The
+    first binding of a key wins, as in the CLI loader.
+    """
+    values: dict[str, str] = {}
+    for raw in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip().removeprefix("export ").strip()
+        if key and key not in values:
+            values[key] = value.strip().strip("'\"")
+    return values
+
+
+def write_compose(
+    bundles: Sequence[str],
+    *,
+    catalog_dir: Path,
+    output_path: Path,
+    environment: Mapping[str, str],
+) -> ResolvedStack:
+    """Resolve ``bundles``, refuse a host-port clash, and write the compose file.
+
+    Raises:
+        ProtocolConfigurationError: two services publish one host port.
+        ValueError: the catalog refuses the bundle (unknown bundle or service).
+    """
+    resolved = CatalogResolver(catalog_dir=str(catalog_dir)).resolve(
+        bundles=list(bundles)
+    )
+    clash = find_duplicate_host_ports(resolved.manifests)
+    if not clash.ok:
+        raise ProtocolConfigurationError(
+            "Cannot render: duplicate host ports in the resolved stack: "
+            + "; ".join(clash.messages())
+        )
+    compose = generate_compose(resolved, environment=environment)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        yaml.dump(compose, f, default_flow_style=False, sort_keys=False)
+    return resolved
+
+
+def topology_from_resolved_stack(resolved: ResolvedStack) -> ModelDeploymentTopology:
+    """Port bridge: each service publishing a host port becomes a LOCAL entry.
+
+    The host port is the one the render publishes (a bundle's port override
+    wins over the manifest), so the provision node polls the port compose
+    actually binds. A service with no published port has no topology entry:
+    the topology model requires a port, and such services are reached by
+    running the whole compose project.
+    """
+    services: dict[str, ModelDeploymentTopologyService] = {}
+    for name, manifest in resolved.manifests.items():
+        if manifest.ports is None:
+            continue
+        services[name] = ModelDeploymentTopologyService(
+            mode=EnumDeploymentMode.LOCAL,
+            local=ModelDeploymentTopologyLocalConfig(
+                compose_service=name,
+                host_port=resolved.port_overrides.get(name, manifest.ports.external),
+            ),
+        )
+    return ModelDeploymentTopology(
+        schema_version=_TOPOLOGY_SCHEMA_VERSION, services=services
+    )
+
+
+def render_bundle(
+    bundles: Sequence[str],
+    *,
+    infra_root: Path,
+    env_file: Path | None = None,
+    output_path: Path | None = None,
+    process_environment: Mapping[str, str] | None = None,
+) -> ModelRenderedBundle:
+    """Render catalog ``bundles`` from the checkout at ``infra_root``.
+
+    ``env_file`` is the operator's env file. It must exist and carry no
+    template placeholder. Compose interpolates from the runtime policy file
+    first, then ``env_file``, and the process environment wins over both, the
+    precedence the catalog CLI loads them in. ``process_environment`` is used
+    only to decide whether a required variable is set; nothing is read from
+    the real process environment here.
+
+    Raises:
+        ProtocolConfigurationError: the checkout has no catalog, the env file is
+            missing or still a template, a required variable is unset, or two
+            services publish one host port. Messages name variables, never values.
+    """
+    root = infra_root.expanduser().resolve()
+    catalog_dir = root / CATALOG_RELPATH
+    if not (catalog_dir / "bundles.yaml").is_file():
+        raise ProtocolConfigurationError(
+            f"{root} is not an omnibase_infra checkout: "
+            f"{CATALOG_RELPATH / 'bundles.yaml'} is missing."
+        )
+
+    env_files: list[Path] = []
+    file_values: dict[str, str] = {}
+    policy = root / RUNTIME_POLICY_ENV_RELPATH
+    if policy.is_file():
+        env_files.append(policy)
+        file_values.update(read_env_file(policy))
+    if env_file is not None:
+        operator_env = env_file.expanduser()
+        if not operator_env.is_file():
+            raise ProtocolConfigurationError(
+                f"Env file not found: {operator_env}. Create it from the template "
+                "the bundle documents (for the laptop profile: "
+                "docker/local.env.example, or run `make local-env`)."
+            )
+        operator_values = read_env_file(operator_env)
+        placeholders = sorted(
+            k for k, v in operator_values.items() if TEMPLATE_PLACEHOLDER_PREFIX in v
+        )
+        if placeholders:
+            raise ProtocolConfigurationError(
+                f"Env file {operator_env} still carries template placeholders for: "
+                f"{', '.join(placeholders)}."
+            )
+        env_files.append(operator_env)
+        file_values.update(operator_values)
+
+    environment: dict[str, str] = {**file_values, **(process_environment or {})}
+    out = output_path if output_path is not None else root / COMPOSE_OUTPUT_RELPATH
+    resolved = write_compose(
+        bundles, catalog_dir=catalog_dir, output_path=out, environment=environment
+    )
+    missing = sorted(var for var in resolved.required_env if not environment.get(var))
+    if missing:
+        raise ProtocolConfigurationError(
+            "Cannot start: missing required env vars: " + ", ".join(missing)
+        )
+    return ModelRenderedBundle(
+        bundles=tuple(bundles),
+        project=resolved.project,
+        compose_file_path=str(out.resolve()),
+        env_files=tuple(str(p.resolve()) for p in env_files),
+        services=tuple(resolved.manifests),
+        topology=topology_from_resolved_stack(resolved),
+    )

@@ -90,6 +90,9 @@ class _Executor:
     def verify(self, **kwargs: object) -> list[object]:
         return []
 
+    def run_lane_mirror(self, **kwargs: object) -> None:
+        return None
+
     def deliver_onex_api_pin(self, **kwargs: Any) -> dict[str, Any]:
         self.events.append("pin")
         return {"result": "WRITTEN", "tag_advanced": True, "recreated": True}

@@ -281,7 +281,9 @@ uv run pytest tests/ -n 0 -xvs   # Debug mode (no parallelism)
 The pre-push test leg was retired in this repo on 2026-09-10 per
 `knowledge-base-internal#328` phase 1, merged as `e50b0b84`. Pre-push is now policy,
 type and lint only — mypy, architecture-layer validation, and deploy-scope DoD parity —
-and finishes in seconds. Hosted CI is the enforced merge gate and the test surface. Run
+and finishes in seconds. The deploy-scope hook also refuses a push whose commit subjects cite
+a ticket with no `contracts/OMN-<n>.yaml` at HEAD, or whose contract has a prose check
+value, using the released verifier's own shape guard at the repo-evidence pin (OMN-20870). Hosted CI is the enforced merge gate and the test surface. Run
 tests locally when you want them, with the commands above; nothing runs them for you at
 `git push`.
 

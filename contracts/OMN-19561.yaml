@@ -30,11 +30,11 @@ dod_evidence:
     binds_ac:
       - AC1
   - id: dod-omn-19561-deploy-runtime-wiring-start
-    description: The deployed runtime's stateful dispatch callback starts the completion-bound sweeper at wiring when a loop is running. The probe execs into the omninode-runtime container, which hosted CI does not have, so only the local Done gate runs it.
+    description: The runtime's stateful dispatch callback starts the completion-bound sweeper during wiring in a running loop. Against throwaway Postgres, the real StateStoreAdapter selects an abandoned row and CAS-finalizes it after publication of its failure terminal, without a dispatch. This test fails against the merge base's callback, which leaves the row in flight.
     source: manual
-    execution_scope: local_done_gate
     checks:
-      - check_type: command
-        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "import inspect; from omnibase_infra.runtime.auto_wiring.handler_wiring import _make_stateful_dispatch_callback as f; s = inspect.getsource(f); assert 'asyncio.get_running_loop()' in s and s.count('_ensure_bound_sweeper_started()') >= 3, 'OMN-19561 wiring-time sweeper start is not deployed'"
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/migrations/test_completion_bound_restart_omn19561.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1

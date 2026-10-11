@@ -2313,10 +2313,18 @@ repos:
   # absence-locally is never treated as proof-of-absence). FAIL-LOUD (root
   # CLAUDE.md Rule #8 / OMN-14655 principle #4): hard-errors (exit 1) if the diff
   # base or the canonical validator cannot resolve; never a green skip.
+  #
+  # OMN-20870: the same hook also mirrors the hosted repo-evidence / dod-verify
+  # refusals it can decide locally. A ticket cited in the branch's commit
+  # subjects with no contracts/<ticket>.yaml in the pushed HEAD fails and names
+  # the file; a command / test_passes check value the released verifier's own
+  # shape guard calls prose fails and names the check. The guard runs from
+  # omnimarket==<verifier-version>, read from call-repo-evidence-gate.yml, so
+  # local and hosted share one pin. It judges shape only and runs no check.
   - repo: local
     hooks:
       - id: prepush-deploy-scope-dod
-        name: Deploy-scope DoD parity (pre-push, OMN-14681)
+        name: Deploy-scope DoD and ticket-contract parity (pre-push, OMN-14681, OMN-20870)
         entry: uv run --frozen python scripts/ci/check_deploy_scope_dod.py
         language: system
         pass_filenames: false

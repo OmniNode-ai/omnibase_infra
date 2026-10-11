@@ -1111,6 +1111,84 @@ class ModelOnexApiDelivery(BaseModel):
         )
 
 
+class EnumLaneMirrorOutcome(StrEnum):
+    """How the lane-mirror step ended for one deploy (OMN-20867).
+
+    Three outcomes are typed no-ops and never failures: a host that carries no
+    lane-mirror overlay, an overlay none of whose host vars name this lane's
+    network, and a host vars that enables no profile. Everything else is
+    ``READY`` (every enabled forwarder runs the lane's runtime image and is
+    healthy) or ``FAILED``.
+    """
+
+    NO_OVERLAY = "no_overlay"
+    NOT_THIS_LANE = "not_this_lane"
+    NO_PROFILES = "no_profiles"
+    READY = "ready"
+    FAILED = "failed"
+
+
+class ModelLaneMirrorForwarder(BaseModel):
+    """One enabled forwarder's state after the step brought it up."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    profile: str
+    service: str
+    container: str
+    #: ``docker inspect`` ``.State.Status``, or ``absent``.
+    state: str
+    #: ``.State.Health.Status``, ``none`` without a healthcheck, or ``absent``.
+    health: str
+    #: The image the container runs, empty when it does not exist.
+    image_id: str = ""
+    #: Running, healthy and on the lane's runtime image.
+    ready: bool
+
+
+class ModelLaneMirrorReceipt(BaseModel):
+    """What the lane-mirror step did on one deploy (OMN-20867).
+
+    The forwarders that mirror a source lane's topics onto this lane (the
+    private overlay's ``deploy-overlays/lane-mirror``) run the lane's own
+    runtime image, so each deploy that changes that image brings them up on it
+    again. Like ``onex_api_delivery`` this never changes ``status``: the
+    compose lane converged on its own merits before the step ran, and a lane is
+    not broken because a mirror of another lane's topics failed to start. It is
+    reported per forwarder instead, and ``is_failure`` makes a failure legible
+    at a glance in the terminal event.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    outcome: EnumLaneMirrorOutcome
+    detail: str
+    #: The overlay clone's commit the step read, empty when none was read.
+    overlay_sha: str = ""
+    #: The host vars file that names this lane's network.
+    vars_file: str = ""
+    lane_network: str = ""
+    #: The image id of the lane's runtime container the forwarders were given.
+    runtime_image: str = ""
+    profiles: tuple[str, ...] = ()
+    forwarders: tuple[ModelLaneMirrorForwarder, ...] = ()
+    compose_argv: tuple[str, ...] = ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_own_computed_fields(cls, data: object) -> object:
+        """Accept this model's own serialised form back (see ModelOnexApiDelivery)."""
+        if isinstance(data, dict) and "is_failure" in data:
+            data = {k: v for k, v in data.items() if k != "is_failure"}
+        return data
+
+    # No ``@property`` under ``@computed_field``: pydantic wraps the method
+    # itself (see ``ModelRebuildCompleted.status``).
+    @computed_field
+    def is_failure(self) -> bool:
+        return self.outcome is EnumLaneMirrorOutcome.FAILED
+
+
 class ModelRebuildCompleted(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
     correlation_id: UUID
@@ -1169,6 +1247,10 @@ class ModelRebuildCompleted(BaseModel):
     # before this runs and a lane that converged is not broken because an image
     # failed to reach it.
     onex_api_delivery: ModelOnexApiDelivery | None = None
+    # OMN-20867: what the lane-mirror step did after the runtime was verified.
+    # ``None`` means the step was not reached (a non-dev lane, a job that failed
+    # before it, an agent older than this field). It never changes ``status``.
+    lane_mirror: ModelLaneMirrorReceipt | None = None
 
     @model_validator(mode="after")
     def validate_phase_results_are_settled(self) -> ModelRebuildCompleted:
