@@ -1,0 +1,59 @@
+schema_version: "1.0.0"
+ticket_id: OMN-18606
+title: the lane census snapshot reaches this repository through the refresh leg instead of a hand-opened pull request
+summary: deploy/lane-census/census-snapshot.json is refreshed by .github/workflows/lane-census-refresh.yml. The lab host's census is collected, scripts/lane_census_refresh_decision.py decides whether the result is worth a pull request, and the pull request is opened by the writer app with a title and body that resolve to this one ticket. The census is emitted by scripts/lane-census-check.sh --snapshot in the shape scripts/check_lane_census_age.py accepts.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn18606
+    statement: The committed lane census snapshot is refreshed by the workflow leg only when the census moved or aged, never with a candidate that is malformed or older than the committed one, and every refresh pull request resolves to this one ticket.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the refresh decision opens a pull request for a missing, unusable, topology-changed or aging census, stays quiet for a recent and unchanged one, and never moves the census with a backwards, equal or malformed candidate -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_refresh_decision_omn18606.py -q -p no:randomly -k "missing_committed or unusable_timestamp or backwards_clock or equal_timestamp or malformed_candidate or topology_change or aging_census or recent_and_unchanged or leaves_real_margin"'
+      - id: AC2
+        statement: 'AC2: lane-census-check.sh --snapshot emits a snapshot the staleness gate accepts, and the plan document the script emits without that flag is rejected by the gate -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_snapshot_emit_omn18606.py -q -p no:randomly'
+      - id: AC3
+        statement: 'AC3: the refresh pull request title clears the ticket gate, binds to this ticket and its body resolves exactly one ticket -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_refresh_decision_omn18606.py -q -p no:randomly -k "binds_to_the_ticket or resolves_exactly_one_ticket or title_clears_the_ticket_gate"'
+evidence_requirements:
+  - kind: tests
+    description: The refresh decision rule refreshes on a missing, unusable, changed or aging census and refuses a backwards, equal or malformed candidate.
+    command: uv run pytest tests/unit/scripts/test_lane_census_refresh_decision_omn18606.py -q -p no:randomly -k "missing_committed or unusable_timestamp or backwards_clock or equal_timestamp or malformed_candidate or topology_change or aging_census or recent_and_unchanged or leaves_real_margin"
+  - kind: tests
+    description: The snapshot emitter produces a gate-valid snapshot and the plan document is rejected.
+    command: uv run pytest tests/unit/scripts/test_lane_census_snapshot_emit_omn18606.py -q -p no:randomly
+  - kind: tests
+    description: The refresh pull request title and body bind to this one ticket.
+    command: uv run pytest tests/unit/scripts/test_lane_census_refresh_decision_omn18606.py -q -p no:randomly -k "binds_to_the_ticket or resolves_exactly_one_ticket or title_clears_the_ticket_gate"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-18606-ac1
+    description: The decision tests prove the refresh rule opens a pull request for a missing, unusable, changed or aging census and refuses a backwards, equal or malformed candidate.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_lane_census_refresh_decision_omn18606.py -q -p no:randomly -k "missing_committed or unusable_timestamp or backwards_clock or equal_timestamp or malformed_candidate or topology_change or aging_census or recent_and_unchanged or leaves_real_margin"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-18606-ac2
+    description: The emitter tests prove the snapshot flag writes a gate-valid snapshot and the plan document is rejected by the staleness gate.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_lane_census_snapshot_emit_omn18606.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-18606-ac3
+    description: The workflow tests prove the refresh pull request title binds to this ticket and its body resolves exactly one ticket.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_lane_census_refresh_decision_omn18606.py -q -p no:randomly -k "binds_to_the_ticket or resolves_exactly_one_ticket or title_clears_the_ticket_gate"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
