@@ -333,6 +333,22 @@ def test_fresh_build_matches_the_topology_modulo_the_shrink_only_allowlist(
         assert pr_landing_live == pr_landing_declared, pr_landing_table
         assert "DELETE" not in pr_landing_live, pr_landing_table
 
+    # OMN-20604: the two lab job read models vendored ahead of omnimarket#3434
+    # have the same declared/live ACL as PR landing above, including UPDATE on
+    # transitions via migration 099's defaults, and never DELETE.
+    for lab_job_table in ("lab_job_state", "lab_job_transitions"):
+        lab_job_declared = {
+            privilege
+            for principal, relation, privilege in declared_acl(
+                load_topology_profile(PROFILE)
+            ).table_grants
+            if principal == _RUNTIME and relation == lab_job_table
+        }
+        assert lab_job_declared == {"SELECT", "INSERT", "UPDATE"}, lab_job_table
+        lab_job_live = _live_privileges(fresh_build, lab_job_table, _RUNTIME)
+        assert lab_job_live == lab_job_declared, lab_job_table
+        assert "DELETE" not in lab_job_live, lab_job_table
+
     # OMN-19399: the worktree reconcile projection grants exactly the runtime
     # writer's SELECT/INSERT/UPDATE privileges, with no DELETE or sequence.
     worktree_reconcile_declared = {

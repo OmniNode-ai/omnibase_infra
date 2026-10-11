@@ -9,22 +9,35 @@ second voter's URL lived in an Actions variable per repository and a
 hard-coded port in this workflow. These tests hold the workflow to passing
 the overlay and nothing else, and the ratchet below refuses any voter endpoint,
 port, model flag or endpoint variable creeping back into a workflow file.
+
+OMN-20923 (operator RULING 2026-10-10T21:57:38Z): the overlay itself is a
+deployment fact and is not in this repository. The workflow fetches it at run
+time from the private CI overlay named by the org variable OMNI_CI_OVERLAY_REPO;
+with the variable unset the neutral default is "no review voters configured",
+and the gate fails closed saying so.
 """
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 import yaml
 
+from omnibase_core.validators.no_unguarded_git_subprocess import (
+    scrub_git_location_env,
+)
+
 pytestmark = [pytest.mark.unit]
 
 _WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 WORKFLOW = _WORKFLOWS / "hostile-reviewer.yml"
-OVERLAY_SUFFIX = "docker/lane-overlays/hostile-review-voters.yaml"
+OVERLAY_SUFFIX = "config/onex/overlays/node_review_voters_overlay_compute/overlay.yaml"
+OVERLAY_ENV = "${{ github.workspace }}/../ci-overlay/" + OVERLAY_SUFFIX
 OVERLAY_ARG = '--voters-overlay "$REVIEW_VOTERS_OVERLAY"'
 
 # What a voter endpoint looks like when someone writes one into a workflow:
@@ -117,22 +130,17 @@ def test_preflight_resolves_targets_from_the_overlay() -> None:
     assert '"$REVIEW_VOTERS_OVERLAY"' in run
 
 
-def test_overlay_path_is_the_canonical_overlay() -> None:
+def test_overlay_path_is_the_ci_overlay_outside_the_workspace() -> None:
+    """The roster is read from the CI overlay, never from this pull request's
+    checkout: a pull request cannot choose the voters that review it."""
     parsed = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     env = parsed["jobs"]["hostile-review"]["env"]
-    assert str(env["REVIEW_VOTERS_OVERLAY"]).endswith(OVERLAY_SUFFIX)
+    assert env["REVIEW_VOTERS_OVERLAY"] == OVERLAY_ENV
+    assert "../ci-overlay" in str(_step("Clean stale dependency clones")["run"])
 
 
 _ROOT = Path(__file__).resolve().parents[2]
-_OVERLAY = _ROOT / OVERLAY_SUFFIX
 _SIBLING_PINS = _ROOT / ".github" / "sibling-pins.yaml"
-
-
-def test_overlay_is_read_from_this_pull_requests_checkout() -> None:
-    """A pull request that changes a voter is reviewed by the voters it declares."""
-    parsed = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    env = parsed["jobs"]["hostile-review"]["env"]
-    assert env["REVIEW_VOTERS_OVERLAY"] == "${{ github.workspace }}/" + OVERLAY_SUFFIX
 
 
 def test_omniintelligence_is_pinned_to_the_sibling_pin() -> None:
@@ -143,22 +151,95 @@ def test_omniintelligence_is_pinned_to_the_sibling_pin() -> None:
     assert f"checkout --quiet {pin}" in str(_step("Clone omniintelligence")["run"])
 
 
-def test_every_overlay_backend_is_bound_in_the_delegation_overlay() -> None:
-    """Cross-file check of the overlay this repository owns; the typed
-    validation is omniintelligence's node_review_voters_overlay_compute, which
-    the gate runs on every pull request against this same file."""
-    overlay = yaml.safe_load(_OVERLAY.read_text(encoding="utf-8"))
-    assert overlay["schema_version"] == "review_voters_overlay.v1"
-    bifrost = yaml.safe_load(
-        (_OVERLAY.parent / overlay["backend_overlay"]).read_text(encoding="utf-8")
+def _tracked_files() -> list[str]:
+    out = subprocess.run(
+        ["git", "ls-files"],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=scrub_git_location_env(os.environ),
     )
-    bound = {b["backend_id"]: b for b in bifrost["backends"]}
-    voters = overlay["voters"]
-    assert len({v["voter_id"] for v in voters}) == len(voters)
-    assert sum(1 for v in voters if v["required"] is True) >= 2
-    for voter in voters:
-        if "backend_id" in voter:
-            assert bound[voter["backend_id"]]["endpoint_url"], voter["voter_id"]
+    return out.stdout.splitlines()
+
+
+def test_this_repository_carries_no_review_voters_overlay() -> None:
+    """OMN-20923: no lab roster ships in this repository (positive control:
+    the scan finds the schema id in a synthetic overlay text)."""
+    marker = "review_voters_overlay.v1"
+    assert marker in 'schema_version: "review_voters_overlay.v1"\nvoters: []\n'
+    offenders = []
+    for rel in _tracked_files():
+        path = _ROOT / rel
+        if path.suffix not in {".yaml", ".yml"} or not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if re.search(r"^schema_version:\s*[\"']?review_voters_overlay\.v1", text, re.M):
+            offenders.append(rel)
+    assert offenders == []
+    assert not (_ROOT / "docker/lane-overlays/hostile-review-voters.yaml").exists()
+
+
+def test_the_ci_overlay_repository_comes_from_an_org_variable() -> None:
+    step = _step("Resolve the CI overlay")
+    assert step["env"]["CI_OVERLAY_REPO"] == "${{ vars.OMNI_CI_OVERLAY_REPO }}"
+    fetch = _step("Fetch the CI overlay")
+    assert fetch["with"]["repository"] == (
+        "${{ github.repository_owner }}/${{ steps.ci-overlay.outputs.name }}"
+    )
+    assert fetch["with"]["persist-credentials"] is False
+
+
+def test_the_workflow_names_no_network() -> None:
+    """The transport's CIDR allowlist is derived from the resolved voters."""
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert not re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?\b", text)
+    parsed = yaml.safe_load(text)
+    assert "LLM_ENDPOINT_CIDR_ALLOWLIST" not in parsed["jobs"]["hostile-review"]["env"]
+    assert 'LLM_ENDPOINT_CIDR_ALLOWLIST=${ALLOWLIST}" >> "$GITHUB_ENV"' in str(
+        _step("Preflight")["run"]
+    )
+
+
+def _run_resolve(repo_var: str, tmp_path: Path) -> tuple[int, str, str]:
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    proc = subprocess.run(
+        ["bash", "-c", str(_step("Resolve the CI overlay")["run"])],
+        env={
+            "CI_OVERLAY_REPO": repo_var,
+            "GITHUB_OUTPUT": str(output),
+            "PATH": "/usr/bin:/bin",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return proc.returncode, output.read_text(encoding="utf-8"), proc.stdout
+
+
+def test_a_fork_with_no_ci_overlay_gets_the_neutral_default(tmp_path: Path) -> None:
+    """Unset variable: configured=false and a named "no review voters
+    configured" error; the preflight then fails the gate closed with that reason
+    before reading any file."""
+    rc, out, stdout = _run_resolve("", tmp_path)
+    assert rc == 0
+    assert "configured=false" in out
+    assert "no review voters configured" in stdout
+    preflight = str(_step("Preflight")["run"])
+    assert preflight.index('"${CI_OVERLAY_CONFIGURED}" != "true"') < preflight.index(
+        "PROBE_TARGETS="
+    )
+    assert "error=${REASON}" in preflight
+
+
+def test_our_ci_resolves_the_named_overlay_repository(tmp_path: Path) -> None:
+    rc, out, _ = _run_resolve("deploy-config", tmp_path)
+    assert rc == 0
+    assert "configured=true" in out
+    assert "name=deploy-config" in out
+    rc, _, _ = _run_resolve("owner/repo", tmp_path)
+    assert rc == 1
 
 
 def test_preflight_runs_in_the_installed_environment() -> None:
@@ -193,6 +274,9 @@ def test_every_overlay_voter_resolved_to_a_live_single_model_endpoint(
     Deliberately not bound to the overlay's current contents: changing a voter
     is an overlay-only edit and must not require a new recording.
     """
+    provenance = cast("dict[str, str]", recorded_response["_provenance"])
+    # The recording was taken from the overlay path this workflow reads.
+    assert OVERLAY_SUFFIX in provenance["source"]
     voters = cast("list[dict[str, object]]", recorded_response["voters"])
     required = [v for v in voters if v["required"] is True]
     assert len(required) >= 2
@@ -200,4 +284,4 @@ def test_every_overlay_voter_resolved_to_a_live_single_model_endpoint(
     for voter in voters:
         assert voter["http_status"] == 200, voter["voter_id"]
         assert len(cast("list[str]", voter["served_model_ids"])) == 1, voter
-        assert str(voter["resolved_from"]).startswith("backend "), voter
+        assert str(voter["resolved_from"]) == "endpoint_url", voter

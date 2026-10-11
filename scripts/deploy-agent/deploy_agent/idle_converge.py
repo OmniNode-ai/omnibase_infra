@@ -48,6 +48,21 @@ INERT UNTIL A ROUTE EXISTS
 The converge fires only when the loaded routing table sends omnimarket to
 another instance. The committed table routes nothing to dev-202, so on .201
 nothing changes until the (dev, omnimarket) -> dev-202 row lands (task B8).
+
+THE SAME RULE, FOR omnibase_infra (OMN-20867)
+---------------------------------------------
+The rule is per repository, over :data:`FOLLOWED_REPOSITORIES`: an instance
+follows the dev head of every followed repository whose rebuilds the table
+routes to another instance. On the default instance that is omnimarket alone,
+as before (omnibase_infra routes to the default itself). On an instance whose
+receipt proves omnimarket only, it is omnibase_infra: its rebuilds go to the
+default instance by operator ruling, so such an instance otherwise took an
+omnibase_infra build only when an omnimarket merge happened to rebuild it, and
+ran a revision without a merged runtime change for as long as omnimarket was
+quiet. A converge is not a merge: it carries no
+``gha/`` requester, no per-merge verify job runs for it and no lab-pass receipt
+is emitted for it, and an instance receipt counts only for the repositories its
+``proves`` names, so this changes no repository's lab-pass evidence.
 """
 
 from __future__ import annotations
@@ -94,6 +109,11 @@ CONVERGE_CEILING: Final = timedelta(minutes=30)
 #: The probes that grade .201 and bind staging delivery.
 GUARDED_PROBES: Final = frozenset({"C15", "C16"})
 
+#: The repositories whose dev heads an idle instance follows, in the order the
+#: idle branch evaluates them (OMN-20867). Each is followed only on an instance
+#: the routing table does not send its rebuilds to.
+FOLLOWED_REPOSITORIES: Final = ("omnimarket", "omnibase_infra")
+
 #: How often the idle branch re-evaluates. Each check reads a container file
 #: and asks git for one ref.
 CHECK_INTERVAL_SECONDS: Final = 60
@@ -126,7 +146,9 @@ class ModelIdleConvergeInputs(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     now: datetime
-    omnimarket_routed_elsewhere: bool
+    #: The followed repository this decision is about (OMN-20867).
+    repository: str
+    routed_elsewhere: bool
     job_active: bool
     #: The end of the last job, or the agent's start when it has run none.
     last_activity: datetime
@@ -159,10 +181,11 @@ def decide(inputs: ModelIdleConvergeInputs) -> ModelIdleConvergeDecision:
 
     if inputs.frozen_reason is not None:
         return refuse(EnumIdleConvergeVerdict.FROZEN, inputs.frozen_reason)
-    if not inputs.omnimarket_routed_elsewhere:
+    repo = inputs.repository
+    if not inputs.routed_elsewhere:
         return refuse(
             EnumIdleConvergeVerdict.NOT_ROUTED_ELSEWHERE,
-            "the routing table sends omnimarket rebuilds to this instance",
+            f"the routing table sends {repo} rebuilds to this instance",
         )
     if inputs.job_active:
         return refuse(EnumIdleConvergeVerdict.JOB_ACTIVE, "a job is in flight")
@@ -179,27 +202,27 @@ def decide(inputs: ModelIdleConvergeInputs) -> ModelIdleConvergeDecision:
     if inputs.head_ref is None:
         return refuse(
             EnumIdleConvergeVerdict.HEAD_UNREADABLE,
-            "the omnimarket dev head could not be read",
+            f"the {repo} dev head could not be read",
         )
     if inputs.running_ref is None:
         return refuse(
             EnumIdleConvergeVerdict.RUNNING_UNREADABLE,
-            "the lane's running omnimarket revision could not be read",
+            f"the lane's running {repo} revision could not be read",
         )
     if inputs.running_ref == inputs.head_ref:
         return refuse(
             EnumIdleConvergeVerdict.UP_TO_DATE,
-            f"the lane runs omnimarket {inputs.head_ref[:12]}, the dev head",
+            f"the lane runs {repo} {inputs.head_ref[:12]}, the dev head",
         )
     if inputs.head_ref in inputs.attempted_heads:
         return refuse(
             EnumIdleConvergeVerdict.ALREADY_ATTEMPTED,
-            f"omnimarket {inputs.head_ref[:12]} was already converged on once",
+            f"{repo} {inputs.head_ref[:12]} was already converged on once",
         )
     return ModelIdleConvergeDecision(
         verdict=EnumIdleConvergeVerdict.CONVERGE,
         detail=(
-            f"idle {int(idle.total_seconds())}s, omnimarket "
+            f"idle {int(idle.total_seconds())}s, {repo} "
             f"{inputs.running_ref[:12]} -> dev head {inputs.head_ref[:12]}"
         ),
         head_ref=inputs.head_ref,
@@ -211,7 +234,8 @@ def converge_command() -> ModelRebuildRequested:
 
     Workspace-sourced, like every CI-published dev command, so the build stages
     omnimarket from origin/dev (stage_workspace.sh), which is the revision the
-    decision compared against.
+    decision compared against; and it builds omnibase_infra at the tracking
+    ref, the dev head an omnibase_infra decision compared against (OMN-20867).
     """
     return ModelRebuildRequested(
         correlation_id=uuid4(),
@@ -292,13 +316,15 @@ def _is_sha(value: object) -> bool:
     )
 
 
-def read_running_omnimarket_ref(
-    container: str, *, run: Runner = _default_run
+def read_running_ref(
+    container: str, repository: str, *, run: Runner = _default_run
 ) -> str | None:
-    """The omnimarket commit the lane's runtime image vendored, or ``None``.
+    """The ``repository`` commit the lane's runtime image carries, or ``None``.
 
     Read from the image's own build-provenance manifest, the same file the
-    lineage fence and the sibling-revision guard read.
+    lineage fence and the sibling-revision guard read: ``infra_vcs_ref`` for
+    omnibase_infra, which the image is built from, and the vendored sibling's
+    ``vcs_ref`` for any other repository.
     """
     try:
         result = run(
@@ -311,14 +337,18 @@ def read_running_omnimarket_ref(
         return None
     try:
         manifest = json.loads(result.stdout)
-        ref = manifest["per_repo_vcs_provenance"]["siblings"]["omnimarket"]["vcs_ref"]
+        ref = (
+            manifest["infra_vcs_ref"]
+            if repository == "omnibase_infra"
+            else manifest["per_repo_vcs_provenance"]["siblings"][repository]["vcs_ref"]
+        )
     except (ValueError, KeyError, TypeError):
         return None
     return ref if _is_sha(ref) else None
 
 
-def read_omnimarket_dev_head(clone: Path, *, run: Runner = _default_run) -> str | None:
-    """The omnimarket ``dev`` head on its remote, read from the local clone."""
+def read_dev_head(clone: Path, *, run: Runner = _default_run) -> str | None:
+    """The ``dev`` head on ``clone``'s remote, read from the local clone."""
     try:
         result = run(
             ["git", "-C", str(clone), "ls-remote", "origin", "refs/heads/dev"],

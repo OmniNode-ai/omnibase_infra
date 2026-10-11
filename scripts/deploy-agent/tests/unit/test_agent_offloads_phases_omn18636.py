@@ -204,6 +204,9 @@ class _BlockingExecutor:
         self.calls.append("verify")
         return []
 
+    def run_lane_mirror(self, **kwargs: Any) -> None:
+        return None
+
     def self_update(self, *, boundary: Any, **kwargs: Any) -> None:
         self.boundaries.append(str(boundary.value))
 
