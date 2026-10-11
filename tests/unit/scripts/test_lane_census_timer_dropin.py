@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.lane_census_fixtures import NEUTRAL_CONFIG_ROOT
+
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
@@ -87,7 +89,12 @@ def _installer_env(tmp_path: Path) -> tuple[dict[str, str], Path]:
     stub = bin_dir / "systemctl"
     stub.write_text(f'#!/usr/bin/env bash\necho "$*" >> "{calls}"\nexit 0\n')
     stub.chmod(0o755)
-    env = {"HOME": str(home), "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+    env = {
+        "HOME": str(home),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        # OMN-20934: the unit carries the config root its census reads from.
+        "ONEX_WORKSPACE_CONFIG_ROOT": str(NEUTRAL_CONFIG_ROOT),
+    }
     return env, home
 
 
@@ -120,6 +127,7 @@ def test_installer_renders_the_dropin_with_broker_and_clone(tmp_path: Path) -> N
     assert result.returncode == 0, result.stderr
     body = (units / "onex-disk-gc.service.d/20-lane-census.conf").read_text()
     assert "Environment=LANE_MEMORY_BROKER_CONTAINER=omnibase-infra-redpanda" in body
+    assert f"Environment=ONEX_WORKSPACE_CONFIG_ROOT={NEUTRAL_CONFIG_ROOT}" in body
     assert f"ExecStart=-/bin/bash {_REPO}/scripts/lane-census-check.sh" in body
     assert "--snapshot" in body and "--memory" in body
     assert (
@@ -156,7 +164,31 @@ def test_installer_standalone_on_a_host_without_disk_gc(tmp_path: Path) -> None:
         in service
     )
     assert f"ExecStart=/bin/bash {_REPO}/scripts/lane-census-check.sh" in service
+    assert f"Environment=ONEX_WORKSPACE_CONFIG_ROOT={NEUTRAL_CONFIG_ROOT}" in service
     assert (units / "onex-lane-census.timer").exists()
     assert not (units / "onex-disk-gc.service.d/20-lane-census.conf").exists()
     calls = (tmp_path / "systemctl.log").read_text()
     assert "--user enable --now onex-lane-census.timer" in calls
+
+
+@pytest.mark.parametrize("root", [None, "missing"])
+def test_installer_requires_a_config_root_holding_the_manifest(
+    tmp_path: Path, root: str | None
+) -> None:
+    """OMN-20934: no root, or a root without the manifest, installs nothing."""
+    env, home = _installer_env(tmp_path)
+    units = home / ".config/systemd/user"
+    (units / "onex-disk-gc.service").write_text("[Service]\n")
+    if root is None:
+        del env["ONEX_WORKSPACE_CONFIG_ROOT"]
+    else:
+        env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(tmp_path / root)
+    result = _install(
+        env, "--broker-container", "omnibase-infra-redpanda", "--repo-root", str(_REPO)
+    )
+    assert result.returncode == 2, result.stderr
+    assert (
+        "ONEX_WORKSPACE_CONFIG_ROOT" in result.stderr
+        or "lane-manifest" in result.stderr
+    )
+    assert not (units / "onex-disk-gc.service.d/20-lane-census.conf").exists()
