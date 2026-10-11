@@ -48,6 +48,6 @@ dod_evidence:
         check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/runtime/test_runtime_scheduler.py tests/integration/runtime/test_runtime_tick_slot_alignment_omn20867.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/runtime_scheduler.py?ref=b2a709fc04bddd6aea3cf134b870898ddb71f850' --jq .content | base64 -d | grep -q 'scheduled_at=scheduled_at or tick_time'
+        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/runtime_scheduler.py?ref=b2a709fc04bddd6aea3cf134b870898ddb71f850' --jq .content | base64 -d | grep -F 'scheduled_at=scheduled_at or tick_time' >/dev/null
     binds_ac:
       - AC2
