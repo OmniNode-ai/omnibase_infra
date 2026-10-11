@@ -301,6 +301,9 @@ class _FakeExecutor:
         self.calls.append("verify")
         return []
 
+    def run_lane_mirror(self, **kwargs: object) -> None:
+        return None
+
     def deliver_onex_api_pin(self, **kwargs: object) -> object:
         self.calls.append("deliver_onex_api_pin")
         raise AssertionError("the onex-api pin delivery must not run here")
