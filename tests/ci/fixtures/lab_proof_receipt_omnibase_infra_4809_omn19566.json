@@ -1,0 +1,106 @@
+{
+  "_provenance": {
+    "source": "lab pool run of omnibase_infra#4809 at cf87a9a8af on a lab pool host (prepr_runtime_pool.py): the pr-head receipt and bus event it minted, and the PR's changed paths as the landing prover read them from the live PR ref (git diff --name-status --no-renames merge-base..head). The host name in subject.host and runner_identity is replaced with a placeholder for this public repository; nothing else is edited.",
+    "captured_utc": "2026-10-10T20:42:17Z"
+  },
+  "response": {
+    "changed_paths": [
+      ".github/omnimarket-contract-pin.yaml",
+      ".github/sibling-pins.yaml",
+      ".github/workflows/ci.yml",
+      ".github/workflows/contract-topic-graph.yml",
+      ".github/workflows/contractor-integration-note.yml",
+      ".github/workflows/delegation-consumer-kwarg-parity.yml",
+      ".github/workflows/dispatcher-route-coverage.yml",
+      ".github/workflows/duplication-sweep.yml",
+      ".github/workflows/exposure-reader-coverage.yml",
+      ".github/workflows/r1-front-door-probe.yml",
+      ".github/workflows/runtime-rebuild-trigger.yml",
+      ".github/workflows/skill-node-mapping-sync.yml",
+      "contracts/OMN-17292.yaml",
+      "src/omnibase_infra/topology/table_grant_derivation.py",
+      "src/omnibase_infra/validators/bus_backed_exposure_readers.py",
+      "tests/ci/fixtures/omnimarket_pin_credentials_reader_omn17292.json",
+      "tests/ci/test_omnimarket_pin_handoff_omn17292.py",
+      "tests/ci/test_supplemental_declaration_expiry_omn18863.py",
+      "tests/integration/runtime/test_delegation_dispatch_port_handler_compat.py",
+      "tests/unit/validators/test_omn17199_bus_backed_exposure_readers.py"
+    ],
+    "receipt": {
+      "receipt_version": "lab_pass_receipt.v1",
+      "sha": "cf87a9a8af8eefd40aeb42b5afb25916596de017",
+      "lane": "pr-head",
+      "started_at": "2026-10-10T20:21:31.196548+00:00",
+      "finished_at": "2026-10-10T20:42:17.393436+00:00",
+      "result": "PASS",
+      "checks": [
+        {
+          "name": "subject_head_identity",
+          "ok": true,
+          "evidence": "prepr_runtime_pool.judge head_matches: omnibase_infra#4783 fetched head 0238bc1ccae71daa1997ab34cfdb7c0d6e2ebbe2 expected 0238bc1ccae71daa1997ab34cfdb7c0d6e2ebbe2 match=yes; omnibase_infra#4809 fetched head cf87a9a8af8eefd40aeb42b5afb25916596de017 expected cf87a9a8af8eefd40aeb42b5afb25916596de017 match=yes"
+        },
+        {
+          "name": "group_built",
+          "ok": true,
+          "evidence": "prepr_runtime_pool.judge group_built: group-commit omnibase_infra 27cb99b68f7859d8091f1be088a4c5d9d6787d7e tree cb732266f4b81ce28d2cedf0e94dad5d02e05279 base 7ce6dd18eeced2039a73abe829ffb54ee2bd89ca tree-agrees=yes"
+        },
+        {
+          "name": "stack_built",
+          "ok": true,
+          "evidence": "prepr_runtime_pool.judge stack_built: build rc=0 2026-10-10T20:31:51Z; up rc=0 2026-10-10T20:41:55Z"
+        },
+        {
+          "name": "runtime_image_identity",
+          "ok": true,
+          "evidence": "prepr_runtime_pool.judge image_identity: pkg-tree omnibase_infra omnibase-infra-local-omninode-runtime tree-files=3556 image-files=3556 missing=0 differ=0 stale-py=0 extra-other=0 match=yes; pkg-tree omnibase_infra omnibase-infra-local-runtime-effects tree-files=3556 image-files=3556 missing=0 differ=0 stale-py=0 extra-other=0 match=yes; file omnibase_infra/topology/table_grant_derivation.py image=3f10b8ea9c68 build-tree=3f10b8ea9c68 match=yes; file omnibase_infra/validators/bus_backed_exposure_readers.py image=a46f91d3a03a build-tree=a46f91d3a03a match=yes"
+        },
+        {
+          "name": "runtime_main_healthy",
+          "ok": true,
+          "evidence": "prepr_runtime_pool.judge health_8085: port 8085 HTTP 200 status healthy healthy True failed_handlers {}"
+        },
+        {
+          "name": "runtime_effects_healthy",
+          "ok": true,
+          "evidence": "prepr_runtime_pool.judge health_8086: port 8086 HTTP 200 status healthy healthy True failed_handlers {}"
+        },
+        {
+          "name": "migration_gate_healthy",
+          "ok": true,
+          "evidence": "prepr_runtime_pool.judge migration_gate_healthy: /omnibase-infra-local-migration-gate health=healthy restarts=0 running exit=0"
+        },
+        {
+          "name": "no_wiring_failures",
+          "ok": true,
+          "evidence": "prepr_runtime_pool.judge no_wiring_failures: omnibase-infra-local-omninode-runtime lines=7385 autowire-fail=0 dup-dispatcher=0 ERROR=45 Traceback=12; omnibase-infra-local-runtime-effects lines=5426 autowire-fail=0 dup-dispatcher=0 ERROR=48 Traceback=10"
+        },
+        {
+          "name": "focused_tests",
+          "ok": true,
+          "evidence": "prepr_runtime_pool.judge focused_tests: omnibase_infra focused rc=0 2026-10-10T20:42:11Z"
+        }
+      ],
+      "agent_command_id": null,
+      "subject": {
+        "repo": "OmniNode-ai/omnibase_infra",
+        "pr_number": 4809,
+        "base_sha": "7ce6dd18eeced2039a73abe829ffb54ee2bd89ca",
+        "merge_base_sha": "7ce6dd18eeced2039a73abe829ffb54ee2bd89ca",
+        "profile_id": "omnibase_infra.runtime_and_scripts",
+        "profile_version": "1",
+        "handler_kind": "runtime_image",
+        "host": "lab-host",
+        "slot": "isolated omnibase-infra-local",
+        "runner_identity": "landing-lab-omnibase_infra-L94@lab-host",
+        "verifier_identity": "prepr_runtime_pool.judge@driver-7a551ff81d",
+        "pr_diff_digest": "sha256:ad16356549d7c289b17f920c5036788ca7a11296f1c9f7a8011eff558fc0c615",
+        "carried_from": ""
+      }
+    },
+    "verifier_token": "MISSING_MANDATORY_CHECK",
+    "missing_mandatory_checks": [
+      "changed_path_live",
+      "forwarder_refused_topic"
+    ]
+  }
+}
