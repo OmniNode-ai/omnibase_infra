@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20947"
+title: "The Hostile Reviewer pins an omniintelligence revision whose overlay schema accepts substitute votes and overflow endpoints"
+summary: "omnibase_infra pins omniintelligence at 64b95097 at six workflow sites and in .github/sibling-pins.yaml, and the Hostile Reviewer passes cli_review the pull request head with --head-sha. The review voters overlay model forbids unknown keys, so at 8782c050 an overlay that sets substitute_votes or a voter's overflow_endpoint_urls is refused and the Hostile Reviewer fails closed. At 64b95097 clean signed off-CI review receipts may stand in for a required voter that timed out or was unavailable (including an unavailable served-model read), read only for the head commit passed. This is a CI-workflow pin with no runtime effect."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-hostile-reviewer-omniintelligence-pin"
+    statement: "Every workflow site that clones omniintelligence names the sibling pin, and the pinned revision's overlay schema accepts substitute votes and overflow endpoints where the previous pin refuses them."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: every workflow clone of omniintelligence names the .github/sibling-pins.yaml revision, and the recorded overlay schema at that revision accepts substitute_votes and overflow endpoints that the control revision refuses -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q fails over the merge base's pin 8782c050, where the recorded pinned revision differs from the sibling pin"
+  - id: "req-review-passes-head-sha"
+    statement: "The review step passes cli_review the pull request's head commit, and the pinned gate substitutes receipts for a voter lost to a timeout or an unavailable endpoint where the previous pin covers only a timeout."
+    acceptance:
+      - id: "AC2"
+        statement: "AC2: the review step's HEAD_SHA is github.event.pull_request.head.sha and cli_review gets --head-sha \"$HEAD_SHA\"; the recorded pinned cli_review accepts --head-sha where the control does not, and the recorded pinned classifier substitutes for a timeout, a 503, a refused connection and an unavailable served-model read but not a 500 -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q -k 'head_sha or lost_voter' fails over the merge base's workflow, which passes no head"
+evidence_requirements:
+  - kind: "tests"
+    description: "The pin test passes at the head and fails over the merge base's pin."
+    command: "uv run pytest tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20947-ac1-omniintelligence-pin"
+    description: "AC1 hosted probe. Every omniintelligence clone in the workflows names the sibling pin, and the recorded schema at the pin accepts substitute votes and overflow endpoints."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn20947-ac2-review-passes-head-sha"
+    description: "AC2. The review step passes the pull request head with --head-sha, and the recorded pinned gate substitutes receipts for a voter lost to a timeout or an unavailable endpoint."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q -k 'head_sha or lost_voter'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]

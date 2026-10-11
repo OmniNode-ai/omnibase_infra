@@ -27,7 +27,7 @@
 
 set -euo pipefail
 
-HOST="${1:-jonah@192.168.86.201}"  # onex-allow-internal-ip OMN-17392 reason="the queue host is a fixed lab machine; the queue is host-local by construction"
+HOST="${1:?usage: deploy-push-lanes.sh <ssh-target> -- the queue host is deployment-specific and this repository ships none; pass the ssh target of your queue host (OMN-20931)}"
 DEST="push-lanes"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 

@@ -1,0 +1,10 @@
+{
+  "_provenance": {
+    "source": "docker inspect on an isolated lab lane (compose project omnibase-infra-omn19972) (Docker Engine 29.2.1, API 1.53): '{{.State.Health.Status}}' before 'docker stop', then the negative-control step's own format '{{.State.Status}} health={{.State.Health.Status}}' after it, on the tenant-projection-writer carrier started from this branch's local render; the carrier was restarted and read healthy again 165 s later",
+    "captured_utc": "2026-10-10T09:04:22Z",
+    "ticket": "OMN-19972"
+  },
+  "container": "omnibase-infra-omn19972-tenant-projection-writer",
+  "before_stop": "healthy",
+  "after_stop": "exited health=unhealthy"
+}

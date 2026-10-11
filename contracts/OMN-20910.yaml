@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20910"
+title: "Review-voter models are declared in a contract overlay, not repo variables or workflow files"
+summary: "A review voters overlay declares every Hostile Reviewer voter (endpoint, model selection, sampling, focus, timeout, required). Since OMN-20923 the overlay is a private CI overlay, not a file of this repository; hostile-reviewer.yml fetches it at run time and reads it through omniintelligence's cli_review --voters-overlay, and names no voter endpoint, port, model flag or endpoint variable. The quorum rule and the fail-closed gate are unchanged."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-overlay-declares-voters"
+    statement: "One contract overlay declares every review voter, and the gate resolves voters only from it."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1 (amended by OMN-20923): the review and preflight read the overlay from the private CI overlay, outside the pull request checkout -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'outside_the_workspace or reads_the_overlay or from_the_overlay'"
+  - id: "req-no-voter-endpoint-in-workflows"
+    statement: "No workflow file names a review voter endpoint, port, model flag or endpoint variable."
+    acceptance:
+      - id: "AC3"
+        statement: "AC3: a ratchet over every reviewer workflow finds no voter endpoint, port, model flag or endpoint variable, and finds all five lines of a known-bad fixture -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'ratchet or names_a_voter or retired_endpoint'"
+evidence_requirements:
+  - kind: "tests"
+    description: "The overlay and the workflow tests pass at the head."
+    command: "uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20910-ac1-overlay-declares-voters"
+    description: "The review and preflight read the overlay from the private CI overlay, outside the pull request checkout (amended by OMN-20923)."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'outside_the_workspace or reads_the_overlay or from_the_overlay'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn20910-ac3-no-voter-endpoint"
+    description: "No reviewer workflow names a voter endpoint; the ratchet's positive control finds the known-bad lines."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'ratchet or names_a_voter or retired_endpoint'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC3"]

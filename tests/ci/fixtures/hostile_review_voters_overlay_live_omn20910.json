@@ -1,0 +1,30 @@
+{
+  "_provenance": {
+    "source": "GET <base_url>/v1/models for every voter that omniintelligence load_review_voters (8782c050) resolved from the private CI overlay config/onex/overlays/node_review_voters_overlay_compute/overlay.yaml, from the operator Mac on the lab LAN",
+    "captured_utc": "2026-10-10T22:45:33Z",
+    "ticket": "OMN-20923",
+    "note": "base_url is recorded as the sha256 of the resolved URL (endpoint_sha256), so the fixture carries no lab address"
+  },
+  "voters": [
+    {
+      "voter_id": "correctness",
+      "required": true,
+      "resolved_from": "endpoint_url",
+      "http_status": 200,
+      "served_model_ids": [
+        "Qwen3.8-27B"
+      ],
+      "endpoint_sha256": "e95c1ca2c6dacd91ed50652eadd1a959a94ce8178b5df6b68e91b91e2fa531fe"
+    },
+    {
+      "voter_id": "security-contracts",
+      "required": true,
+      "resolved_from": "endpoint_url",
+      "http_status": 200,
+      "served_model_ids": [
+        "Qwen3.8-27B"
+      ],
+      "endpoint_sha256": "878259cc9e9254511813f5e42b17a56a9e5b6b325b5ff19da2a72949312e644b"
+    }
+  ]
+}

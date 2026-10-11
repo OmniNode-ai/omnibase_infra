@@ -10,16 +10,16 @@ requirements:
     statement: The Hostile Reviewer uses Qwen3.6-35B-A3B as its second voter alongside Qwen3.8-27B, with the existing review keys and quorum rule.
     acceptance:
       - id: AC1
-        statement: 'AC1: the recorded second-voter response identifies qwen3.6-35b-a3b and a completed reply, distinct from the first voter Qwen3.8-27B -- falsifier: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_second_voter_endpoint_serves_a_different_model_than_the_first'
+        statement: 'AC1: the recorded second-voter response identifies Qwen3.8-27B, the one model the Studio serves, and a completed reply (the footer no longer names a model since OMN-20910) -- falsifier: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_second_voter_endpoint_is_the_studio_single_served_model'
       - id: AC2
-        statement: 'AC2: the review and preflight read one job-level LLM_LOCAL_STUDIO_PLANNER_URL on port 8131 -- falsifier: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_review_and_preflight_share_one_second_voter_url_on_port_8131'
+        statement: 'AC2 (superseded by OMN-20910): the review and preflight read one review voters overlay and name no voter URL -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k from_the_overlay'
       - id: AC3
-        statement: 'AC3: qwen3-review and local-studio-planner remain the quorum keys -- falsifier: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_the_quorum_keys_are_unchanged'
+        statement: 'AC3 (superseded by OMN-20910): the voters are the overlay entries and the quorum rule is unchanged -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k reads_the_overlay'
   - id: req-reviewer-pin-and-key
     statement: The Hostile Reviewer clones omniintelligence at the dev tip that carries the failed-vote parse fix and the registry key rename, and every roster site names the renamed second voter.
     acceptance:
       - id: AC4
-        statement: 'AC4: sibling-pins.yaml and the hostile-reviewer clone name omniintelligence 30f37eca07b692d7889692edfe99686c87612315, and the retired gpt-oss-review key and its URL env var are gone -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_pin_omn20422.py -q'
+        statement: 'AC4 (superseded by OMN-20910): sibling-pins.yaml and the hostile-reviewer clone name one full omniintelligence sha that carries the parse fix and the voters overlay reader, and no retired endpoint variable is read -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k "pinned or retired_endpoint"'
   - id: req-omn20422-shadow-timer
     statement: The shadow reviewer tick runs from a lab-host user timer, never from a CI runner, and a stale or missing PR watcher state fails the tick visibly instead of reading as a quiet day.
     acceptance:
@@ -38,20 +38,20 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-20422-ac1
-    description: The recorded second-voter response identifies qwen3.6-35b-a3b and a completed reply, distinct from the first voter Qwen3.8-27B.
+    description: The recorded second-voter response identifies Qwen3.8-27B, the one model the Studio serves, and a completed reply, and the review comment footer names local-studio-planner with that model.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_second_voter_endpoint_serves_a_different_model_than_the_first
+        check_value: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_second_voter_endpoint_is_the_studio_single_served_model
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
   - id: dod-omn-20422-ac2
-    description: The review and preflight steps read one job-level LLM_LOCAL_STUDIO_PLANNER_URL on port 8131.
+    description: The review and preflight steps read one job-level LLM_LOCAL_STUDIO_PLANNER_URL from the repository variable.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_review_and_preflight_share_one_second_voter_url_on_port_8131
+        check_value: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k from_the_overlay
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
@@ -60,16 +60,16 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_hostile_review_second_voter_omn20422.py -q -k test_the_quorum_keys_are_unchanged
+        check_value: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k reads_the_overlay
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
   - id: dod-omn-20422-ac4
-    description: The omniintelligence pin is 30f37eca07b692d7889692edfe99686c87612315 (carries omniintelligence#1020), the renamed second voter is requested at every roster site, and both voters answer and parse on the pinned build per the recorded cli_review run.
+    description: Superseded by OMN-20910 -- the omniintelligence pin is one full sha carrying the parse fix and the voters overlay reader, and the workflow reads the voters from the overlay.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_hostile_reviewer_pin_omn20422.py -q
+        check_value: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k pinned
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
