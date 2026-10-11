@@ -1,13 +1,14 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-14186: contract-validation validates against the pinned OCC schema.
+"""OMN-14186: the pinned onex_change_control schema admits ``binds_ac``.
 
 ``validate-contract@main`` read onex_change_control ``main``, whose schema
 predates ``binds_ac`` and refused every contract that repo-evidence /
 dod-verify requires, so no PR with declared acceptance criteria could pass
-both. The workflow now checks the validators out at the onex_change_control
-sibling pin. The recording is the real validate-yaml output of both commits
-against this ticket's own contract.
+both. The recording is the real validate-yaml output of the sibling-pin commit
+and of ``main`` against this ticket's own contract. The workflow no longer
+reads onex_change_control at all (OMN-20074: it validates with omnibase_core's
+ModelTicketContract), so the recording stays as the history of that fix.
 """
 
 from __future__ import annotations
@@ -26,17 +27,6 @@ PINS = cast(
 )
 
 
-def _validator_checkout_ref() -> str:
-    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    steps = workflow["jobs"]["contract-validation"]["steps"]
-    [ref] = [
-        step["with"]["ref"]
-        for step in steps
-        if step.get("with", {}).get("repository") == "OmniNode-ai/onex_change_control"
-    ]
-    return cast("str", ref)
-
-
 @pytest.mark.live_contact(
     "tests/ci/fixtures/contract_validation_pinned_validator_omn14186.json"
 )
@@ -46,7 +36,6 @@ def test_the_pinned_validator_admits_binds_ac_that_main_refuses(
     runs = cast("dict[str, dict[str, object]]", recorded_response["response"])
     pinned, main = runs["pinned"], runs["main"]
     assert pinned["onex_change_control_sha"] == PINS["onex_change_control"]
-    assert pinned["onex_change_control_sha"] == _validator_checkout_ref()
     assert pinned["exit_code"] == 0
     assert main["exit_code"] == 1
     assert any(

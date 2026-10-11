@@ -382,16 +382,16 @@ def test_the_pr_title_clears_the_ticket_gate_and_arms_auto_merge() -> None:
 
 
 def test_the_leg_writes_only_the_census_file() -> None:
-    """Blast radius. A refresh PR that touched anything else would be unreviewable."""
+    """Blast radius. A refresh PR stages the census and its own ticket contract, nothing else."""
     body = _WORKFLOW.read_text(encoding="utf-8")
     added = [
         line.strip()
         for line in body.splitlines()
         if line.strip().startswith("git add ")
     ]
-    assert added == ["git add deploy/lane-census/census-snapshot.json"], (
-        f"the leg stages something other than the census: {added}"
-    )
+    assert added == [
+        "git add deploy/lane-census/census-snapshot.json contracts/OMN-18606.yaml"
+    ], f"the leg stages something other than the census: {added}"
 
 
 def test_end_to_end_from_a_fixture_census_rather_than_the_lab_host(

@@ -101,6 +101,28 @@ LANE_MIRROR_LANE_NETWORK=lane-b-network
 """
 
 
+@pytest.fixture(autouse=True)
+def _isolate_overlay_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep temporary-clone reads and writes independent of harness git paths."""
+    real_run = subprocess.run
+
+    def run(argv: list[str], **kwargs: Any) -> Any:
+        if argv[:2] == ["git", "-C"]:
+            repo = Path(argv[2])
+            if repo.is_relative_to(tmp_path):
+                argv = [
+                    "git",
+                    "--git-dir",
+                    str(repo / ".git"),
+                    "--work-tree",
+                    str(repo),
+                    *argv[1:],
+                ]
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
+
+
 def _git(repo: Path, *args: str) -> None:
     subprocess.run(
         ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
