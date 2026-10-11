@@ -18,7 +18,7 @@ evidence_requirements:
     description: Every contract in contracts/ loads through the strict loader.
     command: uv run pytest tests/ci/test_contracts_strict_load_omn20945.py -q -k every_contract_loads
   - kind: tests
-    description: The strict loader refuses a repeated key.
+    description: contracts/OMN-17427.yaml loads with one value per key, and its repaired item joined back to the next one, as it stood before the repair, is refused by the strict loader.
     command: uv run pytest tests/ci/test_contracts_strict_load_omn20945.py -q -k refuses_a_duplicate_key
 emergency_bypass:
   enabled: false
@@ -35,7 +35,7 @@ dod_evidence:
     binds_ac:
       - AC1
   - id: dod-contracts-strict-load-ac2
-    description: The focused test shows the strict loader refuses a repeated key.
+    description: The focused test loads contracts/OMN-17427.yaml through the strict loader and shows the loader refuses its repaired item rebuilt from that file with the removed key pair back in one mapping.
     source: manual
     checks:
       - check_type: test_passes
