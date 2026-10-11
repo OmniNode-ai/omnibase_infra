@@ -21,10 +21,10 @@ Security:
     - Response bodies are sanitized via ``sanitize_error_string()`` before
       inclusion in error context or exception messages, preventing accidental
       leakage of secrets or PII through error propagation paths.
-    - CIDR allowlist (default: ``192.168.86.0/24``, configurable via
-      ``LLM_ENDPOINT_CIDR_ALLOWLIST``) restricts local outbound LLM calls to the
-      local network trust boundary. Authenticated cloud providers must use HTTPS
-      and match an exact hostname in ``LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST``.
+    - CIDR allowlist (required, no default: ``LLM_ENDPOINT_CIDR_ALLOWLIST``)
+      restricts local outbound LLM calls to the local network trust boundary.
+      Authenticated cloud providers must use HTTPS and match an exact hostname
+      in ``LLM_CLOUD_ENDPOINT_HOST_ALLOWLIST``.
       Requests outside these declared boundaries are rejected before any HTTP
       call is made (fail-closed).
     - HMAC-SHA256 request signing using the ``LOCAL_LLM_SHARED_SECRET``
@@ -121,7 +121,7 @@ def _parse_cidr_allowlist() -> tuple[IPv4Network, ...]:
         msg = (
             "LLM_ENDPOINT_CIDR_ALLOWLIST is required but not set. "
             "Add it to ~/.omnibase/.env "
-            "(e.g. LLM_ENDPOINT_CIDR_ALLOWLIST=192.168.86.0/24)"
+            "(e.g. LLM_ENDPOINT_CIDR_ALLOWLIST=192.0.2.0/24)"
         )
         raise RuntimeError(msg)
     parsed: list[IPv4Network] = []
@@ -210,7 +210,7 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
 
             async def execute_effect(self, input_data):
                 result = await self._execute_llm_http_call(
-                    url="http://192.168.86.201:8000/v1/chat/completions",
+                    url="http://192.0.2.10:8000/v1/chat/completions",
                     payload={"messages": [...]},
                     correlation_id=input_data.correlation_id,
                 )
@@ -223,7 +223,8 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
     #: CIDR networks defining the local LLM trust boundary.
     #: Only endpoints within these networks are permitted.
     #: Configurable via the ``LLM_ENDPOINT_CIDR_ALLOWLIST`` environment variable
-    #: (comma-separated CIDR ranges). Defaults to ``192.168.86.0/24``.
+    #: (comma-separated CIDR ranges).
+    #: There is no default: an unset variable is refused.
     #:
     #: .. important:: Configuration reload asymmetry
     #:
@@ -488,9 +489,9 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
             resolves the same hostname moments later.
 
             This is acceptable for the current local-network trust boundary
-            (``192.168.86.0/24``) where DNS is resolved by a trusted local
-            resolver and endpoints are on a private LAN segment not exposed to
-            the public internet. If the trust boundary is extended to untrusted
+            (the CIDRs in ``LLM_ENDPOINT_CIDR_ALLOWLIST``) where DNS is
+            resolved by a trusted local resolver and endpoints are on a private
+            LAN segment not exposed to the public internet. If the trust boundary is extended to untrusted
             networks, this method should be replaced with an approach that pins
             the resolved IP and passes it directly to the HTTP client (e.g.,
             via httpx transport-level address binding).
@@ -611,8 +612,8 @@ class MixinLlmHttpTransport(MixinAsyncCircuitBreaker, MixinRetryExecution):
             call share the same signature value.
 
             This is acceptable for the current local-network trust boundary
-            (``192.168.86.0/24``) where traffic stays on a private LAN segment
-            not exposed to the public internet. The HMAC serves as a proof-of-
+            (the CIDRs in ``LLM_ENDPOINT_CIDR_ALLOWLIST``) where traffic stays
+            on a private LAN segment not exposed to the public internet. The HMAC serves as a proof-of-
             origin to prevent accidental cross-service calls, not as a defense
             against active network attackers. If the trust boundary is extended
             to untrusted networks, the signing scheme should be upgraded to

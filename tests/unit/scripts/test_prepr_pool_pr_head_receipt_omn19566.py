@@ -47,7 +47,7 @@ def _load(name: str, path: Path) -> Any:
 pool = _load("prepr_runtime_pool", POOL_PY)
 fakes = _load("prepr_runtime_pool_fakes_omn19566", POOL_TESTS)
 receipts = pool._receipts()
-CFG = pool.load_pool_config()
+CFG = pool.load_pool_config(fakes.POOL_FIXTURE)
 NOW = dt.datetime(2026, 9, 28, 10, 0, tzinfo=dt.UTC)
 
 HEAD = "1" * 40
@@ -95,11 +95,11 @@ def _run(
     out = tmp_path / "receipts"
     code, text = pool.run_proof(
         CFG,
-        fakes.FakeTransport({"lab-101": host}),
+        fakes.FakeTransport({"pool-a": host}),
         _params(tmp_path),
         "plan-item-I7",
         60,
-        "lab-101",
+        "pool-a",
         [],
         now_fn=lambda: NOW,
         log=lambda s: None,
@@ -138,7 +138,7 @@ def test_a_pass_mints_an_accepted_receipt_keyed_by_the_exact_head(
     assert subject.profile_id == "omnimarket.runtime_image"
     assert subject.profile_version == "1"
     assert subject.handler_kind is receipts.EnumLabProofHandlerKind.RUNTIME_IMAGE
-    assert subject.runner_identity == "plan-item-I7@lab-101"
+    assert subject.runner_identity == "plan-item-I7@pool-a"
     assert subject.verifier_identity == "prepr_runtime_pool.judge@test-mac"
     # the receipt speaks the profile vocabulary, so the profile can judge it
     names = {c.name for c in receipt.checks}
@@ -189,7 +189,7 @@ def test_a_changed_path_no_runtime_mentions_fails_the_proof(tmp_path: Path) -> N
 
 
 def test_a_runner_that_is_its_own_verifier_is_refused(tmp_path: Path) -> None:
-    _, text, _, events = _run(tmp_path, verifier="PLAN-ITEM-I7@lab-101")
+    _, text, _, events = _run(tmp_path, verifier="PLAN-ITEM-I7@pool-a")
     assert events[0]["verifier_token"] == "RUNNER_IS_VERIFIER"
     assert "verifier=RUNNER_IS_VERIFIER" in text
 
@@ -203,8 +203,8 @@ def test_the_default_verifier_is_never_the_runner(tmp_path: Path) -> None:
     assert subject["verifier_identity"] != subject["runner_identity"]
     # published on public repositories: no machine name, no LAN address
     assert socket.gethostname() not in json.dumps(found[0])
-    assert subject["host"] == "lab-101"
-    assert "192.168." not in json.dumps(found[0])
+    assert subject["host"] == "pool-a"
+    assert CFG.host("pool-a").ssh_target not in json.dumps(found[0])
 
 
 def test_a_failing_proof_still_leaves_a_fail_receipt(tmp_path: Path) -> None:
@@ -219,11 +219,11 @@ def test_a_failing_proof_still_leaves_a_fail_receipt(tmp_path: Path) -> None:
     out = tmp_path / "fail"
     code, _text = pool.run_proof(
         CFG,
-        fakes.FakeTransport({"lab-101": host}),
+        fakes.FakeTransport({"pool-a": host}),
         _params(tmp_path),
         "plan-item-I7",
         60,
-        "lab-101",
+        "pool-a",
         [],
         now_fn=lambda: NOW,
         log=lambda s: None,

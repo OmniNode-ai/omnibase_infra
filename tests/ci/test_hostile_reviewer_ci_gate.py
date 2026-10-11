@@ -116,20 +116,17 @@ def test_hostile_reviewer_gate_blocks_on_failed_review() -> None:
     assert "exit 1" in script
 
 
-def test_hostile_review_job_uses_live_local_models() -> None:
-    """The gate targets live local models (OMN-14176). Since OMN-17492 those
-    are two DIFFERENT models: qwen3-review (.201) and local-studio-planner (.200).
-    qwen3-review-b named the same .201 model as qwen3-review, so it is no
-    longer a voter; test_hostile_review_distinct_reviewers_omn17492.py pins
-    the full roster."""
+def test_hostile_review_job_reads_its_voters_from_the_overlay() -> None:
+    """The gate's voters come from the review voters overlay (OMN-20910), not
+    from --model flags in this workflow; the full rules are in
+    test_hostile_reviewer_voters_overlay_omn20910.py."""
     workflow = _load_yaml(HOSTILE_REVIEWER_WORKFLOW)
     review_job = workflow["jobs"]["hostile-review"]
     steps = review_job["steps"]
     review_step = next(s for s in steps if s.get("name") == "Run adversarial review")
     script = review_step["run"]
-    assert "--model qwen3-review " in script
-    assert "--model local-studio-planner" in script
-    assert "--model qwen3-review-b" not in script
+    assert '--voters-overlay "$REVIEW_VOTERS_OVERLAY"' in script
+    assert "--model" not in script
 
 
 def test_hostile_review_wires_shared_secret_from_ci_secrets() -> None:
