@@ -36,6 +36,11 @@ requirements:
     acceptance:
       - id: AC5
         statement: 'AC5: the kernel-wired poller publishes no poll-cycle summary; an unconfigured or not-yet-due tick publishes nothing -- falsifier: uv run pytest tests/integration/runtime/test_github_pr_poller_publishes_only_status_events.py -q'
+  - id: req-omn20867-lane-mirror-deploy-step
+    statement: After the runtime phase is verified, the deploy agent of a dev-fenced process with a deployment overlay clone starts the lane-mirror forwarders the overlay enables, on the lane runtime image, and reports per forwarder whether it is ready without changing the deploy verdict, and an instance that routes omnibase_infra rebuilds to another instance follows the omnibase_infra dev head.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: handle_lane_mirror returns a typed no-op for an absent overlay, an absent directory, a lane network no vars file names and a vars file enabling no profile, starts each enabled profile with the lane runtime image id, reports a failed receipt for an unhealthy, exited or wrong-image forwarder, a refused compose up and a missing credential map, never changes the deploy verdict, runs only on a dev-fenced agent with a clone, and idle converge follows the omnibase_infra dev head on an instance that routes omnibase_infra elsewhere -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_mirror_phase_omn20867.py -q -p no:randomly'
 evidence_requirements:
   - kind: tests
     description: The scheduler wiring test covers the dev lane overlay.
@@ -133,6 +138,22 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -c '^x-runtime-passthrough-env:'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20867-lane-mirror-deploy-step
+    description: The lane-mirror step tests are added by this pull request and fail on the merge base, where deploy_agent.instance_lanes has no EnumLaneMirrorOutcome and the test file fails collection, and pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_mirror_phase_omn20867.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
+  - id: dod-omn20867-lane-mirror-deploy-probe
+    description: Deploy probe. The deploy agent module at the checked-out commit carries the lane-mirror handler this change adds; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base. The readout after the dev lane agent rolls to this commit is the lane_mirror field of the terminal rebuild-completed event reporting capacity-a ready.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/deploy-agent/deploy_agent/instance_lanes.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'def handle_lane_mirror'
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn-20867-ac5
     description: The kernel-wired GitHub PR poller publishes only PR status events, and nothing on a tick that polls nothing.

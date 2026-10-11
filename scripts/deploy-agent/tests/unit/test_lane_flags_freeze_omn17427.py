@@ -150,7 +150,8 @@ def _committed(consumer: DeployConsumer) -> list[int]:
 def _inputs(**overrides: Any) -> ModelIdleConvergeInputs:
     values: dict[str, Any] = {
         "now": QUIET,
-        "omnimarket_routed_elsewhere": True,
+        "repository": "omnimarket",
+        "routed_elsewhere": True,
         "job_active": False,
         "last_activity": QUIET - IDLE_AFTER,
         "running_ref": RUNNING,
@@ -307,8 +308,8 @@ def _agent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> DeployAgent:
     agent.executor = cast("Any", _FakeExecutor())
     agent._idle_converge_started_at = QUIET - timedelta(hours=1)
     agent._idle_converge_now = lambda: QUIET
-    agent._idle_read_running_ref = lambda: RUNNING
-    agent._idle_read_head_ref = lambda: HEAD
+    agent._idle_read_running_ref = lambda repo: RUNNING
+    agent._idle_read_head_ref = lambda repo: HEAD
     agent._idle_probe_blocker = lambda now: None
     agent._lane_flags = ModelLaneFlags()
     return agent
