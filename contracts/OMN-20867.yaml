@@ -196,7 +196,7 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
-  - id: dod-omn20867-mirror-source-consume-only-deploy-probe
+  - id: dod-omn20867-mirror-consume-only-deploy-probe
     description: Deploy probe. The Kafka transport module at the checked-out commit carries the consume-only constructor assignment this change adds; the probe reads it from GitHub at that commit, tests the decoded content inside jq and exits nonzero on a tree without it, so it fails at the merge base. The readout after the deploy agent rolls the image is the capacity-a lane mirror container reaching healthy with its read-only source login and no InitProducerId authorization error in its log.
     source: manual
     checks:
