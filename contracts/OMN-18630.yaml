@@ -1,0 +1,37 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-18630"
+title: "Each baselined mkdir lock site carries a verdict, and the two defect sites write a holder record"
+summary: "The governed-helper gate baseline judges every lock-without-holder-record site. Two sites were verdicted defect: the flock-less fallback of docker/runners/runner-monitor.sh and the flock-less fallback of scripts/ci/ensure_ci_env.sh. Both now write the holder (pid host started) into the lock directory, name it when they skip or wait, and the ensure_ci_env.sh wait is bounded by OMNI_CI_ENV_LOCK_TIMEOUT_SECONDS; their baseline verdicts become benign. The gate pattern no longer matches mkdir -p, which cannot exclude a second taker, so the ensure_ci_env.sh lock-directory entry leaves the baseline."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-lock-sites-carry-verdicts"
+    statement: "Every baselined lock-without-holder-record site carries a verdict and a reason, the baseline can only shrink, and mkdir -p is not read as a lock acquisition."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: the governed-helper gate exits 0 on the tree against the base ref, the lock pair refuses a bare mkdir lock and does not match mkdir -p -- falsifier: uv run pytest tests/ci/test_governed_helper_gate.py -q -k mkdir_dash_p fails over the merge base's policy, whose bare_pattern matches mkdir -p"
+evidence_requirements:
+  - kind: "tests"
+    description: "The governed-helper gate tests pass at the head."
+    command: "uv run pytest tests/ci/test_governed_helper_gate.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn18630-ac1-gate-and-pattern"
+    description: "AC1. The gate tests pass, including the mkdir -p pattern pin with its positive control."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_governed_helper_gate.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn18630-gate-on-tree"
+    description: "The governed-helper gate exits 0 on the tree against the base ref."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "python3 scripts/ci/governed_helper_gate.py --base-ref origin/dev"
+        cwd: "${OMNI_HOME}/omnibase_infra"
