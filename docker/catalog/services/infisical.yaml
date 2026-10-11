@@ -18,6 +18,16 @@ operational_defaults:
   # OMN-13417: dev lane host port is 8881 so `onex up core` no longer collides
   # with the stability-test lane infisical (host 8880) on a shared host.
   SITE_URL: http://localhost:8881
+  # OMN-20999: see docker-compose.infra.yml for why these are empty by default
+  # and for the v0.146 name verification. Blank SMTP_HOST means email off, which
+  # is the current behaviour of every lane.
+  SMTP_HOST: '${INFISICAL_SMTP_HOST:-}'
+  SMTP_PORT: '${INFISICAL_SMTP_PORT:-587}'
+  SMTP_USERNAME: '${INFISICAL_SMTP_USERNAME:-}'
+  SMTP_PASSWORD: '${INFISICAL_SMTP_PASSWORD:-}'
+  SMTP_FROM_ADDRESS: '${INFISICAL_SMTP_FROM_ADDRESS:-}'
+  SMTP_FROM_NAME: '${INFISICAL_SMTP_FROM_NAME:-OmniNode}'
+  SMTP_REQUIRE_TLS: '${INFISICAL_SMTP_REQUIRE_TLS:-true}'
 ports:
   external: 8881
   internal: 8080
