@@ -608,9 +608,11 @@ async def test_process_starts_both_legs_and_cleans_readiness(
             topics: Sequence[str],
             auto_offset_reset: str,
             refused_topic_retry_seconds: float | None = None,
+            consume_only: bool = False,
         ) -> None:
             super().__init__(config=config, group=group, topics=topics)
             self.refused_topic_retry_seconds = refused_topic_retry_seconds
+            assert not consume_only
             instances.append(self)
 
     class _StoreFactory(_FakeStore):

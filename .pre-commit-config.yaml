@@ -23,6 +23,13 @@
 repos:
   - repo: local
     hooks:
+      - id: mirror-source-consume-only
+        name: Mirror source consume-only regression (OMN-20867)
+        entry: uv run --frozen pytest tests/integration/gateway/test_mirror_source_consume_only_omn20867.py -q
+        language: system
+        pass_filenames: false
+        files: ^(src/omnibase_infra/(event_bus/kafka_transport|runtime/gateway_forwarder)\.py|tests/integration/gateway/test_mirror_source_consume_only_omn20867\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        stages: [pre-commit]
       - id: lab-reconcile-model-evidence
         name: Reviewed lab reconcile model evidence (OMN-19421)
         entry: uv run --frozen pytest tests/ci/test_lab_reconcile_model.py -q --no-cov
