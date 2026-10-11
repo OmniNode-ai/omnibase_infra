@@ -1,0 +1,62 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19566
+title: A lab-proof receipt is judged against the checks its own diff can be held to
+summary: The omnibase_infra and omnimarket runtime proof profiles make changed_path_live and forwarder_refused_topic conditional on the PR's changed paths, the lab pool derives changed_path_live from the changed nodes, and the lab-proof-receipt workflow resolves the conditional checks from the PR's own diff, so a green pin or lock bump is ACCEPTED and a node or forwarder change is still held to the check.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19566-conditional-checks
+    statement: A profile variant may declare a check as conditional on changed-path globs; the pin makes it mandatory when the PR's diff touches one of them, and an unread or empty diff makes every conditional check mandatory.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a pin or lock bump is not held to changed_path_live or forwarder_refused_topic, a node change is held to changed_path_live, a forwarder change to forwarder_refused_topic, an unread or empty diff waives nothing, and a malformed or overlapping conditional row is refused -- falsifier: uv run pytest tests/unit/scripts/ci/test_lab_proof_conditional_checks_omn19566.py -q'
+  - id: req-omn19566-workflow-diff
+    statement: The lab-proof-receipt workflow reads the PR's changed paths from its own clone and pins the profile against them, never against the dispatcher's word.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the workflow-path pin of a pin bump posts success for a receipt lacking changed_path_live, of a node change posts MISSING_MANDATORY_CHECK for the same receipt, and of an empty diff waives nothing -- falsifier: uv run pytest tests/unit/ci/test_pr_head_receipt_publication_omn19566.py -q'
+  - id: req-omn19566-prover-derives
+    statement: The lab pool prints each PR's changed paths beside its subject, derives one LIVE_GREP term per changed node that exists at the head, and mints each receipt against the profile resolved from that PR's own paths.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: a green pin advance is ACCEPTED, the same run without its paths is MISSING both checks, a live derived node term is ACCEPTED and a dead one FAILs naming the node, a forwarder change stays MISSING forwarder_refused_topic, and the host prints the paths the workflow reads -- falsifier: uv run pytest tests/unit/scripts/test_prepr_pool_pr_head_receipt_omn19566.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The conditional-check, workflow-path and pool-driver tests.
+    command: uv run pytest tests/unit/scripts/ci/test_lab_proof_conditional_checks_omn19566.py tests/unit/ci/test_pr_head_receipt_publication_omn19566.py tests/unit/scripts/test_prepr_pool_pr_head_receipt_omn19566.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19566-conditional-checks
+    description: The registry resolves conditional checks from the diff in both directions.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/ci/test_lab_proof_conditional_checks_omn19566.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn19566-workflow-diff
+    description: The workflow path pins against the PR's own changed paths.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/ci/test_pr_head_receipt_publication_omn19566.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -q -- '--changed-files' .github/workflows/lab-proof-receipt.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn19566-prover-derives
+    description: The lab pool mints each receipt against the profile resolved from that PR's paths and derives changed_path_live from changed nodes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_prepr_pool_pr_head_receipt_omn19566.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
