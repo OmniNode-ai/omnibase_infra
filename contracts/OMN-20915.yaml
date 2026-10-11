@@ -39,9 +39,13 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-omn-20915-deploy-probe
-    description: "Package and runtime-discovery probe for the omnibase_infra deletion half only. The moved and dead node directories, entry points, adapter and source imports are absent, and the runtime's real contract discovery and profile filter find none of the removed nodes. These checks fail against the merge-base source tree with this head's tests overlaid. The receiving nodes' deployment remains the omnimarket receiving pull request's proof; this item does not claim that they are deployed or that the complete move is finished."
+    description: "Read the published repository tree at the verifier's exact checkout SHA and require the moved and dead node directories, GitHub adapter and merge-sweep workflow to be absent. Refuse a truncated response and require the retained merge-gate contract as a non-empty-tree control. The tests separately exercise package entry points, imports and real runtime contract discovery. This proves the deletion artifact only; the receiving nodes' live deployment remains the receiving pull request's proof."
     source: manual
     checks:
+      - check_type: command
+        check_value: >-
+          gh api "repos/OmniNode-ai/omnibase_infra/git/trees/$(git rev-parse HEAD)?recursive=1" | python -c 'import json, sys; tree = json.load(sys.stdin); assert tree.get("truncated") is False, "incomplete GitHub tree"; paths = {entry["path"] for entry in tree["tree"]}; root = "src/omnibase_infra/"; removed = ("node_github_pr_poller_effect", "node_github_webhook_ingress_effect", "node_pr_state_projection_compute", "node_pr_state_write_effect", "node_merge_sweep_pr_list_effect", "node_merge_sweep_classify_compute", "node_merge_sweep_workflow_orchestrator", "node_merge_sweep_workflow_reducer", "node_merge_sweep_auto_merge_effect", "node_pr_label_effect", "node_pr_state_fetch_effect", "node_mergeability_orchestrator", "node_mergeability_evaluate_compute"); prefixes = tuple(root + "nodes/" + name + "/" for name in removed) + (root + "adapters/github/",); assert root + "nodes/node_merge_gate_effect/contract.yaml" in paths, "retained merge-gate contract missing"; offenders = sorted(path for path in paths if path.startswith(prefixes) or path == root + "workflows/merge_sweep_workflow.yaml"); assert not offenders, offenders; print("published deletion tree has no moved or dead GitHub node, adapter or workflow")'
+        cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: "uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q -p no:randomly"
         cwd: ${OMNI_HOME}/omnibase_infra
