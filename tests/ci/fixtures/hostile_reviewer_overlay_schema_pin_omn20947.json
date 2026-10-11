@@ -1,0 +1,265 @@
+{
+  "_provenance": {
+    "source": "omniintelligence ModelReviewVotersOverlay.model_json_schema() and review_pairing.model_registry_loader.load_review_voters, run from a lab host in a uv sync --locked environment of each listed omniintelligence revision, over the synthetic overlays below",
+    "captured_utc": "2026-10-11T04:46:31Z",
+    "ticket": "OMN-20947",
+    "pinned_revision": "f4bf0a1989fc37bd7ad9b4a7ad591f801d2a1070",
+    "control_revision": "8782c0507035e2cec20ccacbc404d32f894161b5",
+    "note": "voter hosts and reviewer logins are synthetic; each overlay is written with schema_version review_voters_overlay.v1 before loading"
+  },
+  "overlays": {
+    "voters_only": {
+      "voters": [
+        {
+          "voter_id": "correctness",
+          "endpoint_url": "http://voter-a.example.invalid:8000",
+          "required": true,
+          "timeout_seconds": 300
+        },
+        {
+          "voter_id": "security-contracts",
+          "endpoint_url": "http://voter-b.example.invalid:8000",
+          "required": true,
+          "timeout_seconds": 300
+        }
+      ]
+    },
+    "substitute_votes": {
+      "voters": [
+        {
+          "voter_id": "correctness",
+          "endpoint_url": "http://voter-a.example.invalid:8000",
+          "required": true,
+          "timeout_seconds": 300
+        },
+        {
+          "voter_id": "security-contracts",
+          "endpoint_url": "http://voter-b.example.invalid:8000",
+          "required": true,
+          "timeout_seconds": 300
+        }
+      ],
+      "substitute_votes": {
+        "reviewers": [
+          {
+            "reviewer_id": "offci-reviewer-a",
+            "github_logins": [
+              "example-reviewer-a"
+            ]
+          },
+          {
+            "reviewer_id": "offci-reviewer-b",
+            "github_logins": [
+              "example-reviewer-b"
+            ]
+          }
+        ],
+        "receipts_per_vote": 2,
+        "receipt_max_age_seconds": 86400,
+        "signing_key_env": "REVIEW_RECEIPT_SIGNING_KEY"
+      }
+    },
+    "overflow_endpoints": {
+      "voters": [
+        {
+          "voter_id": "correctness",
+          "endpoint_url": "http://voter-a.example.invalid:8000",
+          "required": true,
+          "timeout_seconds": 300
+        },
+        {
+          "voter_id": "security-contracts",
+          "endpoint_url": "http://voter-b.example.invalid:8000",
+          "required": true,
+          "timeout_seconds": 300,
+          "overflow_endpoint_urls": [
+            "http://voter-overflow.example.invalid:8000"
+          ],
+          "overflow_after_seconds": 180
+        }
+      ]
+    },
+    "substitute_votes_and_overflow": {
+      "voters": [
+        {
+          "voter_id": "correctness",
+          "endpoint_url": "http://voter-a.example.invalid:8000",
+          "required": true,
+          "timeout_seconds": 300
+        },
+        {
+          "voter_id": "security-contracts",
+          "endpoint_url": "http://voter-b.example.invalid:8000",
+          "required": true,
+          "timeout_seconds": 300,
+          "overflow_endpoint_urls": [
+            "http://voter-overflow.example.invalid:8000"
+          ],
+          "overflow_after_seconds": 180
+        }
+      ],
+      "substitute_votes": {
+        "reviewers": [
+          {
+            "reviewer_id": "offci-reviewer-a",
+            "github_logins": [
+              "example-reviewer-a"
+            ]
+          },
+          {
+            "reviewer_id": "offci-reviewer-b",
+            "github_logins": [
+              "example-reviewer-b"
+            ]
+          }
+        ],
+        "receipts_per_vote": 2,
+        "receipt_max_age_seconds": 86400,
+        "signing_key_env": "REVIEW_RECEIPT_SIGNING_KEY"
+      }
+    }
+  },
+  "revisions": {
+    "f4bf0a1989fc37bd7ad9b4a7ad591f801d2a1070": {
+      "schema": {
+        "overlay_properties": [
+          "backend_overlay",
+          "schema_version",
+          "substitute_votes",
+          "voters"
+        ],
+        "voter_properties": [
+          "api_model_id",
+          "backend_id",
+          "constrain_findings_schema",
+          "enable_thinking",
+          "endpoint_url",
+          "max_retries",
+          "model_id_source",
+          "overflow_after_seconds",
+          "overflow_endpoint_urls",
+          "reasoning_effort",
+          "required",
+          "review_focus",
+          "temperature",
+          "timeout_seconds",
+          "top_p",
+          "voter_id"
+        ],
+        "substitute_vote_policy_properties": [
+          "receipt_max_age_seconds",
+          "receipts_per_vote",
+          "reviewers",
+          "signing_key_env"
+        ]
+      },
+      "loaded": {
+        "voters_only": {
+          "ok": true,
+          "error": "",
+          "voter_ids": [
+            "correctness",
+            "security-contracts"
+          ],
+          "overflow_endpoint_count": 0,
+          "substitute_reviewer_ids": []
+        },
+        "substitute_votes": {
+          "ok": true,
+          "error": "",
+          "voter_ids": [
+            "correctness",
+            "security-contracts"
+          ],
+          "overflow_endpoint_count": 0,
+          "substitute_reviewer_ids": [
+            "offci-reviewer-a",
+            "offci-reviewer-b"
+          ]
+        },
+        "overflow_endpoints": {
+          "ok": true,
+          "error": "",
+          "voter_ids": [
+            "correctness",
+            "security-contracts"
+          ],
+          "overflow_endpoint_count": 1,
+          "substitute_reviewer_ids": []
+        },
+        "substitute_votes_and_overflow": {
+          "ok": true,
+          "error": "",
+          "voter_ids": [
+            "correctness",
+            "security-contracts"
+          ],
+          "overflow_endpoint_count": 1,
+          "substitute_reviewer_ids": [
+            "offci-reviewer-a",
+            "offci-reviewer-b"
+          ]
+        }
+      }
+    },
+    "8782c0507035e2cec20ccacbc404d32f894161b5": {
+      "schema": {
+        "overlay_properties": [
+          "backend_overlay",
+          "schema_version",
+          "voters"
+        ],
+        "voter_properties": [
+          "api_model_id",
+          "backend_id",
+          "constrain_findings_schema",
+          "enable_thinking",
+          "endpoint_url",
+          "max_retries",
+          "model_id_source",
+          "reasoning_effort",
+          "required",
+          "review_focus",
+          "temperature",
+          "timeout_seconds",
+          "top_p",
+          "voter_id"
+        ],
+        "substitute_vote_policy_properties": []
+      },
+      "loaded": {
+        "voters_only": {
+          "ok": true,
+          "error": "",
+          "voter_ids": [
+            "correctness",
+            "security-contracts"
+          ],
+          "overflow_endpoint_count": 0,
+          "substitute_reviewer_ids": []
+        },
+        "substitute_votes": {
+          "ok": false,
+          "error": "overlay <overlay> failed validation: substitute_votes: Extra inputs are not permitted",
+          "voter_ids": [],
+          "overflow_endpoint_count": 0,
+          "substitute_reviewer_ids": []
+        },
+        "overflow_endpoints": {
+          "ok": false,
+          "error": "review voter 'security-contracts': overlay <overlay> failed validation: voters.1.overflow_endpoint_urls: Extra inputs are not permitted; voters.1.overflow_after_seconds: Extra inputs are not permitted",
+          "voter_ids": [],
+          "overflow_endpoint_count": 0,
+          "substitute_reviewer_ids": []
+        },
+        "substitute_votes_and_overflow": {
+          "ok": false,
+          "error": "review voter 'security-contracts': overlay <overlay> failed validation: voters.1.overflow_endpoint_urls: Extra inputs are not permitted; voters.1.overflow_after_seconds: Extra inputs are not permitted; substitute_votes: Extra inputs are not permitted",
+          "voter_ids": [],
+          "overflow_endpoint_count": 0,
+          "substitute_reviewer_ids": []
+        }
+      }
+    }
+  }
+}
