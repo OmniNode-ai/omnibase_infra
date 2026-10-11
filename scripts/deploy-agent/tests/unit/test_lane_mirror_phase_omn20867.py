@@ -45,6 +45,7 @@ from deploy_agent.events import (
 from deploy_agent.idle_converge import (
     IDLE_CONVERGE_REQUESTER,
     EnumIdleConvergeVerdict,
+    EnumRuntimePresence,
     converge_command,
     read_running_ref,
 )
@@ -526,6 +527,11 @@ def _agent_as(
     heads = {"omnimarket": "e" * 40, "omnibase_infra": INFRA_HEAD}
     running = {"omnimarket": "e" * 40, "omnibase_infra": INFRA_RUNNING}
     agent._idle_read_running_ref = lambda repo: running[repo]
+    # OMN-20864: the lane's runtime is running, so the restore rule stays out.
+    agent._idle_read_runtime_presence = lambda: (
+        EnumRuntimePresence.RUNNING,
+        "omninode-runtime is running",
+    )
     agent._idle_read_head_ref = lambda repo: heads[repo]
     agent._idle_probe_blocker = lambda now: None
     agent._lane_flags = ModelLaneFlags()
