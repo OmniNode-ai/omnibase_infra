@@ -126,3 +126,12 @@ dod_evidence:
       - check_type: command
         check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -c '^x-runtime-passthrough-env:'
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20867-ci-run-failed-topic-set
+    description: AC4, CI failure topic-set slice. The contract names exactly the ci-run-failed topic in ci_run_failed, and the loader selects it together with pr_state without selecting lab_capacity. The two focused tests fail on the merge base's forwarder contract, which has no ci_run_failed topic set, and pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_gateway_forwarder_mirror_only_omn20867.py -q -p no:randomly -k ci_run_failed
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
