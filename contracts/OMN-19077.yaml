@@ -42,7 +42,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/observability/runner_health/test_runner_fleet_config.py::test_runner_compose_reconciled_to_the_spread_60_fleet tests/ci/test_runner_kubeconfig_mount.py::test_every_fleet_service_has_the_kubeconfig_env_var tests/ci/test_runner_kubeconfig_mount.py::test_every_fleet_service_has_the_readonly_kubeconfig_mount tests/ci/test_runner_kubeconfig_mount.py::test_the_mount_is_read_only tests/ci/test_runner_local_llm_secret_env_omn18415.py::test_every_fleet_service_carries_the_local_llm_shared_secret tests/ci/test_runner_listener_liveness.py::TestFleetCanaryFunctional::test_canary_sums_every_declared_action_pool -q --no-cov
+        check_value: uv run pytest tests/unit/observability/runner_health/test_runner_fleet_config.py tests/ci/test_runner_kubeconfig_mount.py tests/ci/test_runner_local_llm_secret_env_omn18415.py tests/ci/test_runner_listener_liveness.py -k "test_runner_compose_reconciled_to_the_spread_60_fleet or test_every_fleet_service_has_the_kubeconfig_env_var or test_every_fleet_service_has_the_readonly_kubeconfig_mount or test_the_mount_is_read_only or test_every_fleet_service_carries_the_local_llm_shared_secret or test_canary_sums_every_declared_action_pool" -q --no-cov
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
