@@ -204,7 +204,7 @@ jobs:
             rm -rf ../omniintelligence
             if git clone --filter=blob:none --no-checkout \
               https://github.com/OmniNode-ai/omniintelligence.git ../omniintelligence \
-              && git -C ../omniintelligence checkout --quiet 8782c0507035e2cec20ccacbc404d32f894161b5; then # .github/sibling-pins.yaml
+              && git -C ../omniintelligence checkout --quiet 64b950973a5686d33e0b439fb80749d66362d06d; then # .github/sibling-pins.yaml
               exit 0
             fi
             sleep $((attempt * 10))
@@ -413,6 +413,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
+          # The pull request's head commit, never the merge ref this job checks
+          # out: a signed off-CI review receipt is bound to the head its
+          # reviewer read, and cli_review lets one stand in for a timed-out or
+          # unavailable voter only for exactly this commit, and only when the
+          # voters overlay declares substitute_votes (OMN-20947).
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           LOCAL_LLM_SHARED_SECRET: ${{ secrets.LOCAL_LLM_SHARED_SECRET }}
           REVIEW_JSON_PATH: ${{ github.workspace }}/hostile-review-result.json
         working-directory: ../omniintelligence
@@ -433,6 +439,7 @@ jobs:
           uv run python -m omniintelligence.review_pairing.cli_review \
             --pr "$PR_NUMBER" \
             --repo "$REPO" \
+            --head-sha "$HEAD_SHA" \
             --voters-overlay "$REVIEW_VOTERS_OVERLAY" \
             --output "$REVIEW_JSON_PATH" \
             2> >(tee hostile-reviewer-stderr.log >&2) || REVIEW_EXIT=$?

@@ -67,7 +67,7 @@ import asyncio
 import logging
 import random
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import redis.asyncio as redis
@@ -102,6 +102,21 @@ logger = logging.getLogger(__name__)
 # The event_type every runtime-tick subscriber routes on (handler_routing
 # ``event_type: platform.runtime-tick`` in each subscribing contract).
 RUNTIME_TICK_EVENT_TYPE = "platform.runtime-tick"
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def next_tick_slot(after: datetime, tick_interval_ms: int) -> datetime:
+    """The first epoch-aligned slot of ``tick_interval_ms`` strictly after ``after``.
+
+    OMN-20867: the tick loop is due on these slots. A tick carries the slot it was
+    due on as ``scheduled_at`` and the next tick is due on the first slot after its
+    ``now``, so the spans ``(scheduled_at - tick_interval, now]`` of consecutive
+    ticks tile the clock however late the loop wakes. A consumer that gates a
+    window on that span fires each window start on the slot grid exactly once.
+    """
+    slot = timedelta(milliseconds=tick_interval_ms)
+    return _EPOCH + ((after.astimezone(UTC) - _EPOCH) // slot + 1) * slot
 
 
 class RuntimeScheduler(MixinAsyncCircuitBreaker):
@@ -373,15 +388,21 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
     # Core Methods
     # =========================================================================
 
-    async def emit_tick(self, now: datetime | None = None) -> None:
+    async def emit_tick(
+        self,
+        now: datetime | None = None,
+        *,
+        scheduled_at: datetime | None = None,
+    ) -> None:
         """Emit a single tick immediately.
 
-        This method emits a RuntimeTick event outside the normal interval loop.
-        It is primarily used for testing and manual intervention.
+        The tick loop calls this with the slot the tick was due on; a direct call
+        (testing, manual intervention) emits a tick scheduled for its own ``now``.
 
         Args:
             now: Optional override for current time. If None, uses actual
                 current time (datetime.now(timezone.utc)).
+            scheduled_at: The slot this tick was due on. If None, ``now``.
 
         Raises:
             InfraUnavailableError: When the circuit breaker is open.
@@ -407,7 +428,7 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
             now=tick_time,
             tick_id=tick_id,
             sequence_number=current_sequence,
-            scheduled_at=tick_time,
+            scheduled_at=scheduled_at or tick_time,
             correlation_id=correlation_id,
             scheduler_id=self.scheduler_id,
             tick_interval_ms=self._config.tick_interval_ms,
@@ -587,6 +608,12 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
         This method runs as a background task and continuously emits ticks
         until the shutdown event is set. It handles jitter and graceful
         shutdown.
+
+        OMN-20867: each tick is due on an epoch-aligned slot (``next_tick_slot``)
+        and carries that slot as ``scheduled_at``. Waiting a whole interval after
+        each publish made the real period the interval plus jitter plus publish
+        time, so a consumer gating on ``now`` alone lost whole windows. A tick whose
+        publish failed hands its slot to the next tick, so no slot goes uncovered.
         """
         logger.debug(
             "Tick loop started",
@@ -596,10 +623,13 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
             },
         )
 
+        tick_interval_ms = self._config.tick_interval_ms
+        due = next_tick_slot(datetime.now(UTC), tick_interval_ms)
+        unpublished: datetime | None = None
         try:
             while not self._shutdown_event.is_set():
-                # Calculate interval with jitter
-                interval_seconds = self._config.tick_interval_ms / 1000.0
+                # Wait until the slot this tick is due on, plus jitter
+                interval_seconds = max(0.0, (due - datetime.now(UTC)).total_seconds())
                 if self._config.max_tick_jitter_ms > 0:
                     jitter_ms = random.randint(0, self._config.max_tick_jitter_ms)
                     interval_seconds += jitter_ms / 1000.0
@@ -620,10 +650,19 @@ class RuntimeScheduler(MixinAsyncCircuitBreaker):
                 if self._shutdown_event.is_set():
                     break
 
+                tick_time = datetime.now(UTC)
+                if tick_time < due:
+                    # Woke before the slot: wait out the remainder.
+                    continue
+                scheduled_at = unpublished or due
+                due = next_tick_slot(tick_time, tick_interval_ms)
+
                 # Emit tick (errors are logged but don't crash the loop)
                 try:
-                    await self.emit_tick()
+                    await self.emit_tick(now=tick_time, scheduled_at=scheduled_at)
+                    unpublished = None
                 except Exception as e:
+                    unpublished = scheduled_at
                     # Log but don't crash the loop
                     logger.exception(
                         "Error in tick loop, continuing",

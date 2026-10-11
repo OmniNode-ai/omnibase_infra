@@ -5,8 +5,8 @@
 
 OMN-16871. ``onex delegate --bus kafka`` with no explicit broker used to let
 ``EventBusKafka`` read ``KAFKA_BOOTSTRAP_SERVERS``. On the launching Mac that
-variable is ``192.168.86.201:39092``  # onex-allow-internal-ip OMN-16871 reason="forensic quote of the ambient value this module removes from the resolution path; not a configurable endpoint"
--- the STABILITY-TEST lane's external Redpanda listener, not the dev lane's
+variable named a governed proof lane's broker
+-- its external Redpanda listener, not the dev lane's
 ``:19092``. So every ad hoc delegation from a developer shell published onto a
 governed proof lane, and the lane's own consumer-group list recorded it: four
 ``local.omnibase_core.runtime_local_terminal_run_*`` groups belonging to CLI

@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 from click.testing import CliRunner
 
@@ -16,6 +17,15 @@ from omnibase_infra.models.environment.model_machine_registry import (
     EnumMachineRole,
     ModelMachineEntry,
 )
+
+
+@pytest.fixture(autouse=True)
+def _infra_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OMNI_INFRA_HOST", "192.0.2.10")
+    monkeypatch.delenv("POSTGRES_HOST", raising=False)
+    monkeypatch.delenv("VALKEY_HOST", raising=False)
+    monkeypatch.delenv("KAFKA_BOOTSTRAP_SERVERS", raising=False)
+
 
 EXPECTED_ENV_KEYS = {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",
@@ -95,7 +105,7 @@ class TestRenderSettingsJson:
     def test_fleet_constants(self) -> None:
         result = render_settings_json(_make_entry())
         assert result["env"]["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] == "1"
-        assert result["env"]["OMNI_INFRA_HOST"] == "192.168.86.201"
+        assert result["env"]["OMNI_INFRA_HOST"] == "192.0.2.10"
         assert result["model"] == "opus[1m]"
 
     def test_no_null_env_values(self) -> None:
