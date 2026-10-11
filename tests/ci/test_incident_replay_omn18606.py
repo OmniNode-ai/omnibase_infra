@@ -48,8 +48,14 @@ _FIXTURES = _REPO / "tests" / "fixtures" / "omn18606"
 _STALE_CENSUS = _FIXTURES / "stale-census-snapshot-2e4eec05.json.captured"
 _INSTALLED_DROPIN = _FIXTURES / "installed-dropin-no-snapshot.conf.captured"
 _CENSUS_SH = _SCRIPTS / "lane-census-check.sh"
-_REPO_DROPIN = (
-    _REPO / "deploy" / "lane-census" / "onex-disk-gc.service.d" / "20-lane-census.conf"
+# The collector argv the hourly lane-census units carry after the script path.
+# The units are lab configuration and ship from the operator's private config
+# root (OMN-20933); that repository's tests pin each unit's ExecStart to exactly
+# this argv. Spelled here, not read from there, so this test runs everywhere.
+_FIXED_DROPIN_ARGV = (
+    "--snapshot",
+    "%h/.local/state/onex/census-snapshot.json",
+    "--memory",
 )
 
 sys.path.insert(0, str(_SCRIPTS))
@@ -143,15 +149,6 @@ def test_the_dropin_actually_installed_on_the_host_could_not_write_a_census() ->
     )
 
 
-def test_the_repo_dropin_now_carries_an_output_destination() -> None:
-    """The fixed configuration, for contrast with the captured one."""
-    argv = _exec_start_argv(_REPO_DROPIN.read_text(encoding="utf-8"))
-    assert "--snapshot" in argv, f"the shipped drop-in still writes no census: {argv}"
-    assert argv[argv.index("--snapshot") + 1].endswith(".json"), (
-        f"--snapshot must name a destination file: {argv}"
-    )
-
-
 def test_the_real_collector_accepts_the_fixed_dropins_argv(tmp_path: Path) -> None:
     """Drive the REAL script with the fixed drop-in's flags and prove it parses.
 
@@ -169,8 +166,7 @@ def test_the_real_collector_accepts_the_fixed_dropins_argv(tmp_path: Path) -> No
     unit test's business. Exit 2 is the parse refusal and is the only outcome
     this test rejects; any other exit means the argv was accepted.
     """
-    argv = _exec_start_argv(_REPO_DROPIN.read_text(encoding="utf-8"))
-    flags = list(argv[argv.index("--snapshot") :])
+    flags = list(_FIXED_DROPIN_ARGV)
     flags[flags.index("--snapshot") + 1] = str(tmp_path / "unreachable.json")
 
     empty_path = tmp_path / "empty-bin"
