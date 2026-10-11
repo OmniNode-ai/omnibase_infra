@@ -49,6 +49,7 @@ def test_strict_loader_refuses_a_duplicate_key() -> None:
     items = load_yaml_mapping_no_duplicates(text, source=OMN_17427.name)[
         "evidence_requirements"
     ]
+    assert isinstance(items, list)
     commands = [item["command"] for item in items]
     assert commands.count(REPAIRED_COMMAND) == 1
     repaired = commands.index(REPAIRED_COMMAND)
