@@ -172,6 +172,9 @@ class _FakeExecutor:
         self.calls.append("verify")
         return []
 
+    def run_lane_mirror(self, **kwargs: object) -> None:
+        return None
+
     def deploy_and_verify(self, **kwargs: object) -> list[object]:
         self.calls.append("deploy_and_verify")
         return []
