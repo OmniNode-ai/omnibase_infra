@@ -42,6 +42,15 @@ def test_redpanda_advertises_the_neutral_default() -> None:
 
 @pytest.mark.unit
 def test_deploy_push_lanes_refuses_without_a_target(tmp_path: Path) -> None:
+    # ssh and scp are stubs that fail at once, so a script that still falls
+    # back to a host never reaches it: it fails fast here instead of hanging
+    # on a connect or copying files to a real machine.
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    for name in ("ssh", "scp"):
+        stub = stubs / name
+        stub.write_text("#!/bin/sh\nexit 97\n", encoding="utf-8")
+        stub.chmod(0o755)
     result = subprocess.run(
         ["bash", str(DEPLOY_PUSH_LANES)],
         capture_output=True,
@@ -49,7 +58,7 @@ def test_deploy_push_lanes_refuses_without_a_target(tmp_path: Path) -> None:
         timeout=30,
         check=False,
         cwd=tmp_path,
-        env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+        env={"PATH": f"{stubs}:/usr/bin:/bin", "HOME": str(tmp_path)},
     )
     assert result.returncode != 0
     assert "usage: deploy-push-lanes.sh <ssh-target>" in result.stderr
