@@ -1692,3 +1692,143 @@ def test_live_repository_visibility_uses_a_gh_cli_flag_that_actually_exists(
     # out of scope for a merge-gating placement check.
     assert "--no-archived" in captured_args[0]
     assert result == [("a-private-repo", True), ("a-public-repo", False)]
+
+
+class _GhResult:
+    def __init__(self, stdout: str, returncode: int = 0, stderr: str = "") -> None:
+        self.stdout = stdout
+        self.returncode = returncode
+        self.stderr = stderr
+
+
+def _workflow_tree(*entries: dict[str, object]) -> str:
+    return json.dumps({"data": {"repository": {"object": {"entries": list(entries)}}}})
+
+
+def _blob(name: str, text: str, **flags: object) -> dict[str, object]:
+    return {
+        "name": name,
+        "path": f".github/workflows/{name}",
+        "type": "blob",
+        "object": {"text": text, "isBinary": False, "isTruncated": False, **flags},
+    }
+
+
+def test_workflow_texts_cost_one_graphql_read_per_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-20864: a repository's workflows are ONE read, however many files.
+
+    The contents API read cost one REST call per workflow file plus a listing.
+    This pass runs in every omnibase_infra CI run on CROSS_REPO_PAT, the
+    operator's token, and across the org's private repositories (the largest
+    carries about a hundred workflows) it spent the operator's hourly
+    core quota on 2026-10-11 (job 114569998935: rate limit exceeded for the
+    operator's user id), which stopped the landing controller with QUOTA.
+    """
+    module = _load_script()
+    calls: list[list[str]] = []
+    many = [_blob(f"w{i}.yml", f"name: w{i}\n") for i in range(100)]
+
+    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
+        calls.append(args)
+        return _GhResult(_workflow_tree(*many))
+
+    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
+
+    texts = module._default_branch_workflow_texts("a-private-repo")
+
+    assert len(calls) == 1
+    assert calls[0][:2] == ["api", "graphql"]
+    assert "owner=OmniNode-ai" in calls[0] and "name=a-private-repo" in calls[0]
+    assert not any("contents/" in part for part in calls[0])
+    assert len(texts) == 100
+    assert texts[".github/workflows/w7.yml"] == "name: w7\n"
+
+
+def test_workflow_texts_keep_only_yaml_blobs(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_script()
+    tree = _workflow_tree(
+        _blob("ci.yml", "a: 1\n"),
+        _blob("deploy.yaml", "b: 2\n"),
+        _blob("README.md", "docs\n"),
+        {"name": "nested.yml", "path": ".github/workflows/nested.yml", "type": "tree"},
+    )
+    monkeypatch.setattr(module, "_run_gh", lambda args, timeout=20: _GhResult(tree))
+
+    assert module._default_branch_workflow_texts("a-private-repo") == {
+        ".github/workflows/ci.yml": "a: 1\n",
+        ".github/workflows/deploy.yaml": "b: 2\n",
+    }
+
+
+def test_a_repository_without_a_workflows_directory_reads_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    body = json.dumps({"data": {"repository": {"object": None}}})
+    monkeypatch.setattr(module, "_run_gh", lambda args, timeout=20: _GhResult(body))
+
+    assert module._default_branch_workflow_texts("a-private-repo") == {}
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        _GhResult("", returncode=1, stderr="gh: API rate limit exceeded"),
+        _GhResult(json.dumps({"data": {"repository": None}})),
+        _GhResult(_workflow_tree(_blob("big.yml", "x", isTruncated=True))),
+        _GhResult(
+            _workflow_tree(
+                {
+                    "name": "bin.yml",
+                    "path": ".github/workflows/bin.yml",
+                    "type": "blob",
+                    "object": {"text": None, "isBinary": True, "isTruncated": False},
+                }
+            )
+        ),
+    ],
+    ids=["read-failed", "no-repository", "truncated", "no-text"],
+)
+def test_an_unread_workflow_raises_instead_of_reading_clean(
+    monkeypatch: pytest.MonkeyPatch, result: _GhResult
+) -> None:
+    """A failed or partial read is never an empty, passing repository (rule 16)."""
+    module = _load_script()
+    monkeypatch.setattr(module, "_run_gh", lambda args, timeout=20: result)
+
+    with pytest.raises(RuntimeError, match="graphql workflow read"):
+        module._default_branch_workflow_texts("a-private-repo")
+
+
+def test_each_variable_list_is_read_once_per_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-20864: the seam audit and the scoped audit share one read per list."""
+    module = _load_script()
+    calls: list[list[str]] = []
+
+    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
+        calls.append(args)
+        return _GhResult(json.dumps([{"name": "X", "value": "1"}]))
+
+    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
+
+    for _ in range(3):
+        assert module._variables(["--org", "OmniNode-ai"]) == [
+            {"name": "X", "value": "1"}
+        ]
+        module._variables(["--repo", "OmniNode-ai/omnibase_infra"])
+
+    assert calls == [
+        ["variable", "list", "--org", "OmniNode-ai", "--json", "name,value"],
+        [
+            "variable",
+            "list",
+            "--repo",
+            "OmniNode-ai/omnibase_infra",
+            "--json",
+            "name,value",
+        ],
+    ]

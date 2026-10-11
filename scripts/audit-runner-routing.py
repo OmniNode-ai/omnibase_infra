@@ -17,7 +17,6 @@ a later one).
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import re
 import subprocess
@@ -132,7 +131,19 @@ def _run_gh(args: list[str], timeout: int = 20) -> subprocess.CompletedProcess[s
     )
 
 
+# OMN-20864: the seam audit and the scoped-variable audit read the same org and
+# repository variable lists in one run; each list is read from GitHub once.
+_VARIABLES_READ: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+
+
 def _variables(args: list[str]) -> list[dict[str, Any]]:
+    key = tuple(args)
+    if key not in _VARIABLES_READ:
+        _VARIABLES_READ[key] = _read_variables(args)
+    return _VARIABLES_READ[key]
+
+
+def _read_variables(args: list[str]) -> list[dict[str, Any]]:
     result = _run_gh(
         [
             "variable",
@@ -510,39 +521,95 @@ def _live_repository_visibility(org: str = ORG) -> list[tuple[str, bool]]:
     return [(str(item["name"]), bool(item["isPrivate"])) for item in values]
 
 
+# OMN-20864: one GraphQL read returns every file of a repository's default-branch
+# workflows directory with its text, so the per-repository cost is one call however
+# many workflows it has. The contents API needed one call per file (the largest
+# private repository has about a hundred), and this pass runs inside every omnibase_infra CI run
+# on CROSS_REPO_PAT, the operator's token: on 2026-10-11 it spent the operator's
+# shared hourly core quota, and the landing controller stopped with QUOTA.
+WORKFLOW_TREE_QUERY = """
+query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    object(expression: "HEAD:.github/workflows") {
+      ... on Tree {
+        entries {
+          name
+          path
+          type
+          object {
+            ... on Blob {
+              text
+              isBinary
+              isTruncated
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
 def _default_branch_workflow_texts(repo_name: str, org: str = ORG) -> dict[str, str]:
     """Fetch every default-branch ``.github/workflows/*.yml``/``.yaml`` file's text.
 
-    OMN-18365 AC3: reads live content through the GitHub contents API rather
-    than a local checkout, because the private-repo hosted-placement check
-    runs against every private repository in the org, not just this
-    repository's own clone. A repository with no workflows directory (or no
-    workflows at all) is not a finding-worthy condition and returns ``{}``.
+    OMN-18365 AC3: reads live content from GitHub rather than a local checkout,
+    because the private-repo hosted-placement check runs against every private
+    repository in the org, not just this repository's own clone. A repository
+    with no workflows directory (or no workflows at all) is not a
+    finding-worthy condition and returns ``{}``.
+
+    OMN-20864: the read is ONE GraphQL query per repository, never one REST
+    call per file. A failed read raises instead of reading as an empty, clean
+    repository, and a file whose text GitHub truncated or did not return
+    raises too: an unread workflow is not a passing one.
     """
-    listing = _run_gh(["api", f"repos/{org}/{repo_name}/contents/.github/workflows"])
-    if listing.returncode != 0:
+    result = _run_gh(
+        [
+            "api",
+            "graphql",
+            "-f",
+            f"query={WORKFLOW_TREE_QUERY}",
+            "-f",
+            f"owner={org}",
+            "-f",
+            f"name={repo_name}",
+        ]
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"gh api graphql workflow read for {repo_name} failed: "
+            f"{result.stderr.strip()}"
+        )
+    payload = json.loads(result.stdout or "{}")
+    repository = (payload.get("data") or {}).get("repository")
+    if not isinstance(repository, dict):
+        raise RuntimeError(
+            f"gh api graphql workflow read for {repo_name} returned no repository"
+        )
+    tree = repository.get("object")
+    if tree is None:
         return {}
-    entries = json.loads(listing.stdout or "[]")
+    entries = tree.get("entries") if isinstance(tree, dict) else None
     if not isinstance(entries, list):
         raise RuntimeError(
-            f"gh api contents listing for {repo_name} returned a non-list payload"
+            f"gh api graphql workflow read for {repo_name} returned a non-list payload"
         )
     texts: dict[str, str] = {}
     for entry in entries:
         name = str(entry.get("name", ""))
-        if not name.endswith((".yml", ".yaml")):
+        if entry.get("type") != "blob" or not name.endswith((".yml", ".yaml")):
             continue
-        path = str(entry.get("path", f".github/workflows/{name}"))
-        content_result = _run_gh(
-            ["api", f"repos/{org}/{repo_name}/contents/{path}", "--jq", ".content"]
-        )
-        if content_result.returncode != 0:
+        path = str(entry.get("path") or f".github/workflows/{name}")
+        blob = entry.get("object") or {}
+        text = blob.get("text")
+        if blob.get("isBinary") or blob.get("isTruncated") or not isinstance(text, str):
             raise RuntimeError(
-                f"gh api content fetch for {repo_name}:{path} failed: "
-                f"{content_result.stderr.strip()}"
+                f"gh api graphql workflow read for {repo_name}:{path} returned no "
+                "complete text"
             )
-        encoded = content_result.stdout.replace("\n", "")
-        texts[path] = base64.b64decode(encoded).decode("utf-8")
+        texts[path] = text
     return texts
 
 
