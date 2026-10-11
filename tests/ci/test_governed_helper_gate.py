@@ -165,6 +165,20 @@ def test_a_new_bare_occurrence_is_refused_and_the_governed_form_is_not(
     )
 
 
+def test_mkdir_dash_p_is_not_a_lock_acquisition(tmp_path: Path) -> None:
+    """OMN-18630: `mkdir -p` succeeds on an existing directory, so it excludes nobody."""
+    policy = gate.load_policy(POLICY_PATH)
+    empty = gate.Baseline(entries=())
+
+    (tmp_path / "mk.sh").write_text('mkdir -p "${lock_dir}"\n', encoding="utf-8")
+    assert gate.scan(policy, empty, tmp_path, ["mk.sh"]).new == []
+
+    # POSITIVE CONTROL: the same path without -p is still refused.
+    (tmp_path / "mk.sh").write_text('mkdir "${lock_dir}"\n', encoding="utf-8")
+    refused = gate.scan(policy, empty, tmp_path, ["mk.sh"])
+    assert [f.pair_id for f in refused.new] == ["lock-without-holder-record"]
+
+
 def test_the_refusal_names_the_file_the_line_the_pair_and_the_helper(
     tmp_path: Path,
 ) -> None:
@@ -430,9 +444,9 @@ def test_a_baseline_entry_without_a_verdict_reason_is_refused(tmp_path: Path) ->
 
 
 def test_every_shipped_baseline_entry_carries_a_verdict_and_a_reason() -> None:
-    """AC7 on the committed artifact: all 12 remaining baselined sites are judged."""
+    """AC7 on the committed artifact: all 11 remaining baselined sites are judged."""
     baseline = gate.load_baseline(BASELINE_PATH)
-    assert sum(entry.occurrences for entry in baseline.entries) == 12
+    assert sum(entry.occurrences for entry in baseline.entries) == 11
     for entry in baseline.entries:
         assert entry.verdict in gate.VERDICTS, entry
         assert entry.verdict_reason.strip(), entry
