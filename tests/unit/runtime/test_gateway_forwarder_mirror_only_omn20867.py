@@ -121,6 +121,29 @@ def test_contract_names_the_two_landing_topic_sets() -> None:
     )
 
 
+def test_contract_names_the_ci_run_failed_topic_set() -> None:
+    """Red triage on a mirror lane needs CI-failed events, and only those."""
+    assert _topic_set("ci_run_failed") == (
+        "onex.evt.omnimarket.ci-run-failed.v1",  # onex-topic-allow: OMN-20867
+    )
+
+
+def test_loader_selects_pr_state_and_ci_run_failed_together(tmp_path: Path) -> None:
+    config = _load(
+        _mirror_only_overlay(
+            tmp_path, topic_sets=["pr_state", "ci_run_failed"], mirror_lanes=["lane-b"]
+        ),
+        tmp_path,
+    )
+
+    lane_mirror = config.forwarder.lane_mirror
+    assert lane_mirror is not None
+    assert set(lane_mirror.topics) == set(_topic_set("pr_state")) | set(
+        _topic_set("ci_run_failed")
+    )
+    assert set(lane_mirror.topics).isdisjoint(_topic_set("lab_capacity"))
+
+
 def test_loader_resolves_a_mirror_only_overlay_without_any_cloud_input(
     tmp_path: Path,
 ) -> None:
@@ -255,10 +278,12 @@ class _RecordingTransport:
         topics: Sequence[str],
         auto_offset_reset: str,
         refused_topic_retry_seconds: float | None = None,
+        consume_only: bool = False,
     ) -> None:
         self.config = config
         self.group = group
         self.topics = tuple(topics)
+        self.consume_only = consume_only
         self.started = False
         self.closed = False
         self.sent: list[tuple[str, bytes | None, bytes]] = []
@@ -394,8 +419,10 @@ async def test_mirror_only_process_republishes_the_selected_set_and_nothing_else
     }
     source = by_group[source_group]
     assert source.topics == (capacity_topic,)
+    assert source.consume_only
     for lane in _MIRROR_LANES:
         producer = by_group[f"tenant-{_TENANT_SLUG}-gateway-lane-mirror-{lane}"]
+        assert not producer.consume_only
         assert [topic for topic, _key, _value in producer.sent] == [capacity_topic]
     # The record outside the selected set is committed past, never republished.
     assert source.committed == [inside, outside]
