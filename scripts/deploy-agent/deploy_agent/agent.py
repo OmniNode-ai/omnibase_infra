@@ -66,6 +66,7 @@ from deploy_agent.executor import (
     resolve_prod_target_service,
     restore_rollback_point,
     select_dev_instance,
+    set_lane_overlay_clone,
 )
 from deploy_agent.health import create_health_app
 from deploy_agent.host_slot import (
@@ -389,6 +390,10 @@ class DeployAgent:
             # Selected here, once, before anything reads a lane config; an
             # instance with no composition refuses start (ValueError).
             select_dev_instance(self._router.instance.name)
+            # OMN-20867: the instance's lane env fragment is read from the
+            # clone the lab-overlay apply archives from, so there is one answer
+            # to which deployment overlay this host deploys.
+            set_lane_overlay_clone(LAB_OVERLAY_SOURCE_DIR)
         # OMN-19509. The idle converge's state and its reads, each a seam a test
         # replaces. See _maybe_idle_converge.
         self._idle_converge_started_at = datetime.now(UTC)

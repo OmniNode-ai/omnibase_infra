@@ -6,28 +6,47 @@ is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn20867-lane-env-fragment
+    statement: The deploy agent's compose env and the dev lane's warm refresh overlay the operator env store with the per-lane env fragment read from the deployment overlay clone at origin/dev, and a process with no clone, no fragment, or a fence wider than the dev lane applies none, while a fragment outside the schema's allowlist is refused.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: the fragment reader allows exactly the six act switches, refuses a key outside the allowlist or a malformed fragment by name, reads the ref and not the working tree, and compose env overlays exactly the fragment keys for a dev-fenced agent only -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q'
   - id: req-omn20867-dev-lane-tick
     statement: The dev lane's main runtime opts in to the runtime scheduler and no secondary role on that lane carries the switch.
     acceptance:
       - id: AC1
         statement: 'AC1: the dev lane overlay sets the flag on omninode-runtime only and joins the opted-in overlay set -- falsifier: uv run pytest tests/unit/runtime/test_runtime_scheduler_wiring.py -q'
+  - id: req-omn20867-mirror-only-forwarder
+    statement: The gateway forwarder runs with a source lane and mirror lanes and no cloud leg, republishing only the topic set a deployment names, and the shipped contract names the lab capacity and PR state sets.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: the config loader resolves a mirror-only overlay with no cloud input, selects only the named topic set, refuses a config with neither leg, and the process republishes one record of the selected set to each mirror lane and fails loudly if the mirror loop dies -- falsifier: uv run pytest tests/unit/runtime/test_gateway_forwarder_mirror_only_omn20867.py -q -p no:randomly'
   - id: req-omn20867-tick-slot
     statement: Each runtime tick carries the epoch-aligned slot it was due on as scheduled_at, and consecutive ticks tile the clock even when a publish runs late or fails.
     acceptance:
       - id: AC2
         statement: 'AC2: the tick loop stamps scheduled_at with the slot it was due on and schedules the next tick for the first slot after this tick''s now, so no schedule window is lost to a late tick -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/runtime/test_runtime_scheduler.py tests/integration/runtime/test_runtime_tick_slot_alignment_omn20867.py -q'
+  - id: req-omn20867-lane-act-switch-passthrough
+    statement: The runtime services that merge the shared runtime environment pass the six per-lane act switches of the landing orchestrator and CI-red triage through value-less, so a host value that is unset stays unset in the container and a host value that is set reaches it verbatim.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: x-runtime-passthrough-env names the six act switches with no value, no switch is interpolated, and every service that merges x-runtime-env also merges it -- falsifier: uv run pytest tests/ci/test_runtime_env_anchor.py -q -k RuntimeLaneActSwitchPassthrough'
   - id: req-omn20867-pr-status-poller
     statement: With the tick on, the GitHub PR poller publishes only PR status events to onex.evt.github.pr-status.v1, and a tick that polls nothing publishes nothing.
     acceptance:
-      - id: AC4
-        statement: 'AC4: the kernel-wired poller publishes no poll-cycle summary; an unconfigured or not-yet-due tick publishes nothing -- falsifier: uv run pytest tests/integration/runtime/test_github_pr_poller_publishes_only_status_events.py -q'
+      - id: AC5
+        statement: 'AC5: the kernel-wired poller publishes no poll-cycle summary; an unconfigured or not-yet-due tick publishes nothing -- falsifier: uv run pytest tests/integration/runtime/test_github_pr_poller_publishes_only_status_events.py -q'
 evidence_requirements:
   - kind: tests
     description: The scheduler wiring test covers the dev lane overlay.
     command: uv run pytest tests/unit/runtime/test_runtime_scheduler_wiring.py -q
   - kind: tests
+    description: The mirror-only forwarder tests cover the contract topic sets, the loader and the mirror-only process.
+    command: uv run pytest tests/unit/runtime/test_gateway_forwarder_mirror_only_omn20867.py -q -p no:randomly
+  - kind: tests
     description: The scheduler tests and the lane producer integration test prove each tick carries its slot and the ticks tile the clock under a slow or failed publish.
     command: env -u PYTHONPATH uv run --frozen pytest tests/unit/runtime/test_runtime_scheduler.py tests/integration/runtime/test_runtime_tick_slot_alignment_omn20867.py -q
+  - kind: tests
     description: The kernel-wired poller publishes only PR status events.
     command: uv run pytest tests/integration/runtime/test_github_pr_poller_publishes_only_status_events.py -q
 emergency_bypass:
@@ -35,6 +54,15 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn20867-lane-env-fragment
+    description: The fragment tests fail on the merge base, which has no fragment reader in deploy_agent.instance_lanes, and pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_lane_env_fragment_omn20867.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
   - id: dod-omn-20867-ac1
     description: The dev lane overlay sets ONEX_RUNTIME_SCHEDULER_ENABLED on omninode-runtime only.
     source: manual
@@ -47,6 +75,38 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn20867-mirror-only-topic-sets
+    description: AC4, loader and topic-set slice. The shipped forwarder contract names the lab capacity and PR state topic sets, the loader selects only the named set, honors an overlay's declared lanes and refuses a config with neither a cloud leg nor a mirror leg. The tests are added by this pull request and fail on the merge base, where neither topic set exists.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_gateway_forwarder_mirror_only_omn20867.py -q -p no:randomly -k 'topic_set or loader or overlay or declared or neither or cloud_selectors or ref_map'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn20867-mirror-only-process
+    description: AC4, process slice. The mirror-only process republishes one record of the selected set to each of two mirror lanes, commits past a record outside the set without republishing it, and fails loudly with every transport closed when the mirror loop dies. The tests are added by this pull request and fail on the merge base, where the entrypoint refuses a mirror-only config.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_gateway_forwarder_mirror_only_omn20867.py -q -p no:randomly -k mirror_only_process
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn20867-mirror-only-forwarder-deploy-probe
+    description: Deploy probe. The forwarder module at the checked-out commit carries the mirror-only entrypoint this change adds; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base. The readout after the deploy agent rolls the image is the runtime importing the module and the forwarder process with a mirror-only overlay reaching its ready file, with no cloud leg started.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/gateway_forwarder.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'async def _run_mirror_only_forwarder'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20867-mirror-only-contract-deploy-probe
+    description: Deploy probe. The forwarder node contract at the checked-out commit names the lab capacity topic set this change adds; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base. The readout after the deploy agent rolls it is the mirror process, started with a lab capacity selector, republishing the lab-host-capacity-advertised records to each mirror lane the deployment overlay declares.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_bus_forwarder_effect/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'lab_capacity:'
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn-20867-ac2-tick-slot
     description: The runtime tick carries the slot it was due on; ticks tile the clock when a publish runs late or fails (omnibase_infra#4815).
     source: manual
@@ -58,7 +118,23 @@ dod_evidence:
         check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/runtime_scheduler.py?ref=b2a709fc04bddd6aea3cf134b870898ddb71f850' --jq .content | base64 -d | grep -F 'scheduled_at=scheduled_at or tick_time' >/dev/null
     binds_ac:
       - AC2
-  - id: dod-omn-20867-ac4
+  - id: dod-omn20867-lane-act-switch-passthrough
+    description: The anchor test class fails on the merge base's compose file, which has no x-runtime-passthrough-env, and passes at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runtime_env_anchor.py -q -p no:randomly -k RuntimeLaneActSwitchPassthrough
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn20867-lane-act-switch-deploy-probe
+    description: Deploy probe. docker/docker-compose.infra.yml at the checked-out commit declares the x-runtime-passthrough-env anchor, the file the deploy agent renders for the runtime services; the probe reads it from GitHub at that commit and exits nonzero on a tree without the anchor. The dev-lane readout after the deploy agent rolls it is the six switch names in the environment of the omninode-runtime container, each unset on a lane that sets none.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -c '^x-runtime-passthrough-env:'
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-20867-ac5
     description: The kernel-wired GitHub PR poller publishes only PR status events, and nothing on a tick that polls nothing.
     source: manual
     checks:
@@ -66,14 +142,13 @@ dod_evidence:
         check_value: uv run pytest tests/integration/runtime/test_github_pr_poller_publishes_only_status_events.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC4
-  - id: dod-omn-20867-ac4-deploy
-    description: The deployed dev lane runtime carries the poller fix, so it has the PR status poll event model and no longer has the poll-cycle summary model.
+      - AC5
+  - id: dod-omn-20867-ac5-deploy
+    description: Deploy probe. The PR status poll event model at the checked-out commit exists; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base. The readout after the deploy agent rolls the image is the dev lane runtime importing that model and no longer finding the poll-cycle summary model module.
     source: manual
     checks:
       - check_type: command
-        check_value: >-
-          docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c "import importlib.util as u; from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_pr_status_poll_event import ModelGitHubPrStatusPollEvent; assert u.find_spec('omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_poller_result') is None"
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_github_pr_poller_effect/models/model_github_pr_status_poll_event.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'class ModelGitHubPrStatusPollEvent'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC4
+      - AC5
