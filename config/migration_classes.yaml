@@ -289,6 +289,8 @@ migrations:
   forward/nodes/node_projection_intent_classification/0001_intent_classification_agent_source.sql: expand-only
   forward/nodes/node_projection_intent_classification/0002_grant_omninode_runtime_intent_classification_events.sql: expand-only
   forward/nodes/node_projection_intent_classification/0003_grant_omninode_runtime_intent_classification_sequence.sql: expand-only
+  forward/nodes/node_projection_lab_job/0000_create_lab_job.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.lab_job_state)
+  forward/nodes/node_projection_lab_job/0001_grant_omninode_runtime_lab_job.sql: expand-only # additive
   forward/nodes/node_projection_lab_lane_health/0000_create_lab_lane_health.sql: forward-only # ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_lab_lane_health/0001_grant_omninode_runtime_lab_lane_health.sql: expand-only
   forward/nodes/node_projection_lab_proof_receipts/0000_create_lab_proof_receipts.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.lab_proof_receipts)
