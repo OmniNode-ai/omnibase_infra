@@ -5,9 +5,6 @@
 
 from __future__ import annotations
 
-# OMN-19566 planted negative control for the lab proof; reverted in the next commit.
-raise ImportError("OMN-19566 planted negative control: this handler must fail to wire")
-
 import json
 import logging
 from collections.abc import Callable, Sequence
