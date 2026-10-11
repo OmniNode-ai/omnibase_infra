@@ -47,11 +47,11 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-omn-20933-deploy
-    description: The two lab compose files are absent from docker/ at the pull request head, read live from GitHub. Red at the merge base, where docker/ lists both.
+    description: The two lab compose files are absent from docker/ in the checked-out tree. Red at the merge base, where docker/ lists both.
     source: manual
     checks:
       - check_type: command
-        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker?ref=6175bc44aa4c35545fa4162cc19e5601af3ec5ae' --jq '[.[].name | select(. == "docker-compose.dns-canary.yml" or . == "docker-compose.infisical-stability.yml")] | length' | grep -qx 0
+        check_value: test ! -e docker/docker-compose.dns-canary.yml && test ! -e docker/docker-compose.infisical-stability.yml
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
