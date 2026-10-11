@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21000"
+title: "onex scm job-log is refused by the dev broker: developer principal grants declare no github-repo-gateway read command, completed terminal or scm caller group"
+summary: "onex scm job-log (and every github-repo-gateway read verb) failed with TopicAuthorizationFailedError on the gateway completed terminal, because deploy/lab/developer-principal-grants.yaml declared neither gateway read topic nor the scm caller group, so lanes fell back to gh api log reads. This change declares exactly the three grants the read path uses: the read command (write, describe), the completed terminal (read, describe) and the prefixed caller group local.omnimarket.scm_command_client.consume.v1. (read, describe). The write node's topics stay undeclared."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-scm-read-grants-declared"
+    statement: "A developer principal's declared grants admit the onex scm gateway read path and nothing on the write node."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: deploy/lab/developer-principal-grants.yaml declares the gateway read command (write, describe), the gateway completed terminal (read, describe) and the prefixed group local.omnimarket.scm_command_client.consume.v1. (read, describe), literal topic names only, and no write-node topic -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -k scm_read_caller fails at the merge base and passes at the head"
+evidence_requirements:
+  - kind: "tests"
+    description: "The grant declaration test pins the three scm read grants and the absence of write-node grants."
+    command: "uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21000-ac1-scm-read-grants"
+    description: "The developer principal grant file declares the scm gateway read command, its completed terminal and the scm caller group, and the issuer accepts the file."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k scm_read_caller"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
