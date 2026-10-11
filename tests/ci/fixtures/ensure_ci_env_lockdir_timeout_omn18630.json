@@ -1,0 +1,12 @@
+{
+  "_provenance": {
+    "source": "scripts/ci/ensure_ci_env.sh executed under a PATH without flock against a leaked lock directory (bash, OMNI_CI_ENV_LOCK_TIMEOUT_SECONDS=0)",
+    "captured_utc": "2026-10-11T10:43:47.029465+00:00",
+    "transport": "subprocess /bin/bash scripts/ci/ensure_ci_env.sh"
+  },
+  "response": {
+    "returncode": 1,
+    "stderr": "::error::Timed out waiting for shared CI env lock <LOCKDIR>; holder (pid host started): 4242 leaked-host 2026-10-11T00:00:00Z. If that pid is gone on that host, remove the lock directory.",
+    "lock_left_in_place": true
+  }
+}

@@ -25,8 +25,8 @@ from omnibase_infra.nodes.node_github_pr_poller_effect.handlers import (
 from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_poller_config import (
     ModelGitHubPollerConfig,
 )
-from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_poller_result import (
-    ModelGitHubPollerResult,
+from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_pr_status_poll_event import (
+    ModelGitHubPrStatusPollEvent,
 )
 from omnibase_infra.runtime.auto_wiring import discover_contracts_from_paths
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
@@ -91,13 +91,13 @@ async def test_github_api_poll_golden_chain(
     bus = EventBusInmemory(environment="test", group="github-api-poll-golden-chain")
     await bus.start()
     try:
-        observed_results: asyncio.Queue[ModelGitHubPollerResult] = asyncio.Queue()
+        observed_results: asyncio.Queue[ModelGitHubPrStatusPollEvent] = asyncio.Queue()
         correlation_id = UUID("44444444-4444-4444-8444-444444444444")
 
         async def collect_result(message: ModelEventMessage) -> None:
-            envelope = ModelEventEnvelope[ModelGitHubPollerResult].model_validate_json(
-                message.value
-            )
+            envelope = ModelEventEnvelope[
+                ModelGitHubPrStatusPollEvent
+            ].model_validate_json(message.value)
             if envelope.correlation_id == correlation_id:
                 await observed_results.put(envelope.payload)
 
@@ -142,20 +142,16 @@ async def test_github_api_poll_golden_chain(
 
         result = await asyncio.wait_for(observed_results.get(), timeout=2)
 
-        assert result.errors == []
-        assert result.repos_polled == [_REPO]
-        assert result.prs_polled == 1
-        assert result.events_published == 0
-        assert result.pending_events == [
-            {
-                "event_type": _OUTPUT_TOPIC,
-                "repo": _REPO,
-                "pr_number": 1709,
-                "triage_state": "ready_to_merge",
-                "title": "Register GitHub API poller",
-                "is_draft": False,
-                "partition_key": f"{_REPO}:1709",
-            }
-        ]
+        # OMN-20867: the PR status event is what reaches the topic, never the
+        # poll-cycle summary.
+        assert result.model_dump(
+            mode="json", include={"event_type", "repo", "pr_number"}
+        ) == {"event_type": _OUTPUT_TOPIC, "repo": _REPO, "pr_number": 1709}
+        assert result.triage_state.value == "ready_to_merge"
+        assert result.title == "Register GitHub API poller"
+        assert result.is_draft is False
+        assert result.partition_key == f"{_REPO}:1709"
+        assert result.correlation_id == correlation_id
+        assert observed_results.empty()
     finally:
         await bus.close()

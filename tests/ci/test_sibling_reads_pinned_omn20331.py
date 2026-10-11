@@ -38,9 +38,6 @@ LIVE_ACTIONS = frozenset({"onex_change_control/.github/actions/validate-boundari
 PINNED_WORKFLOWS = (
     "ci.yml",
     "contract-topic-graph.yml",
-    # OMN-14186: validate-contract@main read OCC main, whose schema predates
-    # binds_ac and refused every contract repo-evidence / dod-verify accepts.
-    # The workflow now checks out the validators at the pin and runs them inline.
     "contract-validation.yml",
     "contractor-integration-note.yml",
     "delegation-consumer-kwarg-parity.yml",

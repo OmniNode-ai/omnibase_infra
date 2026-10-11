@@ -35,8 +35,13 @@ CONFIG = REPO_ROOT / ".public-repo-hygiene.yaml"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "public-repo-hygiene.yml"
 PRECOMMIT = REPO_ROOT / ".pre-commit-config.yaml"
 
-# omniclaude dev 6e47aa311, a descendant of 9a58ef705 (added-lines scope).
-GATE_REV = "6e47aa311ac5d177d116d9597b07966a233d2463"
+# omniclaude dev 0c9f9146d, a descendant of 6e47aa311 and of 9a58ef705 (added-lines
+# scope). It carries the deployment-config job and hook (OMN-20923) that the
+# required context public-repo-hygiene / deployment-config comes from (OMN-20940).
+GATE_REV = "0c9f9146d8dd0446fc5c10952aa57247b3a880ae"
+# The revision the recorded gate run below was made at (6e47aa311). The recording
+# is a captured response, so it keeps its own revision; the pin moves on.
+RECORDED_REV = "6e47aa311ac5d177d116d9597b07966a233d2463"
 # The pin before this change: it carries the added-lines scope but not the
 # env-var vocabulary path the exported pre-commit hook reads.
 PREVIOUS_REV = "3b8addff365b1a53e04106284b9275b6d5fad3c6"
@@ -143,7 +148,7 @@ def test_gate_at_the_pin_fails_a_planted_lab_config_literal(
 ) -> None:
     """The recorded run of the real gate, at the revision both callers use."""
     recording = cast("dict[str, object]", recorded_response["response"])
-    assert recording["gate_rev"] == GATE_REV
+    assert recording["gate_rev"] == RECORDED_REV
     assert recording["exit_code"] == 1
     assert "1 enforced finding(s) on lines this change adds" in cast(
         "str", recording["enforce_scope_line"]
@@ -151,5 +156,22 @@ def test_gate_at_the_pin_fails_a_planted_lab_config_literal(
     assert [
         f.rsplit(": ", 1)[-1] for f in cast("list[str]", recording["added_findings"])
     ] == ["lab-config"]
-    assert recording["gate_rev"] in WORKFLOW.read_text()
-    assert recording["gate_rev"] in PRECOMMIT.read_text()
+    assert GATE_REV in WORKFLOW.read_text()
+    assert GATE_REV in PRECOMMIT.read_text()
+
+
+def test_precommit_runs_the_deployment_config_hook_at_the_same_revision() -> None:
+    """OMN-20940: the local twin of public-repo-hygiene / deployment-config."""
+    precommit = yaml.safe_load(PRECOMMIT.read_text())
+    blocks = [
+        (repo, hook)
+        for repo in precommit["repos"]
+        if repo["repo"] == "https://github.com/OmniNode-ai/omniclaude"
+        for hook in repo.get("hooks", [])
+        if hook.get("id") == "deployment-config"
+    ]
+    assert len(blocks) == 1, "exactly one deployment-config hook is declared"
+    repo, hook = blocks[0]
+    assert repo["rev"] == GATE_REV
+    narrowing = {"entry", "args", "files", "exclude", "stages", "always_run"}
+    assert not narrowing & set(hook), sorted(narrowing & set(hook))
