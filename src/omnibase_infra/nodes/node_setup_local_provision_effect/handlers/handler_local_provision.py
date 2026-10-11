@@ -171,6 +171,9 @@ class HandlerLocalProvision:
         )
 
         topology: ModelDeploymentTopology = topology_raw
+        whole_project = envelope.get("whole_project") is True
+        compose_base = compose_base_command(compose_path, envelope.get("env_files"))
+        build_args = str_tuple(envelope.get("build_args"))
 
         # --- Collect unique profiles (deduplication) ---
         profiles: set[str] = set()
@@ -182,7 +185,7 @@ class HandlerLocalProvision:
                     profiles.add(svc.local.compose_profile)
                 local_service_names.append(svc.local.compose_service)
 
-        if not local_service_names:
+        if not local_service_names and not whole_project:
             return ModelHandlerOutput.for_compute(
                 input_envelope_id=uuid4(),
                 correlation_id=corr_id,
@@ -198,25 +201,35 @@ class HandlerLocalProvision:
         profile_flags: list[str] = [
             item for p in sorted(profiles) for item in ["--profile", p]
         ]
-        cmd: list[str] = (
-            ["docker", "compose", "-f", str(compose_path)]
-            + profile_flags
-            + ["up", "-d"]
-            + local_service_names
-        )
+        # whole_project: no service arguments, so compose starts every service
+        # in the file (OMN-19972).
+        targets = [] if whole_project else local_service_names
+
+        if envelope.get("build") is True:
+            build_cmd: list[str] = (
+                compose_base
+                + profile_flags
+                + ["build"]
+                + [item for arg in build_args for item in ("--build-arg", arg)]
+                + targets
+            )
+            # Build arguments are identity stamps, never secrets, but only the
+            # verb is logged so a caller's argument cannot reach the log.
+            logger.info("Running: docker compose build (%d args)", len(build_args))
+            build_rc, build_err, _ = await run_compose(build_cmd)
+            if build_rc != 0:
+                return _make_error_output(
+                    corr_id,
+                    build_err or f"docker compose build exited with code {build_rc}",
+                )
+
+        cmd: list[str] = compose_base + profile_flags + ["up", "-d"] + targets
 
         logger.info("Running: %s", " ".join(cmd))
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _stdout_bytes, stderr_bytes = await proc.communicate()
-        returncode = proc.returncode
+        returncode, stderr_text, _ = await run_compose(cmd)
 
         if returncode != 0:
-            stderr_text = stderr_bytes.decode("utf-8", errors="replace").strip()
             logger.error(
                 "docker compose up failed (rc=%d): %s", returncode, stderr_text
             )
@@ -278,6 +291,48 @@ class HandlerLocalProvision:
         )
 
 
+DOCKER_MISSING_MESSAGE = (
+    "Docker is required: the `docker` command was not found on PATH. Install "
+    "Docker (https://docs.docker.com/get-docker/) and start it, then retry."
+)
+
+
+def str_tuple(raw: object) -> tuple[str, ...]:
+    """Return ``raw`` as a tuple of strings, or ``()`` when it is not one."""
+    if isinstance(raw, (list, tuple)) and all(isinstance(x, str) for x in raw):
+        return tuple(raw)
+    return ()
+
+
+def compose_base_command(compose_path: Path, env_files_raw: object) -> list[str]:
+    """``docker compose [--env-file F]... -f <compose_path>``."""
+    env_flags = [item for f in str_tuple(env_files_raw) for item in ("--env-file", f)]
+    return ["docker", "compose", *env_flags, "-f", str(compose_path)]
+
+
+async def run_compose(cmd: list[str]) -> tuple[int, str, str]:
+    """Run ``cmd``; return its exit code, stripped stderr and stripped stdout.
+
+    A missing ``docker`` binary is returned as exit 127 with a message naming
+    Docker, never raised, so a caller gets a typed failure and not a traceback.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        return 127, DOCKER_MISSING_MESSAGE, ""
+    stdout_bytes, stderr_bytes = await proc.communicate()
+    returncode = proc.returncode if proc.returncode is not None else 1
+    return (
+        returncode,
+        stderr_bytes.decode("utf-8", errors="replace").strip(),
+        stdout_bytes.decode("utf-8", errors="replace").strip(),
+    )
+
+
 def _make_error_output(
     corr_id: UUID,
     error_message: str,
@@ -295,4 +350,10 @@ def _make_error_output(
     )
 
 
-__all__: list[str] = ["HandlerLocalProvision"]
+__all__: list[str] = [
+    "DOCKER_MISSING_MESSAGE",
+    "HandlerLocalProvision",
+    "compose_base_command",
+    "run_compose",
+    "str_tuple",
+]

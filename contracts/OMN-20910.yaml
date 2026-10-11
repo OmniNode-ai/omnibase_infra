@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-20910"
 title: "Review-voter models are declared in a contract overlay, not repo variables or workflow files"
-summary: "docker/lane-overlays/hostile-review-voters.yaml declares every Hostile Reviewer voter (endpoint via a dev.bifrost.yaml backend, model selection, sampling, focus, timeout, required). This repository's hostile-reviewer.yml reads it from the pull request's own checkout through omniintelligence's cli_review --voters-overlay and names no voter endpoint, port, model flag or endpoint variable; omnimarket and omniclaude read the same file from dev. The quorum rule and the fail-closed gate are unchanged."
+summary: "A review voters overlay declares every Hostile Reviewer voter (endpoint, model selection, sampling, focus, timeout, required). Since OMN-20923 the overlay is a private CI overlay, not a file of this repository; hostile-reviewer.yml fetches it at run time and reads it through omniintelligence's cli_review --voters-overlay, and names no voter endpoint, port, model flag or endpoint variable. The quorum rule and the fail-closed gate are unchanged."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -10,7 +10,7 @@ requirements:
     statement: "One contract overlay declares every review voter, and the gate resolves voters only from it."
     acceptance:
       - id: "AC1"
-        statement: "AC1: the overlay declares each voter and every backend it names is bound in dev.bifrost.yaml; the review and preflight read it from the pull request checkout -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'overlay_backend or this_pull_requests_checkout or reads_the_overlay or from_the_overlay'"
+        statement: "AC1 (amended by OMN-20923): the review and preflight read the overlay from the private CI overlay, outside the pull request checkout -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'outside_the_workspace or reads_the_overlay or from_the_overlay'"
   - id: "req-no-voter-endpoint-in-workflows"
     statement: "No workflow file names a review voter endpoint, port, model flag or endpoint variable."
     acceptance:
@@ -26,11 +26,11 @@ emergency_bypass:
   follow_up_ticket_id: ""
 dod_evidence:
   - id: "dod-omn20910-ac1-overlay-declares-voters"
-    description: "The overlay's backends are bound and the review and preflight read it from the pull request checkout."
+    description: "The review and preflight read the overlay from the private CI overlay, outside the pull request checkout (amended by OMN-20923)."
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'overlay_backend or this_pull_requests_checkout or reads_the_overlay or from_the_overlay'"
+        check_value: "uv run pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -k 'outside_the_workspace or reads_the_overlay or from_the_overlay'"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC1"]
   - id: "dod-omn20910-ac3-no-voter-endpoint"
