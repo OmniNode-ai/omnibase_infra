@@ -1214,8 +1214,10 @@ check_postgres_backup_freshness() {
 # as the gate half.
 #
 # The census is written by a systemd USER unit
-# (deploy/lane-census/onex-disk-gc.service.d/20-lane-census.conf, whose
-# ExecStart uses `%h`), so it lands in the census OWNER's home, not the
+# (the 20-lane-census.conf drop-in, whose ExecStart uses `%h`; it ships from
+# the private config root's systemd/lane-census/ and
+# deploy/lane-census/install-lane-census.sh installs it), so it lands in the
+# census OWNER's home, not the
 # caller's. Resolve that owner through getent rather than assuming the two are
 # the same account. The repository root is the deployed checkout, the same
 # /data tree this script already reads its env file and writes its logs under.
