@@ -2082,7 +2082,7 @@ repos:
         stages: [pre-commit]
       # Skip-token rejection gate (OMN-11412 / OMN-10414)
       # Blocks [skip-*] bypass tokens in staged markdown/yaml/txt files.
-      # Escape hatch: add '# skip-token-allowed: <receipt-id>' with a traceable approval receipt.
+      # There is no escape hatch (OMN-20074): a skip token is rejected whatever comment accompanies it.
       - id: reject-deploy-gate-skip-token
         require_serial: true
         name: Reject skip-gate bypass tokens (OMN-10414)
@@ -2485,9 +2485,11 @@ repos:
   # denylist from the file named by OMNI_HYGIENE_VOCAB_PATH, with the lab
   # vocabulary beside it, and fails closed without them.
   - repo: https://github.com/OmniNode-ai/omniclaude
-    rev: 6e47aa311ac5d177d116d9597b07966a233d2463
+    rev: 0c9f9146d8dd0446fc5c10952aa57247b3a880ae
     hooks:
       - id: public-repo-hygiene
+        require_serial: true
+      - id: deployment-config
         require_serial: true
   # OMN-19666: VCS-backed additional_dependencies can inherit GIT_INDEX_FILE
   # during a cold-cache commit and overwrite the committing worktree index.

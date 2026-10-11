@@ -45,6 +45,7 @@ from deploy_agent.events import (
     DEV_LANE_ONLY_MIGRATION_SERVICES,
     GATEWAY_COMPOSE_PROJECT,
     BuildSource,
+    EnumLaneMirrorOutcome,
     EnumRecreateOutcome,
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
@@ -53,6 +54,7 @@ from deploy_agent.events import (
     ModelContainerResidue,
     ModelDepsConvergenceFinding,
     ModelHealthCheck,
+    ModelLaneMirrorReceipt,
     ModelRebuildRequested,
     ModelRecreateSupervision,
     ModelVerifyRecreate,
@@ -69,7 +71,10 @@ from deploy_agent.gateway_budget import (
 )
 from deploy_agent.host_conditions import probe_host_conditions
 from deploy_agent.instance_lanes import (
+    LANE_MIRROR_CREDENTIAL_MAP_KEY,
     ModelInstanceLane,
+    ModelLaneMirrorRequest,
+    handle_lane_mirror,
     load_instance_lanes,
     load_instance_runtime_lanes,
     read_lane_env_fragment,
@@ -2215,6 +2220,58 @@ class DeployExecutor:
         self.deps_convergence = []
         self.compose_invocations = []
         self.health_checks = []
+
+    def run_lane_mirror(
+        self, *, lane: EnumRuntimeLane, materialize_root: Path
+    ) -> ModelLaneMirrorReceipt | None:
+        """Bring the lane's mirror forwarders up on its runtime image (OMN-20867).
+
+        Runs after verification, on the dev lane of a process fenced to it
+        alone and only once the agent has named the overlay clone -- the same
+        fence and the same clone as the lane env fragment, so a host has one
+        answer to which deployment overlay it deploys. Returns ``None`` when
+        the fence excludes it; otherwise the receipt, which never changes the
+        job's verdict and is logged at ERROR when it is a failure.
+
+        The credential map path is operator-held. It is re-read from the
+        operator env store on every call, like the repointed pins, so adding
+        it there reaches the next deploy without an agent restart.
+        """
+        clone = _LaneOverlayClone.path
+        raw = os.environ.get(ENV_ALLOWED_LANES, "").strip()
+        if (
+            lane is not EnumRuntimeLane.DEV
+            or clone is None
+            or not raw
+            or parse_allowed_lanes(raw) != frozenset({EnumRuntimeLane.DEV})
+        ):
+            return None
+        env = _compose_env()
+        store = _operator_env_file()
+        if store is not None and store.is_file():
+            declared = _load_dotenv_file(store).get(LANE_MIRROR_CREDENTIAL_MAP_KEY)
+            if declared:
+                env[LANE_MIRROR_CREDENTIAL_MAP_KEY] = declared
+        receipt = handle_lane_mirror(
+            ModelLaneMirrorRequest(
+                clone=clone,
+                runtime_container=lane_config_for(lane).main_runtime_container,
+                materialize_root=materialize_root,
+                compose_env=env,
+            )
+        )
+        if receipt.outcome is EnumLaneMirrorOutcome.FAILED:
+            logger.error(
+                "lane mirror FAILED: %s; forwarders: %s friction_type=lane_mirror_failed",
+                receipt.detail,
+                ", ".join(
+                    f"{f.container}={f.state}/{f.health}" for f in receipt.forwarders
+                )
+                or "none",
+            )
+        else:
+            logger.info("lane mirror %s: %s", receipt.outcome.value, receipt.detail)
+        return receipt
 
     def _record_container_residue(
         self, stuck: list[str], *, lane: EnumRuntimeLane

@@ -436,6 +436,9 @@ class _FakeExecutor:
         self.calls.append("verify")
         return []
 
+    def run_lane_mirror(self, **kwargs: object) -> None:
+        return None
+
 
 def _agent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, slot_dir: Path | None
