@@ -1,0 +1,9 @@
+{
+  "_provenance": {
+    "source": "GitHub REST GET repos/OmniNode-ai/omnibase_infra/actions/runs?head_sha=2173c0c53a46624be1efd4cff91cd07f3f8df13b&per_page=100, recorded under OMN-15550",
+    "source_commit": "dc825f6397a5661dc9f0321f4a13994f5b23d8f5",
+    "source_file": "tests/fixtures/omn15550/healed/repos_OmniNode_ai_omnibase_infra_actions_runs_head_sha_2173c0c53a46624be1efd4cff91cd07f3f8df13b_per_page_100.json",
+    "source_sha256": "9b12ddc41361b44492ddff7f5ed2dfc5db3be7982d0137e04b9eeaaf2c0793d1",
+    "note": "Reuses the live workflow-runs response already recorded in source_file (OMN-19998); the test reads the runs from that file, verified by its sha256."
+  }
+}

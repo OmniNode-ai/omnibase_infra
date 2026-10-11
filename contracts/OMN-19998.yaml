@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19998
+title: The broker-wedge rerun scan reads jobs only of runs that can hold a wedge job
+summary: The completed-run scan skips job reads for runs whose conclusion is success, skipped or neutral. Runs concluding failure, cancelled or timed_out, and runs with no conclusion, still reach the existing job-signature detector and targeted rerun.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19998-run-conclusion-filter
+    statement: The broker-dispatch-wedge scanner must avoid job-list reads for completed runs that cannot contain a wedge job while retaining reads and detection for candidate runs.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: success, skipped and neutral runs cause no job-list reads, while failure, cancelled, timed_out and missing conclusions retain wedge detection; the recorded 100-run list reads only candidate runs -- falsifier: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py -q -k "TestOnlyFailedRunsAreRead or test_recorded_runs_list_reads_only_runs_that_can_hold_a_wedge"'
+evidence_requirements:
+  - kind: tests
+    description: The run-conclusion tests and recorded runs-list replay exercise the scanner against its HTTP endpoints and count job-list reads.
+    command: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py -q -k "TestOnlyFailedRunsAreRead or test_recorded_runs_list_reads_only_runs_that_can_hold_a_wedge"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19998-ac1-run-conclusion-filter
+    description: AC1 tests count job-list requests, retain wedge detection for candidate runs and replay the recorded 100-run list.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_broker_dispatch_wedge_rerun.py -q -k "TestOnlyFailedRunsAreRead or test_recorded_runs_list_reads_only_runs_that_can_hold_a_wedge"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
