@@ -1,0 +1,33 @@
+schema_version: "1.0.0"
+ticket_id: OMN-18595
+title: Scheduled release cut per release-synced Python repo
+summary: The release train cuts omnibase_infra releases under this ticket. This in-repo contract is the release evidence release.yml reads for a release cut (OMN-20959), now that no change-control companion is minted after S6. A release cut is content-bound by its changelog; the top CHANGELOG.md section names the version in pyproject.toml at the release head, and does not at its merge base, where pyproject already carries the next version.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn18595-release-cut-changelog
+    statement: A release cut's head carries a CHANGELOG.md section for the version it releases.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the first CHANGELOG.md heading names the pyproject.toml version -- falsifier: the check below exits 1 at a release PR''s merge base'
+evidence_requirements:
+  - kind: ci
+    description: The top changelog heading names the pyproject version.
+    command: |-
+      python3 -c "import re,tomllib; v=tomllib.load(open('pyproject.toml','rb'))['project']['version']; h=re.search(r'^## v(\S+)', open('CHANGELOG.md').read(), re.M); raise SystemExit(0 if h and h.group(1)==v else 1)"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-18595-release-cut-changelog
+    description: The release head's top changelog section names the released version.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          python3 -c "import re,tomllib; v=tomllib.load(open('pyproject.toml','rb'))['project']['version']; h=re.search(r'^## v(\S+)', open('CHANGELOG.md').read(), re.M); raise SystemExit(0 if h and h.group(1)==v else 1)"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
