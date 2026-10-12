@@ -28,3 +28,11 @@ dod_evidence:
         check_value: uv run pytest tests/unit/docker/test_runtime_memory_pin_omn18596.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn-18596-memory-pin-deploy-probe
+    description: Deploy probe. The runtime Dockerfile at the checked-out commit pins omninode-memory with the 0.18.4 floor; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base, which pins 0.18.3. The readout after the deploy agent rolls the image is omninode-memory 0.18.4 or later installed in the runtime container.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF '"omninode-memory>=0.18.4,<1.0.0"'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
