@@ -3396,17 +3396,59 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
-    "dispatcher.auto.node_validation_executor.HandlerRunChecks.validation_run_checks_da8e1227": {
+    "dispatcher.auto.node_validation_adjudicator.HandlerAdjudicate.validation_adjudicate_cdd496b0": {
+      "category": "event",
+      "contract_name": "node_validation_adjudicator",
+      "event_model_module": "omnibase_infra.models.validation.model_validation_adjudication_requested",
+      "event_model_name": "ModelValidationAdjudicationRequested",
+      "handler_id": "dispatcher.auto.node_validation_adjudicator.HandlerAdjudicate.validation_adjudicate_cdd496b0",
+      "handler_module": "omnibase_infra.handlers.handler_validation_adjudicate",
+      "handler_name": "HandlerAdjudicate",
+      "message_types": [
+        "ModelValidationAdjudicationRequested",
+        "onex.evt.platform.validation-adjudication-requested.v1",
+        "platform.validation-adjudication-requested"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_validation_executor.HandlerRunChecks.validation_run_checks_51a80bba": {
       "category": "event",
       "contract_name": "node_validation_executor",
-      "event_model_module": null,
-      "event_model_name": null,
-      "handler_id": "dispatcher.auto.node_validation_executor.HandlerRunChecks.validation_run_checks_da8e1227",
+      "event_model_module": "omnibase_infra.models.validation.model_validation_execution_requested",
+      "event_model_name": "ModelValidationExecutionRequested",
+      "handler_id": "dispatcher.auto.node_validation_executor.HandlerRunChecks.validation_run_checks_51a80bba",
       "handler_module": "omnibase_infra.nodes.node_validation_executor.handlers.handler_run_checks",
       "handler_name": "HandlerRunChecks",
-      "message_types": null,
+      "message_types": [
+        "ModelValidationExecutionRequested",
+        "onex.evt.platform.validation-execution-requested.v1",
+        "platform.validation-execution-requested"
+      ],
       "package": "omnibase_infra",
-      "type_scoped": false
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df": {
+      "category": "event",
+      "contract_name": "node_validation_ledger_projection_compute",
+      "event_model_module": "omnibase_infra.event_bus.models.model_event_message",
+      "event_model_name": "ModelEventMessage",
+      "handler_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df",
+      "handler_module": "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection",
+      "handler_name": "HandlerValidationLedgerProjection",
+      "message_types": [
+        "ModelEventMessage",
+        "onex.evt.platform.validation-result-published.v1",
+        "onex.evt.validation.cross-repo-run-completed.v1",
+        "onex.evt.validation.cross-repo-run-started.v1",
+        "onex.evt.validation.cross-repo-violations-batch.v1",
+        "platform.validation-result-published",
+        "validation.cross-repo-run-completed",
+        "validation.cross-repo-run-started",
+        "validation.cross-repo-violations-batch"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
     },
     "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_5d7d0032": {
       "category": "event",
@@ -3418,9 +3460,11 @@
       "handler_name": "HandlerValidationLedgerProjection",
       "message_types": [
         "ModelEventMessage",
+        "onex.evt.platform.validation-result-published.v1",
         "onex.evt.validation.cross-repo-run-completed.v1",
         "onex.evt.validation.cross-repo-run-started.v1",
         "onex.evt.validation.cross-repo-violations-batch.v1",
+        "platform.validation-result-published",
         "validation.cross-repo-run-completed",
         "validation.cross-repo-run-started",
         "validation.cross-repo-violations-batch"
@@ -3438,9 +3482,11 @@
       "handler_name": "HandlerValidationLedgerProjection",
       "message_types": [
         "ModelEventMessage",
+        "onex.evt.platform.validation-result-published.v1",
         "onex.evt.validation.cross-repo-run-completed.v1",
         "onex.evt.validation.cross-repo-run-started.v1",
         "onex.evt.validation.cross-repo-violations-batch.v1",
+        "platform.validation-result-published",
         "validation.cross-repo-run-completed",
         "validation.cross-repo-run-started",
         "validation.cross-repo-violations-batch"
@@ -3458,9 +3504,11 @@
       "handler_name": "HandlerValidationLedgerProjection",
       "message_types": [
         "ModelEventMessage",
+        "onex.evt.platform.validation-result-published.v1",
         "onex.evt.validation.cross-repo-run-completed.v1",
         "onex.evt.validation.cross-repo-run-started.v1",
         "onex.evt.validation.cross-repo-violations-batch.v1",
+        "platform.validation-result-published",
         "validation.cross-repo-run-completed",
         "validation.cross-repo-run-started",
         "validation.cross-repo-violations-batch"
@@ -3483,12 +3531,12 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
-    "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan": {
+    "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan.validation_build_plan_9a1e887b": {
       "category": "event",
       "contract_name": "node_validation_orchestrator",
       "event_model_module": "omnibase_infra.nodes.node_validation_orchestrator.models.model_pattern_candidate",
       "event_model_name": "ModelPatternCandidate",
-      "handler_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan",
+      "handler_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan.validation_build_plan_9a1e887b",
       "handler_module": "omnibase_infra.nodes.node_validation_orchestrator.handlers.handler_build_plan",
       "handler_name": "HandlerBuildPlan",
       "message_types": [
@@ -3496,9 +3544,77 @@
         "onex.evt.platform.validation-adjudication-completed.v1",
         "onex.evt.platform.validation-candidate-submitted.v1",
         "onex.evt.platform.validation-checks-completed.v1",
+        "onex.evt.platform.validation-plan-created.v1",
         "platform.validation-adjudication-completed",
         "platform.validation-candidate-submitted",
-        "platform.validation-checks-completed"
+        "platform.validation-checks-completed",
+        "platform.validation-plan-created"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_validation_orchestrator.HandlerPublishResult.validation_publish_result_558d717f": {
+      "category": "event",
+      "contract_name": "node_validation_orchestrator",
+      "event_model_module": "omnibase_infra.models.validation.model_validation_adjudication_completed",
+      "event_model_name": "ModelValidationAdjudicationCompleted",
+      "handler_id": "dispatcher.auto.node_validation_orchestrator.HandlerPublishResult.validation_publish_result_558d717f",
+      "handler_module": "omnibase_infra.nodes.node_validation_orchestrator.handlers.handler_build_plan",
+      "handler_name": "HandlerPublishResult",
+      "message_types": [
+        "ModelValidationAdjudicationCompleted",
+        "onex.evt.platform.validation-adjudication-completed.v1",
+        "onex.evt.platform.validation-candidate-submitted.v1",
+        "onex.evt.platform.validation-checks-completed.v1",
+        "onex.evt.platform.validation-plan-created.v1",
+        "platform.validation-adjudication-completed",
+        "platform.validation-candidate-submitted",
+        "platform.validation-checks-completed",
+        "platform.validation-plan-created"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_validation_orchestrator.HandlerRequestAdjudication.validation_request_adjudication_1b8ecf24": {
+      "category": "event",
+      "contract_name": "node_validation_orchestrator",
+      "event_model_module": "omnibase_infra.models.validation.model_validation_checks_completed",
+      "event_model_name": "ModelValidationChecksCompleted",
+      "handler_id": "dispatcher.auto.node_validation_orchestrator.HandlerRequestAdjudication.validation_request_adjudication_1b8ecf24",
+      "handler_module": "omnibase_infra.nodes.node_validation_orchestrator.handlers.handler_build_plan",
+      "handler_name": "HandlerRequestAdjudication",
+      "message_types": [
+        "ModelValidationChecksCompleted",
+        "onex.evt.platform.validation-adjudication-completed.v1",
+        "onex.evt.platform.validation-candidate-submitted.v1",
+        "onex.evt.platform.validation-checks-completed.v1",
+        "onex.evt.platform.validation-plan-created.v1",
+        "platform.validation-adjudication-completed",
+        "platform.validation-candidate-submitted",
+        "platform.validation-checks-completed",
+        "platform.validation-plan-created"
+      ],
+      "package": "omnibase_infra",
+      "type_scoped": true
+    },
+    "dispatcher.auto.node_validation_orchestrator.HandlerRequestExecution.validation_request_execution_d898cfb8": {
+      "category": "event",
+      "contract_name": "node_validation_orchestrator",
+      "event_model_module": "omnibase_infra.models.validation.model_validation_plan",
+      "event_model_name": "ModelValidationPlan",
+      "handler_id": "dispatcher.auto.node_validation_orchestrator.HandlerRequestExecution.validation_request_execution_d898cfb8",
+      "handler_module": "omnibase_infra.nodes.node_validation_orchestrator.handlers.handler_build_plan",
+      "handler_name": "HandlerRequestExecution",
+      "message_types": [
+        "ModelValidationPlan",
+        "onex.evt.platform.validation-adjudication-completed.v1",
+        "onex.evt.platform.validation-candidate-submitted.v1",
+        "onex.evt.platform.validation-checks-completed.v1",
+        "onex.evt.platform.validation-plan-created.v1",
+        "platform.validation-adjudication-completed",
+        "platform.validation-candidate-submitted",
+        "platform.validation-checks-completed",
+        "platform.validation-plan-created"
       ],
       "package": "omnibase_infra",
       "type_scoped": true
@@ -3568,11 +3684,11 @@
       },
       "contracts_discovered": 162,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 94,
-      "probe_count": 1071,
-      "registered_dispatchers": 126,
-      "registered_routes": 111,
-      "type_scoped_dispatchers": 70
+      "distinct_subscribe_topics": 98,
+      "probe_count": 1101,
+      "registered_dispatchers": 131,
+      "registered_routes": 115,
+      "type_scoped_dispatchers": 76
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3612,7 +3728,7 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-10-11T19:22:26.624167+00:00",
+    "generated_at_utc": "2026-10-12T14:07:48.225104+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.39",
       "omnibase-infra": "0.38.71",
@@ -5041,6 +5157,21 @@
       },
       "topic": "onex.evt.platform.validation-adjudication-completed.v1"
     },
+    "P1a::onex.evt.platform.validation-adjudication-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.validation-adjudication-requested",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-adjudication-requested",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-adjudication-requested.v1"
+    },
     "P1a::onex.evt.platform.validation-candidate-submitted.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -5070,6 +5201,51 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.validation-checks-completed.v1"
+    },
+    "P1a::onex.evt.platform.validation-execution-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.validation-execution-requested",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-execution-requested",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-execution-requested.v1"
+    },
+    "P1a::onex.evt.platform.validation-plan-created.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.validation-plan-created",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-plan-created",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-plan-created.v1"
+    },
+    "P1a::onex.evt.platform.validation-result-published.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": "platform.validation-result-published",
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-result-published",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-result-published.v1"
     },
     "P1a::onex.evt.steel-onslaught.match-terminal.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -6451,6 +6627,21 @@
       },
       "topic": "onex.evt.platform.validation-adjudication-completed.v1"
     },
+    "P1b::onex.evt.platform.validation-adjudication-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
+        "message_category": "event",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-adjudication-requested.v1"
+    },
     "P1b::onex.evt.platform.validation-candidate-submitted.v1": {
       "family": "P1_topic_event_type_matrix",
       "input": {
@@ -6480,6 +6671,51 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.validation-checks-completed.v1"
+    },
+    "P1b::onex.evt.platform.validation-execution-requested.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
+        "message_category": "event",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-execution-requested.v1"
+    },
+    "P1b::onex.evt.platform.validation-plan-created.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
+        "message_category": "event",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-plan-created.v1"
+    },
+    "P1b::onex.evt.platform.validation-result-published.v1": {
+      "family": "P1_topic_event_type_matrix",
+      "input": {
+        "event_type": null,
+        "payload": "_DictPayload"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.events.v1",
+        "message_category": "event",
+        "message_type": "_DictPayload",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-result-published.v1"
     },
     "P1b::onex.evt.steel-onslaught.match-terminal.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -23954,6 +24190,146 @@
       },
       "topic": "onex.evt.omnibase-infra.topic-migration-lifecycle.v1"
     },
+    "P4::dispatcher.auto.node_validation_adjudicator.HandlerAdjudicate.validation_adjudicate_cdd496b0::onex.evt.platform.validation-adjudication-requested.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_adjudicator.HandlerAdjudicate.validation_adjudicate_cdd496b0",
+      "event_model": "omnibase_infra.models.validation.model_validation_adjudication_requested.ModelValidationAdjudicationRequested",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-adjudication-requested",
+        "payload": "ModelValidationAdjudicationRequested"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_adjudicator.HandlerAdjudicate.validation_adjudicate_cdd496b0"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.validation-adjudication-requested",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.validation-adjudication-requested.v1"
+    },
+    "P4::dispatcher.auto.node_validation_executor.HandlerRunChecks.validation_run_checks_51a80bba::onex.evt.platform.validation-execution-requested.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_executor.HandlerRunChecks.validation_run_checks_51a80bba",
+      "event_model": "omnibase_infra.models.validation.model_validation_execution_requested.ModelValidationExecutionRequested",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-execution-requested",
+        "payload": "ModelValidationExecutionRequested"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_executor.HandlerRunChecks.validation_run_checks_51a80bba"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.validation-execution-requested",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.validation-execution-requested.v1"
+    },
+    "P4::dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df::onex.evt.platform.validation-result-published.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-result-published",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.validation-result-published",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.validation-result-published.v1"
+    },
+    "P4::dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df::onex.evt.validation.cross-repo-run-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "validation.cross-repo-run-completed",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_eefd98e8"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "validation.cross-repo-run-completed",
+        "status": "success"
+      },
+      "topic": "onex.evt.validation.cross-repo-run-completed.v1"
+    },
+    "P4::dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df::onex.evt.validation.cross-repo-run-started.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "validation.cross-repo-run-started",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_fa3d06c9"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "validation.cross-repo-run-started",
+        "status": "success"
+      },
+      "topic": "onex.evt.validation.cross-repo-run-started.v1"
+    },
+    "P4::dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df::onex.evt.validation.cross-repo-violations-batch.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "validation.cross-repo-violations-batch",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_5d7d0032"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "validation.cross-repo-violations-batch",
+        "status": "success"
+      },
+      "topic": "onex.evt.validation.cross-repo-violations-batch.v1"
+    },
+    "P4::dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_5d7d0032::onex.evt.platform.validation-result-published.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_5d7d0032",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-result-published",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.validation-result-published",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.validation-result-published.v1"
+    },
     "P4::dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_5d7d0032::onex.evt.validation.cross-repo-run-completed.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_5d7d0032",
@@ -24013,6 +24389,26 @@
         "status": "success"
       },
       "topic": "onex.evt.validation.cross-repo-violations-batch.v1"
+    },
+    "P4::dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_eefd98e8::onex.evt.platform.validation-result-published.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_eefd98e8",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-result-published",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.validation-result-published",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.validation-result-published.v1"
     },
     "P4::dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_eefd98e8::onex.evt.validation.cross-repo-run-completed.v1": {
       "construct_only": true,
@@ -24074,6 +24470,26 @@
       },
       "topic": "onex.evt.validation.cross-repo-violations-batch.v1"
     },
+    "P4::dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_fa3d06c9::onex.evt.platform.validation-result-published.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_fa3d06c9",
+      "event_model": "omnibase_infra.event_bus.models.model_event_message.ModelEventMessage",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-result-published",
+        "payload": "ModelEventMessage"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.validation-result-published",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.validation-result-published.v1"
+    },
     "P4::dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_fa3d06c9::onex.evt.validation.cross-repo-run-completed.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_fa3d06c9",
@@ -24134,9 +24550,9 @@
       },
       "topic": "onex.evt.validation.cross-repo-violations-batch.v1"
     },
-    "P4::dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan::onex.evt.platform.validation-adjudication-completed.v1": {
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan.validation_build_plan_9a1e887b::onex.evt.platform.validation-adjudication-completed.v1": {
       "construct_only": true,
-      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan",
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan.validation_build_plan_9a1e887b",
       "event_model": "omnibase_infra.nodes.node_validation_orchestrator.models.model_pattern_candidate.ModelPatternCandidate",
       "family": "P4_payload_type_scoping",
       "input": {
@@ -24144,19 +24560,17 @@
         "payload": "ModelPatternCandidate"
       },
       "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan"
-        ],
-        "dlq_topic": null,
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
         "message_category": "event",
         "message_type": "platform.validation-adjudication-completed",
-        "status": "success"
+        "status": "no_dispatcher"
       },
       "topic": "onex.evt.platform.validation-adjudication-completed.v1"
     },
-    "P4::dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan::onex.evt.platform.validation-candidate-submitted.v1": {
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan.validation_build_plan_9a1e887b::onex.evt.platform.validation-candidate-submitted.v1": {
       "construct_only": true,
-      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan",
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan.validation_build_plan_9a1e887b",
       "event_model": "omnibase_infra.nodes.node_validation_orchestrator.models.model_pattern_candidate.ModelPatternCandidate",
       "family": "P4_payload_type_scoping",
       "input": {
@@ -24165,7 +24579,7 @@
       },
       "selection": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan"
+          "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan.validation_build_plan_9a1e887b"
         ],
         "dlq_topic": null,
         "message_category": "event",
@@ -24174,9 +24588,9 @@
       },
       "topic": "onex.evt.platform.validation-candidate-submitted.v1"
     },
-    "P4::dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan::onex.evt.platform.validation-checks-completed.v1": {
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan.validation_build_plan_9a1e887b::onex.evt.platform.validation-checks-completed.v1": {
       "construct_only": true,
-      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan",
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan.validation_build_plan_9a1e887b",
       "event_model": "omnibase_infra.nodes.node_validation_orchestrator.models.model_pattern_candidate.ModelPatternCandidate",
       "family": "P4_payload_type_scoping",
       "input": {
@@ -24184,8 +24598,154 @@
         "payload": "ModelPatternCandidate"
       },
       "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-checks-completed",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-checks-completed.v1"
+    },
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan.validation_build_plan_9a1e887b::onex.evt.platform.validation-plan-created.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan.validation_build_plan_9a1e887b",
+      "event_model": "omnibase_infra.nodes.node_validation_orchestrator.models.model_pattern_candidate.ModelPatternCandidate",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-plan-created",
+        "payload": "ModelPatternCandidate"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-plan-created",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-plan-created.v1"
+    },
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerPublishResult.validation_publish_result_558d717f::onex.evt.platform.validation-adjudication-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerPublishResult.validation_publish_result_558d717f",
+      "event_model": "omnibase_infra.models.validation.model_validation_adjudication_completed.ModelValidationAdjudicationCompleted",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-adjudication-completed",
+        "payload": "ModelValidationAdjudicationCompleted"
+      },
+      "selection": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan"
+          "dispatcher.auto.node_validation_orchestrator.HandlerPublishResult.validation_publish_result_558d717f"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.validation-adjudication-completed",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.validation-adjudication-completed.v1"
+    },
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerPublishResult.validation_publish_result_558d717f::onex.evt.platform.validation-candidate-submitted.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerPublishResult.validation_publish_result_558d717f",
+      "event_model": "omnibase_infra.models.validation.model_validation_adjudication_completed.ModelValidationAdjudicationCompleted",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-candidate-submitted",
+        "payload": "ModelValidationAdjudicationCompleted"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-candidate-submitted",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-candidate-submitted.v1"
+    },
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerPublishResult.validation_publish_result_558d717f::onex.evt.platform.validation-checks-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerPublishResult.validation_publish_result_558d717f",
+      "event_model": "omnibase_infra.models.validation.model_validation_adjudication_completed.ModelValidationAdjudicationCompleted",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-checks-completed",
+        "payload": "ModelValidationAdjudicationCompleted"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-checks-completed",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-checks-completed.v1"
+    },
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerPublishResult.validation_publish_result_558d717f::onex.evt.platform.validation-plan-created.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerPublishResult.validation_publish_result_558d717f",
+      "event_model": "omnibase_infra.models.validation.model_validation_adjudication_completed.ModelValidationAdjudicationCompleted",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-plan-created",
+        "payload": "ModelValidationAdjudicationCompleted"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-plan-created",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-plan-created.v1"
+    },
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerRequestAdjudication.validation_request_adjudication_1b8ecf24::onex.evt.platform.validation-adjudication-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerRequestAdjudication.validation_request_adjudication_1b8ecf24",
+      "event_model": "omnibase_infra.models.validation.model_validation_checks_completed.ModelValidationChecksCompleted",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-adjudication-completed",
+        "payload": "ModelValidationChecksCompleted"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-adjudication-completed",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-adjudication-completed.v1"
+    },
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerRequestAdjudication.validation_request_adjudication_1b8ecf24::onex.evt.platform.validation-candidate-submitted.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerRequestAdjudication.validation_request_adjudication_1b8ecf24",
+      "event_model": "omnibase_infra.models.validation.model_validation_checks_completed.ModelValidationChecksCompleted",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-candidate-submitted",
+        "payload": "ModelValidationChecksCompleted"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-candidate-submitted",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-candidate-submitted.v1"
+    },
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerRequestAdjudication.validation_request_adjudication_1b8ecf24::onex.evt.platform.validation-checks-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerRequestAdjudication.validation_request_adjudication_1b8ecf24",
+      "event_model": "omnibase_infra.models.validation.model_validation_checks_completed.ModelValidationChecksCompleted",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-checks-completed",
+        "payload": "ModelValidationChecksCompleted"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_orchestrator.HandlerRequestAdjudication.validation_request_adjudication_1b8ecf24"
         ],
         "dlq_topic": null,
         "message_category": "event",
@@ -24193,6 +24753,98 @@
         "status": "success"
       },
       "topic": "onex.evt.platform.validation-checks-completed.v1"
+    },
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerRequestAdjudication.validation_request_adjudication_1b8ecf24::onex.evt.platform.validation-plan-created.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerRequestAdjudication.validation_request_adjudication_1b8ecf24",
+      "event_model": "omnibase_infra.models.validation.model_validation_checks_completed.ModelValidationChecksCompleted",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-plan-created",
+        "payload": "ModelValidationChecksCompleted"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-plan-created",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-plan-created.v1"
+    },
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerRequestExecution.validation_request_execution_d898cfb8::onex.evt.platform.validation-adjudication-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerRequestExecution.validation_request_execution_d898cfb8",
+      "event_model": "omnibase_infra.models.validation.model_validation_plan.ModelValidationPlan",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-adjudication-completed",
+        "payload": "ModelValidationPlan"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-adjudication-completed",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-adjudication-completed.v1"
+    },
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerRequestExecution.validation_request_execution_d898cfb8::onex.evt.platform.validation-candidate-submitted.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerRequestExecution.validation_request_execution_d898cfb8",
+      "event_model": "omnibase_infra.models.validation.model_validation_plan.ModelValidationPlan",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-candidate-submitted",
+        "payload": "ModelValidationPlan"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-candidate-submitted",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-candidate-submitted.v1"
+    },
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerRequestExecution.validation_request_execution_d898cfb8::onex.evt.platform.validation-checks-completed.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerRequestExecution.validation_request_execution_d898cfb8",
+      "event_model": "omnibase_infra.models.validation.model_validation_plan.ModelValidationPlan",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-checks-completed",
+        "payload": "ModelValidationPlan"
+      },
+      "selection": {
+        "dispatcher_ids": [],
+        "dlq_topic": "onex.dlq.omnibase-infra.platform.v1",
+        "message_category": "event",
+        "message_type": "platform.validation-checks-completed",
+        "status": "no_dispatcher"
+      },
+      "topic": "onex.evt.platform.validation-checks-completed.v1"
+    },
+    "P4::dispatcher.auto.node_validation_orchestrator.HandlerRequestExecution.validation_request_execution_d898cfb8::onex.evt.platform.validation-plan-created.v1": {
+      "construct_only": true,
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerRequestExecution.validation_request_execution_d898cfb8",
+      "event_model": "omnibase_infra.models.validation.model_validation_plan.ModelValidationPlan",
+      "family": "P4_payload_type_scoping",
+      "input": {
+        "event_type": "platform.validation-plan-created",
+        "payload": "ModelValidationPlan"
+      },
+      "selection": {
+        "dispatcher_ids": [
+          "dispatcher.auto.node_validation_orchestrator.HandlerRequestExecution.validation_request_execution_d898cfb8"
+        ],
+        "dlq_topic": null,
+        "message_category": "event",
+        "message_type": "platform.validation-plan-created",
+        "status": "success"
+      },
+      "topic": "onex.evt.platform.validation-plan-created.v1"
     }
   },
   "routes": [
@@ -25207,6 +25859,36 @@
       "type_scoped": false
     },
     {
+      "contract_name": "node_validation_adjudicator",
+      "dispatcher_id": "dispatcher.auto.node_validation_adjudicator.HandlerAdjudicate.validation_adjudicate_cdd496b0",
+      "handler_id": "dispatcher.auto.node_validation_adjudicator.HandlerAdjudicate.validation_adjudicate_cdd496b0",
+      "message_category": "event",
+      "route_id": "route.auto.node_validation_adjudicator.HandlerAdjudicate.validation_adjudicate_cdd496b0.onex_evt_platform_validation_adjudication_requested_v1",
+      "topic": "onex.evt.platform.validation-adjudication-requested.v1",
+      "topic_pattern": "*.evt.platform.validation-adjudication-requested.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_validation_executor",
+      "dispatcher_id": "dispatcher.auto.node_validation_executor.HandlerRunChecks.validation_run_checks_51a80bba",
+      "handler_id": "dispatcher.auto.node_validation_executor.HandlerRunChecks.validation_run_checks_51a80bba",
+      "message_category": "event",
+      "route_id": "route.auto.node_validation_executor.HandlerRunChecks.validation_run_checks_51a80bba.onex_evt_platform_validation_execution_requested_v1",
+      "topic": "onex.evt.platform.validation-execution-requested.v1",
+      "topic_pattern": "*.evt.platform.validation-execution-requested.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_validation_ledger_projection_compute",
+      "dispatcher_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df",
+      "handler_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df",
+      "message_category": "event",
+      "route_id": "route.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_13e305df.onex_evt_platform_validation_result_published_v1",
+      "topic": "onex.evt.platform.validation-result-published.v1",
+      "topic_pattern": "*.evt.platform.validation-result-published.*",
+      "type_scoped": true
+    },
+    {
       "contract_name": "node_validation_ledger_projection_compute",
       "dispatcher_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_5d7d0032",
       "handler_id": "dispatcher.auto.node_validation_ledger_projection_compute.HandlerValidationLedgerProjection.validation_ledger_project_5d7d0032",
@@ -25248,32 +25930,42 @@
     },
     {
       "contract_name": "node_validation_orchestrator",
-      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan",
-      "handler_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan",
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan.validation_build_plan_9a1e887b",
+      "handler_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan.validation_build_plan_9a1e887b",
       "message_category": "event",
-      "route_id": "route.auto.node_validation_orchestrator.HandlerBuildPlan.onex_evt_platform_validation_adjudication_completed_v1",
-      "topic": "onex.evt.platform.validation-adjudication-completed.v1",
-      "topic_pattern": "*.evt.platform.validation-adjudication-completed.*",
-      "type_scoped": true
-    },
-    {
-      "contract_name": "node_validation_orchestrator",
-      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan",
-      "handler_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan",
-      "message_category": "event",
-      "route_id": "route.auto.node_validation_orchestrator.HandlerBuildPlan.onex_evt_platform_validation_candidate_submitted_v1",
+      "route_id": "route.auto.node_validation_orchestrator.HandlerBuildPlan.validation_build_plan_9a1e887b.onex_evt_platform_validation_candidate_submitted_v1",
       "topic": "onex.evt.platform.validation-candidate-submitted.v1",
       "topic_pattern": "*.evt.platform.validation-candidate-submitted.*",
       "type_scoped": true
     },
     {
       "contract_name": "node_validation_orchestrator",
-      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan",
-      "handler_id": "dispatcher.auto.node_validation_orchestrator.HandlerBuildPlan",
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerPublishResult.validation_publish_result_558d717f",
+      "handler_id": "dispatcher.auto.node_validation_orchestrator.HandlerPublishResult.validation_publish_result_558d717f",
       "message_category": "event",
-      "route_id": "route.auto.node_validation_orchestrator.HandlerBuildPlan.onex_evt_platform_validation_checks_completed_v1",
+      "route_id": "route.auto.node_validation_orchestrator.HandlerPublishResult.validation_publish_result_558d717f.onex_evt_platform_validation_adjudication_completed_v1",
+      "topic": "onex.evt.platform.validation-adjudication-completed.v1",
+      "topic_pattern": "*.evt.platform.validation-adjudication-completed.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_validation_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerRequestAdjudication.validation_request_adjudication_1b8ecf24",
+      "handler_id": "dispatcher.auto.node_validation_orchestrator.HandlerRequestAdjudication.validation_request_adjudication_1b8ecf24",
+      "message_category": "event",
+      "route_id": "route.auto.node_validation_orchestrator.HandlerRequestAdjudication.validation_request_adjudication_1b8ecf24.onex_evt_platform_validation_checks_completed_v1",
       "topic": "onex.evt.platform.validation-checks-completed.v1",
       "topic_pattern": "*.evt.platform.validation-checks-completed.*",
+      "type_scoped": true
+    },
+    {
+      "contract_name": "node_validation_orchestrator",
+      "dispatcher_id": "dispatcher.auto.node_validation_orchestrator.HandlerRequestExecution.validation_request_execution_d898cfb8",
+      "handler_id": "dispatcher.auto.node_validation_orchestrator.HandlerRequestExecution.validation_request_execution_d898cfb8",
+      "message_category": "event",
+      "route_id": "route.auto.node_validation_orchestrator.HandlerRequestExecution.validation_request_execution_d898cfb8.onex_evt_platform_validation_plan_created_v1",
+      "topic": "onex.evt.platform.validation-plan-created.v1",
+      "topic_pattern": "*.evt.platform.validation-plan-created.*",
       "type_scoped": true
     },
     {

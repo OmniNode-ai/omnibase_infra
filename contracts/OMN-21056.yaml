@@ -1,0 +1,48 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21056"
+title: "The validation pipeline orchestrator publishes execution and adjudication requests nothing subscribes to: one candidate must reach a validation-result-published event on the dev lane"
+summary: "The validation pipeline stopped after the plan: execution-requested and adjudication-requested had no subscriber, the executor and adjudicator declared none, the orchestrator's one routing entry owned every subscribed topic, and the validation ledger projection never saw the result topic. This change gives each hop a topic-scoped handler entry and a subscription, adds the shared event models the hops exchange, adds the adjudicator handler, and subscribes the ledger projection to validation-result-published."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-validation-pipeline-chain"
+    statement: "A pattern candidate submitted on the bus reaches exactly one validation-result-published event, and a failed check reaches a FAIL or QUARANTINE verdict."
+    acceptance:
+      - id: "AC2"
+        statement: "AC2: every hop between plan-created, execution-requested, checks-completed, adjudication-requested and adjudication-completed has a dispatched consumer, driven through the auto-wiring dispatch callback and the contract-derived result applier -- falsifier: uv run pytest tests/integration/runtime/test_validation_pipeline_chain_omn21056.py fails at the merge base and passes at the head"
+      - id: "AC3"
+        statement: "AC3: a failed required check yields a FAIL verdict and recommended failures below the threshold yield QUARANTINE, through the same dispatch entry point, with no event on the lifecycle topic -- falsifier: uv run pytest tests/ -k 'validation_pipeline and quarantine' -q selects the quarantine test, and the FAIL test in the same file fails at the merge base"
+evidence_requirements:
+  - kind: "tests"
+    description: "The chain test drives a candidate through every hop to result-published and the ledger intent, and the failed-check paths."
+    command: "uv run pytest tests/integration/runtime/test_validation_pipeline_chain_omn21056.py -q -n 0"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21056-ac2-chain"
+    description: "Every pipeline topic has a dispatched consumer and a candidate reaches result-published and a ledger intent."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/runtime/test_validation_pipeline_chain_omn21056.py -q -n 0 -k 'subscriber or real_dispatch or projected'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn21056-ac3-failed-checks"
+    description: "A failed required check is FAIL and recommended failures are QUARANTINE."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/integration/runtime/test_validation_pipeline_chain_omn21056.py -q -n 0 -k 'fail_verdict or quarantine'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC3"]
+  - id: "dod-omn21056-deploy-runtime-import"
+    description: "Deploy probe on the lab dev lane once the deploy agent rolls this change: the rolled runtime container carries the adjudicator handler and the result-published event model this change adds. It exits nonzero on a runtime that predates this change. Hosted CI has no runtime container, so only the local Done gate runs it. This supplemental deployment check binds no acceptance criterion; the hosted chain test proves AC2."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.handlers.handler_validation_adjudicate import HandlerAdjudicate; from omnibase_infra.models.validation.model_validation_result_published import ModelValidationResultPublished'"
+    binds_ac: []
