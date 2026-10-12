@@ -38,3 +38,11 @@ dod_evidence:
         check_value: uv run pytest tests/unit/nodes/node_runtime_error_triage_effect -k escalate_once -q -n 0
     binds_ac:
       - AC2
+  - id: dod-escalation-deploy
+    description: The deployed runtime container imports the escalation rule this change adds.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.nodes.node_runtime_error_triage_effect.models.model_escalation_rule import ModelEscalationRule'
+    binds_ac:
+      - AC1
