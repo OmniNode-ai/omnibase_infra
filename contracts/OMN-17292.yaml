@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: OMN-17292
+title: "The omnimarket contract pin advances to cc1b5fef4e4e6f9c727c6b7fb5f1929297dfe1a5"
+summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn17292
+    statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
+    acceptance:
+      - id: AC1
+        statement: "AC1: .github/omnimarket-contract-pin.yaml carries the refreshed value -- falsifier: grep -qF -- 'omnimarket_contract_ref: cc1b5fef4e4e6f9c727c6b7fb5f1929297dfe1a5' .github/omnimarket-contract-pin.yaml"
+evidence_requirements:
+  - kind: command
+    description: .github/omnimarket-contract-pin.yaml carries the refreshed value.
+    command: "grep -qF -- 'omnimarket_contract_ref: cc1b5fef4e4e6f9c727c6b7fb5f1929297dfe1a5' .github/omnimarket-contract-pin.yaml"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-17292-ac1
+    description: .github/omnimarket-contract-pin.yaml carries the refreshed value.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "grep -qF -- 'omnimarket_contract_ref: cc1b5fef4e4e6f9c727c6b7fb5f1929297dfe1a5' .github/omnimarket-contract-pin.yaml"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
