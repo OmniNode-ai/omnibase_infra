@@ -247,6 +247,10 @@ class RegistrationReducerService:
                 "capability_tags": [],
                 "contract_version": None,
                 "liveness_deadline": liveness_deadline,
+                # A fresh registration re-arms timeout detection: a node that
+                # expired and re-registers must be able to expire again.
+                "ack_timeout_emitted_at": None,
+                "liveness_timeout_emitted_at": None,
                 "last_applied_event_id": registration_attempt_id,
                 "registered_at": now,
                 "updated_at": now,
