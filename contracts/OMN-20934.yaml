@@ -66,3 +66,5 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_deploy_lane_verify_route_omn19507.py -q -p no:randomly -k sibling_verifier_fetches_private_census_before_probing
         cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
