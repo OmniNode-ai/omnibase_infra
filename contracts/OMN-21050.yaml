@@ -38,3 +38,11 @@ dod_evidence:
         check_value: uv run pytest tests/unit/nodes/node_topic_migration_executor_effect -q -n 0 -k cutover_with_residual_lag
     binds_ac:
       - AC2
+  - id: dod-omn21050-deploy-dispatch-entrypoint-at-head
+    description: The executor handler source at the merged head carries the handle() dispatch entrypoint the runtime resolves; it reads false at the merge base, where only execute() exists.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_topic_migration_executor_effect/handlers/handler_topic_migration_executor.py?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("async def handle(")' | grep -qx true
+    binds_ac:
+      - AC1
