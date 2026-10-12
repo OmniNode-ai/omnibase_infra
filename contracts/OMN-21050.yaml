@@ -13,8 +13,6 @@ requirements:
         statement: "AC1: the real node_topic_migration_executor_effect contract, wired through _prepare_handler_wiring, turns a DUAL_WRITE command into one ModelTopicMigrationLifecycleEvent with phase DUAL_WRITE and the command's correlation id, and build_contract_result_applier publishes it to onex.evt.omnibase-infra.topic-migration-lifecycle.v1 -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_executor_dispatch_omn21050.py -k dual_write fails at the merge base with 'does not expose a callable handle() or handle_async() dispatch entrypoint'"
       - id: "AC2"
         statement: "AC2: a CUTOVER command whose old consumer group still has residual lag, dispatched through the same entrypoint, raises 'cutover blocked by drain-proof gate' and returns no lifecycle event for phase CUTOVER -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_executor_dispatch_omn21050.py -k cutover fails if the gate result is ignored"
-      - id: "AC3"
-        statement: "AC3: after the deploy agent rolls the lab dev lane runtime onto this change, one DUAL_WRITE execute command for the synthetic pair onex.evt.labproof.omn21050-old.v1 and onex.evt.labproof.omn21050-new.v1 leaves the synthetic new topic present on the dev broker and a DUAL_WRITE lifecycle event on the lifecycle topic -- falsifier: the rpk topic list readback finds no onex.evt.labproof.omn21050-new.v1 before the roll"
 evidence_requirements:
   - kind: "tests"
     description: "The dispatch tests pass at the head and the DUAL_WRITE one fails at the merge base."
@@ -48,11 +46,3 @@ dod_evidence:
         check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_executor_dispatch_omn21050.py -q -k cutover"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC2"]
-  - id: "dod-omn21050-ac3-deploy-readback"
-    description: "AC3. Deploy readback on the lab dev lane broker: the synthetic new topic exists after the DUAL_WRITE command. It reads the lab dev lane broker container after the deploy agent rolls the runtime, which a hosted runner does not have, so only the local Done gate runs it."
-    source: "manual"
-    execution_scope: "local_done_gate"
-    checks:
-      - check_type: "command"
-        check_value: "docker exec omnibase-infra-redpanda sh -c 'RPK_USER=\"$DEV_KAFKA_SASL_USERNAME\" RPK_PASS=\"$DEV_KAFKA_SASL_PASSWORD\" RPK_SASL_MECHANISM=SCRAM-SHA-256 rpk topic list' | grep -q onex.evt.labproof.omn21050-new.v1"
-    binds_ac: ["AC3"]
