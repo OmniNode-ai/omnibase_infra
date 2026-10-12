@@ -1,3 +1,38 @@
+## v0.38.71 (2026-10-12)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.71 by the scheduled release train.
+- 26 release-relevant commit(s) merged since v0.38.70.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.70
+- feat: vendor the automation-liveness projection migrations ahead of omnimarket (#4877)
+- fix: runner fleet maintain start reaches the completed event (#4893)
+- fix: CI Live Contact admits a pin-only workflow edit, decided from the diff (#4884)
+- fix: publish contract-registered for every discovered contract (#4892)
+- feat: escalate runtime error incidents once on a contract-declared topic (#4891)
+- fix: wire the validation pipeline from plan to result-published (#4899)
+- fix: align workspace rejection payload with dispatch contract (#4895)
+- fix: rename execute to handle in HandlerTopicMigrationExecutor (#4894)
+- fix: apply the liveness expiry the timeout path already emits (#4890)
+- feat: vendor the tenant-credentials expiry and bound-host migrations (#4882)
+- feat: vendor the run_trace projection migrations ahead of omnimarket's node (#4860)
+- feat: the lane census manifest and snapshot leave the shipped repo for the private config root (#4869)
+- feat: a dev-lane instance takes named landing nodes from its lane class (#4871)
+- feat: lab lane overlays leave this repository; compose mounts the private overlay per project (#4842)
+- fix: a lab-proof receipt is judged against the checks its own diff can be held to (#4867)
+- fix: start completion-bound sweeper at wiring (#4806)
+- fix: avoid producers on read-only mirror sources (#4875)
+- feat: the lane mirror names a ci_run_failed topic set (#4857)
+- chore: advance omnimarket contract pin to e286bd296e37 (#4809)
+- ci: contract-validation validates with omnibase_core ModelTicketContract, not onex_change_control (#4819)
+- fix: the GitHub PR poller publishes only PR status events, never its poll-cycle summary (#4846)
+- feat: the gateway forwarder runs mirror-only with named product topic sets (#4840)
+- feat: vendor metering_summary 0004, savings as a share of the baseline (#4795)
+- fix: the runtime tick carries the slot it was due on, so no schedule window is lost to a late tick (#4815)
+- fix: lab address defaults and lab examples leave shipped source (#4830)
+- feat: vendor the lab_job projection migrations and grant the runtime role ahead of omnimarket#3434 (#4826)
+
 ## v0.38.70 (2026-10-11)
 
 ### Release
