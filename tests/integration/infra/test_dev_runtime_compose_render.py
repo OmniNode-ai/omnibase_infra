@@ -82,6 +82,8 @@ _RENDER_ONLY = "render-only"
 # Every :?-required var in docker-compose.infra.yml EXCEPT
 # DEV_REDPANDA_ADVERTISE_HOST, which each test sets (or omits) explicitly.
 BASE_REQUIRED_ENV: dict[str, str] = {
+    # OMN-20932: lane overlays are private; the mount refuses without this.
+    "ONEX_LANE_OVERLAY_DIR": "/nonexistent/onex-lane-overlays",
     "POSTGRES_PASSWORD": "test",
     "VALKEY_PASSWORD": "test",
     "INFISICAL_ENCRYPTION_KEY": "0" * 64,
@@ -1308,3 +1310,76 @@ def test_lanes_layering_the_dev_overlay_carry_no_skill_overlay_roots(
 
     assert str(effects["environment"].get(_SKILL_OVERLAY_ROOTS_ENV, "")).strip() == ""
     assert _mounts_at(effects, _SKILL_OVERLAY_ROOTS_TARGET) == []
+
+
+# OMN-20867. omnimarket's landing orchestrator and CI-red triage read six
+# per-lane act switches through contract ``${env.VAR:default}`` references. The
+# contract's inline default is today's behaviour, and a set-but-empty value is
+# refused at contract load, so compose must pass each name through value-less:
+# unset on the host stays unset in the container, set passes verbatim. Never the
+# ``${VAR:-}`` form, which would turn unset into the empty string the contract
+# refuses.
+_LANE_ACT_SWITCH_VALUES: dict[str, str] = {
+    "ONEX_PR_LANDING_GITHUB_MODE": "dry_run",
+    "ONEX_PR_LANDING_ARM_ACTION_MODE": "report_only",
+    "ONEX_CI_RED_TRIAGE_ACT_RUNNER": "false",
+    "ONEX_CI_RED_TRIAGE_ACT_PR_OWN": "false",
+    "ONEX_CI_RED_TRIAGE_ACT_SHARED_CAUSE": "false",
+    "ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD": "false",
+}
+_LANE_ACT_SWITCH_SERVICES = ("omninode-runtime", "runtime-effects")
+
+
+def _render_lane_runtime_services(
+    overlay: str | None, **switches: str
+) -> dict[str, Any]:
+    env = _render_env(
+        DEV_REDPANDA_ADVERTISE_HOST=_OFF_HOST_ADVERTISE_HOST,
+        **(_PREPR_SLOT_RENDER_ENV if overlay else {}),
+        **switches,
+    )
+    for key in _LANE_ACT_SWITCH_VALUES:
+        if key not in switches:
+            env.pop(key, None)
+    result = _run_compose_config(
+        env,
+        profile=_BORROWER_OVERLAYS[overlay] if overlay else "runtime",
+        with_dev_lane_overlay=True,
+        borrower_overlay=(REPO_ROOT / "docker" / overlay) if overlay else None,
+    )
+    assert result.returncode == 0, f"docker compose config failed:\n{result.stderr}"
+    services = yaml.safe_load(result.stdout)["services"]
+    assert isinstance(services, dict)
+    return services
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("overlay", [None, *sorted(_BORROWER_OVERLAYS)])
+def test_lane_act_switches_stay_unset_when_the_host_leaves_them_unset(
+    overlay: str | None,
+) -> None:
+    services = _render_lane_runtime_services(overlay)
+    for name in _LANE_ACT_SWITCH_SERVICES:
+        environment = services[name]["environment"]
+        # Positive control: the runtime anchor really was merged here.
+        assert "ONEX_CONTRACTS_DIR" in environment
+        for key in _LANE_ACT_SWITCH_VALUES:
+            # Listed (so a set host value would reach the container) and
+            # value-less (so compose passes nothing, not "").
+            assert key in environment, f"{name} does not pass {key} through"
+            assert environment[key] is None, (
+                f"{name} renders {key}={environment[key]!r} with the host value "
+                "unset; it must stay unset in the container"
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("overlay", [None, *sorted(_BORROWER_OVERLAYS)])
+def test_lane_act_switches_pass_a_set_host_value_through(overlay: str | None) -> None:
+    services = _render_lane_runtime_services(overlay, **_LANE_ACT_SWITCH_VALUES)
+    for name in _LANE_ACT_SWITCH_SERVICES:
+        environment = services[name]["environment"]
+        for key, value in _LANE_ACT_SWITCH_VALUES.items():
+            assert environment.get(key) == value, (
+                f"{name} renders {key}={environment.get(key)!r}, not the host's {value!r}"
+            )

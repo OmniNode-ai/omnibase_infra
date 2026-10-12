@@ -1,15 +1,15 @@
 {
   "_provenance": {
-    "source": "GET <base_url>/v1/models for every voter that omniintelligence load_review_voters (8782c050) resolved from omnibase_infra docker/lane-overlays/hostile-review-voters.yaml, from the operator Mac on the lab LAN",
-    "captured_utc": "2026-10-10T20:18:15Z",
-    "ticket": "OMN-20910",
+    "source": "GET <base_url>/v1/models for every voter that omniintelligence load_review_voters (8782c050) resolved from the private CI overlay config/onex/overlays/node_review_voters_overlay_compute/overlay.yaml, from the operator Mac on the lab LAN",
+    "captured_utc": "2026-10-10T22:45:33Z",
+    "ticket": "OMN-20923",
     "note": "base_url is recorded as the sha256 of the resolved URL (endpoint_sha256), so the fixture carries no lab address"
   },
   "voters": [
     {
       "voter_id": "correctness",
       "required": true,
-      "resolved_from": "backend local-coder in dev.bifrost.yaml",
+      "resolved_from": "endpoint_url",
       "http_status": 200,
       "served_model_ids": [
         "Qwen3.8-27B"
@@ -19,7 +19,7 @@
     {
       "voter_id": "security-contracts",
       "required": true,
-      "resolved_from": "backend local-studio-planner in dev.bifrost.yaml",
+      "resolved_from": "endpoint_url",
       "http_status": 200,
       "served_model_ids": [
         "Qwen3.8-27B"

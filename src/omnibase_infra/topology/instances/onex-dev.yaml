@@ -96,6 +96,8 @@ databases:
               - dod_verify_runs
               - gateway_link_health
               - lab_container_memory_window
+              - lab_job_state
+              - lab_job_transitions
               - lab_lane_health
               - lab_proof_receipts
               - live_events
@@ -214,6 +216,7 @@ databases:
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
               - provider_quota_state
+              - run_trace
               - savings_estimates
               - skill_execution_snapshots
               - tenant_inference_credentials

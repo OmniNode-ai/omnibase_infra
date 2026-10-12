@@ -34,7 +34,7 @@ DIFF_DIGEST = f"sha256:{'e' * 64}"
 REPO = "OmniNode-ai/omnimarket"
 PR_NUMBER = 3042
 PROFILE_ID = "omnimarket.runtime_image"
-PROFILE_VERSION = "1"
+PROFILE_VERSION = "2"
 MANDATORY = frozenset({"runtime_main_healthy", "changed_path_live"})
 STARTED = datetime(2026, 9, 28, 10, 0, tzinfo=UTC)
 FINISHED = datetime(2026, 9, 28, 10, 16, tzinfo=UTC)
@@ -404,25 +404,34 @@ REGISTRY = REPO_ROOT / "config" / "lab_proof_profiles.yaml"
 VALIDATOR = REPO_ROOT / "scripts" / "ci" / "validate_lab_proof_profiles.py"
 
 
-def _pin_json(tmp_path: Path, repo: str = REPO, kind: str = "runtime_image") -> Path:
-    """The pin exactly as the workflow makes it: the validator's --pin output."""
+def _pin_json(
+    tmp_path: Path,
+    repo: str = REPO,
+    kind: str = "runtime_image",
+    changed: list[str] | None = None,
+) -> Path:
+    """The pin exactly as the workflow makes it: the validator's --pin output.
+
+    ``changed`` is the PR's changed paths, written as the workflow writes
+    ``changed.txt`` (OMN-19566); None passes no --changed-files at all.
+    """
     import subprocess
     import sys
 
-    done = subprocess.run(
-        [
-            sys.executable,
-            str(VALIDATOR),
-            "--registry",
-            str(REGISTRY),
-            "--pin",
-            repo,
-            kind,
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    argv = [
+        sys.executable,
+        str(VALIDATOR),
+        "--registry",
+        str(REGISTRY),
+        "--pin",
+        repo,
+        kind,
+    ]
+    if changed is not None:
+        listing = tmp_path / "changed.txt"
+        listing.write_text("".join(f"{line}\n" for line in changed), encoding="utf-8")
+        argv += ["--changed-files", str(listing)]
+    done = subprocess.run(argv, check=True, capture_output=True, text=True)
     path = tmp_path / "pin.json"
     path.write_text(done.stdout, encoding="utf-8")
     return path
@@ -523,6 +532,52 @@ class TestTheRegistryPin:
         )
         assert done.returncode == 1
         assert "no profile pin" in done.stderr
+
+    # OMN-19566: the profile's conditional checks are decided by the PR's own
+    # changed paths, which the workflow reads from its clone. Both directions.
+    PIN_BUMP_DIFF = [".github/sibling-pins.yaml", "uv.lock", "tests/unit/test_pin.py"]
+    NODE_DIFF = ["src/omnimarket/nodes/node_x/handlers/handler_x.py", "uv.lock"]
+
+    def _without_changed_path_live(self, tmp_path: Path) -> dict[str, bool]:
+        checks = dict.fromkeys(self._registry_checks(tmp_path), True)
+        assert "changed_path_live" in checks  # no diff given: every one applies
+        del checks["changed_path_live"]
+        return checks
+
+    def test_a_pin_bump_is_not_held_to_a_check_its_diff_cannot_touch(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        checks = self._without_changed_path_live(tmp_path)
+        pin = _pin_json(tmp_path, changed=self.PIN_BUMP_DIFF)
+        doc = json.loads(pin.read_text(encoding="utf-8"))
+        assert "changed_path_live" not in doc["mandatory_checks"]
+        assert doc["inapplicable_checks"] == ["changed_path_live"]
+        code, body = self._post(tmp_path, _receipt(checks=checks), capsys, pin=pin)
+        assert code == 0
+        assert body["conclusion"] == "success", body["output"]["title"]
+
+    def test_a_node_change_is_held_to_changed_path_live(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        checks = self._without_changed_path_live(tmp_path)
+        pin = _pin_json(tmp_path, changed=self.NODE_DIFF)
+        doc = json.loads(pin.read_text(encoding="utf-8"))
+        assert "changed_path_live" in doc["mandatory_checks"]
+        assert doc["inapplicable_checks"] == []
+        code, body = self._post(tmp_path, _receipt(checks=checks), capsys, pin=pin)
+        assert code == 0
+        assert body["conclusion"] == "failure"
+        assert "MISSING_MANDATORY_CHECK" in body["output"]["title"]
+
+    def test_an_empty_diff_waives_nothing(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        checks = self._without_changed_path_live(tmp_path)
+        pin = _pin_json(tmp_path, changed=[])
+        code, body = self._post(tmp_path, _receipt(checks=checks), capsys, pin=pin)
+        assert code == 0
+        assert body["conclusion"] == "failure"
+        assert "MISSING_MANDATORY_CHECK" in body["output"]["title"]
 
     def test_no_profile_source_at_all_is_a_usage_error(self, tmp_path: Path) -> None:
         path = tmp_path / "receipt.json"

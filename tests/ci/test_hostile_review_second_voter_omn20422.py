@@ -5,10 +5,10 @@
 RULING 2026-10-09T04:15:56Z keeps Codex out of CI. RULING 2026-10-10T16:28:58Z puts one
 model on the Mac Studio; the recording below is its port 8130 serving Qwen3.8-27B, the
 same model the first voter serves on its own host. Since OMN-20910 the workflow names no
-voter URL or model: the voters, and which endpoint each reads, are declared in
-docker/lane-overlays/hostile-review-voters.yaml (see
-test_hostile_reviewer_voters_overlay_omn20910.py), and a distinct second voter
-(OMN-20889) is an edit to that overlay.
+voter URL or model: the voters, and which endpoint each reads, are declared in a
+review voters overlay that, since OMN-20923, is a private CI overlay and not part of
+this repository (see test_hostile_reviewer_voters_overlay_omn20910.py); a distinct
+second voter (OMN-20889) is an edit to that overlay.
 """
 
 from __future__ import annotations

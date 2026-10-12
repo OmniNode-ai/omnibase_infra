@@ -133,7 +133,7 @@ def _ticket_body(host: str, plan: Plan) -> str:
         f"Lanes not applicable on this host: "
         f"{', '.join(plan.get('lanes_not_applicable', [])) or '(none)'}",
         "",
-        "The desired-state lane census (deploy/lane-census/lane-manifest.yaml)",
+        "The desired-state lane census (the private lane-manifest.yaml)",
         "does not match the live runtime. Drift items below name exactly what is",
         "missing or extra. This is the regression class the lane-census ratchet",
         "(OMN-13011) exists to catch — it would have fired on 2026-06-11 when prod",

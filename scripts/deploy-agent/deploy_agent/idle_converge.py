@@ -48,6 +48,41 @@ INERT UNTIL A ROUTE EXISTS
 The converge fires only when the loaded routing table sends omnimarket to
 another instance. The committed table routes nothing to dev-202, so on .201
 nothing changes until the (dev, omnimarket) -> dev-202 row lands (task B8).
+
+THE SAME RULE, FOR omnibase_infra (OMN-20867)
+---------------------------------------------
+The rule is per repository, over :data:`FOLLOWED_REPOSITORIES`: an instance
+follows the dev head of every followed repository whose rebuilds the table
+routes to another instance. On the default instance that is omnimarket alone,
+as before (omnibase_infra routes to the default itself). On an instance whose
+receipt proves omnimarket only, it is omnibase_infra: its rebuilds go to the
+default instance by operator ruling, so such an instance otherwise took an
+omnibase_infra build only when an omnimarket merge happened to rebuild it, and
+ran a revision without a merged runtime change for as long as omnimarket was
+quiet. A converge is not a merge: it carries no
+``gha/`` requester, no per-merge verify job runs for it and no lab-pass receipt
+is emitted for it, and an instance receipt counts only for the repositories its
+``proves`` names, so this changes no repository's lab-pass evidence.
+
+A LANE WITH NO RUNNING RUNTIME IS RESTORED (OMN-20864)
+-----------------------------------------------------
+The converge rule above reads the running revision out of the runtime
+container, so with no runtime running it could only refuse
+(``running_unreadable``), and it did, every minute, from 14:14Z to 19:41Z on
+2026-10-11 while the lab dev lane sat with ``omninode-runtime`` absent and
+its replacement stuck in Created. A lane that is down is not "up to date" and
+not "unreadable"; it is down. :func:`decide_restore` is a separate rule,
+evaluated first in the same idle branch: when the lane's main runtime
+container is absent or stopped, the instance runs ONE runtime rebuild
+(:func:`restore_command`, requested as ``agent/idle-restore``) to bring it up.
+It keeps every bound that protects a running lane or a waiting command -- the
+idle branch only, no job in flight, the lane's FROZEN flag, the load gate --
+and adds two of its own: the lane must have been quiet for
+:data:`RESTORE_AFTER`, and a restore is tried at most once per
+:data:`RESTORE_RETRY_AFTER`, so a lane that will not come up costs one rebuild
+an hour, not one a minute. It ignores routing (a missing runtime is missing on
+every instance) and the probe windows, which protect a probe from a lane being
+rebuilt under it; a lane with no runtime fails the probe either way.
 """
 
 from __future__ import annotations
@@ -80,6 +115,22 @@ logger = logging.getLogger(__name__)
 #: event are never mistaken for a merge's.
 IDLE_CONVERGE_REQUESTER: Final = "agent/idle-converge"
 
+#: ``requested_by`` of a restore of a lane with no running runtime (OMN-20864).
+IDLE_RESTORE_REQUESTER: Final = "agent/idle-restore"
+
+#: OMN-20864: how long a lane with no running runtime must have run no job
+#: before a restore starts. Long enough that a deploy's own recovery, or an
+#: operator's hand refresh that just ended, is not raced; short next to the
+#: 5h50m the 2026-10-11 outage cost.
+RESTORE_AFTER: Final = timedelta(minutes=5)
+
+#: OMN-20864: at most one restore per this long, so a lane that will not come up
+#: costs one rebuild an hour instead of one every idle interval.
+RESTORE_RETRY_AFTER: Final = timedelta(minutes=60)
+
+#: ``docker inspect`` states of the main runtime that mean the lane is down.
+DOWN_STATES: Final = frozenset({"created", "exited", "dead"})
+
 #: OMN-19509 AC1: no job for this long.
 IDLE_AFTER: Final = timedelta(minutes=16)
 
@@ -93,6 +144,11 @@ CONVERGE_CEILING: Final = timedelta(minutes=30)
 
 #: The probes that grade .201 and bind staging delivery.
 GUARDED_PROBES: Final = frozenset({"C15", "C16"})
+
+#: The repositories whose dev heads an idle instance follows, in the order the
+#: idle branch evaluates them (OMN-20867). Each is followed only on an instance
+#: the routing table does not send its rebuilds to.
+FOLLOWED_REPOSITORIES: Final = ("omnimarket", "omnibase_infra")
 
 #: How often the idle branch re-evaluates. Each check reads a container file
 #: and asks git for one ref.
@@ -126,7 +182,9 @@ class ModelIdleConvergeInputs(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     now: datetime
-    omnimarket_routed_elsewhere: bool
+    #: The followed repository this decision is about (OMN-20867).
+    repository: str
+    routed_elsewhere: bool
     job_active: bool
     #: The end of the last job, or the agent's start when it has run none.
     last_activity: datetime
@@ -159,10 +217,11 @@ def decide(inputs: ModelIdleConvergeInputs) -> ModelIdleConvergeDecision:
 
     if inputs.frozen_reason is not None:
         return refuse(EnumIdleConvergeVerdict.FROZEN, inputs.frozen_reason)
-    if not inputs.omnimarket_routed_elsewhere:
+    repo = inputs.repository
+    if not inputs.routed_elsewhere:
         return refuse(
             EnumIdleConvergeVerdict.NOT_ROUTED_ELSEWHERE,
-            "the routing table sends omnimarket rebuilds to this instance",
+            f"the routing table sends {repo} rebuilds to this instance",
         )
     if inputs.job_active:
         return refuse(EnumIdleConvergeVerdict.JOB_ACTIVE, "a job is in flight")
@@ -179,27 +238,27 @@ def decide(inputs: ModelIdleConvergeInputs) -> ModelIdleConvergeDecision:
     if inputs.head_ref is None:
         return refuse(
             EnumIdleConvergeVerdict.HEAD_UNREADABLE,
-            "the omnimarket dev head could not be read",
+            f"the {repo} dev head could not be read",
         )
     if inputs.running_ref is None:
         return refuse(
             EnumIdleConvergeVerdict.RUNNING_UNREADABLE,
-            "the lane's running omnimarket revision could not be read",
+            f"the lane's running {repo} revision could not be read",
         )
     if inputs.running_ref == inputs.head_ref:
         return refuse(
             EnumIdleConvergeVerdict.UP_TO_DATE,
-            f"the lane runs omnimarket {inputs.head_ref[:12]}, the dev head",
+            f"the lane runs {repo} {inputs.head_ref[:12]}, the dev head",
         )
     if inputs.head_ref in inputs.attempted_heads:
         return refuse(
             EnumIdleConvergeVerdict.ALREADY_ATTEMPTED,
-            f"omnimarket {inputs.head_ref[:12]} was already converged on once",
+            f"{repo} {inputs.head_ref[:12]} was already converged on once",
         )
     return ModelIdleConvergeDecision(
         verdict=EnumIdleConvergeVerdict.CONVERGE,
         detail=(
-            f"idle {int(idle.total_seconds())}s, omnimarket "
+            f"idle {int(idle.total_seconds())}s, {repo} "
             f"{inputs.running_ref[:12]} -> dev head {inputs.head_ref[:12]}"
         ),
         head_ref=inputs.head_ref,
@@ -211,7 +270,8 @@ def converge_command() -> ModelRebuildRequested:
 
     Workspace-sourced, like every CI-published dev command, so the build stages
     omnimarket from origin/dev (stage_workspace.sh), which is the revision the
-    decision compared against.
+    decision compared against; and it builds omnibase_infra at the tracking
+    ref, the dev head an omnibase_infra decision compared against (OMN-20867).
     """
     return ModelRebuildRequested(
         correlation_id=uuid4(),
@@ -292,13 +352,15 @@ def _is_sha(value: object) -> bool:
     )
 
 
-def read_running_omnimarket_ref(
-    container: str, *, run: Runner = _default_run
+def read_running_ref(
+    container: str, repository: str, *, run: Runner = _default_run
 ) -> str | None:
-    """The omnimarket commit the lane's runtime image vendored, or ``None``.
+    """The ``repository`` commit the lane's runtime image carries, or ``None``.
 
     Read from the image's own build-provenance manifest, the same file the
-    lineage fence and the sibling-revision guard read.
+    lineage fence and the sibling-revision guard read: ``infra_vcs_ref`` for
+    omnibase_infra, which the image is built from, and the vendored sibling's
+    ``vcs_ref`` for any other repository.
     """
     try:
         result = run(
@@ -311,14 +373,150 @@ def read_running_omnimarket_ref(
         return None
     try:
         manifest = json.loads(result.stdout)
-        ref = manifest["per_repo_vcs_provenance"]["siblings"]["omnimarket"]["vcs_ref"]
+        ref = (
+            manifest["infra_vcs_ref"]
+            if repository == "omnibase_infra"
+            else manifest["per_repo_vcs_provenance"]["siblings"][repository]["vcs_ref"]
+        )
     except (ValueError, KeyError, TypeError):
         return None
     return ref if _is_sha(ref) else None
 
 
-def read_omnimarket_dev_head(clone: Path, *, run: Runner = _default_run) -> str | None:
-    """The omnimarket ``dev`` head on its remote, read from the local clone."""
+class EnumRuntimePresence(StrEnum):
+    """Whether the lane's main runtime container is running (OMN-20864)."""
+
+    RUNNING = "running"
+    DOWN = "down"
+    UNKNOWN = "unknown"
+
+
+class EnumIdleRestoreVerdict(StrEnum):
+    RESTORE = "restore"
+    NOT_DOWN = "not_down"
+    PRESENCE_UNREADABLE = "presence_unreadable"
+    FROZEN = "frozen"
+    JOB_ACTIVE = "job_active"
+    RECENTLY_ACTIVE = "recently_active"
+    RECENTLY_ATTEMPTED = "recently_attempted"
+
+
+class ModelIdleRestoreInputs(BaseModel):
+    """Everything one restore decision reads, gathered before it is made."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    now: datetime
+    presence: EnumRuntimePresence
+    #: What the presence read saw, for the log line.
+    presence_detail: str
+    job_active: bool
+    #: The end of the last job, or the agent's start when it has run none.
+    last_activity: datetime
+    #: When the last restore started, or ``None`` when none has.
+    last_attempt: datetime | None
+    frozen_reason: str | None = None
+
+
+class ModelIdleRestoreDecision(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    verdict: EnumIdleRestoreVerdict
+    detail: str
+
+
+def decide_restore(inputs: ModelIdleRestoreInputs) -> ModelIdleRestoreDecision:
+    """Restore a lane whose main runtime is not running, or the first reason not to.
+
+    Pure: every read happened already. See the module's OMN-20864 section.
+    """
+
+    def refuse(
+        verdict: EnumIdleRestoreVerdict, detail: str
+    ) -> ModelIdleRestoreDecision:
+        return ModelIdleRestoreDecision(verdict=verdict, detail=detail)
+
+    if inputs.presence is EnumRuntimePresence.RUNNING:
+        return refuse(EnumIdleRestoreVerdict.NOT_DOWN, inputs.presence_detail)
+    if inputs.presence is EnumRuntimePresence.UNKNOWN:
+        return refuse(
+            EnumIdleRestoreVerdict.PRESENCE_UNREADABLE, inputs.presence_detail
+        )
+    if inputs.frozen_reason is not None:
+        return refuse(EnumIdleRestoreVerdict.FROZEN, inputs.frozen_reason)
+    if inputs.job_active:
+        return refuse(EnumIdleRestoreVerdict.JOB_ACTIVE, "a job is in flight")
+    idle = inputs.now - inputs.last_activity
+    if idle < RESTORE_AFTER:
+        return refuse(
+            EnumIdleRestoreVerdict.RECENTLY_ACTIVE,
+            f"lane down ({inputs.presence_detail}); idle "
+            f"{int(idle.total_seconds())}s of {int(RESTORE_AFTER.total_seconds())}s",
+        )
+    if (
+        inputs.last_attempt is not None
+        and inputs.now - inputs.last_attempt < RESTORE_RETRY_AFTER
+    ):
+        return refuse(
+            EnumIdleRestoreVerdict.RECENTLY_ATTEMPTED,
+            f"lane down ({inputs.presence_detail}); last restore started "
+            f"{inputs.last_attempt:%Y-%m-%dT%H:%M:%SZ}, next allowed after "
+            f"{int(RESTORE_RETRY_AFTER.total_seconds())}s",
+        )
+    return ModelIdleRestoreDecision(
+        verdict=EnumIdleRestoreVerdict.RESTORE,
+        detail=(
+            f"lane down ({inputs.presence_detail}), idle {int(idle.total_seconds())}s"
+        ),
+    )
+
+
+def restore_command() -> ModelRebuildRequested:
+    """The one rebuild a restore runs: the converge's command, named apart.
+
+    A runtime-scope rebuild at the tracking ref brings every runtime service
+    up through the agent's ordinary path (compose up, per-container recovery,
+    verification), so a restore is a deploy with a job record and a terminal
+    event like any other.
+    """
+    return converge_command().model_copy(
+        update={"correlation_id": uuid4(), "requested_by": IDLE_RESTORE_REQUESTER}
+    )
+
+
+def read_runtime_presence(
+    container: str, *, run: Runner = _default_run
+) -> tuple[EnumRuntimePresence, str]:
+    """Whether ``container`` is running, down, or could not be read.
+
+    DOWN covers both shapes of 2026-10-11: no container under the name at all
+    (docker answers "No such object"), and one there but created, exited or
+    dead. Any other failure -- docker not answering, a timeout -- is UNKNOWN,
+    which never restores.
+    """
+    try:
+        result = run(
+            ["docker", "inspect", "--format", "{{.State.Status}}", container],
+            timeout=READ_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return EnumRuntimePresence.UNKNOWN, f"docker inspect {container}: {exc}"
+    if result.returncode != 0:
+        said = (result.stderr or result.stdout).strip()
+        if "no such object" in said.lower() or "no such container" in said.lower():
+            return EnumRuntimePresence.DOWN, f"no container named {container}"
+        return (
+            EnumRuntimePresence.UNKNOWN,
+            f"docker inspect {container} exited {result.returncode}: {said[:200]}",
+        )
+    state = result.stdout.strip().lower()
+    if state in DOWN_STATES:
+        return EnumRuntimePresence.DOWN, f"{container} is {state}"
+    return EnumRuntimePresence.RUNNING, f"{container} is {state}"
+
+
+def read_dev_head(clone: Path, *, run: Runner = _default_run) -> str | None:
+    """The ``dev`` head on ``clone``'s remote, read from the local clone."""
     try:
         result = run(
             ["git", "-C", str(clone), "ls-remote", "origin", "refs/heads/dev"],

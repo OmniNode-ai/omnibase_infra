@@ -33,6 +33,18 @@ requirements:
     acceptance:
       - id: AC6
         statement: 'AC6: no-hardcoded-topics is listed in .pre-commit-config.yaml only under the omnibase_core repo block, pinned to a full commit sha, with require_serial and its exclude carried over -- falsifier: uv run pytest tests/ci/test_precommit_hooks_core_omn20074.py -q fails at the merge base'
+  - id: req-contract-validation-core-s8
+    statement: omnibase_infra's contract-validation workflow must validate the branch ticket's contract with omnibase_core's ModelTicketContract at the locked core version instead of the onex_change_control validators, under unchanged workflow and job names.
+    acceptance:
+      - id: AC7
+        statement: 'AC7: .github/workflows/contract-validation.yml names no onex_change_control (no auth preflight, no validator checkout, no validate-yaml), validates with omnibase_core''s ModelTicketContract at the uv.lock core version that carries the binds_ac rules (0.47.39 or later), and keeps its workflow name Contract Validation and its job name contract-validation -- falsifier: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q -k test_workflow_'
+      - id: AC8
+        statement: 'AC8: the contract-validation step''s own run block passes this repository''s branch-ticket contract, skips a branch with no ticket or no contract, and fails a planted binds_ac entry that is not a criterion label, a planted binds_ac item of check_type command_exit_0 and a planted malformed contract, each naming the file, the first two also the rule -- falsifier: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q'
+  - id: req-retire-skip-token-approvals
+    statement: The local pre-commit hook must reject a skip token even when a receipt-id comment accompanies it, retiring the approvals registry escape hatch.
+    acceptance:
+      - id: AC9
+        statement: 'AC9: the hook rejects a token with or without a receipt-id comment in a file and rejects a commit message with a receipt-id comment, while a comment alone remains inert -- falsifier: uv run pytest tests/unit/test_reject_skip_token_hook_no_escape_hatch.py -q fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: No workflow calls an OCC reusable workflow, waits on occ-preflight or requires an OCC companion context.
@@ -49,6 +61,12 @@ evidence_requirements:
   - kind: tests
     description: no-hardcoded-topics is consumed from the omnibase_core hook block, pinned to a full sha.
     command: uv run pytest tests/ci/test_precommit_hooks_core_omn20074.py -q
+  - kind: tests
+    description: The contract-validation workflow reads no onex_change_control, validates with omnibase_core at the locked core and keeps its names.
+    command: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q -k test_workflow_
+  - kind: tests
+    description: The contract-validation step passes this repository's branch contract and refuses both planted binds_ac shapes and a malformed contract.
+    command: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -108,3 +126,30 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
+  - id: dod-contract-validation-core-ac7
+    description: The workflow test proves no onex_change_control reference, the locked core version and the unchanged names.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q -k test_workflow_
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
+  - id: dod-contract-validation-core-ac8
+    description: The step's own run block passes the branch contract and fails each planted shape naming the file.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC8
+  - id: dod-retire-skip-token-approvals-ac9
+    description: The hook behaviour tests reject tokens accompanied by receipt-id comments in files and commit messages; those assertions fail against the merge base's hook.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/test_reject_skip_token_hook_no_escape_hatch.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC9

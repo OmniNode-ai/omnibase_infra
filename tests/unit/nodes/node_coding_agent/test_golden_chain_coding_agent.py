@@ -51,11 +51,11 @@ from omnibase_infra.models.coding_agent import (
     ModelWorkspaceValidateCommand,
     ModelWorkspaceValidateResult,
 )
+from omnibase_infra.models.coding_agent.model_coding_agent_fsm_advance import (
+    ModelCodingAgentFsmAdvance,
+)
 from omnibase_infra.nodes.node_coding_agent_fsm_reducer.handlers.handler_coding_agent_fsm import (
     delta,
-)
-from omnibase_infra.nodes.node_coding_agent_fsm_reducer.models.model_coding_agent_fsm_advance import (
-    ModelCodingAgentFsmAdvance,
 )
 from omnibase_infra.nodes.node_coding_agent_invoke_effect.handlers.handler_coding_agent_invoke import (
     ModelSubprocessInvocation,
@@ -189,6 +189,9 @@ class TestWorkspaceComputeDispatch:
             allowed_roots=(_allowed_root(tmp_path),),
             sandbox=EnumAgentSandbox.WORKSPACE_WRITE,
             prompt="do the thing",
+            invoke_command=_invoke_command(
+                workspace_path=str(tmp_path), sandbox=EnumAgentSandbox.WORKSPACE_WRITE
+            ),
         )
         # def-B (OMN-14355/OMN-14587 wave 1): handle() takes the typed command
         # directly and returns the verdict directly — no envelope wrapping.
@@ -211,6 +214,7 @@ class TestWorkspaceComputeDispatch:
             allowed_roots=(str(root),),
             sandbox=EnumAgentSandbox.READ_ONLY,
             prompt="do the thing",
+            invoke_command=_invoke_command(workspace_path=str(escape)),
         )
         verdict = await handler.handle(command)
         assert isinstance(verdict, ModelWorkspaceValidateResult)
@@ -225,6 +229,7 @@ class TestWorkspaceComputeDispatch:
             allowed_roots=(),
             sandbox=EnumAgentSandbox.READ_ONLY,
             prompt="do the thing",
+            invoke_command=_invoke_command(workspace_path=str(tmp_path)),
         )
         verdict = await handler.handle(command)
         assert isinstance(verdict, ModelWorkspaceValidateResult)
@@ -290,6 +295,7 @@ class TestOrchestratorDispatch:
         self, tmp_path: Path
     ) -> None:
         from omnibase_infra.nodes.node_coding_agent_orchestrator.handlers.handler_coding_agent_orchestrator import (
+            TOPIC_FAILED,
             TOPIC_FSM_ADVANCE,
             TOPIC_INVOKE,
         )
@@ -298,24 +304,28 @@ class TestOrchestratorDispatch:
         command = _invoke_command(workspace_path=str(tmp_path))
         verdict = ModelWorkspaceValidateResult(
             correlation_id=command.correlation_id,
+            invoke_command=command,
             valid=False,
             rejection_reason="symlink escape",
         )
         envelope: ModelEventEnvelope[Any] = ModelEventEnvelope(
-            payload={
-                "verdict": verdict.model_dump(mode="json"),
-                "command": command.model_dump(mode="json"),
-            },
+            payload=verdict.model_dump(mode="json"),
             correlation_id=command.correlation_id,
             event_type=_CORPUS.event_type_for(TOPIC_WORKSPACE_VALIDATED),
         )
         output = await handler.handle(envelope)
-        assert len(output.events) == 1
-        emitted = output.events[0]
-        # Rejected -> FSM advance to REJECTED, NEVER the invoke command.
-        assert emitted.event_type == TOPIC_FSM_ADVANCE
-        assert emitted.event_type != TOPIC_INVOKE
-        assert emitted.payload["event"]["kind"] == "workspace_rejected"
+        # Rejected -> FSM advance to REJECTED plus the one terminal REJECTED
+        # result on the failed topic, NEVER the invoke command.
+        assert [e.event_type for e in output.events] == [
+            TOPIC_FSM_ADVANCE,
+            TOPIC_FAILED,
+        ]
+        assert TOPIC_INVOKE not in {e.event_type for e in output.events}
+        advance, terminal = (e.payload for e in output.events)
+        assert advance.event.kind == EnumCodingAgentEventKind.WORKSPACE_REJECTED
+        assert advance.state.current_state == EnumCodingAgentFsmState.VALIDATING
+        assert terminal.status == EnumAgentStatus.REJECTED
+        assert terminal.exit_code is None
 
     async def test_workspace_ok_emits_invoke(self, tmp_path: Path) -> None:
         from omnibase_infra.nodes.node_coding_agent_orchestrator.handlers.handler_coding_agent_orchestrator import (
@@ -326,14 +336,12 @@ class TestOrchestratorDispatch:
         command = _invoke_command(workspace_path=str(tmp_path))
         verdict = ModelWorkspaceValidateResult(
             correlation_id=command.correlation_id,
+            invoke_command=command,
             valid=True,
             resolved_path=str(tmp_path),
         )
         envelope: ModelEventEnvelope[Any] = ModelEventEnvelope(
-            payload={
-                "verdict": verdict.model_dump(mode="json"),
-                "command": command.model_dump(mode="json"),
-            },
+            payload=verdict.model_dump(mode="json"),
             correlation_id=command.correlation_id,
             event_type=_CORPUS.event_type_for(TOPIC_WORKSPACE_VALIDATED),
         )
@@ -707,6 +715,7 @@ class TestEndToEndCredentialIndependentChain:
             allowed_roots=(str(root),),
             sandbox=command.sandbox,
             prompt=command.prompt,
+            invoke_command=command,
         )
         verdict = await compute.handle(validate_command)
         assert verdict.valid is False
@@ -719,10 +728,7 @@ class TestEndToEndCredentialIndependentChain:
 
         orch_out = await orchestrator.handle(
             ModelEventEnvelope(
-                payload={
-                    "verdict": verdict.model_dump(mode="json"),
-                    "command": command.model_dump(mode="json"),
-                },
+                payload=verdict.model_dump(mode="json"),
                 correlation_id=corr,
                 event_type=_CORPUS.event_type_for(TOPIC_WORKSPACE_VALIDATED),
             )
@@ -730,14 +736,10 @@ class TestEndToEndCredentialIndependentChain:
         advance_event = orch_out.events[0]
         assert advance_event.event_type == TOPIC_FSM_ADVANCE
 
-        # REDUCER folds the rejection -> terminal REJECTED.
+        # REDUCER folds the orchestrator's advance -> terminal REJECTED.
         reducer = HandlerCodingAgentFsm()
-        advance = ModelCodingAgentFsmAdvance(
-            state=_fsm_state(corr, EnumCodingAgentFsmState.VALIDATING),
-            event=ModelCodingAgentEvent.model_validate(advance_event.payload["event"]),
-        )
         fsm_out = await reducer.handle(
-            ModelEventEnvelope(payload=advance, correlation_id=corr)
+            ModelEventEnvelope(payload=advance_event.payload, correlation_id=corr)
         )
         final_state = fsm_out.projections[0]
         assert final_state.current_state == EnumCodingAgentFsmState.REJECTED

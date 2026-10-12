@@ -810,6 +810,17 @@ EXPECTED_EXTERNAL_CONTEXTS: tuple[str, ...] = (
     # EXPECTED_EXTERNAL_CONTEXTS is asserted only on pull_request CI Summary
     # runs, so this PR-only producer needs no merge_group trigger.
     "repo-evidence / dod-verify",
+    # OMN-20934: the lab-overlay parity tests (lane-census-parity.yml). They hold
+    # this repository's lane compose files, deploy agent and pre-PR pool against
+    # the lab's own lane manifest, which is private config fetched from the CI
+    # overlay, so the generic splits deselect them (marker `lab_overlay`) and this
+    # job is the only place they run. Registered here for the OMN-16878 reason the
+    # kb-doc-gate note above gives: `dev` requires exactly ONE context, so this
+    # tuple IS the external enforcement surface on this repo, and a job outside it
+    # is refused by advisory-job-gate as a verification job that cannot fail
+    # anything. Admitted under POST_FIXTURE_WINDOW_CONTEXTS and placed at the tail
+    # for the reason the `Governed helper primitive gate` entry states.
+    "Lab-overlay parity tests (OMN-20934)",
 )
 
 # OMN-17199 — contexts admitted AFTER the last historical measurement window
@@ -976,6 +987,26 @@ POST_FIXTURE_WINDOW_CONTEXTS: frozenset[str] = frozenset(
         #   * It is proven able to PASS: omnimarket at 933d0ca8's parent exits
         #     0 under the same index, and this repository's dev head exits 0.
         "pypi-pin-resolvability",
+        # OMN-20934: the parity workflow lands in this same PR, so no merged PR
+        # in either fixture window could have produced this check-run. Comes out
+        # at the next fixture re-capture.
+        #
+        # ADMISSION IS BY CONSTRUCTION, on the argument recorded for
+        # `exposure-reader-coverage` above:
+        #   * The producer (.github/workflows/lane-census-parity.yml) declares
+        #     `pull_request` with no `types:`, no `branches:` filter and no
+        #     `paths:` filter (its header says why), and its one job carries no
+        #     `needs:` and no job-level `if:` -- so it reports on every
+        #     pull-request shape and cannot be skipped-as-passed. An empty
+        #     selection, an unset or unreadable overlay and a missing census file
+        #     each fail the job rather than pass it.
+        #   * It is proven able to FAIL on real input: the tests it selects fail
+        #     with no ONEX_WORKSPACE_CONFIG_ROOT (the pre-PR pool case reads
+        #     `the lane census is not configured`).
+        #   * It is proven able to PASS: with the census from the overlay's
+        #     default branch the lab_overlay-marked tests of the files this
+        #     change touches pass (135 of them).
+        "Lab-overlay parity tests (OMN-20934)",
     }
 )
 

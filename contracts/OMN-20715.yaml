@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20715"
+title: "the release train decision surface is enforced in the PR gate and in a pre-commit hook"
+summary: "The release-train-cuts-omnimarket ruling is carried by config/release_train_policy.yaml and tests/scripts/test_release_train_nightly.py, merged in omnibase_infra#4708. No workflow job named the tests and no pre-commit hook ran them, because the change-aware selector does not pick tests/scripts/ for a config or scripts change. A named test-parallel step in ci.yml, whose result feeds the required CI Summary context, and a check-only pre-commit hook now run the file, and three tests pin both."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn20715-wire-release-train-nightly-tests"
+    statement: "tests/scripts/test_release_train_nightly.py is run by name by a ci.yml test-parallel step and by a pre-commit hook that fires on the policy, the train, its workflow and the test."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: ci.yml test-parallel has a step running tests/scripts/test_release_train_nightly.py and .pre-commit-config.yaml has a check-only hook running it, firing on the policy file, the train script, the nightly workflow and the test itself -- falsifier: uv run pytest tests/scripts/test_release_train_nightly.py -q -k EnforcedInCIAndPrecommit fails at the merge base, where neither the step nor the hook exists"
+evidence_requirements:
+  - kind: "tests"
+    description: "The wiring tests pass at the head and fail at the merge base."
+    command: "uv run pytest tests/scripts/test_release_train_nightly.py -q -k EnforcedInCIAndPrecommit"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20715-ac1-wired"
+    description: "AC1. The nightly decision-surface tests are run by a named CI step and a pre-commit hook."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/scripts/test_release_train_nightly.py -q -k EnforcedInCIAndPrecommit"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]

@@ -86,6 +86,8 @@ databases:
               - dod_verify_runs
               - gateway_link_health
               - lab_container_memory_window
+              - lab_job_state
+              - lab_job_transitions
               - lab_lane_health
               - lab_proof_receipts
               - live_events
@@ -223,6 +225,7 @@ databases:
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
               - provider_quota_state
+              - run_trace
               - savings_estimates
               - skill_execution_snapshots
               - tenant_inference_credentials
@@ -385,5 +388,5 @@ source:
   profile_catalog_path: src/omnibase_infra/topology/application_database_profiles.yaml
   profile_catalog_sha256: 690ada1927fc31465fd1d80435e82c96394fa05d49bd433e30242ea014fa740f
   repository: OmniNode-ai/omnibase_infra
-  sha256: 7cfb07606c676f28e6e984e8046b55a1d2a91690ea77f94e18c8c26c5ecfd12b
+  sha256: 94385a52c502547fe64ad8ab040ab029160aab5c9775195c21710ecd54ecf085
 topology_instance: local

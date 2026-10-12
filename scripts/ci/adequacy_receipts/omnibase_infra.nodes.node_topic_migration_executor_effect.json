@@ -1,0 +1,27 @@
+{
+  "branch_coverage_pct": 66.23,
+  "candidate_count": 8,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_topic_migration_executor_effect.handlers.handler_topic_migration_executor",
+  "handler_module_sha256": "sha256:192b056f04c1529fe084270ec3c44bccddaf6f7f26fd829b75785210dae0a04e",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_topic_migration_executor_effect",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-10-12T12:47:51.059506+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 7,
+  "selected_input_hashes": [
+    "sha256:711556bd41573b8774b0cee101c4381941f77123b2d1ccc23ab3424f1f8e4823",
+    "sha256:818652fb9310aec3c901c40897dbf1dde4d2ba0d22e0e5f732a829f5b1d95b2f",
+    "sha256:38bc86a73da5a02a13d82dfa96892767792d7345c29d9b00fa2e6c4d6caad49b",
+    "sha256:5a32caadea29e728bdea31ea3fcc6299a844064aa4ad2dd79c5f9437c1c842d6",
+    "sha256:239caa81dfa1f706be3ccc48300db286178a6e2142ab16d141fe5f2a4941d93a",
+    "sha256:923fd9bd5f2dfb911dd2d9bf7a3a6ee99b5ac8ece2228fde9c3a4a545b166150",
+    "sha256:9bc6dbf90cc6242ca4d76c007522e582f082a61f44ac36500e4665d2562bbaf5"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-21050 hand-flips node_topic_migration_executor_effect to canonical def-B via a PURE RENAME execute->handle (OMN-14781 path): execute(command) became handle(request) with the body unchanged apart from binding command = request, and the phase-ordering, forward-validation and consumer-group-minting helpers are re-derived byte-identical base_ref<->HEAD by the ratchet from git. Equivalence is proven by that git-verbatim preservation plus the green runtime-dispatch parity tests, which drive the real contract.yaml through the kernel's wiring (DUAL_WRITE reaches a lifecycle event; a CUTOVER with residual lag emits none).",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": []
+}

@@ -30,21 +30,31 @@ description: >
 
 # Strongly typed I/O models
 input_model:
-  name: "ModelValidationPlan"
-  module: "omnibase_infra.nodes.node_validation_orchestrator.models"
-  description: "Validation plan containing the checks to execute."
+  name: "ModelValidationExecutionRequested"
+  module: "omnibase_infra.models.validation.model_validation_execution_requested"
+  description: "Execution request carrying the validation plan whose checks to run."
 output_model:
-  name: "ModelExecutorResult"
-  module: "omnibase_infra.nodes.node_validation_executor.models"
-  description: "Aggregated result of all check executions."
+  name: "ModelValidationChecksCompleted"
+  module: "omnibase_infra.models.validation.model_validation_checks_completed"
+  description: "Aggregated result of all check executions, with the plan's score threshold."
 # Event Bus Configuration [OMN-3371]
+#
+# OMN-21056: the executor had no subscription, so the orchestrator's execution
+# request was published to a topic nothing consumed. It now consumes the request
+# and publishes the aggregated result on checks-completed.
 event_bus:
   version:
     major: 0
     minor: 1
     patch: 0
+  subscribe_topics:
+    - "onex.evt.platform.validation-execution-requested.v1"
   publish_topics:
     - "onex.evt.platform.validation-checks-completed.v1"
+# The key is the returned event class name with its `Model` prefix stripped.
+published_events:
+  - topic: "onex.evt.platform.validation-checks-completed.v1"
+    event_type: "ValidationChecksCompleted"
 # Capability declaration
 capabilities:
   - name: "validation.execute_checks"
@@ -59,13 +69,17 @@ handler_routing:
   routing_strategy: "operation_match"
   handlers:
     - operation: "validation.run_checks"
+      topic: "onex.evt.platform.validation-execution-requested.v1"
       handler:
         name: "HandlerRunChecks"
         module: "omnibase_infra.nodes.node_validation_executor.handlers.handler_run_checks"
       description: "Execute all checks in a validation plan"
+      event_model:
+        name: "ModelValidationExecutionRequested"
+        module: "omnibase_infra.models.validation.model_validation_execution_requested"
       input_model:
-        name: "ModelValidationPlan"
-        module: "omnibase_infra.nodes.node_validation_orchestrator.models"
+        name: "ModelValidationExecutionRequested"
+        module: "omnibase_infra.models.validation.model_validation_execution_requested"
 # Error handling
 error_handling:
   retry_policy:

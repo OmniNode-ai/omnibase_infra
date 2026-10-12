@@ -1156,7 +1156,7 @@ jobs:
           sys.stdout.write(hits[0]["run"])
           PY
           [ -s "$step_file" ] || { echo "::error::could not read the health step text"; exit 1; }
-          for svc in projection-api omnimarket-projection-llm-cost consumer-health-projection; do
+          for svc in projection-api omnimarket-projection-llm-cost consumer-health-projection tenant-projection-writer; do
             container="${LOCAL_PROJECT}-${svc}"
             before="$(docker inspect --format '{{.State.Health.Status}}' "$container")"
             if [ "$before" != "healthy" ]; then

@@ -158,6 +158,9 @@ class _FastExecutor:
         self.calls.append("verify")
         return []
 
+    def run_lane_mirror(self, **kwargs: Any) -> None:
+        return None
+
     def deliver_onex_api_pin(self, **kwargs: Any) -> dict[str, Any]:
         """The SECOND post-terminal phase (OMN-18572), blocking on demand."""
         self.calls.append("deliver_onex_api_pin")

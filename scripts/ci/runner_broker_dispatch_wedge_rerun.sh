@@ -221,9 +221,13 @@ for repo in $(echo "${REPOS_CSV}" | tr ',' '\n'); do
     continue
   fi
 
+  # OMN-19998: a wedge job concludes failure or cancelled, so its run cannot conclude success, skipped or
+  # neutral. Those runs' jobs are never read: before this, every scan read the jobs of every completed run in
+  # the lookback (up to 5 lists + 150 job reads every 10 minutes on the operator's personal token).
   run_ids="$(echo "${runs_json}" | jq -r --arg cutoff "${cutoff_iso}" '
     .workflow_runs[]?
     | select(.created_at >= $cutoff)
+    | select((.conclusion // "") as $c | ($c != "success" and $c != "skipped" and $c != "neutral"))
     | .id
   ' 2>/dev/null || true)"
 

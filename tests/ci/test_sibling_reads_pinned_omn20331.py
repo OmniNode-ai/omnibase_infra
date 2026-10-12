@@ -30,17 +30,12 @@ PINS = yaml.safe_load((REPO_ROOT / ".github" / "sibling-pins.yaml").read_text())
 # Deliberately live, not in PINNED_WORKFLOWS (measured red when pinned, PR #4449):
 # ci-bus-overlay-binding.yml binds the overlay to the branch the publisher reads at
 # merge time (its own test requires omnimarket ``dev``). The validate-boundaries
-# action ci.yml calls stays live: at a pinned OCC dev sha its inner
-# checkout takes ``github.action_ref``, which resolves to ``v6`` inside the
-# composite, and the merge_group Cross-Repo Migration Conflicts job went red
-# (run 36942428614); that one ``uses:`` stays on ``@main``.
-LIVE_ACTIONS = frozenset({"onex_change_control/.github/actions/validate-boundaries"})
+# action ci.yml calls is omnibase_core's copy at a full sha (OMN-20963): it
+# runs the handlers from its own checkout and never reads ``github.action_ref``,
+# which is what made the change-control copy unpinnable (run 36942428614).
 PINNED_WORKFLOWS = (
     "ci.yml",
     "contract-topic-graph.yml",
-    # OMN-14186: validate-contract@main read OCC main, whose schema predates
-    # binds_ac and refused every contract repo-evidence / dod-verify accepts.
-    # The workflow now checks out the validators at the pin and runs them inline.
     "contract-validation.yml",
     "contractor-integration-note.yml",
     "delegation-consumer-kwarg-parity.yml",
@@ -115,9 +110,7 @@ def test_no_sibling_reusable_workflow_or_clone_by_branch(name: str) -> None:
     bad = [
         f"{name}: {m.group(1)}@{m.group(3)}"
         for m in USES.finditer(text)
-        if m.group(2) in PINS
-        and m.group(1) not in LIVE_ACTIONS
-        and not HEX40.fullmatch(m.group(3))
+        if m.group(2) in PINS and not HEX40.fullmatch(m.group(3))
     ]
     assert not bad, f"sibling reusable workflow/action by branch: {bad}"
     assert not re.search(r"^\s*core-ref: (dev|main)\s*$", text, re.M)

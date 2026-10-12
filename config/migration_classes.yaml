@@ -120,6 +120,7 @@ migrations:
   forward/108_create_pr_landing_workflow_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
   forward/109_delegation_workflow_state_updated_at_only_on_transition.sql: forward-only # CREATE OR REPLACE FUNCTION on an existing trigger function
   forward/110_add_ledger_chain_chain_state.sql: forward-only # DROP; ALTER TABLE public.ledger_chain DROP CONSTRAINT IF; ALTER TABLE public.ledger_chain ADD CONSTRAINT CK_LEDGER_CHAIN_CHAIN_STATE (ADD CONSTRAINT class)
+  forward/111_widen_runtime_error_triage_active_unique_to_escalated.sql: forward-only # UNIQUE INDEX on an existing table; DROP
   forward/nodes/node_canary_score_reducer/0001_create_capability_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0002_capability_scores_tenant_id_and_rls.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
@@ -289,6 +290,8 @@ migrations:
   forward/nodes/node_projection_intent_classification/0001_intent_classification_agent_source.sql: expand-only
   forward/nodes/node_projection_intent_classification/0002_grant_omninode_runtime_intent_classification_events.sql: expand-only
   forward/nodes/node_projection_intent_classification/0003_grant_omninode_runtime_intent_classification_sequence.sql: expand-only
+  forward/nodes/node_projection_lab_job/0000_create_lab_job.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.lab_job_state)
+  forward/nodes/node_projection_lab_job/0001_grant_omninode_runtime_lab_job.sql: expand-only # additive
   forward/nodes/node_projection_lab_lane_health/0000_create_lab_lane_health.sql: forward-only # ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_lab_lane_health/0001_grant_omninode_runtime_lab_lane_health.sql: expand-only
   forward/nodes/node_projection_lab_proof_receipts/0000_create_lab_proof_receipts.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.lab_proof_receipts)
@@ -338,6 +341,9 @@ migrations:
   forward/nodes/node_projection_routing_decision/0023_grant_tenant_projection_writer_agent_routing_decisions.sql: expand-only
   forward/nodes/node_projection_routing_feedback/0000_create_delegation_routing_feedback.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT
   forward/nodes/node_projection_routing_feedback/0001_grant_tenant_projection_writer_delegation_routing_feedback.sql: expand-only # additive
+  forward/nodes/node_projection_run_trace/0000_create_run_trace.sql: forward-only # ALTER TABLE public.run_trace ALTER COLUMN SET NOT NULL; ENABLE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
+  forward/nodes/node_projection_run_trace/0001_grant_tenant_projection_writer_run_trace.sql: expand-only
+  forward/nodes/node_projection_run_trace/0002_force_rls_run_trace.sql: forward-only # ALTER TABLE public.run_trace FORCE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
   forward/nodes/node_projection_runner_fleet/0000_create_runner_fleet_liveness.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_runner_fleet/0001_grant_omninode_runtime_runner_fleet_liveness.sql: expand-only
   forward/nodes/node_projection_demo_readiness/0000_create_demo_readiness_latest.sql: forward-only # UNIQUE INDEX on created table
@@ -346,6 +352,7 @@ migrations:
   forward/nodes/node_projection_metering_summary/0001_grant_tenant_projection_writer_metering_summary.sql: expand-only
   forward/nodes/node_projection_metering_summary/0002_metering_summary_savings_per_measured_run.sql: expand-only
   forward/nodes/node_projection_metering_summary/0003_metering_summary_compression_and_cache_hit.sql: expand-only
+  forward/nodes/node_projection_metering_summary/0004_metering_summary_savings_pct.sql: expand-only
   forward/nodes/node_projection_lab_container_memory/0000_create_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_lab_container_memory/0001_grant_omninode_runtime_lab_container_memory_window.sql: expand-only # additive
   forward/nodes/node_projection_topic_activity/0000_create_topic_activity.sql: forward-only # ALTER TABLE on the created table
@@ -393,6 +400,8 @@ migrations:
   forward/nodes/node_projection_tenant_credentials/0001_relax_name_provider_not_null.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_tenant_credentials/0002_credential_identity_not_null.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_INFEREN
   forward/nodes/node_projection_tenant_credentials/0005_tenant_credentials_fingerprint_and_set_at.sql: expand-only
+  forward/nodes/node_projection_tenant_credentials/0006_tenant_credentials_expires_at.sql: expand-only
+  forward/nodes/node_projection_tenant_credentials/0007_tenant_credentials_bound_host.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/003_grant_tenant_projection_writer_tenant_inference_credentials.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql: forward-only # DROP
   forward/nodes/node_projection_tenant_registry/0000_create_tenant_registry_mirror.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_REGISTR

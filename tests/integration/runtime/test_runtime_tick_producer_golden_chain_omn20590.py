@@ -4,7 +4,7 @@
 
 The chain: ``start_lane_runtime_scheduler`` (main profile, lane switch on) ->
 ``RuntimeScheduler.emit_tick`` -> event bus -> auto-wired runtime-tick
-subscription -> MessageDispatchEngine -> HandlerGitHubApiPoll -> result topic.
+subscription -> MessageDispatchEngine -> HandlerGitHubApiPoll -> PR status topic.
 
 RED on the parent: no lane producer could be started at all (no
 ``start_lane_runtime_scheduler``, no lane switch), so no tick ever reached a
@@ -30,8 +30,8 @@ from omnibase_infra.nodes.node_github_pr_poller_effect.handlers import (
 from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_poller_config import (
     ModelGitHubPollerConfig,
 )
-from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_poller_result import (
-    ModelGitHubPollerResult,
+from omnibase_infra.nodes.node_github_pr_poller_effect.models.model_github_pr_status_poll_event import (
+    ModelGitHubPrStatusPollEvent,
 )
 from omnibase_infra.runtime.auto_wiring import discover_contracts_from_paths
 from omnibase_infra.runtime.auto_wiring.handler_wiring import wire_from_manifest
@@ -101,13 +101,13 @@ async def test_lane_producer_tick_drives_a_tick_subscriber(
     bus = EventBusInmemory(environment="test", group="runtime-tick-producer-chain")
     await bus.start()
     try:
-        observed: asyncio.Queue[ModelEventEnvelope[ModelGitHubPollerResult]] = (
+        observed: asyncio.Queue[ModelEventEnvelope[ModelGitHubPrStatusPollEvent]] = (
             asyncio.Queue()
         )
 
         async def collect_result(message: ModelEventMessage) -> None:
             await observed.put(
-                ModelEventEnvelope[ModelGitHubPollerResult].model_validate_json(
+                ModelEventEnvelope[ModelGitHubPrStatusPollEvent].model_validate_json(
                     message.value
                 )
             )
@@ -136,9 +136,9 @@ async def test_lane_producer_tick_drives_a_tick_subscriber(
         finally:
             await scheduler.stop()
 
-        assert result.payload.errors == []
-        assert result.payload.repos_polled == [_REPO]
-        assert result.payload.prs_polled == 1
+        assert result.payload.repo == _REPO
+        assert result.payload.pr_number == 20590
+        assert result.payload.triage_state.value == "ready_to_merge"
     finally:
         await bus.close()
 

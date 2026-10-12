@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -20,17 +21,53 @@ from omnibase_infra.runtime.models.model_bifrost_endpoint_probe_failure import (
 from omnibase_infra.runtime.render_bifrost_delegation_contract import (
     render_bifrost_delegation_contract,
 )
+from tests.helpers.lane_overlay_fixtures import (
+    cloud_overlay,
+    lab_backend,
+    lab_overlay,
+    write_overlay,
+)
 
-_ROOT = Path(__file__).resolve().parents[3]
-_OVERLAY = _ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
-# OMN-17502: the cloud lane's committed overlay — zero local backends, stated.
-_CLOUD_OVERLAY = _ROOT / "docker" / "lane-overlays" / "onex-dev.bifrost.yaml"
 _ENDPOINT = "http://192.168.86.201:8000/v1/chat/completions"
 # OMN-16833: the second live local rung — DS-V4-Flash on .200:8101.
 _DS_V4_ENDPOINT = "http://192.168.86.200:8101/v1/chat/completions"
 # OMN-17099: the embedding rung the dev overlay now binds (live probe
 # 2026-09-27: .201:8002/v1/embeddings serves text-embedding-qwen3).
 _EMBEDDING_ENDPOINT = "http://192.168.86.201:8002/v1/embeddings"
+
+
+def _lab_overlay() -> dict[str, Any]:
+    return lab_overlay(
+        lane="dev",
+        backends=[
+            lab_backend("local-coder", endpoint_url=_ENDPOINT),
+            lab_backend("local-heavy-reasoning", endpoint_url=_ENDPOINT),
+            lab_backend(
+                "local-embedding",
+                endpoint_url=_EMBEDDING_ENDPOINT,
+                served_model_id="text-embedding-qwen3",
+                parameter_count="0.6B",
+                context_window=8192,
+                max_tokens=1,
+                timeout_ms=30000,
+            ),
+        ],
+    )
+
+
+@pytest.fixture(scope="module")
+def lab_overlay_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return write_overlay(
+        tmp_path_factory.mktemp("lab-overlay") / "dev.bifrost.yaml", _lab_overlay()
+    )
+
+
+@pytest.fixture(scope="module")
+def cloud_overlay_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return write_overlay(
+        tmp_path_factory.mktemp("cloud-overlay") / "lane.bifrost.yaml",
+        cloud_overlay(),
+    )
 
 
 @pytest.mark.unit
@@ -91,6 +128,7 @@ def _write_base_contract(
 
 @pytest.mark.unit
 def test_typed_overlay_wins_over_poisoned_model_and_endpoint_environment(
+    lab_overlay_path: Path,
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "base.yaml"
@@ -99,7 +137,7 @@ def test_typed_overlay_wins_over_poisoned_model_and_endpoint_environment(
 
     rendered = render_bifrost_delegation_contract(
         source_path=source,
-        overlay_path=_OVERLAY,
+        overlay_path=lab_overlay_path,
         target_path=target,
         environ={
             "LLM_CODER_URL": "http://cloud.invalid/v1/chat/completions",
@@ -232,7 +270,9 @@ def test_missing_lane_overlay_pin_fails_naming_the_lane(tmp_path: Path) -> None:
 
 
 @pytest.mark.unit
-def test_lane_overlay_pin_resolves_from_the_environment(tmp_path: Path) -> None:
+def test_lane_overlay_pin_resolves_from_the_environment(
+    lab_overlay_path: Path, tmp_path: Path
+) -> None:
     """The per-lane env pin is the production path (compose sets it per lane)."""
     source = tmp_path / "base.yaml"
     target = tmp_path / "rendered.yaml"
@@ -241,21 +281,19 @@ def test_lane_overlay_pin_resolves_from_the_environment(tmp_path: Path) -> None:
     rendered = render_bifrost_delegation_contract(
         source_path=source,
         target_path=target,
-        environ={"BIFROST_LANE_OVERLAY_PATH": str(_OVERLAY)},
+        environ={"BIFROST_LANE_OVERLAY_PATH": str(lab_overlay_path)},
     )
     assert rendered == target
 
     # A pinned-but-absent lane file fails naming exactly that lane's file.
     with pytest.raises(
         ProtocolConfigurationError,
-        match=r"overlay not found: .*lakshman\.bifrost\.yaml",
+        match=r"overlay not found: .*lane\.bifrost\.yaml",
     ):
         render_bifrost_delegation_contract(
             source_path=source,
             target_path=tmp_path / "rendered2.yaml",
-            environ={
-                "BIFROST_LANE_OVERLAY_PATH": str(tmp_path / "lakshman.bifrost.yaml")
-            },
+            environ={"BIFROST_LANE_OVERLAY_PATH": str(tmp_path / "lane.bifrost.yaml")},
         )
 
 
@@ -294,6 +332,7 @@ def test_missing_or_malformed_overlay_fails_before_dispatch(tmp_path: Path) -> N
 
 @pytest.mark.unit
 def test_overlay_model_overrides_a_different_base_model_and_records_it(
+    lab_overlay_path: Path,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -303,7 +342,7 @@ def test_overlay_model_overrides_a_different_base_model_and_records_it(
 
     render_bifrost_delegation_contract(
         source_path=source,
-        overlay_path=_OVERLAY,
+        overlay_path=lab_overlay_path,
         target_path=target,
         verify_endpoints=False,
     )
@@ -319,6 +358,7 @@ def test_overlay_model_overrides_a_different_base_model_and_records_it(
 
 @pytest.mark.unit
 def test_base_backend_without_a_model_name_key_is_still_malformed(
+    lab_overlay_path: Path,
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "base.yaml"
@@ -331,7 +371,7 @@ def test_base_backend_without_a_model_name_key_is_still_malformed(
     with pytest.raises(ProtocolConfigurationError, match="must declare model_name"):
         render_bifrost_delegation_contract(
             source_path=source,
-            overlay_path=_OVERLAY,
+            overlay_path=lab_overlay_path,
             target_path=target,
         )
     assert not target.exists()
@@ -345,7 +385,7 @@ def test_dark_rung_keeps_the_overlay_model_when_it_differs_from_the_base(
     overlay_path = tmp_path / "lane.yaml"
     target = tmp_path / "rendered.yaml"
     _write_base_contract(source)
-    overlay = yaml.safe_load(_OVERLAY.read_text(encoding="utf-8"))
+    overlay = _lab_overlay()
     for binding in overlay["backends"]:
         if binding["backend_id"] == "local-coder":
             binding["served_model_id"] = "operator-chosen-model"
@@ -378,6 +418,7 @@ def test_dark_rung_keeps_the_overlay_model_when_it_differs_from_the_base(
 
 @pytest.mark.unit
 def test_unbound_base_model_is_materialized_from_the_typed_served_id(
+    lab_overlay_path: Path,
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "base.yaml"
@@ -386,7 +427,7 @@ def test_unbound_base_model_is_materialized_from_the_typed_served_id(
 
     render_bifrost_delegation_contract(
         source_path=source,
-        overlay_path=_OVERLAY,
+        overlay_path=lab_overlay_path,
         target_path=target,
     )
 
@@ -396,7 +437,9 @@ def test_unbound_base_model_is_materialized_from_the_typed_served_id(
 
 
 @pytest.mark.unit
-def test_endpoint_probe_requires_advertised_served_id(tmp_path: Path) -> None:
+def test_endpoint_probe_requires_advertised_served_id(
+    lab_overlay_path: Path, tmp_path: Path
+) -> None:
     source = tmp_path / "base.yaml"
     _write_base_contract(source)
 
@@ -416,7 +459,7 @@ def test_endpoint_probe_requires_advertised_served_id(tmp_path: Path) -> None:
     with pytest.raises(ProtocolConfigurationError, match="failed verification"):
         render_bifrost_delegation_contract(
             source_path=source,
-            overlay_path=_OVERLAY,
+            overlay_path=lab_overlay_path,
             target_path=tmp_path / "rendered.yaml",
             verify_endpoints=True,
             endpoint_probe=rejected_probe,
@@ -516,7 +559,7 @@ def _write_mixed_base_contract(
 
 
 def _write_cloud_overlay(path: Path, **binding_overrides: object) -> None:
-    overlay = yaml.safe_load(_CLOUD_OVERLAY.read_text(encoding="utf-8"))
+    overlay = cloud_overlay()
     overlay["backends"] = [
         {
             "backend_id": "cloud-gemini-pro",
@@ -626,7 +669,7 @@ def test_cloud_overlay_refuses_added_or_base_local_backends(
         )
 
     message = str(excinfo.value)
-    assert "lane 'onex-dev'" in message
+    assert "example-cloud" in message
     assert "locale 'cloud'" in message
     assert backend_id in message
     assert "local" in message
@@ -636,6 +679,7 @@ def test_cloud_overlay_refuses_added_or_base_local_backends(
 
 @pytest.mark.unit
 def test_cloud_locale_renders_cloud_backends_and_disables_every_local_one(
+    cloud_overlay_path: Path,
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "base.yaml"
@@ -644,7 +688,7 @@ def test_cloud_locale_renders_cloud_backends_and_disables_every_local_one(
 
     rendered = render_bifrost_delegation_contract(
         source_path=source,
-        overlay_path=_CLOUD_OVERLAY,
+        overlay_path=cloud_overlay_path,
         target_path=target,
         # A poisoned environment must not resurrect a local rung: the overlay,
         # not the env, is the authority (OMN-15807) and this overlay says none.
@@ -674,7 +718,9 @@ def test_cloud_locale_renders_cloud_backends_and_disables_every_local_one(
 
 
 @pytest.mark.unit
-def test_cloud_locale_keeps_local_backend_ids_declared(tmp_path: Path) -> None:
+def test_cloud_locale_keeps_local_backend_ids_declared(
+    cloud_overlay_path: Path, tmp_path: Path
+) -> None:
     """Disabled, never deleted.
 
     ``load_bifrost_delegation_config`` (omnimarket, OMN-15628) raises
@@ -690,7 +736,7 @@ def test_cloud_locale_keeps_local_backend_ids_declared(tmp_path: Path) -> None:
     _write_mixed_base_contract(source)
 
     render_bifrost_delegation_contract(
-        source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+        source_path=source, overlay_path=cloud_overlay_path, target_path=target
     )
 
     contract = yaml.safe_load(target.read_text(encoding="utf-8"))
@@ -703,6 +749,7 @@ def test_cloud_locale_keeps_local_backend_ids_declared(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 def test_cloud_locale_fails_closed_when_the_base_has_no_cloud_endpoint(
+    cloud_overlay_path: Path,
     tmp_path: Path,
 ) -> None:
     """A cloud lane with nothing to route to is a misconfiguration, not a lane
@@ -714,13 +761,14 @@ def test_cloud_locale_fails_closed_when_the_base_has_no_cloud_endpoint(
 
     with pytest.raises(ProtocolConfigurationError, match="no active endpoint"):
         render_bifrost_delegation_contract(
-            source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+            source_path=source, overlay_path=cloud_overlay_path, target_path=target
         )
     assert not target.exists()
 
 
 @pytest.mark.unit
 def test_cloud_lane_overlay_still_resolves_only_from_its_own_pin(
+    cloud_overlay_path: Path,
     tmp_path: Path,
 ) -> None:
     """OMN-17150 is not relaxed by OMN-17502: a cloud lane that renders without
@@ -743,7 +791,7 @@ def test_cloud_lane_overlay_still_resolves_only_from_its_own_pin(
     rendered = render_bifrost_delegation_contract(
         source_path=source,
         target_path=target,
-        environ={"BIFROST_LANE_OVERLAY_PATH": str(_CLOUD_OVERLAY)},
+        environ={"BIFROST_LANE_OVERLAY_PATH": str(cloud_overlay_path)},
     )
     assert rendered == target
 
@@ -776,6 +824,7 @@ def _write_base_with_typed_decision_backend(
 
 @pytest.mark.unit
 def test_typed_decision_backend_renders_its_operation_url_verbatim(
+    cloud_overlay_path: Path,
     tmp_path: Path,
 ) -> None:
     source = tmp_path / "base.yaml"
@@ -785,7 +834,7 @@ def test_typed_decision_backend_renders_its_operation_url_verbatim(
     )
 
     render_bifrost_delegation_contract(
-        source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+        source_path=source, overlay_path=cloud_overlay_path, target_path=target
     )
 
     contract = yaml.safe_load(target.read_text(encoding="utf-8"))
@@ -794,7 +843,9 @@ def test_typed_decision_backend_renders_its_operation_url_verbatim(
 
 
 @pytest.mark.unit
-def test_chat_backend_without_the_chat_path_is_still_refused(tmp_path: Path) -> None:
+def test_chat_backend_without_the_chat_path_is_still_refused(
+    cloud_overlay_path: Path, tmp_path: Path
+) -> None:
     """Positive control for the test above: the same non-chat URL on a backend
     that is NOT declared typed_decision still fails the render."""
     source = tmp_path / "base.yaml"
@@ -803,7 +854,7 @@ def test_chat_backend_without_the_chat_path_is_still_refused(tmp_path: Path) -> 
 
     with pytest.raises(ProtocolConfigurationError, match="must be complete"):
         render_bifrost_delegation_contract(
-            source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+            source_path=source, overlay_path=cloud_overlay_path, target_path=target
         )
     assert not target.exists()
 
@@ -819,7 +870,7 @@ def test_chat_backend_without_the_chat_path_is_still_refused(tmp_path: Path) -> 
     ],
 )
 def test_typed_decision_backend_bare_base_or_plain_http_is_refused(
-    tmp_path: Path, bare: str
+    cloud_overlay_path: Path, tmp_path: Path, bare: str
 ) -> None:
     source = tmp_path / "base.yaml"
     target = tmp_path / "rendered.yaml"
@@ -827,13 +878,14 @@ def test_typed_decision_backend_bare_base_or_plain_http_is_refused(
 
     with pytest.raises(ProtocolConfigurationError, match="typed-decision endpoint"):
         render_bifrost_delegation_contract(
-            source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+            source_path=source, overlay_path=cloud_overlay_path, target_path=target
         )
     assert not target.exists()
 
 
 @pytest.mark.unit
 def test_typed_decision_backend_is_not_an_active_delegation_endpoint(
+    cloud_overlay_path: Path,
     tmp_path: Path,
 ) -> None:
     """A contract whose only endpoint is a typed-decision one has no rung to
@@ -846,6 +898,6 @@ def test_typed_decision_backend_is_not_an_active_delegation_endpoint(
 
     with pytest.raises(ProtocolConfigurationError, match="no active endpoint"):
         render_bifrost_delegation_contract(
-            source_path=source, overlay_path=_CLOUD_OVERLAY, target_path=target
+            source_path=source, overlay_path=cloud_overlay_path, target_path=target
         )
     assert not target.exists()

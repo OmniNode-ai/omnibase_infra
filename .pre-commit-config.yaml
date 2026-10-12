@@ -23,6 +23,27 @@
 repos:
   - repo: local
     hooks:
+      - id: imperative-contract-guard-caller
+        name: Caller-owned imperative guard regression (OMN-21004)
+        entry: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
+        language: system
+        files: ^(\.github/workflows/imperative-contract-guard\.yml|imperative-contract-allowlist\.yaml|tests/ci/test_imperative_contract_guard_caller_omn21004\.py|tests/ci/fixtures/imperative_contract_guard_omn21004\.json|contracts/OMN-21004\.yaml|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: anthropic-key-prefix-workflows
+        name: No Anthropic key value in a workflow (OMN-20967)
+        entry: uv run --frozen pytest tests/ci/test_anthropic_key_prefix_workflows_omn20967.py -q -n 0 --no-cov
+        language: system
+        files: ^(\.github/workflows/|tests/ci/test_anthropic_key_prefix_workflows_omn20967\.py$|\.pre-commit-config\.yaml$)
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: mirror-source-consume-only
+        name: Mirror source consume-only regression (OMN-20867)
+        entry: uv run --frozen pytest tests/integration/gateway/test_mirror_source_consume_only_omn20867.py -q
+        language: system
+        pass_filenames: false
+        files: ^(src/omnibase_infra/(event_bus/kafka_transport|runtime/gateway_forwarder)\.py|tests/integration/gateway/test_mirror_source_consume_only_omn20867\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        stages: [pre-commit]
       - id: lab-reconcile-model-evidence
         name: Reviewed lab reconcile model evidence (OMN-19421)
         entry: uv run --frozen pytest tests/ci/test_lab_reconcile_model.py -q --no-cov
@@ -62,7 +83,7 @@ repos:
         name: Census unhealthy and restart bounds (OMN-19416)
         entry: uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "unhealthy or restart_loop" -q
         language: system
-        files: ^(scripts/lane_census_plan\.py|deploy/lane-census/lane-manifest\.yaml|tests/unit/scripts/test_lane_census_plan\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        files: ^(scripts/lane_census_plan\.py|tests/unit/scripts/test_lane_census_plan\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: census-health-collector
@@ -76,7 +97,7 @@ repos:
         name: Alarm reads census restart bounds (OMN-19416)
         entry: uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k "restart or shipped_config or manifest" -q
         language: system
-        files: ^(scripts/(lab_alarm|lane_census_plan)\.py|config/lab_alarm\.json|deploy/lane-census/lane-manifest\.yaml|tests/ci/test_lab_alarm_omn18867\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        files: ^(scripts/(lab_alarm|lane_census_plan)\.py|config/lab_alarm\.json|tests/ci/test_lab_alarm_omn18867\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
       - id: linear-transport-consolidation
@@ -93,7 +114,7 @@ repos:
   # .onex_ratchets/canonical_file_shape_baseline.txt. CI runs the same module
   # at the same commit (job "Canonical File Shape (OMN-20304)").
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24
+    rev: 031148215620031436cba30619bbae67c0bb38ad
     hooks:
       - id: canonical-file-shape
         require_serial: true
@@ -103,7 +124,7 @@ repos:
   # no suppression marker. CI twin job node-boundary-imports in
   # .github/workflows/ci.yml; keep this rev equal to that job's pin.
   - repo: https://github.com/OmniNode-ai/omnibase_core
-    rev: 422e207e953841b11b7ae4919bd486f8c84b8c24
+    rev: 031148215620031436cba30619bbae67c0bb38ad
     hooks:
       - id: check-node-boundary-imports
         require_serial: true
@@ -476,6 +497,14 @@ repos:
         language: script
         types: [shell]
         pass_filenames: true
+        stages: [pre-commit]
+      - id: release-train-nightly-tests
+        require_serial: true
+        name: Release train decision surface (OMN-20715)
+        entry: uv run --frozen pytest tests/scripts/test_release_train_nightly.py -q --no-cov
+        language: system
+        pass_filenames: false
+        files: ^(config/release_train_policy\.yaml|scripts/ci/release_train\.py|\.github/workflows/release-train-nightly\.yml|tests/scripts/test_release_train_nightly\.py)$
         stages: [pre-commit]
       - id: runner-disk-admission-self-pause
         require_serial: true
@@ -2082,7 +2111,7 @@ repos:
         stages: [pre-commit]
       # Skip-token rejection gate (OMN-11412 / OMN-10414)
       # Blocks [skip-*] bypass tokens in staged markdown/yaml/txt files.
-      # Escape hatch: add '# skip-token-allowed: <receipt-id>' with a traceable approval receipt.
+      # There is no escape hatch (OMN-20074): a skip token is rejected whatever comment accompanies it.
       - id: reject-deploy-gate-skip-token
         require_serial: true
         name: Reject skip-gate bypass tokens (OMN-10414)
@@ -2313,10 +2342,18 @@ repos:
   # absence-locally is never treated as proof-of-absence). FAIL-LOUD (root
   # CLAUDE.md Rule #8 / OMN-14655 principle #4): hard-errors (exit 1) if the diff
   # base or the canonical validator cannot resolve; never a green skip.
+  #
+  # OMN-20870: the same hook also mirrors the hosted repo-evidence / dod-verify
+  # refusals it can decide locally. A ticket cited in the branch's commit
+  # subjects with no contracts/<ticket>.yaml in the pushed HEAD fails and names
+  # the file; a command / test_passes check value the released verifier's own
+  # shape guard calls prose fails and names the check. The guard runs from
+  # omnimarket==<verifier-version>, read from call-repo-evidence-gate.yml, so
+  # local and hosted share one pin. It judges shape only and runs no check.
   - repo: local
     hooks:
       - id: prepush-deploy-scope-dod
-        name: Deploy-scope DoD parity (pre-push, OMN-14681)
+        name: Deploy-scope DoD and ticket-contract parity (pre-push, OMN-14681, OMN-20870)
         entry: uv run --frozen python scripts/ci/check_deploy_scope_dod.py
         language: system
         pass_filenames: false
@@ -2477,9 +2514,11 @@ repos:
   # denylist from the file named by OMNI_HYGIENE_VOCAB_PATH, with the lab
   # vocabulary beside it, and fails closed without them.
   - repo: https://github.com/OmniNode-ai/omniclaude
-    rev: 6e47aa311ac5d177d116d9597b07966a233d2463
+    rev: 0c9f9146d8dd0446fc5c10952aa57247b3a880ae
     hooks:
       - id: public-repo-hygiene
+        require_serial: true
+      - id: deployment-config
         require_serial: true
   # OMN-19666: VCS-backed additional_dependencies can inherit GIT_INDEX_FILE
   # during a cold-cache commit and overwrite the committing worktree index.

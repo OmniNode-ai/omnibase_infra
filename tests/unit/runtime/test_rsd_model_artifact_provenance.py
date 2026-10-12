@@ -31,10 +31,48 @@ from omnibase_infra.runtime.rsd_model_artifact_provenance import (
     verify_rsd_model_artifact_provenance,
 )
 
-_ROOT = Path(__file__).parents[3]
-_EXAMPLE_PATH = (
-    _ROOT / "docker/lane-overlays/dev.rsd-model-artifact-provenance.example.yaml"
-)
+_EXAMPLE_TEXT = """\
+# OMN-17871: inert example only; not an activation or deployment record.
+schema_version: rsd.model-artifact-provenance.v2
+execute_enabled: false
+approval_status: unapproved
+model_id: qwen/qwen3.8-27b
+base_model_id: Qwen/Qwen3.8-27B
+base_model_revision_sha: 1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0
+artifact_id: gittensor-model-hub/Qwen3.8-27B-NVFP4-RTX5090
+artifact_revision_sha: 0cc27958cefbbe231782ec8511de8c4eb5233348
+artifact_manifest_digest_sha256: e46ef4e3895ed0a6db7c237d642121095629c53bd5b3e5ac799b8a8e2ae83e4f
+artifact_manifest_algorithm: sha256-path-size-content-sha256-v1
+artifact_source_relation:
+  # Revision-scoped primary metadata; this does not claim weight derivation.
+  source_metadata_authority: huggingface-model-revision-api-v1
+  source_model_card_sha256: 57e4bdb258ee1a7d2635c5174ebd4e56abe392505cdb5f8bbb356b0dc4293641
+  source_config_sha256: 191e0af232104ed8b65258cf3fb2b842e288008baca7633c11b82a1ac7203aab
+  artifact_metadata_authority: huggingface-model-revision-api-v1
+  artifact_model_card_sha256: 3704987ff0e2206ab934af6d71cd0a9b5140536ee8d305aa7ba6e7665f135058
+  artifact_embedded_source_model_card_sha256: 57e4bdb258ee1a7d2635c5174ebd4e56abe392505cdb5f8bbb356b0dc4293641
+  artifact_declared_base_model_id: Qwen/Qwen3.8-27B
+  relation_status: publisher-declared-unverified
+  approval_status: not-approved
+quantization: modelopt_nvfp4
+weight_activation_precision: w4a4
+kv_cache_dtype: fp8
+architecture: Qwen3_5ForConditionalGeneration
+runtime_implementation: vllm
+runtime_version: 0.27.1
+required_hardware_capability: nvidia.rtx5090_32gb
+served_model_id: Qwen/Qwen3.8-27B
+launch_profile_id: qwen38-nvfp4-rtx5090-v1
+launch_profile_digest: 40defad1345d27226916e8946647482bb3eaaeca96c4330968e6a0bcaad074b3
+issued_at: "2026-09-04T19:55:00Z"
+expires_at: "2026-09-04T20:00:00Z"
+signer_capability_ref: capability://rsd/model-artifact-provenance/signer
+signer_key_id: 00000000-0000-4000-8000-000000000003
+signer_public_key_fingerprint_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+signature_domain: omninode-rsd.model-artifact-provenance.v2
+# Sentinel signature: an operator must issue a real signature before approval.
+signature_base64: N9Eiaa5K2V9Ay9uS09n8Gh-KmtdsiOjle1bypnfa_CEj1y-zZkvMulCu5ZlHHLSZ364R_qeoX9pejwGHI_ijCw==
+"""
 _KEY_ID = "00000000-0000-4000-8000-000000000003"
 _NOW = datetime(2026, 9, 4, 19, 58, tzinfo=UTC)
 
@@ -52,7 +90,7 @@ class _KeyProvider:
 
 
 def _raw_example() -> dict[str, object]:
-    raw = yaml.safe_load(_EXAMPLE_PATH.read_text(encoding="utf-8"))
+    raw = yaml.safe_load(_EXAMPLE_TEXT)
     assert type(raw) is dict
     return cast("dict[str, object]", raw)
 
@@ -74,8 +112,10 @@ def _signed_example() -> tuple[ModelRsdModelArtifactProvenance, _KeyProvider]:
 
 
 @pytest.mark.unit
-def test_example_is_inert_and_binds_immutable_public_identity() -> None:
-    provenance = load_rsd_model_artifact_provenance(_EXAMPLE_PATH)
+def test_example_is_inert_and_binds_immutable_public_identity(tmp_path: Path) -> None:
+    path = tmp_path / "provenance.yaml"
+    path.write_text(_EXAMPLE_TEXT, encoding="utf-8")
+    provenance = load_rsd_model_artifact_provenance(path)
 
     assert provenance.execute_enabled is False
     assert provenance.approval_status == "unapproved"
@@ -155,7 +195,7 @@ def test_freshness_fields_require_canonical_utc_form() -> None:
 
 @pytest.mark.unit
 def test_loader_rejects_unquoted_native_datetime_nodes(tmp_path: Path) -> None:
-    path_text = _EXAMPLE_PATH.read_text(encoding="utf-8")
+    path_text = _EXAMPLE_TEXT
     unquoted = path_text.replace(
         'issued_at: "2026-09-04T19:55:00Z"',
         "issued_at: 2026-09-04T19:55:00Z",
@@ -403,9 +443,12 @@ def test_loader_rejects_oversized_document_without_echoing_content(
 
 @pytest.mark.unit
 def test_loader_uses_one_bounded_descriptor_read_without_stat_race(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    payload = _EXAMPLE_PATH.read_bytes()
+    example_path = tmp_path / "provenance.yaml"
+    example_path.write_text(_EXAMPLE_TEXT, encoding="utf-8")
+    payload = _EXAMPLE_TEXT.encode("utf-8")
 
     class _TrackingReader:
         def __init__(self, value: bytes) -> None:
@@ -427,7 +470,7 @@ def test_loader_uses_one_bounded_descriptor_read_without_stat_race(
     original_stat = Path.stat
 
     def fail_stat(path: Path, *, follow_symlinks: bool = True) -> object:
-        if path == _EXAMPLE_PATH:
+        if path == example_path:
             raise AssertionError("loader must not stat before opening the descriptor")
         return original_stat(path, follow_symlinks=follow_symlinks)
 
@@ -438,7 +481,7 @@ def test_loader_uses_one_bounded_descriptor_read_without_stat_race(
     monkeypatch.setattr(Path, "stat", fail_stat)
     monkeypatch.setattr(Path, "open", open_once)
 
-    assert load_rsd_model_artifact_provenance(_EXAMPLE_PATH).execute_enabled is False
+    assert load_rsd_model_artifact_provenance(example_path).execute_enabled is False
     assert reader.read_sizes == [64 * 1024 + 1]
 
 

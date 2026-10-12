@@ -43,13 +43,14 @@ from deploy_agent.idle_converge import (
     IDLE_CONVERGE_REQUESTER,
     PROBE_MARGIN,
     EnumIdleConvergeVerdict,
+    EnumRuntimePresence,
     ModelIdleConvergeInputs,
     converge_command,
     decide,
     load_probe_windows,
     probe_blocking,
-    read_omnimarket_dev_head,
-    read_running_omnimarket_ref,
+    read_dev_head,
+    read_running_ref,
 )
 from deploy_agent.job_state import JobStore
 from deploy_agent.routing import (
@@ -81,7 +82,8 @@ QUIET = datetime(2026, 9, 25, 4, 53, tzinfo=UTC)
 def _inputs(**overrides: Any) -> ModelIdleConvergeInputs:
     values: dict[str, Any] = {
         "now": QUIET,
-        "omnimarket_routed_elsewhere": True,
+        "repository": "omnimarket",
+        "routed_elsewhere": True,
         "job_active": False,
         "last_activity": QUIET - IDLE_AFTER,
         "running_ref": RUNNING,
@@ -141,7 +143,7 @@ class TestIdleConvergeDecision:
         assert decision.verdict is EnumIdleConvergeVerdict.WINDOWS_UNREADABLE
 
     def test_idle_converge_only_when_omnimarket_is_routed_elsewhere(self) -> None:
-        decision = decide(_inputs(omnimarket_routed_elsewhere=False))
+        decision = decide(_inputs(routed_elsewhere=False))
         assert decision.verdict is EnumIdleConvergeVerdict.NOT_ROUTED_ELSEWHERE
 
     def test_idle_converge_command_shape(self) -> None:
@@ -231,7 +233,7 @@ class TestIdleConvergeReaders:
             seen.append(argv)
             return _proc(manifest)
 
-        assert read_running_omnimarket_ref("omninode-runtime", run=run) == RUNNING
+        assert read_running_ref("omninode-runtime", "omnimarket", run=run) == RUNNING
         assert seen[0][:3] == ["docker", "exec", "omninode-runtime"]
 
     @pytest.mark.parametrize(
@@ -239,8 +241,10 @@ class TestIdleConvergeReaders:
     )
     def test_idle_converge_an_unreadable_manifest_is_none(self, stdout: str) -> None:
         assert (
-            read_running_omnimarket_ref(
-                "omninode-runtime", run=lambda argv, timeout: _proc(stdout)
+            read_running_ref(
+                "omninode-runtime",
+                "omnimarket",
+                run=lambda argv, timeout: _proc(stdout),
             )
             is None
         )
@@ -250,11 +254,8 @@ class TestIdleConvergeReaders:
             assert argv[-2:] == ["origin", "refs/heads/dev"]
             return _proc(f"{HEAD}\trefs/heads/dev\n")
 
-        assert read_omnimarket_dev_head(tmp_path, run=run) == HEAD
-        assert (
-            read_omnimarket_dev_head(tmp_path, run=lambda argv, timeout: _proc("", 128))
-            is None
-        )
+        assert read_dev_head(tmp_path, run=run) == HEAD
+        assert read_dev_head(tmp_path, run=lambda argv, timeout: _proc("", 128)) is None
 
 
 # --------------------------------------------------------------------------- #
@@ -314,8 +315,13 @@ def _agent(
     agent.executor = _FakeExecutor()  # type: ignore[assignment]
     agent._idle_converge_started_at = QUIET - timedelta(hours=1)
     agent._idle_converge_now = lambda: QUIET
-    agent._idle_read_running_ref = lambda: RUNNING
-    agent._idle_read_head_ref = lambda: HEAD
+    agent._idle_read_running_ref = lambda repo: RUNNING
+    # OMN-20864: the lane's runtime is running, so the restore rule stays out.
+    agent._idle_read_runtime_presence = lambda: (
+        EnumRuntimePresence.RUNNING,
+        "omninode-runtime is running",
+    )
+    agent._idle_read_head_ref = lambda repo: HEAD
     agent._idle_probe_blocker = lambda now: None
     # The committed table freezes dev-201 until 2026-10-19 (lane flags), which
     # covers QUIET; these tests are about the converge rule, so the lane is
@@ -383,9 +389,9 @@ class TestIdleConvergeInTheAgent:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         agent = _agent(tmp_path, monkeypatch, omnimarket_to_202=True)
-        agent._idle_read_head_ref = lambda: None  # a refused check
+        agent._idle_read_head_ref = lambda repo: None  # a refused check
         agent._maybe_idle_converge()
         reads: list[str] = []
-        agent._idle_read_head_ref = lambda: reads.append("x") or HEAD
+        agent._idle_read_head_ref = lambda repo: reads.append("x") or HEAD
         agent._maybe_idle_converge()
         assert reads == [], "a second check inside the interval must not run"

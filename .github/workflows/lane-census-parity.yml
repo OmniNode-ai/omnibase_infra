@@ -1,0 +1,84 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# lane-census-parity.yml — OMN-20934.
+#
+# The lab's lane manifest is private deployment config (operator RULING
+# 2026-10-10T21:57:38Z); this repository ships none. The tests that cross-check
+# this repository's lane compose files, deploy agent and pre-PR pool against
+# the lab's own declarations carry the `lab_overlay` marker. The generic test
+# splits in ci.yml and the deploy-agent unit job deselect that marker, because
+# they do not fetch the overlay, and this job selects it, with the overlay
+# fetched by .github/actions/fetch-census-overlay.
+#
+# It runs on EVERY pull request, deliberately without a path filter: these
+# tests police files all over the tree, and a path filter would be a path
+# around them. The census's own freshness and drift stay in
+# lane-census-staleness.yml, which keeps its path filter, so a stale private
+# census does not redden unrelated pull requests.
+#
+# FAILURE DIRECTION. No overlay, an unreadable one, or an empty selection fails
+# the job. Deselected from the splits is not skipped here.
+---
+name: Lane Census Parity (OMN-20934)
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: lane-census-parity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.6.14"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  lab-overlay-tests:
+    name: Lab-overlay parity tests (OMN-20934)
+    runs-on: >-
+      ${{
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name != github.repository)
+        && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]')
+        || fromJSON(vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]')
+      }}
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Setup Python and uv
+        uses: ./.github/actions/setup-python-uv
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          uv-version: ${{ env.UV_VERSION }}
+          cache-version: "0.6.0"
+          cache-enabled: "false"
+
+      - name: Fetch the private lane census
+        uses: ./.github/actions/fetch-census-overlay
+        with:
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+
+      - name: Lab-overlay tests (main suite)
+        run: |
+          uv run pytest tests --ignore=tests/integration/docker \
+            -m lab_overlay -p no:randomly -q --no-cov
+
+      - name: Lab-overlay tests (deploy agent)
+        run: |
+          uv run --project scripts/deploy-agent --extra dev \
+            pytest scripts/deploy-agent/tests -m lab_overlay -q

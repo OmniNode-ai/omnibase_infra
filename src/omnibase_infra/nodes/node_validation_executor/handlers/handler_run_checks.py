@@ -21,7 +21,7 @@ from uuid import UUID
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.validation import (
     ModelCheckResult,
-    ModelExecutorResult,
+    ModelValidationChecksCompleted,
     ModelValidationPlan,
 )
 
@@ -75,8 +75,8 @@ class HandlerRunChecks:
     async def handle(
         self,
         plan: ModelValidationPlan,
-        correlation_id: UUID,
-    ) -> ModelExecutorResult:
+        correlation_id: UUID | None = None,
+    ) -> ModelValidationChecksCompleted:
         """Execute all checks in the validation plan.
 
         MVP: Skeleton implementation that records check results without
@@ -86,12 +86,18 @@ class HandlerRunChecks:
         Actual subprocess execution (mypy, ruff, pytest) will be wired
         in a follow-up ticket.
 
+        The runtime hands the handler the typed request alone, so
+        ``correlation_id`` is optional; the dispatch envelope's correlation id
+        is carried onto the published event by the runtime applier.
+
         Args:
             plan: Validation plan containing the checks to execute.
-            correlation_id: Correlation ID for distributed tracing.
+            correlation_id: Correlation ID for log tracing, when the caller
+                has one.
 
         Returns:
-            Aggregated executor result with all check outcomes.
+            Aggregated executor result with all check outcomes and the plan's
+            score threshold, published as ``validation-checks-completed``.
         """
         logger.info(
             "Executing validation plan %s with %d checks (correlation_id=%s)",
@@ -144,11 +150,12 @@ class HandlerRunChecks:
 
         total_duration_ms = (time.monotonic() - start_time) * 1000.0
 
-        executor_result = ModelExecutorResult(
+        executor_result = ModelValidationChecksCompleted(
             plan_id=plan.plan_id,
             candidate_id=plan.candidate_id,
             check_results=tuple(results),
             total_duration_ms=total_duration_ms,
+            score_threshold=plan.score_threshold,
         )
 
         logger.info(

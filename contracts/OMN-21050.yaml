@@ -1,0 +1,51 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21050"
+title: "topic migration: one execute command for a synthetic topic pair reaches a DUAL_WRITE lifecycle event on the lab"
+summary: "On the lab dev lane the topic-migration executor was loaded and its consumer group Stable, yet a DUAL_WRITE execute command for a synthetic topic pair never became a lifecycle event: HandlerTopicMigrationExecutor exposed only execute(), which the runtime never calls, so every delivery raised 'does not expose a callable handle() or handle_async() dispatch entrypoint' and was retried into a failure terminal on the lifecycle topic. The handler now exposes the canonical handle(request) -> ModelTopicMigrationLifecycleEvent. Two tests wire the real contract.yaml from disk through the kernel's _prepare_handler_wiring and drive the resulting dispatcher: a DUAL_WRITE command yields one DUAL_WRITE lifecycle event carrying the command's correlation id that the contract applier publishes to the lifecycle topic, and a CUTOVER with residual lag yields no CUTOVER lifecycle event."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn21050-executor-reachable-through-runtime"
+    statement: "The topic-migration executor handler is reachable through the entrypoint the runtime dispatches to, and its drain-proof gate holds through that entrypoint."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: the real node_topic_migration_executor_effect contract, wired through _prepare_handler_wiring, turns a DUAL_WRITE command into one ModelTopicMigrationLifecycleEvent with phase DUAL_WRITE and the command's correlation id, and build_contract_result_applier publishes it to onex.evt.omnibase-infra.topic-migration-lifecycle.v1 -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_executor_dispatch_omn21050.py -k dual_write fails at the merge base with 'does not expose a callable handle() or handle_async() dispatch entrypoint'"
+      - id: "AC2"
+        statement: "AC2: a CUTOVER command whose old consumer group still has residual lag, dispatched through the same entrypoint, raises 'cutover blocked by drain-proof gate' and returns no lifecycle event for phase CUTOVER -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_executor_dispatch_omn21050.py -k cutover fails if the gate result is ignored"
+evidence_requirements:
+  - kind: "tests"
+    description: "The dispatch tests pass at the head and the DUAL_WRITE one fails at the merge base."
+    command: "uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_executor_dispatch_omn21050.py tests/integration/test_topic_migration_executor_bus_omn21050.py tests/unit/nodes/node_topic_migration_executor_effect -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21050-ac1-dual-write-through-runtime"
+    description: "AC1. A DUAL_WRITE command reaches one DUAL_WRITE lifecycle event through the real contract's dispatcher and the contract applier."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_executor_dispatch_omn21050.py -q -k dual_write"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_topic_migration_executor_effect/handlers/handler_topic_migration_executor.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'async def handle('"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn21050-ac1-bus-roundtrip"
+    description: "AC1. The real contract booted through wire_from_manifest turns a command delivered on the subscribed topic into a DUAL_WRITE lifecycle event sent to the lifecycle topic by the real publisher."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/integration/test_topic_migration_executor_bus_omn21050.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn21050-ac2-cutover-gate"
+    description: "AC2. A CUTOVER with residual lag emits no CUTOVER lifecycle event through the runtime entrypoint."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/runtime/auto_wiring/test_topic_migration_executor_dispatch_omn21050.py -q -k cutover"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]

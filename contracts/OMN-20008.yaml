@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20008
+title: Vendor metering_summary 0004, savings as a share of the baseline
+summary: omnimarket's node_projection_metering_summary migration 0004 adds one nullable column, savings_pct_of_counterfactual, which the Savings card's "N% below the <baseline> baseline (modelled)" line reads. This change vendors it byte-identical into the infra forward-migration surface with its ledger row and migration class, so an omnibase_infra release can carry it. AC1 to AC4 shipped in earlier changes and are not claimed here; this change carries the infra half of AC5.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20008-ac5-infra-vendor
+    statement: The metering_summary 0004 migration that adds savings_pct_of_counterfactual is vendored into omnibase_infra byte-identical to omnimarket's source, declared in the application-migrations ledger and classified, so the percentage line's served column exists wherever infra applies migrations.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: The Savings card shows "N% below the <baseline> baseline (modelled)" from the served savings_pct_of_counterfactual, never "verified", and no line when it is not served -- falsifier: the omnidash vitest and the omnimarket fold test. Infra half here: the vendored 0004 file is byte-identical to the source, adds only that nullable column, and is declared in the ledger -- falsifier: the vendor test fails with the file, its ledger row or its class removed'
+evidence_requirements:
+  - kind: tests
+    description: The direct infra receipt verifier fetches the private census before lane_sync; an unreadable overlay still reaches the real probe and receipt emitter and cannot earn PASS.
+    command: uv run pytest tests/ci/test_direct_lab_census_omn20008.py -q
+  - kind: tests
+    description: The vendored 0004 file matches omnimarket's source byte for byte, adds only the nullable savings_pct_of_counterfactual column, and is declared in the ledger and the migration classes.
+    command: uv run pytest tests/unit/migrations/test_omn20008_metering_savings_pct_vendor.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20008-ac5-infra-release-census
+    description: The infra release carrying metering_summary 0004 needs a published lab PASS receipt. The workflow regression fails at the merge base because the direct verifier never fetches the private census; it passes with the fetch wired before the probe. Recorded live census responses with the private root configured and absent prove the real probe and emitter refuse PASS without it. This is local workflow and replay proof, not a published lab PASS.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_direct_lab_census_omn20008.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
+  - id: dod-omn20008-ac5-vendor-0004-savings-pct
+    description: The vendor test passes at this head and fails at the merge base, where the 0004 file, its ledger row and its class do not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn20008_metering_savings_pct_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5

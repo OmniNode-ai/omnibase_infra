@@ -1,0 +1,48 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20413
+title: "OCC-writer refresh PRs carry a head-bound contract for the ticket they cite"
+summary: The lane census and omnimarket contract-pin producer workflows render contracts/<ticket>.yaml inline, binding the value each refresh moves, so repo-evidence / dod-verify finds a contract at the bot PR head whose check fails at the merge base.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20413
+    statement: Each in-repo OCC-writer refresh producer commits a contract for its cited ticket that binds the refreshed value.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the contract check each producer workflow renders passes on the refreshed file and fails on the pre-refresh file, and the workflow commits the contract -- falsifier: uv run pytest tests/ci/test_render_bot_refresh_contract.py -q'
+  - id: req-omn20413-routing-audit-batched-read
+    statement: The routing audit's live private-repo pass reads the default-branch workflows of every private repository in batched GraphQL queries, so one CI run spends a few GraphQL points on CROSS_REPO_PAT instead of one per private repository, and an unread repository in a batch still raises instead of reading clean.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: 45 private repositories are read in three gh api graphql calls with every repository keyed to its own texts, a rate-limited batch raises GitHubRateLimitError, a null repository in a batch raises naming it, and the batched pass still reports a private bare hosted pin -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k batch'
+evidence_requirements:
+  - kind: tests
+    description: The rendering lines of both producer workflows run as written against a refreshed and a pre-refresh file.
+    command: uv run pytest tests/ci/test_render_bot_refresh_contract.py -q
+  - kind: tests
+    description: The batched workflow read counts gh graphql calls across many private repositories and replays the unread shapes.
+    command: uv run pytest tests/ci/test_runner_routing_audit.py -q -k batch
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20413-ac1
+    description: The rendered contract binds the refreshed value and both producers commit it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_render_bot_refresh_contract.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn20413-ac2-routing-audit-batched-read
+    description: AC2 tests count the gh api graphql calls of the batched private-repo workflow read and replay its unread shapes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_runner_routing_audit.py -q -k batch
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

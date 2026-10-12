@@ -728,6 +728,15 @@ assert strip_topic_namespace(physical) == topic
 PYIMAGE
 fi
 
+# OMN-20932: the slot mounts its compose project's Bifrost overlay from
+# ${ONEX_LANE_OVERLAY_DIR}, resolved by the same helper every lane deploy uses
+# (ONEX_LANE_OVERLAY_DIR, else config/lab/lane-overlays under
+# ONEX_WORKSPACE_CONFIG_ROOT); a slot with none is refused before any build.
+# shellcheck source=./compose_files.sh
+source "${SCRIPT_DIR}/compose_files.sh"
+resolve_lane_overlay_dir "${COMPOSE_PROJECT}" || fail "${EXIT_USAGE}" \
+    "no lane overlay for the slot's compose project (see the error above)."
+
 SNAPSHOT_DOCKER="${STAGING_ROOT}/repo/docker"
 COMPOSE_FILES=(
     -f "${SNAPSHOT_DOCKER}/docker-compose.infra.yml"

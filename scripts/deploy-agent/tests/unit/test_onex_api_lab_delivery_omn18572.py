@@ -154,6 +154,9 @@ class _LockProbingExecutor:
         self._record("verify")
         return []
 
+    def run_lane_mirror(self, **kwargs: object) -> None:
+        return None
+
     def deploy_and_verify(self, **kwargs: object) -> list[object]:
         self._record("deploy_and_verify")
         return []
