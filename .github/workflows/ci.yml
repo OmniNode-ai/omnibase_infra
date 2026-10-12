@@ -316,6 +316,9 @@ jobs:
       - name: Rolling runner registration preflight (OMN-18877)
         run: uv run --frozen pytest tests/ci/test_deploy_runners_registration_preflight.py -q
 
+      - name: Caller-owned imperative guard regression (OMN-21004)
+        run: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
+
       # OMN-17678: same focused suite as the pre-commit transport gate.
       - name: Linear transport consolidation regression (OMN-17678)
         run: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q
@@ -1692,7 +1695,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
+          ref: e286bd296e373e8e17e11c735393613a227f7972 # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -1925,7 +1928,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
+          ref: e286bd296e373e8e17e11c735393613a227f7972 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1941,7 +1944,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
+          ref: e286bd296e373e8e17e11c735393613a227f7972 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -2576,6 +2579,14 @@ jobs:
       - name: Verify cloud migration failure scope (OMN-18496)
         run: uv run --frozen pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py -q
 
+      # OMN-20715: the change-aware selector does not pick tests/scripts/ for a
+      # config/ or scripts/ change, so a release-train policy edit merged with no
+      # job running the tests that pin it. One split runs them, by name; this
+      # job's result feeds the required "CI Summary" through "CI Tests Gate".
+      - name: Verify release train decision surface (OMN-20715)
+        if: matrix.split == 1
+        run: uv run --frozen pytest tests/scripts/test_release_train_nightly.py -q --no-cov
+
       - name: Run pytest (smart selection)
         if: vars.ENABLE_SMART_TESTS == 'true' && needs.detect-changes.outputs.is_full_suite == 'false'
         # OMN-15233: tests/integration/ci/test_workflow_uses_refs_resolve_live.py
@@ -2618,7 +2629,7 @@ jobs:
           fi
           uv run pytest $paths \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer and not ephemeral_pg" \
+            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer and not ephemeral_pg and not lab_overlay" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
@@ -2649,7 +2660,7 @@ jobs:
         run: |
           uv run pytest \
             --ignore=tests/integration/docker \
-            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer and not ephemeral_pg" \
+            -m "not slow and not chaos and not kafka and not qdrant and not graph and not e2e and not heavy and not performance and not live_github_api and not cross_repo_consumer and not ephemeral_pg and not lab_overlay" \
             --splits ${{ needs.detect-changes.outputs.split_count }} \
             --group ${{ matrix.split }} \
             -n 2 --dist loadgroup \
@@ -3031,7 +3042,7 @@ jobs:
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
           owner: OmniNode-ai
           permission-contents: write
-      - uses: OmniNode-ai/onex_change_control/.github/actions/validate-boundaries@main
+      - uses: OmniNode-ai/omnibase_core/.github/actions/validate-boundaries@de3398d1fcf7a6f48451f680b74b1a6c6c383b8a # omnibase_core dev (OMN-20074 H/F)
         id: migration_conflicts
         env:
           OMNI_REPO_CLONE_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
@@ -4171,7 +4182,7 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     timeout-minutes: 15
     env:
-      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@422e207e953841b11b7ae4919bd486f8c84b8c24"
+      CANONICAL_FILE_SHAPE_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@031148215620031436cba30619bbae67c0bb38ad"
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4234,7 +4245,7 @@ jobs:
     runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && fromJSON(vars.OMNI_PUBLIC_PR_RUNS_ON_JSON || '["ubuntu-latest"]') || fromJSON((github.event_name == 'merge_group' && vars.OMNI_REQUIRED_CI_RUNS_ON_JSON) || vars.OMNI_TRUSTED_CI_RUNS_ON_JSON || '["self-hosted","omnibase-ci"]') }}
     timeout-minutes: 15
     env:
-      NODE_BOUNDARY_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@422e207e953841b11b7ae4919bd486f8c84b8c24"
+      NODE_BOUNDARY_CORE: "omnibase-core @ git+https://github.com/OmniNode-ai/omnibase_core@031148215620031436cba30619bbae67c0bb38ad"
     steps:
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -4587,7 +4598,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
+          ref: e286bd296e373e8e17e11c735393613a227f7972 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4603,7 +4614,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: f859c7af5e1d2a4df043bbb5d5e9d873a6c1c495 # .github/sibling-pins.yaml
+          ref: e286bd296e373e8e17e11c735393613a227f7972 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 

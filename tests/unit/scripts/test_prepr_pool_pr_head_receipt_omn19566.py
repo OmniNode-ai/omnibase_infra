@@ -136,7 +136,7 @@ def test_a_pass_mints_an_accepted_receipt_keyed_by_the_exact_head(
     assert (subject.base_sha, subject.merge_base_sha) == (DEV, MERGE_BASE)
     assert subject.pr_diff_digest == DIGEST
     assert subject.profile_id == "omnimarket.runtime_image"
-    assert subject.profile_version == "1"
+    assert subject.profile_version == "2"
     assert subject.handler_kind is receipts.EnumLabProofHandlerKind.RUNTIME_IMAGE
     assert subject.runner_identity == "plan-item-I7@pool-a"
     assert subject.verifier_identity == "prepr_runtime_pool.judge@test-mac"
@@ -156,7 +156,7 @@ def test_a_pass_mints_an_accepted_receipt_keyed_by_the_exact_head(
     assert event["topic"] == "onex.evt.omnibase-infra.lab-proof-receipt.v1"
     assert event["verifier_token"] == "ACCEPTED"
     assert (
-        f"receipt OmniNode-ai/omnimarket#3042@{HEAD}:omnimarket.runtime_image@1 "
+        f"receipt OmniNode-ai/omnimarket#3042@{HEAD}:omnimarket.runtime_image@2 "
         "result=PASS verifier=ACCEPTED"
     ) in text
 
@@ -476,3 +476,230 @@ def test_a_dispatch_that_cannot_run_is_reported_not_raised(
 
     (line,) = pool.dispatch_check_runs(minted, runner=runner)
     assert line.startswith("  check-run dispatch k: not dispatched")
+
+
+# --- conditional checks resolved from the PR's own diff (OMN-19566) ---------
+
+INFRA_CLONE = (
+    f"omnibase_infra#4809 fetched head {HEAD} expected {HEAD} match=yes\n"
+    f"pr-subject omnibase_infra#4809 head={HEAD} base={DEV} merge-base={MERGE_BASE} "
+    f"diff-digest={DIGEST}\n"
+    "{changed}"
+    f"omnibase_infra test-merge clean {'6' * 40} (dev {DEV})\n"
+    "clone done"
+)
+PIN_ADVANCE = (
+    ".github/omnimarket-contract-pin.yaml",
+    ".github/sibling-pins.yaml",
+    "docker/catalog/database-topology/omninode_internal.yaml",
+    "tests/ci/test_supplemental_declaration_expiry_omn18863.py",
+)
+NODE = "src/omnibase_infra/nodes/node_runtime_error_triage_effect/handlers/h.py"
+FORWARDER_CONTRACT = "src/omnibase_infra/nodes/node_bus_forwarder_effect/contract.yaml"
+
+
+def _infra_clone(*changed: str) -> str:
+    return INFRA_CLONE.replace(
+        "{changed}", "".join(f"pr-changed omnibase_infra#4809 {p}\n" for p in changed)
+    )
+
+
+def _infra_run(
+    tmp_path: Path, clone: str, live: str = ""
+) -> tuple[int, str, list[dict[str, Any]]]:
+    host = fakes.FakeHost()
+    host.phases["clone"] = clone
+    host.phases["probe"] = fakes.GOOD["probe"] + live
+    params = tmp_path / "p.env"
+    params.write_text(f"INFRA_PR=4809\nINFRA_HEAD={HEAD}\n", encoding="utf-8")
+    out = tmp_path / "receipts"
+    code, text = pool.run_proof(
+        CFG,
+        fakes.FakeTransport({"pool-a": host}),
+        params,
+        "labproof-gate",
+        60,
+        "pool-a",
+        [],
+        now_fn=lambda: NOW,
+        log=lambda s: None,
+        receipt_dir=out,
+        verifier_identity="prepr_runtime_pool.judge@test-mac",
+    )
+    events = [json.loads(p.read_text()) for p in sorted(out.glob("*.event.json"))]
+    return code, text, events
+
+
+def test_a_pin_advance_proved_green_is_accepted_without_the_surface_checks(
+    tmp_path: Path,
+) -> None:
+    code, text, events = _infra_run(tmp_path, _infra_clone(*PIN_ADVANCE))
+    assert code == pool.EXIT_PASS, text
+    assert events[0]["verifier_token"] == "ACCEPTED", text
+    assert "changed_path_live" not in events[0]["mandatory_checks"]
+    assert "forwarder_refused_topic" not in events[0]["mandatory_checks"]
+    assert "touch no surface of conditional check(s)" in text
+    assert ":omnibase_infra.runtime_and_scripts@2 result=PASS verifier=ACCEPTED" in text
+
+
+def test_the_same_pass_without_its_changed_paths_waives_nothing(
+    tmp_path: Path,
+) -> None:
+    _, text, events = _infra_run(tmp_path, _infra_clone())
+    assert events[0]["verifier_token"] == "MISSING_MANDATORY_CHECK"
+    assert events[0]["missing_mandatory_checks"] == [
+        "changed_path_live",
+        "forwarder_refused_topic",
+    ]
+    assert "no changed paths in the clone output" in text
+
+
+def test_a_node_change_with_no_live_line_is_missing_changed_path_live(
+    tmp_path: Path,
+) -> None:
+    _, _, events = _infra_run(tmp_path, _infra_clone(NODE))
+    assert events[0]["verifier_token"] == "MISSING_MANDATORY_CHECK"
+    assert events[0]["missing_mandatory_checks"] == ["changed_path_live"]
+
+
+def test_a_node_change_whose_derived_term_is_live_is_accepted(
+    tmp_path: Path,
+) -> None:
+    term = pool.LIVE_TERM_DOT + "node_runtime_error_triage_effect" + pool.LIVE_TERM_DOT
+    live = (
+        f"live-grep derived from the diff: {term} \n"
+        f"  omnibase-infra-local-omninode-runtime mentions {term}: 4\n"
+        f"  omnibase-infra-local-runtime-effects mentions {term}: 0\n"
+    )
+    code, text, events = _infra_run(tmp_path, _infra_clone(NODE), live)
+    assert code == pool.EXIT_PASS, text
+    assert events[0]["verifier_token"] == "ACCEPTED", text
+    assert "changed_path_live" in events[0]["mandatory_checks"]
+
+
+def test_a_node_change_whose_derived_term_is_dead_fails_naming_the_node(
+    tmp_path: Path,
+) -> None:
+    term = pool.LIVE_TERM_DOT + "node_runtime_error_triage_effect" + pool.LIVE_TERM_DOT
+    live = (
+        f"  omnibase-infra-local-omninode-runtime mentions {term}: 0\n"
+        f"  omnibase-infra-local-runtime-effects mentions {term}: 0\n"
+    )
+    code, text, events = _infra_run(tmp_path, _infra_clone(NODE), live)
+    assert code == pool.EXIT_FAIL
+    assert (
+        "changed path not live, no runtime log mentions: "
+        "node_runtime_error_triage_effect\n"
+    ) in text + "\n"
+    assert events[0]["failing_checks"] == ["changed_path_live"]
+
+
+def test_a_forwarder_change_stays_missing_the_check_no_pool_stack_can_run(
+    tmp_path: Path,
+) -> None:
+    term = pool.LIVE_TERM_DOT + "node_bus_forwarder_effect" + pool.LIVE_TERM_DOT
+    live = f"  omnibase-infra-local-runtime-effects mentions {term}: 2\n"
+    _, _, events = _infra_run(tmp_path, _infra_clone(FORWARDER_CONTRACT), live)
+    assert events[0]["verifier_token"] == "MISSING_MANDATORY_CHECK"
+    assert events[0]["missing_mandatory_checks"] == ["forwarder_refused_topic"]
+
+
+def test_pr_changed_lines_are_read_per_pull_request() -> None:
+    clone = (
+        "pr-changed omnibase_infra#1 a/b.py\n"
+        "pr-changed omnibase_infra#2 c d/e.py\n"
+        "pr-changed omnibase_infra#1 f.yaml\n"
+    )
+    assert pool.pr_changed_paths(clone) == {
+        ("omnibase_infra", 1): ["a/b.py", "f.yaml"],
+        ("omnibase_infra", 2): ["c d/e.py"],
+    }
+
+
+def _shell_function(name: str) -> str:
+    script = PROVE_SH.read_text(encoding="utf-8")
+    start = script.index(f"{name}() {{")
+    end = script.index("\n}\n", start) + 3
+    return script[start:end]
+
+
+def test_the_host_prints_the_changed_paths_the_workflow_reads(tmp_path: Path) -> None:
+    repo = tmp_path / "r"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "dev")
+    (repo / "a.txt").write_text("base\n", encoding="utf-8")
+    (repo / "old.txt").write_text("moved\n", encoding="utf-8")
+    _git(repo, "add", "a.txt", "old.txt")
+    _git(repo, "commit", "-qm", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "switch", "-q", "-c", "pr")
+    (repo / "a.txt").write_text("head\n", encoding="utf-8")
+    _git(repo, "mv", "old.txt", "new.txt")
+    _git(repo, "add", "a.txt")
+    _git(repo, "commit", "-qm", "head")
+    head = _git(repo, "rev-parse", "HEAD")
+    out = subprocess.run(
+        [
+            "bash",
+            "-c",
+            _shell_function("pr_subject") + f'pr_subject "{repo}" r 7 {head} {base}',
+        ],
+        env=scrub_git_location_env(),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    # the workflow's own command (lab-proof-receipt.yml), over the same range
+    workflow = _git(repo, "diff", "--name-only", "--no-renames", base, head)
+    assert pool.pr_changed_paths(out) == {("r", 7): workflow.splitlines()}
+    assert sorted(workflow.splitlines()) == ["a.txt", "new.txt", "old.txt"]
+
+
+def test_live_terms_are_derived_from_changed_nodes_that_exist_at_the_head(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    repo = root / "omnibase_infra"
+    nodes = repo / "src" / "omnibase_infra" / "nodes"
+    for node in ("node_kept", "node_gone", "node_untouched"):
+        (nodes / node).mkdir(parents=True)
+        (nodes / node / "contract.yaml").write_text("name: x\n", encoding="utf-8")
+    (nodes / "__init__.py").write_text("", encoding="utf-8")
+    (repo / "README.md").write_text("x\n", encoding="utf-8")
+    _git(repo, "init", "-q", "-b", "dev")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "update-ref", "refs/remotes/origin/dev", "HEAD")
+    _git(repo, "switch", "-q", "-c", "pr")
+    (nodes / "node_kept" / "handler.py").write_text("x = 1\n", encoding="utf-8")
+    _git(repo, "rm", "-rq", str(nodes / "node_gone"))
+    (nodes / "__init__.py").write_text("# touched\n", encoding="utf-8")
+    (repo / "README.md").write_text("y\n", encoding="utf-8")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "head")
+    script = _shell_function("derive_live_grep")
+    out = subprocess.run(
+        ["bash", "-c", f'R="{root}"\n' + script + "derive_live_grep omnibase_infra"],
+        env=scrub_git_location_env(),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert out.split() == [pool.LIVE_TERM_DOT + "node_kept" + pool.LIVE_TERM_DOT]
+    # live means the node ran (its consumer group, its own logger), never that
+    # it was discovered; and node_kept is not live on node_kept_more's lines
+    for line, expected in (
+        ("Discovered contract: node_kept (EFFECT_GENERIC) from omnibase_infra", "0"),
+        ("contract=node_kept, skipping Kafka subscription for 'node_kept'", "0"),
+        ("consumer_group=local.omnibase_infra.node_kept_more.consume.1.0.0", "0"),
+        ("consumer_group=local.omnibase_infra.node_kept.consume.1.0.0", "1"),
+        ("[INFO] omnibase_infra.nodes.node_kept.handlers.handler_x: ran", "1"),
+    ):
+        count = subprocess.run(
+            ["grep", "-c", out.split()[0]],
+            input=line + "\n",
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.strip()
+        assert count == expected

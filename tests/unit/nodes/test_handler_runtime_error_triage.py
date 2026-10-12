@@ -319,8 +319,11 @@ class TestNoOrphanedErrorTriagedEmission:
     ``ORPHANED_PRODUCER``.
     """
 
-    def test_contract_declares_no_publish_topics(self) -> None:
-        """contract.yaml must not declare the orphaned publish topic."""
+    def test_contract_publishes_only_the_escalation_topic(self) -> None:
+        """contract.yaml must not declare the orphaned publish topic.
+
+        OMN-21029 added the escalation topic; error-triaged.v1 stays removed.
+        """
         from pathlib import Path
 
         import yaml
@@ -335,7 +338,9 @@ class TestNoOrphanedErrorTriagedEmission:
         )
         contract = yaml.safe_load(contract_path.read_text())
 
-        assert contract["event_bus"]["publish_topics"] == []
+        assert contract["event_bus"]["publish_topics"] == [
+            "onex.evt.omnibase-infra.runtime-error-escalated.v1"
+        ]
 
     def test_handler_takes_no_event_bus_dependency(self) -> None:
         """The bus dependency existed only to emit the orphaned event."""

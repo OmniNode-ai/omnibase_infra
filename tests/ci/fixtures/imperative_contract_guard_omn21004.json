@@ -1,0 +1,84 @@
+{
+  "_provenance": {
+    "source": "h201: check-imperative-contracts --scan-freestanding; omnibase_core@031148215620031436cba30619bbae67c0bb38ad and historical guard@ebe30bc3589c9f803e8920b941ddaef07b17ed90; same omnibase_infra tree; clean and planted live auth-gate handler",
+    "captured_utc": "2026-10-11T20:59:13.450228+00:00",
+    "source_sha256": "4c331be4ba8165f60b143997df85cf52bfcab3f1fc57c0af4c326e4f2ac06939",
+    "note": "Captured CLI responses from exact commit source exports; static scanner did not execute the planted request."
+  },
+  "response": {
+    "core-clean": {
+      "exit": 0,
+      "new_violation_count": 0,
+      "new_violations": []
+    },
+    "occ-clean": {
+      "exit": 0,
+      "new_violation_count": 0,
+      "new_violations": []
+    },
+    "core-planted": {
+      "exit": 1,
+      "new_violation_count": 1,
+      "new_violations": [
+        {
+          "handler_path": "omnibase_infra/nodes/node_auth_gate_compute/handlers/handler_auth_gate.py",
+          "node_dir": "omnibase_infra/nodes/node_auth_gate_compute",
+          "repo": "omnibase_infra",
+          "contract_path": "omnibase_infra/nodes/node_auth_gate_compute/contract.yaml",
+          "violations": [
+            "undeclared_transport"
+          ],
+          "violation_details": [
+            "undeclared transport HTTP used in handler"
+          ],
+          "declared_topics": [],
+          "used_topics": [],
+          "undeclared_topics": [],
+          "declared_transports": [],
+          "used_transports": [
+            "HTTP"
+          ],
+          "undeclared_transports": [
+            "HTTP"
+          ],
+          "handler_in_routing": true,
+          "verdict": "hybrid",
+          "allowlisted": false,
+          "reachability": "live"
+        }
+      ]
+    },
+    "occ-planted": {
+      "exit": 1,
+      "new_violation_count": 1,
+      "new_violations": [
+        {
+          "handler_path": "omnibase_infra/nodes/node_auth_gate_compute/handlers/handler_auth_gate.py",
+          "node_dir": "omnibase_infra/nodes/node_auth_gate_compute",
+          "repo": "omnibase_infra",
+          "contract_path": "omnibase_infra/nodes/node_auth_gate_compute/contract.yaml",
+          "violations": [
+            "undeclared_transport"
+          ],
+          "violation_details": [
+            "undeclared transport HTTP used in handler"
+          ],
+          "declared_topics": [],
+          "used_topics": [],
+          "undeclared_topics": [],
+          "declared_transports": [],
+          "used_transports": [
+            "HTTP"
+          ],
+          "undeclared_transports": [
+            "HTTP"
+          ],
+          "handler_in_routing": true,
+          "verdict": "hybrid",
+          "allowlisted": false,
+          "reachability": "live"
+        }
+      ]
+    }
+  }
+}

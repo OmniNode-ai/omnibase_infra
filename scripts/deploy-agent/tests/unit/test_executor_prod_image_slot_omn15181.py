@@ -126,6 +126,9 @@ _DUMMY_BOOTSTRAP_ENV: dict[str, str] = dict.fromkeys(
         # until now, so a CI runner's clean shell was the first environment to
         # expose the gap.
         "DEV_REDPANDA_ADVERTISE_HOST",
+        # OMN-20932: every lane compose file interpolates its overlay mount from
+        # ${ONEX_LANE_OVERLAY_DIR:?}, and compose interpolates the whole model.
+        "ONEX_LANE_OVERLAY_DIR",
     ),
     "dummy-placeholder-value",
 )

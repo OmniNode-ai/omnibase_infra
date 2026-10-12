@@ -517,6 +517,20 @@ jobs:
             --correlation-id "$CORRELATION_ID" \
             --wall-clock-seconds "$CONVERGE_WALL_CLOCK"
 
+      # OMN-20934: this runner sees the routed host's docker socket, but not
+      # its private workspace config. lane_sync needs the census manifest
+      # from that config; the guard checkout deliberately ships no copy.
+      # Reuse the read-only overlay action and the App credentials the caller
+      # already passes for delivery. If the read fails, the always-running
+      # probe records lane_sync indeterminate and the emitter refuses PASS.
+      - name: Fetch the private census for the routed sibling lane
+        if: always()
+        uses: ./.github/actions/fetch-census-overlay
+        with:
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
+
       # The readiness and health-dimension reads an integration pass makes by
       # hand. What a compose-dev receipt does NOT cover is named in
       # scripts/ci/lab_pass_receipt.py's PROBES_NOT_YET_WIRED (migrations,

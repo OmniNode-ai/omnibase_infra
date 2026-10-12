@@ -41,13 +41,15 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.helpers.lane_census_fixtures import LAB_MANIFEST
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RUNTIME_BUILD = REPO_ROOT / "scripts" / "runtime_build"
 ENTRYPOINT = RUNTIME_BUILD / "prepr_verify_lane.sh"
 POLICY_PATH = RUNTIME_BUILD / "prepr_slot_policy.py"
 VERIFIER_PATH = RUNTIME_BUILD / "prepr_verify_rendered_slot.py"
 OVERLAY = REPO_ROOT / "docker" / "docker-compose.prepr.yml"
-MANIFEST = REPO_ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
+MANIFEST = LAB_MANIFEST  # OMN-20934: private config
 
 pytestmark = pytest.mark.unit
 
@@ -452,6 +454,7 @@ def _manifest_lane(lane: str) -> dict[str, Any]:
     return yaml.safe_load(MANIFEST.read_text(encoding="utf-8"))["lanes"][lane]
 
 
+@pytest.mark.lab_overlay
 @pytest.mark.parametrize("slot", sorted(policy.SLOTS))
 def test_the_policy_table_matches_the_lane_manifest(slot: int) -> None:
     """OMN-18890 declared the pool before anything was built. Keep them equal.
@@ -469,6 +472,7 @@ def test_the_policy_table_matches_the_lane_manifest(slot: int) -> None:
     )
 
 
+@pytest.mark.lab_overlay
 @pytest.mark.parametrize("slot", sorted(policy.SLOTS))
 def test_the_overlay_container_names_match_the_manifest_services(slot: int) -> None:
     declared = {s["name"] for s in _manifest_lane(f"prepr-{slot}")["services"]}

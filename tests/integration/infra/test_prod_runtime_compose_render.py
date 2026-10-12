@@ -28,6 +28,8 @@ def _cidr(prefix: str, suffix: str) -> str:
 
 
 COMPOSE_RENDER_ENV = {
+    # OMN-20932: lane overlays are private; the mount refuses without this.
+    "ONEX_LANE_OVERLAY_DIR": "/nonexistent/onex-lane-overlays",
     # OMN-16843: x-runtime-env builds OMNINODE_INTERNAL_DB_URL from this with
     # the fail-closed ${VAR:?} form, so the layered render aborts without it.
     # Render-only, never a real credential.

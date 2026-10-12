@@ -9,7 +9,8 @@
 # FAIL, and dispatches this workflow with that receipt. The job reads the PR's
 # LIVE head from the API, recomputes the PR's diff digest from a fresh clone
 # with the verifier's own command, pins the profile and its mandatory checks
-# from config/lab_proof_profiles.yaml (the typed registry's --pin), runs the
+# from config/lab_proof_profiles.yaml (the typed registry's --pin, with the
+# PR's own changed paths deciding its conditional checks), runs the
 # offline verifier, and posts one check run named `lab-proof-receipt` on the
 # PROVEN head: `success` only for the verifier's ACCEPTED, `failure` with the
 # token in its title for anything else.
@@ -28,8 +29,9 @@
 #
 # WHAT A DISPATCHER CAN AND CANNOT CLAIM. The receipt is an input, so whoever
 # can dispatch this workflow chooses the check rows it carries. What they
-# cannot choose: the head (read live), the diff digest (recomputed here), the
-# profile and its mandatory checks (read from the reviewed registry), and the
+# cannot choose: the head (read live), the diff digest and the changed paths
+# (recomputed here), the profile and its mandatory checks (read from the
+# reviewed registry, resolved against those changed paths), and the
 # runner/verifier distinctness and carry-over rules (the verifier's). That is
 # acceptable for an informational check and is exactly why it is not the gate.
 name: lab-proof-receipt
@@ -136,7 +138,12 @@ jobs:
           merge_base=$(git -C "${clone}" merge-base "origin/${base}" "${head}")
           digest=$(uv run python scripts/ci/lab_pass_receipt.py pr-diff-digest \
             --repo-dir "${clone}" --merge-base "${merge_base}" --head "${head}")
-          echo "live head ${head} (base ${base}, merge base ${merge_base}, digest ${digest})"
+          # The PR's own changed paths, read here and never from the dispatcher:
+          # they decide which of the profile's conditional checks the receipt
+          # must carry (OMN-19566). An empty list makes every one mandatory.
+          git -C "${clone}" diff --name-only --no-renames "${merge_base}" "${head}" \
+            >"${RUNNER_TEMP}/changed.txt"
+          echo "live head ${head} (base ${base}, merge base ${merge_base}, digest ${digest}, $(wc -l <"${RUNNER_TEMP}/changed.txt") changed paths)"
           {
             echo "head=${head}"
             echo "digest=${digest}"
@@ -157,7 +164,8 @@ jobs:
           # registry, through its typed model, never from the dispatcher.
           uv run python scripts/ci/validate_lab_proof_profiles.py \
             --registry config/lab_proof_profiles.yaml \
-            --pin "${REPO}" "${KIND}" >"${RUNNER_TEMP}/pin.json"
+            --pin "${REPO}" "${KIND}" \
+            --changed-files "${RUNNER_TEMP}/changed.txt" >"${RUNNER_TEMP}/pin.json"
           uv run python scripts/ci/lab_pass_receipt.py post-pr-head-check \
             --receipt "${RUNNER_TEMP}/receipt.json" \
             --head-sha "${HEAD_SHA}" \

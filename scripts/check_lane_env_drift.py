@@ -25,7 +25,7 @@ Exit codes:
 
 Usage:
   python scripts/check_lane_env_drift.py
-  python scripts/check_lane_env_drift.py --manifest deploy/lane-census/lane-manifest.yaml
+  python scripts/check_lane_env_drift.py --manifest <dir>/lane-manifest.yaml
   python scripts/check_lane_env_drift.py --compose-dir docker/
 """
 
@@ -40,7 +40,7 @@ from typing import Any
 import yaml
 
 _REPO = Path(__file__).resolve().parent.parent
-_DEFAULT_MANIFEST = _REPO / "deploy" / "lane-census" / "lane-manifest.yaml"
+_SCRIPTS = _REPO / "scripts"
 _DEFAULT_COMPOSE_DIR = _REPO / "docker"
 
 # Hardcoded IP pattern — a bootstrap server that is a literal IP address violates
@@ -169,8 +169,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--manifest",
         type=Path,
-        default=_DEFAULT_MANIFEST,
-        help="Path to lane-manifest.yaml",
+        default=None,
+        help=(
+            "Path to lane-manifest.yaml (default: config/lab/lane-census/"
+            "lane-manifest.yaml under the workspace config root, OMN-20934)"
+        ),
     )
     parser.add_argument(
         "--compose-dir",
@@ -180,7 +183,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    manifest = _load_manifest(args.manifest)
+    manifest_path = args.manifest
+    if manifest_path is None:
+        if str(_SCRIPTS) not in sys.path:
+            sys.path.insert(0, str(_SCRIPTS))
+        from lane_census_plan import LaneCensusConfigError, default_manifest_path
+
+        try:
+            manifest_path = default_manifest_path()
+        except LaneCensusConfigError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
+    manifest = _load_manifest(manifest_path)
     violations = check_drift(manifest, args.compose_dir)
 
     if violations:

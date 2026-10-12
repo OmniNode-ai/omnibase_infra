@@ -19,6 +19,8 @@ from typing import Any
 
 import pytest
 
+from tests.helpers.lane_census_fixtures import use_neutral_lane_census
+
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
@@ -189,19 +191,27 @@ def test_custom_max_age_days_respected() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Real snapshot file test
+# Default resolution (OMN-20934)
 # ---------------------------------------------------------------------------
 
 
-def test_committed_snapshot_is_present_and_valid() -> None:
-    """The committed census-snapshot.json must exist and be parseable."""
-    snapshot_path = _REPO / "deploy" / "lane-census" / "census-snapshot.json"
-    assert snapshot_path.exists(), (
-        "deploy/lane-census/census-snapshot.json is missing. "
-        "This file must be committed and kept fresh (OMN-13034)."
-    )
-    with open(snapshot_path, encoding="utf-8") as fh:
-        snapshot = json.load(fh)
-    assert snapshot.get("schema_version") in {"1.0.0", "1.1.0"}
-    assert "emitted_at" in snapshot
-    assert "lanes_checked" in snapshot
+def test_default_snapshot_resolves_under_the_workspace_config_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no --snapshot the gate reads the census under the config root.
+
+    The committed census is private config (OMN-20934); this repository ships
+    none. The neutral fixture stands in for it here.
+    """
+    use_neutral_lane_census(monkeypatch)
+    assert MOD.main(["--max-age-days", "100000"]) == 0
+
+
+def test_default_snapshot_without_a_config_root_fails_loud(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No config root is a red gate naming the variable, never a pass."""
+    monkeypatch.delenv("ONEX_WORKSPACE_CONFIG_ROOT", raising=False)
+    monkeypatch.delenv("OMNI_HOME", raising=False)
+    assert MOD.main([]) == 1
+    assert "ONEX_WORKSPACE_CONFIG_ROOT" in capsys.readouterr().err

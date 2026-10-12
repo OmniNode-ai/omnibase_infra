@@ -17,13 +17,14 @@ a later one).
 from __future__ import annotations
 
 import argparse
-import base64
 import json
+import os
 import re
 import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -76,12 +77,21 @@ REQUIRED_OVERRIDE_ACTIVATION_GATE_KEYS: tuple[str, ...] = (
     "evidence_companion_fate_isolation",
     "positive_control_acceptance",
 )
+# OMN-20864: a live pass that could not read GitHub exits with its own code and
+# its own annotation. An unread routing state is neither clean nor drift.
+EXIT_FINDINGS = 1
+EXIT_UNREADABLE = 3
+RATE_LIMIT_RE = re.compile(r"\brate limit\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
 class Finding:
     scope: str
     message: str
+
+
+class GitHubRateLimitError(RuntimeError):
+    """A live read refused by a GitHub API rate limit: the state was not read."""
 
 
 def _load_policy(path: Path) -> dict[str, Any]:
@@ -132,7 +142,52 @@ def _run_gh(args: list[str], timeout: int = 20) -> subprocess.CompletedProcess[s
     )
 
 
+def _rate_limit_reset_note() -> str:
+    """Name when the exhausted bucket resets; empty when GitHub does not say."""
+    result = _run_gh(["api", "rate_limit"])
+    if result.returncode != 0:
+        return ""
+    try:
+        resources = json.loads(result.stdout or "{}").get("resources", {})
+    except (json.JSONDecodeError, AttributeError):
+        return ""
+    resets = [
+        int(bucket["reset"])
+        for bucket in resources.values()
+        if isinstance(bucket, dict)
+        and bucket.get("remaining") == 0
+        and "reset" in bucket
+    ]
+    if not resets:
+        return ""
+    reset = datetime.fromtimestamp(max(resets), tz=UTC)
+    return f" (resets {reset:%Y-%m-%dT%H:%M:%SZ}; a rerun after that reads it)"
+
+
+def _read_failed(what: str, result: subprocess.CompletedProcess[str]) -> RuntimeError:
+    """OMN-20864: a rate limit raises its own error, every other failure stays as is."""
+    detail = result.stderr.strip()
+    if RATE_LIMIT_RE.search(detail):
+        return GitHubRateLimitError(
+            f"{what} was refused by a GitHub API rate limit"
+            f"{_rate_limit_reset_note()}: {detail}"
+        )
+    return RuntimeError(f"{what} failed: {detail}")
+
+
+# OMN-20864: the seam audit and the scoped-variable audit read the same org and
+# repository variable lists in one run; each list is read from GitHub once.
+_VARIABLES_READ: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+
+
 def _variables(args: list[str]) -> list[dict[str, Any]]:
+    key = tuple(args)
+    if key not in _VARIABLES_READ:
+        _VARIABLES_READ[key] = _read_variables(args)
+    return _VARIABLES_READ[key]
+
+
+def _read_variables(args: list[str]) -> list[dict[str, Any]]:
     result = _run_gh(
         [
             "variable",
@@ -143,7 +198,7 @@ def _variables(args: list[str]) -> list[dict[str, Any]]:
         ]
     )
     if result.returncode != 0:
-        raise RuntimeError(f"gh variable list failed: {result.stderr.strip()}")
+        raise _read_failed("gh variable list", result)
     values = json.loads(result.stdout or "[]")
     if not isinstance(values, list):
         raise RuntimeError("gh variable list returned a non-list payload")
@@ -503,46 +558,129 @@ def _live_repository_visibility(org: str = ORG) -> list[tuple[str, bool]]:
         ]
     )
     if result.returncode != 0:
-        raise RuntimeError(f"gh repo list failed: {result.stderr.strip()}")
+        raise _read_failed("gh repo list", result)
     values = json.loads(result.stdout or "[]")
     if not isinstance(values, list):
         raise RuntimeError("gh repo list returned a non-list payload")
     return [(str(item["name"]), bool(item["isPrivate"])) for item in values]
 
 
+# OMN-20864: one GraphQL read returns every file of a repository's default-branch
+# workflows directory with its text, so the per-repository cost is one call however
+# many workflows it has. The contents API needed one call per file (the largest
+# private repository has about a hundred), and this pass runs inside every omnibase_infra CI run
+# on CROSS_REPO_PAT, the operator's token: on 2026-10-11 it spent the operator's
+# shared hourly core quota, and the landing controller stopped with QUOTA.
+# OMN-20413: amortize the shared token's GraphQL cost across private repos.
+WORKFLOW_READ_BATCH_SIZE = 20
+# A batch returns up to twenty repositories' workflow texts in one response.
+WORKFLOW_READ_BATCH_TIMEOUT_SECONDS = 60
+WORKFLOW_TREE_SELECTION = """
+    object(expression: "HEAD:.github/workflows") {
+      ... on Tree {
+        entries {
+          name
+          path
+          type
+          object {
+            ... on Blob {
+              text
+              isBinary
+              isTruncated
+            }
+          }
+        }
+      }
+    }
+"""
+
+
 def _default_branch_workflow_texts(repo_name: str, org: str = ORG) -> dict[str, str]:
+    """Fetch one repository through the shared default-branch batch reader."""
+    return _default_branch_workflow_texts_batch([repo_name], org)[repo_name]
+
+
+def _default_branch_workflow_texts_batch(
+    repo_names: list[str], org: str = ORG
+) -> dict[str, dict[str, str]]:
     """Fetch every default-branch ``.github/workflows/*.yml``/``.yaml`` file's text.
 
-    OMN-18365 AC3: reads live content through the GitHub contents API rather
-    than a local checkout, because the private-repo hosted-placement check
-    runs against every private repository in the org, not just this
-    repository's own clone. A repository with no workflows directory (or no
-    workflows at all) is not a finding-worthy condition and returns ``{}``.
+    OMN-18365 AC3: reads live content from GitHub rather than a local checkout,
+    because the private-repo hosted-placement check runs against every private
+    repository in the org. A repository with no workflows directory returns ``{}``.
+
+    OMN-20413: one GraphQL query reads up to ``WORKFLOW_READ_BATCH_SIZE``
+    repositories under aliases, so a CI run spends a few points of
+    CROSS_REPO_PAT's hourly GraphQL budget instead of one per private
+    repository. A failed, partial or errored read still raises: an unread
+    workflow is not a passing one.
     """
-    listing = _run_gh(["api", f"repos/{org}/{repo_name}/contents/.github/workflows"])
-    if listing.returncode != 0:
+    texts: dict[str, dict[str, str]] = {}
+    for offset in range(0, len(repo_names), WORKFLOW_READ_BATCH_SIZE):
+        chunk = repo_names[offset : offset + WORKFLOW_READ_BATCH_SIZE]
+        declarations = ["$owner: String!"]
+        selections: list[str] = []
+        variables = ["-f", f"owner={org}"]
+        for index, repo_name in enumerate(chunk):
+            declarations.append(f"$n{index}: String!")
+            selections.append(
+                f"r{index}: repository(owner: $owner, name: $n{index}) {{"
+                f"{WORKFLOW_TREE_SELECTION}"
+                "}"
+            )
+            variables.extend(["-f", f"n{index}={repo_name}"])
+        query = "query(" + ", ".join(declarations) + ") {" + "\n".join(selections) + "}"
+        result = _run_gh(
+            ["api", "graphql", "-f", f"query={query}", *variables],
+            timeout=WORKFLOW_READ_BATCH_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            raise _read_failed(
+                f"gh api graphql workflow read for {', '.join(chunk)}", result
+            )
+        payload = json.loads(result.stdout or "{}")
+        data = payload.get("data")
+        for index, repo_name in enumerate(chunk):
+            repository = data.get(f"r{index}") if isinstance(data, dict) else None
+            # OMN-20413: errors without a usable tree must not read as clean.
+            if payload.get("errors") and isinstance(repository, dict):
+                if repository.get("object") is None:
+                    raise RuntimeError(
+                        f"gh api graphql workflow read for {repo_name} "
+                        "returned no usable workflow data"
+                    )
+            texts[repo_name] = _parse_workflow_tree(repo_name, repository)
+    return texts
+
+
+def _parse_workflow_tree(repo_name: str, repository: Any) -> dict[str, str]:
+    """Parse a repository tree; unread workflows raise instead of reading clean."""
+    if not isinstance(repository, dict):
+        raise RuntimeError(
+            f"gh api graphql workflow read for {repo_name} returned no repository"
+        )
+    tree = repository.get("object")
+    if tree is None:
         return {}
-    entries = json.loads(listing.stdout or "[]")
+    entries = tree.get("entries") if isinstance(tree, dict) else None
     if not isinstance(entries, list):
         raise RuntimeError(
-            f"gh api contents listing for {repo_name} returned a non-list payload"
+            f"gh api graphql workflow read for {repo_name} returned a non-list payload"
         )
     texts: dict[str, str] = {}
     for entry in entries:
         name = str(entry.get("name", ""))
-        if not name.endswith((".yml", ".yaml")):
+        if entry.get("type") != "blob" or not name.endswith((".yml", ".yaml")):
             continue
-        path = str(entry.get("path", f".github/workflows/{name}"))
-        content_result = _run_gh(
-            ["api", f"repos/{org}/{repo_name}/contents/{path}", "--jq", ".content"]
-        )
-        if content_result.returncode != 0:
+        path = str(entry.get("path") or f".github/workflows/{name}")
+        blob = entry.get("object") or {}
+        text = blob.get("text")
+        if blob.get("isBinary") or blob.get("isTruncated") or not isinstance(text, str):
             raise RuntimeError(
-                f"gh api content fetch for {repo_name}:{path} failed: "
-                f"{content_result.stderr.strip()}"
+                f"gh api graphql workflow read for {repo_name}:{path} returned no "
+                "complete text"
             )
-        encoded = content_result.stdout.replace("\n", "")
-        texts[path] = base64.b64decode(encoded).decode("utf-8")
+        texts[path] = text
     return texts
 
 
@@ -550,8 +688,11 @@ def audit_private_repo_hosted_placement(
     visibility_fn: Callable[
         [str], list[tuple[str, bool]]
     ] = _live_repository_visibility,
-    workflow_fetch_fn: Callable[[str], dict[str, str]] = _default_branch_workflow_texts,
+    workflow_fetch_fn: Callable[[str], dict[str, str]] | None = None,
     org: str = ORG,
+    workflow_batch_fetch_fn: Callable[
+        [list[str], str], dict[str, dict[str, str]]
+    ] = _default_branch_workflow_texts_batch,
 ) -> list[Finding]:
     """OMN-18365 AC3: private repositories never run on GitHub-hosted runners.
 
@@ -575,10 +716,18 @@ def audit_private_repo_hosted_placement(
     layer only reports; it cannot itself stop a job from starting).
     """
     findings: list[Finding] = []
-    for repo_name, is_private in visibility_fn(org):
-        if not is_private:
-            continue
-        for path, text in workflow_fetch_fn(repo_name).items():
+    # OMN-20413: production reads all private repos in bounded GraphQL batches.
+    private_repos = [name for name, is_private in visibility_fn(org) if is_private]
+    batch_texts = (
+        workflow_batch_fetch_fn(private_repos, org) if workflow_fetch_fn is None else {}
+    )
+    for repo_name in private_repos:
+        workflow_texts = (
+            workflow_fetch_fn(repo_name)
+            if workflow_fetch_fn is not None
+            else batch_texts[repo_name]
+        )
+        for path, text in workflow_texts.items():
             try:
                 workflow = yaml.safe_load(text)
             except yaml.YAMLError as exc:
@@ -1067,6 +1216,7 @@ def main() -> int:
 
     policy = _load_policy(args.policy)
     findings: list[Finding] = []
+    unreadable: list[str] = []
     if args.local_workflows:
         findings.extend(audit_local_workflows(policy, args.repo_root))
         # OMN-18031, additive: the per-run routing consumer shape. Extends the
@@ -1078,25 +1228,51 @@ def main() -> int:
         # document above does not retain.
         findings.extend(audit_selector_markers(args.repo_root))
     if args.github_vars:
-        findings.extend(audit_github_variables(policy))
-        # OMN-18205: additive, and inside the SAME step as the seam audit so a
-        # finding here cannot be masked by the step-level ordering OMN-16727
-        # records -- main() extends one findings list and prints them all.
-        findings.extend(audit_scoped_variables(policy))
-        # OMN-18365 AC3, additive and inside the same step for the same
-        # reason: resolves its repository universe from live visibility
-        # rather than the policy's hand-curated `repositories:` list.
-        findings.extend(audit_private_repo_hosted_placement())
+        live_passes: list[Callable[[], list[Finding]]] = [
+            lambda: audit_github_variables(policy),
+            # OMN-18205: additive, and inside the SAME step as the seam audit so
+            # a finding here cannot be masked by the step-level ordering
+            # OMN-16727 records -- main() extends one findings list and prints
+            # them all.
+            lambda: audit_scoped_variables(policy),
+            # OMN-18365 AC3, additive and inside the same step for the same
+            # reason: resolves its repository universe from live visibility
+            # rather than the policy's hand-curated `repositories:` list.
+            audit_private_repo_hosted_placement,
+        ]
+        for live_pass in live_passes:
+            # OMN-20864: a rate limit in one pass is reported as unreadable and
+            # neither stops the remaining passes nor counts as a finding.
+            try:
+                findings.extend(live_pass())
+            except GitHubRateLimitError as exc:
+                unreadable.append(str(exc))
+        _write_step_outputs(findings=len(findings), unreadable=len(unreadable))
 
+    for finding in findings:
+        print(f"::error title=Runner routing drift::{finding.scope}: {finding.message}")
+    for reason in unreadable:
+        print(
+            "::error title=Runner audit unreadable::"
+            f"{reason}; the routing state was not read, which is not a finding"
+        )
     if findings:
-        for finding in findings:
-            print(
-                f"::error title=Runner routing drift::{finding.scope}: {finding.message}"
-            )
-        return 1
+        return EXIT_FINDINGS
+    if unreadable:
+        return EXIT_UNREADABLE
 
     print("Runner routing audit passed.")
     return 0
+
+
+def _write_step_outputs(**values: int) -> None:
+    """OMN-20864: tell the workflow's combined step findings from unread passes."""
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        return
+    with Path(path).open("a", encoding="utf-8") as handle:
+        for key, value in values.items():
+            handle.write(f"{key}={value}\n")
 
 
 if __name__ == "__main__":

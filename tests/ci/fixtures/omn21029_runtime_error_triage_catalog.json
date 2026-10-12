@@ -1,0 +1,8 @@
+{
+  "_provenance": {
+    "source": "psql -d omnibase_infra, run through docker exec in the omnibase-infra-postgres container of the dev lane: one read-only SELECT over information_schema.tables, pg_indexes and pg_namespace",
+    "captured_utc": "2026-10-12T13:13:07Z",
+    "note": "Live read-only capture for OMN-21029, before migration 111 was applied anywhere. It records where the relation migration 111 indexes physically lives: public.runtime_error_triage, in the omnibase_infra service database, and nowhere else. The reply holds no credential."
+  },
+  "response": {"current_database" : "omnibase_infra", "runtime_error_triage_schemas" : ["public"], "runtime_error_triage_indexes" : ["idx_runtime_error_triage_category", "idx_runtime_error_triage_correlation", "idx_runtime_error_triage_fingerprint", "idx_runtime_error_triage_fingerprint_state", "idx_runtime_error_triage_last_seen", "idx_runtime_error_triage_state", "runtime_error_triage_pkey", "uq_runtime_error_triage_active_fingerprint"], "non_system_schemas" : ["omninode_internal", "public"]}
+}

@@ -95,6 +95,7 @@ class EnumOmnibaseInfraTopic(str, Enum):
     EVT_RUNNER_HEALTH_SNAPSHOT_V1 = "onex.evt.omnibase-infra.runner-health-snapshot.v1"  # onex.evt.omnibase-infra.runner-health-snapshot.v1
     EVT_RUNTIME_BOOTED_V1 = "onex.evt.omnibase-infra.runtime-booted.v1"  # onex.evt.omnibase-infra.runtime-booted.v1
     EVT_RUNTIME_ERROR_V1 = "onex.evt.omnibase-infra.runtime-error.v1"  # onex.evt.omnibase-infra.runtime-error.v1
+    EVT_RUNTIME_ERROR_ESCALATED_V1 = "onex.evt.omnibase-infra.runtime-error-escalated.v1"  # onex.evt.omnibase-infra.runtime-error-escalated.v1
     EVT_RUNTIME_MANIFEST_PUBLISHED_V1 = "onex.evt.omnibase-infra.runtime-manifest-published.v1"  # onex.evt.omnibase-infra.runtime-manifest-published.v1
     EVT_SAVINGS_ESTIMATED_V1 = "onex.evt.omnibase-infra.savings-estimated.v1"  # onex.evt.omnibase-infra.savings-estimated.v1
     EVT_TOPIC_MIGRATION_LIFECYCLE_V1 = "onex.evt.omnibase-infra.topic-migration-lifecycle.v1"  # onex.evt.omnibase-infra.topic-migration-lifecycle.v1

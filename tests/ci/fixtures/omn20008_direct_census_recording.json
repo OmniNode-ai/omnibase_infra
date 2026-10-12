@@ -1,0 +1,48 @@
+{
+  "_provenance": {
+    "source": "Read-only check_lane_sync on the converged compose lane, with the private census root configured and then absent",
+    "captured_utc": "2026-10-12T16:24:38.328001+00:00",
+    "base_sha": "ae5fca1228a34d61f76d1cbfdd1babbe64b7392d",
+    "source_sha256": "d77e3d4a8c2937180117532496012dbdd80b9ac2f3cf6e4ee768c35fff6c1a9c",
+    "redactions": "Daemon, host and lane names replaced with neutral identifiers. Exit codes, timestamps, findings, config variable names and check outcomes retained."
+  },
+  "configured": {
+    "responses": [
+      {
+        "returncode": 0,
+        "stdout": "recorded-daemon\n",
+        "stderr": ""
+      },
+      {
+        "returncode": 0,
+        "stdout": "{\"schema_version\": \"1.1.0\", \"host\": \"recorded-host\", \"lanes_checked\": [\"recorded-lane-1\", \"recorded-lane-2\", \"recorded-lane-3\", \"recorded-lane-4\", \"recorded-lane-5\", \"recorded-lane-6\", \"recorded-lane-7\", \"recorded-lane-8\"], \"lanes_not_applicable\": [\"recorded-lane-9\", \"recorded-lane-10\", \"recorded-lane-11\", \"recorded-lane-12\", \"recorded-lane-13\"], \"lanes_skipped_optional_down\": [\"recorded-lane-6\", \"recorded-lane-7\"], \"findings\": [], \"has_drift\": false}\n",
+        "stderr": "[2026-10-12T16:23:52Z] [lane-census] Starting (lane=ALL, host=recorded-daemon, LIVE)\n[2026-10-12T16:23:52Z] [lane-census] No lane drift. Desired == actual.\n"
+      }
+    ],
+    "check": {
+      "name": "lane_sync",
+      "ok": true,
+      "evidence": "{\"findings\": [], \"has_drift\": false, \"host\": \"recorded-host\", \"lanes_checked\": [\"recorded-lane-1\", \"recorded-lane-2\", \"recorded-lane-3\", \"recorded-lane-4\", \"recorded-lane-5\", \"recorded-lane-6\", \"recorded-lane-7\", \"recorded-lane-8\"], \"lanes_not_applicable\": [\"recorded-lane-9\", \"recorded-lane-10\", \"recorded-lane-11\", \"recorded-lane-12\", \"recorded-lane-13\"], \"lanes_skipped_optional_down\": [\"recorded-lane-6\", \"recorded-lane-7\"], \"schema_version\": \"1.1.0\"}"
+    }
+  },
+  "unconfigured": {
+    "responses": [
+      {
+        "returncode": 0,
+        "stdout": "recorded-daemon\n",
+        "stderr": ""
+      },
+      {
+        "returncode": 3,
+        "stdout": "",
+        "stderr": "[2026-10-12T16:23:52Z] [lane-census] Starting (lane=ALL, host=recorded-daemon, LIVE)\n[2026-10-12T16:23:52Z] [lane-census] ERROR: the lane census is not configured: neither ONEX_WORKSPACE_CONFIG_ROOT nor OMNI_HOME is set; set ONEX_WORKSPACE_CONFIG_ROOT to the directory that holds config/lab/lane-census/lane-manifest.yaml. This repository ships no lane manifest\n[2026-10-12T16:23:52Z] [lane-census] ABORT: the lane planner failed (exit 3).\n"
+      }
+    ],
+    "check": {
+      "name": "lane_sync",
+      "ok": false,
+      "evidence": "census unreadable: ValueError: census exit=3: [2026-10-12T16:23:52Z] [lane-census] Starting (lane=ALL, host=recorded-daemon, LIVE)\n[2026-10-12T16:23:52Z] [lane-census] ERROR: the lane census is not configured: neither ONEX_WORKSPACE_CONFIG_ROOT nor OMNI_HOME is set; set ONEX_WORKSPACE_CONFIG_ROOT to the directory that holds config/lab/lane-census/lane-manifest.yaml. This repository ships no lane manifest\n[2026-10-12T16:23:52Z] [lane-census] ABORT: the lane planner failed (exit 3).",
+      "outcome": "indeterminate"
+    }
+  }
+}

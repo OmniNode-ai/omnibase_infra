@@ -23,15 +23,14 @@ friction -> Linear precedent.
 
 DEPLOY-GAP CHECK (OMN-14994): in addition to the per-repo PyPI/tag/main/dev
 checks, this shell also gathers ``DeployFacts`` for a small set of cloud deploy
-targets (repo + branch + workflow, e.g. ``omninode_infra`` dev ->
-``deploy-onex-staging.yml``) and evaluates them via
+targets (repo + branch + workflow) and evaluates them via
 ``release_drift_monitor_lib.evaluate_deploy_target``. This closes the "merged
 but never deployed" gap that let three production-blocking fixes
 (omninode_infra PRs #619/#620/#622) sit merged to dev for ~28 hours with
 nothing red: that repo's push-trigger only fires on ``main``/``m7/**``, but
-``dev`` is the actual default/everyday branch (OMN-14198). Scope is deliberately
-narrow (onex-dev only) -- this monitor never touches or asserts anything about
-prod.
+``dev`` is the actual default/everyday branch (OMN-14198). No deploy target is
+configured today (OMN-20112): this monitor reads no staging-plane result and
+never touches or asserts anything about prod.
 
 SCOPE NOTE (per-lane running-signature): the design also calls for a per-lane
 "running-signature vs intended-ref" check. That requires reading a live ``.201``
@@ -151,35 +150,15 @@ class DeployTargetConfig:
 
 
 # Deploy targets monitored for the "merged but never deployed" gap (OMN-14994).
-# Scope is deliberately onex-dev only -- this monitor never touches or reasons
-# about prod. Extend this tuple (never hand-roll a parallel check) when another
-# repo/branch/workflow triple needs the same gap coverage.
-# OMN-18348: the workflow named here was RENAMED. `deploy-onex-dev.yml` became
-# `deploy-onex-staging.yml` in omninode_infra#789 (OMN-10854); the old file is
-# absent from both dev and main, and its last run of any kind was 2026-08-01.
-# GitHub still resolves the retired filename and serves its final runs, so the
-# monitor kept comparing onex-dev against a 2026-07-31 dispatch -- it would
-# have reported a ~7-week-stale P1 the moment its 403 was fixed. `onex-dev` on
-# the dev-system cluster is deployed by `deploy-onex-staging.yml`, which
-# re-applies k8s/onex-dev-overlay-dev on every push to dev.
-DEPLOY_TARGETS: tuple[DeployTargetConfig, ...] = (
-    DeployTargetConfig(
-        repo="omninode_infra",
-        target="onex-dev",
-        branch="dev",
-        workflow="deploy-onex-staging.yml",
-        deploy_paths=(
-            "k8s/onex-dev",
-            "k8s/onex-dev-overlay-dev",
-            "k8s/onex-dev-rbac",
-            ".github/workflows/deploy-onex-staging.yml",
-            "scripts/post-deploy-verify.sh",
-            "scripts/validate-deployment-env-vars.sh",
-            "docker/onex-api",
-            "docker/omnidash",
-        ),
-    ),
-)
+# OMN-20112: empty by design. The one target this tuple carried read the staging
+# plane's deploy workflow result in the cloud infra repository. Operator ruling
+# 2026-09-29: nothing outside that repository may read or require staging, so the
+# target is gone and any staging deploy-gap watch lives there. The machinery below
+# (DeployTargetConfig, gather_deploy_facts, the pure evaluator in
+# release_drift_monitor_lib) stays generic. The monitor reads only the repositories
+# in DEFAULT_REPOS; tests/scripts/test_release_drift_monitor_no_staging.py refuses
+# a deploy target or a probe outside them.
+DEPLOY_TARGETS: tuple[DeployTargetConfig, ...] = ()
 
 
 # --------------------------------------------------------------------------- #

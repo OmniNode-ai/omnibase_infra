@@ -125,12 +125,34 @@ PY
 # diff. The digest is `git diff --no-color --no-ext-diff <merge-base>..<head>`
 # hashed with sha256, byte for byte the command lab_pass_receipt.py's
 # compute_pr_diff_digest_from_repo runs, so a verifier elsewhere recomputes the
-# same value from the same two shas.
+# same value from the same two shas. The PR's changed paths over the same range
+# follow, one pr-changed line each, read as the lab-proof-receipt workflow reads
+# them (--name-only --no-renames): they decide which of the profile's
+# conditional checks the receipt must carry.
 pr_subject() { # dir repo pr head base
   local d=$1 repo=$2 pr=$3 h=$4 base=$5 mb dg
   mb=$(git -C "$d" merge-base "$base" "$h" 2>/dev/null) || { echo "pr-subject-unavailable $repo#$pr no merge base with $base"; return 0; }
   dg=$(git -C "$d" diff --no-color --no-ext-diff "$mb..$h" | shasum -a 256 | cut -d' ' -f1)
   echo "pr-subject $repo#$pr head=$h base=$base merge-base=$mb diff-digest=sha256:$dg"
+  git -C "$d" diff --name-only --no-renames "$mb" "$h" | sed "s|^|pr-changed $repo#$pr |"
+}
+
+# changed_path_live, when the caller names no LIVE_GREP: one term per node the
+# PR changes (src/<repo>/nodes/<node>/...) that still exists at the head, so a
+# deleted node is not demanded live. The term is the node name between dots,
+# which a runtime logs only once the node runs: its consumer group
+# (<lane>.<repo>.<node>.consume, on the Auto-wired subscription and group
+# lines) or its own modules' loggers (<repo>.nodes.<node>.handlers...).
+# Discovery ("Discovered contract: <node> (") and registration lines do not
+# match, so a node that is only discovered is not live, and node_x does not
+# match node_x_y. Printed for the reader; the judge reads the mention lines.
+derive_live_grep() { # repo... (each checked out at the tree under proof in $R)
+  local repo n
+  for repo in "$@"; do
+    for n in $(git -C "$R/$repo" diff --name-only --no-renames origin/dev...HEAD -- "src/$repo/nodes/" | awk -F/ 'NF>=5{print $4}' | sort -u); do
+      [ -f "$R/$repo/src/$repo/nodes/$n/contract.yaml" ] && printf '[.]%s[.] ' "$n"
+    done
+  done
 }
 
 fetch_pr() { # dir repo pr expected -> merges PR head into dev (no-ff), falls back to raw head on conflict
@@ -374,6 +396,10 @@ print("status",d.get("status"),"healthy",det.get("healthy"),"failed_handlers",de
   # migrations against its fresh databases and exits non-zero when one fails
   [ "$KIND" = prepr-slot ] && echo "slot-migration-gate health=$([ -f "$W/migrated" ] && echo healthy || echo unknown)"
   docker ps -aq --filter label=com.docker.compose.project=$P | xargs docker inspect -f '{{.Name}} health={{if .State.Health}}{{.State.Health.Status}}{{end}} restarts={{.RestartCount}} {{.State.Status}} exit={{.State.ExitCode}}'
+  if [ -z "${LIVE_GREP:-}" ]; then
+    LIVE_GREP=$(derive_live_grep $SUBJECTS)
+    echo "live-grep derived from the diff: ${LIVE_GREP:-none (the PR changes no node that exists at its head)}"
+  fi
   echo "== wiring"
   for c in $M $E; do L=$(docker logs $c 2>&1); echo "$c lines=$(echo "$L" | wc -l | tr -d ' ') autowire-fail=$(echo "$L" | grep -c 'Auto-wiring failed for') dup-dispatcher=$(echo "$L" | grep -c 'Cannot register duplicate dispatcher ID') ERROR=$(echo "$L" | grep -c ERROR) Traceback=$(echo "$L" | grep -c Traceback)"
     echo "$L" | grep -E 'ERROR|Traceback|Auto-wiring failed' | sed -E 's/^[0-9T:.,Z -]+//' | cut -c1-160 | sort | uniq -c | sort -rn | head -4
@@ -382,7 +408,8 @@ print("status",d.get("status"),"healthy",det.get("healthy"),"failed_handlers",de
     echo "failed-contracts $c: $(echo "$L" | grep 'Auto-wiring failed for' | sed -E 's/.*enforce\): //' | awk -v RS='; ' -F': ' 'NF>1{print $1}' | sort -u | tr '\n' ' ')"
     echo "$L" | grep 'Auto-wiring failed for' | sed -E 's/.*enforce\): //' | awk -v RS='; ' 'NF{sub(/^ +/, ""); print}' \
       | sed -E "s/^([^:]+): .*failed: (.*)$/  failed-contract-reason $c \\1: \\2/" | cut -c1-260
-    for n in ${LIVE_GREP:-}; do echo "  $c mentions $n: $(echo "$L" | grep -c "$n")"; done; done
+    # noglob: a derived term carries a bracket class, never a file pattern
+    set -f; for n in ${LIVE_GREP:-}; do echo "  $c mentions $n: $(echo "$L" | grep -c "$n")"; done; set +f; done
   if [ "$KIND" = prepr-slot ] && { [ -n "${SQL:-}" ] || [ -n "${GROUP_GREP:-}" ]; }; then
     echo "== sql and consumer groups: not read on a prepr slot (its databases and groups live on the dev lane's shared servers)"
   elif [ -n "${SQL:-}" ]; then echo "== sql"; PG=$(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}}' | grep -m1 postgres)

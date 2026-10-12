@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20959
+title: omnibase_infra release resolves release evidence without a change-control companion
+summary: After S6 (omnibase_infra#4792) no autobind writes a citation into a release PR body, so release.yml stopped every release before the PyPI publish (v0.38.70, release PR #4845). The resolver now reads the merged release PR's ticket from its title or head branch and takes evidence from contracts/<ticket>.yaml at the release commit (non-empty dod_evidence), else from a PASS change-control receipt on onex_change_control main bound to the release PR by number, ticket and head sha, and refuses before the build when neither exists. contracts/OMN-18595.yaml gives the release train's own ticket an in-repo contract, so later release cuts resolve from this repository. dependency-cascade.yml is unchanged and already accepts both source shapes; tests/ci/test_release_evidence_omn20959.py keeps a regression test for that, but it is not a DoD item, because it passes at the merge base by construction.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20959-release-evidence-in-repo
+    statement: release.yml resolves release evidence from the in-repo contract or a merged change-control receipt bound to the release PR, never from the PR body, and reaches the build.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a release PR with no body citation and an in-repo contract with dod_evidence resolves, and so does one with a PASS receipt bound to its head; red on the previous workflow -- falsifier: uv run pytest tests/ci -k release_evidence -q'
+  - id: req-omn20959-refuses
+    statement: The OMN-16286 refusal still fires before publish when neither evidence form exists or a receipt is not bound to the release PR.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: neither form, an empty contract, or a receipt that fails or names another PR, head or ticket exits 1 -- falsifier: uv run pytest tests/ci -k release_evidence_refuses -q'
+evidence_requirements:
+  - kind: tests
+    description: The shipped resolver, run under bash with a stub gh, resolves both evidence forms and refuses every unbound or absent one.
+    command: uv run pytest tests/ci/test_release_evidence_omn20959.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20959-ac1-release-evidence-resolves
+    description: The resolver resolves the in-repo contract and the bound receipt, and ignores a body citation.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_release_evidence_omn20959.py -q -k "release_evidence and not refuses"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20959-ac3-refuses
+    description: The refusal fires for every absent or unbound form.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_release_evidence_omn20959.py -q -k release_evidence_refuses
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

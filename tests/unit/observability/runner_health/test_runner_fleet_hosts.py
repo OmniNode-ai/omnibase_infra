@@ -44,8 +44,11 @@ def _config() -> ModelRunnerFleetConfig:
 # a static analyser, and the two CodeQL high-severity
 # `py/incomplete-url-substring-sanitization` alerts this file first raised were
 # exactly that false shape. `.get()` says the same thing and does not.
+# The primary host's row is named by the config's own top-level runner_host,
+# resolved in the test, so this table needs no second copy of that address.
+_PRIMARY = "<runner_host>"
 EXPECTED_HOSTS: tuple[tuple[str, str, int], ...] = (
-    ("omninode-pc.tail75df5e.ts.net", "amd64", 44),
+    (_PRIMARY, "amd64", 10),
     ("stickybeatz-2.tail75df5e.ts.net", "arm64", 1),
     ("192.168.86.202", "amd64", 1),
     ("stickybeatz-studio.tail75df5e.ts.net", "arm64", 1),
@@ -55,10 +58,15 @@ EXPECTED_HOSTS: tuple[tuple[str, str, int], ...] = (
 def test_inventory_declares_every_lab_host_with_its_architecture() -> None:
     config = _config()
     by_host = {host.host: host for host in config.hosts}
+    expected = [
+        (config.runner_host if address == _PRIMARY else address, arch, count)
+        for address, arch, count in EXPECTED_HOSTS
+    ]
+    assert config.primary_host().host == config.runner_host
     # OMN-17427: the retired .105 host must not inflate declared capacity.
-    assert set(by_host) == {address for address, _, _ in EXPECTED_HOSTS}
+    assert set(by_host) == {address for address, _, _ in expected}
 
-    for address, arch, expected_count in EXPECTED_HOSTS:
+    for address, arch, expected_count in expected:
         row = by_host.get(address)
         assert row is not None, (
             f"the inventory must declare the host {address!r}; it declares "
@@ -118,7 +126,8 @@ def test_declared_total_sums_only_the_hosts_carrying_that_class() -> None:
 
     # OMN-19895: 44 on the primary host plus .202's 16-runner pool. The spread
     # moved capacity between hosts; it did not change the declared total.
-    assert config.declared_total("action") == 60
+    # OMN-19077 then cut the primary host's share 44 -> 10, so 10 + 16.
+    assert config.declared_total("action") == 26
     assert config.declared_total("customer-plane") == 3
     assert config.declared_total("verify") == 6
     # A class nothing declares is zero, not an error and not the whole fleet.

@@ -1,0 +1,94 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20864
+title: The dev-lane deploy agent no longer takes the lane down over a degraded runtime, and the runner routing audit reads each private repository's workflows in one GraphQL call
+summary: On 2026-10-11 the lab dev-lane deploy agent force-recreated a runtime that was up and answering degraded, the recreate timed out and left the new container Created, and the idle branch then refused every minute for 5h50m. The agent now leaves a running degraded runtime in place (the verdict still fails), cleans up and retries a timed-out recreate once, and restores a lane whose main runtime is absent or stopped; the dev refresh gate waits out the runtime's declared start budget while it says still starting. Also, The private-repo hosted-placement pass of scripts/audit-runner-routing.py runs inside every omnibase_infra CI run on CROSS_REPO_PAT, the operator's token, and read every workflow file of every private repository through the REST contents API, one call per file. On 2026-10-11 that spent the operator's shared hourly core quota and the landing controller stopped with QUOTA. Each repository's workflows directory is now one GraphQL read, each variable list is read once per run, and a failed or partial read raises instead of reading clean.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20864-no-recreate-answering-degraded
+    statement: Post-deploy verification on the dev lane does not force-recreate a runtime that answers running with its health monitor naming a degraded dimension; it records outcome not_recreated_answering and still fails the verdict, ends the declared-start wait once two consecutive monitor cycles name the same dimensions, and keeps recreating a dead, unhealthy or bus-down runtime.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the replay of job 72e74ec6 issues no compose recreate and records not_recreated_answering, a boot-transient degraded cycle followed by healthy passes, and a refused port is still recreated -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "answering or settled or degraded or boot_transient or dead_port"'
+  - id: req-omn20864-recreate-timeout-cleanup
+    statement: A compose recreate killed at its ceiling has every Created container of the lane's project with the recreate's temporary name removed, scoped to the services it recreated, and is retried once; a second timeout is cleaned up the same way and raised. This holds for the verify recreate, the migration preflight, the onex-api recreate and the runtime compose up.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the leftover removal is scoped to the lane project, the created state, the temporary name and the service; a timed-out recreate is retried once; the 13:50Z and 14:14Z replays leave nothing Created -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "leftover or timeout or times_out or replay_13 or replay_14_14z_the_migration"'
+  - id: req-omn20864-idle-restore
+    statement: An idle dev-lane agent whose main runtime container is absent or stopped runs one runtime rebuild as agent/idle-restore, at most once an hour, never while a job runs, the lane is frozen or the lane was active in the last five minutes, and never on an unreadable docker answer.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: decide_restore and read_runtime_presence cover every verdict, the 14:14Z replay restores instead of idling and does not restore twice in an hour, and a frozen or unreadable lane is not restored -- falsifier: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q -k "restore or presence"'
+  - id: req-omn20864-dev-gate-boot-window
+    statement: The dev refresh health gate does not spend its verdict wait while the runtime answers still starting inside the seconds left of its declared start budget, which refresh_dev_lane.sh reads with the runtime_health_wait.sh helpers and passes to both gate runs.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: the 2026-10-11 replay fails without the window and passes inside it, a runtime that never finishes starting still fails, and the script passes the window to both gates -- falsifier: uv run pytest scripts/runtime_build/tests/test_dev_gate_boot_window_omn20864.py -q'
+  - id: req-omn20864-routing-audit-quota
+    statement: The routing audit must read a private repository's workflows with one GitHub call however many files it holds, read each variable list at most once per run, and never report a repository clean when its workflows were not read.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: a repository with 100 workflow files costs one gh api graphql call and no contents API call; only yaml blobs are kept; a missing directory reads empty; a failed, repository-less, truncated or textless read raises; each variable list is read once across repeated audits -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "workflow_texts or workflows_directory or unread_workflow or variable_list_is_read_once"'
+  - id: req-omn20864-routing-audit-rate-limit
+    statement: A GitHub API rate limit in the routing audit's live pass is reported as an unreadable routing state with its own annotation, the reset time and a distinct exit code, never as routing drift; findings of the other live passes are still reported, and the workflow's combined step names drift only when a pass reported findings.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: the replay of job 114609134005 (GraphQL: API rate limit already exceeded) exits unreadable with no drift annotation, a finding in one live pass survives a rate limit in another, a non-rate-limit failure is not relabelled, and the combined step prints unreadable, drift, incomplete or clean for each outcome -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "rate_limit or not_relabelled or survive or combined_step_names"'
+evidence_requirements:
+  - kind: tests
+    description: The outage replay and rule tests for the deploy agent.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q
+  - kind: tests
+    description: The dev refresh gate boot-window tests.
+    command: uv run pytest scripts/runtime_build/tests/test_dev_gate_boot_window_omn20864.py -q
+  - kind: tests
+    description: The fake gh runner counts the calls the audit makes and replays truncated, binary and failed reads.
+    command: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "workflow_texts or workflows_directory or unread_workflow or variable_list_is_read_once"
+  - kind: tests
+    description: The fake gh runner replays the rate-limited reply of job 114609134005 through the audit and runs the combined step's shell for each outcome.
+    command: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "rate_limit or not_relabelled or survive or combined_step_names"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20864-agent-outage-rules
+    description: The outage replay and rule tests fail on the merge base, which has no not_recreated_answering outcome, no leftover cleanup and no restore rule, and pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_outage_omn20864.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2
+      - AC3
+  - id: dod-omn20864-dev-gate-boot-window
+    description: The dev gate boot-window tests pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/runtime_build/tests/test_dev_gate_boot_window_omn20864.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn20864-ac5-routing-audit-quota
+    description: AC5 tests count gh calls per repository and per variable list and replay the failure shapes.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "workflow_texts or workflows_directory or unread_workflow or variable_list_is_read_once"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
+  - id: dod-omn20864-ac6-routing-audit-rate-limit
+    description: AC6 tests fail on the merge base, where a rate limit is a traceback the combined step names routing drift, and pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "rate_limit or not_relabelled or survive or combined_step_names"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6

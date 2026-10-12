@@ -37,10 +37,13 @@ Portability:
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import yaml
 
 # =============================================================================
 # Root Directory Allowlist
@@ -344,6 +347,41 @@ def _suggest_action(item: Path) -> str:
     return "Move contents to appropriate location or add to ALLOWED_ROOT_DIRECTORIES"
 
 
+def _declared_guard_configurations(repo_path: Path) -> set[str]:
+    """Recognize caller-owned configuration wired to the pinned core guard.
+
+    The reusable and canonical-file-shape enforce its shrink-only ratchet.
+    Read the declaration instead of adding an exception to the root allowlist.
+    """
+    declared: set[str] = set()
+    workflow_dir = repo_path / ".github/workflows"
+    for workflow_path in workflow_dir.glob("*"):
+        if workflow_path.suffix not in {".yaml", ".yml"} or not workflow_path.is_file():
+            continue
+        try:
+            workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, yaml.YAMLError):
+            continue
+        if not isinstance(workflow, dict) or not isinstance(workflow.get("jobs"), dict):
+            continue
+        for job in workflow["jobs"].values():
+            if not isinstance(job, dict) or not re.fullmatch(
+                r"OmniNode-ai/omnibase_core/\.github/workflows/"
+                r"imperative-contract-guard\.yml@[0-9a-f]{40}",
+                str(job.get("uses", "")),
+            ):
+                continue
+            inputs = job.get("with")
+            path = inputs.get("allowlist-path") if isinstance(inputs, dict) else None
+            if (
+                isinstance(path, str)
+                and Path(path).name == path
+                and Path(path).suffix in {".yaml", ".yml"}
+            ):
+                declared.add(path)
+    return declared
+
+
 def validate_root_directory(
     repo_path: Path,
     verbose: bool = False,
@@ -368,6 +406,7 @@ def validate_root_directory(
 
     # Collect all root items first so we can batch the gitignore check.
     all_items = sorted(repo_path.iterdir())
+    guard_configurations = _declared_guard_configurations(repo_path)
 
     # Items that pass the allowlist checks immediately — no git call needed.
     unresolved: list[Path] = []
@@ -385,6 +424,10 @@ def validate_root_directory(
 
         # Check if it's an allowed file
         if item.is_file():
+            if name in guard_configurations and not item.is_symlink():
+                if verbose:
+                    print(f"  ✓ {name} (reusable guard configuration)")
+                continue
             if name in ALLOWED_ROOT_FILES:
                 if verbose:
                     print(f"  ✓ {name} (allowed file)")

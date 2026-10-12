@@ -77,6 +77,10 @@ source "${SCRIPT_DIR}/lane_lock.sh"
 # its KAFKA_SASL_* environment. Nothing here spells a compose file by hand.
 # shellcheck source=./compose_files.sh
 source "${SCRIPT_DIR}/compose_files.sh"
+# OMN-20864: the runtime's OWN declared start budget, read by the same helpers
+# the deploy agent and onex-runtime-deploy wait on (OMN-18349/OMN-19374).
+# shellcheck source=./runtime_health_wait.sh
+source "${SCRIPT_DIR}/runtime_health_wait.sh"
 VERIFY_SCRIPT="${SCRIPT_DIR}/verify_dev_refresh.py"
 # OMN-18061: the ONE rule that decides whether a failed refresh may DESTROY the
 # lane, shared byte-for-byte with refresh_stability_lane.sh. OMN-16729 landed
@@ -360,6 +364,29 @@ fi
 
 run_verify() {
     run_python "${VERIFY_SCRIPT}" "$@"
+}
+
+# OMN-20864: seconds left of a container's declared start budget
+# (start_period + retries x (interval + timeout)), less its age. The health
+# gate does not spend its verdict wait while the runtime answers "still
+# starting" inside this window. On 2026-10-11 the gate read 503 "still
+# starting" for its whole 600 s and the receipt said FAILED over a runtime that
+# was HEALTHY 10 minutes after it started, inside its declared 2000 s. Prints 0
+# when anything is unreadable, which keeps the gate's previous behaviour.
+runtime_boot_window_seconds() {
+    local container="$1" budget started started_epoch now_epoch left
+    [[ -n "${container}" ]] || { echo 0; return 0; }
+    budget="$(runtime_health_budget_seconds "${container}")"
+    started="$(runtime_started_at "${container}")"
+    if [[ ! "${budget}" =~ ^[0-9]+$ ]] || [[ -z "${started}" ]] \
+        || ! started_epoch="$(date -u -d "${started}" +%s 2>/dev/null)"; then
+        echo 0
+        return 0
+    fi
+    now_epoch="$(date -u +%s)"
+    left=$(( budget - (now_epoch - started_epoch) ))
+    (( left > 0 )) || left=0
+    echo "${left}"
 }
 
 run_python() {
@@ -860,6 +887,8 @@ CONTAINER_IDS_JSON="$(
 
 GATE1_JSON="${WORKDIR}/gate1.json"
 GATE_EXIT=0
+BOOT_WINDOW_SECONDS="$(runtime_boot_window_seconds "${NEW_CONTAINER_IDS[omninode-runtime]:-}")"
+log "runtime boot window: ${BOOT_WINDOW_SECONDS}s left of omninode-runtime's declared start budget"
 # shellcheck disable=SC2086
 run_verify \
     --lane "${LANE}" \
@@ -871,6 +900,7 @@ run_verify \
     --effects-health-url "${EFFECTS_HEALTH_URL}" \
     --broker-container "${REDPANDA_CONTAINER}" \
     --min-contracts "${MIN_CONTRACTS}" \
+    --boot-window-seconds "${BOOT_WINDOW_SECONDS}" \
     ${REQUIRE_DIGEST_CHANGE} \
     --json > "${GATE1_JSON}" || GATE_EXIT=$?
 
@@ -980,6 +1010,7 @@ elif [[ "${DECISION_RESULT}" == "ROLLBACK_REQUIRED" ]]; then
     )"
     GATE2_JSON="${WORKDIR}/gate2.json"
     GATE2_EXIT=0
+    ROLLBACK_BOOT_WINDOW_SECONDS="$(runtime_boot_window_seconds "$(compose_ps_q_any omninode-runtime)")"
     run_verify \
         --lane "${LANE}" \
         --expected-revision "${OLD_INFRA_REVISION:-unknown}" \
@@ -990,6 +1021,7 @@ elif [[ "${DECISION_RESULT}" == "ROLLBACK_REQUIRED" ]]; then
         --effects-health-url "${EFFECTS_HEALTH_URL}" \
         --broker-container "${REDPANDA_CONTAINER}" \
         --min-contracts "${MIN_CONTRACTS}" \
+        --boot-window-seconds "${ROLLBACK_BOOT_WINDOW_SECONDS}" \
         --no-require-digest-change \
         --json > "${GATE2_JSON}" || GATE2_EXIT=$?
 

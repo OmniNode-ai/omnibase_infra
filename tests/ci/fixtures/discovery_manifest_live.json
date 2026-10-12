@@ -57,7 +57,7 @@
               },
               "event_model": {
                 "name": "ModelCodingAgentFsmAdvance",
-                "module": "omnibase_infra.nodes.node_coding_agent_fsm_reducer.models.model_coding_agent_fsm_advance"
+                "module": "omnibase_infra.models.coding_agent.model_coding_agent_fsm_advance"
               },
               "operation": "coding_agent.fsm.advance",
               "event_type": null,

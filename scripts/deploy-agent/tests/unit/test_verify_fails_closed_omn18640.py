@@ -334,13 +334,18 @@ def test_the_agent_publishes_the_executors_checks_when_its_own_are_empty() -> No
     assert "health_checks or self.executor.health_checks" in agent_source
 
 
-def test_the_four_verify_recreate_outcomes_are_unchanged() -> None:
-    """Anti-drift on #3802: this change adds a verdict, not an outcome."""
+def test_the_verify_recreate_outcomes_are_pinned() -> None:
+    """Anti-drift on #3802: this change added a verdict, not an outcome.
+
+    OMN-20864 added exactly one, ``not_recreated_answering``: a degraded but
+    running runtime is no longer recreated, and the record says so.
+    """
     assert {outcome.value for outcome in EnumVerifyRecreateOutcome} == {
         "recovered",
         "still_failing",
         "recreate_failed",
         "recreate_timed_out",
+        "not_recreated_answering",
     }
 
 

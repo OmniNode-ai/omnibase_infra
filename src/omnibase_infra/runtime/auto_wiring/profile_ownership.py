@@ -18,6 +18,17 @@ lane fails CLOSED: the contract is not attached and a discovery error naming it
 is added to the manifest, which the runtime health monitor reports as a
 DEGRADED ``discovery_errors`` dimension. It is never a silent skip.
 
+A lane may be an INSTANCE of a registered lane class (OMN-20867): a second
+copy of a lab lane on another host declares its own registered lane, named
+``<class>-<instance>``. Shipped contracts may not name a host's lane, so the
+deployment's private overlay says it, in two variables read together:
+``ONEX_RUNTIME_LANE_CLASS`` (the class) and ``ONEX_RUNTIME_LANE_CLASS_CONTRACTS``
+(the class contracts this instance takes). Only the named contracts are
+borrowed, never the whole class: a lane-keyed contract such as the lab
+lane-health projection folds rows for the class's own lane and would consume
+and drop everything on an instance. A selection that cannot be honoured is a
+discovery error, never a silent skip.
+
 Both the kernel's wiring and the health monitor's expectations read this one
 filter, so what is attached and what health expects cannot disagree.
 """
@@ -25,6 +36,7 @@ filter, so what is attached and what health expects cannot disagree.
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -33,6 +45,9 @@ from omnibase_core.constants.constants_runtime_lanes import REGISTERED_RUNTIME_L
 from omnibase_core.models.contracts.subcontracts.model_runtime_lane_scope import (
     ModelRuntimeLaneScope,
 )
+from omnibase_infra.models.runtime.model_runtime_lane_class_selection import (
+    ModelRuntimeLaneClassSelection,
+)
 from omnibase_infra.runtime.auto_wiring.models import (
     ModelAutoWiringManifest,
     ModelDiscoveredContract,
@@ -40,6 +55,8 @@ from omnibase_infra.runtime.auto_wiring.models import (
 )
 from omnibase_infra.runtime.health.runtime_lane_identity import (
     ENV_RUNTIME_LANE,
+    ENV_RUNTIME_LANE_CLASS,
+    ENV_RUNTIME_LANE_CLASS_CONTRACTS,
     describe_undeclared_runtime_lane,
     resolve_declared_runtime_lane,
 )
@@ -80,6 +97,55 @@ def extract_runtime_profiles_from_contract(
     return tuple(dict.fromkeys(profiles))
 
 
+def resolve_runtime_lane_class_selection(
+    runtime_lane: str | None,
+    environ: Mapping[str, str] | None = None,
+) -> ModelRuntimeLaneClassSelection:
+    """Read the deployment's lane-class selection for a runtime's declared lane.
+
+    Both variables unset is no selection. Otherwise the class must be a
+    registered lane, the declared lane must be ``<class>-<instance>``, and at
+    least one contract must be named; anything else is returned as a refusal
+    with no class, so nothing is borrowed.
+    """
+    source: Mapping[str, str] = os.environ if environ is None else environ
+    raw_class = (source.get(ENV_RUNTIME_LANE_CLASS) or "").strip().lower()
+    raw_contracts = (source.get(ENV_RUNTIME_LANE_CLASS_CONTRACTS) or "").strip()
+    if not raw_class and not raw_contracts:
+        return ModelRuntimeLaneClassSelection()
+    contracts = tuple(
+        dict.fromkeys(part.strip() for part in raw_contracts.split(",") if part.strip())
+    )
+    refusal = ""
+    if not raw_class:
+        refusal = f"{ENV_RUNTIME_LANE_CLASS_CONTRACTS} is set but {ENV_RUNTIME_LANE_CLASS} is not"
+    elif not contracts:
+        refusal = (
+            f"{ENV_RUNTIME_LANE_CLASS}={raw_class!r} names no contracts; set "
+            f"{ENV_RUNTIME_LANE_CLASS_CONTRACTS}"
+        )
+    elif raw_class not in REGISTERED_RUNTIME_LANES:
+        refusal = (
+            f"{ENV_RUNTIME_LANE_CLASS}={raw_class!r} is not a registered lane "
+            f"{sorted(REGISTERED_RUNTIME_LANES)}"
+        )
+    elif runtime_lane is None:
+        refusal = (
+            f"{ENV_RUNTIME_LANE_CLASS}={raw_class!r} is set but this runtime "
+            f"declares no registered {ENV_RUNTIME_LANE}"
+        )
+    elif not runtime_lane.startswith(f"{raw_class}-"):
+        refusal = (
+            f"{ENV_RUNTIME_LANE}={runtime_lane!r} is not an instance of lane "
+            f"class {raw_class!r}; an instance is named '{raw_class}-<instance>'"
+        )
+    return ModelRuntimeLaneClassSelection(
+        lane_class=None if refusal else raw_class,
+        contracts=contracts,
+        refusal=refusal,
+    )
+
+
 def _runtime_lane_admits_raw_contract(
     raw_contract: Mapping[str, object],
     environ: Mapping[str, str] | None,
@@ -98,7 +164,13 @@ def _runtime_lane_admits_raw_contract(
         scope = ModelRuntimeLaneScope.model_validate({"lanes": lanes_raw})
     except ValidationError:
         return False
-    return scope.admits(resolve_declared_runtime_lane(environ))
+    runtime_lane = resolve_declared_runtime_lane(environ)
+    if scope.admits(runtime_lane):
+        return True
+    name = raw_contract.get("name")
+    return isinstance(name, str) and resolve_runtime_lane_class_selection(
+        runtime_lane, environ
+    ).admits(name, scope)
 
 
 def runtime_profile_owns_contract(
@@ -155,6 +227,21 @@ class ModelRuntimeProfileOwnershipResult(BaseModel):
             "listed here; it is a discovery error in manifest.errors."
         ),
     )
+    runtime_lane_class: str | None = Field(
+        default=None,
+        description=(
+            "The lane class this runtime is an instance of "
+            "(ONEX_RUNTIME_LANE_CLASS), or None when none is selected or the "
+            "selection was refused (OMN-20867)."
+        ),
+    )
+    lane_class_admitted_contracts: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Contracts attached because the deployment selected them from the "
+            "runtime's lane class, though its own lane is outside their scope."
+        ),
+    )
 
     @field_validator("runtime_profile", mode="before")
     @classmethod
@@ -182,6 +269,16 @@ def _undeclared_lane_error(
     )
 
 
+def _lane_class_error(entry_point_name: str, error: str) -> ModelDiscoveryError:
+    """The fail-closed record for a lane-class selection that cannot be honoured."""
+    record = ModelDiscoveryError(
+        entry_point_name=entry_point_name,
+        error=f"{error}; not borrowed from a lane class, fail-closed (OMN-20867).",
+    )
+    logger.error("Auto-wiring lane class: %s", record.error)
+    return record
+
+
 def filter_manifest_for_runtime_profile(
     manifest: ModelAutoWiringManifest,
     runtime_profile: str,
@@ -200,6 +297,12 @@ def filter_manifest_for_runtime_profile(
     ``lane_excluded_contracts``). No registered lane at all drops it AND adds a
     discovery error naming it: fail-closed, never a silent skip.
 
+    A contract the declared lane excludes is still kept when the deployment
+    selected it from the runtime's lane class (OMN-20867), listed in
+    ``lane_class_admitted_contracts``. A refused selection, a selected name no
+    discovered contract has, and a selected contract whose scope excludes the
+    class each add a discovery error.
+
     Args:
         environ: Override for the process environment the runtime lane is read
             from. Injected by tests; the default reads ``os.environ``.
@@ -210,6 +313,21 @@ def filter_manifest_for_runtime_profile(
     skipped_contracts: list[str] = []
     lane_excluded_contracts: list[str] = []
     lane_errors: list[ModelDiscoveryError] = []
+    lane_class_admitted: list[str] = []
+    selection = resolve_runtime_lane_class_selection(runtime_lane, environ)
+    if selection.refusal:
+        lane_errors.append(_lane_class_error(ENV_RUNTIME_LANE_CLASS, selection.refusal))
+    elif selection.lane_class is not None:
+        discovered = {contract.name for contract in manifest.contracts}
+        for name in selection.contracts:
+            if name not in discovered:
+                lane_errors.append(
+                    _lane_class_error(
+                        name,
+                        f"{ENV_RUNTIME_LANE_CLASS_CONTRACTS} names {name!r}, "
+                        "which no discovered contract is",
+                    )
+                )
 
     for contract in manifest.contracts:
         if contract.runtime_profiles:
@@ -222,6 +340,23 @@ def filter_manifest_for_runtime_profile(
 
         scope = contract.runtime_lanes
         if scope is not None and not scope.admits(runtime_lane):
+            if selection.admits(contract.name, scope):
+                lane_class_admitted.append(contract.name)
+                owned_contracts.append(contract)
+                continue
+            if (
+                selection.lane_class is not None
+                and contract.name in selection.contracts
+            ):
+                lane_errors.append(
+                    _lane_class_error(
+                        contract.entry_point_name,
+                        f"contract '{contract.name}' is selected from lane class "
+                        f"{selection.lane_class!r} but its runtime_lanes "
+                        f"{list(scope.lanes)} do not admit that class",
+                    )
+                )
+                continue
             if runtime_lane is None:
                 error = _undeclared_lane_error(contract, scope, environ)
                 logger.error("Auto-wiring lane scope: %s", error.error)
@@ -231,6 +366,14 @@ def filter_manifest_for_runtime_profile(
             continue
         owned_contracts.append(contract)
 
+    if lane_class_admitted:
+        logger.info(
+            "Auto-wiring runtime lane scope: lane=%s class=%s attached_by_class=%s "
+            "(OMN-20867)",
+            runtime_lane,
+            selection.lane_class,
+            lane_class_admitted,
+        )
     if lane_excluded_contracts:
         logger.info(
             "Auto-wiring runtime lane scope: lane=%s excluded=%s (OMN-19408)",
@@ -248,6 +391,8 @@ def filter_manifest_for_runtime_profile(
         skipped_contracts=tuple(skipped_contracts),
         runtime_lane=runtime_lane,
         lane_excluded_contracts=tuple(lane_excluded_contracts),
+        runtime_lane_class=selection.lane_class,
+        lane_class_admitted_contracts=tuple(lane_class_admitted),
     )
 
 
@@ -255,5 +400,6 @@ __all__ = [
     "ModelRuntimeProfileOwnershipResult",
     "extract_runtime_profiles_from_contract",
     "filter_manifest_for_runtime_profile",
+    "resolve_runtime_lane_class_selection",
     "runtime_profile_owns_contract",
 ]
