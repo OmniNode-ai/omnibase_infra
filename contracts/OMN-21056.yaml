@@ -38,3 +38,10 @@ dod_evidence:
         check_value: "uv run pytest tests/integration/runtime/test_validation_pipeline_chain_omn21056.py -q -n 0 -k 'fail_verdict or quarantine'"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC3"]
+  - id: "dod-omn21056-deploy-runtime-import"
+    description: "The rolled runtime container carries the adjudicator handler and the result-published event model this change adds."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.handlers.handler_validation_adjudicate import HandlerAdjudicate; from omnibase_infra.models.validation.model_validation_result_published import ModelValidationResultPublished'"
+    binds_ac: ["AC2"]
