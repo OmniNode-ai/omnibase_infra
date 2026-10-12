@@ -37,17 +37,28 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.helpers.lane_census_fixtures import (
+    NEUTRAL_CONFIG_ROOT,
+    NEUTRAL_HOSTNAME,
+    NEUTRAL_MANIFEST,
+)
+
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
 _SCRIPT = _REPO / "scripts" / "runtime_build" / "refresh_dev_lane.sh"
-_MANIFEST = _REPO / "deploy" / "lane-census" / "lane-manifest.yaml"
+_MANIFEST = NEUTRAL_MANIFEST
 
 _EXIT_DRIFT = 30
 _EXIT_INVENTORY_UNOBSERVABLE = 4
 
-_LEFTOVER = "b4320b97cc9a_omnibase-infra-forward-migration"
 _MANIFEST_DATA = yaml.safe_load(_MANIFEST.read_text())
+_DEV_SERVICE = next(
+    s["name"]
+    for s in _MANIFEST_DATA["lanes"]["dev"]["services"]
+    if s["kind"] == "service"
+)
+_LEFTOVER = f"b4320b97cc9a_{_DEV_SERVICE}"
 
 _DOCKER_SHIM = r"""#!/usr/bin/env python3
 import json, os, sys
@@ -64,7 +75,7 @@ if args[:2] == ["ps", "-a"]:
     for r in rows:
         print("\t".join([r["name"], r["state"], r["status"], r["image"], r["labels"]]))
 elif args[:2] == ["network", "ls"]:
-    print("omnibase-infra-network")
+    print(os.environ["SHIM_NETWORK"])
     print("bridge")
 elif args[0] == "inspect":
     fmt = args[args.index("--format") + 1]
@@ -133,10 +144,13 @@ def _run(
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
     env["HOME"] = str(tmp_path)
     env["OMNI_HOME"] = str(tmp_path)
+    env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(NEUTRAL_CONFIG_ROOT)
+    env.pop("LANE_MANIFEST", None)
     env["SHIM_INVENTORY"] = str(inventory)
     env["SHIM_CALLS"] = str(calls)
+    env["SHIM_NETWORK"] = _MANIFEST_DATA["lanes"]["dev"]["network"]
     env["LANE_CENSUS_DOCKER_SOCKET"] = "/nonexistent/refresh-dev-lane-test.sock"
-    env["LANE_CENSUS_HOST"] = _MANIFEST_DATA["lanes"]["dev"]["hosts"][0]
+    env["LANE_CENSUS_HOST"] = NEUTRAL_HOSTNAME
     env["LANE_CENSUS_PYTHON"] = sys.executable
     env["ONEX_LANE_LOCK_DIR"] = str(tmp_path / "locks")
     for name in ("OMNIBASE_INFRA_COMPOSE_PROJECT", "LANE_MEMORY_BROKER_CONTAINER"):
@@ -174,10 +188,11 @@ def test_refresh_dev_lane_census_gate_passes_on_a_clean_lane(tmp_path: Path) -> 
 def test_refresh_dev_lane_fails_on_census_drift_when_a_required_container_is_absent(
     tmp_path: Path,
 ) -> None:
-    rows = [r for r in _clean_dev_lane() if r["name"] != "omninode-runtime-effects"]
+    # The optional lane stays partially up, so its missing service is drift.
+    rows = [r for r in _clean_dev_lane() if r["name"] != _DEV_SERVICE]
     proc, calls, _ = _run(tmp_path, rows, "--execute")
     assert proc.returncode == _EXIT_DRIFT, proc.stderr
-    assert "container_absent omninode-runtime-effects (dev)" in proc.stderr
+    assert f"container_absent {_DEV_SERVICE} (dev)" in proc.stderr
     assert _rm_calls(calls) == []
 
 
@@ -195,7 +210,7 @@ def test_refresh_dev_lane_fails_on_census_drift_when_an_unexpected_container_car
 def test_refresh_dev_lane_fails_on_census_drift_in_plan_mode_too(
     tmp_path: Path,
 ) -> None:
-    rows = [r for r in _clean_dev_lane() if r["name"] != "omninode-runtime-effects"]
+    rows = [r for r in _clean_dev_lane() if r["name"] != _DEV_SERVICE]
     proc, _, _ = _run(tmp_path, rows)
     assert proc.returncode == _EXIT_DRIFT, proc.stderr
 
@@ -249,14 +264,12 @@ def test_refresh_removes_leftover_lane_containers_never_touches_another_lane(
     # lane's own first service, labelled for that lane, plus one of the dev lane's
     # declared names under a hash, labelled for another lane.
     other_lanes = [lane for lane in _MANIFEST_DATA["lanes"] if lane != "dev"]
-    assert len(other_lanes) >= 3, other_lanes
+    assert len(other_lanes) >= 2, other_lanes
     foreign = [
         _row(f"{i:012x}_{_MANIFEST_DATA['lanes'][lane]['services'][0]['name']}", lane)
         for i, lane in enumerate(other_lanes, start=0xAAAAAAAAAAAA)
     ]
-    foreign.append(
-        _row("0123456789ab_omnibase-infra-forward-migration", other_lanes[0])
-    )
+    foreign.append(_row(f"0123456789ab_{_DEV_SERVICE}", other_lanes[0]))
     undeclared = _row("dddddddddddd_not-a-dev-service", "dev")
     rows = [
         *_clean_dev_lane(),
