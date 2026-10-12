@@ -1,0 +1,47 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21031"
+title: "The contract registry chain writes no rows on the dev lane: public.contracts is empty"
+summary: "The contract registry reducer and persistence effect are attached on the dev lane, but nothing in the runtime published onex.evt.platform.contract-registered.v1, so public.contracts stayed empty. The kernel now announces every contract its discovery pass found, once its contract-registry consumers are attached, wrapped in the envelope the kernel's contract router parses (the bare event the unwired ServiceContractPublisher builds is rejected there)."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn21031-contract-registered-producer"
+    statement: "The runtime publishes a contract-registered envelope for each discovered contract after the registry consumers attach, and the registry chain turns each into a postgres.upsert_contract intent."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: tests/unit/nodes/node_contract_loader_effect/test_contract_registration_chain.py drives real discovered contracts through publish_contract_registrations, the real ContractRegistrationEventRouter and ContractRegistryReducer, and reaches the postgres.upsert_contract handler for each -- falsifier: the file fails to import at the merge base, where publish_contract_registrations does not exist"
+      - id: "AC2"
+        statement: "AC2: tests/integration/runtime/test_contract_registered_producer_omn21031.py discovers every node contract shipped in src/omnibase_infra/nodes and publishes exactly one contract-registered envelope per contract on the contract-registered topic -- falsifier: the file fails to import at the merge base, where publish_contract_registrations does not exist"
+evidence_requirements:
+  - kind: "tests"
+    description: "The chain test passes at the head."
+    command: "uv run pytest tests/unit/nodes/node_contract_loader_effect/test_contract_registration_chain.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21031-ac1-chain-test"
+    description: "AC1. Discovered contracts reach the upsert effect through the real producer, router and reducer."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/nodes/node_contract_loader_effect/test_contract_registration_chain.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-ac2-shipped-contracts"
+    description: "AC2. Every shipped node contract is published once through the kernel producer."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/integration/runtime/test_contract_registered_producer_omn21031.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-deploy"
+    description: "Deploy-scope readback, bound to no criterion: after the deploy agent rolls the dev lane, public.contracts holds at least one row. It reads the dev lane's postgres container, which a hosted runner does not have, so only the local Done gate runs it and the hosted must-fail control does not control it."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec omnibase-infra-postgres psql -U postgres -d omnibase_infra -tAc 'select count(*) from contracts' | grep -qv '^0$'"
