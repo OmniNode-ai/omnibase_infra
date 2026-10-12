@@ -12,7 +12,7 @@ requirements:
       - id: "AC1"
         statement: "AC1: tests/unit/nodes/node_contract_loader_effect/test_contract_registration_chain.py drives real discovered contracts through publish_contract_registrations, the real ContractRegistrationEventRouter and ContractRegistryReducer, and reaches the postgres.upsert_contract handler for each -- falsifier: the file fails to import at the merge base, where publish_contract_registrations does not exist"
       - id: "AC2"
-        statement: "AC2: after the deploy agent rolls the dev lane, select count(*) from contracts on the dev lane postgres is greater than zero -- falsifier: it prints 0, as it did before this change"
+        statement: "AC2: tests/integration/runtime/test_contract_registered_producer_omn21031.py discovers every node contract shipped in src/omnibase_infra/nodes and publishes exactly one contract-registered envelope per contract on the contract-registered topic -- falsifier: the file fails to import at the merge base, where publish_contract_registrations does not exist"
 evidence_requirements:
   - kind: "tests"
     description: "The chain test passes at the head."
@@ -30,11 +30,18 @@ dod_evidence:
         check_value: "uv run pytest tests/unit/nodes/node_contract_loader_effect/test_contract_registration_chain.py -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC1"]
+  - id: "dod-ac2-shipped-contracts"
+    description: "AC2. Every shipped node contract is published once through the kernel producer."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/integration/runtime/test_contract_registered_producer_omn21031.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
   - id: "dod-deploy"
-    description: "AC2. Deploy-scope readback: after the deploy agent rolls the dev lane, public.contracts holds at least one row. It reads the dev lane's postgres container, which a hosted runner does not have, so only the local Done gate runs it."
+    description: "Deploy-scope readback, bound to no criterion: after the deploy agent rolls the dev lane, public.contracts holds at least one row. It reads the dev lane's postgres container, which a hosted runner does not have, so only the local Done gate runs it and the hosted must-fail control does not control it."
     source: "manual"
     execution_scope: "local_done_gate"
     checks:
       - check_type: "command"
         check_value: "docker exec omnibase-infra-postgres psql -U postgres -d omnibase_infra -tAc 'select count(*) from contracts' | grep -qv '^0$'"
-    binds_ac: ["AC2"]
