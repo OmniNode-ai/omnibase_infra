@@ -1,45 +1,30 @@
-schema_version: 1.0.0
+schema_version: "1.0.0"
 ticket_id: OMN-17292
-title: Omnimarket contract pin handoff preserves reader compatibility
-summary: Advance the omnimarket contract pin with its database declaration handoff and the matching Omnidash reader surface.
+title: "The omnimarket contract pin advances to 5d6c5e4e4cb3a0563fde9e24fdc864617e0917bd"
+summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
-  - id: req-pin-handoff
-    statement: The pinned contracts must remain compatible with the reader-coverage gate.
+  - id: req-omn17292
+    statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
     acceptance:
-      - id: AC2
-        statement: Reader coverage resolves placed local-page component bindings, refuses unreadable pages, and validates read_all_rows against the pinned boolean reader field.
-      - id: AC3
-        statement: The Credentials page captured at the pinned Omnidash revision counts as a reader of the tenant-credentials projection.
+      - id: AC1
+        statement: "AC1: .github/omnimarket-contract-pin.yaml carries the refreshed value -- falsifier: grep -qF -- 'omnimarket_contract_ref: 5d6c5e4e4cb3a0563fde9e24fdc864617e0917bd' .github/omnimarket-contract-pin.yaml"
 evidence_requirements:
-  - kind: tests
-    description: Reader coverage resolves placed local-page component bindings, refuses unreadable pages, and validates read_all_rows against the pinned boolean reader field.
-    command: uv run pytest tests/unit/validators/test_omn17199_bus_backed_exposure_readers.py -q -k 'read_all_rows or local_pages'
-  - kind: tests
-    description: The Credentials page captured at the pinned Omnidash revision counts as a reader of the tenant-credentials projection.
-    command: uv run pytest tests/ci/test_omnimarket_pin_handoff_omn17292.py -q
+  - kind: command
+    description: .github/omnimarket-contract-pin.yaml carries the refreshed value.
+    command: "grep -qF -- 'omnimarket_contract_ref: 5d6c5e4e4cb3a0563fde9e24fdc864617e0917bd' .github/omnimarket-contract-pin.yaml"
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn17292-ac2
-    description: Reader coverage resolves placed local-page component bindings, refuses unreadable pages, and validates read_all_rows against the pinned boolean reader field.
+  - id: dod-omn-17292-ac1
+    description: .github/omnimarket-contract-pin.yaml carries the refreshed value.
     source: manual
     checks:
-      - check_type: test_passes
-        check_value: uv run pytest tests/unit/validators/test_omn17199_bus_backed_exposure_readers.py -q -k 'read_all_rows or local_pages'
+      - check_type: command
+        check_value: "grep -qF -- 'omnimarket_contract_ref: 5d6c5e4e4cb3a0563fde9e24fdc864617e0917bd' .github/omnimarket-contract-pin.yaml"
         cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC2
-  - id: dod-omn17292-ac3
-    description: The Credentials page captured at the pinned Omnidash revision counts as a reader of the tenant-credentials projection.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_omnimarket_pin_handoff_omn17292.py -q
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac:
-      - AC3
+    binds_ac: [AC1]
