@@ -1,30 +1,30 @@
 schema_version: "1.0.0"
 ticket_id: OMN-17292
 title: "The omnimarket contract pin advances to 5d6c5e4e4cb3a0563fde9e24fdc864617e0917bd"
-summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
+summary: The automated refresh moves .github/omnimarket-contract-pin.yaml, the omnimarket sibling pin and every inline omnimarket checkout ref to a value the merge base does not carry.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
   - id: req-omn17292
-    statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
+    statement: The omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry the value this refresh produced.
     acceptance:
       - id: AC1
-        statement: "AC1: .github/omnimarket-contract-pin.yaml carries the refreshed value -- falsifier: grep -qF -- 'omnimarket_contract_ref: 5d6c5e4e4cb3a0563fde9e24fdc864617e0917bd' .github/omnimarket-contract-pin.yaml"
+        statement: "AC1: the contract pin, sibling pin and inline workflow omnimarket refs all read 5d6c5e4e4cb3a0563fde9e24fdc864617e0917bd -- falsifier: uv run pytest tests/ci/test_omnimarket_pin_advance_5d6c5e4e_omn17292.py -q fails at the merge base"
 evidence_requirements:
-  - kind: command
-    description: .github/omnimarket-contract-pin.yaml carries the refreshed value.
-    command: "grep -qF -- 'omnimarket_contract_ref: 5d6c5e4e4cb3a0563fde9e24fdc864617e0917bd' .github/omnimarket-contract-pin.yaml"
+  - kind: tests
+    description: The contract pin, sibling pin and inline workflow omnimarket refs all carry the refreshed value.
+    command: uv run pytest tests/ci/test_omnimarket_pin_advance_5d6c5e4e_omn17292.py -q
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-17292-ac1
-    description: .github/omnimarket-contract-pin.yaml carries the refreshed value.
+    description: The contract pin, sibling pin and inline workflow omnimarket refs all carry the refreshed value.
     source: manual
     checks:
-      - check_type: command
-        check_value: "grep -qF -- 'omnimarket_contract_ref: 5d6c5e4e4cb3a0563fde9e24fdc864617e0917bd' .github/omnimarket-contract-pin.yaml"
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_omnimarket_pin_advance_5d6c5e4e_omn17292.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
