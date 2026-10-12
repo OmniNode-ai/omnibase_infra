@@ -29,6 +29,7 @@ empty. No network client is constructed on this path.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -184,9 +185,11 @@ async def _run_chain(
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_reconcile_command_reaches_update_plan_emitted_and_posts_no_comment() -> (
-    None
-):
+@pytest.mark.parametrize("wire_shape", ["envelope", "bare"])
+async def test_reconcile_command_reaches_update_plan_emitted_and_posts_no_comment(
+    wire_shape: str,
+) -> None:
+    """``bare`` is what the ``artifact-reconcile`` CLI publishes: the command alone."""
     chain = _Chain()
     correlation_id = uuid4()
     command = {
@@ -196,19 +199,24 @@ async def test_reconcile_command_reaches_update_plan_emitted_and_posts_no_commen
         "actor": "artrecon-1d5b",
         "reason": "OMN-21053 chain test: synthetic artifact set, no PR",
     }
+    wire = (
+        _envelope(command, correlation_id, "artifact.reconcile")
+        if wire_shape == "envelope"
+        else json.dumps(command).encode("utf-8")
+    )
 
     with patch("httpx.AsyncClient") as github:
         await _run_chain(
             chain,
             chain.command_topic,
-            _envelope(command, correlation_id, "artifact.reconcile"),
+            wire,
             lambda: bool(chain.seen[chain.emitted_topic]),
         )
 
-    emitted = [
-        e for e in chain.seen[chain.emitted_topic] if e.correlation_id == correlation_id
-    ]
+    emitted = chain.seen[chain.emitted_topic]
     assert len(emitted) == 1, f"expected exactly one emitted event: {chain.counts()}"
+    if wire_shape == "envelope":
+        assert emitted[0].correlation_id == correlation_id
     payload = emitted[0].payload
     assert isinstance(payload, dict)
     plan = yaml.safe_load(str(payload["yaml_payload"]))
@@ -223,7 +231,10 @@ async def test_reconcile_command_reaches_update_plan_emitted_and_posts_no_commen
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_pr_webhook_reaches_update_plan_emitted_and_pr_comment_posted() -> None:
+@pytest.mark.parametrize("wire_shape", ["envelope", "bare"])
+async def test_pr_webhook_reaches_update_plan_emitted_and_pr_comment_posted(
+    wire_shape: str,
+) -> None:
     """Positive control for the comment topic: a PR trigger does post (GitHub mocked).
 
     Without it, the empty ``pr-comment-posted`` assertion above could pass for a
@@ -259,7 +270,11 @@ async def test_pr_webhook_reaches_update_plan_emitted_and_pr_comment_posted() ->
         await _run_chain(
             chain,
             chain.webhook_topic,
-            _envelope(webhook, correlation_id, "github.pr-webhook"),
+            (
+                _envelope(webhook, correlation_id, "github.pr-webhook")
+                if wire_shape == "envelope"
+                else json.dumps(webhook).encode("utf-8")
+            ),
             lambda: bool(chain.seen[chain.emitted_topic])
             and bool(chain.seen[chain.comment_topic]),
         )
