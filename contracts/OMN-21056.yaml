@@ -39,10 +39,10 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC3"]
   - id: "dod-omn21056-deploy-runtime-import"
-    description: "Deploy probe on the lab dev lane once the deploy agent rolls this change: the rolled runtime container carries the adjudicator handler and the result-published event model this change adds. It exits nonzero on a runtime that predates this change. Hosted CI has no runtime container, so only the local Done gate runs it."
+    description: "Deploy probe on the lab dev lane once the deploy agent rolls this change: the rolled runtime container carries the adjudicator handler and the result-published event model this change adds. It exits nonzero on a runtime that predates this change. Hosted CI has no runtime container, so only the local Done gate runs it. This supplemental deployment check binds no acceptance criterion; the hosted chain test proves AC2."
     source: "manual"
     execution_scope: "local_done_gate"
     checks:
       - check_type: "command"
         check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.handlers.handler_validation_adjudicate import HandlerAdjudicate; from omnibase_infra.models.validation.model_validation_result_published import ModelValidationResultPublished'"
-    binds_ac: ["AC2"]
+    binds_ac: []
