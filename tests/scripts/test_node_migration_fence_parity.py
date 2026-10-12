@@ -554,6 +554,14 @@ FENCED_DELEGATION_DISPOSITIONS_RLS_IDS = (
 FENCED_BUDGET_APPLIED_EVENTS_RLS_IDS = (
     "node:node_projection_delegation:0057_delegation_budget_applied_events_rls.sql",
 )
+# OMN-19987: run_trace's FORCE ROW LEVEL SECURITY lives in its own 0002
+# migration, split out of the create as the other tenant projections' is, so
+# only that step is fenced on arrival; 0000 (the create) and 0001 (the writer
+# grant) apply on every lane. Its release is a separate operator-sequenced
+# step; this fence addition carries no lane release.
+FENCED_RUN_TRACE_RLS_IDS = (
+    "node:node_projection_run_trace:0002_force_rls_run_trace.sql",
+)
 EXPECTED_FENCE = (
     FENCED_DELEGATION_IDS
     + FENCED_REGISTRATION_IDS
@@ -569,6 +577,7 @@ EXPECTED_FENCE = (
     + FENCED_DELEGATION_EVAL_RUN_RLS_IDS
     + FENCED_DELEGATION_DISPOSITIONS_RLS_IDS
     + FENCED_BUDGET_APPLIED_EVENTS_RLS_IDS
+    + FENCED_RUN_TRACE_RLS_IDS
 )
 
 # --- OMN-15336 item 4 repair (D1, 2026-08-05): FORCE-RLS grandfather snapshot
@@ -940,11 +949,12 @@ def test_manifest_pins_the_known_baseline_fence() -> None:
         + FENCED_DELEGATION_EVAL_RUN_RLS_IDS
         + FENCED_DELEGATION_DISPOSITIONS_RLS_IDS
         + FENCED_BUDGET_APPLIED_EVENTS_RLS_IDS
+        + FENCED_RUN_TRACE_RLS_IDS
     ), (
         "the OMN-19978 usage_by_model_day, OMN-19790 delegation_eval_items, "
-        "OMN-20154 provider_quota_state, OMN-19793 eval-run and OMN-20242 "
-        "delegation_dispositions and OMN-20613 budget_applied_events RLS holds are not "
-        "the expected ids"
+        "OMN-20154 provider_quota_state, OMN-19793 eval-run, OMN-20242 "
+        "delegation_dispositions, OMN-20613 budget_applied_events and OMN-19987 "
+        "run_trace RLS holds are not the expected ids"
     )
 
 
