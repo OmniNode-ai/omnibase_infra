@@ -1,0 +1,42 @@
+schema_version: 1.0.0
+ticket_id: OMN-21028
+title: 'omnibase_infra: apply the liveness expiry the registration timeout path already emits'
+summary: The registration timeout emitter publishes node-liveness-expired and stamps the marker but never sets current_state, so expired registrations stay active. Write liveness_expired in the same projection update.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-liveness-expiry-applied
+    statement: A registration whose liveness deadline has passed is moved to liveness_expired by the existing timeout path, and a registration that heartbeats in time stays active.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a registration in state active whose liveness deadline has passed is moved to liveness_expired by the existing timeout path, and the test fails before the fix -- falsifier: uv run pytest tests/unit/nodes -k liveness_expired_applied -q in omnibase_infra'
+      - id: AC2
+        statement: 'AC2: a registration that heartbeats before its deadline stays active (positive control) while a lapsed registration in the same tick is expired -- falsifier: uv run pytest tests/integration/timeouts/test_liveness_expiry_applied_integration.py -q -n 0 in omnibase_infra'
+evidence_requirements:
+  - kind: tests
+    description: Emitter-to-projector write test, and a scanner-to-emitter tick over the projection store with a heartbeat positive control.
+    command: uv run pytest tests/unit/nodes/node_registration_orchestrator/test_liveness_expiry_applied.py tests/integration/timeouts/test_liveness_expiry_applied_integration.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-liveness-expiry-ac1
+    description: The emitter writes current_state liveness_expired with the marker in one partial update.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_registration_orchestrator/test_liveness_expiry_applied.py -k liveness_expired_applied -q -n 0
+      - check_type: command
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/services/service_timeout_emitter.py?ref=947331cac0371cc4544cbafc9758c395a6dba96b --jq .content | base64 -d | grep -qF 'EnumRegistrationState.LIVENESS_EXPIRED.value'
+    binds_ac:
+      - AC1
+  - id: dod-liveness-expiry-ac2
+    description: In one tick over the projection store, the row that heartbeated in time stays active with no marker while the lapsed row is stored as liveness_expired.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/timeouts/test_liveness_expiry_applied_integration.py -q -n 0
+    binds_ac:
+      - AC2

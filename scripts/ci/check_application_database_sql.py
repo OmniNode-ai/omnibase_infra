@@ -248,6 +248,20 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
         # application relation. Keep the exact-path exemption: created-object
         # ownership validation still runs unconditionally.
         Path("docker/migrations/forward/110_add_ledger_chain_chain_state.sql"),
+        # OMN-21029: 111 and its rollback swap the active-fingerprint unique
+        # index on runtime_error_triage, created by 055 in the omnibase_infra
+        # SERVICE database, whose declared schema is public. Like 110 above,
+        # this is existing service authority, not a new application relation.
+        # Keep the exact-path exemptions: created-object ownership validation
+        # still runs unconditionally.
+        Path(
+            "docker/migrations/forward/"
+            "111_widen_runtime_error_triage_active_unique_to_escalated.sql"
+        ),
+        Path(
+            "docker/migrations/rollback/"
+            "rollback_111_widen_runtime_error_triage_active_unique_to_escalated.sql"
+        ),
         # OMN-18172: 106 alters the existing delegation_workflow_state relation
         # created by 090 in the omnibase_infra SERVICE database. That database
         # has exactly one declared schema, public, while StateStoreAdapter and

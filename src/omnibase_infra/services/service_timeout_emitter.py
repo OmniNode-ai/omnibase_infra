@@ -38,7 +38,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from omnibase_core.container import ModelONEXContainer
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
-from omnibase_infra.enums import EnumInfraTransportType
+from omnibase_infra.enums import EnumInfraTransportType, EnumRegistrationState
 from omnibase_infra.enums.generated.enum_platform_topic import EnumPlatformTopic
 from omnibase_infra.errors import ModelInfraErrorContext, ProtocolConfigurationError
 from omnibase_infra.models.projection import ModelRegistrationProjection
@@ -615,11 +615,12 @@ class ServiceTimeoutEmitter:
         tick_id: UUID,
         correlation_id: UUID,
     ) -> None:
-        """Emit liveness expiration event and update marker.
+        """Emit liveness expiration event, then expire the row and update marker.
 
         This method follows the event-first pattern:
         1. Create and emit the expiration event
-        2. Update the emission marker in projection atomically
+        2. Set ``current_state`` to LIVENESS_EXPIRED and stamp the emission
+           marker in the projection atomically
 
         If the emit succeeds but marker update fails, the event will be
         duplicated on retry (at-least-once semantics). Downstream consumers
@@ -692,12 +693,15 @@ class ServiceTimeoutEmitter:
             topic=topic,
         )
 
-        # 3. Update emission marker atomically
+        # 3. Apply the expiry to the projection row and stamp the marker atomically
         # This MUST happen AFTER successful publish to ensure exactly-once semantics
-        # Uses atomic marker update to avoid race conditions with concurrent updates
+        # Uses atomic update to avoid race conditions with concurrent updates.
+        # The marker alone only silences the scanner; current_state is what makes
+        # the node stop reading as ACTIVE to every projection consumer (OMN-21028).
         await self._projector.partial_update(
             aggregate_id=projection.entity_id,
             updates={
+                "current_state": EnumRegistrationState.LIVENESS_EXPIRED.value,
                 "liveness_timeout_emitted_at": detected_at,
                 "updated_at": detected_at,
             },

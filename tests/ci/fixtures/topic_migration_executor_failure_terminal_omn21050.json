@@ -1,0 +1,63 @@
+{
+  "_provenance": {
+    "captured_utc": "2026-10-12T12:08:00Z",
+    "command_correlation_id": "b2e5c19d-661a-4beb-815c-81cfdba1fcc7",
+    "source": "rpk topic consume onex.evt.omnibase-infra.topic-migration-lifecycle.v1 --offset 0 --num 1 on the lab dev lane broker (compose project omnibase-infra), the failure terminal the runtime wrote for a DUAL_WRITE execute command",
+    "ticket": "OMN-21050"
+  },
+  "offset": 0,
+  "partition": 0,
+  "record_timestamp_ms": 1791806726803,
+  "topic": "onex.evt.omnibase-infra.topic-migration-lifecycle.v1",
+  "value": {
+    "correlation_id": "b2e5c19d-661a-4beb-815c-81cfdba1fcc7",
+    "envelope_id": "002b9f15-4fa4-4ebe-8d03-599559936163",
+    "envelope_timestamp": "2026-10-12T12:05:26.785636Z",
+    "envelope_version": {
+      "build": null,
+      "major": 2,
+      "minor": 2,
+      "patch": 0,
+      "prerelease": null
+    },
+    "event_type": "omnibase-infra.topic-migration-lifecycle",
+    "metadata": {
+      "headers": {},
+      "parent_span_id": null,
+      "request_id": null,
+      "span_id": null,
+      "tags": {},
+      "trace_id": null
+    },
+    "onex_version": {
+      "build": null,
+      "major": 1,
+      "minor": 0,
+      "patch": 0,
+      "prerelease": null
+    },
+    "parent_envelope_id": null,
+    "payload": {
+      "correlation_id": "b2e5c19d-661a-4beb-815c-81cfdba1fcc7",
+      "failure_class": "ModelOnexError",
+      "failure_code": "ONEX_CORE_095_HANDLER_EXECUTION_ERROR",
+      "failure_reason": "Auto-wired handler HandlerTopicMigrationExecutor does not expose a callable handle() or handle_async() dispatch entrypoint.",
+      "origin_topic": "onex.cmd.omnibase-infra.topic-migration-execute.v1",
+      "retryable": true,
+      "status": "failed",
+      "terminalized_at": "2026-10-12T12:05:26.785631Z"
+    },
+    "payload_schema_version": null,
+    "payload_type": "ModelBoundaryFailureTerminal",
+    "priority": 5,
+    "request_id": null,
+    "retry_count": 0,
+    "security_context": null,
+    "source_tool": "auto-wiring-boundary",
+    "span_id": null,
+    "target_tool": "onex.evt.omnibase-infra.topic-migration-lifecycle.v1",
+    "tenant_id": null,
+    "timeout_seconds": null,
+    "trace_id": null
+  }
+}

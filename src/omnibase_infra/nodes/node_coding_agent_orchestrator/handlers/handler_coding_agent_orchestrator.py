@@ -12,9 +12,11 @@ workspace / invoke events.
 Flow (event-driven, no in-process loop):
 
   1. consume invoke-requested -> emit the workspace-validate command (-> COMPUTE).
-  2. consume workspace-validated:
-       - rejected -> emit the FSM workspace-rejected advance (terminal REJECTED;
-         NO subprocess ever runs).
+  2. consume workspace-validated (the COMPUTE node's verdict, which echoes the
+     originating invoke command so this orchestrator keeps no state):
+       - rejected -> emit the FSM workspace-rejected advance AND the one terminal
+         REJECTED result on the failed terminal topic (NO subprocess ever runs,
+         no completed event).
        - ok -> emit the invoke command (-> the agent EFFECT).
   3. consume invoke-completed -> emit the FSM invoke-completed advance, then the
      capture is driven by the FSM's next intent; consume invoke-failed -> emit
@@ -34,8 +36,30 @@ from omnibase_core.models.dispatch.model_handler_output import ModelHandlerOutpu
 from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.event_bus.topic_constants import derive_event_type_alias_for_topic
+from omnibase_infra.models.coding_agent.enum_agent_status import EnumAgentStatus
+from omnibase_infra.models.coding_agent.enum_cli_backend_status import (
+    EnumCliBackendStatus,
+)
+from omnibase_infra.models.coding_agent.enum_coding_agent_event_kind import (
+    EnumCodingAgentEventKind,
+)
+from omnibase_infra.models.coding_agent.enum_coding_agent_fsm_state import (
+    EnumCodingAgentFsmState,
+)
+from omnibase_infra.models.coding_agent.model_coding_agent_event import (
+    ModelCodingAgentEvent,
+)
+from omnibase_infra.models.coding_agent.model_coding_agent_fsm_advance import (
+    ModelCodingAgentFsmAdvance,
+)
+from omnibase_infra.models.coding_agent.model_coding_agent_fsm_state import (
+    ModelCodingAgentFsmState,
+)
 from omnibase_infra.models.coding_agent.model_coding_agent_invoke_command import (
     ModelCodingAgentInvokeCommand,
+)
+from omnibase_infra.models.coding_agent.model_coding_agent_result import (
+    ModelCodingAgentResult,
 )
 from omnibase_infra.models.coding_agent.model_workspace_validate_command import (
     ModelWorkspaceValidateCommand,
@@ -95,6 +119,7 @@ EVENT_TYPE_WORKSPACE_VALIDATED = derive_event_type_alias_for_topic(
 TOPIC_WORKSPACE_VALIDATE = _topic_with_suffix("coding-agent-workspace-validate.v1")
 TOPIC_INVOKE = _topic_with_suffix("coding-agent-effect-invoke.v1")
 TOPIC_FSM_ADVANCE = _topic_with_suffix("coding-agent-fsm-advance.v1")
+TOPIC_FAILED = _topic_with_suffix("coding-agent-failed.v1")
 
 
 class HandlerCodingAgentOrchestrator:
@@ -116,7 +141,7 @@ class HandlerCodingAgentOrchestrator:
         correlation_id = envelope.correlation_id or uuid4()
 
         if event_type == EVENT_TYPE_WORKSPACE_VALIDATED:
-            events = self._on_workspace_validated(envelope, correlation_id)
+            events = self._on_workspace_validated(envelope)
         else:
             # Default entrypoint: the invoke-requested command.
             events = self._on_invoke_requested(envelope, correlation_id)
@@ -139,6 +164,7 @@ class HandlerCodingAgentOrchestrator:
             allowed_roots=_resolve_allowed_roots(),
             sandbox=command.sandbox,
             prompt=command.prompt,
+            invoke_command=command,
         )
         return [
             ModelEventEnvelope(
@@ -150,27 +176,48 @@ class HandlerCodingAgentOrchestrator:
         ]
 
     def _on_workspace_validated(
-        self, envelope: ModelEventEnvelope[object], correlation_id: UUID
+        self, envelope: ModelEventEnvelope[object]
     ) -> list[ModelEventEnvelope[object]]:
         """React to the validation verdict: invoke if valid, else reject."""
-        verdict, command = _coerce_validated(envelope.payload, correlation_id)
+        verdict = _coerce_validated(envelope.payload)
+        command = verdict.invoke_command
 
         if not verdict.valid:
-            # No subprocess ever runs: advance the FSM straight to REJECTED.
-            advance = {
-                "event": {
-                    "correlation_id": str(command.correlation_id),
-                    "kind": "workspace_rejected",
-                    "error_message": verdict.rejection_reason or "workspace rejected",
-                }
-            }
+            # No subprocess ever runs. The FSM records the rejection and the run
+            # ends in exactly one terminal event on the failed terminal topic.
+            rejection = verdict.rejection_reason or "workspace rejected"
+            advance = ModelCodingAgentFsmAdvance(
+                state=ModelCodingAgentFsmState(
+                    correlation_id=command.correlation_id,
+                    agent=command.agent,
+                    sandbox=command.sandbox,
+                    current_state=EnumCodingAgentFsmState.VALIDATING,
+                ),
+                event=ModelCodingAgentEvent(
+                    correlation_id=command.correlation_id,
+                    kind=EnumCodingAgentEventKind.WORKSPACE_REJECTED,
+                    error_message=rejection,
+                ),
+            )
+            terminal = ModelCodingAgentResult(
+                correlation_id=command.correlation_id,
+                status=EnumAgentStatus.REJECTED,
+                error_class=EnumCliBackendStatus.INVALID_REQUEST,
+                output=rejection,
+            )
             return [
                 ModelEventEnvelope(
                     payload=advance,
                     correlation_id=command.correlation_id,
                     event_type=TOPIC_FSM_ADVANCE,
                     tenant_id=envelope.tenant_id,
-                )
+                ),
+                ModelEventEnvelope(
+                    payload=terminal,
+                    correlation_id=command.correlation_id,
+                    event_type=TOPIC_FAILED,
+                    tenant_id=envelope.tenant_id,
+                ),
             ]
 
         return [
@@ -222,23 +269,19 @@ def _coerce_invoke(
     )
 
 
-def _coerce_validated(
-    payload: object, correlation_id: UUID
-) -> tuple[ModelWorkspaceValidateResult, ModelCodingAgentInvokeCommand]:
-    """Coerce the workspace-validated payload into (verdict, original command)."""
+def _coerce_validated(payload: object) -> ModelWorkspaceValidateResult:
+    """Coerce the workspace-validated payload into the COMPUTE node's verdict.
+
+    The verdict is the payload the COMPUTE node publishes, unchanged; it carries
+    the originating invoke command in ``invoke_command``.
+    """
     mapping = _as_mapping(payload)
     if mapping is None:
         raise TypeError(
-            "workspace-validated payload must be a mapping/model carrying 'verdict' "
-            f"and 'command'; got {type(payload).__name__}"
+            "workspace-validated payload must be a mapping/model carrying the "
+            f"workspace verdict; got {type(payload).__name__}"
         )
-    if "verdict" not in mapping or "command" not in mapping:
-        raise ValueError(
-            "workspace-validated payload must carry both 'verdict' and 'command'"
-        )
-    verdict = ModelWorkspaceValidateResult.model_validate(_as_dict(mapping["verdict"]))
-    command = ModelCodingAgentInvokeCommand.model_validate(_as_dict(mapping["command"]))
-    return verdict, command
+    return ModelWorkspaceValidateResult.model_validate(dict(mapping))
 
 
 def _as_mapping(candidate: object) -> Mapping[str, object] | None:
@@ -252,15 +295,9 @@ def _as_mapping(candidate: object) -> Mapping[str, object] | None:
     return None
 
 
-def _as_dict(candidate: object) -> dict[str, object]:
-    mapping = _as_mapping(candidate)
-    if mapping is None:
-        raise TypeError(f"expected a mapping/model; got {type(candidate).__name__}")
-    return dict(mapping)
-
-
 __all__: list[str] = [
     "HANDLER_ID",
+    "TOPIC_FAILED",
     "TOPIC_FSM_ADVANCE",
     "TOPIC_INVOKE",
     "TOPIC_WORKSPACE_VALIDATE",

@@ -1,0 +1,38 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21052"
+title: "An invoke command for an unsafe coding-agent workspace never reached a rejected terminal event: the workspace-validated verdict carried no command, the FSM advance carried no state, and no node published the rejected terminal"
+summary: "On the lab dev lane the COMPUTE node rejected an out-of-root workspace correctly, then the orchestrator raised on the verdict because it required a verdict-and-command payload the COMPUTE node never published; the auto-wiring boundary retried the failure and published a failed terminal on every attempt. The validate command and the verdict now carry the originating invoke command, so the orchestrator needs no stored state. On a rejection it emits a typed FSM advance (prior state plus event, a model payload so the applier does not double-nest it) and the single REJECTED result on the failed terminal topic. No subprocess and no completed event."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-rejected-workspace-reaches-terminal"
+    statement: "An invoke command naming a workspace outside the allowed roots ends in exactly one terminal event on the failed terminal topic, status REJECTED, with no completed event and no subprocess."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: the COMPUTE verdict the orchestrator consumes is the verdict the COMPUTE node publishes, and a rejected verdict yields one FSM advance the reducer folds to REJECTED plus one REJECTED result on the failed terminal topic and nothing on the effect-invoke or completed topics -- falsifier: uv run pytest tests/unit/nodes/node_coding_agent/test_rejection_path_real_dispatch.py fails at the merge base and passes at the head"
+evidence_requirements:
+  - kind: "tests"
+    description: "The rejection chain drives compute and orchestrator through the real dispatch engine and applier, each hop fed the previous hop's published payload."
+    command: "uv run pytest tests/unit/nodes/node_coding_agent -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21052-ac1-rejected-terminal"
+    description: "The rejection chain test passes over the real dispatch engine and applier."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/node_coding_agent/test_rejection_path_real_dispatch.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn21052-orchestrator-deploy-probe"
+    description: "Deploy probe. The orchestrator handler at the checked-out commit takes the invoke command from the published verdict; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base. The readout after the deploy agent rolls the image is one invoke command for an out-of-root workspace ending in one REJECTED record on coding-agent-failed.v1 and none on coding-agent-completed.v1."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "gh api \"repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_coding_agent_orchestrator/handlers/handler_coding_agent_orchestrator.py?ref=$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF 'command = verdict.invoke_command'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]

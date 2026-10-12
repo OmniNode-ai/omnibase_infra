@@ -42,6 +42,7 @@ def validate_workspace(
     if not command.prompt.strip():
         return ModelWorkspaceValidateResult(
             correlation_id=command.correlation_id,
+            invoke_command=command.invoke_command,
             valid=False,
             rejection_reason="empty prompt",
         )
@@ -49,6 +50,7 @@ def validate_workspace(
     if not command.workspace_path.strip():
         return ModelWorkspaceValidateResult(
             correlation_id=command.correlation_id,
+            invoke_command=command.invoke_command,
             valid=False,
             rejection_reason="empty workspace_path",
         )
@@ -56,6 +58,7 @@ def validate_workspace(
     if not command.allowed_roots:
         return ModelWorkspaceValidateResult(
             correlation_id=command.correlation_id,
+            invoke_command=command.invoke_command,
             valid=False,
             rejection_reason="no allowed roots configured; nothing is permitted",
         )
@@ -71,6 +74,7 @@ def validate_workspace(
     if not under_allowed_root:
         return ModelWorkspaceValidateResult(
             correlation_id=command.correlation_id,
+            invoke_command=command.invoke_command,
             valid=False,
             resolved_path=str(resolved),
             rejection_reason=(
@@ -81,6 +85,7 @@ def validate_workspace(
 
     return ModelWorkspaceValidateResult(
         correlation_id=command.correlation_id,
+        invoke_command=command.invoke_command,
         valid=True,
         resolved_path=str(resolved),
     )
