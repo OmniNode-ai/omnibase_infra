@@ -17,6 +17,9 @@ import pytest
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.handlers.handler_runner_fleet_snapshot import (
     HandlerRunnerFleetSnapshot,
 )
+from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot_gather_command import (
+    ModelRunnerFleetSnapshotGatherCommand,
+)
 from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
     ModelRunnerFleetConfig,
 )
@@ -85,7 +88,9 @@ def _dispatcher(
 async def _gather(dispatcher: AsyncMock):
     handler = HandlerRunnerFleetSnapshot(config=_config())
     with patch("asyncio.create_subprocess_exec", dispatcher):
-        return await handler.handle(correlation_id=uuid4())
+        return await handler.handle(
+            ModelRunnerFleetSnapshotGatherCommand(correlation_id=uuid4())
+        )
 
 
 @pytest.mark.unit

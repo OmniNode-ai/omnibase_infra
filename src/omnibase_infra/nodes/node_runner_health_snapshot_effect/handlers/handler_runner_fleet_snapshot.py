@@ -28,7 +28,6 @@ import asyncio
 import json
 import logging
 from datetime import UTC, datetime
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_runner_fact import (
@@ -36,6 +35,9 @@ from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner
 )
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot import (
     ModelRunnerFleetSnapshot,
+)
+from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot_gather_command import (
+    ModelRunnerFleetSnapshotGatherCommand,
 )
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_zombie_run_candidate import (
     ModelZombieRunCandidate,
@@ -396,15 +398,18 @@ class HandlerRunnerFleetSnapshot:
         error_summary = "; ".join(errors) if errors else None
         return len(examples), tuple(examples), error_summary
 
-    async def handle(self, correlation_id: UUID) -> ModelRunnerFleetSnapshot:
+    async def handle(
+        self, request: ModelRunnerFleetSnapshotGatherCommand
+    ) -> ModelRunnerFleetSnapshot:
         """Gather a read-only, point-in-time runner-fleet snapshot.
 
         Args:
-            correlation_id: Workflow correlation ID.
+            request: The gather command; its correlation ID is the tick's.
 
         Returns:
             ModelRunnerFleetSnapshot with facts only -- no classification.
         """
+        correlation_id = request.correlation_id
         logger.info(
             "Gathering runner-fleet snapshot (correlation_id=%s)", correlation_id
         )

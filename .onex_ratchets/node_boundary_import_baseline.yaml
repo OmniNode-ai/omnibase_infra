@@ -311,8 +311,6 @@ edges:
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_rsd_data_fetch_effect:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_rsd_orchestrator:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_rsd_state_reducer:'
-  - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator:'
-  - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_runner_health_snapshot_effect:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_runtime_manifest_reducer:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_runtime_orchestrator:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_scope_file_read_effect:'

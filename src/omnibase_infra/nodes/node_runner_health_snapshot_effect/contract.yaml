@@ -33,6 +33,9 @@
 #     reported as unknown (empty health, None counts, None disk) and are never
 #     defaulted to a passing value, so a failed probe becomes an UNKNOWN readiness
 #     signal downstream rather than a fabricated PASS.
+#   - OMN-21041: handle() takes the whole typed ModelRunnerFleetSnapshotGatherCommand as
+#     `request`; the runtime hands a handler the whole validated command, not a bare
+#     correlation_id.
 #   - OMN-15195: replaced this handler's direct env reads (WEDGE_QUEUE_AGE_SECONDS,
 #     RUNNER_CODELOAD_SCAN_LIMIT, WEDGE_WATCH_REPOS) with the typed
 #     ModelRunnerFleetConfig (observability.runner_health.model_runner_fleet_config),

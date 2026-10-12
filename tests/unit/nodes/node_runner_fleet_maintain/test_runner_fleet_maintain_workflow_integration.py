@@ -34,6 +34,9 @@ from omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.handlers.handl
 from omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.handlers.handler_runner_fleet_snapshot_complete import (
     HandlerRunnerFleetSnapshotComplete,
 )
+from omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.models.model_runner_fleet_maintain_start_command import (
+    ModelRunnerFleetMaintainStartCommand,
+)
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.handlers.handler_runner_fleet_snapshot import (
     HandlerRunnerFleetSnapshot,
 )
@@ -95,7 +98,9 @@ class TestRunnerFleetMaintainWorkflowIntegration:
 
         # Step 1: Start (ORCHESTRATOR handler) -- no I/O.
         start_handler = HandlerRunnerFleetMaintainStart()
-        gather_command = await start_handler.handle(correlation_id=cid)
+        gather_command = await start_handler.handle(
+            ModelRunnerFleetMaintainStartCommand(correlation_id=cid)
+        )
         assert gather_command.correlation_id == cid
 
         # Step 2: Gather snapshot (EFFECT) -- all I/O mocked.
@@ -112,14 +117,12 @@ class TestRunnerFleetMaintainWorkflowIntegration:
             "asyncio.create_subprocess_exec",
             _dispatcher(github_runners, docker_lines),
         ):
-            snapshot = await snapshot_handler.handle(
-                correlation_id=gather_command.correlation_id
-            )
+            snapshot = await snapshot_handler.handle(gather_command)
         assert len(snapshot.runners) == 2
 
         # Step 3: Snapshot complete (ORCHESTRATOR handler) -- no I/O.
         snapshot_complete_handler = HandlerRunnerFleetSnapshotComplete()
-        evaluate_command = await snapshot_complete_handler.handle(snapshot=snapshot)
+        evaluate_command = await snapshot_complete_handler.handle(snapshot)
         assert evaluate_command.correlation_id == cid
         assert evaluate_command.snapshot is snapshot
 
@@ -134,7 +137,7 @@ class TestRunnerFleetMaintainWorkflowIntegration:
 
         # Step 5: Verdict complete (ORCHESTRATOR handler) -- terminal event, no I/O.
         verdict_complete_handler = HandlerRunnerFleetHealthVerdictComplete()
-        completed = await verdict_complete_handler.handle(verdict=verdict)
+        completed = await verdict_complete_handler.handle(verdict)
 
         assert completed.correlation_id == cid
         assert completed.verdict is verdict
@@ -151,24 +154,20 @@ class TestRunnerFleetMaintainWorkflowIntegration:
         docker_lines = ["omninode-runner-1\trunning\t0\tUp 2 days\t20"]
 
         start_handler = HandlerRunnerFleetMaintainStart()
-        gather_command = await start_handler.handle(correlation_id=cid)
+        gather_command = await start_handler.handle(
+            ModelRunnerFleetMaintainStartCommand(correlation_id=cid)
+        )
 
         snapshot_handler = HandlerRunnerFleetSnapshot(config=_config())
         with patch(
             "asyncio.create_subprocess_exec",
             _dispatcher(github_runners, docker_lines),
         ):
-            snapshot = await snapshot_handler.handle(
-                correlation_id=gather_command.correlation_id
-            )
+            snapshot = await snapshot_handler.handle(gather_command)
 
-        evaluate_command = await HandlerRunnerFleetSnapshotComplete().handle(
-            snapshot=snapshot
-        )
+        evaluate_command = await HandlerRunnerFleetSnapshotComplete().handle(snapshot)
         verdict = await HandlerRunnerFleetHealthEvaluate().handle(evaluate_command)
-        completed = await HandlerRunnerFleetHealthVerdictComplete().handle(
-            verdict=verdict
-        )
+        completed = await HandlerRunnerFleetHealthVerdictComplete().handle(verdict)
 
         assert completed.verdict.recommended_actions == ()
         assert all(

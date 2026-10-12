@@ -37,12 +37,12 @@ class HandlerRunnerFleetHealthVerdictComplete:
         return EnumHandlerTypeCategory.COMPUTE
 
     async def handle(
-        self, verdict: ModelRunnerFleetHealthVerdict
+        self, request: ModelRunnerFleetHealthVerdict
     ) -> ModelRunnerFleetMaintainCompletedEvent:
         """Build the terminal runner-fleet-maintain-completed event.
 
         Args:
-            verdict: Classified health verdict from the COMPUTE node.
+            request: Classified health verdict from the COMPUTE node.
 
         Returns:
             ModelRunnerFleetMaintainCompletedEvent (health report, no mutation).
@@ -50,14 +50,14 @@ class HandlerRunnerFleetHealthVerdictComplete:
         logger.info(
             "Runner-fleet-maintain tick complete: %d/%d online, %d recommended actions "
             "(recorded only, correlation_id=%s)",
-            verdict.online_count,
-            verdict.expected_count,
-            len(verdict.recommended_actions),
-            verdict.correlation_id,
+            request.online_count,
+            request.expected_count,
+            len(request.recommended_actions),
+            request.correlation_id,
         )
         return ModelRunnerFleetMaintainCompletedEvent(
-            correlation_id=verdict.correlation_id,
-            verdict=verdict,
+            correlation_id=request.correlation_id,
+            verdict=request,
         )
 
 
