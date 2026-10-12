@@ -93,9 +93,6 @@ known_entrypointless:
   - contract: node_setup_validate_effect
     handler: HandlerServiceValidate
     module: omnibase_infra.nodes.node_setup_validate_effect.handlers.handler_service_validate
-  - contract: node_topic_migration_executor_effect
-    handler: HandlerTopicMigrationExecutor
-    module: omnibase_infra.nodes.node_topic_migration_executor_effect.handlers.handler_topic_migration_executor
   - contract: node_topic_migration_projection
     handler: HandlerTopicMigrationProjection
     module: omnibase_infra.nodes.node_topic_migration_projection.handlers.handler_topic_migration_projection
