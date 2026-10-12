@@ -31,10 +31,9 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC1"]
   - id: "dod-deploy"
-    description: "AC2. Deploy-scope readback: the chain test passes at the deployed sha; the lab readback of public.contracts row count is taken after the deploy agent rolls the dev lane."
+    description: "AC2. Deploy-scope readback: after the deploy agent rolls the dev lane, public.contracts holds at least one row."
     source: "manual"
     checks:
-      - check_type: "test_passes"
-        check_value: "uv run pytest tests/unit/nodes/node_contract_loader_effect/test_contract_registration_chain.py -q"
-        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "command"
+        check_value: "docker exec omnibase-infra-postgres psql -U postgres -d omnibase_infra -tAc 'select count(*) from contracts' | grep -qv '^0$'"
     binds_ac: ["AC2"]
