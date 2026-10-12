@@ -6,9 +6,11 @@
 THE CLASS FIX (retro B-6): the CLAUDE.md lane table must be a generated block
 derived from a machine-readable census snapshot. The snapshot is written by
 `lane-census-check.sh --snapshot <path>` on .201 — the hourly census pass writes
-it to the host, and it is committed here. This gate asserts that:
+it to the host, and the refresh leg commits it to the private lane census
+directory (config/lab/lane-census under the workspace config root, OMN-20934;
+this repository ships no census). This gate asserts that:
 
-  1. A census snapshot file exists at deploy/lane-census/census-snapshot.json.
+  1. A census snapshot file exists in that directory (or at --snapshot).
   2. Its `emitted_at` timestamp is within MAX_AGE_DAYS (default 7) of now.
   3. The snapshot's `schema_version` is supported.
 
@@ -22,7 +24,7 @@ Exit codes:
 
 Usage:
   python scripts/check_lane_census_age.py
-  python scripts/check_lane_census_age.py --max-age-days 7 --snapshot deploy/lane-census/census-snapshot.json
+  python scripts/check_lane_census_age.py --max-age-days 7 --snapshot <dir>/census-snapshot.json
 """
 
 from __future__ import annotations
@@ -33,8 +35,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_DEFAULT_SNAPSHOT = _REPO / "deploy" / "lane-census" / "census-snapshot.json"
+_SCRIPTS = Path(__file__).resolve().parent
 _DEFAULT_MAX_AGE_DAYS = 7
 # 1.1.0 (OMN-19411) widens the finding-kind vocabulary only; every key this
 # gate reads is unchanged. Must match lane_census_event.SUPPORTED_EVENT_SCHEMA_VERSIONS.
@@ -56,10 +57,10 @@ def check_census_age(
     if not snapshot_path.exists():
         print(
             f"::error title=LANE-CENSUS-STALE::Census snapshot missing: "
-            f"{snapshot_path.relative_to(_REPO) if snapshot_path.is_relative_to(_REPO) else snapshot_path}. "
+            f"{snapshot_path}. "
             f"Run 'bash scripts/lane-census-check.sh --snapshot "
-            f"deploy/lane-census/census-snapshot.json' on .201 and commit the "
-            f"result. Use --snapshot, NOT --json: --json emits the plan "
+            f"{snapshot_path}' on the lab host and commit the "
+            f"result to the private lane census directory. Use --snapshot, NOT --json: --json emits the plan "
             f"document, which carries no 'emitted_at' and is rejected here "
             f"(OMN-18606). A missing snapshot means the lane table is "
             f"undocumented — the failure class OMN-13034 was written to prevent.",
@@ -120,7 +121,7 @@ def check_census_age(
             f"::error title=LANE-CENSUS-STALE::Census snapshot is {age_days} days "
             f"old (emitted_at={emitted_raw!r}). Maximum allowed age is "
             f"{max_age_days} days. Run 'bash scripts/lane-census-check.sh "
-            f"--snapshot deploy/lane-census/census-snapshot.json' on .201 and "
+            f"--snapshot {snapshot_path}' on the lab host and "
             f"commit the result (--snapshot, not --json — see OMN-18606). "
             f"Stale census = undocumented runtime topology "
             f"(retro B-6 / OMN-13034).",
@@ -145,8 +146,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--snapshot",
         type=Path,
-        default=_DEFAULT_SNAPSHOT,
-        help="Path to census-snapshot.json (default: deploy/lane-census/census-snapshot.json)",
+        default=None,
+        help=(
+            "Path to census-snapshot.json (default: config/lab/lane-census/"
+            "census-snapshot.json under the workspace config root)"
+        ),
     )
     parser.add_argument(
         "--max-age-days",
@@ -155,7 +159,18 @@ def main(argv: list[str] | None = None) -> int:
         help=f"Maximum allowed census age in days (default: {_DEFAULT_MAX_AGE_DAYS})",
     )
     args = parser.parse_args(argv)
-    return check_census_age(args.snapshot, args.max_age_days)
+    snapshot = args.snapshot
+    if snapshot is None:
+        if str(_SCRIPTS) not in sys.path:
+            sys.path.insert(0, str(_SCRIPTS))
+        from lane_census_plan import LaneCensusConfigError, default_snapshot_path
+
+        try:
+            snapshot = default_snapshot_path()
+        except LaneCensusConfigError as exc:
+            print(f"::error title=LANE-CENSUS-STALE::{exc}", file=sys.stderr)
+            return 1
+    return check_census_age(snapshot, args.max_age_days)
 
 
 if __name__ == "__main__":

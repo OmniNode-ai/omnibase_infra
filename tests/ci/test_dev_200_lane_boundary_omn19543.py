@@ -39,6 +39,7 @@ from scripts.preflight_lane_deploy_attribution import (
     GOVERNED_LANES,
     GRANT_INTERLOCK_LANES,
 )
+from tests.helpers.lane_census_fixtures import LAB_MANIFEST
 from tests.helpers.lane_overlay_fixtures import (
     LANE_OVERLAY_MOUNT,
     LANE_OVERLAY_TARGET,
@@ -49,7 +50,7 @@ from tests.helpers.lane_overlay_fixtures import (
 pytestmark = pytest.mark.ci
 
 ROOT = Path(__file__).resolve().parents[2]
-MANIFEST_PATH = ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
+MANIFEST_PATH = LAB_MANIFEST  # OMN-20934: private config
 OVERLAY_PATH = ROOT / "docker" / "docker-compose.dev-200.yml"
 
 LANE = "dev-200"
@@ -148,6 +149,7 @@ def test_dev_200_lane_boundary_is_not_in_the_prod_grant_interlock() -> None:
     assert frozenset({"stability-test"}) == GRANT_INTERLOCK_LANES
 
 
+@pytest.mark.lab_overlay
 def test_dev_200_lane_boundary_manifest_declares_lab_200_only() -> None:
     lane = _manifest()["lanes"][LANE]
     assert lane["hosts"] == [HOST_ID]
@@ -160,6 +162,7 @@ def test_dev_200_lane_boundary_manifest_declares_lab_200_only() -> None:
     )
 
 
+@pytest.mark.lab_overlay
 def test_dev_200_lane_boundary_declares_every_dev_service_under_its_name() -> None:
     """AC1. The .201 dev lane's declared set maps one to one onto dev-200."""
     manifest = _manifest()
@@ -175,6 +178,7 @@ def test_dev_200_lane_boundary_declares_every_dev_service_under_its_name() -> No
     assert gated == PROFILE_GATED
 
 
+@pytest.mark.lab_overlay
 def test_dev_200_lane_boundary_declares_no_forbidden_service() -> None:
     names = [s["name"] for s in _manifest()["lanes"][LANE]["services"]]
     offending = [n for n in names for f in FORBIDDEN_SERVICE_FRAGMENTS if f in n]
@@ -334,6 +338,7 @@ def _plan_on_200(rows: list[dict[str, Any]], networks: list[str]) -> dict[str, A
     return build_plan(envelope, _manifest())
 
 
+@pytest.mark.lab_overlay
 def test_dev_200_lane_boundary_host_resolves_and_carries_dev_200() -> None:
     manifest = _manifest()
     validate_hosts(manifest)
@@ -344,6 +349,7 @@ def test_dev_200_lane_boundary_host_resolves_and_carries_dev_200() -> None:
     assert lanes_on_host == ["dev-200", "dogfood"]
 
 
+@pytest.mark.lab_overlay
 def test_dev_200_lane_boundary_census_on_200_reads_clean() -> None:
     plan = _plan_on_200(_healthy_dev_200_rows(), [NETWORK])
     manifest = _manifest()
@@ -357,6 +363,7 @@ def test_dev_200_lane_boundary_census_on_200_reads_clean() -> None:
     assert plan["has_drift"] is False
 
 
+@pytest.mark.lab_overlay
 def test_dev_200_lane_boundary_census_still_reports_a_stopped_runtime() -> None:
     """Negative control: a real outage on dev-200 is still named."""
     rows = [
@@ -370,6 +377,7 @@ def test_dev_200_lane_boundary_census_still_reports_a_stopped_runtime() -> None:
     ), plan["findings"]
 
 
+@pytest.mark.lab_overlay
 def test_dev_200_lane_boundary_a_201_dev_container_on_200_is_a_finding() -> None:
     rows = [
         *_healthy_dev_200_rows(),
