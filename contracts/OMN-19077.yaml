@@ -1,0 +1,61 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19077
+title: The primary runner host's general pool is declared at 10, down from 44
+summary: config/runner_fleet.yaml declares 10 general-pool runners on the primary host (top-level scalars and its hosts row) and docker/docker-compose.runners.yml carries exactly omninode-runner-1..10 with their creds volumes, matching the host as already capped under the operator consent at ROLLING_WORK_LEDGER.md:66460. The second host's pool of 16 is unchanged, so the declared action total is 26. Tests that pinned 44 or 60 now pin the declared values.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19077-primary-pool-10
+    statement: The repository's runner fleet config and primary compose file must declare 10 general-pool runners on the primary host, so a deploy or artifact converge from the repository cannot bring back the retired 34.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: config/runner_fleet.yaml declares expected_count 10 and burst_count 10 for the primary host and declared_total("action") is 26 -- falsifier: uv run pytest tests/unit/observability/runner_health/test_runner_fleet_config.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q fails'
+      - id: AC2
+        statement: 'AC2: docker/docker-compose.runners.yml declares exactly omninode-runner-1..10, each with its creds volume, and every fleet-wiring test reads the 26-runner fleet -- falsifier: uv run pytest tests/unit/observability/runner_health/test_runner_fleet_config.py::test_runner_compose_reconciled_to_the_spread_60_fleet tests/ci/test_runner_kubeconfig_mount.py tests/ci/test_runner_local_llm_secret_env_omn18415.py tests/ci/test_runner_listener_liveness.py -q fails'
+evidence_requirements:
+  - kind: tests
+    description: The fleet config and hosts tests read the declared primary-host count and the action total.
+    command: uv run pytest tests/unit/observability/runner_health/test_runner_fleet_config.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q --no-cov
+  - kind: tests
+    description: The compose reconciliation, kubeconfig mount, local-LLM secret and fleet canary tests read the 26-runner fleet.
+    command: uv run pytest tests/ci/test_runner_kubeconfig_mount.py tests/ci/test_runner_local_llm_secret_env_omn18415.py tests/ci/test_runner_listener_liveness.py -q --no-cov
+  - kind: manual
+    description: On the primary runner host the live config already declares 10 and runs omninode-runner-1..10; quoted on the Lab line of the PR body.
+    command: grep -E '^expected_count' ~/.omnibase/runners/config/runner_fleet.yaml
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19077-ac1-fleet-config-10
+    description: The fleet config declares 10 on the primary host and 26 action runners in total. Red at the merge base, which declares 44 and 60.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/observability/runner_health/test_runner_fleet_config.py tests/unit/observability/runner_health/test_runner_fleet_hosts.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn19077-ac2-compose-10
+    description: The primary compose file carries exactly omninode-runner-1..10 with their creds volumes, all 26 fleet services retain kubeconfig and local-LLM secret wiring, and the canary reads the 26-runner total. These focused assertions fail against the merge-base config and compose, which declare 44 and 60. Listener lifecycle tests remain in the CI suite but are outside this pool-declaration check's 30-second budget.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/observability/runner_health/test_runner_fleet_config.py tests/ci/test_runner_kubeconfig_mount.py tests/ci/test_runner_local_llm_secret_env_omn18415.py tests/ci/test_runner_listener_liveness.py -k "test_runner_compose_reconciled_to_the_spread_60_fleet or test_every_fleet_service_has_the_kubeconfig_env_var or test_every_fleet_service_has_the_readonly_kubeconfig_mount or test_the_mount_is_read_only or test_every_fleet_service_carries_the_local_llm_shared_secret or test_canary_sums_every_declared_action_pool" -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn19077-declared-pool-deploy-probe
+    description: Repository-only promotion probe. Read the published config and compose from GitHub at the checked-out commit, never this contract or its receipts. The config must declare expected_count 10 and burst_count 10; the compose must declare exactly the ten primary runner services and their ten creds volumes. The same assertions fail on the merge base. This verifies the published deployment inputs, not the live container population; this lane does not redeploy or change host settings.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/config/runner_fleet.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python -c 'import sys, yaml; c = yaml.safe_load(sys.stdin); assert c["expected_count"] == c["burst_count"] == 10, (c["expected_count"], c["burst_count"])'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.runners.yml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | python -c 'import re, sys, yaml; c = yaml.safe_load(sys.stdin); services = {n for n in c["services"] if re.fullmatch(r"omninode-runner-\d+", n)}; volumes = {n for n in c["volumes"] if re.fullmatch(r"runner-\d+-creds", n)}; assert services == {f"omninode-runner-{i}" for i in range(1, 11)}, sorted(services); assert volumes == {f"runner-{i}-creds" for i in range(1, 11)}, sorted(volumes); assert all(f"runner-{i}-creds:/home/runner/.runner-creds" in c["services"][f"omninode-runner-{i}"]["volumes"] for i in range(1, 11))'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+      - AC2

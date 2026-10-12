@@ -36,9 +36,11 @@ def test_runner_fleet_config_loads_from_repo_config() -> None:
     # ROLLING_WORK_LEDGER.md:13156) SPREAD the 60 across two hosts: these
     # scalars are the primary host's 44, and .202's omnipc2-ci-runner pool
     # carries the other 16, so the action fleet's declared total stays 60.
-    assert config.expected_count == 44
-    assert config.burst_count == 44
-    assert config.declared_total("action") == 60
+    # OMN-19077 (operator consent ROLLING_WORK_LEDGER.md:66460) cut the
+    # primary host's share 44 -> 10, so the declared total is now 26.
+    assert config.expected_count == 10
+    assert config.burst_count == 10
+    assert config.declared_total("action") == 26
 
 
 def test_runner_compose_matches_configured_count() -> None:
@@ -540,6 +542,8 @@ def test_runner_compose_reconciled_to_the_spread_60_fleet() -> None:
     its own declared count exactly, so `deploy-runners.sh` can neither
     orphan-remove nor resurrect a runner, and every runner in both mounts the
     OMN-12433 egress healthcheck script and is steady (no burst profile).
+    OMN-19077 (operator consent ROLLING_WORK_LEDGER.md:66460) cut the primary
+    file 44 -> 10, so the fleet is 26.
 
     Capped down from 88 (OMN-15978) after a CI burst drove one-minute load to
     100.9 on the 32-core `.201` host: idle runners cost nothing, so the
@@ -549,7 +553,7 @@ def test_runner_compose_reconciled_to_the_spread_60_fleet() -> None:
     hc_mount = "./runners/healthcheck.sh:/usr/local/bin/healthcheck.sh:ro"
     total = 0
     for filename, prefix, volume_prefix, count in (
-        ("docker-compose.runners.yml", "omninode-runner", "runner", 44),
+        ("docker-compose.runners.yml", "omninode-runner", "runner", 10),
         (
             "docker-compose.runners-omnipc2-ci-runner.yml",
             "omnipc2-ci-runner",
@@ -583,7 +587,7 @@ def test_runner_compose_reconciled_to_the_spread_60_fleet() -> None:
         }
         assert len(volume_names) == count
         total += count
-    assert total == 60
+    assert total == 26
 
 
 def test_every_general_pool_runner_runs_in_the_aggregate_slice() -> None:
