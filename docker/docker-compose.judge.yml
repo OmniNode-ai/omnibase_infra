@@ -120,9 +120,9 @@ x-judge-runtime-env: &judge-runtime-env
   # next cold boot would have crash-looped exactly like the collaborator
   # lane's first one (the latent same-class instance OMN-17150 names). The
   # runtime services now mount
-  # ./lane-overlays/judge.bifrost.yaml at exactly this path, and the renderer
+  # this lane's private overlay at exactly this path, and the renderer
   # fails fast, naming this lane, if the pin or the file is absent.
-  BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/judge.bifrost.yaml
+  BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/lane.bifrost.yaml
   # OMN-15628: judge redefines its own x-runtime-env anchor, so it must carry
   # the routing-tiers pin explicitly alongside BIFROST_CONTRACT_PATH. Same
   # in-image path and same fail-closed consumer as the base infra anchor
@@ -185,6 +185,20 @@ x-judge-runtime-env: &judge-runtime-env
   QDRANT_PORT: "6333"
   QDRANT_API_KEY: ""
   KAFKA_MAX_POLL_INTERVAL_MS: "1800000"
+# OMN-20932: a lane's Bifrost overlay is private deployment config; this
+# repository ships none (only lane-overlays/local.bifrost.example.yaml, the
+# neutral template). Every runtime service mounts the overlay named for its
+# compose project from ONEX_LANE_OVERLAY_DIR at one lane-neutral path, and
+# compose refuses when the directory is unset or the file is absent. The deploy
+# paths resolve the directory (scripts/runtime_build/compose_files.sh and the
+# deploy agent's _compose_env).
+x-lane-overlay-mount: &lane-overlay-mount
+  type: bind
+  source: "${ONEX_LANE_OVERLAY_DIR:?ONEX_LANE_OVERLAY_DIR must name the directory holding your COMPOSE_PROJECT_NAME.bifrost.yaml (config/lab/lane-overlays under ONEX_WORKSPACE_CONFIG_ROOT); this repository ships no lab lane overlay}/${COMPOSE_PROJECT_NAME}.bifrost.yaml"
+  target: /app/config/delegation/lane.bifrost.yaml
+  read_only: true
+  bind:
+    create_host_path: false
 services:
   postgres:
     image: postgres:16-alpine
@@ -506,7 +520,7 @@ services:
       - judge_runtime_logs:/app/logs
       - judge_runtime_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/judge.bifrost.yaml:/app/config/delegation/judge.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
     tmpfs:
       - /run/onex-runtime:uid=1000,gid=1000,mode=0770
@@ -563,7 +577,7 @@ services:
       - judge_effects_logs:/app/logs
       - judge_effects_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/judge.bifrost.yaml:/app/config/delegation/judge.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:?OMNICLAUDE_SKILLS_DIR must point to the host skills directory}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]

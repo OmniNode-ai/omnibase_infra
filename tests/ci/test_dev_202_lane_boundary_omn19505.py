@@ -38,16 +38,16 @@ from typing import Any
 import pytest
 import yaml
 
-from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
-    EnumBifrostLaneLocale,
-)
-from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
-    ModelBifrostLaneOverlay,
-)
 from scripts.lane_census_plan import build_plan, resolve_host, validate_hosts
 from scripts.preflight_lane_deploy_attribution import (
     GOVERNED_LANES,
     GRANT_INTERLOCK_LANES,
+)
+from tests.helpers.lane_overlay_fixtures import (
+    LANE_OVERLAY_MOUNT,
+    LANE_OVERLAY_TARGET,
+    lane_overlay_mounts,
+    load_compose,
 )
 
 pytestmark = pytest.mark.ci
@@ -55,7 +55,6 @@ pytestmark = pytest.mark.ci
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
 OVERLAY_PATH = ROOT / "docker" / "docker-compose.dev-202.yml"
-BIFROST_OVERLAY_PATH = ROOT / "docker" / "lane-overlays" / "dev-202.bifrost.yaml"
 
 LANE = "dev-202"
 HOST_ID = "lab-202"
@@ -287,25 +286,21 @@ def test_dev_202_lane_boundary_reaches_nothing_on_201() -> None:
         line for line in raw.splitlines() if not line.lstrip().startswith("#")
     )
     assert "192.168." not in body
-    assert "./lane-overlays/dev.bifrost.yaml" not in body
     assert "omnimemory-network" not in body
-    mount = "./lane-overlays/dev-202.bifrost.yaml:/app/config/delegation/dev-202.bifrost.yaml:ro"
-    assert body.count(mount) == 4, (
-        "omninode-runtime, runtime-effects, runtime-worker and "
-        "tenant-projection-writer each mount the dev-202 overlay"
-    )
-    assert (
-        body.count(
-            "BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-202.bifrost.yaml"
+    runtime_services = {
+        "omninode-runtime",
+        "runtime-effects",
+        "runtime-worker",
+        "tenant-projection-writer",
+    }
+    assert lane_overlay_mounts(OVERLAY_PATH) == {
+        service: [LANE_OVERLAY_MOUNT] for service in runtime_services
+    }
+    services = load_compose(OVERLAY_PATH)["services"]
+    for service in runtime_services:
+        assert services[service]["environment"]["BIFROST_LANE_OVERLAY_PATH"] == (
+            LANE_OVERLAY_TARGET
         )
-        == 4
-    )
-    overlay = ModelBifrostLaneOverlay.model_validate(
-        yaml.safe_load(BIFROST_OVERLAY_PATH.read_text(encoding="utf-8"))
-    )
-    assert overlay.lane == LANE
-    assert overlay.locale is EnumBifrostLaneLocale.CLOUD
-    assert overlay.backends == ()
 
 
 def test_dev_202_lane_boundary_relabels_every_dev_lane_label() -> None:

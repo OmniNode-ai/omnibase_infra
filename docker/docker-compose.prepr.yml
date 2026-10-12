@@ -148,6 +148,20 @@ x-prepr-slot-marker-env: &prepr_slot_marker_env
 # reader can see the whole fenced set by searching for one token.
 x-prepr-fenced: &prepr_fenced
   profiles: !override ["prepr-never-start-a-shared-dependency"]
+# OMN-20932: a lane's Bifrost overlay is private deployment config; this
+# repository ships none (only lane-overlays/local.bifrost.example.yaml, the
+# neutral template). Every runtime service mounts the overlay named for its
+# compose project from ONEX_LANE_OVERLAY_DIR at one lane-neutral path, and
+# compose refuses when the directory is unset or the file is absent. The deploy
+# paths resolve the directory (scripts/runtime_build/compose_files.sh and the
+# deploy agent's _compose_env).
+x-lane-overlay-mount: &lane-overlay-mount
+  type: bind
+  source: "${ONEX_LANE_OVERLAY_DIR:?ONEX_LANE_OVERLAY_DIR must name the directory holding your COMPOSE_PROJECT_NAME.bifrost.yaml (config/lab/lane-overlays under ONEX_WORKSPACE_CONFIG_ROOT); this repository ships no lab lane overlay}/${COMPOSE_PROJECT_NAME}.bifrost.yaml"
+  target: /app/config/delegation/lane.bifrost.yaml
+  read_only: true
+  bind:
+    create_host_path: false
 services:
   # =========================================================================
   # THE FENCE: every service that is NOT one of the slot's twelve.
@@ -294,7 +308,7 @@ services:
       - prepr_runtime_logs:/app/logs
       - prepr_runtime_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - ${VERTEX_ACCESS_TOKEN_HOST_FILE:-/dev/null}:/run/secrets/vertex_access_token:ro
     labels: !override
@@ -347,7 +361,7 @@ services:
       - prepr_effects_logs:/app/logs
       - prepr_effects_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - ${VERTEX_ACCESS_TOKEN_HOST_FILE:-/dev/null}:/run/secrets/vertex_access_token:ro
       - ${CODING_AGENT_CODEX_AUTH_HOST_FILE:-/dev/null}:/home/omniinfra/.codex/auth.json:ro
@@ -366,7 +380,7 @@ services:
     volumes: !override
       - prepr_worker_logs:/app/logs
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     labels: !override
       - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"
@@ -395,7 +409,7 @@ services:
       - prepr_tenant_projection_logs:/app/logs
       - prepr_tenant_projection_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     labels: !override
       - "com.omninode.lane=prepr-${ONEX_PREPR_SLOT}"

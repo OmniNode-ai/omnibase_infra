@@ -28,7 +28,8 @@
 # exactly one copy and every caller reads it.
 #
 # This file defines functions only. It sets no options and mutates nothing at
-# source time, so it is safe to source from a script that has already set
+# source time (resolve_compose_file_args exports or unsets ONEX_LANE_OVERLAY_DIR when
+# called), so it is safe to source from a script that has already set
 # `set -euo pipefail`.
 
 # Emit an error through the caller's own logger when it has one, so a message
@@ -123,6 +124,61 @@ resolve_lane_overlay_filename() {
     esac
 }
 
+# OMN-20932: a lane's Bifrost overlay is private deployment config, not part of
+# this repository. Every lane compose file mounts
+# ${ONEX_LANE_OVERLAY_DIR:?...}/${COMPOSE_PROJECT_NAME}.bifrost.yaml, and the
+# directory is found through the workspace-config resolver's order:
+#   1. ONEX_LANE_OVERLAY_DIR, when the caller already set it (the deploy agent
+#      sets it in _compose_env through the runtime's own resolver);
+#   2. config/lab/lane-overlays under ONEX_WORKSPACE_CONFIG_ROOT.
+# There is no fallback to a committed overlay: this repository ships only the
+# neutral docker/lane-overlays/local.bifrost.example.yaml template.
+_lane_overlay_dir_candidate() {
+    local dir="${ONEX_LANE_OVERLAY_DIR:-}"
+    if [[ -z "${dir}" && -n "${ONEX_WORKSPACE_CONFIG_ROOT:-}" ]]; then
+        dir="${ONEX_WORKSPACE_CONFIG_ROOT}/config/lab/lane-overlays"
+    fi
+    printf '%s' "${dir}"
+}
+
+# Strict form, for a caller that must stop before any compose call (the pre-PR
+# slot): a missing directory, or one without this compose project's overlay, is
+# refused naming both variables.
+#   resolve_lane_overlay_dir <compose_project>
+resolve_lane_overlay_dir() {
+    local compose_project="$1"
+    local dir
+    dir="$(_lane_overlay_dir_candidate)"
+    if [[ -z "${dir}" || ! -f "${dir}/${compose_project}.bifrost.yaml" ]]; then
+        _compose_files_log_error "No lane overlay for compose project '${compose_project}'${dir:+ in \"${dir}\"}."
+        _compose_files_log_error "  The lane compose files mount \${ONEX_LANE_OVERLAY_DIR}/\${COMPOSE_PROJECT_NAME}.bifrost.yaml,"
+        _compose_files_log_error "  and this repository ships no lab lane overlay. Set ONEX_LANE_OVERLAY_DIR to the"
+        _compose_files_log_error "  directory holding ${compose_project}.bifrost.yaml, or ONEX_WORKSPACE_CONFIG_ROOT to a"
+        _compose_files_log_error "  config root whose config/lab/lane-overlays/ holds it (OMN-20932)."
+        return 1
+    fi
+    ONEX_LANE_OVERLAY_DIR="$(cd "${dir}" && pwd -P)"
+    export ONEX_LANE_OVERLAY_DIR
+}
+
+# Export form, run by resolve_compose_file_args before every lane compose call:
+# a directory holding this compose project's overlay is exported; otherwise
+# ONEX_LANE_OVERLAY_DIR is left unset, so compose itself refuses at the overlay
+# mount with the message that names both variables, the same contract as the
+# deploy agent's _compose_env.
+#   export_lane_overlay_dir <compose_project>
+export_lane_overlay_dir() {
+    local compose_project="$1"
+    local dir
+    dir="$(_lane_overlay_dir_candidate)"
+    if [[ -n "${dir}" && -f "${dir}/${compose_project}.bifrost.yaml" ]]; then
+        ONEX_LANE_OVERLAY_DIR="$(cd "${dir}" && pwd -P)"
+        export ONEX_LANE_OVERLAY_DIR
+    else
+        unset ONEX_LANE_OVERLAY_DIR
+    fi
+}
+
 resolve_compose_file_args() {
     # Populate a caller-provided array (passed by name) with the full
     # `-f <file>` token sequence for a lane. Standard lanes layer
@@ -148,6 +204,7 @@ resolve_compose_file_args() {
     local compose_project="$3"
 
     local docker_dir="${deploy_target}/docker"
+    export_lane_overlay_dir "${compose_project}"
     if [[ "${compose_project}" == "omnibase-infra-dogfood" ]]; then
         eval "${_out_args_name}=(-f $(printf '%q' "${docker_dir}/docker-compose.dogfood.yml"))"
         return 0

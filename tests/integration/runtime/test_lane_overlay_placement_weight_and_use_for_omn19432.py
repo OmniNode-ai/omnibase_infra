@@ -7,7 +7,7 @@ proportion to what it measures. The routing authority (omnimarket) reads two pla
 the lane overlay could not carry, because the placement model refuses unknown keys: ``use_for``
 narrows the classes a placed backend serves, ``weight`` sets its share of a spread group.
 
-This drives the real renderer over a copy of the committed dev overlay whose placed backend
+This drives the real renderer over a fixture overlay whose placed backend
 declares both, and shows each key is written only when it differs from the default, so a
 routing authority older than the keys still parses every existing placement byte for byte.
 """
@@ -27,11 +27,16 @@ from omnibase_infra.runtime.models.model_bifrost_lane_backend_placement import (
 from omnibase_infra.runtime.render_bifrost_delegation_contract import (
     render_bifrost_delegation_contract,
 )
+from tests.helpers.lane_overlay_fixtures import (
+    NEUTRAL_CHAT_ENDPOINT,
+    NEUTRAL_EMBEDDINGS_ENDPOINT,
+    lab_backend,
+    lab_overlay,
+    write_overlay,
+)
 
 pytestmark = pytest.mark.integration
 
-_ROOT = Path(__file__).resolve().parents[3]
-_DEV_OVERLAY = _ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
 _PLACED = "local-omnipc2-chat"
 _ENDPOINT_URL_ENV = {
     "local-coder": "LLM_CODER_URL",
@@ -41,9 +46,43 @@ _ENDPOINT_URL_ENV = {
 
 
 def _overlay() -> dict[str, Any]:
-    loaded = yaml.safe_load(_DEV_OVERLAY.read_text("utf-8"))
-    assert isinstance(loaded, dict)
-    return loaded
+    placed = lab_backend(
+        _PLACED,
+        endpoint_url=NEUTRAL_CHAT_ENDPOINT,
+        context_window=65536,
+        max_tokens=4096,
+    )
+    placed.update(
+        {
+            "provider": "local",
+            "tier": "local",
+            "credential": {"kind": "none"},
+            "capabilities": ["code_generation", "refactoring", "documentation"],
+            "placement": {
+                "tier": "local",
+                "fallback_for": ["local-coder", "local-heavy-reasoning"],
+                "max_context_tokens": 65536,
+                "mode": "spread",
+            },
+        }
+    )
+    return lab_overlay(
+        lane="dev",
+        backends=[
+            lab_backend("local-coder"),
+            lab_backend("local-heavy-reasoning"),
+            lab_backend(
+                "local-embedding",
+                endpoint_url=NEUTRAL_EMBEDDINGS_ENDPOINT,
+                served_model_id="text-embedding-qwen3",
+                parameter_count="0.6B",
+                context_window=8192,
+                max_tokens=1,
+                timeout_ms=30000,
+            ),
+            placed,
+        ],
+    )
 
 
 def _placement(overlay: dict[str, Any]) -> dict[str, Any]:
@@ -53,7 +92,7 @@ def _placement(overlay: dict[str, Any]) -> dict[str, Any]:
 
 def _render(tmp_path: Path, overlay: dict[str, Any]) -> dict[str, Any]:
     overlay_path = tmp_path / "overlay.bifrost.yaml"
-    overlay_path.write_text(yaml.safe_dump(overlay, sort_keys=False), encoding="utf-8")
+    write_overlay(overlay_path, overlay)
     served = {b["backend_id"]: b["served_model_id"] for b in overlay["backends"]}
     source = tmp_path / "base.yaml"
     source.write_text(
@@ -95,7 +134,7 @@ def test_a_declared_weight_and_class_list_reach_the_rendered_contract(
 
 
 def test_the_defaults_render_neither_key(tmp_path: Path) -> None:
-    """CONTROL: the committed placement declares neither, so an older authority sees no new key."""
+    """CONTROL: the fixture placement declares neither, so an older authority sees no new key."""
     rendered = _render(tmp_path, _overlay())
     assert "weight" not in rendered
     assert "use_for" not in rendered

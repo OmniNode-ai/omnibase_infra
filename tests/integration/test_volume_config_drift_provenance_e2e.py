@@ -41,23 +41,14 @@ from omnibase_infra.runtime.render_bifrost_delegation_contract import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-_CANONICAL_LANE_OVERLAY = REPO_ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
+_CANONICAL_LANE_OVERLAY = (
+    REPO_ROOT / "docker" / "lane-overlays" / "local.bifrost.example.yaml"
+)
 
-# OMN-16999: DERIVED from the committed dev lane overlay, never restated.
-#
-# `_merge_lane_overlay` refuses a base contract whose ``model_name`` disagrees
-# with the overlay's ``served_model_id``. Spelling the served ids here as literals
-# made this fixture another copy of a fact that has now flipped several times, so
-# a routing re-probe broke a test about volume drift -- a surface with nothing to
-# do with which model .201 is serving. Reading the overlay means the next
-# re-probe touches one place and this fixture follows. (OMN-17099 moved the lab
-# bindings out of a table in ``src/`` into the lane overlays; this reads those.)
-#
-# OMN-16833: every backend the canonical dev lane overlay REBINDS is declared
-# here too, because `_merge_lane_overlay` refuses an overlay naming a base
-# backend the base contract does not declare. A backend the overlay ADDS (it
-# carries its own ``provider``, OMN-17099) is left out: the renderer refuses a
-# base contract that already declares a backend the overlay claims to add.
+# Derive served ids from the shipped neutral template. The drift test follows
+# the bindings it renders instead of duplicating deployment-specific values.
+# Declare every rebound backend in the base contract; added backends carry
+# their own provider declaration and must remain absent from the base.
 _OVERLAY_SERVED_IDS: dict[str, str] = {
     backend["backend_id"]: backend["served_model_id"]
     for backend in yaml.safe_load(_CANONICAL_LANE_OVERLAY.read_text("utf-8"))[
