@@ -31,6 +31,11 @@ requirements:
     acceptance:
       - id: AC5
         statement: 'AC5: a repository with 100 workflow files costs one gh api graphql call and no contents API call; only yaml blobs are kept; a missing directory reads empty; a failed, repository-less, truncated or textless read raises; each variable list is read once across repeated audits -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "workflow_texts or workflows_directory or unread_workflow or variable_list_is_read_once"'
+  - id: req-omn20864-routing-audit-rate-limit
+    statement: A GitHub API rate limit in the routing audit's live pass is reported as an unreadable routing state with its own annotation, the reset time and a distinct exit code, never as routing drift; findings of the other live passes are still reported, and the workflow's combined step names drift only when a pass reported findings.
+    acceptance:
+      - id: AC6
+        statement: 'AC6: the replay of job 114609134005 (GraphQL: API rate limit already exceeded) exits unreadable with no drift annotation, a finding in one live pass survives a rate limit in another, a non-rate-limit failure is not relabelled, and the combined step prints unreadable, drift, incomplete or clean for each outcome -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "rate_limit or not_relabelled or survive or combined_step_names"'
 evidence_requirements:
   - kind: tests
     description: The outage replay and rule tests for the deploy agent.
@@ -41,6 +46,9 @@ evidence_requirements:
   - kind: tests
     description: The fake gh runner counts the calls the audit makes and replays truncated, binary and failed reads.
     command: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "workflow_texts or workflows_directory or unread_workflow or variable_list_is_read_once"
+  - kind: tests
+    description: The fake gh runner replays the rate-limited reply of job 114609134005 through the audit and runs the combined step's shell for each outcome.
+    command: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "rate_limit or not_relabelled or survive or combined_step_names"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -75,3 +83,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
+  - id: dod-omn20864-ac6-routing-audit-rate-limit
+    description: AC6 tests fail on the merge base, where a rate limit is a traceback the combined step names routing drift, and pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "rate_limit or not_relabelled or survive or combined_step_names"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC6

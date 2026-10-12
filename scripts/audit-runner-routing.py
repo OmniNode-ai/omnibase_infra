@@ -18,11 +18,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -75,12 +77,21 @@ REQUIRED_OVERRIDE_ACTIVATION_GATE_KEYS: tuple[str, ...] = (
     "evidence_companion_fate_isolation",
     "positive_control_acceptance",
 )
+# OMN-20864: a live pass that could not read GitHub exits with its own code and
+# its own annotation. An unread routing state is neither clean nor drift.
+EXIT_FINDINGS = 1
+EXIT_UNREADABLE = 3
+RATE_LIMIT_RE = re.compile(r"\brate limit\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
 class Finding:
     scope: str
     message: str
+
+
+class GitHubRateLimitError(RuntimeError):
+    """A live read refused by a GitHub API rate limit: the state was not read."""
 
 
 def _load_policy(path: Path) -> dict[str, Any]:
@@ -131,6 +142,39 @@ def _run_gh(args: list[str], timeout: int = 20) -> subprocess.CompletedProcess[s
     )
 
 
+def _rate_limit_reset_note() -> str:
+    """Name when the exhausted bucket resets; empty when GitHub does not say."""
+    result = _run_gh(["api", "rate_limit"])
+    if result.returncode != 0:
+        return ""
+    try:
+        resources = json.loads(result.stdout or "{}").get("resources", {})
+    except (json.JSONDecodeError, AttributeError):
+        return ""
+    resets = [
+        int(bucket["reset"])
+        for bucket in resources.values()
+        if isinstance(bucket, dict)
+        and bucket.get("remaining") == 0
+        and "reset" in bucket
+    ]
+    if not resets:
+        return ""
+    reset = datetime.fromtimestamp(max(resets), tz=UTC)
+    return f" (resets {reset:%Y-%m-%dT%H:%M:%SZ}; a rerun after that reads it)"
+
+
+def _read_failed(what: str, result: subprocess.CompletedProcess[str]) -> RuntimeError:
+    """OMN-20864: a rate limit raises its own error, every other failure stays as is."""
+    detail = result.stderr.strip()
+    if RATE_LIMIT_RE.search(detail):
+        return GitHubRateLimitError(
+            f"{what} was refused by a GitHub API rate limit"
+            f"{_rate_limit_reset_note()}: {detail}"
+        )
+    return RuntimeError(f"{what} failed: {detail}")
+
+
 # OMN-20864: the seam audit and the scoped-variable audit read the same org and
 # repository variable lists in one run; each list is read from GitHub once.
 _VARIABLES_READ: dict[tuple[str, ...], list[dict[str, Any]]] = {}
@@ -154,7 +198,7 @@ def _read_variables(args: list[str]) -> list[dict[str, Any]]:
         ]
     )
     if result.returncode != 0:
-        raise RuntimeError(f"gh variable list failed: {result.stderr.strip()}")
+        raise _read_failed("gh variable list", result)
     values = json.loads(result.stdout or "[]")
     if not isinstance(values, list):
         raise RuntimeError("gh variable list returned a non-list payload")
@@ -514,7 +558,7 @@ def _live_repository_visibility(org: str = ORG) -> list[tuple[str, bool]]:
         ]
     )
     if result.returncode != 0:
-        raise RuntimeError(f"gh repo list failed: {result.stderr.strip()}")
+        raise _read_failed("gh repo list", result)
     values = json.loads(result.stdout or "[]")
     if not isinstance(values, list):
         raise RuntimeError("gh repo list returned a non-list payload")
@@ -578,10 +622,7 @@ def _default_branch_workflow_texts(repo_name: str, org: str = ORG) -> dict[str, 
         ]
     )
     if result.returncode != 0:
-        raise RuntimeError(
-            f"gh api graphql workflow read for {repo_name} failed: "
-            f"{result.stderr.strip()}"
-        )
+        raise _read_failed(f"gh api graphql workflow read for {repo_name}", result)
     payload = json.loads(result.stdout or "{}")
     repository = (payload.get("data") or {}).get("repository")
     if not isinstance(repository, dict):
@@ -1134,6 +1175,7 @@ def main() -> int:
 
     policy = _load_policy(args.policy)
     findings: list[Finding] = []
+    unreadable: list[str] = []
     if args.local_workflows:
         findings.extend(audit_local_workflows(policy, args.repo_root))
         # OMN-18031, additive: the per-run routing consumer shape. Extends the
@@ -1145,25 +1187,51 @@ def main() -> int:
         # document above does not retain.
         findings.extend(audit_selector_markers(args.repo_root))
     if args.github_vars:
-        findings.extend(audit_github_variables(policy))
-        # OMN-18205: additive, and inside the SAME step as the seam audit so a
-        # finding here cannot be masked by the step-level ordering OMN-16727
-        # records -- main() extends one findings list and prints them all.
-        findings.extend(audit_scoped_variables(policy))
-        # OMN-18365 AC3, additive and inside the same step for the same
-        # reason: resolves its repository universe from live visibility
-        # rather than the policy's hand-curated `repositories:` list.
-        findings.extend(audit_private_repo_hosted_placement())
+        live_passes: list[Callable[[], list[Finding]]] = [
+            lambda: audit_github_variables(policy),
+            # OMN-18205: additive, and inside the SAME step as the seam audit so
+            # a finding here cannot be masked by the step-level ordering
+            # OMN-16727 records -- main() extends one findings list and prints
+            # them all.
+            lambda: audit_scoped_variables(policy),
+            # OMN-18365 AC3, additive and inside the same step for the same
+            # reason: resolves its repository universe from live visibility
+            # rather than the policy's hand-curated `repositories:` list.
+            audit_private_repo_hosted_placement,
+        ]
+        for live_pass in live_passes:
+            # OMN-20864: a rate limit in one pass is reported as unreadable and
+            # neither stops the remaining passes nor counts as a finding.
+            try:
+                findings.extend(live_pass())
+            except GitHubRateLimitError as exc:
+                unreadable.append(str(exc))
+        _write_step_outputs(findings=len(findings), unreadable=len(unreadable))
 
+    for finding in findings:
+        print(f"::error title=Runner routing drift::{finding.scope}: {finding.message}")
+    for reason in unreadable:
+        print(
+            "::error title=Runner audit unreadable::"
+            f"{reason}; the routing state was not read, which is not a finding"
+        )
     if findings:
-        for finding in findings:
-            print(
-                f"::error title=Runner routing drift::{finding.scope}: {finding.message}"
-            )
-        return 1
+        return EXIT_FINDINGS
+    if unreadable:
+        return EXIT_UNREADABLE
 
     print("Runner routing audit passed.")
     return 0
+
+
+def _write_step_outputs(**values: int) -> None:
+    """OMN-20864: tell the workflow's combined step findings from unread passes."""
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        return
+    with Path(path).open("a", encoding="utf-8") as handle:
+        for key, value in values.items():
+            handle.write(f"{key}={value}\n")
 
 
 if __name__ == "__main__":

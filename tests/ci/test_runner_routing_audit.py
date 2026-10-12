@@ -6,6 +6,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1832,3 +1833,219 @@ def test_each_variable_list_is_read_once_per_run(
             "name,value",
         ],
     ]
+
+
+# OMN-20864: job 114609134005 (omnibase_infra#4863, 2026-10-11T23:59:14Z) failed
+# the live pass on `gh repo list failed: GraphQL: API rate limit already exceeded
+# for user ID 1002253.` and the combined step reported it as routing drift.
+RATE_LIMITED = "GraphQL: API rate limit already exceeded for user ID 1002253."
+
+
+def _run_main(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> tuple[int, str, str]:
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["audit-runner-routing.py", "--github-vars", "--policy", str(POLICY)],
+    )
+    code = module.main()
+    return code, capsys.readouterr().out, output.read_text(encoding="utf-8")
+
+
+def test_a_rate_limited_live_read_is_unreadable_not_a_finding(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A rate limit is an unread routing state, never routing drift."""
+    module = _load_script()
+    monkeypatch.setattr(
+        module,
+        "_run_gh",
+        lambda args, timeout=20: _GhResult("", returncode=1, stderr=RATE_LIMITED),
+    )
+
+    code, out, github_output = _run_main(module, monkeypatch, tmp_path, capsys)
+
+    assert code == module.EXIT_UNREADABLE
+    assert code != 1
+    assert "Runner routing drift" not in out
+    assert "::error title=Runner audit unreadable::" in out
+    assert "rate limit" in out
+    assert "findings=0" in github_output.splitlines()
+    assert "unreadable=3" in github_output.splitlines()
+
+
+def test_findings_of_one_live_pass_survive_a_rate_limit_in_another(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_script()
+    monkeypatch.setattr(
+        module,
+        "audit_github_variables",
+        lambda policy: [module.Finding("omnibase_core", "drifted to hosted")],
+    )
+    monkeypatch.setattr(
+        module,
+        "_run_gh",
+        lambda args, timeout=20: _GhResult("", returncode=1, stderr=RATE_LIMITED),
+    )
+
+    code, out, github_output = _run_main(module, monkeypatch, tmp_path, capsys)
+
+    assert code == 1
+    assert "::error title=Runner routing drift::omnibase_core: drifted to hosted" in out
+    assert "::error title=Runner audit unreadable::" in out
+    assert "findings=1" in github_output.splitlines()
+    assert "unreadable=2" in github_output.splitlines()
+
+
+def test_a_rate_limit_names_when_the_limit_resets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    rate_limit = json.dumps(
+        {
+            "resources": {
+                "core": {"limit": 5000, "remaining": 4000, "reset": 1791763200},
+                "graphql": {"limit": 5000, "remaining": 0, "reset": 1791764160},
+            }
+        }
+    )
+
+    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
+        if args == ["api", "rate_limit"]:
+            return _GhResult(rate_limit)
+        return _GhResult("", returncode=1, stderr=RATE_LIMITED)
+
+    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
+
+    with pytest.raises(
+        module.GitHubRateLimitError, match="resets 2026-10-12T00:16:00Z"
+    ):
+        module._live_repository_visibility()
+
+
+def test_a_failed_read_that_is_not_a_rate_limit_is_not_relabelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    monkeypatch.setattr(
+        module,
+        "_run_gh",
+        lambda args, timeout=20: _GhResult("", returncode=1, stderr="HTTP 404"),
+    )
+
+    with pytest.raises(RuntimeError, match="gh repo list failed: HTTP 404") as raised:
+        module._live_repository_visibility()
+    assert not isinstance(raised.value, module.GitHubRateLimitError)
+
+
+def _render_combined_step(local: str, live: str, findings: str, unreadable: str) -> str:
+    import re
+
+    import yaml
+
+    workflow = yaml.safe_load(RUNNER_ROUTING_AUDIT_WORKFLOW.read_text())
+    steps = workflow["jobs"]["audit"]["steps"]
+    combined = next(s for s in steps if "combined" in s.get("name", ""))
+    values = {
+        "steps.local_workflows.outcome": local,
+        "steps.github_vars.outcome": live,
+        "steps.github_vars.outputs.findings": findings,
+        "steps.github_vars.outputs.unreadable": unreadable,
+    }
+    rendered = re.sub(
+        r"\$\{\{\s*([A-Za-z0-9_.]+)\s*\}\}",
+        lambda m: values[m.group(1)],
+        combined["run"],
+    )
+    return str(rendered)
+
+
+@pytest.mark.parametrize(
+    ("local", "live", "findings", "unreadable", "rc", "present", "absent"),
+    [
+        (
+            "success",
+            "failure",
+            "0",
+            "1",
+            1,
+            "Runner audit unreadable",
+            "Runner routing drift",
+        ),
+        ("success", "failure", "1", "0", 1, "Runner routing drift", "unreadable"),
+        ("failure", "success", "0", "0", 1, "Runner routing drift", "unreadable"),
+        ("success", "failure", "", "", 1, "Runner audit incomplete", "drift"),
+        ("success", "success", "0", "0", 0, "reported clean", "::error"),
+    ],
+    ids=["rate-limited", "live-finding", "local-finding", "no-verdict", "clean"],
+)
+def test_combined_step_names_an_unread_live_pass_as_unreadable_not_drift(
+    local: str,
+    live: str,
+    findings: str,
+    unreadable: str,
+    rc: int,
+    present: str,
+    absent: str,
+) -> None:
+    """OMN-20864: the combined step said "reported findings" for a rate limit."""
+    import subprocess
+
+    script = _render_combined_step(local, live, findings, unreadable)
+    result = subprocess.run(
+        ["bash", "-e", "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == rc, result.stdout + result.stderr
+    assert present in result.stdout
+    assert absent not in result.stdout
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/runner_routing_audit_rate_limit_omn20864.json"
+)
+def test_recorded_rate_limit_job_is_unreadable_not_drift(
+    recorded_response: dict[str, Any],
+) -> None:
+    """OMN-20864: replay job 114609134005, whose rate limit was named drift."""
+    import subprocess
+
+    lines = recorded_response["response"]["log_lines"]
+    module = _load_script()
+    stderr = lines["live_pass_error"].split("gh repo list failed: ", 1)[1]
+    assert module.RATE_LIMIT_RE.search(stderr)
+    assert "reported findings" in lines["combined_annotation"]
+    local = lines["local_outcome"].rsplit(": ", 1)[1]
+    live = lines["live_outcome"].rsplit(": ", 1)[1]
+    assert (local, live) == ("success", "failure")
+
+    # The fixed live pass writes these counts for that read (asserted by
+    # test_a_rate_limited_live_read_is_unreadable_not_a_finding).
+    script = _render_combined_step(local, live, "0", "1")
+    result = subprocess.run(
+        ["bash", "-e", "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 1
+    assert "::error title=Runner audit unreadable::" in result.stdout
+    assert "reported findings" not in result.stdout

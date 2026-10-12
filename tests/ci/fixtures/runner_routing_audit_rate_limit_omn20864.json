@@ -1,0 +1,19 @@
+{
+  "_provenance": {
+    "source": "gh api repos/OmniNode-ai/omnibase_infra/actions/jobs/114609134005/logs",
+    "captured_utc": "2026-10-12T00:33:08Z",
+    "source_sha256": "9460cc0e22ce273c15706f255652d3d722c8db24183992c351b9acde05de93bb",
+    "note": "runner-routing-audit / Runner Routing Audit job of omnibase_infra#4863 (head 05227526b, merge ref 868b3b434), completed 2026-10-11T23:59:14Z. Lines are verbatim; the sha256 is of the full log."
+  },
+  "response": {
+    "job_id": 114609134005,
+    "job_name": "runner-routing-audit / Runner Routing Audit",
+    "log_lines": {
+      "local_pass": "2026-10-11T23:59:11.2285213Z Runner routing audit passed.",
+      "live_pass_error": "2026-10-11T23:59:14.2931909Z RuntimeError: gh repo list failed: GraphQL: API rate limit already exceeded for user ID 1002253.",
+      "local_outcome": "2026-10-11T23:59:14.3281833Z local_workflows outcome: success",
+      "live_outcome": "2026-10-11T23:59:14.3282258Z github_vars outcome: failure",
+      "combined_annotation": "2026-10-11T23:59:14.3294953Z ##[error]at least one audit pass reported findings; see the step logs above for every surface, not just the first"
+    }
+  }
+}
