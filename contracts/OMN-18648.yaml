@@ -27,4 +27,10 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/ci/test_ci_live_contact.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/ci/test_ci_live_contact_integration_omn18648.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_ci_live_contact.py?ref=54e6ac032ff0f826d60b0108cc92e9663cd6192e --jq .content | base64 -d | grep -c 'def _is_pin_only_diff'
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
