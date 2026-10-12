@@ -10,15 +10,20 @@
 # first-match-wins triage with cross-layer correlation to consumer health,
 # persisting the outcome to the runtime_error_triage table.
 #
-# This node publishes nothing. OMN-17187 removed the
-# onex.evt.omnibase-infra.error-triaged.v1 emission: no contract in any repo
-# subscribed to it and the omnidash projection its handler claimed to feed was
-# never built, so it was an unwired path (contract-topic-graph ORPHANED_PRODUCER).
+# The only event this node publishes is the escalation event
+# (onex.evt.omnibase-infra.runtime-error-escalated.v1, OMN-21029): an open
+# incident that crosses the `escalation` rule below is moved to `escalated` in
+# one atomic UPDATE and exactly one ModelRuntimeErrorEscalatedEvent is
+# published; later occurrences of the same incident publish nothing. Intended
+# consumer: the OMN-20769 monitoring watchdog, which alerts on it. OMN-17187
+# removed the onex.evt.omnibase-infra.error-triaged.v1 emission (no subscriber,
+# no projection) and it stays removed.
 #
 # Related Tickets:
 #   - OMN-5522: Create NodeRuntimeErrorTriageEffect
 #   - OMN-5529: Runtime Health Event Pipeline (epic)
 #   - OMN-17187: Remove the orphaned error-triaged.v1 emission
+#   - OMN-21029: Escalate incidents that cross the contract-declared rule
 # Contract identifiers
 name: "node_runtime_error_triage_effect"
 contract_name: "node_runtime_error_triage_effect"
@@ -35,7 +40,7 @@ node_version:
 node_type: "EFFECT_GENERIC"
 # Description
 description: >
-  Effect node that consumes runtime error events from onex.evt.omnibase-infra.runtime-error.v1 and applies first-match-wins triage. Default rules cover aiokafka, asyncpg, and aiohttp patterns. Includes cross-layer correlation with Layer 1 consumer health incidents. Uses runtime_error_triage PostgreSQL table.
+  Effect node that consumes runtime error events from onex.evt.omnibase-infra.runtime-error.v1 and applies first-match-wins triage. Default rules cover aiokafka, asyncpg, and aiohttp patterns. Includes cross-layer correlation with Layer 1 consumer health incidents. Uses runtime_error_triage PostgreSQL table. An open incident that crosses the contract-declared escalation rule is moved to escalated once and one ModelRuntimeErrorEscalatedEvent is published to onex.evt.omnibase-infra.runtime-error-escalated.v1.
 
 # Event bus subscription
 event_bus:
@@ -45,7 +50,23 @@ event_bus:
     patch: 0
   subscribe_topics:
     - "onex.evt.omnibase-infra.runtime-error.v1"
-  publish_topics: []
+  publish_topics:
+    - &runtime_error_escalated_topic "onex.evt.omnibase-infra.runtime-error-escalated.v1"
+# Typed events the handler returns, routed to their contract-declared topic.
+published_events:
+  - topic: *runtime_error_escalated_topic
+    event_type: "ModelRuntimeErrorEscalatedEvent"
+    message_category: "EVENT"
+    description: "One runtime error incident crossed the escalation rule; published once per incident."
+# Escalation rule (OMN-21029). Evaluated by the pure
+# ModelEscalationRule.evaluate on the incident the handler just wrote; only
+# incidents handled by an `alert` triage rule are eligible (`suppress` means
+# ignore, `ticket` has its own path).
+escalation:
+  # An open incident escalates when its occurrence count reaches this.
+  occurrence_threshold: 10
+  # A fingerprint at or above this severity escalates on its first occurrence.
+  new_fingerprint_severity: "critical"
 # I/O models
 input_model:
   name: "ModelRuntimeErrorEvent"
