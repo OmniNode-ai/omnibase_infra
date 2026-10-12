@@ -10,6 +10,8 @@ sibling checkouts read two different contract sets.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import re
 from pathlib import Path
 
@@ -43,3 +45,17 @@ def test_every_inline_omnimarket_checkout_reads_the_advanced_ref() -> None:
     }
     assert refs
     assert {r for r in refs if not r.endswith(_ADVANCED_REF)} == set()
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/omnimarket_pin_commit_5d6c5e4e_omn17292.json"
+)
+def test_advanced_ref_is_the_recorded_omnimarket_commit(
+    recorded_response: dict[str, object],
+) -> None:
+    assert recorded_response["repository"] == "OmniNode-ai/omnimarket"
+    raw = base64.b64decode(str(recorded_response["commit_object"]))
+    object_id = hashlib.sha1(
+        b"commit %d\0" % len(raw) + raw, usedforsecurity=False
+    ).hexdigest()
+    assert object_id == recorded_response["ref"] == _ADVANCED_REF
