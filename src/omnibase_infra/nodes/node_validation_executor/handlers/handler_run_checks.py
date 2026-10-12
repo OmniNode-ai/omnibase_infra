@@ -16,13 +16,12 @@ from __future__ import annotations
 import logging
 import time
 from datetime import UTC, datetime
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.validation import (
     ModelCheckResult,
     ModelExecutorResult,
-    ModelValidationPlan,
+    ModelValidationExecutionRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,11 +72,9 @@ class HandlerRunChecks:
         return EnumHandlerTypeCategory.EFFECT
 
     async def handle(
-        self,
-        plan: ModelValidationPlan,
-        correlation_id: UUID,
+        self, request: ModelValidationExecutionRequest
     ) -> ModelExecutorResult:
-        """Execute all checks in the validation plan.
+        """Execute all checks in the requested validation plan.
 
         MVP: Skeleton implementation that records check results without
         running actual subprocesses. Enabled checks are recorded as
@@ -87,17 +84,17 @@ class HandlerRunChecks:
         in a follow-up ticket.
 
         Args:
-            plan: Validation plan containing the checks to execute.
-            correlation_id: Correlation ID for distributed tracing.
+            request: Execution request carrying the validation plan whose
+                checks to execute.
 
         Returns:
             Aggregated executor result with all check outcomes.
         """
+        plan = request.plan
         logger.info(
-            "Executing validation plan %s with %d checks (correlation_id=%s)",
+            "Executing validation plan %s with %d checks",
             plan.plan_id,
             len(plan.checks),
-            correlation_id,
         )
 
         start_time = time.monotonic()
@@ -149,6 +146,7 @@ class HandlerRunChecks:
             candidate_id=plan.candidate_id,
             check_results=tuple(results),
             total_duration_ms=total_duration_ms,
+            score_threshold=plan.score_threshold,
         )
 
         logger.info(

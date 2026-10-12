@@ -23,6 +23,8 @@ class ModelExecutorResult(BaseModel):
         candidate_id: Reference to the pattern candidate.
         check_results: Tuple of individual check results.
         total_duration_ms: Total execution duration in milliseconds.
+        score_threshold: Minimum score for a PASS verdict, copied from the
+            plan so the adjudicator needs nothing but this result.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid", from_attributes=True)
@@ -34,6 +36,9 @@ class ModelExecutorResult(BaseModel):
     )
     total_duration_ms: float = Field(
         default=0.0, ge=0.0, description="Total execution duration in ms."
+    )
+    score_threshold: float = Field(
+        default=0.8, ge=0.0, le=1.0, description="Minimum score for PASS verdict."
     )
 
     @property

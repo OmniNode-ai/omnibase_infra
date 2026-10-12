@@ -10,18 +10,16 @@ collecting -> adjudicating -> verdict_emitted -> collecting.
 
 Available Exports:
     - NodeValidationAdjudicator: The declarative reducer node
-    - ModelAdjudicatorState: Immutable FSM state model
-    - ModelVerdict: Validation verdict output model
     - RegistryInfraValidationAdjudicator: DI registry
+
+The FSM state and verdict models are shared validation pipeline models in
+``omnibase_infra.models.validation`` (ModelAdjudicatorState, ModelVerdict), and
+the contract's handler is ``omnibase_infra.handlers.handler_validation_adjudicate``.
 
 Tracking:
     - OMN-2147: Validation Skeleton -- Orchestrator + Executor
 """
 
-from omnibase_infra.nodes.node_validation_adjudicator.models import (
-    ModelAdjudicatorState,
-    ModelVerdict,
-)
 from omnibase_infra.nodes.node_validation_adjudicator.node import (
     NodeValidationAdjudicator,
 )
@@ -30,8 +28,6 @@ from omnibase_infra.nodes.node_validation_adjudicator.registry import (
 )
 
 __all__: list[str] = [
-    "ModelAdjudicatorState",
-    "ModelVerdict",
     "NodeValidationAdjudicator",
     "RegistryInfraValidationAdjudicator",
 ]

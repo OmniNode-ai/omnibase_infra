@@ -25,13 +25,13 @@ from omnibase_infra.enums import (
     EnumValidationVerdict,
 )
 from omnibase_infra.errors import RuntimeHostError
+from omnibase_infra.models.validation.model_adjudicator_state import (
+    ModelAdjudicatorState,
+)
 from omnibase_infra.models.validation.model_check_result import (
     ModelCheckResult,
 )
-from omnibase_infra.nodes.node_validation_adjudicator.models.model_adjudicator_state import (
-    ModelAdjudicatorState,
-)
-from omnibase_infra.nodes.node_validation_adjudicator.models.model_verdict import (
+from omnibase_infra.models.validation.model_verdict import (
     ModelVerdict,
 )
 

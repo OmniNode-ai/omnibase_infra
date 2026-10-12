@@ -1,0 +1,58 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21056"
+title: "one validation-candidate-submitted event reaches a validation-result-published event and a validation ledger row"
+summary: "A synthetic pattern candidate published to validation-candidate-submitted on the dev lane stopped after one hop, at validation-plan-created. The executor and the adjudicator declared no subscribe_topics and no published_events (so they had no consumer group and the kernel built no result applier for them), the orchestrator's single unscoped routing entry sent checks-completed and adjudication-completed to the candidate handler, nothing emitted execution-requested, adjudication-requested or result-published, and the validation ledger projection did not read the result topic. Each node now owns a topic-scoped routing entry per subscribe topic and declares the published_events that route its returned model to the next topic, and the ledger projection reads validation-result-published."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn21056-validation-pipeline-reaches-result"
+    statement: "A pattern candidate walks candidate-submitted, plan-created, execution-requested, checks-completed, adjudication-requested, adjudication-completed and result-published, and the result is projected into the validation ledger."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: one validation-candidate-submitted event for a synthetic candidate, published on the dev lane bus, yields exactly one validation-result-published event for the correlation id and a row in the validation ledger table -- falsifier: rpk topic consume on validation-result-published.v1 filtered by the correlation id returns no record or more than one, or the ledger table has no row for it"
+      - id: "AC2"
+        statement: "AC2: every missing subscription or publisher between plan-created, execution-requested, checks-completed, adjudication-requested and adjudication-completed has a failing test written first and passes after the fix -- falsifier: uv run pytest tests/ -k validation_pipeline -q"
+      - id: "AC3"
+        statement: "AC3: a check that fails yields a FAIL or QUARANTINE verdict and no promotion, through the entry point the runtime uses -- falsifier: uv run pytest tests/ -k \"validation_pipeline and quarantine\" -q"
+evidence_requirements:
+  - kind: "tests"
+    description: "The pipeline wiring tests pass at the head and fail at the merge base."
+    command: "uv run pytest tests/unit/nodes/node_validation_orchestrator/test_validation_pipeline_wiring_omn21056.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21056-ac1-dev-lane-consumers"
+    description: "AC1. After the deploy agent rolls the dev lane, the executor and the adjudicator each hold a consumer group on their subscribe topic, which they did not before."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "ssh \"$ONEX_RUNTIME_SSH_HOST\" \"docker exec omnibase-infra-redpanda sh -c 'rpk -X user=\\\"\\$DEV_KAFKA_SASL_USERNAME\\\" -X pass=\\\"\\$DEV_KAFKA_SASL_PASSWORD\\\" -X sasl.mechanism=SCRAM-SHA-256 group list'\" | grep -q 'node_validation_executor.consume' && ssh \"$ONEX_RUNTIME_SSH_HOST\" \"docker exec omnibase-infra-redpanda sh -c 'rpk -X user=\\\"\\$DEV_KAFKA_SASL_USERNAME\\\" -X pass=\\\"\\$DEV_KAFKA_SASL_PASSWORD\\\" -X sasl.mechanism=SCRAM-SHA-256 group list'\" | grep -q 'node_validation_adjudicator.consume'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn21056-ac1-dev-lane-result-published"
+    description: "AC1. After the deploy agent rolls the dev lane, validation-result-published.v1 holds a record, which it did not before."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "test \"$(ssh \"$ONEX_RUNTIME_SSH_HOST\" \"docker exec omnibase-infra-redpanda sh -c 'rpk -X user=\\\"\\$DEV_KAFKA_SASL_USERNAME\\\" -X pass=\\\"\\$DEV_KAFKA_SASL_PASSWORD\\\" -X sasl.mechanism=SCRAM-SHA-256 topic describe onex.evt.platform.validation-result-published.v1 -p' | tail -1 | awk '{print \\$NF}'\")\" -ge 1"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn21056-ac2-pipeline-tests"
+    description: "AC2. The pipeline wiring tests pass: every hop topic has a publisher and a subscriber, every subscribe topic has its own routing entry, every publishing contract declares published_events, and one candidate reaches exactly one result."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/nodes/node_validation_orchestrator/test_validation_pipeline_wiring_omn21056.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn21056-ac3-fail-and-quarantine"
+    description: "AC3. A failed REQUIRED check publishes a FAIL result and a score under the threshold publishes a QUARANTINE result, both entered at the adjudicator's subscribe topic, and neither reaches the lifecycle topic."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/nodes/node_validation_orchestrator/test_validation_pipeline_wiring_omn21056.py -q -k \"validation_pipeline and (quarantine or fail)\""
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC3"]

@@ -27,7 +27,14 @@ Exports:
     ModelValidateAndRaiseParams: Parameters for validate and raise operations
     ModelValidationErrorParams: Parameters for security validation error creation
     ModelValidationOutcome: Generic validation result model
+    ModelValidationAdjudicationRequest: Request to the adjudicator for a verdict
+    ModelValidationExecutionRequest: Request to the executor to run a plan
     ModelValidationPlan: Validation plan produced by orchestrator
+
+``ModelAdjudicatorState`` and ``ModelVerdict`` (the adjudicator's FSM state and
+verdict) live in this package too but are imported by module path, not
+exported here: they import ``omnibase_infra.errors``, which imports this
+package, so exporting them would be a circular import.
 """
 
 from omnibase_infra.models.validation.model_any_type_validation_result import (
@@ -80,8 +87,14 @@ from omnibase_infra.models.validation.model_planned_check import ModelPlannedChe
 from omnibase_infra.models.validation.model_validate_and_raise_params import (
     ModelValidateAndRaiseParams,
 )
+from omnibase_infra.models.validation.model_validation_adjudication_request import (
+    ModelValidationAdjudicationRequest,
+)
 from omnibase_infra.models.validation.model_validation_error_params import (
     ModelValidationErrorParams,
+)
+from omnibase_infra.models.validation.model_validation_execution_request import (
+    ModelValidationExecutionRequest,
 )
 from omnibase_infra.models.validation.model_validation_outcome import (
     ModelValidationOutcome,
@@ -109,7 +122,9 @@ __all__ = [
     "ModelOutputValidationParams",
     "ModelPlannedCheck",
     "ModelValidateAndRaiseParams",
+    "ModelValidationAdjudicationRequest",
     "ModelValidationErrorParams",
+    "ModelValidationExecutionRequest",
     "ModelValidationOutcome",
     "ModelValidationPlan",
 ]
