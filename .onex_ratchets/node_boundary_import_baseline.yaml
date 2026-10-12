@@ -326,7 +326,6 @@ edges:
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_setup_orchestrator:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_setup_preflight_effect:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_setup_validate_effect:'
-  - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_topic_migration_executor_effect:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_topic_migration_projection:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_update_plan_reducer:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_validation_adjudicator:'

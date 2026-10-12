@@ -35,6 +35,7 @@ from omnibase_core.models.contracts.model_topic_migration_contract import (
 from omnibase_core.models.contracts.model_topic_schema_binding import (
     ModelTopicSchemaBinding,
 )
+from omnibase_core.models.errors import ModelOnexError
 from omnibase_core.models.primitives.model_semver import ModelSemVer
 from omnibase_core.services.service_handler_resolver import ServiceHandlerResolver
 from omnibase_core.services.service_local_handler_ownership_query import (
@@ -187,6 +188,17 @@ def _materialized_dispatch(command: ModelTopicMigrationCommand) -> dict[str, obj
     }
 
 
+async def _dispatch(
+    dispatcher: Callable[[object], Awaitable[object]],
+    command: ModelTopicMigrationCommand,
+) -> tuple[Exception | None, object]:
+    """Run the dispatcher; return (raised error, result) so a failure is an assertion."""
+    try:
+        return None, await dispatcher(_materialized_dispatch(command))
+    except (ValueError, ModelOnexError) as exc:
+        return exc, None
+
+
 @pytest.mark.asyncio
 async def test_dual_write_command_reaches_a_dual_write_lifecycle_event() -> None:
     """RED before the fix: the dispatcher raised ``does not expose a callable handle()``."""
@@ -198,8 +210,9 @@ async def test_dual_write_command_reaches_a_dual_write_lifecycle_event() -> None
         phase=EnumMigrationPhase.PLANNED, target=EnumMigrationPhase.DUAL_WRITE
     )
 
-    result = await dispatcher(_materialized_dispatch(command))
+    error, result = await _dispatch(dispatcher, command)
 
+    assert error is None, f"dispatch raised {error!r}"
     events = [
         event
         for event in getattr(result, "output_events", ())
@@ -245,14 +258,13 @@ async def test_cutover_with_residual_lag_emits_no_cutover_lifecycle_event() -> N
         phase=EnumMigrationPhase.DUAL_READ, target=EnumMigrationPhase.CUTOVER
     )
 
-    emitted: list[object] = []
-    with pytest.raises(ValueError, match="cutover blocked by drain-proof gate"):
-        result = await dispatcher(_materialized_dispatch(command))
-        emitted.extend(getattr(result, "output_events", ()))
+    error, result = await _dispatch(dispatcher, command)
 
+    assert isinstance(error, ValueError), f"dispatch raised {error!r}"
+    assert "cutover blocked by drain-proof gate" in str(error)
     assert not [
         event
-        for event in emitted
+        for event in getattr(result, "output_events", ())
         if isinstance(event, ModelTopicMigrationLifecycleEvent)
         and event.phase is EnumMigrationPhase.CUTOVER
     ]
