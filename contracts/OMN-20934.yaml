@@ -59,3 +59,10 @@ dod_evidence:
       - check_type: command
         check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/lane_census_plan.py?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("def lane_census_dir")' | grep -qx true
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-20934-sibling-verifier-fetches-census
+    description: The sibling lane verifier job in runtime-rebuild-trigger-reusable.yml fetches the private census overlay before the probe and keeps the probe and emitter always-running. The test does not exist at the merge base, so the control fails there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_deploy_lane_verify_route_omn19507.py -q -p no:randomly -k sibling_verifier_fetches_private_census_before_probing
+        cwd: ${OMNI_HOME}/omnibase_infra
