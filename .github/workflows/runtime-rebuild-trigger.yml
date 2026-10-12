@@ -742,6 +742,23 @@ jobs:
       # The probe function, its CLI flag and its tests are all still there for
       # that wiring.
 
+      # OMN-18595: the probe's lane_sync check runs the lane census, and since
+      # 222eebe0d the lane manifest is private config this checkout does not
+      # carry. The verify runners hold no OMNI_HOME and no private clone by
+      # design (tests/ci/test_verify_runner_credential_read_only_omn18408.py),
+      # so without this step the census exits 3 and every dev lab-pass receipt
+      # from 222eebe0d on read lane_sync indeterminate.
+      # The action exports ONEX_WORKSPACE_CONFIG_ROOT through GITHUB_ENV, which
+      # the probe's census inherits. A failed fetch leaves the check
+      # indeterminate, so the receipt stays non-PASS.
+      - name: Fetch the private lane census
+        if: always() && steps.converge.outputs.probe_lane != 'false'
+        uses: ./.github/actions/fetch-census-overlay
+        with:
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+
       - name: Probe the dev lane
         id: probe
         # OMN-18976: an observation with nothing to answer for probes nothing.
