@@ -10,13 +10,13 @@ requirements:
     statement: "A pattern candidate submitted on the bus reaches exactly one validation-result-published event, and a failed check reaches a FAIL or QUARANTINE verdict."
     acceptance:
       - id: "AC2"
-        statement: "AC2: every hop between plan-created, execution-requested, checks-completed, adjudication-requested and adjudication-completed has a dispatched consumer, driven through the auto-wiring dispatch callback and the contract-derived result applier -- falsifier: uv run pytest tests/unit/nodes/node_validation_orchestrator/test_validation_pipeline_chain_omn21056.py fails at the merge base and passes at the head"
+        statement: "AC2: every hop between plan-created, execution-requested, checks-completed, adjudication-requested and adjudication-completed has a dispatched consumer, driven through the auto-wiring dispatch callback and the contract-derived result applier -- falsifier: uv run pytest tests/integration/runtime/test_validation_pipeline_chain_omn21056.py fails at the merge base and passes at the head"
       - id: "AC3"
         statement: "AC3: a failed required check yields a FAIL verdict and recommended failures below the threshold yield QUARANTINE, through the same dispatch entry point, with no event on the lifecycle topic -- falsifier: uv run pytest tests/ -k 'validation_pipeline and quarantine' -q selects the quarantine test, and the FAIL test in the same file fails at the merge base"
 evidence_requirements:
   - kind: "tests"
     description: "The chain test drives a candidate through every hop to result-published and the ledger intent, and the failed-check paths."
-    command: "uv run pytest tests/unit/nodes/node_validation_orchestrator/test_validation_pipeline_chain_omn21056.py -q -n 0"
+    command: "uv run pytest tests/integration/runtime/test_validation_pipeline_chain_omn21056.py -q -n 0"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -27,7 +27,7 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "uv run pytest tests/unit/nodes/node_validation_orchestrator/test_validation_pipeline_chain_omn21056.py -q -n 0 -k 'subscriber or real_dispatch or projected'"
+        check_value: "uv run pytest tests/integration/runtime/test_validation_pipeline_chain_omn21056.py -q -n 0 -k 'subscriber or real_dispatch or projected'"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC2"]
   - id: "dod-omn21056-ac3-failed-checks"
@@ -35,6 +35,6 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "command"
-        check_value: "uv run pytest tests/unit/nodes/node_validation_orchestrator/test_validation_pipeline_chain_omn21056.py -q -n 0 -k 'fail_verdict or quarantine'"
+        check_value: "uv run pytest tests/integration/runtime/test_validation_pipeline_chain_omn21056.py -q -n 0 -k 'fail_verdict or quarantine'"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC3"]
