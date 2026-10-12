@@ -23,6 +23,8 @@ JUDGE_NETWORK = "omnibase-infra-judge-network"
 # surfaces its `:?`-required vars even for services excluded from the judge
 # profile. These values are never used to run containers — `config` only.
 LAYERED_RENDER_DUMMY_ENV = {
+    # OMN-20932: lane overlays are private; the mount refuses without this.
+    "ONEX_LANE_OVERLAY_DIR": "/nonexistent/onex-lane-overlays",
     # OMN-16843: x-runtime-env builds OMNINODE_INTERNAL_DB_URL from this with
     # the fail-closed ${VAR:?} form, so the layered render aborts without it.
     # Render-only, never a real credential.
@@ -144,6 +146,7 @@ def _compose_render_env() -> dict[str, str]:
         "PATH": os.environ.get("PATH", ""),
         "PYTHONPATH": python_path,
         "USER": os.environ.get("USER", ""),
+        "ONEX_LANE_OVERLAY_DIR": LAYERED_RENDER_DUMMY_ENV["ONEX_LANE_OVERLAY_DIR"],
     }
 
 

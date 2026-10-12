@@ -797,12 +797,15 @@ def _memory_inputs() -> tuple[dict[str, str], list[str]]:
     """
     import yaml  # lazy: the inventory path itself needs no third-party import
 
-    manifest_path = os.environ.get("LANE_MANIFEST") or str(
-        Path(__file__).resolve().parent.parent
-        / "deploy"
-        / "lane-census"
-        / "lane-manifest.yaml"
-    )
+    # OMN-20934: the manifest is private config at the workspace config root;
+    # the planner owns that resolution (LANE_MANIFEST still overrides it).
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from lane_census_plan import LaneCensusConfigError, default_manifest_path
+
+    try:
+        manifest_path = str(default_manifest_path())
+    except LaneCensusConfigError as exc:
+        raise MemoryProbeError(f"lane manifest unreadable: {exc}") from exc
     try:
         with open(manifest_path, encoding="utf-8") as fh:
             manifest = yaml.safe_load(fh) or {}

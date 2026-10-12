@@ -12,11 +12,22 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from omnibase_infra.topology.application_database import load_topology_profile
+from omnibase_infra.topology.table_grant_derivation import (
+    LEGACY_MIGRATION_TABLE_DECLARATIONS,
+    STATE_IO_TABLE_DECLARATIONS,
+    ContractTableDeclaration,
+)
 from omnibase_infra.validation.application_database_domain_enforcement import (
     application_database_created_catalog_identities,
     application_database_sql_target_requirements,
     lint_application_database_sql,
     load_application_database_ownership_identities,
+)
+from omnibase_infra.validation.enums.enum_application_inventory_object_kind import (
+    EnumApplicationInventoryObjectKind,
+)
+from omnibase_infra.validation.models.model_application_database_catalog_identity import (
+    ModelApplicationDatabaseCatalogIdentity,
 )
 
 _NON_DEPLOYABLE_SQL_EXACT_PATHS = frozenset(
@@ -248,6 +259,20 @@ _LEGACY_DEFAULT_SCHEMA_SQL_EXACT_PATHS = frozenset(
         # application relation. Keep the exact-path exemption: created-object
         # ownership validation still runs unconditionally.
         Path("docker/migrations/forward/110_add_ledger_chain_chain_state.sql"),
+        # OMN-21029: 111 and its rollback swap the active-fingerprint unique
+        # index on runtime_error_triage, created by 055 in the omnibase_infra
+        # SERVICE database, whose declared schema is public. Like 110 above,
+        # this is existing service authority, not a new application relation.
+        # Keep the exact-path exemptions: created-object ownership validation
+        # still runs unconditionally.
+        Path(
+            "docker/migrations/forward/"
+            "111_widen_runtime_error_triage_active_unique_to_escalated.sql"
+        ),
+        Path(
+            "docker/migrations/rollback/"
+            "rollback_111_widen_runtime_error_triage_active_unique_to_escalated.sql"
+        ),
         # OMN-18172: 106 alters the existing delegation_workflow_state relation
         # created by 090 in the omnibase_infra SERVICE database. That database
         # has exactly one declared schema, public, while StateStoreAdapter and
@@ -614,6 +639,57 @@ def _stale_baseline_entries(
     return tuple(sorted(stale))
 
 
+def _supplemental_ownership_identities(
+    repository: Path,
+    authoritative: Sequence[ModelApplicationDatabaseCatalogIdentity],
+    *,
+    declarations: Sequence[ContractTableDeclaration],
+) -> tuple[ModelApplicationDatabaseCatalogIdentity, ...]:
+    """Resolve the same migration-owned tables used by grant derivation.
+
+    An infra-first migration can precede its downstream ownership manifest.
+    Its typed supplemental declaration supplies ownership during that window,
+    but only for a table actually created by its declared local migration.
+    Manifest ownership takes over when the downstream declaration arrives;
+    the existing supplemental-expiry gate then requires retiring the bridge.
+    """
+    manifest_locations = {
+        (identity.schema, identity.name) for identity in authoritative
+    }
+    supplemental: dict[
+        tuple[str, str, EnumApplicationInventoryObjectKind, str | None],
+        ModelApplicationDatabaseCatalogIdentity,
+    ] = {}
+    root = repository.resolve()
+    for declaration in declarations:
+        table = declaration.table
+        if table.database_ref != "application":
+            continue
+        migration = (root / table.migration).resolve()
+        if not migration.is_relative_to(root) or not migration.is_file():
+            continue
+        identity = ModelApplicationDatabaseCatalogIdentity(
+            schema=table.schema,
+            name=table.name,
+            kind=EnumApplicationInventoryObjectKind.TABLE,
+        )
+        created = application_database_created_catalog_identities(
+            migration.read_text(encoding="utf-8")
+        )
+        if identity.identity not in {item.identity for item in created}:
+            continue
+        # An upstream declaration of the wrong kind must remain a gate failure,
+        # not be repaired by assigning a second owner at the same location.
+        if (identity.schema, identity.name) in manifest_locations:
+            continue
+        if identity.identity in supplemental:
+            raise ValueError(
+                f"duplicate supplemental ownership declaration: {identity.identity!r}"
+            )
+        supplemental[identity.identity] = identity
+    return tuple(supplemental.values())
+
+
 def validate_changed_sql(
     repository: Path,
     base_revision: str,
@@ -634,6 +710,12 @@ def validate_changed_sql(
     try:
         ownership_identities = load_application_database_ownership_identities(
             ownership_manifest_paths
+        )
+        ownership_identities += _supplemental_ownership_identities(
+            repository,
+            ownership_identities,
+            declarations=STATE_IO_TABLE_DECLARATIONS
+            + LEGACY_MIGRATION_TABLE_DECLARATIONS,
         )
     except ValueError as exc:
         ownership_identities = ()

@@ -40,7 +40,11 @@ from scripts.ci.deploy_lane_verify_route import (
     route,
     targets_for_receipt_lane,
 )
-from scripts.ci.lab_pass_receipt import ANY_OF_DEFAULT_LANES, EnumLabLane
+from scripts.ci.lab_pass_receipt import (
+    ANY_OF_DEFAULT_LANES,
+    EnumLabLane,
+    ModelLabPassCheck,
+)
 from scripts.ci.lane_settle_budget import (
     assert_declaration_within_bounds,
     load_declaration,
@@ -403,6 +407,62 @@ def _jobs(path: Path) -> dict[str, Any]:
 
 def _run_text(job: dict[str, Any]) -> str:
     return "\n".join(str(step.get("run", "")) for step in job["steps"])
+
+
+def test_sibling_verifier_fetches_private_census_before_probing() -> None:
+    """OMN-20934: a routed runner has a docker socket, not the host's config.
+
+    Without the overlay, a successful sibling redeploy cannot establish the
+    mandatory lane_sync check. Fetch failure must still reach the real probe
+    and emitter so it records a non-PASS receipt rather than losing evidence.
+    """
+    steps = _jobs(REUSABLE)["verify-sibling-converged"]["steps"]
+    fetches = [
+        (index, step)
+        for index, step in enumerate(steps)
+        if step.get("uses") == "./.github/actions/fetch-census-overlay"
+    ]
+    assert len(fetches) == 1, "the sibling verifier needs the private census"
+    fetch_index, fetch = fetches[0]
+    assert fetch["with"] == {
+        "overlay-repo": "${{ vars.OMNI_CI_OVERLAY_REPO }}",
+        "app-id": "${{ secrets.ONEXBOT_OCC_APP_ID }}",
+        "private-key": "${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}",
+    }
+    assert fetch["if"] == "always()"
+    assert not fetch.get("continue-on-error", False)
+    probe_index = next(i for i, step in enumerate(steps) if step.get("id") == "probe")
+    assert fetch_index < probe_index
+    assert steps[probe_index]["if"] == "always()"
+    emitter = next(
+        step for step in steps if "lab_pass_receipt.py emit" in step.get("run", "")
+    )
+    assert emitter["if"] == "always()"
+    assert not emitter.get("continue-on-error", False)
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/omn20934_sibling_lab_measurement.json")
+def test_recorded_sibling_probes_do_not_promote_an_unproven_revision(
+    recorded_response: dict[str, object],
+) -> None:
+    """A healthy census alone cannot turn an indeterminate revision into PASS."""
+    recorded_checks = recorded_response["probe_checks"]
+    assert isinstance(recorded_checks, list)
+    checks = {
+        check.name: check
+        for check in (ModelLabPassCheck.from_dict(row) for row in recorded_checks)
+    }
+    assert all(check.ok for check in checks.values())
+    assert checks["lane_sync"].ok
+    census = json.loads(checks["lane_sync"].evidence)
+    assert census["lanes_checked"]
+    assert not census["has_drift"]
+    assert not census["findings"]
+    assert checks["probe_generation_bound"].ok
+    revision = ModelLabPassCheck.from_dict(recorded_response["sibling_revision"])
+    assert revision.indeterminate
+    assert not revision.ok
+    assert recorded_response["receipt_result"] == "FAIL"
 
 
 @pytest.mark.parametrize(

@@ -40,6 +40,12 @@ from typing import Any
 
 import pytest
 
+from tests.helpers.lane_census_fixtures import (
+    NEUTRAL_HOSTNAME,
+    NEUTRAL_LANE,
+    NEUTRAL_MANIFEST,
+)
+
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
@@ -281,12 +287,12 @@ def test_empty_inventory_is_the_total_outage_signal(planner: Any) -> None:
     This pins the blast radius the fail-open produced, so nobody reintroduces a
     "just default to empty" shortcut.
     """
-    manifest = planner.load_manifest()
+    manifest = planner.load_manifest(NEUTRAL_MANIFEST)
     plan = planner.build_plan(
         {
             "lane": None,
             # OMN-19088: the planner scopes to the lanes declared for this host.
-            "host": "omninode-pc",
+            "host": NEUTRAL_HOSTNAME,
             "containers": [],
             "networks": [],
             "runtime_tag": None,
@@ -294,14 +300,21 @@ def test_empty_inventory_is_the_total_outage_signal(planner: Any) -> None:
         manifest,
     )
     assert plan["has_drift"] is True
-    # OMN-16803 moved this floor from 30 to 20. Eight declared `kind: service`
-    # entries (four on stability-test, four on prod) were reclassified
-    # `profile_gated` because the lane compose files disable them via profile
-    # overrides — they can never run there, so their eight "absent" findings were
-    # permanent FALSE criticals padding this count. The signal being pinned here
-    # is unchanged: an empty envelope must still produce a large, uniformly
-    # critical, multi-lane finding set, never a quiet zero.
-    assert len(plan["findings"]) >= 20
+    # OMN-20934: pinned against the neutral manifest, so the floor is derived
+    # from it rather than counted from a lab's: every required service of the
+    # required lane on this host is absent and its network detached. The
+    # signal is unchanged: an empty envelope produces a finding for every
+    # declared service, uniformly critical, never a quiet zero.
+    required = [
+        s["name"]
+        for s in manifest["lanes"][NEUTRAL_LANE]["services"]
+        if s.get("kind", "service") == "service"
+    ]
+    absent = {
+        f["container"] for f in plan["findings"] if f["kind"] == "container_absent"
+    }
+    assert absent == set(required) and len(required) >= 4
+    assert any(f["kind"] == "network_detached" for f in plan["findings"])
     assert {f["severity"] for f in plan["findings"]} == {"critical"}
 
 
@@ -377,7 +390,8 @@ def test_recorded_api_envelope_drives_the_planner(inventory: Any, planner: Any) 
     )
     # OMN-19088: the collector does not name the host; the driver does.
     plan = planner.build_plan(
-        {**envelope, "host": "omninode-pc"}, planner.load_manifest()
+        {**envelope, "host": NEUTRAL_HOSTNAME},
+        planner.load_manifest(NEUTRAL_MANIFEST),
     )
     assert plan["schema_version"]
     # The lane label on the recorded rows must be read through the mapping form.

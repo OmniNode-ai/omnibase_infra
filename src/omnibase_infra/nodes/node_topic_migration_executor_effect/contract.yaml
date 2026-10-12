@@ -51,7 +51,7 @@ handler_routing:
       handler:
         name: "HandlerTopicMigrationExecutor"
         module: "omnibase_infra.nodes.node_topic_migration_executor_effect.handlers.handler_topic_migration_executor"
-      description: "Advance a topic migration one forward phase with drain-proof gating"
+      description: "Advance a topic migration one forward phase with drain-proof gating; dispatched to handle(request: ModelTopicMigrationCommand) -> ModelTopicMigrationLifecycleEvent (OMN-21050)"
       output_fields:
         - event_id
         - migration_ticket
@@ -91,7 +91,7 @@ metadata:
   author: "OmniNode Team"
   license: "MIT"
   created: "2026-06-02"
-  updated: "2026-06-02"
+  updated: "2026-10-12"
   tags:
     - effect
     - migration

@@ -1,0 +1,47 @@
+schema_version: 1.0.0
+ticket_id: OMN-21029
+title: 'omnibase_infra: node_runtime_error_triage_effect escalates recurring and critical incidents'
+summary: The runtime error triage effect moves an open incident to escalated once, by a contract-declared rule, and publishes one typed escalation event.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-escalate-once
+    statement: An incident crossing the declared occurrence threshold, or a first-occurrence critical fingerprint, is escalated once and publishes exactly one event.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the escalation rule is declared in contract.yaml (occurrence_threshold 10, new_fingerprint_severity critical) with the publish topic and published_events entry for ModelRuntimeErrorEscalatedEvent -- falsifier: uv run pytest tests/unit/nodes/node_runtime_error_triage_effect -k escalat -q -n 0 fails when the contract lacks the rule or the topic.'
+      - id: AC2
+        statement: 'AC2: later occurrences of an escalated fingerprint publish nothing -- falsifier: uv run pytest tests/unit/nodes/node_runtime_error_triage_effect -k escalate_once -q -n 0 fails when a second event is returned.'
+evidence_requirements:
+  - kind: tests
+    description: Escalation decision, handler and contract assertions.
+    command: uv run pytest tests/unit/nodes/node_runtime_error_triage_effect tests/unit/nodes/test_handler_runtime_error_triage.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-escalation-ac1
+    description: The contract declares the rule, topic and published event, and the handler honours them.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_runtime_error_triage_effect/test_escalation.py -k escalat -q -n 0
+    binds_ac:
+      - AC1
+  - id: dod-escalation-ac2
+    description: An escalated fingerprint publishes once and later occurrences publish nothing.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_runtime_error_triage_effect/test_escalation.py -k escalate_once -q -n 0
+    binds_ac:
+      - AC2
+  - id: dod-escalation-deploy
+    description: The deployed runtime container imports the escalation rule this change adds. It reads the runtime container after the deploy agent rolls it, which a hosted runner does not have, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.nodes.node_runtime_error_triage_effect.models.model_escalation_rule import ModelEscalationRule'

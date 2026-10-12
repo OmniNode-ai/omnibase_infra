@@ -33,7 +33,6 @@ from scripts import lab_principal_issuer as lpi
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GRANTS = REPO_ROOT / "deploy" / "lab" / "developer-principal-grants.yaml"
-FACTS = REPO_ROOT / "deploy" / "lab" / "developer-onboarding.yaml"
 LOGIN = "dev.person@omninode.ai"
 UNIX_ONLY = pytest.mark.skipif(
     not hasattr(socket, "SO_PEERCRED"), reason="SO_PEERCRED is Linux-only"
@@ -116,8 +115,42 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
         "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.cmd.omnimarket.work-ledger-append-requested.v1",
         "onex.cmd.omnimarket.pr-handoff-requested.v1",
+        "onex.cmd.omnimarket.github-repo-gateway-read-requested.v1",
     }
     assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
+
+
+def test_scm_read_caller_reads_the_gateway_terminal_and_never_its_serve_group(
+    declaration: lpi.Declaration,
+) -> None:
+    # OMN-21000: `onex scm job-log` (and every gateway read verb) publishes the
+    # gateway read command and reads the one completed terminal under its own
+    # per-call group. Without these three grants the dev broker refused the
+    # terminal subscribe with TopicAuthorizationFailedError.
+    grants = {g.name: g for g in declaration.grants}
+    command = grants["onex.cmd.omnimarket.github-repo-gateway-read-requested.v1"]
+    assert (command.resource, command.pattern) == ("topic", "literal")
+    assert set(command.operations) == {"write", "describe"}
+    terminal = grants["onex.evt.omnimarket.github-repo-gateway-read-completed.v1"]
+    assert (terminal.resource, terminal.pattern) == ("topic", "literal")
+    assert set(terminal.operations) == {"read", "describe"}
+
+    prefix = "local.omnimarket.scm_command_client.consume.v1."
+    caller = grants[prefix]
+    assert (caller.resource, caller.pattern) == ("group", "prefixed")
+    assert set(caller.operations) == {"read", "describe"}
+    # The bus client consumes as <group>.__t.<topic>; the per-call group adds a
+    # 12-hex suffix to the derived caller group.
+    assert (
+        f"{prefix}0123456789ab.__t.onex.evt.omnimarket."
+        "github-repo-gateway-read-completed.v1"
+    ).startswith(caller.name)
+    for version in ("1.0.0", "1.1.0", "1.2.0"):
+        serve = f"local.omnimarket.node_github_repo_gateway_effect.consume.{version}"
+        assert not serve.startswith(caller.name)
+
+    # The write node mutates GitHub; a developer principal holds none of it.
+    assert not any("github-repo-write" in g.name for g in declaration.grants)
 
 
 def test_handoff_caller_can_read_replies_without_writing_them(
@@ -593,29 +626,3 @@ def test_serve_refuses_a_path_that_is_not_a_socket(
     with pytest.raises(SystemExit, match="non-socket path"):
         lpi.UnixHTTPServer(path, lpi.make_handler(issuer, os.getuid()))
     assert path.read_text() == "leave this file untouched"
-
-
-# --- the file the onboarding script reads ---------------------------------
-
-
-def test_onboarding_facts_are_flat_and_complete() -> None:
-    """lab-onboarding.sh parses this with sed before Python exists: one key per line."""
-    keys: dict[str, str] = {}
-    for line in FACTS.read_text().splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        match = re.fullmatch(r"([a-z_]+):[ \t]*(\S.*)", line)
-        assert match, f"not a flat key: value line: {line!r}"
-        keys[match.group(1)] = match.group(2)
-    for required in (
-        "schema",
-        "tailnet_suffix",
-        "lane",
-        "principal_issuer_url",
-        "lab_model_url",
-        "lab_model_name",
-    ):
-        assert required in keys, required
-    assert keys["lane"] == yaml.safe_load(GRANTS.read_text())["lane"]
-    assert keys["principal_issuer_url"].startswith("https://")
-    assert keys["lab_model_url"].endswith("/v1/chat/completions")

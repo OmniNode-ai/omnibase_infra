@@ -228,8 +228,47 @@ jobs:
           TARGET_PIN: ${{ steps.pins.outputs.target }}
         run: |
           set -euo pipefail
+          # The Repo Evidence Gate reads contracts/OMN-17292.yaml at this head (OMN-20074),
+          # refuses a contract carried unchanged from the merge base, and runs its check
+          # at the merge base, where it must fail: bind the value this refresh moved.
+          PATTERN="omnimarket_contract_ref: ${TARGET_PIN}"
+          grep -qF -- "$PATTERN" .github/omnimarket-contract-pin.yaml
+          CHECK="grep -qF -- '$PATTERN' .github/omnimarket-contract-pin.yaml"
+          cat > contracts/OMN-17292.yaml <<EOF_CONTRACT
+          schema_version: "1.0.0"
+          ticket_id: OMN-17292
+          title: "The omnimarket contract pin advances to ${TARGET_PIN}"
+          summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
+          is_seam_ticket: false
+          interface_change: false
+          interfaces_touched: []
+          requirements:
+            - id: req-omn17292
+              statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
+              acceptance:
+                - id: AC1
+                  statement: "AC1: .github/omnimarket-contract-pin.yaml carries the refreshed value -- falsifier: $CHECK"
+          evidence_requirements:
+            - kind: command
+              description: .github/omnimarket-contract-pin.yaml carries the refreshed value.
+              command: "$CHECK"
+          emergency_bypass:
+            enabled: false
+            justification: ''
+            follow_up_ticket_id: ''
+          dod_evidence:
+            - id: dod-omn-17292-ac1
+              description: .github/omnimarket-contract-pin.yaml carries the refreshed value.
+              source: manual
+              checks:
+                - check_type: command
+                  check_value: "$CHECK"
+                  cwd: \${OMNI_HOME}/omnibase_infra
+              binds_ac: [AC1]
+          EOF_CONTRACT
           # .proof-dependencies is a CI-only checkout; never let it into a commit.
           git add -- .github/omnimarket-contract-pin.yaml \
+                     contracts/OMN-17292.yaml \
                      .github/sibling-pins.yaml \
                      .github/workflows \
                      src/omnibase_infra/topology/instances \

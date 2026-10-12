@@ -28,7 +28,7 @@ class ModelBifrostBackendConfig(BaseModel):
         backend_id: Stable unique identifier for this backend.
             Referenced by ``ModelBifrostRoutingRule.backend_ids``.
         base_url: Base URL for the backend endpoint
-            (e.g. ``"http://192.168.86.201:8000"``). The gateway
+            (e.g. ``"http://192.0.2.10:8000"``). The gateway
             appends ``/v1/chat/completions`` or ``/v1/completions``
             based on the operation type.
         hmac_secret: Optional HMAC-SHA256 secret key for request
@@ -48,7 +48,7 @@ class ModelBifrostBackendConfig(BaseModel):
     Example:
         >>> backend = ModelBifrostBackendConfig(
         ...     backend_id="qwen-14b",
-        ...     base_url="http://192.168.86.201:8000",
+        ...     base_url="http://192.0.2.10:8000",
         ...     model_name="qwen2.5-coder-14b",
         ... )
     """
@@ -129,11 +129,11 @@ class ModelBifrostConfig(BaseModel):
         ...     backends={
         ...         "qwen-14b": ModelBifrostBackendConfig(
         ...             backend_id="qwen-14b",
-        ...             base_url="http://192.168.86.201:8000",
+        ...             base_url="http://192.0.2.10:8000",
         ...         ),
         ...         "codestral": ModelBifrostBackendConfig(
         ...             backend_id="codestral",
-        ...             base_url="http://192.168.86.202:8000",
+        ...             base_url="http://192.0.2.11:8000",
         ...         ),
         ...     },
         ...     routing_rules=[

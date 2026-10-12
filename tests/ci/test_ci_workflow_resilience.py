@@ -189,7 +189,7 @@ def test_migration_conflict_action_is_blocking() -> None:
         step
         for step in job["steps"]
         if str(step.get("uses", "")).startswith(
-            "OmniNode-ai/onex_change_control/.github/actions/validate-boundaries@"
+            "OmniNode-ai/omnibase_core/.github/actions/validate-boundaries@de3398d1"
         )
     )
     assert "continue-on-error" not in validate_step

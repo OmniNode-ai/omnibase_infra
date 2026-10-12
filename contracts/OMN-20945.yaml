@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20945
+title: Repair the duplicate mapping key in omnibase_infra's contracts so the strict contract loader accepts them
+summary: contracts/OMN-17427.yaml wrote the description and command of one evidence item twice, so the strict contract loader that dod-verify uses refuses the file although yaml.safe_load keeps the last value. The earlier pair is removed, the parsed mapping is unchanged, and a test pins every contract in contracts/ to one value per key.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-contracts-strict-load
+    statement: Every ticket contract in omnibase_infra's contracts/ must load through omnibase_core's load_yaml_mapping_no_duplicates, so dod-verify never refuses one for a duplicate mapping key.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: every contracts/*.yaml loads through load_yaml_mapping_no_duplicates with no duplicate mapping key -- falsifier: uv run pytest tests/ci/test_contracts_strict_load_omn20945.py -q -k every_contract_loads'
+      - id: AC2
+        statement: 'AC2: the strict loader refuses a mapping that repeats a key, so a passing AC1 is not vacuous -- falsifier: uv run pytest tests/ci/test_contracts_strict_load_omn20945.py -q -k refuses_a_duplicate_key'
+evidence_requirements:
+  - kind: tests
+    description: Every contract in contracts/ loads through the strict loader.
+    command: uv run pytest tests/ci/test_contracts_strict_load_omn20945.py -q -k every_contract_loads
+  - kind: tests
+    description: contracts/OMN-17427.yaml loads with one value per key, and its repaired item joined back to the next one, as it stood before the repair, is refused by the strict loader.
+    command: uv run pytest tests/ci/test_contracts_strict_load_omn20945.py -q -k refuses_a_duplicate_key
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-contracts-strict-load-ac1
+    description: The focused test loads every contracts/*.yaml through the strict loader.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contracts_strict_load_omn20945.py -q -k every_contract_loads
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-contracts-strict-load-ac2
+    description: The focused test loads contracts/OMN-17427.yaml through the strict loader and shows the loader refuses its repaired item rebuilt from that file with the removed key pair back in one mapping.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_contracts_strict_load_omn20945.py -q -k refuses_a_duplicate_key
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

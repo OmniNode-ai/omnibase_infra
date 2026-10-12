@@ -45,6 +45,16 @@ ENV_RUNTIME_LANE = "ONEX_RUNTIME_LANE"
 #: Whether this runtime speaks for its lane's health (OMN-19812).
 ENV_RUNTIME_LANE_HEALTH_SPEAKER = "ONEX_RUNTIME_LANE_HEALTH_SPEAKER"
 
+#: The registered lane this runtime is an INSTANCE of, for placement only
+#: (OMN-20867): a declared lane ``<class>-<instance>`` of the ``<class>`` lane.
+#: Set by the deployment's private overlay, never by a shipped file, and read
+#: only together with :data:`ENV_RUNTIME_LANE_CLASS_CONTRACTS`. It never keys
+#: health: an instance does not speak for its class's lane.
+ENV_RUNTIME_LANE_CLASS = "ONEX_RUNTIME_LANE_CLASS"
+
+#: Comma-separated contract names the instance takes from its class (OMN-20867).
+ENV_RUNTIME_LANE_CLASS_CONTRACTS = "ONEX_RUNTIME_LANE_CLASS_CONTRACTS"
+
 #: The lanes a runtime's HEALTH may be keyed on. Deliberately the LAB set and
 #: nothing else (OMN-18769 AC6): the stability-test, judge and collaborator
 #: lanes are read-only surfaces, and a runtime there has no business publishing
@@ -211,6 +221,8 @@ def resolve_runtime_lane(environ: Mapping[str, str] | None = None) -> str | None
 
 __all__: list[str] = [
     "ENV_RUNTIME_LANE",
+    "ENV_RUNTIME_LANE_CLASS",
+    "ENV_RUNTIME_LANE_CLASS_CONTRACTS",
     "ENV_RUNTIME_LANE_HEALTH_SPEAKER",
     "KNOWN_LANES",
     "describe_undeclared_runtime_lane",

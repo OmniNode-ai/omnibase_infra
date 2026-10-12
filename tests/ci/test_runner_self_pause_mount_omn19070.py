@@ -131,7 +131,9 @@ def test_the_population_is_not_empty() -> None:
         "omnipc2-verify-runner-1",
     ) in services
     assert ("docker-compose.runners.yml", "omninode-verify-runner-1") in services
-    assert len(services) >= 60
+    # Floor, not a count: it fails if discovery collapses. OMN-19077 cut the
+    # primary host's general pool 44 -> 10, which took the population to 38.
+    assert len(services) >= 30
 
 
 @pytest.mark.unit

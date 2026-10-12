@@ -4,7 +4,7 @@
 
 The compose-dev lab-pass receipt carries a ``lane_sync`` check (OMN-19417): the
 census planner runs on the lane's host and any finding fails the receipt. The
-census reads the lane manifest (``deploy/lane-census/lane-manifest.yaml``), and
+census reads the lane manifest (private config since OMN-20934), and
 the dev-202 and dev-200 entries declare ``omnibase-infra-dev-<n>-phoenix`` as a
 ``service`` with one replica, because those entries are parity-checked against
 their compose overlays.
@@ -29,6 +29,7 @@ container of a compose service that one of the deploy's two legs starts.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +49,17 @@ pytestmark = pytest.mark.unit
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _DOCKER = _REPO_ROOT / "docker"
-_MANIFEST = _REPO_ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
+
+
+def _lab_manifest() -> Path:
+    """The lab's lane manifest, private config under the config root (OMN-20934)."""
+    root = os.environ.get("ONEX_WORKSPACE_CONFIG_ROOT", "").strip()
+    assert root, (
+        "ONEX_WORKSPACE_CONFIG_ROOT is unset: the lane manifest is private config "
+        "under config/lab/lane-census there, and this repository ships none"
+    )
+    return Path(root) / "config" / "lab" / "lane-census" / "lane-manifest.yaml"
+
 
 #: The instances whose manifest entry is parity-checked against its overlay and
 #: therefore declares every service the composition runs.
@@ -80,7 +91,7 @@ def _runtime_leg(disabled: frozenset[str]) -> set[str]:
 
 
 def _declared_running(compose_project: str) -> set[str]:
-    manifest = yaml.safe_load(_MANIFEST.read_text())
+    manifest = yaml.safe_load(_lab_manifest().read_text())
     lanes = [
         spec
         for spec in manifest["lanes"].values()
@@ -94,6 +105,7 @@ def _declared_running(compose_project: str) -> set[str]:
     }
 
 
+@pytest.mark.lab_overlay
 @pytest.mark.parametrize("instance", _OVERLAY_INSTANCES)
 def test_instance_lane_deploy_starts_every_declared_running_service(
     instance: str,

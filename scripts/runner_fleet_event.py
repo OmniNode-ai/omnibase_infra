@@ -177,8 +177,8 @@ def _parse_name_prefixes(name_prefix: str) -> tuple[str, ...]:
     OMN-19842: `name_prefix` used to be matched as a single literal string. A
     fleet spanning several hosts (OMN-17477) has several declared
     `runner_name_prefix` values that share no common substring —
-    `omninode-runner` and `omnipc2-verify-runner` are both real prefixes in
-    the live inventory — so the caller now passes the whole declared set,
+    `omninode-runner` and `<host>-verify-runner` are both real prefixes in
+    one inventory — so the caller now passes the whole declared set,
     comma-joined, and a runner is kept if it starts with ANY member. A bare
     single prefix with no comma still works exactly as before: it is the
     one-element case of this same split.

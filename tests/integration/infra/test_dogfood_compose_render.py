@@ -30,6 +30,8 @@ COMPOSE_PROJECT = "omnibase-infra-dogfood"
 #: These live only in the test. They exercise compose interpolation without
 #: putting an operator value in a tracked configuration example.
 RENDER_ONLY_SECRETS = {
+    # OMN-20932: lane overlays are private; the mount refuses without this.
+    "ONEX_LANE_OVERLAY_DIR": "/nonexistent/onex-lane-overlays",
     "POSTGRES_PASSWORD": "render-only-not-a-secret",
     "VALKEY_PASSWORD": "render-only-not-a-secret",
     "OMNINODE_RUNTIME_PASSWORD": "render-only-not-a-secret",

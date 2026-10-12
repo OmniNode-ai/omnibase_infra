@@ -23,18 +23,32 @@ import click
 
 _MACHINES_YAML_DEFAULT = Path(__file__).parents[4] / "config" / "machines.yaml"
 
-# Fleet-wide constants — read from environment with fleet defaults
-_INFRA_HOST = os.environ.get(
-    "OMNI_INFRA_HOST",
-    "192.168.86.201",  # fallback-ok: lab-fixed IP
-)
-_KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", f"{_INFRA_HOST}:19092")
-_POSTGRES_HOST = os.environ.get("POSTGRES_HOST", _INFRA_HOST)
-_POSTGRES_PORT = os.environ.get("POSTGRES_PORT", "5436")
-_VALKEY_HOST = os.environ.get("VALKEY_HOST", _INFRA_HOST)
-_VALKEY_PORT = os.environ.get("VALKEY_PORT", "6379")
 _MODEL = os.environ.get("OMNI_MODEL", "opus[1m]")
 _OMNICLAUDE_MODE = os.environ.get("OMNICLAUDE_MODE", "agent")
+
+
+def _infra_env() -> dict[str, str]:
+    """Infrastructure addresses, read at render time.
+
+    The infrastructure host is deployment-specific, so there is no shipped
+    default: an unset ``OMNI_INFRA_HOST`` is refused (OMN-20931).
+    """
+    host = os.environ.get("OMNI_INFRA_HOST", "").strip()
+    if not host:
+        raise click.ClickException(
+            "OMNI_INFRA_HOST is not set. onex ships no infrastructure host: "
+            "set OMNI_INFRA_HOST (for example in ~/.omnibase/.env) to the host "
+            "that runs your Postgres, Redpanda and Valkey, then run render-settings again."
+        )
+    kafka = os.environ.get("KAFKA_BOOTSTRAP_SERVERS", f"{host}:19092")
+    return {
+        "OMNI_INFRA_HOST": host,
+        "POSTGRES_HOST": os.environ.get("POSTGRES_HOST", host),
+        "POSTGRES_PORT": os.environ.get("POSTGRES_PORT", "5436"),
+        "VALKEY_HOST": os.environ.get("VALKEY_HOST", host),
+        "VALKEY_PORT": os.environ.get("VALKEY_PORT", "6379"),
+        "KAFKA_BOOTSTRAP_SERVERS": kafka,
+    }
 
 
 @click.group("env")
@@ -72,7 +86,8 @@ def render_settings_json(machine: object) -> dict[str, object]:
     """Build canonical settings.json dict from a ModelMachineEntry.
 
     Machine-specific values (paths) come from registry entry computed properties.
-    Fleet-wide constants (infra host, Kafka, Postgres) are the same for every machine.
+    The infrastructure host comes from OMNI_INFRA_HOST; the render refuses when
+    it is unset.
     """
     from omnibase_infra.models.environment.model_machine_registry import (
         ModelMachineEntry,
@@ -80,21 +95,23 @@ def render_settings_json(machine: object) -> dict[str, object]:
 
     assert isinstance(machine, ModelMachineEntry)
 
+    infra = _infra_env()
+
     env: dict[str, str] = {
         "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
         "OMNI_HOME": machine.omni_home,
         "ONEX_STATE_DIR": machine.onex_state_dir,
         "OMNICLAUDE_MODE": _OMNICLAUDE_MODE,
-        "OMNI_INFRA_HOST": _INFRA_HOST,
+        "OMNI_INFRA_HOST": infra["OMNI_INFRA_HOST"],
         "MAX_THINKING_TOKENS": "10000",
         "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "32000",
         "DISABLE_TELEMETRY": "1",
         "DISABLE_ERROR_REPORTING": "1",
-        "POSTGRES_HOST": _POSTGRES_HOST,
-        "POSTGRES_PORT": _POSTGRES_PORT,
-        "VALKEY_HOST": _VALKEY_HOST,
-        "VALKEY_PORT": _VALKEY_PORT,
-        "KAFKA_BOOTSTRAP_SERVERS": _KAFKA_BOOTSTRAP,
+        "POSTGRES_HOST": infra["POSTGRES_HOST"],
+        "POSTGRES_PORT": infra["POSTGRES_PORT"],
+        "VALKEY_HOST": infra["VALKEY_HOST"],
+        "VALKEY_PORT": infra["VALKEY_PORT"],
+        "KAFKA_BOOTSTRAP_SERVERS": infra["KAFKA_BOOTSTRAP_SERVERS"],
     }
 
     return {

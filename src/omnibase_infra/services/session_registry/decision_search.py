@@ -69,7 +69,7 @@ class DecisionSearchClient:
         embedder: Callable that takes text and returns embedding vector.
             When provided, ``embedding_base_url`` is not used.
         embedding_base_url: Full base URL of the embedding service (e.g.
-            ``"http://192.168.86.201:8100"``). Required when no custom
+            ``"http://192.0.2.10:8100"``). Required when no custom
             ``embedder`` is provided; must be injected from the node contract
             or routing authority — no env-var fallback.
         embedding_model: Model name to request from the embedding API.

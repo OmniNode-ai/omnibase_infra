@@ -45,6 +45,7 @@ from deploy_agent.events import (
     DEV_LANE_ONLY_MIGRATION_SERVICES,
     GATEWAY_COMPOSE_PROJECT,
     BuildSource,
+    EnumLaneMirrorOutcome,
     EnumRecreateOutcome,
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
@@ -53,6 +54,7 @@ from deploy_agent.events import (
     ModelContainerResidue,
     ModelDepsConvergenceFinding,
     ModelHealthCheck,
+    ModelLaneMirrorReceipt,
     ModelRebuildRequested,
     ModelRecreateSupervision,
     ModelVerifyRecreate,
@@ -68,11 +70,20 @@ from deploy_agent.gateway_budget import (
     derive_gateway_deploy_budget,
 )
 from deploy_agent.host_conditions import probe_host_conditions
-from deploy_agent.instance_lanes import ModelInstanceLane, load_instance_lanes
+from deploy_agent.instance_lanes import (
+    LANE_MIRROR_CREDENTIAL_MAP_KEY,
+    ModelInstanceLane,
+    ModelLaneMirrorRequest,
+    handle_lane_mirror,
+    load_instance_lanes,
+    load_instance_runtime_lanes,
+    read_lane_env_fragment,
+)
 from deploy_agent.lane_lock_client import (
     DEFAULT_LANE_LOCK_TIMEOUT_SECONDS,
     lane_lock,
 )
+from deploy_agent.lane_policy import ENV_ALLOWED_LANES, parse_allowed_lanes
 from deploy_agent.loaded_code import loaded_code_sha
 from deploy_agent.reconcile_host_lock import hold_reconcile_host_lock
 from deploy_agent.recreate_supervisor import (
@@ -743,6 +754,12 @@ DEV_INSTANCE_LANE_CONFIGS: dict[str, ModelLaneConfig] = build_dev_instance_lane_
     load_instance_lanes(AGENT_CLONE_ROOT)
 )
 
+#: OMN-20867. Each dev instance's runtime lane id (its ``verify.receipt_lane``),
+#: the name its env fragment is read under in the deployment overlay clone.
+DEV_INSTANCE_RUNTIME_LANES: dict[str, str] = load_instance_runtime_lanes(
+    AGENT_CLONE_ROOT
+)
+
 
 class _DevInstanceSelection:
     """The process's selected dev instance; one attribute, set once at start."""
@@ -1265,6 +1282,56 @@ def _repointed_pin_env() -> dict[str, str]:
     }
 
 
+class _LaneOverlayClone:
+    """The host's deployment overlay clone, set once by the agent at start."""
+
+    path: Path | None = None
+
+
+def set_lane_overlay_clone(path: Path) -> None:
+    """Name the deployment overlay clone the lane env fragment is read from.
+
+    The agent passes the clone its lab-overlay apply archives from, so both read
+    one clone. A process that never sets it (a script importing this module, a
+    unit test) reads no fragment.
+    """
+    _LaneOverlayClone.path = path
+
+
+def _lane_env_overlay() -> dict[str, str]:
+    """This agent's lane env fragment, or nothing (OMN-20867).
+
+    Only a process fenced to the dev lane alone reads one: ``_compose_env``
+    serves every lane, and a deploy of any other lane must never take a dev
+    lane's settings. The fragment is the active dev instance's, read from
+    the overlay clone at its ``origin/dev`` on every call, so a merged overlay
+    change reaches the next compose command without an agent restart.
+    """
+    clone = _LaneOverlayClone.path
+    raw = os.environ.get(ENV_ALLOWED_LANES, "").strip()
+    if clone is None or not raw:
+        return {}
+    if parse_allowed_lanes(raw) != frozenset({EnumRuntimeLane.DEV}):
+        return {}
+    lane_id = DEV_INSTANCE_RUNTIME_LANES[active_dev_instance()]
+    overlay = read_lane_env_fragment(clone, lane_id)
+    if overlay != _LaneEnvOverlayLog.last:
+        logger.info(
+            "lane env fragment for %s from %s: %s",
+            lane_id,
+            clone,
+            ", ".join(f"{k}={v}" for k, v in sorted(overlay.items())) or "none",
+        )
+        _LaneEnvOverlayLog.last = dict(overlay)
+    return overlay
+
+
+class _LaneEnvOverlayLog:
+    """The fragment last logged, so a change is logged once, not per command."""
+
+    last: dict[str, str] | None = None
+
+
 def _load_dotenv_file(env_path: Path) -> dict[str, str]:
     """Parse one committed dotenv file with shell-compatible quoting."""
     if not env_path.exists():
@@ -1363,14 +1430,71 @@ def _assert_no_undecoded_ansi_c_quoting(env: Mapping[str, str]) -> None:
     )
 
 
+#: OMN-20932: every lane compose file mounts its Bifrost overlay from
+#: ``${ONEX_LANE_OVERLAY_DIR}/${COMPOSE_PROJECT_NAME}.bifrost.yaml``. The overlays
+#: are private deployment config and no longer live in this repository.
+LANE_OVERLAY_DIR_ENV = "ONEX_LANE_OVERLAY_DIR"
+LANE_OVERLAY_RELATIVE_DIR = Path("config") / "lab" / "lane-overlays"
+
+
+def _workspace_config_root(workspace_root: Path) -> Path:
+    """The workspace-config owner, from the runtime's own resolver (OMN-19743).
+
+    ``ONEX_WORKSPACE_CONFIG_ROOT`` when set, otherwise the workspace's sibling
+    operator repository or its developer config. Imported here, not at module
+    load, because the resolver lives in the runtime kernel module.
+    """
+    from omnibase_infra.runtime.service_kernel import workspace_runtime_config_root
+
+    return workspace_runtime_config_root(workspace_root)
+
+
+def resolve_lane_overlay_dir(
+    env: Mapping[str, str], repo_dir: str = REPO_DIR
+) -> str | None:
+    """Resolve the private lane-overlay directory every lane compose file mounts.
+
+    ``ONEX_LANE_OVERLAY_DIR`` when it names a directory; otherwise
+    ``config/lab/lane-overlays`` under the workspace-config owner of the
+    workspace that holds this deploy clone (``REPO_DIR/..``). The workspace is
+    derived from the clone, not from ``OMNI_HOME``, because the agent's unit
+    names a different ``OMNI_HOME`` level than its clone's workspace.
+
+    Returns ``None`` when no directory exists. The caller then leaves the
+    variable unset, and compose refuses every lane file with the mount's own
+    message naming both variables: there is no committed overlay to fall back to.
+    """
+    configured = env.get(LANE_OVERLAY_DIR_ENV, "").strip()
+    if configured:
+        return str(Path(configured).resolve()) if Path(configured).is_dir() else None
+    candidate = (
+        _workspace_config_root(Path(repo_dir).parent) / LANE_OVERLAY_RELATIVE_DIR
+    )
+    if candidate.is_dir():
+        return str(candidate.resolve())
+    return None
+
+
 def _compose_env(extra_env: Mapping[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ)
     for key, value in _load_runtime_policy_env().items():
         env.setdefault(key, value)
+    # OMN-20932: resolve the private lane-overlay directory every lane compose
+    # file mounts. Left unset when none exists, so compose refuses loudly.
+    lane_overlay_dir = resolve_lane_overlay_dir(env)
+    if lane_overlay_dir is None:
+        env.pop(LANE_OVERLAY_DIR_ENV, None)
+    else:
+        env[LANE_OVERLAY_DIR_ENV] = lane_overlay_dir
     # OMN-18572: `update`, not `setdefault`. The process environment ALREADY
     # carries a value for these keys -- a stale one, resolved at unit start --
     # so a setdefault would read as wired and change nothing.
     env.update(_repointed_pin_env())
+    # OMN-20867: `update`, not `setdefault`. The lane's own fragment in the
+    # private deployment overlay is the source for the keys it sets, over any
+    # value the operator store holds for them; a key it leaves out keeps
+    # whatever the store says, or stays unset.
+    env.update(_lane_env_overlay())
     # OMN-18073: refuse before compose interpolation writes a provably-mangled
     # value into every container this deploy creates. Deliberately AFTER the
     # re-read above, so a mangled value arriving from the store is refused on
@@ -1477,6 +1601,246 @@ def _runtime_health_reason(result: subprocess.CompletedProcess[str]) -> str:
 def _runtime_health_passed(result: subprocess.CompletedProcess[str]) -> bool:
     """Return whether a runtime /health response proves deploy readiness."""
     return not _runtime_health_reason(result)
+
+
+class ModelAnsweringDegraded(BaseModel):
+    """A runtime that answered ``/health`` running, with its monitor degraded.
+
+    OMN-20864. ``observed_at`` is the health monitor's own timestamp for the
+    reading, so two probes inside one monitor cycle read as ONE observation.
+    ``dimensions`` names every monitor dimension that is not ``HEALTHY``.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    observed_at: str
+    dimensions: frozenset[str]
+
+    def describe(self) -> str:
+        return (
+            f"monitor DEGRADED on {', '.join(sorted(self.dimensions))} "
+            f"(observed {self.observed_at or 'at an unread time'})"
+        )
+
+
+def _answering_degraded(
+    result: subprocess.CompletedProcess[str],
+) -> ModelAnsweringDegraded | None:
+    """The monitor-degraded reading of a runtime that is up, or ``None``.
+
+    OMN-20864. MEASURED on the lab dev lane 2026-10-11: job 72e74ec6's
+    runtime answered ``status=degraded is_running=True`` on every probe; its
+    health monitor (``onex.evt.omnibase-infra.runtime-health-check.v1``) named
+    ``projection_dlq_saturation`` on every cycle from 13:28Z, the same finding
+    the container it replaced had carried since at least 12:41Z. The agent
+    force-recreated it at 13:50Z, the recreate timed out, and the lane was down
+    until 19:41Z.
+
+    The runtime's own contract (``ServiceHealth``: degraded and operational is
+    HTTP 200, "automatic restarts may mask recurring issues") is that such a
+    runtime stays in service. So this is NARROW, and everything outside it
+    keeps the OMN-18640 recreate: the probe answered JSON, ``status`` is
+    ``degraded``, ``details.is_running`` is true, the runtime is attached and
+    not starting, the event bus is not reported unhealthy, and the monitor
+    block names at least one non-``HEALTHY`` dimension. A dead port, a
+    timeout, an ``unhealthy`` runtime, a stopped one, one whose bus is down,
+    or a degraded one whose monitor names nothing is not this.
+    """
+    if result.returncode != 0:
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    details = payload.get("details")
+    if not isinstance(details, dict):
+        return None
+    if (
+        payload.get("status") != "degraded"
+        or details.get("is_running") is not True
+        or details.get("runtime_attached") is False
+        or details.get("startup_in_progress") is True
+        or details.get("event_bus_healthy") is False
+    ):
+        return None
+    monitor = details.get("runtime_health")
+    if not isinstance(monitor, dict):
+        return None
+    raw_dimensions = monitor.get("dimensions")
+    dimensions = frozenset(
+        str(dimension["name"])
+        for dimension in (raw_dimensions if isinstance(raw_dimensions, list) else [])
+        if isinstance(dimension, dict)
+        and dimension.get("name")
+        and dimension.get("status") != "HEALTHY"
+    )
+    if not dimensions:
+        return None
+    return ModelAnsweringDegraded(
+        observed_at=str(monitor.get("observed_at") or ""),
+        dimensions=dimensions,
+    )
+
+
+def monitor_settled_degraded(
+    previous: ModelAnsweringDegraded | None, current: ModelAnsweringDegraded | None
+) -> bool:
+    """Whether two readings prove the monitor has SETTLED degraded (OMN-20864).
+
+    Two consecutive monitor cycles -- distinct ``observed_at`` -- naming the same
+    non-empty set of dimensions. One degraded cycle is how a booting runtime
+    looks: on the same lane at 19:36:15Z the refreshed runtime's first cycle
+    named ``projection_attachment`` and ``projection_apply_divergence`` and its
+    second, at 19:41:22Z, was HEALTHY. A finding that survives a cycle is not
+    boot-transient, and waiting out the rest of a 2000 s start budget for it
+    only delays the verdict.
+    """
+    return (
+        previous is not None
+        and current is not None
+        and bool(previous.observed_at)
+        and bool(current.observed_at)
+        and previous.observed_at != current.observed_at
+        and previous.dimensions == current.dimensions
+    )
+
+
+#: OMN-20864: the name ``docker compose`` gives the NEW container of a
+#: recreate until it has removed the old one and renamed the new one into
+#: place -- ``<first 12 hex of the replaced container's id>_<container name>``.
+#: A compose client killed in that window (a ``subprocess`` timeout is SIGKILL)
+#: leaves it in ``Created`` with nothing, or a stopped container, under the
+#: real name. Measured on the lab dev lane 2026-10-11: ``d41bf2abebd1_
+#: omninode-runtime`` (13:55Z) and ``3cf1f627bfc8_omnibase-infra-forward-
+#: migration`` (14:14Z), both still Created at 19:16Z.
+RECREATE_TMP_NAME = re.compile(r"^/?(?P<replaced>[0-9a-f]{12})_(?P<name>\S+)$")
+
+#: The bound on each ``docker ps`` / ``docker rm`` of the leftover cleanup.
+RECREATE_LEFTOVER_TIMEOUT_SECONDS = 60
+
+
+def remove_recreate_leftovers(
+    lane: EnumRuntimeLane, services: Sequence[str] | None = None
+) -> list[str]:
+    """Remove this lane's half-finished recreate containers; return their names.
+
+    OMN-20864. Scoped by the lane's compose project label, to containers in the
+    ``created`` state whose name has the recreate's temporary shape, and -- when
+    ``services`` is given -- to those compose services. A ``created``
+    container has never run, so removing it loses nothing; it is the one
+    container shape whose presence blocks the next ``up`` from putting the
+    service back under its own name. Every lane mutation that can reach here
+    runs under the lane lock, so no concurrent compose command owns it.
+    """
+    project = lane_config_for(lane).compose_project
+    try:
+        listed = _run(
+            [
+                "docker",
+                "ps",
+                "-a",
+                "--filter",
+                f"label=com.docker.compose.project={project}",
+                "--filter",
+                "status=created",
+                "--format",
+                '{{.ID}}\t{{.Names}}\t{{.Label "com.docker.compose.service"}}',
+            ],
+            timeout=RECREATE_LEFTOVER_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("recreate leftovers on %s unread: %s", project, exc)
+        return []
+    if listed.returncode != 0:
+        logger.warning(
+            "recreate leftovers on %s unread: docker ps exited %s: %s",
+            project,
+            listed.returncode,
+            (listed.stderr or listed.stdout).strip()[:200],
+        )
+        return []
+    wanted = set(services) if services else None
+    removed: list[str] = []
+    for line in listed.stdout.splitlines():
+        fields = line.split("\t")
+        if len(fields) != 3:
+            continue
+        container_id, name, service = (field.strip() for field in fields)
+        if not RECREATE_TMP_NAME.match(name):
+            continue
+        if wanted is not None and service not in wanted:
+            continue
+        try:
+            result = _run(
+                ["docker", "rm", "-f", container_id],
+                timeout=RECREATE_LEFTOVER_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning("could not remove recreate leftover %s: %s", name, exc)
+            continue
+        if result.returncode == 0:
+            removed.append(name)
+            logger.warning(
+                "removed recreate leftover %s (service %s, Created, never ran) "
+                "on %s (OMN-20864)",
+                name,
+                service,
+                project,
+            )
+        else:
+            logger.warning(
+                "could not remove recreate leftover %s: %s",
+                name,
+                (result.stderr or result.stdout).strip()[:200],
+            )
+    return removed
+
+
+def run_compose_recreate(
+    argv: list[str],
+    *,
+    timeout: int,
+    lane: EnumRuntimeLane,
+    services: Sequence[str],
+    env: dict[str, str] | None = None,
+    removed: list[str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run one compose recreate; on a timeout clean up and retry it ONCE.
+
+    OMN-20864. A recreate killed at its ceiling leaves the new container
+    ``Created`` under its temporary name (``RECREATE_TMP_NAME``), and nothing
+    in this agent ever looked for it: the 2026-10-11 dev lane sat that way for
+    5h50m. On a timeout the leftover is removed and the command retried once;
+    a second timeout is cleaned up the same way and then raised, so the caller
+    reports the timeout exactly as before but never leaves the shape behind.
+    The name of every leftover removed is appended to ``removed``, which the
+    caller passes when it records them; it is filled before a raise as well.
+    """
+    if removed is None:
+        removed = []
+    try:
+        return _run(argv, timeout=timeout, env=env)
+    except subprocess.TimeoutExpired:
+        removed.extend(remove_recreate_leftovers(lane, services))
+        logger.warning(
+            "compose recreate of %s timed out at %ss; leftovers removed: %s; "
+            "retrying once (OMN-20864)",
+            ", ".join(services),
+            timeout,
+            removed or "none",
+        )
+    try:
+        return _run(argv, timeout=timeout, env=env)
+    except subprocess.TimeoutExpired:
+        removed.extend(remove_recreate_leftovers(lane, services))
+        logger.exception(
+            "compose recreate of %s timed out twice at %ss; leftovers removed: %s",
+            ", ".join(services),
+            timeout,
+            removed or "none",
+        )
+        raise
 
 
 def _compose_service_states(
@@ -2105,6 +2469,11 @@ class DeployExecutor:
         # whether that repaired them. Read by the agent when it builds the
         # terminal event, for the same reason residue and supervision are.
         self.verify_recreate: list[ModelVerifyRecreate] = []
+        # OMN-20864: per runtime health port, what its LAST probe answered when
+        # that was a running runtime whose monitor reads degraded, else None.
+        # Read by the declared-start wait (has the monitor settled?) and by the
+        # recreate decision (is this a runtime a recreate cannot help?).
+        self._last_answering_degraded: dict[int, ModelAnsweringDegraded | None] = {}
         # OMN-18640: what the deps leg found before it acted -- per core
         # service, whether convergence was about to replace that container and
         # why. Read by the agent when it builds the terminal event, for the
@@ -2148,6 +2517,58 @@ class DeployExecutor:
         self.deps_convergence = []
         self.compose_invocations = []
         self.health_checks = []
+
+    def run_lane_mirror(
+        self, *, lane: EnumRuntimeLane, materialize_root: Path
+    ) -> ModelLaneMirrorReceipt | None:
+        """Bring the lane's mirror forwarders up on its runtime image (OMN-20867).
+
+        Runs after verification, on the dev lane of a process fenced to it
+        alone and only once the agent has named the overlay clone -- the same
+        fence and the same clone as the lane env fragment, so a host has one
+        answer to which deployment overlay it deploys. Returns ``None`` when
+        the fence excludes it; otherwise the receipt, which never changes the
+        job's verdict and is logged at ERROR when it is a failure.
+
+        The credential map path is operator-held. It is re-read from the
+        operator env store on every call, like the repointed pins, so adding
+        it there reaches the next deploy without an agent restart.
+        """
+        clone = _LaneOverlayClone.path
+        raw = os.environ.get(ENV_ALLOWED_LANES, "").strip()
+        if (
+            lane is not EnumRuntimeLane.DEV
+            or clone is None
+            or not raw
+            or parse_allowed_lanes(raw) != frozenset({EnumRuntimeLane.DEV})
+        ):
+            return None
+        env = _compose_env()
+        store = _operator_env_file()
+        if store is not None and store.is_file():
+            declared = _load_dotenv_file(store).get(LANE_MIRROR_CREDENTIAL_MAP_KEY)
+            if declared:
+                env[LANE_MIRROR_CREDENTIAL_MAP_KEY] = declared
+        receipt = handle_lane_mirror(
+            ModelLaneMirrorRequest(
+                clone=clone,
+                runtime_container=lane_config_for(lane).main_runtime_container,
+                materialize_root=materialize_root,
+                compose_env=env,
+            )
+        )
+        if receipt.outcome is EnumLaneMirrorOutcome.FAILED:
+            logger.error(
+                "lane mirror FAILED: %s; forwarders: %s friction_type=lane_mirror_failed",
+                receipt.detail,
+                ", ".join(
+                    f"{f.container}={f.state}/{f.health}" for f in receipt.forwarders
+                )
+                or "none",
+            )
+        else:
+            logger.info("lane mirror %s: %s", receipt.outcome.value, receipt.detail)
+        return receipt
 
     def _record_container_residue(
         self, stuck: list[str], *, lane: EnumRuntimeLane
@@ -2882,9 +3303,11 @@ class DeployExecutor:
             "--force-recreate",
             ONEX_API_SERVICE,
         ]
-        result = _run(
+        result = run_compose_recreate(
             recreate,
             timeout=ONEX_API_RECREATE_TIMEOUT_SECONDS,
+            lane=lane,
+            services=[ONEX_API_SERVICE],
             env=_compose_env(),
         )
         record["recreated"] = result.returncode == 0
@@ -4887,6 +5310,10 @@ class DeployExecutor:
                     "%s; verifying live service state before deciding the phase verdict",
                     compose_up_error,
                 )
+                # OMN-20864: a killed recreate leaves its new container Created
+                # under a temporary name, which the per-container recovery
+                # below cannot start; clear it first so recovery recreates.
+                remove_recreate_leftovers(lane, requested_services or None)
             else:
                 compose_up_error = (
                     result.stderr.strip() if result.returncode != 0 else ""
@@ -5012,7 +5439,11 @@ class DeployExecutor:
         for service in RUNTIME_MIGRATION_SERVICES:
             cmd = [*base_cmd, service]
             self._record_compose_invocation(Phase.RUNTIME, cmd)
-            result = _run(cmd, timeout=timeout, env=_compose_env())
+            # OMN-20864: a recreate killed at its ceiling is cleaned up and
+            # retried once instead of leaving a Created container behind.
+            result = run_compose_recreate(
+                cmd, timeout=timeout, lane=lane, services=[service], env=_compose_env()
+            )
             if result.returncode != 0:
                 raise RuntimeError(
                     f"Runtime migration preflight failed for {service}: "
@@ -5047,7 +5478,13 @@ class DeployExecutor:
                 list(DEV_LANE_ONLY_MIGRATION_SERVICES), lane
             ):
                 cmd = [*base_cmd, service]
-                result = _run(cmd, timeout=timeout, env=_compose_env())
+                result = run_compose_recreate(
+                    cmd,
+                    timeout=timeout,
+                    lane=lane,
+                    services=[service],
+                    env=_compose_env(),
+                )
                 if result.returncode != 0:
                     raise DevLaneMigrationPreflightError(
                         f"Dev-lane migration preflight failed for {service}: "
@@ -5244,7 +5681,19 @@ class DeployExecutor:
                     failed=check,
                     timed_out=timed_out,
                 )
-            if check.status == "fail" and lane in VERIFY_RECREATE_LANES:
+            answering = self._last_answering_degraded.get(port)
+            if (
+                check.status == "fail"
+                and lane in VERIFY_RECREATE_LANES
+                and answering is not None
+            ):
+                # OMN-20864: up, answering, and its monitor naming a finding.
+                # A recreate cannot clear that and is what took the dev lane
+                # down on 2026-10-11; the verdict below still fails.
+                check = self._decline_recreate_answering(
+                    lane=lane, service=service, failed=check, reading=answering
+                )
+            elif check.status == "fail" and lane in VERIFY_RECREATE_LANES:
                 check, timed_out = self._force_recreate_and_reverify(
                     lane=lane,
                     service=service,
@@ -5314,8 +5763,12 @@ class DeployExecutor:
                 f"the probe did not answer within "
                 f"{RUNTIME_HEALTH_PROBE_TIMEOUT_SECONDS}s"
             )
+            self._last_answering_degraded[port] = None
         else:
             reason = _runtime_health_reason(result)
+            self._last_answering_degraded[port] = (
+                _answering_degraded(result) if reason else None
+            )
         latency = int((time.monotonic() - start) * 1000)
         return (
             ModelHealthCheck(
@@ -5377,6 +5830,11 @@ class DeployExecutor:
         started = time.monotonic()
         check = failed
         state = ""
+        # OMN-20864: the monitor reading of the up-front probe, then of each
+        # probe here. Two consecutive cycles degraded on the same dimensions
+        # is a settled finding, not a boot, and ends the wait early.
+        reading = self._last_answering_degraded.get(port)
+        settled: ModelAnsweringDegraded | None = None
         for _attempt in range(attempts):
             state = _runtime_health_helper("runtime_health_state", container, baseline)
             elapsed = int(time.monotonic() - started)
@@ -5388,7 +5846,27 @@ class DeployExecutor:
             check, timed_out = self._probe_runtime_health(service=service, port=port)
             if check.status == "pass":
                 break
+            current = self._last_answering_degraded.get(port)
+            if monitor_settled_degraded(reading, current):
+                settled = current
+                break
+            if current is not None and (
+                reading is None or current.observed_at != reading.observed_at
+            ):
+                reading = current
         waited = round(time.monotonic() - started, 1)
+        if settled is not None:
+            logger.warning(
+                "%s: %s's health monitor settled DEGRADED on two consecutive "
+                "cycles (%s) after %ss; not waiting out the rest of its %ss "
+                "start budget (OMN-20864)",
+                failed.endpoint,
+                service,
+                settled.describe(),
+                waited,
+                budget,
+            )
+            return check, timed_out
         if check.status == "pass":
             logger.info(
                 "%s passed after %ss inside %s's declared %ss start budget "
@@ -5518,9 +5996,15 @@ class DeployExecutor:
             service,
             config.compose_project,
         )
+        removed: list[str] = []
         try:
-            result = _run(
-                argv, timeout=VERIFY_RECREATE_TIMEOUT_SECONDS, env=_compose_env()
+            result = run_compose_recreate(
+                argv,
+                timeout=VERIFY_RECREATE_TIMEOUT_SECONDS,
+                lane=lane,
+                services=[service],
+                env=_compose_env(),
+                removed=removed,
             )
         except subprocess.TimeoutExpired:
             self._record_verify_recreate(
@@ -5533,8 +6017,8 @@ class DeployExecutor:
                 budget=0,
                 detail=(
                     f"the recreate exceeded its {VERIFY_RECREATE_TIMEOUT_SECONDS}s "
-                    f"ceiling; the container was left mid-recreate and the probe "
-                    f"was not re-run"
+                    f"ceiling twice and the probe was not re-run; half-finished "
+                    f"recreate containers removed: {', '.join(removed) or 'none'}"
                 ),
             )
             return failed, timed_out
@@ -5593,6 +6077,38 @@ class DeployExecutor:
             ),
         )
         return check, (None if recovered else timed_out)
+
+    def _decline_recreate_answering(
+        self,
+        *,
+        lane: EnumRuntimeLane,
+        service: str,
+        failed: ModelHealthCheck,
+        reading: ModelAnsweringDegraded,
+    ) -> ModelHealthCheck:
+        """Record why a degraded-but-running runtime was NOT recreated (OMN-20864).
+
+        The check stays failed, so the verdict refuses the deploy exactly as
+        OMN-18640 AC8 requires; only the remedy is withheld. The detail names
+        the monitor dimensions so the terminal event carries the finding a
+        reader has to act on, which is not this deploy's to fix.
+        """
+        detail = (
+            f"{reading.describe()}; not recreated: the runtime is up and "
+            f"answering, and a recreate cannot clear a health-monitor finding "
+            f"(OMN-20864)"
+        )
+        self._record_verify_recreate(
+            lane=lane,
+            service=service,
+            endpoint=failed.endpoint,
+            outcome=EnumVerifyRecreateOutcome.NOT_RECREATED_ANSWERING,
+            returncode=None,
+            waited=0.0,
+            budget=0,
+            detail=detail,
+        )
+        return failed.model_copy(update={"detail": f"{failed.detail}; {detail}"})
 
     def _record_verify_recreate(
         self,

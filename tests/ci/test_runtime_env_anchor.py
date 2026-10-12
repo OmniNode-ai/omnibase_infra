@@ -412,3 +412,77 @@ class TestResolverEnvRefsReachTheAnchor:
         """
         declaration = "OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}"
         assert declaration in COMPOSE_PATH.read_text(), declaration
+
+
+class TestRuntimeLaneActSwitchPassthrough:
+    """OMN-20867: the six per-lane act switches are value-less pass-throughs.
+
+    omnimarket's landing orchestrator and CI-red triage read them through
+    contract ``${env.VAR:default}`` references whose inline default is today's
+    behaviour, and refuse a set-but-empty value at contract load. Compose must
+    therefore keep an unset host value unset inside the container. They live in
+    their own anchor because ``x-runtime-env`` holds no null value (see
+    ``test_anchor_has_no_null_values``) and ``${VAR:-}`` would render the empty
+    string the contract refuses.
+    """
+
+    LANE_ACT_SWITCH_KEYS: frozenset[str] = frozenset(
+        {
+            "ONEX_PR_LANDING_GITHUB_MODE",
+            "ONEX_PR_LANDING_ARM_ACTION_MODE",
+            "ONEX_CI_RED_TRIAGE_ACT_RUNNER",
+            "ONEX_CI_RED_TRIAGE_ACT_PR_OWN",
+            "ONEX_CI_RED_TRIAGE_ACT_SHARED_CAUSE",
+            "ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD",
+        }
+    )
+    # The lane class an instance's runtime borrows contracts from, read by the
+    # auto-wiring ownership filter; the same overlay-only, value-less rule.
+    LANE_CLASS_KEYS: frozenset[str] = frozenset(
+        {"ONEX_RUNTIME_LANE_CLASS", "ONEX_RUNTIME_LANE_CLASS_CONTRACTS"}
+    )
+    PASSTHROUGH_KEYS: frozenset[str] = LANE_ACT_SWITCH_KEYS | LANE_CLASS_KEYS
+
+    @pytest.mark.unit
+    def test_passthrough_anchor_declares_each_switch_value_less(self) -> None:
+        data = _load_compose()
+        passthrough = data.get("x-runtime-passthrough-env")
+        assert isinstance(passthrough, dict), (
+            "x-runtime-passthrough-env anchor not found in docker-compose.infra.yml"
+        )
+        assert set(passthrough) >= self.PASSTHROUGH_KEYS
+        valued = {k: v for k, v in passthrough.items() if v is not None}
+        assert not valued, (
+            f"x-runtime-passthrough-env must hold value-less names only: {valued}"
+        )
+        assert not self.PASSTHROUGH_KEYS & _get_runtime_env_keys(data)
+
+    @pytest.mark.unit
+    def test_no_switch_is_interpolated_anywhere(self) -> None:
+        raw = COMPOSE_PATH.read_text()
+        for key in sorted(self.PASSTHROUGH_KEYS):
+            assert "${" + key not in raw, (
+                f"{key} is interpolated in the compose file; it must only be "
+                "passed through value-less"
+            )
+
+    @pytest.mark.unit
+    def test_every_runtime_env_service_merges_the_passthrough_anchor(self) -> None:
+        data = _load_compose()
+        anchor_keys = _get_runtime_env_keys(data)
+        merging = {
+            name: config["environment"]
+            for name, config in data.get("services", {}).items()
+            if isinstance(config, dict)
+            and isinstance(config.get("environment"), dict)
+            and anchor_keys <= set(config["environment"])
+        }
+        assert merging, "no service merges x-runtime-env (positive control)"
+        missing = {
+            name: sorted(self.PASSTHROUGH_KEYS - set(environment))
+            for name, environment in merging.items()
+            if not set(environment) >= self.PASSTHROUGH_KEYS
+        }
+        assert not missing, (
+            f"services merging x-runtime-env without the act switches: {missing}"
+        )

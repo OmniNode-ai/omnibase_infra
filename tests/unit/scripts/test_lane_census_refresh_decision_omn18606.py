@@ -32,6 +32,8 @@ from typing import Any
 
 import pytest
 
+from tests.helpers.lane_census_fixtures import NEUTRAL_SNAPSHOT
+
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
@@ -382,16 +384,22 @@ def test_the_pr_title_clears_the_ticket_gate_and_arms_auto_merge() -> None:
 
 
 def test_the_leg_writes_only_the_census_file() -> None:
-    """Blast radius. A refresh PR that touched anything else would be unreviewable."""
+    """Blast radius. A refresh PR stages the census, nothing else.
+
+    OMN-20934: the census is private config, so the bump PR is opened in the
+    CI overlay repository and stages its census file; nothing is committed to
+    this repository.
+    """
     body = _WORKFLOW.read_text(encoding="utf-8")
     added = [
         line.strip()
         for line in body.splitlines()
         if line.strip().startswith("git add ")
     ]
-    assert added == ["git add deploy/lane-census/census-snapshot.json"], (
+    assert added == ["git add config/lab/lane-census/census-snapshot.json"], (
         f"the leg stages something other than the census: {added}"
     )
+    assert '--repo "$OVERLAY_REPO"' in body
 
 
 def test_end_to_end_from_a_fixture_census_rather_than_the_lab_host(
@@ -429,7 +437,7 @@ def test_end_to_end_from_a_fixture_census_rather_than_the_lab_host(
     including the refresh pull request itself. The race the threshold exists to
     avoid was being reintroduced by the test that proves the leg.
     """
-    committed_path = _REPO / "deploy" / "lane-census" / "census-snapshot.json"
+    committed_path = NEUTRAL_SNAPSHOT
     committed = dict(json.loads(committed_path.read_text(encoding="utf-8")))
 
     # A synthetic committed census: the real document's shape, a controlled age.
@@ -494,7 +502,7 @@ def test_a_census_aged_past_the_threshold_still_asks_for_a_refresh(
     of forcing the threshold, so the aging branch is still proven by a real
     elapsed interval and the rule stays pinned in both directions.
     """
-    committed_path = _REPO / "deploy" / "lane-census" / "census-snapshot.json"
+    committed_path = NEUTRAL_SNAPSHOT
     committed = dict(json.loads(committed_path.read_text(encoding="utf-8")))
 
     now = datetime.now(UTC)

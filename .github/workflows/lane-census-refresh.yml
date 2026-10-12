@@ -4,8 +4,16 @@
 # lane-census-refresh.yml — the missing leg: the lab host's census reaches this
 # repository without a hand-heal (OMN-18606 AC2, under OMN-13034).
 #
+# WHERE IT WRITES (OMN-20934). The census and the lane manifest it is judged
+# against describe one lab's hosts, lanes and addresses, so they are private
+# deployment config (operator RULING 2026-10-10T21:57:38Z). Committed here,
+# every refresh failed the public-repo hygiene gate on the private addresses
+# and names it carries. They live in config/lab/lane-census of the CI overlay
+# repository the org Actions variable OMNI_CI_OVERLAY_REPO names, and this
+# workflow opens its bump PR THERE. Nothing is committed to this repository.
+#
 # WHY THIS EXISTS. `Lane Census Staleness` reads `emitted_at` out of the
-# COMMITTED `deploy/lane-census/census-snapshot.json`, and until now nothing
+# COMMITTED `census-snapshot.json`, and until now nothing
 # refreshed that file but a person. Every entry in its git history is a
 # hand-opened PR — #2395, #2691, #2846, #2998, #3394, #3489 — and a seventh
 # (#3703, an unrelated lane) landed a snapshot by hand while OMN-18606 was
@@ -51,9 +59,10 @@ on:
         required: false
         default: "3"
 
+# The bump PR is opened in the CI overlay with the App's token; nothing is
+# written to this repository (OMN-20934).
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 concurrency:
   # Never cancel-in-progress: a cancelled run here leaves a pushed branch with
@@ -76,21 +85,63 @@ jobs:
       # OMN-16373 / OMN-18273: a push authored by an App identity triggers
       # downstream CI, which the default GITHUB_TOKEN does not. The bump PR is
       # worthless if the staleness gate never runs on it.
-      - name: Mint onexbot-occ-writer app token
+      - name: Resolve the CI overlay
+        id: ci-overlay
+        env:
+          CI_OVERLAY_REPO: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CI_OVERLAY_REPO}" ]; then
+            echo "::error::no lane census configured: OMNI_CI_OVERLAY_REPO is unset, so there is no repository to read the lane manifest from or commit the census to."
+            exit 1
+          fi
+          if [[ ! "${CI_OVERLAY_REPO}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::OMNI_CI_OVERLAY_REPO must be a bare repository name, got '${CI_OVERLAY_REPO}'"
+            exit 1
+          fi
+          echo "name=${CI_OVERLAY_REPO}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint onexbot-occ-writer app token for the CI overlay
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
           private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
-          owner: OmniNode-ai
-          repositories: omnibase_infra
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.ci-overlay.outputs.name }}
           permission-contents: write
           permission-pull-requests: write
 
-      - name: Checkout (app token so the bot PR triggers CI)
+      - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          persist-credentials: false
+
+      # The overlay is checked out OUTSIDE this workspace with the app token,
+      # so the bump branch it pushes is authored by the App and triggers the
+      # overlay's CI. The collector reads the lane manifest from it.
+      - name: Check out the CI overlay (app token so the bot PR triggers CI)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ${{ github.repository_owner }}/${{ steps.ci-overlay.outputs.name }}
           token: ${{ steps.app-token.outputs.token }}
+          path: .ci-overlay-checkout
+          sparse-checkout: |
+            config/lab/lane-census
+          sparse-checkout-cone-mode: false
+
+      - name: Place the CI overlay outside the workspace
+        run: |
+          set -euo pipefail
+          rm -rf ../ci-overlay
+          mv .ci-overlay-checkout ../ci-overlay
+          root="$(cd ../ci-overlay && pwd)"
+          if [ ! -s "$root/config/lab/lane-census/lane-manifest.yaml" ]; then
+            echo "::error::the CI overlay carries no config/lab/lane-census/lane-manifest.yaml; the census has no desired state to read."
+            exit 1
+          fi
+          echo "ONEX_WORKSPACE_CONFIG_ROOT=$root" >> "$GITHUB_ENV"
+          echo "CENSUS_DIR=$root/config/lab/lane-census" >> "$GITHUB_ENV"
 
       - name: Set up CI Python environment
         uses: ./.github/actions/setup-python-uv
@@ -226,7 +277,7 @@ jobs:
           set -euo pipefail
           DECISION="${RUNNER_TEMP}/census-decision-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
           uv run python scripts/lane_census_refresh_decision.py \
-            --committed deploy/lane-census/census-snapshot.json \
+            --committed "${CENSUS_DIR}/census-snapshot.json" \
             --candidate "$CANDIDATE" \
             --refresh-after-days "$REFRESH_AFTER_DAYS" > "$DECISION"
           {
@@ -241,65 +292,56 @@ jobs:
           echo "### Lane census refresh: no-op" >> "$GITHUB_STEP_SUMMARY"
           echo "Reason: \`${{ steps.decide.outputs.reason }}\`" >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Open the census bump PR
+      - name: Open the census bump PR in the CI overlay
         if: steps.decide.outputs.refresh == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           CANDIDATE: ${{ steps.collect.outputs.candidate }}
           REASON: ${{ steps.decide.outputs.reason }}
+          OVERLAY_REPO: ${{ github.repository_owner }}/${{ steps.ci-overlay.outputs.name }}
         run: |
           set -euo pipefail
-          cp "$CANDIDATE" deploy/lane-census/census-snapshot.json
+          EMITTED="$(uv run python -c 'import json,sys;print(json.load(open(sys.argv[1]))["emitted_at"])' "$CANDIDATE")"
+          DRIFT="$(uv run python -c 'import json,sys;print(json.load(open(sys.argv[1]))["drift_count"])' "$CANDIDATE")"
+          {
+            printf '%s\n' "Automated lane-census refresh, opened by the refresh leg built in OMN-18606."
+            printf '\n'
+            printf '%s\n' "Collected on the lab host by the census runner (vars.LANE_CENSUS_RUNS_ON_JSON) against the"
+            printf '%s\n' "same docker daemon the hourly census pass reads."
+            printf '\n'
+            printf '%s\n' "- \`emitted_at\`: \`${EMITTED}\`"
+            printf '%s\n' "- drift findings: ${DRIFT}"
+            printf '%s\n' "- refresh reason: \`${REASON}\`"
+            printf '%s\n' "- run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } > "${RUNNER_TEMP}/census_refresh_body.md"
+
+          cd "$CENSUS_DIR/../../.."
+          cp "$CANDIDATE" config/lab/lane-census/census-snapshot.json
+          grep -qF -- "$EMITTED" config/lab/lane-census/census-snapshot.json
 
           BRANCH="bot/lane-census-refresh-$(date -u +%Y%m%d%H%M%S)"
           # OMN-18273: commit as the App this job already authenticates as.
           git config user.name "onexbot-occ-writer[bot]"
           git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add deploy/lane-census/census-snapshot.json
+          git add config/lab/lane-census/census-snapshot.json
           git commit -m "chore(deps, OMN-18606): refresh the lane census snapshot [bot]" \
             --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
             --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           git push origin "$BRANCH"
 
-          EMITTED="$(uv run python -c 'import json,sys;print(json.load(open(sys.argv[1]))["emitted_at"])' "$CANDIDATE")"
-          DRIFT="$(uv run python -c 'import json,sys;print(json.load(open(sys.argv[1]))["drift_count"])' "$CANDIDATE")"
-
-          {
-            printf '%s\n' "Automated lane-census refresh, opened by the refresh leg built in OMN-18606."
-            printf '\n'
-            printf '%s\n' "Collected on the lab host by the census runner (vars.LANE_CENSUS_RUNS_ON_JSON) against the"
-            printf '%s\n' "same docker daemon the hourly \`onex-disk-gc\` census pass reads."
-            printf '\n'
-            printf '%s\n' "- \`emitted_at\`: \`${EMITTED}\`"
-            printf '%s\n' "- drift findings: ${DRIFT}"
-            printf '%s\n' "- refresh reason: \`${REASON}\`"
-            printf '\n'
-            printf '%s\n' "Before this leg existed, every refresh of this file was a person opening"
-            printf '%s\n' "a PR — six of them between 2026-07-22 and 2026-09-14, plus a seventh"
-            printf '%s\n' "while OMN-18606 was being written. Review the census delta and merge."
-          } > "${RUNNER_TEMP}/census_refresh_body.md"
-
+          BASE="$(gh repo view "$OVERLAY_REPO" --json defaultBranchRef --jq .defaultBranchRef.name)"
           # `chore(deps,` prefix is exempt from the pr-title ticket gate, matching
           # the sibling-lock-refresh and publish-downstream-pin-bump conventions.
-          #
-          # WHICH TICKET, AND WHY IT IS NOT THE RATCHET'S. The autobind resolves a
-          # ticket from this title and mints an OCC companion bound to it, so the
-          # title decides which contract's DoD tree the bot PR must satisfy. It
-          # cited the lane-census ratchet's ticket until 2026-09-17, which meant
-          # every refresh PR inherited that contract's whole accumulated tree --
-          # 17 checks, two of which BLOCK: they fetch the census at a PINNED sha
-          # and then assert that frozen artifact is under seven days old against
-          # wall-clock now, so each was true when written and false forever about
-          # a week later. `omnibase_infra#3726` could not land for that reason and
-          # neither could any successor. The leg cites the ticket that owns the
-          # leg instead. The ratchet is named in prose above, not as a token,
-          # because a second resolvable reference in the body is a second thing
-          # for an extractor to get wrong.
           gh pr create \
-            --base "${GITHUB_REF_NAME}" \
+            --repo "$OVERLAY_REPO" \
+            --base "$BASE" \
             --head "$BRANCH" \
             --title "chore(deps, OMN-18606): refresh the lane census snapshot [bot]" \
             --body-file "${RUNNER_TEMP}/census_refresh_body.md"
 
-          gh pr merge "$BRANCH" --squash --auto
+          # Arming is a convenience, not the landing path: where the overlay
+          # does not allow auto-merge, the PR stays open for the landing lane.
+          if ! gh pr merge "$BRANCH" --repo "$OVERLAY_REPO" --squash --auto; then
+            echo "::warning::auto-merge could not be armed on ${OVERLAY_REPO}; the census bump PR is open for the landing lane."
+          fi

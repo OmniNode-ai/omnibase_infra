@@ -51,6 +51,10 @@ event_bus:
     - "onex.evt.validation.cross-repo-violations-batch.v1"
     # Validation run completion
     - "onex.evt.validation.cross-repo-run-completed.v1"
+    # OMN-21056: the validation pipeline's terminal result. The ledger had no
+    # path from a pattern candidate's result, so validation_event_ledger stayed
+    # empty on the lab even for a result the pipeline published.
+    - "onex.evt.platform.validation-result-published.v1"
   # Projection consumer - read-only consumption for ledger persistence
   consumer_purpose: "projection"
   # Start from earliest offset to capture all historical validation events
@@ -112,6 +116,17 @@ handler_routing:
         - "validation_ledger.project"
     - operation: validation_ledger.project
       topic: "onex.evt.validation.cross-repo-run-completed.v1"
+      handler_type: "validation_ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerValidationLedgerProjection"
+        module: "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection"
+      supported_operations:
+        - "validation_ledger.project"
+    - operation: validation_ledger.project
+      topic: "onex.evt.platform.validation-result-published.v1"
       handler_type: "validation_ledger_projection"
       event_model:
         name: "ModelEventMessage"

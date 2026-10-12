@@ -79,7 +79,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_setup_orchestrator",
     "omnibase_infra.nodes.node_setup_preflight_effect",
     "omnibase_infra.nodes.node_setup_validate_effect",
-    "omnibase_infra.nodes.node_topic_migration_executor_effect",
     "omnibase_infra.nodes.node_topic_migration_projection",
     "omnibase_infra.nodes.node_update_plan_reducer",
     "omnibase_infra.nodes.node_validation_adjudicator",

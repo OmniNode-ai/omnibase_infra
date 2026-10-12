@@ -14,6 +14,8 @@ from typing import Any, cast
 import pytest
 import yaml
 
+from tests.helpers.lane_census_fixtures import LAB_MANIFEST
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -38,9 +40,13 @@ def test_issuer_external_network_matches_dev_broker() -> None:
     assert issuer["networks"]["dev-lane"]["name"] == _dev_broker_network_name()
 
 
+@pytest.mark.lab_overlay
 @pytest.mark.unit
 def test_manifest_issuer_and_dev_networks_match_dev_broker() -> None:
-    manifest = _load_yaml("deploy/lane-census/lane-manifest.yaml")
+    # OMN-20934: the lab manifest is private config, read from the overlay.
+    manifest = cast(
+        "dict[str, Any]", yaml.safe_load(LAB_MANIFEST.read_text(encoding="utf-8"))
+    )
     lanes = manifest["lanes"]
     assert (
         lanes["principal-issuer"]["network"]

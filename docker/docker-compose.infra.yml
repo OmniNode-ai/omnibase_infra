@@ -176,7 +176,7 @@ x-runtime-env: &runtime-env
   # decision to share the dev binding rather than a silent fallthrough.
   # Services that disable rendering (projection-api, contract-resolver) set
   # BIFROST_LANE_OVERLAY_PATH: "" alongside their BIFROST_CONTRACT_PATH opt-out.
-  BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev.bifrost.yaml
+  BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/lane.bifrost.yaml
   BIFROST_VERIFY_ENDPOINTS: ${BIFROST_VERIFY_ENDPOINTS:?runtime policy contract must set BIFROST_VERIFY_ENDPOINTS}
   # OMN-15645: Hardcoded default — same locus/reason as BIFROST_CONTRACT_PATH
   # above (OMN-12864: no ${VAR:-} ambient-override footgun). omnimarket#2000
@@ -491,9 +491,47 @@ x-runtime-env: &runtime-env
   # OTEL_SERVICE_NAME is set per-service (see individual service blocks below).
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://phoenix:6006"
   OTEL_TRACES_EXPORTER: "otlp"
+# Value-less pass-through names (OMN-20867). Each is listed with no value, so
+# compose hands the container the host's value when one is set and leaves the
+# variable unset in the container when it is not. They are not in x-runtime-env,
+# which holds no null value; never write them as ${VAR:-}, which would turn an
+# unset host value into an empty string.
+#
+# The per-lane act switches of omnimarket's landing orchestrator and CI-red
+# triage. Their contracts read them through ${env.VAR:default} references whose
+# inline default is the shipped behaviour, and refuse a set-but-empty value at
+# contract load. A lane's private deployment overlay sets them; this repository
+# names them only and carries no lane's value.
+#
+# The lane class a runtime is an instance of and the class contracts it takes
+# (ONEX_RUNTIME_LANE_CLASS, ONEX_RUNTIME_LANE_CLASS_CONTRACTS; read by the
+# auto-wiring ownership filter). Same rule: the overlay names the instance.
+x-runtime-passthrough-env: &runtime-passthrough-env
+  ONEX_PR_LANDING_GITHUB_MODE:
+  ONEX_PR_LANDING_ARM_ACTION_MODE:
+  ONEX_CI_RED_TRIAGE_ACT_RUNNER:
+  ONEX_CI_RED_TRIAGE_ACT_PR_OWN:
+  ONEX_CI_RED_TRIAGE_ACT_SHARED_CAUSE:
+  ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD:
+  ONEX_RUNTIME_LANE_CLASS:
+  ONEX_RUNTIME_LANE_CLASS_CONTRACTS:
 # ==========================================================================
 # Services
 # ==========================================================================
+# OMN-20932: a lane's Bifrost overlay is private deployment config; this
+# repository ships none (only lane-overlays/local.bifrost.example.yaml, the
+# neutral template). Every runtime service mounts the overlay named for its
+# compose project from ONEX_LANE_OVERLAY_DIR at one lane-neutral path, and
+# compose refuses when the directory is unset or the file is absent. The deploy
+# paths resolve the directory (scripts/runtime_build/compose_files.sh and the
+# deploy agent's _compose_env).
+x-lane-overlay-mount: &lane-overlay-mount
+  type: bind
+  source: "${ONEX_LANE_OVERLAY_DIR:?ONEX_LANE_OVERLAY_DIR must name the directory holding your COMPOSE_PROJECT_NAME.bifrost.yaml (config/lab/lane-overlays under ONEX_WORKSPACE_CONFIG_ROOT); this repository ships no lab lane overlay}/${COMPOSE_PROJECT_NAME}.bifrost.yaml"
+  target: /app/config/delegation/lane.bifrost.yaml
+  read_only: true
+  bind:
+    create_host_path: false
 services:
   # ==========================================================================
   # PostgreSQL - Primary Data Store
@@ -1146,7 +1184,7 @@ services:
       valkey:
         condition: service_healthy
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-omninode-runtime-main}
       RUNTIME_PROFILE: main
       ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_MAIN_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_MAIN_CAPABILITIES}
@@ -1170,7 +1208,7 @@ services:
       - runtime_logs:/app/logs
       - runtime_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       # OMN-12971: Vertex bearer-token delivery. Bind the operator-supplied token
       # file read-only at the path the secret resolver reads
@@ -1242,7 +1280,7 @@ services:
       redpanda:
         condition: service_healthy
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omninode-runtime-effects
       RUNTIME_PROFILE: effects
       ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_EFFECTS_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_EFFECTS_CAPABILITIES}
@@ -1282,7 +1320,7 @@ services:
       - effects_logs:/app/logs
       - effects_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       # OMN-12971: Vertex bearer-token delivery to the effects container (the
       # runtime that makes the outbound provider call). Operator-supplied host
@@ -1348,7 +1386,7 @@ services:
         condition: service_healthy
     command: ["omnimarket-projection-api"]
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omnimarket-projection-api
       RUNTIME_PROFILE: projection-api
       # Projection API serves materialized read models and has no runtime data
@@ -1416,7 +1454,7 @@ services:
       redpanda:
         condition: service_healthy
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omninode-runtime-worker
       RUNTIME_PROFILE: workers
       ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_WORKER_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_WORKER_CAPABILITIES}
@@ -1432,7 +1470,7 @@ services:
     volumes:
       - worker_logs:/app/logs
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
@@ -1515,7 +1553,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omnimarket-tenant-projection-writer
       RUNTIME_PROFILE: tenant-projection
       ONEX_RUNTIME_CAPABILITIES: ${DEV_RUNTIME_TENANT_PROJECTION_CAPABILITIES:?runtime policy contract must set DEV_RUNTIME_TENANT_PROJECTION_CAPABILITIES}
@@ -1536,7 +1574,7 @@ services:
       - tenant_projection_logs:/app/logs
       - tenant_projection_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8085/health"]
@@ -1850,7 +1888,7 @@ services:
       - --workers
       - "1"
     environment:
-      !!merge <<: *runtime-env
+      !!merge <<: [*runtime-env, *runtime-passthrough-env]
       OTEL_SERVICE_NAME: omninode-contract-resolver
       # Contract resolver does not mount /app/data, so it must not render the
       # Bifrost delegation contract into the shared runtime data path.

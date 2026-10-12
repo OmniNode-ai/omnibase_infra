@@ -95,8 +95,12 @@ if TYPE_CHECKING:
     from omnibase_infra.event_bus.model_topic_readiness_config import (
         ModelTopicReadinessConfig,
     )
+    from omnibase_infra.protocols import ProtocolEventBusLike
     from omnibase_infra.protocols.protocol_runtime_log_producer import (
         ProtocolRuntimeLogProducer,
+    )
+    from omnibase_infra.runtime.auto_wiring.models.model_discovered_contract import (
+        ModelDiscoveredContract,
     )
 from pydantic import ValidationError
 
@@ -116,6 +120,9 @@ from omnibase_infra.errors import (
     DbOwnershipMissingError,
     EventRegistryFingerprintMismatchError,
     EventRegistryFingerprintMissingError,
+    InfraConnectionError,
+    InfraTimeoutError,
+    InfraUnavailableError,
     ModelInfraErrorContext,
     ProtocolConfigurationError,
     RuntimeHostError,
@@ -383,6 +390,96 @@ def make_plugin_secret_resolver(
         return os.environ.get(name)
 
     return _resolve
+
+
+async def publish_contract_registrations(
+    *,
+    event_bus: ProtocolEventBusLike,
+    topic: str,
+    contracts: tuple[ModelDiscoveredContract, ...],
+    correlation_id: UUID,
+) -> int:
+    """Announce the contracts this runtime discovered to the contract registry.
+
+    The contract registry reducer consumes ``contract-registered`` and the
+    persistence effect writes ``public.contracts``; before OMN-21031 nothing in
+    the runtime published that event, so the registry stayed empty. Each event
+    is wrapped in the ``ModelEventEnvelope`` the kernel's contract router
+    parses (a bare event is rejected there) and published.
+
+    A contract whose file cannot be read, or whose publish fails, is logged and
+    skipped; boot continues and the next start re-announces every contract.
+
+    Returns:
+        The number of events published.
+    """
+    from omnibase_core.models.events import ModelContractRegisteredEvent
+    from omnibase_core.models.events.model_event_envelope import ModelEventEnvelope
+    from omnibase_core.models.primitives.model_semver import ModelSemVer
+    from omnibase_infra.errors.error_contract_content_hash import (
+        ContractContentHashError,
+    )
+    from omnibase_infra.runtime.util_contract_content_hash import contract_content_hash
+
+    published = 0
+    skipped = 0
+    for contract in contracts:
+        try:
+            contract_yaml = contract.contract_path.read_text(encoding="utf-8")
+            content_hash = contract.contract_content_hash or contract_content_hash(
+                contract.contract_path, correlation_id=correlation_id
+            )
+        except (OSError, UnicodeDecodeError, ContractContentHashError) as exc:
+            logger.warning(
+                "Contract registration skipped for %s: %s (correlation_id=%s)",
+                contract.name,
+                type(exc).__name__,
+                correlation_id,
+            )
+            skipped += 1
+            continue
+        version = contract.contract_version
+        event = ModelContractRegisteredEvent(
+            node_name=contract.name,
+            node_version=ModelSemVer(
+                major=version.major, minor=version.minor, patch=version.patch
+            ),
+            contract_hash=content_hash,
+            contract_yaml=contract_yaml,
+            correlation_id=correlation_id,
+        )
+        envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
+            payload=event.model_dump(mode="json"),
+            correlation_id=correlation_id,
+            event_type=event.event_type,
+            source_tool="onex-kernel-contract-registration",
+            tenant_id=None,
+        )
+        try:
+            await event_bus.publish_envelope(
+                envelope,
+                topic=topic,
+                key=event.node_name.encode("utf-8"),
+            )
+        except (InfraConnectionError, InfraTimeoutError, InfraUnavailableError):
+            logger.warning(
+                "Contract registration publish failed for %s (correlation_id=%s)",
+                event.node_name,
+                correlation_id,
+                exc_info=True,
+            )
+            skipped += 1
+            continue
+        published += 1
+    logger.info(
+        "Contract registrations published: %d of %d contracts, %d skipped "
+        "(correlation_id=%s)",
+        published,
+        len(contracts),
+        skipped,
+        correlation_id,
+    )
+    return published
 
 
 def _contract_registry_subscription_wiring_disabled(
@@ -4939,6 +5036,18 @@ async def bootstrap() -> int:
                         "event_bus_type": event_bus_type,
                     },
                 )
+
+                # OMN-21031: nothing published contract-registered, so these
+                # consumers (attached above, before this publish) idled and
+                # public.contracts stayed empty. Announce every contract the
+                # discovery pass found.
+                if auto_wiring_manifest_discovered is not None:
+                    await publish_contract_registrations(
+                        event_bus=event_bus,
+                        topic=contract_registered_topic,
+                        contracts=auto_wiring_manifest_discovered.contracts,
+                        correlation_id=correlation_id,
+                    )
 
         # 9.6b. Start the lane's runtime tick producer (OMN-20590).
         # RuntimeScheduler (OMN-953) was never started by any runtime, so

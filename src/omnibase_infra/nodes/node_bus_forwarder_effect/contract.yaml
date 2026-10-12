@@ -253,6 +253,17 @@ config:
     # events (consumed by omnimarket node_projection_delegation) and
     # llm-call-completed (consumed by the llm cost projections). A mirror
     # republishes bytes unchanged, so the envelope keeps the developer's tenant id.
+    #
+    # OMN-20867: a deployment may run this leg with no cloud leg at all (a
+    # mirror-only forwarder: `run_gateway_forwarder` builds the source and
+    # mirror-lane transports and nothing else). `lab_capacity`, `pr_state` and
+    # `ci_run_failed` each name ONE product topic, so a deployment selects
+    # exactly the stream it needs and the process cannot republish anything
+    # beyond it. `ci_run_failed` feeds red triage on a mirror lane. Lanes of a
+    # particular installation are named by that installation's overlay, through
+    # `lane_mirror_binding.declared_lanes`; which source, which mirror lanes,
+    # which broker addresses and which credentials a deployment uses are the
+    # overlay's business, never this file.
     lane_mirror:
       declared_lanes:
         - "stability-test"
@@ -270,6 +281,12 @@ config:
           - "onex.evt.omnibase-infra.delegation-completed.v1"
           - "onex.evt.omnibase-infra.delegation-failed.v1"
           - "onex.evt.omniintelligence.llm-call-completed.v1"
+        lab_capacity:
+          - "onex.evt.omnimarket.lab-host-capacity-advertised.v1"
+        pr_state:
+          - "onex.evt.omnimarket.pr-state-observed.v1"
+        ci_run_failed:
+          - "onex.evt.omnimarket.ci-run-failed.v1"
       # Poll batch size and the source-commit deadline for one drain pass.
       max_messages_per_poll: 50
       poll_timeout_ms: 1000
