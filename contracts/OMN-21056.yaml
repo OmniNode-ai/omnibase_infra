@@ -1,0 +1,42 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21056
+title: Validation pipeline hops each have a publisher and a subscriber, so a candidate reaches result-published
+summary: The executor and adjudicator subscribe to the orchestrator's requests, the adjudicator gains its handler, the orchestrator owns one handler per subscribe topic and publishes the final result, and the validation ledger projects that result.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-validation-pipeline-hops
+    statement: Every request the validation orchestrator publishes has a subscriber, and a candidate's result is published and ledgered.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: every hop between candidate-submitted and result-published has a subscriber and a publisher, proven through the runtime dispatch callback and result applier -- falsifier: uv run pytest tests/unit/nodes/node_validation_orchestrator/test_validation_pipeline_hops_omn21056.py -q'
+      - id: AC3
+        statement: 'AC3: a failed check yields a FAIL or QUARANTINE verdict through the runtime entry point and nothing is promoted -- falsifier: uv run pytest tests/unit/nodes/node_validation_orchestrator/test_validation_pipeline_hops_omn21056.py -q -k "validation_pipeline and quarantine"'
+evidence_requirements:
+  - kind: tests
+    description: Topic graph, handler ownership and the end-to-end hops through the production dispatch callback and applier.
+    command: uv run pytest tests/unit/nodes/node_validation_orchestrator/test_validation_pipeline_hops_omn21056.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-validation-pipeline-hops-ac2
+    description: The hop tests pass for every subscription and publisher between candidate-submitted and result-published.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_validation_orchestrator/test_validation_pipeline_hops_omn21056.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-validation-pipeline-quarantine-ac3
+    description: The quarantine and fail tests pass through the runtime dispatch callback.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_validation_orchestrator/test_validation_pipeline_hops_omn21056.py -q -k "validation_pipeline and quarantine"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3

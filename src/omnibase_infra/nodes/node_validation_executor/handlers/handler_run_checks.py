@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.models.validation import (
@@ -75,7 +75,7 @@ class HandlerRunChecks:
     async def handle(
         self,
         plan: ModelValidationPlan,
-        correlation_id: UUID,
+        correlation_id: UUID | None = None,
     ) -> ModelExecutorResult:
         """Execute all checks in the validation plan.
 
@@ -88,11 +88,14 @@ class HandlerRunChecks:
 
         Args:
             plan: Validation plan containing the checks to execute.
-            correlation_id: Correlation ID for distributed tracing.
+            correlation_id: Correlation ID for distributed tracing. The runtime
+                dispatches the typed plan alone, so a fresh ``uuid4()`` is
+                generated when ``None``.
 
         Returns:
             Aggregated executor result with all check outcomes.
         """
+        correlation_id = correlation_id or uuid4()
         logger.info(
             "Executing validation plan %s with %d checks (correlation_id=%s)",
             plan.plan_id,

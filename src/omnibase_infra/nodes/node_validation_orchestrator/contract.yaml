@@ -65,11 +65,15 @@ event_bus:
 # ==============================
 # Declarative mapping of consumed events to handler implementations.
 handler_routing:
-  routing_strategy: "payload_type_match"
+  routing_strategy: "operation_match"
   handlers:
-    # ModelPatternCandidate -> HandlerBuildPlan
-    # Builds a validation plan with the MVP check catalog for the submitted candidate.
-    - event_model:
+    # OMN-21056: each handler names the one subscribe topic it owns. With a single
+    # un-scoped entry, HandlerBuildPlan owned all three subscribe topics, so
+    # checks-completed and adjudication-completed were dispatched to the plan
+    # builder (and no later hop of the pipeline ever ran).
+    - operation: "validation.build_plan"
+      topic: "onex.evt.platform.validation-candidate-submitted.v1"
+      event_model:
         name: "ModelPatternCandidate"
         module: "omnibase_infra.nodes.node_validation_orchestrator.models.model_pattern_candidate"
       handler:
@@ -77,8 +81,29 @@ handler_routing:
         module: "omnibase_infra.nodes.node_validation_orchestrator.handlers.handler_build_plan"
       output_events:
         - "ModelValidationPlan"
-      description: "Build validation plan from pattern candidate using MVP check catalog."
-# Consumed events
+      description: "Build validation plan from pattern candidate using MVP check catalog; published as the execution request."
+    - operation: "validation.request_adjudication"
+      topic: "onex.evt.platform.validation-checks-completed.v1"
+      event_model:
+        name: "ModelExecutorResult"
+        module: "omnibase_infra.models.validation.model_executor_result"
+      handler:
+        name: "HandlerRequestAdjudication"
+        module: "omnibase_infra.handlers.handler_validation_request_adjudication"
+      output_events:
+        - "ModelValidationAdjudicationRequested"
+      description: "Request adjudication of the executor's check results."
+    - operation: "validation.publish_result"
+      topic: "onex.evt.platform.validation-adjudication-completed.v1"
+      event_model:
+        name: "ModelValidationAdjudicationCompleted"
+        module: "omnibase_infra.models.validation.model_validation_adjudication_completed"
+      handler:
+        name: "HandlerPublishResult"
+        module: "omnibase_infra.handlers.handler_validation_publish_result"
+      output_events:
+        - "ModelValidationResultPublished"
+      description: "Publish the final validation result from the adjudicator's verdict."
 consumed_events:
   - topic: "onex.evt.platform.validation-candidate-submitted.v1"
     event_type: "ValidationCandidateSubmitted"
@@ -93,8 +118,10 @@ consumed_events:
 published_events:
   - topic: "onex.evt.platform.validation-plan-created.v1"
     event_type: "ValidationPlanCreated"
+  # OMN-21056: HandlerBuildPlan returns ModelValidationPlan, whose short name is the
+  # published_events key. The plan IS the execution request (the executor's input).
   - topic: "onex.evt.platform.validation-execution-requested.v1"
-    event_type: "ValidationExecutionRequested"
+    event_type: "ValidationPlan"
   - topic: "onex.evt.platform.validation-adjudication-requested.v1"
     event_type: "ValidationAdjudicationRequested"
   - topic: "onex.evt.platform.validation-result-published.v1"

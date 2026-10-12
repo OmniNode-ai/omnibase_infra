@@ -51,6 +51,8 @@ event_bus:
     - "onex.evt.validation.cross-repo-violations-batch.v1"
     # Validation run completion
     - "onex.evt.validation.cross-repo-run-completed.v1"
+    # OMN-21056: the pattern-validation pipeline's terminal event is ledgered too.
+    - "onex.evt.platform.validation-result-published.v1"
   # Projection consumer - read-only consumption for ledger persistence
   consumer_purpose: "projection"
   # Start from earliest offset to capture all historical validation events
@@ -121,15 +123,26 @@ handler_routing:
         module: "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection"
       supported_operations:
         - "validation_ledger.project"
-# Intent consumption (OMN-14524): the projection emits a
-# `validation_ledger.append` intent per consumed validation event. This table
-# is the SOURCE OF TRUTH the kernel uses to DERIVE a result applier for this
-# contract -- it names the effect node whose canonical handle() persists the
-# intent (node_validation_ledger_write_effect -> HandlerValidationLedgerAppend,
-# keyed by the write-effect's `validation_ledger.append` operation). Without
-# this declaration the kernel has no wired effect path, handler_wiring FAILS
-# the contract (fail-closed), and validation_event_ledger stays empty. There
-# is no by-name kernel allowlist -- declare the routing here, get wired.
+        # Intent consumption (OMN-14524): the projection emits a
+        # `validation_ledger.append` intent per consumed validation event. This table
+        # is the SOURCE OF TRUTH the kernel uses to DERIVE a result applier for this
+        # contract -- it names the effect node whose canonical handle() persists the
+        # intent (node_validation_ledger_write_effect -> HandlerValidationLedgerAppend,
+        # keyed by the write-effect's `validation_ledger.append` operation). Without
+        # this declaration the kernel has no wired effect path, handler_wiring FAILS
+        # the contract (fail-closed), and validation_event_ledger stays empty. There
+        # is no by-name kernel allowlist -- declare the routing here, get wired.
+    - operation: validation_ledger.project
+      topic: "onex.evt.platform.validation-result-published.v1"
+      handler_type: "validation_ledger_projection"
+      event_model:
+        name: "ModelEventMessage"
+        module: "omnibase_infra.event_bus.models.model_event_message"
+      handler:
+        name: "HandlerValidationLedgerProjection"
+        module: "omnibase_infra.nodes.node_validation_ledger_projection_compute.handlers.handler_validation_ledger_projection"
+      supported_operations:
+        - "validation_ledger.project"
 intent_consumption:
   intent_routing_table:
     "validation_ledger.append": "node_validation_ledger_write_effect"

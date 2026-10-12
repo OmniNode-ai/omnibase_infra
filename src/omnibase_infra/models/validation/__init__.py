@@ -27,7 +27,10 @@ Exports:
     ModelValidateAndRaiseParams: Parameters for validate and raise operations
     ModelValidationErrorParams: Parameters for security validation error creation
     ModelValidationOutcome: Generic validation result model
+    ModelValidationAdjudicationCompleted: Adjudicator verdict as seen by the orchestrator
+    ModelValidationAdjudicationRequested: Request to adjudicate executor results
     ModelValidationPlan: Validation plan produced by orchestrator
+    ModelValidationResultPublished: Terminal validation result for one candidate
 """
 
 from omnibase_infra.models.validation.model_any_type_validation_result import (
@@ -80,6 +83,12 @@ from omnibase_infra.models.validation.model_planned_check import ModelPlannedChe
 from omnibase_infra.models.validation.model_validate_and_raise_params import (
     ModelValidateAndRaiseParams,
 )
+from omnibase_infra.models.validation.model_validation_adjudication_completed import (
+    ModelValidationAdjudicationCompleted,
+)
+from omnibase_infra.models.validation.model_validation_adjudication_requested import (
+    ModelValidationAdjudicationRequested,
+)
 from omnibase_infra.models.validation.model_validation_error_params import (
     ModelValidationErrorParams,
 )
@@ -87,6 +96,9 @@ from omnibase_infra.models.validation.model_validation_outcome import (
     ModelValidationOutcome,
 )
 from omnibase_infra.models.validation.model_validation_plan import ModelValidationPlan
+from omnibase_infra.models.validation.model_validation_result_published import (
+    ModelValidationResultPublished,
+)
 
 __all__ = [
     "ModelAnyTypeValidationResult",
@@ -109,7 +121,10 @@ __all__ = [
     "ModelOutputValidationParams",
     "ModelPlannedCheck",
     "ModelValidateAndRaiseParams",
+    "ModelValidationAdjudicationCompleted",
+    "ModelValidationAdjudicationRequested",
     "ModelValidationErrorParams",
     "ModelValidationOutcome",
     "ModelValidationPlan",
+    "ModelValidationResultPublished",
 ]
