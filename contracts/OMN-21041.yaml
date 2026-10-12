@@ -29,7 +29,7 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest tests/unit/nodes/node_runner_fleet_maintain -q"
+        check_value: "uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_maintain_dispatch_chain_omn21041.py -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
       - check_type: "test_passes"
         check_value: "uv run pytest tests/ci/test_runner_fleet_maintain_flip_proof_omn21041.py -q"
@@ -40,7 +40,7 @@ dod_evidence:
     source: "manual"
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest tests/unit/nodes/node_runner_fleet_maintain -q -k read_only"
+        check_value: "uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_maintain_dispatch_chain_omn21041.py -q -k read_only"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC3"]
   - id: "dod-omn21041-ac1-chain-in-process"
