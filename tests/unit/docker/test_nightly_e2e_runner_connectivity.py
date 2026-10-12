@@ -44,6 +44,8 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.helpers.lane_census_fixtures import NEUTRAL_CONFIG_ROOT
+
 pytestmark = [pytest.mark.unit]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -437,6 +439,10 @@ def _run_teardown_step(
             "DOCKER_CALL_LOG": str(call_log),
             "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
             "TEST_PYTHON": sys.executable,
+            # OMN-20934: teardown reads the protected lanes from the lane
+            # manifest under the config root; the neutral one stands in for
+            # the lab's private manifest here.
+            "ONEX_WORKSPACE_CONFIG_ROOT": str(NEUTRAL_CONFIG_ROOT),
         }
     )
     result = subprocess.run(

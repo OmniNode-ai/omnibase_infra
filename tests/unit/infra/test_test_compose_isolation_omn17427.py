@@ -13,10 +13,11 @@ Two ratchets, both static (no docker daemon, so they run in unit CI):
 
 1. Every ``subprocess`` call in ``tests/`` whose argv resolves to
    ``docker compose ... <up|down|start|stop|restart|rm|kill|create|run|pause>``
-   must name its project with ``-p``/``--project-name``, and that project must
-   not be a declared lane's (the lane set comes from
-   ``deploy/lane-census/lane-manifest.yaml``). Without ``-p`` the compose file's
-   own ``name:`` decides, which is how the incident happened.
+   must name its project with ``-p``/``--project-name``, and a literal project
+   must be a test project (the ``onex-test-`` prefix). OMN-20934 turned that
+   from a denylist read out of the lane manifest, which is private deployment
+   config, into an allowlist that needs no list of lanes. Without ``-p`` the
+   compose file's own ``name:`` decides, which is how the incident happened.
 2. The document the catalog round-trip test starts is isolated: its project,
    container names, volumes and networks are the test's own.
 
@@ -35,8 +36,9 @@ import pytest
 from omnibase_infra.docker.catalog.generator import generate_compose
 from omnibase_infra.docker.catalog.resolver import CatalogResolver
 from tests.helpers.compose_isolation import (
+    ISOLATED_PREFIX,
     compose_isolation_violations,
-    declared_lane_projects,
+    is_isolated,
     isolated_project_name,
     without_host_ports,
 )
@@ -106,14 +108,14 @@ def _flatten(
     return [_UNRESOLVED]
 
 
-def _project_is_lane(value: object, names: dict[str, ast.expr]) -> bool | None:
-    """True/False for a resolvable project value; None when it is dynamic."""
+def _project_is_foreign(value: object, names: dict[str, ast.expr]) -> bool | None:
+    """True when a resolvable project is not a test project; None when dynamic."""
     if isinstance(value, str):
-        return value in declared_lane_projects()
+        return not is_isolated(value)
     if isinstance(value, ast.Name) and value.id in names:
-        return _project_is_lane(names[value.id], names)
+        return _project_is_foreign(names[value.id], names)
     if isinstance(value, ast.Constant) and isinstance(value.value, str):
-        return value.value in declared_lane_projects()
+        return not is_isolated(value.value)
     return None  # an f-string, a call or an attribute: computed per run
 
 
@@ -171,9 +173,10 @@ def compose_violations(source: str, label: str) -> list[str]:
                     f"{where}: docker compose {verb} with no -p, so the compose "
                     "file's own name: picks the project"
                 )
-            elif _project_is_lane(project, names):
+            elif _project_is_foreign(project, names):
                 problems.append(
-                    f"{where}: docker compose {verb} on a declared lane project"
+                    f"{where}: docker compose {verb} on project {project!r}, "
+                    f"which is not a test project ({ISOLATED_PREFIX!r} prefix)"
                 )
     return problems
 
@@ -181,16 +184,15 @@ def compose_violations(source: str, label: str) -> list[str]:
 # ----------------------------------------------------------------------------- ratchet 1
 
 
-def test_lane_set_comes_from_the_lane_manifest() -> None:
-    """The declared lanes the incident named are all in the manifest-derived set."""
-    assert {
-        "omnibase-infra",
-        "omnibase-infra-stability-test",
-        "omnibase-infra-judge",
-        "omnibase-infra-lakshman",
-        "omnibase-infra-dogfood",
-        "omninode-ci-bus",
-    } <= declared_lane_projects()
+def test_only_a_minted_test_name_is_isolated() -> None:
+    """The allowlist needs no lane list: a name a test did not mint is refused.
+
+    The incident's own project and an arbitrary lane-shaped one are both refused
+    without either being declared anywhere; a minted name is accepted.
+    """
+    assert not is_isolated("omnibase-infra")
+    assert not is_isolated("example-lane")
+    assert is_isolated(isolated_project_name("anything"))
 
 
 def test_no_test_runs_a_mutating_compose_verb_on_a_lane_project() -> None:
@@ -273,5 +275,5 @@ def test_catalog_roundtrip_document_is_isolated() -> None:
 def test_red_control_default_project_document_is_rejected() -> None:
     """The pre-fix document (default project, lane container names) is refused."""
     problems = compose_isolation_violations(_roundtrip_compose(None))
-    assert any("project 'omnibase-infra'" in p for p in problems), problems
+    assert any("project 'omnibase-infra' is not" in p for p in problems), problems
     assert any("omnibase-infra-postgres" in p for p in problems), problems

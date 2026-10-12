@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.1.0",
+  "event_type": "lane-census-drift",
+  "topic": "onex.evt.infra.lane-census-drift.v1",
+  "host": "box-a",
+  "host_id": "host-a",
+  "emitted_at": "2026-10-11T12:00:00+00:00",
+  "severity": "warning",
+  "lanes_checked": [
+    "judge",
+    "dev"
+  ],
+  "lanes_not_applicable": [
+    "dogfood"
+  ],
+  "lanes_skipped_optional_down": [
+    "dev"
+  ],
+  "drift_count": 0,
+  "findings": [],
+  "alert_key": "lane-census-drift:box-a:e3b0c44298fc1c14",
+  "ticket_title": "lane census: no drift",
+  "ticket_body": "## Lane census drift detected\n\nHost: `box-a`\nLanes checked: judge, dev\nLanes not applicable on this host: dogfood\n\nThe desired-state lane census (the private lane-manifest.yaml)\ndoes not match the live runtime. Drift items below name exactly what is\nmissing or extra. This is the regression class the lane-census ratchet\n(OMN-13011) exists to catch \u2014 it would have fired on 2026-06-11 when prod\nruntime containers and the broker network were silently absent.\n\n## Findings\n\n\n## Action\nBring the lane back to declared state (compose up the absent containers / reattach the network), or update the lane manifest in the same PR if the desired state legitimately changed. Do not silence the check."
+}

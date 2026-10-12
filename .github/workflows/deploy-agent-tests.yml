@@ -99,5 +99,7 @@ jobs:
 
       - name: Run deploy-agent unit tests (OMN-15378)
         run: |
+          # OMN-20934: lab_overlay cases read the private lane manifest and run
+          # in the Lane Census Staleness job, which fetches the overlay.
           uv run --project scripts/deploy-agent --extra dev \
-            pytest scripts/deploy-agent/tests -v --tb=short
+            pytest scripts/deploy-agent/tests -v --tb=short -m "not lab_overlay"

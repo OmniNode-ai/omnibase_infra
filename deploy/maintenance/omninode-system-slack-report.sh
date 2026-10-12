@@ -1241,7 +1241,9 @@ check_census_drift() {
       live="$owner_home/.local/state/onex/census-snapshot.json"
     fi
   fi
-  manifest="${OMNINODE_CENSUS_MANIFEST:-$repo/deploy/lane-census/lane-manifest.yaml}"
+  # OMN-20934: the manifest is private config under the workspace config root;
+  # with neither variable set, the unreadable-manifest row below says so.
+  manifest="${OMNINODE_CENSUS_MANIFEST:-${ONEX_WORKSPACE_CONFIG_ROOT:-}/config/lab/lane-census/lane-manifest.yaml}"
   checker="${OMNINODE_CENSUS_CHECKER:-$repo/scripts/check_lane_census_drift.py}"
   python_bin="${OMNINODE_CENSUS_PYTHON:-python3}"
 

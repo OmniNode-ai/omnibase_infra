@@ -24,10 +24,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-pytestmark = pytest.mark.unit
+from tests.helpers.lane_census_fixtures import LAB_MANIFEST
+
+# OMN-20934: the manifest these compose files are diffed against is private
+# config, so the module runs only where the overlay is fetched (lab_overlay).
+pytestmark = [pytest.mark.unit, pytest.mark.lab_overlay]
 
 _REPO = Path(__file__).resolve().parents[3]
-_MANIFEST_PATH = _REPO / "deploy" / "lane-census" / "lane-manifest.yaml"
+_MANIFEST_PATH = LAB_MANIFEST
 
 # Lanes whose compose files have concrete container_name values we can diff.
 # dev uses generated/non-prefixed names and is intentionally optional/loose, so
@@ -88,7 +92,7 @@ def test_every_compose_container_is_declared(lane: str) -> None:
     missing = compose_names - declared
     assert not missing, (
         f"lane {lane!r}: compose declares containers absent from the lane "
-        f"manifest (update deploy/lane-census/lane-manifest.yaml in the same PR): "
+        f"manifest (update the lab's lane manifest, config/lab/lane-census, with it): "
         f"{sorted(missing)}"
     )
 
@@ -202,7 +206,7 @@ def test_profile_disabled_services_are_declared_profile_gated(lane: str) -> None
     assert not wrongly_required, (
         f"lane {lane!r}: these containers are disabled by a compose profile "
         f"override yet are declared `kind: service` (a required, must-be-running "
-        f"service) in deploy/lane-census/lane-manifest.yaml. No `--profile "
+        f"service) in the lab's lane manifest. No `--profile "
         f"runtime up` can ever start them, so the census will report them as "
         f"permanent false container_absent criticals. Declare them "
         f"`kind: profile_gated`, or remove the compose profile override in this "
