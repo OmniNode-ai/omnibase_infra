@@ -10,6 +10,9 @@
 # Related Tickets:
 #   - OMN-3944: Task 7 — Reconciliation ORCHESTRATOR Node
 #   - OMN-3925: Artifact Reconciliation + Update Planning MVP
+#   - OMN-21053: both handlers expose handle(request); HandlerPlanToPRComment returns
+#     nothing for a plan that is not PR-triggered, so a manual reconcile yields one
+#     update-plan-emitted event and no pr-comment-posted event.
 #
 # Contract identifiers
 name: "node_artifact_reconciliation_orchestrator"

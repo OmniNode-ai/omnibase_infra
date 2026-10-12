@@ -1,0 +1,23 @@
+{
+  "branch_coverage_pct": 30.77,
+  "candidate_count": 4,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_pr_webhook_ingestion",
+  "handler_module_sha256": "sha256:ce39b8a7f3bf3f77c97e8e31ae736155eebaae5f2d307a5b7be55e64eb6a7f6e",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_artifact_change_detector_effect",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-10-12T14:21:41.017931+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 3,
+  "selected_input_hashes": [
+    "sha256:e02a4b50b84a39b36e6ec0badedaf243f0e2b7446a63ef353eeb75a5dbd81382",
+    "sha256:a7eb30e049334ebaefafbf21c2a7a79d4ad19c4b79c5a0e29026018bd978f1d4",
+    "sha256:8b50f81772c19bcea7cfdd355ea55fa3038dc2faa17c4c78103585dda550aa71"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-21053 hand-flips node_artifact_change_detector_effect to canonical def-B (handle(request), OMN-14781 path): the op-method entrypoint is replaced by handle(), and the helpers named in the .handflip.json are preserved byte-identically base_ref<->HEAD, re-derived from git by the canonical-shape ratchet. Equivalence is proven by that git-verbatim preservation plus the parity tests over the corpus in tests/unit/nodes/test_artifact_reconciliation_flip_parity_omn21053.py, not by branch coverage.",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": []
+}

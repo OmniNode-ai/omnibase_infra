@@ -1,0 +1,22 @@
+{
+  "branch_coverage_pct": 15.97,
+  "candidate_count": 2,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.handlers.handler_plan_to_pr_comment",
+  "handler_module_sha256": "sha256:ee0f2070db2ff32eab8c7057bd3fa4c60d56b2b9b56847131291e2a2858d25b6",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_artifact_reconciliation_orchestrator",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-10-12T14:21:41.040395+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 2,
+  "selected_input_hashes": [
+    "sha256:c6c9e2985833bdcf904fb1d05e0b639ec4d9d94cc7e2b918e25b4d223b726432",
+    "sha256:ddf41bcb2c7d583800c7b4c177b3fe19523c1ec3a7567453599bc8edfa188987"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-21053 hand-flips node_artifact_reconciliation_orchestrator to canonical def-B (handle(request), OMN-14781 path): the op-method entrypoint is replaced by handle(), and the helpers named in the .handflip.json are preserved byte-identically base_ref<->HEAD, re-derived from git by the canonical-shape ratchet. Equivalence is proven by that git-verbatim preservation plus the parity tests over the corpus in tests/unit/nodes/test_artifact_reconciliation_flip_parity_omn21053.py, not by branch coverage.",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": []
+}

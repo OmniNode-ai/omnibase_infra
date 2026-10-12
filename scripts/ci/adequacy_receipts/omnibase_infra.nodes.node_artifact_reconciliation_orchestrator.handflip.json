@@ -1,0 +1,24 @@
+{
+  "base_ref": "ae5fca1228a34d61f76d1cbfdd1babbe64b7392d",
+  "canonical_handler_module": "omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.handlers.handler_plan_to_pr_comment",
+  "legacy_handler_module": "omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.handlers.handler_plan_to_pr_comment",
+  "node_id": "omnibase_infra.nodes.node_artifact_reconciliation_orchestrator",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:c6c9e2985833bdcf904fb1d05e0b639ec4d9d94cc7e2b918e25b4d223b726432",
+      "sha256:ddf41bcb2c7d583800c7b4c177b3fe19523c1ec3a7567453599bc8edfa188987"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/test_artifact_reconciliation_flip_parity_omn21053.py::test_pr_comment_handler_exposes_handle_entrypoint",
+      "tests/unit/nodes/test_artifact_reconciliation_flip_parity_omn21053.py::test_pr_comment_handle_returns_nothing_for_a_non_pr_plan"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerPlanToPRComment.post_plan_comment",
+    "HandlerPlanToPRComment._find_existing_comment",
+    "HandlerPlanToPRComment._post_comment",
+    "HandlerPlanToPRComment._update_comment"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

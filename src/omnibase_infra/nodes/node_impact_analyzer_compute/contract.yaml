@@ -13,6 +13,9 @@
 #   - OMN-3925: Artifact Reconciliation + Update Planning MVP
 #   - OMN-14817: HandlerImpactAnalysis flipped to canonical def-B
 #     handle(request) via a hand-flip; scoring helpers preserved verbatim.
+#   - OMN-21053: the request also reads the bare change trigger the detector publishes
+#     (binding the packaged artifact registry) and carries the trigger context into
+#     the result.
 name: "node_impact_analyzer_compute"
 contract_name: "node_impact_analyzer_compute"
 node_name: "node_impact_analyzer_compute"

@@ -1,0 +1,23 @@
+{
+  "base_ref": "ae5fca1228a34d61f76d1cbfdd1babbe64b7392d",
+  "canonical_handler_module": "omnibase_infra.nodes.node_update_plan_reducer.handlers.handler_create_plan",
+  "legacy_handler_module": "omnibase_infra.nodes.node_update_plan_reducer.handlers.handler_create_plan",
+  "node_id": "omnibase_infra.nodes.node_update_plan_reducer",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:9ae61f88a508b9855cbc7cc3f6254ac4d935f39c7482e2c2a93c828eb37e37ab",
+      "sha256:cef7d5d8171997d83c02e2f09857d2538bad61056dffb807249be8a6c3491d4a",
+      "sha256:362e1ea636b5acb89645d91caa291ad42c0ddb25b7e8da2854b1202bb3f25297"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/test_artifact_reconciliation_flip_parity_omn21053.py::test_create_plan_handler_exposes_handle_entrypoint",
+      "tests/unit/nodes/test_artifact_reconciliation_flip_parity_omn21053.py::test_create_plan_handle_returns_a_plan_for_the_result"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerCreatePlan._build_tasks",
+    "HandlerCreatePlan._artifact_to_task"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}
