@@ -27,7 +27,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_runtime_error_triage_effect -k escalat -q -n 0
+        check_value: uv run pytest tests/unit/nodes/node_runtime_error_triage_effect/test_escalation.py -k escalat -q -n 0
     binds_ac:
       - AC1
   - id: dod-escalation-ac2
@@ -35,7 +35,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/nodes/node_runtime_error_triage_effect -k escalate_once -q -n 0
+        check_value: uv run pytest tests/unit/nodes/node_runtime_error_triage_effect/test_escalation.py -k escalate_once -q -n 0
     binds_ac:
       - AC2
   - id: dod-escalation-deploy
