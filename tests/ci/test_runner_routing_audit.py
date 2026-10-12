@@ -6,6 +6,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -1692,3 +1693,362 @@ def test_live_repository_visibility_uses_a_gh_cli_flag_that_actually_exists(
     # out of scope for a merge-gating placement check.
     assert "--no-archived" in captured_args[0]
     assert result == [("a-private-repo", True), ("a-public-repo", False)]
+
+
+class _GhResult:
+    def __init__(self, stdout: str, returncode: int = 0, stderr: str = "") -> None:
+        self.stdout = stdout
+        self.returncode = returncode
+        self.stderr = stderr
+
+
+def _workflow_tree(*entries: dict[str, object]) -> str:
+    return json.dumps({"data": {"repository": {"object": {"entries": list(entries)}}}})
+
+
+def _blob(name: str, text: str, **flags: object) -> dict[str, object]:
+    return {
+        "name": name,
+        "path": f".github/workflows/{name}",
+        "type": "blob",
+        "object": {"text": text, "isBinary": False, "isTruncated": False, **flags},
+    }
+
+
+def test_workflow_texts_cost_one_graphql_read_per_repository(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-20864: a repository's workflows are ONE read, however many files.
+
+    The contents API read cost one REST call per workflow file plus a listing.
+    This pass runs in every omnibase_infra CI run on CROSS_REPO_PAT, the
+    operator's token, and across the org's private repositories (the largest
+    carries about a hundred workflows) it spent the operator's hourly
+    core quota on 2026-10-11 (job 114569998935: rate limit exceeded for the
+    operator's user id), which stopped the landing controller with QUOTA.
+    """
+    module = _load_script()
+    calls: list[list[str]] = []
+    many = [_blob(f"w{i}.yml", f"name: w{i}\n") for i in range(100)]
+
+    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
+        calls.append(args)
+        return _GhResult(_workflow_tree(*many))
+
+    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
+
+    texts = module._default_branch_workflow_texts("a-private-repo")
+
+    assert len(calls) == 1
+    assert calls[0][:2] == ["api", "graphql"]
+    assert "owner=OmniNode-ai" in calls[0] and "name=a-private-repo" in calls[0]
+    assert not any("contents/" in part for part in calls[0])
+    assert len(texts) == 100
+    assert texts[".github/workflows/w7.yml"] == "name: w7\n"
+
+
+def test_workflow_texts_keep_only_yaml_blobs(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _load_script()
+    tree = _workflow_tree(
+        _blob("ci.yml", "a: 1\n"),
+        _blob("deploy.yaml", "b: 2\n"),
+        _blob("README.md", "docs\n"),
+        {"name": "nested.yml", "path": ".github/workflows/nested.yml", "type": "tree"},
+    )
+    monkeypatch.setattr(module, "_run_gh", lambda args, timeout=20: _GhResult(tree))
+
+    assert module._default_branch_workflow_texts("a-private-repo") == {
+        ".github/workflows/ci.yml": "a: 1\n",
+        ".github/workflows/deploy.yaml": "b: 2\n",
+    }
+
+
+def test_a_repository_without_a_workflows_directory_reads_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    body = json.dumps({"data": {"repository": {"object": None}}})
+    monkeypatch.setattr(module, "_run_gh", lambda args, timeout=20: _GhResult(body))
+
+    assert module._default_branch_workflow_texts("a-private-repo") == {}
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        _GhResult("", returncode=1, stderr="gh: API rate limit exceeded"),
+        _GhResult(json.dumps({"data": {"repository": None}})),
+        _GhResult(_workflow_tree(_blob("big.yml", "x", isTruncated=True))),
+        _GhResult(
+            _workflow_tree(
+                {
+                    "name": "bin.yml",
+                    "path": ".github/workflows/bin.yml",
+                    "type": "blob",
+                    "object": {"text": None, "isBinary": True, "isTruncated": False},
+                }
+            )
+        ),
+    ],
+    ids=["read-failed", "no-repository", "truncated", "no-text"],
+)
+def test_an_unread_workflow_raises_instead_of_reading_clean(
+    monkeypatch: pytest.MonkeyPatch, result: _GhResult
+) -> None:
+    """A failed or partial read is never an empty, passing repository (rule 16)."""
+    module = _load_script()
+    monkeypatch.setattr(module, "_run_gh", lambda args, timeout=20: result)
+
+    with pytest.raises(RuntimeError, match="graphql workflow read"):
+        module._default_branch_workflow_texts("a-private-repo")
+
+
+def test_each_variable_list_is_read_once_per_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-20864: the seam audit and the scoped audit share one read per list."""
+    module = _load_script()
+    calls: list[list[str]] = []
+
+    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
+        calls.append(args)
+        return _GhResult(json.dumps([{"name": "X", "value": "1"}]))
+
+    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
+
+    for _ in range(3):
+        assert module._variables(["--org", "OmniNode-ai"]) == [
+            {"name": "X", "value": "1"}
+        ]
+        module._variables(["--repo", "OmniNode-ai/omnibase_infra"])
+
+    assert calls == [
+        ["variable", "list", "--org", "OmniNode-ai", "--json", "name,value"],
+        [
+            "variable",
+            "list",
+            "--repo",
+            "OmniNode-ai/omnibase_infra",
+            "--json",
+            "name,value",
+        ],
+    ]
+
+
+# OMN-20864: job 114609134005 (omnibase_infra#4863, 2026-10-11T23:59:14Z) failed
+# the live pass on `gh repo list failed: GraphQL: API rate limit already exceeded
+# for user ID 1002253.` and the combined step reported it as routing drift.
+RATE_LIMITED = "GraphQL: API rate limit already exceeded for user ID 1002253."
+
+
+def _run_main(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> tuple[int, str, str]:
+    output = tmp_path / "github_output"
+    output.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["audit-runner-routing.py", "--github-vars", "--policy", str(POLICY)],
+    )
+    code = module.main()
+    return code, capsys.readouterr().out, output.read_text(encoding="utf-8")
+
+
+def test_a_rate_limited_live_read_is_unreadable_not_a_finding(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A rate limit is an unread routing state, never routing drift."""
+    module = _load_script()
+    monkeypatch.setattr(
+        module,
+        "_run_gh",
+        lambda args, timeout=20: _GhResult("", returncode=1, stderr=RATE_LIMITED),
+    )
+
+    code, out, github_output = _run_main(module, monkeypatch, tmp_path, capsys)
+
+    assert code == module.EXIT_UNREADABLE
+    assert code != 1
+    assert "Runner routing drift" not in out
+    assert "::error title=Runner audit unreadable::" in out
+    assert "rate limit" in out
+    assert "findings=0" in github_output.splitlines()
+    assert "unreadable=3" in github_output.splitlines()
+
+
+def test_findings_of_one_live_pass_survive_a_rate_limit_in_another(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_script()
+    monkeypatch.setattr(
+        module,
+        "audit_github_variables",
+        lambda policy: [module.Finding("omnibase_core", "drifted to hosted")],
+    )
+    monkeypatch.setattr(
+        module,
+        "_run_gh",
+        lambda args, timeout=20: _GhResult("", returncode=1, stderr=RATE_LIMITED),
+    )
+
+    code, out, github_output = _run_main(module, monkeypatch, tmp_path, capsys)
+
+    assert code == 1
+    assert "::error title=Runner routing drift::omnibase_core: drifted to hosted" in out
+    assert "::error title=Runner audit unreadable::" in out
+    assert "findings=1" in github_output.splitlines()
+    assert "unreadable=2" in github_output.splitlines()
+
+
+def test_a_rate_limit_names_when_the_limit_resets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    rate_limit = json.dumps(
+        {
+            "resources": {
+                "core": {"limit": 5000, "remaining": 4000, "reset": 1791763200},
+                "graphql": {"limit": 5000, "remaining": 0, "reset": 1791764160},
+            }
+        }
+    )
+
+    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
+        if args == ["api", "rate_limit"]:
+            return _GhResult(rate_limit)
+        return _GhResult("", returncode=1, stderr=RATE_LIMITED)
+
+    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
+
+    with pytest.raises(
+        module.GitHubRateLimitError, match="resets 2026-10-12T00:16:00Z"
+    ):
+        module._live_repository_visibility()
+
+
+def test_a_failed_read_that_is_not_a_rate_limit_is_not_relabelled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    monkeypatch.setattr(
+        module,
+        "_run_gh",
+        lambda args, timeout=20: _GhResult("", returncode=1, stderr="HTTP 404"),
+    )
+
+    with pytest.raises(RuntimeError, match="gh repo list failed: HTTP 404") as raised:
+        module._live_repository_visibility()
+    assert not isinstance(raised.value, module.GitHubRateLimitError)
+
+
+def _render_combined_step(local: str, live: str, findings: str, unreadable: str) -> str:
+    import re
+
+    import yaml
+
+    workflow = yaml.safe_load(RUNNER_ROUTING_AUDIT_WORKFLOW.read_text())
+    steps = workflow["jobs"]["audit"]["steps"]
+    combined = next(s for s in steps if "combined" in s.get("name", ""))
+    values = {
+        "steps.local_workflows.outcome": local,
+        "steps.github_vars.outcome": live,
+        "steps.github_vars.outputs.findings": findings,
+        "steps.github_vars.outputs.unreadable": unreadable,
+    }
+    rendered = re.sub(
+        r"\$\{\{\s*([A-Za-z0-9_.]+)\s*\}\}",
+        lambda m: values[m.group(1)],
+        combined["run"],
+    )
+    return str(rendered)
+
+
+@pytest.mark.parametrize(
+    ("local", "live", "findings", "unreadable", "rc", "present", "absent"),
+    [
+        (
+            "success",
+            "failure",
+            "0",
+            "1",
+            1,
+            "Runner audit unreadable",
+            "Runner routing drift",
+        ),
+        ("success", "failure", "1", "0", 1, "Runner routing drift", "unreadable"),
+        ("failure", "success", "0", "0", 1, "Runner routing drift", "unreadable"),
+        ("success", "failure", "", "", 1, "Runner audit incomplete", "drift"),
+        ("success", "success", "0", "0", 0, "reported clean", "::error"),
+    ],
+    ids=["rate-limited", "live-finding", "local-finding", "no-verdict", "clean"],
+)
+def test_combined_step_names_an_unread_live_pass_as_unreadable_not_drift(
+    local: str,
+    live: str,
+    findings: str,
+    unreadable: str,
+    rc: int,
+    present: str,
+    absent: str,
+) -> None:
+    """OMN-20864: the combined step said "reported findings" for a rate limit."""
+    import subprocess
+
+    script = _render_combined_step(local, live, findings, unreadable)
+    result = subprocess.run(
+        ["bash", "-e", "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == rc, result.stdout + result.stderr
+    assert present in result.stdout
+    assert absent not in result.stdout
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/runner_routing_audit_rate_limit_omn20864.json"
+)
+def test_recorded_rate_limit_job_is_unreadable_not_drift(
+    recorded_response: dict[str, Any],
+) -> None:
+    """OMN-20864: replay job 114609134005, whose rate limit was named drift."""
+    import subprocess
+
+    lines = recorded_response["response"]["log_lines"]
+    module = _load_script()
+    stderr = lines["live_pass_error"].split("gh repo list failed: ", 1)[1]
+    assert module.RATE_LIMIT_RE.search(stderr)
+    assert "reported findings" in lines["combined_annotation"]
+    local = lines["local_outcome"].rsplit(": ", 1)[1]
+    live = lines["live_outcome"].rsplit(": ", 1)[1]
+    assert (local, live) == ("success", "failure")
+
+    # The fixed live pass writes these counts for that read (asserted by
+    # test_a_rate_limited_live_read_is_unreadable_not_a_finding).
+    script = _render_combined_step(local, live, "0", "1")
+    result = subprocess.run(
+        ["bash", "-e", "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 1
+    assert "::error title=Runner audit unreadable::" in result.stdout
+    # This PR's own job 114620151828 hit the limit with no reset time reported,
+    # so the annotation may not promise one.
+    assert "reset time when GitHub reports one" in result.stdout
+    assert "reported findings" not in result.stdout

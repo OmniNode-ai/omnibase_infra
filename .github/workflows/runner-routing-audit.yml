@@ -75,13 +75,25 @@ jobs:
 
       # OMN-18780: require actual success from both passes, including after a
       # setup failure. Missing/skipped outcomes cannot stand in for a read.
+      # OMN-20864: the live pass writes findings= and unreadable= counts, so a
+      # rate-limited read fails as unreadable instead of being named drift.
       - name: Evaluate combined runner routing audit result
         if: always()
         run: |
           echo "local_workflows outcome: ${{ steps.local_workflows.outcome }}"
           echo "github_vars outcome: ${{ steps.github_vars.outcome }}"
           if [ "${{ steps.local_workflows.outcome }}" != "success" ] || [ "${{ steps.github_vars.outcome }}" != "success" ]; then
-            echo "::error title=Runner routing drift::at least one audit pass reported findings; see the step logs above for every surface, not just the first"
+            live_findings="${{ steps.github_vars.outputs.findings }}"
+            live_unreadable="${{ steps.github_vars.outputs.unreadable }}"
+            if [ "${{ steps.local_workflows.outcome }}" != "success" ] || [ "${live_findings:-0}" != "0" ]; then
+              echo "::error title=Runner routing drift::at least one audit pass reported findings; see the step logs above for every surface, not just the first"
+            fi
+            if [ "${live_unreadable:-0}" != "0" ]; then
+              echo "::error title=Runner audit unreadable::the live pass could not read GitHub (a GitHub API rate limit, named in the step log above with its reset time when GitHub reports one); rerun after the limit resets"
+            fi
+            if [ "${{ steps.github_vars.outcome }}" != "success" ] && [ -z "${live_findings}" ]; then
+              echo "::error title=Runner audit incomplete::the live pass ended without a verdict; see its step log above"
+            fi
             exit 1
           fi
           echo "Runner routing audit: all executed passes reported clean."

@@ -1,0 +1,50 @@
+schema_version: 1.0.0
+ticket_id: OMN-21009
+title: 'omnibase_infra: pr-title check runs the omnimarket node'
+summary: Run the existing published title-check node in the local workflow and retain its verdict, context, triggers and runner routing.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-pr-title-node
+    statement: The title workflow runs the published node and retains the title policy and local producer context.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: omnibase_infra''s PR Title Check workflow produces `pr-title / check-title` by running node_pr_title_check_compute from a pinned published omnimarket release, and no workflow line in pr-title-check.yml references onex_change_control -- falsifier: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0 fails when parsing the merge-base workflow.'
+      - id: AC2
+        statement: 'AC2: the installed release node''s verdicts equal the old reusable''s bash verdicts on a table of titles and authors covering every exempt prefix, the bot rule, a passing OMN title and a failing bare title -- falsifier: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0 fails on any case run through the installed node.'
+      - id: AC3
+        statement: 'AC3: .github/required-checks.yaml carries a `pr-title / check-title` row naming pr-title-check.yml job pr-title as a local producer -- falsifier: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0 fails when parsing the merge-base manifest.'
+evidence_requirements:
+  - kind: tests
+    description: Workflow and manifest assertions plus installed-release parity with the pinned bash oracle.
+    command: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-pr-title-ac1
+    description: The local title job preserves its context, triggers and runner routing and installs the published node.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0
+    binds_ac:
+      - AC1
+  - id: dod-pr-title-ac2
+    description: The installed node matches the pinned bash verdict and output on every table case and refuses malformed requests.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0
+    binds_ac:
+      - AC2
+  - id: dod-pr-title-ac3
+    description: The manifest names the unchanged context and the local title job.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_pr_title_check_omnimarket_node.py -q -n 0
+    binds_ac:
+      - AC3

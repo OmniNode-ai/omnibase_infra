@@ -47,6 +47,12 @@ NON_ACTING = {
     "ONEX_CI_RED_TRIAGE_ACT_SHARED_CAUSE": "false",
     "ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD": "false",
 }
+# The lane class an instance's runtime borrows contracts from (OMN-20867):
+# read by the runtime's auto-wiring ownership filter, set by the overlay.
+LANE_CLASS = {
+    "ONEX_RUNTIME_LANE_CLASS": "compose-lane",
+    "ONEX_RUNTIME_LANE_CLASS_CONTRACTS": "node_a,node_b",
+}
 
 ROUTING_TEXT = """\
 default_instance: inst-a
@@ -112,8 +118,16 @@ def _fragment_path(lane_id: str = LANE) -> str:
 
 
 @pytest.mark.unit
-def test_schema_declares_exactly_the_six_act_switches() -> None:
-    assert {SCHEMA: frozenset(NON_ACTING)} == LANE_ENV_FRAGMENT_SCHEMA_KEYS
+def test_schema_declares_exactly_the_act_switches_and_the_lane_class() -> None:
+    assert {
+        SCHEMA: frozenset(NON_ACTING) | frozenset(LANE_CLASS)
+    } == LANE_ENV_FRAGMENT_SCHEMA_KEYS
+
+
+@pytest.mark.unit
+def test_a_fragment_may_select_a_lane_class() -> None:
+    env = {**NON_ACTING, **LANE_CLASS}
+    assert parse_lane_env_fragment(_fragment(env), lane_id=LANE, source="t") == env
 
 
 @pytest.mark.unit

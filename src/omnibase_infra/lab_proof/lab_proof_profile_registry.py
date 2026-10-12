@@ -25,6 +25,7 @@ from pathlib import Path
 
 import yaml
 
+from omnibase_infra.lab_proof.enum_lab_proof_check import EnumLabProofCheck
 from omnibase_infra.lab_proof.enum_lab_proof_exempt_class import (
     EnumLabProofExemptClass,
 )
@@ -38,6 +39,9 @@ from omnibase_infra.lab_proof.model_lab_proof_profile_pin import (
 from omnibase_infra.lab_proof.model_lab_proof_profile_registry import (
     ModelLabProofProfileRegistry,
 )
+from omnibase_infra.lab_proof.model_lab_proof_profile_variant import (
+    ModelLabProofProfileVariant,
+)
 
 NODES_RELATIVE_DIR = Path("src/omnibase_infra/nodes")
 
@@ -50,10 +54,40 @@ def load_lab_proof_profile_registry(path: Path) -> ModelLabProofProfileRegistry:
     return ModelLabProofProfileRegistry.model_validate(loaded)
 
 
+def applicable_checks(
+    variant: ModelLabProofProfileVariant, changed_paths: Iterable[str] | None
+) -> tuple[tuple[EnumLabProofCheck, ...], tuple[EnumLabProofCheck, ...]]:
+    """The checks one PR is judged against, and the conditional ones it is not.
+
+    A conditional check is mandatory when at least one changed path matches one
+    of its ``when_changed`` globs. ``changed_paths`` of None (the diff was not
+    read) or an empty diff makes every conditional check mandatory: a check is
+    only ever waived on the evidence of a diff that does not touch its surface.
+    OMN-19566.
+    """
+    paths = None if changed_paths is None else sorted(set(changed_paths))
+    required = list(variant.mandatory_checks)
+    waived: list[EnumLabProofCheck] = []
+    for entry in variant.conditional_checks:
+        compiled = [glob_to_regex(glob) for glob in entry.when_changed]
+        touched = not paths or any(
+            regex.match(path) for path in paths for regex in compiled
+        )
+        (required if touched else waived).append(entry.check)
+    return tuple(required), tuple(waived)
+
+
 def profile_pin(
-    registry: ModelLabProofProfileRegistry, repo: str, proof_kind: EnumLabProofKind
+    registry: ModelLabProofProfileRegistry,
+    repo: str,
+    proof_kind: EnumLabProofKind,
+    changed_paths: Iterable[str] | None = None,
 ) -> ModelLabProofProfilePin:
     """The registry's current profile for ``repo`` and its ``proof_kind`` checks.
+
+    ``changed_paths`` is the PR's own diff (merge base to head); it decides which
+    of the variant's conditional checks are mandatory (``applicable_checks``).
+    Without it every conditional check is mandatory.
 
     Raises KeyError when the registry has no row for ``repo`` and ValueError when
     the row has no variant of that kind or the variant names no mandatory check
@@ -67,12 +101,14 @@ def profile_pin(
                     f"profile {profile.profile_key} variant {variant.variant_key} "
                     "names no mandatory check"
                 )
+            required, waived = applicable_checks(variant, changed_paths)
             return ModelLabProofProfilePin(
                 repo=repo,
                 proof_kind=proof_kind,
                 profile_key=profile.profile_key,
                 profile_version=str(profile.profile_version),
-                mandatory_checks=variant.mandatory_checks,
+                mandatory_checks=required,
+                inapplicable_checks=waived,
             )
     raise ValueError(f"profile {profile.profile_key} has no {proof_kind} variant")
 
@@ -205,6 +241,7 @@ def classify_exemption(
 
 
 __all__ = [
+    "applicable_checks",
     "classify_exemption",
     "glob_to_regex",
     "load_lab_proof_profile_registry",

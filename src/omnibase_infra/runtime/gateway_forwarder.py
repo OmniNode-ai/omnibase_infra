@@ -1219,6 +1219,9 @@ def build_gateway_transports(
                 if name == "cloud"
                 else None
             ),
+            # A mirror-only source is never used for publishing. Keep the
+            # cloud composition's existing producer lifecycle unchanged.
+            consume_only=name == "lane_source" and forwarder.cloud_bus is None,
         )
         for name, (broker, bus, group) in legs.items()
     }

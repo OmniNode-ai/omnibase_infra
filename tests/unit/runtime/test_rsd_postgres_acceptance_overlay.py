@@ -24,6 +24,14 @@ from omnibase_infra.testing.rsd_postgres_acceptance_plugin import (
 
 pytest_plugins = ("pytester",)
 
+_OVERLAY_TEXT = """\
+schema_version: rsd_postgres_acceptance_overlay.v1
+lane: dev
+locale: lab
+rsd_distribution_ref: omninode-rsd/0.1.0
+postgres_capability_ref: capability://rsd/postgres/acceptance
+"""
+
 CAPABILITY_UUID = "123e4567-e89b-42d3-a456-426614174000"
 
 
@@ -49,11 +57,9 @@ def _evidence(
     )
 
 
-def test_overlay_is_typed_and_topology_free() -> None:
-    path = (
-        Path(__file__).parents[3]
-        / "docker/lane-overlays/dev.rsd-postgres-acceptance.yaml"
-    )
+def test_overlay_is_typed_and_topology_free(tmp_path: Path) -> None:
+    path = tmp_path / "postgres-acceptance.yaml"
+    path.write_text(_OVERLAY_TEXT, encoding="utf-8")
     overlay = load_overlay(path)
     assert overlay.lane == "dev" and overlay.locale == "lab"
     overlay_text = path.read_text()
@@ -251,6 +257,7 @@ def test_evidence_rejects_topology_bearing_attestation_refs(
 
 
 def test_explicit_plugin_harness_covers_missing_and_mismatch_paths(
+    tmp_path: Path,
     pytester: Pytester,
 ) -> None:
     """Exercise the actual ``-p`` entrypoint with an isolated fake operator."""
@@ -337,13 +344,8 @@ def test_explicit_plugin_harness_covers_missing_and_mismatch_paths(
                 assert connection is not None
         """
     )
-    overlay = pytester.path / "overlay.yaml"
-    overlay.write_text(
-        "schema_version: rsd_postgres_acceptance_overlay.v1\n"
-        "lane: dev\nlocale: lab\n"
-        "rsd_distribution_ref: omninode-rsd/0.1.0\n"
-        "postgres_capability_ref: capability://rsd/postgres/acceptance\n"
-    )
+    overlay = tmp_path / "postgres-acceptance.yaml"
+    overlay.write_text(_OVERLAY_TEXT, encoding="utf-8")
     result = pytester.runpytest(
         "-p",
         "omnibase_infra.testing.rsd_postgres_acceptance_plugin",
@@ -438,7 +440,7 @@ def test_plugin_rejects_missing_resolver(tmp_path: Path) -> None:
 
     fixture_function = cast(
         "Callable[[object], object]",
-        postgres_lifecycle_connection_factory.__wrapped__,  # type: ignore[attr-defined]
+        postgres_lifecycle_connection_factory.__wrapped__,
     )
     with pytest.raises(pytest.fail.Exception, match="resolver is not injected"):
         fixture_function(Request())

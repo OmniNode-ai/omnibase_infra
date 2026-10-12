@@ -311,9 +311,6 @@ NOT_RUNTIME_PATH_REASONS: dict[str, dict[str, str]] = {
         "docker/docker-compose.dns-*.yml": (
             "the DNS cache and its canary; not a runtime lane"
         ),
-        "docker/docker-compose.infisical-stability.yml": (
-            "an Infisical stability stack; not a runtime lane"
-        ),
         "docker/Dockerfile.gate-runner": (
             "the CI gate-runner image; built only by "
             "docker-compose.gate-runner.yml, which no lane runs"

@@ -33,6 +33,9 @@ from omnibase_infra.lab_proof.model_lab_proof_match import ModelLabProofMatch
 from omnibase_infra.lab_proof.model_lab_proof_negative_control import (
     ModelLabProofNegativeControl,
 )
+from omnibase_infra.models.lab_proof.model_lab_proof_conditional_check import (
+    ModelLabProofConditionalCheck,
+)
 
 # A step names a node and one operation its contract routes: no shell text.
 STEP_REF_PATTERN = re.compile(r"^node_[a-z0-9_]+:[a-z0-9_.]+$")
@@ -58,6 +61,8 @@ class ModelLabProofProfileVariant(BaseModel):
     host_selector: ModelLabProofHostSelector | None = None
     steps: tuple[str, ...] = ()
     mandatory_checks: tuple[EnumLabProofCheck, ...] = ()
+    # Mandatory only for a PR whose diff touches the check's surface (OMN-19566).
+    conditional_checks: tuple[ModelLabProofConditionalCheck, ...] = ()
     negative_control: ModelLabProofNegativeControl | None = None
     foundation: ModelLabProofFoundationTarget | None = None
     timeout_minutes: int | None = Field(default=None, ge=1)
@@ -124,6 +129,26 @@ class ModelLabProofProfileVariant(BaseModel):
             raise ValueError(
                 f"variant {self.variant_key}: steps are only valid with execution node"
             )
+        if self.conditional_checks:
+            # Only the lab pool driver resolves a conditional check from a PR's
+            # diff (it runs the manual_recipe rows); the node path judges a
+            # variant's mandatory_checks alone, and would silently drop one.
+            if execution is not EnumLabProofExecution.MANUAL_RECIPE:
+                raise ValueError(
+                    f"variant {self.variant_key}: conditional_checks are only "
+                    "resolved for execution manual_recipe"
+                )
+            conditional = [entry.check for entry in self.conditional_checks]
+            if len(conditional) != len(set(conditional)):
+                raise ValueError(
+                    f"variant {self.variant_key}: a conditional check is listed twice"
+                )
+            both = sorted(set(conditional) & set(self.mandatory_checks))
+            if both:
+                raise ValueError(
+                    f"variant {self.variant_key}: {both} are both mandatory and "
+                    "conditional; a check is one or the other"
+                )
         if execution is EnumLabProofExecution.MANUAL_RECIPE and not self.recipe_ref:
             raise ValueError(
                 f"variant {self.variant_key}: execution manual_recipe needs recipe_ref"

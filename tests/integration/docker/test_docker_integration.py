@@ -1102,6 +1102,8 @@ _SECRET_RESOLVER_CONFIG_PATH = "/app/data/delegation/secret_resolver.yaml"
 # other compose-render fixtures. Keep every `:?`-required var in
 # docker/docker-compose.infra.yml represented here.
 COMPOSE_CONFIG_RENDER_ENV: dict[str, str] = {
+    # OMN-20932: lane overlays are private; the mount refuses without this.
+    "ONEX_LANE_OVERLAY_DIR": "/nonexistent/onex-lane-overlays",
     "POSTGRES_PASSWORD": "test",
     "VALKEY_PASSWORD": "test",
     "INFISICAL_ENCRYPTION_KEY": "0" * 64,

@@ -5711,9 +5711,9 @@ def _make_stateful_dispatch_callback(
     _recovery_last_run_monotonic = 0.0
     _recovery_lock = asyncio.Lock()
     # OMN-18296: the contract-declared completion bound, and the handle on the
-    # background task that enforces it. The task is started on the first
-    # dispatch (wiring is synchronous, so there is no running loop at wiring
-    # time) and then runs on its OWN timer for the life of the process --
+    # background task that enforces it. The task is started at wiring when a
+    # loop is running (OMN-19561), else on the first dispatch, and then runs on
+    # its OWN timer for the life of the process --
     # deliberately NOT piggybacked on dispatch traffic the way
     # ``_ensure_stale_rows_recovered`` is. That distinction is the whole point:
     # a lane whose last delegation was abandoned by a pod restart has, by
@@ -6197,12 +6197,17 @@ def _make_stateful_dispatch_callback(
                 )
 
     def _ensure_bound_sweeper_started() -> None:
-        """Start the bound sweeper once, on the first dispatch.
+        """Start the bound sweeper once: at wiring when a loop runs, else on dispatch.
 
-        Wiring is synchronous so there is no running loop to attach to there;
-        the first dispatch is the same deterministic async point
-        ``_ensure_stale_rows_recovered`` uses. Unlike that one, what starts here
-        is a task that then runs on its own and never needs another dispatch.
+        ``wire_from_manifest`` is a coroutine, so a boot-time wiring pass has a
+        running loop and the sweeper starts there (OMN-19561): a restarted
+        process owes ``on_runtime_restart`` to rows it never saw dispatched, and
+        waiting for a first dispatch keeps that promise only if traffic returns.
+        A caller that builds this callback with no loop running cannot attach a
+        task, so the first dispatch stays the fallback, the same deterministic
+        async point ``_ensure_stale_rows_recovered`` uses. Either way what
+        starts is a task that then runs on its own and never needs another
+        dispatch.
         """
         nonlocal _bound_sweeper_task
         if completion_bound is None:
@@ -6210,6 +6215,13 @@ def _make_stateful_dispatch_callback(
         if _bound_sweeper_task is not None and not _bound_sweeper_task.done():
             return
         _bound_sweeper_task = asyncio.create_task(_bound_sweeper_loop())
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        _ensure_bound_sweeper_started()
 
     async def _ensure_stale_rows_recovered(skip_cid: str | None = None) -> None:
         """Run outbox re-publish + the give-up sweep, at most once per interval.

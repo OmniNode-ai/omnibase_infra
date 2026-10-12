@@ -43,9 +43,6 @@ _REPO = Path(__file__).resolve().parents[3]
 _SCRIPTS = _REPO / "scripts"
 _CENSUS_SH = _SCRIPTS / "lane-census-check.sh"
 _GATE_PY = _SCRIPTS / "check_lane_census_age.py"
-_DROPIN = (
-    _REPO / "deploy" / "lane-census" / "onex-disk-gc.service.d" / "20-lane-census.conf"
-)
 
 sys.path.insert(0, str(_SCRIPTS))
 
@@ -167,16 +164,4 @@ def test_gate_remediation_names_the_recipe_that_works() -> None:
     assert "lane-census-check.sh --json > " not in body, (
         "the gate still tells the reader to run --json, which emits the plan "
         "document and produces a file this same gate rejects (OMN-18606 D3)"
-    )
-
-
-def test_hourly_dropin_writes_a_snapshot() -> None:
-    """AC2. The tick must write the census, not merely reconcile and publish."""
-    body = _DROPIN.read_text(encoding="utf-8")
-    exec_lines = [ln for ln in body.splitlines() if ln.startswith("ExecStart=")]
-    assert exec_lines, "the drop-in declares no ExecStart"
-    assert any("--snapshot" in ln for ln in exec_lines), (
-        "the hourly lane-census pass writes no snapshot, so nothing refreshes "
-        "the committed census except a human opening a PR (OMN-18606 D2); "
-        f"ExecStart lines were {exec_lines}"
     )

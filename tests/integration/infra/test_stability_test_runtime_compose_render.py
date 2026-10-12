@@ -7,13 +7,19 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
+
+from tests.helpers.lane_overlay_fixtures import (
+    LANE_OVERLAY_TARGET,
+    lab_overlay,
+    load_compose,
+    write_overlay,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILES = (
@@ -31,8 +37,7 @@ REQUIRED_RUNTIME_SERVICES = {
     "runtime-worker",
 }
 _BIFROST_CONTRACT_PATH = "/app/data/delegation/bifrost_delegation.yaml"
-_BIFROST_OVERLAY_TARGET = "/app/config/delegation/dev.bifrost.yaml"
-_BIFROST_OVERLAY_SOURCE = REPO_ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
+_BIFROST_OVERLAY_TARGET = LANE_OVERLAY_TARGET
 # OMN-17562: the standalone projection writers, mirrored onto the PROOF lane.
 #
 # The stability lane is where the `stability-proven` premise of every live
@@ -188,6 +193,8 @@ def _cidr(prefix: str, suffix: str) -> str:
 
 
 COMPOSE_RENDER_ENV = {
+    # OMN-20932: lane overlays are private; the mount refuses without this.
+    "ONEX_LANE_OVERLAY_DIR": "/nonexistent/onex-lane-overlays",
     "INFISICAL_AUTH_SECRET": "render-only-infisical-auth-secret",
     "INFISICAL_DB_CONNECTION_URI": "postgresql://postgres:postgres@postgres:5432/infisical",
     "INFISICAL_ENCRYPTION_KEY": "render-only-infisical-encryption-key-32",
@@ -283,16 +290,16 @@ def _docker_compose_command(*args: str) -> list[str]:
     ]
 
 
-def _docker_compose_available() -> bool:
-    if shutil.which("docker") is None:
-        return False
-    result = subprocess.run(
-        ["docker", "compose", "version"],
-        check=False,
-        capture_output=True,
-        text=True,
+@pytest.fixture(autouse=True)
+def lane_overlay_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    overlay_dir = tmp_path / "lane-overlays"
+    compose = load_compose(REPO_ROOT / COMPOSE_FILES[-1])
+    path = write_overlay(
+        overlay_dir / f"{compose['name']}.bifrost.yaml",
+        lab_overlay(lane=Path(COMPOSE_FILES[-1]).stem.partition(".")[2]),
     )
-    return result.returncode == 0
+    monkeypatch.setenv("ONEX_LANE_OVERLAY_DIR", str(overlay_dir))
+    return path
 
 
 def _compose_render_env() -> dict[str, str]:
@@ -311,6 +318,7 @@ def _compose_render_env() -> dict[str, str]:
         "PYTHONPATH": python_path,
         "USER": os.environ.get("USER", ""),
         **COMPOSE_RENDER_ENV,
+        "ONEX_LANE_OVERLAY_DIR": os.environ["ONEX_LANE_OVERLAY_DIR"],
     }
 
 
@@ -349,12 +357,6 @@ def _label_value(service_config: dict[str, Any], key: str) -> str | None:
             if isinstance(label, str) and label.startswith(prefix):
                 return label.removeprefix(prefix)
     return None
-
-
-pytestmark = pytest.mark.skipif(
-    not _docker_compose_available(),
-    reason="docker compose is required for non-mutating compose render validation",
-)
 
 
 @pytest.mark.integration
@@ -503,7 +505,9 @@ def test_stability_lane_catalog_generated_runtime_compose_is_valid(
 
 
 @pytest.mark.integration
-def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
+def test_stability_lane_render_contains_isolated_runtime_identity(
+    lane_overlay_path: Path,
+) -> None:
     rendered_config = _compose_config_json()
     services = rendered_config["services"]
 
@@ -542,6 +546,7 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         assert environment["ONEX_RUNTIME_ID"].startswith("stability-test-")
         assert environment["ONEX_STATE_DIR"] == environment["ONEX_STATE_ROOT"]
         assert environment["BIFROST_CONTRACT_PATH"] == _BIFROST_CONTRACT_PATH
+        assert environment["BIFROST_LANE_OVERLAY_PATH"] == LANE_OVERLAY_TARGET
         assert "BIFROST_LOCAL_CODER_ENDPOINT_URL" not in environment
         assert "BIFROST_LOCAL_REASONER_ENDPOINT_URL" not in environment
         assert "BIFROST_LOCAL_EMBEDDING_ENDPOINT_URL" not in environment
@@ -553,7 +558,7 @@ def test_stability_lane_render_contains_isolated_runtime_identity() -> None:
         assert len(overlay_binds) == 1
         overlay_bind = overlay_binds[0]
         assert overlay_bind["type"] == "bind"
-        assert overlay_bind["source"] == str(_BIFROST_OVERLAY_SOURCE.resolve())
+        assert overlay_bind["source"] == str(lane_overlay_path.resolve())
         assert overlay_bind["read_only"] is True
         assert (
             _label_value(
