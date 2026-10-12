@@ -1,0 +1,23 @@
+{
+  "node_id": "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator",
+  "receipt_schema": "handflip_proof.v1",
+  "canonical_handler_module": "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.handlers.handler_runner_fleet_maintain_start",
+  "legacy_handler_module": "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.handlers.handler_runner_fleet_maintain_start",
+  "base_ref": "ae5fca1228a34d61f76d1cbfdd1babbe64b7392d",
+  "preserved_symbols": [
+    "HandlerRunnerFleetMaintainStart.handler_type",
+    "HandlerRunnerFleetMaintainStart.handler_category"
+  ],
+  "parity": {
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_maintain_dispatch_chain_omn21041.py::test_start_handler_hop_dispatches_through_the_real_callback",
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_maintain_dispatch_chain_omn21041.py::test_start_command_reaches_completed_event_with_health_verdict",
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_maintain_dispatch_chain_omn21041.py::test_every_output_lands_on_the_topic_its_contract_declares",
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_maintain_dispatch_chain_omn21041.py::test_orchestrator_declares_a_terminal_event_for_onex_run_node"
+    ],
+    "selected_input_hashes": [
+      "sha256:d3d6205824c0727bece07dc8bb0b450e3959a6d3cf548de45857c6131dec298a"
+    ]
+  }
+}
