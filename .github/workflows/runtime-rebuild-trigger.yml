@@ -742,6 +742,17 @@ jobs:
       # The probe function, its CLI flag and its tests are all still there for
       # that wiring.
 
+      # OMN-20008: lane_sync reads private configuration since OMN-20934.
+      # Fetch after convergence and receipt-directory setup so a failed fetch
+      # still reaches the always() probe and emitter with their inputs intact.
+      - name: Fetch the private lane census for the infra receipt
+        if: always() && steps.converge.outputs.probe_lane != 'false'
+        uses: ./.github/actions/fetch-census-overlay
+        with:
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+
       - name: Probe the dev lane
         id: probe
         # OMN-18976: an observation with nothing to answer for probes nothing.
