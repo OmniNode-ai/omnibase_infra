@@ -1,0 +1,26 @@
+{
+  "_provenance": {
+    "source": "lane_sync check of the dev lab-pass receipt for 0ba1a61d34b50513491f161d82ba187b582e4dfb, artifact 38210263823 of workflow run 11730026756 (receipt.json, finished_at 2026-10-12T06:27:03+00:00); the census stderr is the text after 'census exit=3: ' in that check's evidence",
+    "captured_utc": "2026-10-12T07:42:00+00:00",
+    "receipt_json_sha256": "49fc6a81116ba47b533fc5864c3939035127cf4877a77f6c80892d19607d76ad",
+    "redaction": "the lab daemon's host name is replaced by lab-host-a for the public-repo hygiene gate; nothing else is changed"
+  },
+  "responses": [
+    {
+      "returncode": 0,
+      "stdout": "lab-host-a\n",
+      "stderr": ""
+    },
+    {
+      "returncode": 3,
+      "stdout": "",
+      "stderr": "[2026-10-12T06:27:02Z] [lane-census] Starting (lane=ALL, host=lab-host-a, LIVE)\n[2026-10-12T06:27:02Z] [lane-census] ERROR: the lane census is not configured: neither ONEX_WORKSPACE_CONFIG_ROOT nor OMNI_HOME is set; set ONEX_WORKSPACE_CONFIG_ROOT to the directory that holds config/lab/lane-census/lane-manifest.yaml. This repository ships no lane manifest\n[2026-10-12T06:27:02Z] [lane-census] ABORT: the lane planner failed (exit 3).\n"
+    }
+  ],
+  "check": {
+    "name": "lane_sync",
+    "ok": false,
+    "outcome": "indeterminate",
+    "evidence": "census unreadable: ValueError: census exit=3: [2026-10-12T06:27:02Z] [lane-census] Starting (lane=ALL, host=lab-host-a, LIVE)\n[2026-10-12T06:27:02Z] [lane-census] ERROR: the lane census is not configured: neither ONEX_WORKSPACE_CONFIG_ROOT nor OMNI_HOME is set; set ONEX_WORKSPACE_CONFIG_ROOT to the directory that holds config/lab/lane-census/lane-manifest.yaml. This repository ships no lane manifest\n[2026-10-12T06:27:02Z] [lane-census] ABORT: the lane planner failed (exit 3)."
+  }
+}
