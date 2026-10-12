@@ -2048,4 +2048,7 @@ def test_recorded_rate_limit_job_is_unreadable_not_drift(
 
     assert result.returncode == 1
     assert "::error title=Runner audit unreadable::" in result.stdout
+    # This PR's own job 114620151828 hit the limit with no reset time reported,
+    # so the annotation may not promise one.
+    assert "reset time when GitHub reports one" in result.stdout
     assert "reported findings" not in result.stdout

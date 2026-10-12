@@ -89,7 +89,7 @@ jobs:
               echo "::error title=Runner routing drift::at least one audit pass reported findings; see the step logs above for every surface, not just the first"
             fi
             if [ "${live_unreadable:-0}" != "0" ]; then
-              echo "::error title=Runner audit unreadable::the live pass could not read GitHub (a rate limit, named with its reset time in the step log above); rerun after the reset"
+              echo "::error title=Runner audit unreadable::the live pass could not read GitHub (a GitHub API rate limit, named in the step log above with its reset time when GitHub reports one); rerun after the limit resets"
             fi
             if [ "${{ steps.github_vars.outcome }}" != "success" ] && [ -z "${live_findings}" ]; then
               echo "::error title=Runner audit incomplete::the live pass ended without a verdict; see its step log above"
