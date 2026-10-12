@@ -1703,7 +1703,7 @@ class _GhResult:
 
 
 def _workflow_tree(*entries: dict[str, object]) -> str:
-    return json.dumps({"data": {"repository": {"object": {"entries": list(entries)}}}})
+    return json.dumps({"data": {"r0": {"object": {"entries": list(entries)}}}})
 
 
 def _blob(name: str, text: str, **flags: object) -> dict[str, object]:
@@ -1741,7 +1741,7 @@ def test_workflow_texts_cost_one_graphql_read_per_repository(
 
     assert len(calls) == 1
     assert calls[0][:2] == ["api", "graphql"]
-    assert "owner=OmniNode-ai" in calls[0] and "name=a-private-repo" in calls[0]
+    assert "owner=OmniNode-ai" in calls[0] and "n0=a-private-repo" in calls[0]
     assert not any("contents/" in part for part in calls[0])
     assert len(texts) == 100
     assert texts[".github/workflows/w7.yml"] == "name: w7\n"
@@ -1767,7 +1767,7 @@ def test_a_repository_without_a_workflows_directory_reads_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = _load_script()
-    body = json.dumps({"data": {"repository": {"object": None}}})
+    body = json.dumps({"data": {"r0": {"object": None}}})
     monkeypatch.setattr(module, "_run_gh", lambda args, timeout=20: _GhResult(body))
 
     assert module._default_branch_workflow_texts("a-private-repo") == {}
@@ -1777,7 +1777,7 @@ def test_a_repository_without_a_workflows_directory_reads_empty(
     "result",
     [
         _GhResult("", returncode=1, stderr="gh: API rate limit exceeded"),
-        _GhResult(json.dumps({"data": {"repository": None}})),
+        _GhResult(json.dumps({"data": {"r0": None}})),
         _GhResult(_workflow_tree(_blob("big.yml", "x", isTruncated=True))),
         _GhResult(
             _workflow_tree(
@@ -1801,6 +1801,217 @@ def test_an_unread_workflow_raises_instead_of_reading_clean(
 
     with pytest.raises(RuntimeError, match="graphql workflow read"):
         module._default_branch_workflow_texts("a-private-repo")
+
+
+def test_workflow_texts_batch_reads_45_repositories_in_three_queries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-20413: repository aliases share one GraphQL read per 20 repos."""
+    module = _load_script()
+    calls: list[list[str]] = []
+    repo_names = [f"private-repo-{i}" for i in range(45)]
+
+    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
+        calls.append(args)
+        assert args[:2] == ["api", "graphql"]
+        assert "owner=OmniNode-ai" in args
+        query = next(
+            arg.removeprefix("query=") for arg in args if arg.startswith("query=")
+        )
+        names = [arg.split("=", 1)[1] for arg in args if arg.startswith("n")]
+        assert len(names) <= 20
+        data = {}
+        for index, name in enumerate(names):
+            assert f"$n{index}: String!" in query
+            assert f"r{index}: repository(owner: $owner, name: $n{index})" in query
+            data[f"r{index}"] = {
+                "object": {"entries": [_blob("ci.yml", f"name: {name}\n")]}
+            }
+        return _GhResult(json.dumps({"data": data}))
+
+    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
+
+    texts = module._default_branch_workflow_texts_batch(repo_names)
+
+    assert module.WORKFLOW_READ_BATCH_SIZE == 20
+    assert len(calls) == 3
+    assert texts == {
+        name: {".github/workflows/ci.yml": f"name: {name}\n"} for name in repo_names
+    }
+
+
+def test_workflow_texts_batch_rate_limit_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    monkeypatch.setattr(module, "_rate_limit_reset_note", lambda: "")
+    monkeypatch.setattr(
+        module,
+        "_run_gh",
+        lambda args, timeout=20: _GhResult(
+            "",
+            returncode=1,
+            stderr="GraphQL: API rate limit already exceeded for user ID 1",
+        ),
+    )
+
+    with pytest.raises(module.GitHubRateLimitError, match="GitHub API rate limit"):
+        module._default_branch_workflow_texts_batch(["private-one", "private-two"])
+
+
+@pytest.mark.parametrize("repository", [None, "unreadable"])
+def test_workflow_texts_batch_null_alias_names_repository(
+    monkeypatch: pytest.MonkeyPatch,
+    repository: object,
+) -> None:
+    module = _load_script()
+    payload = {"data": {"r0": {"object": None}, "r1": repository}}
+    monkeypatch.setattr(
+        module, "_run_gh", lambda args, timeout=20: _GhResult(json.dumps(payload))
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="graphql workflow read for private-two returned no repository",
+    ):
+        module._default_branch_workflow_texts_batch(["private-one", "private-two"])
+
+
+@pytest.mark.parametrize(
+    "data", [None, {}, {"r0": None}, {"r0": {"object": None}}, {"r0": {}}]
+)
+def test_workflow_texts_batch_errors_without_data_raise(
+    monkeypatch: pytest.MonkeyPatch,
+    data: object,
+) -> None:
+    module = _load_script()
+    payload = {"data": data, "errors": [{"message": "workflow read failed"}]}
+    monkeypatch.setattr(
+        module, "_run_gh", lambda args, timeout=20: _GhResult(json.dumps(payload))
+    )
+
+    with pytest.raises(RuntimeError, match="graphql workflow read for private-one"):
+        module._default_branch_workflow_texts_batch(["private-one"])
+
+
+def test_workflow_texts_batch_names_are_passed_as_variables(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    repo_name = 'repo"with\\special-characters'
+
+    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
+        assert f"n0={repo_name}" in args
+        assert "owner=another-org" in args
+        query = next(arg for arg in args if arg.startswith("query="))
+        assert repo_name not in query
+        return _GhResult(json.dumps({"data": {"r0": {"object": None}}}))
+
+    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
+
+    assert module._default_branch_workflow_texts_batch([repo_name], "another-org") == {
+        repo_name: {}
+    }
+
+
+def test_workflow_texts_batch_empty_input_needs_no_reads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    monkeypatch.setattr(module, "_run_gh", lambda args: pytest.fail("unexpected read"))
+
+    assert module._default_branch_workflow_texts_batch([]) == {}
+
+
+def test_private_hosted_placement_batch_default_ignores_public_repos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script()
+    calls: list[list[str]] = []
+
+    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
+        calls.append(args)
+        if args[:2] == ["repo", "list"]:
+            return _GhResult(
+                json.dumps(
+                    [
+                        {"name": "private-repo", "isPrivate": True},
+                        {"name": "public-repo", "isPrivate": False},
+                        {"name": "private-fleet-repo", "isPrivate": True},
+                    ]
+                )
+            )
+        assert args[:2] == ["api", "graphql"]
+        assert "n0=private-repo" in args
+        assert "n1=private-fleet-repo" in args
+        assert not any("public-repo" in arg for arg in args)
+        return _GhResult(
+            json.dumps(
+                {
+                    "data": {
+                        "r0": {
+                            "object": {
+                                "entries": [
+                                    _blob(
+                                        "ci.yml",
+                                        "jobs:\n  build:\n    runs-on: ubuntu-latest\n",
+                                    )
+                                ]
+                            }
+                        },
+                        "r1": {
+                            "object": {
+                                "entries": [
+                                    _blob(
+                                        "ci.yml",
+                                        "jobs:\n  build:\n    runs-on: [self-hosted, omnibase-ci]\n",
+                                    )
+                                ]
+                            }
+                        },
+                    }
+                }
+            )
+        )
+
+    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
+
+    findings = module.audit_private_repo_hosted_placement()
+
+    assert len(calls) == 2
+    assert len(findings) == 1
+    assert findings[0].scope == "private-repo:.github/workflows/ci.yml:build"
+    assert "pinned to ubuntu-latest" in findings[0].message
+
+
+def test_private_hosted_placement_batch_fetcher_injection() -> None:
+    module = _load_script()
+    calls: list[tuple[list[str], str]] = []
+
+    def fake_batch(repo_names: list[str], org: str) -> dict[str, dict[str, str]]:
+        calls.append((repo_names, org))
+        return {
+            name: {
+                ".github/workflows/ci.yml": "jobs:\n  build:\n    runs-on: ubuntu-latest\n"
+            }
+            for name in reversed(repo_names)
+        }
+
+    findings = module.audit_private_repo_hosted_placement(
+        visibility_fn=lambda org: [
+            ("private-two", True),
+            ("public", False),
+            ("private-one", True),
+        ],
+        org="another-org",
+        workflow_batch_fetch_fn=fake_batch,
+    )
+
+    assert calls == [(["private-two", "private-one"], "another-org")]
+    assert [finding.scope for finding in findings] == [
+        "private-two:.github/workflows/ci.yml:build",
+        "private-one:.github/workflows/ci.yml:build",
+    ]
 
 
 def test_each_variable_list_is_read_once_per_run(

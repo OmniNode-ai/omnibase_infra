@@ -571,9 +571,11 @@ def _live_repository_visibility(org: str = ORG) -> list[tuple[str, bool]]:
 # private repository has about a hundred), and this pass runs inside every omnibase_infra CI run
 # on CROSS_REPO_PAT, the operator's token: on 2026-10-11 it spent the operator's
 # shared hourly core quota, and the landing controller stopped with QUOTA.
-WORKFLOW_TREE_QUERY = """
-query($owner: String!, $name: String!) {
-  repository(owner: $owner, name: $name) {
+# OMN-20413: amortize the shared token's GraphQL cost across private repos.
+WORKFLOW_READ_BATCH_SIZE = 20
+# A batch returns up to twenty repositories' workflow texts in one response.
+WORKFLOW_READ_BATCH_TIMEOUT_SECONDS = 60
+WORKFLOW_TREE_SELECTION = """
     object(expression: "HEAD:.github/workflows") {
       ... on Tree {
         entries {
@@ -590,41 +592,69 @@ query($owner: String!, $name: String!) {
         }
       }
     }
-  }
-}
 """
 
 
 def _default_branch_workflow_texts(repo_name: str, org: str = ORG) -> dict[str, str]:
+    """Fetch one repository through the shared default-branch batch reader."""
+    return _default_branch_workflow_texts_batch([repo_name], org)[repo_name]
+
+
+def _default_branch_workflow_texts_batch(
+    repo_names: list[str], org: str = ORG
+) -> dict[str, dict[str, str]]:
     """Fetch every default-branch ``.github/workflows/*.yml``/``.yaml`` file's text.
 
     OMN-18365 AC3: reads live content from GitHub rather than a local checkout,
     because the private-repo hosted-placement check runs against every private
-    repository in the org, not just this repository's own clone. A repository
-    with no workflows directory (or no workflows at all) is not a
-    finding-worthy condition and returns ``{}``.
+    repository in the org. A repository with no workflows directory returns ``{}``.
 
-    OMN-20864: the read is ONE GraphQL query per repository, never one REST
-    call per file. A failed read raises instead of reading as an empty, clean
-    repository, and a file whose text GitHub truncated or did not return
-    raises too: an unread workflow is not a passing one.
+    OMN-20413: one GraphQL query reads up to ``WORKFLOW_READ_BATCH_SIZE``
+    repositories under aliases, so a CI run spends a few points of
+    CROSS_REPO_PAT's hourly GraphQL budget instead of one per private
+    repository. A failed, partial or errored read still raises: an unread
+    workflow is not a passing one.
     """
-    result = _run_gh(
-        [
-            "api",
-            "graphql",
-            "-f",
-            f"query={WORKFLOW_TREE_QUERY}",
-            "-f",
-            f"owner={org}",
-            "-f",
-            f"name={repo_name}",
-        ]
-    )
-    if result.returncode != 0:
-        raise _read_failed(f"gh api graphql workflow read for {repo_name}", result)
-    payload = json.loads(result.stdout or "{}")
-    repository = (payload.get("data") or {}).get("repository")
+    texts: dict[str, dict[str, str]] = {}
+    for offset in range(0, len(repo_names), WORKFLOW_READ_BATCH_SIZE):
+        chunk = repo_names[offset : offset + WORKFLOW_READ_BATCH_SIZE]
+        declarations = ["$owner: String!"]
+        selections: list[str] = []
+        variables = ["-f", f"owner={org}"]
+        for index, repo_name in enumerate(chunk):
+            declarations.append(f"$n{index}: String!")
+            selections.append(
+                f"r{index}: repository(owner: $owner, name: $n{index}) {{"
+                f"{WORKFLOW_TREE_SELECTION}"
+                "}"
+            )
+            variables.extend(["-f", f"n{index}={repo_name}"])
+        query = "query(" + ", ".join(declarations) + ") {" + "\n".join(selections) + "}"
+        result = _run_gh(
+            ["api", "graphql", "-f", f"query={query}", *variables],
+            timeout=WORKFLOW_READ_BATCH_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            raise _read_failed(
+                f"gh api graphql workflow read for {', '.join(chunk)}", result
+            )
+        payload = json.loads(result.stdout or "{}")
+        data = payload.get("data")
+        for index, repo_name in enumerate(chunk):
+            repository = data.get(f"r{index}") if isinstance(data, dict) else None
+            # OMN-20413: errors without a usable tree must not read as clean.
+            if payload.get("errors") and isinstance(repository, dict):
+                if repository.get("object") is None:
+                    raise RuntimeError(
+                        f"gh api graphql workflow read for {repo_name} "
+                        "returned no usable workflow data"
+                    )
+            texts[repo_name] = _parse_workflow_tree(repo_name, repository)
+    return texts
+
+
+def _parse_workflow_tree(repo_name: str, repository: Any) -> dict[str, str]:
+    """Parse a repository tree; unread workflows raise instead of reading clean."""
     if not isinstance(repository, dict):
         raise RuntimeError(
             f"gh api graphql workflow read for {repo_name} returned no repository"
@@ -658,8 +688,11 @@ def audit_private_repo_hosted_placement(
     visibility_fn: Callable[
         [str], list[tuple[str, bool]]
     ] = _live_repository_visibility,
-    workflow_fetch_fn: Callable[[str], dict[str, str]] = _default_branch_workflow_texts,
+    workflow_fetch_fn: Callable[[str], dict[str, str]] | None = None,
     org: str = ORG,
+    workflow_batch_fetch_fn: Callable[
+        [list[str], str], dict[str, dict[str, str]]
+    ] = _default_branch_workflow_texts_batch,
 ) -> list[Finding]:
     """OMN-18365 AC3: private repositories never run on GitHub-hosted runners.
 
@@ -683,10 +716,18 @@ def audit_private_repo_hosted_placement(
     layer only reports; it cannot itself stop a job from starting).
     """
     findings: list[Finding] = []
-    for repo_name, is_private in visibility_fn(org):
-        if not is_private:
-            continue
-        for path, text in workflow_fetch_fn(repo_name).items():
+    # OMN-20413: production reads all private repos in bounded GraphQL batches.
+    private_repos = [name for name, is_private in visibility_fn(org) if is_private]
+    batch_texts = (
+        workflow_batch_fetch_fn(private_repos, org) if workflow_fetch_fn is None else {}
+    )
+    for repo_name in private_repos:
+        workflow_texts = (
+            workflow_fetch_fn(repo_name)
+            if workflow_fetch_fn is not None
+            else batch_texts[repo_name]
+        )
+        for path, text in workflow_texts.items():
             try:
                 workflow = yaml.safe_load(text)
             except yaml.YAMLError as exc:
