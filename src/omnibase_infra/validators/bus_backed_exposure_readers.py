@@ -190,6 +190,16 @@ class ReaderSurfaceError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ReaderSurfacePaths:
+    """The sibling source paths required to resolve the reader surface."""
+
+    registry: Path
+    layouts_dir: Path
+    backend_reader_surface: Path
+    local_pages_dir: Path
+
+
+@dataclass(frozen=True)
 class Exposure:
     """One served ``bus_backed: true`` projection exposure."""
 
@@ -702,7 +712,7 @@ def _parse_backend_readers(
     seen_ids: set[str] = set()
     required_keys = surface.required_fields
     optional_types = dict(surface.optional_fields)
-    allowed_keys = required_keys | frozenset(optional_types)
+    allowed_keys = required_keys.union(optional_types)
 
     for index, entry in enumerate(raw):
         prefix = f"`backend_readers[{index}]`"
@@ -1067,23 +1077,20 @@ def _report(
 
 def check_exposure_readers(
     contracts_dirs: Sequence[Path],
-    registry: Path,
-    layouts_dir: Path,
-    backend_reader_surface: Path,
-    local_pages_dir: Path,
+    paths: ReaderSurfacePaths,
     stream: IO[str] | None = None,
 ) -> int:
     out = stream if stream is not None else sys.stderr
 
-    surface = collect_backend_reader_surface(backend_reader_surface)
-    registry_readers = collect_registry_readers(registry)
-    layout_readers = collect_layout_readers(layouts_dir, registry_readers)
+    surface = collect_backend_reader_surface(paths.backend_reader_surface)
+    registry_readers = collect_registry_readers(paths.registry)
+    layout_readers = collect_layout_readers(paths.layouts_dir, registry_readers)
     readers: dict[str, set[str]] = {
         topic: set(names) for topic, names in registry_readers.items()
     }
     for topic, names in layout_readers.items():
         readers.setdefault(topic, set()).update(names)
-    for topic, names in collect_local_page_readers(local_pages_dir).items():
+    for topic, names in collect_local_page_readers(paths.local_pages_dir).items():
         readers.setdefault(topic, set()).update(names)
 
     scanned = list(_iter_contract_files(contracts_dirs))
@@ -1108,10 +1115,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return check_exposure_readers(
             dirs,
-            args.registry,
-            args.layouts_dir,
-            args.backend_reader_surface,
-            args.local_pages_dir,
+            ReaderSurfacePaths(
+                registry=args.registry,
+                layouts_dir=args.layouts_dir,
+                backend_reader_surface=args.backend_reader_surface,
+                local_pages_dir=args.local_pages_dir,
+            ),
         )
     except ReaderSurfaceError as exc:
         sys.stderr.write(f"[exposure-reader-coverage] FAIL (fail-closed): {exc}\n")

@@ -286,6 +286,7 @@ class RuntimeDelegationDispatchPort:
         temperature: float | None = None,
         response_format: dict[str, object] | None = None,
         attribution: Mapping[str, str] | None = None,
+        model: str | None = None,
     ) -> dict[str, object]:
         """Dispatch a request; guard OMN-18931 faults, pass OMN-19124 routing pins.
 
@@ -307,6 +308,8 @@ class RuntimeDelegationDispatchPort:
             ("system_prompt", system_prompt),
             ("temperature", temperature),
             ("response_format", response_format),
+            # The bus wire does not carry a model choice (dev fix OMN-20844).
+            ("model", model),
         ):
             if feature_value is not None:
                 raise NotImplementedError(

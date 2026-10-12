@@ -75,6 +75,7 @@ def test_runtime_port_exposes_consumer_handler_optional_parameters() -> None:
         assert parameters["system_prompt"].default is None
         assert parameters["temperature"].default is None
         assert parameters["response_format"].default is None
+        assert parameters["model"].default is None
         # OMN-18321: added by OMN-18172 on the consumer side (omnimarket#2494,
         # squash 849fdae6) and not here, which took every dev-lane delegation to
         # a failed terminal with no FSM row for a day. The name is asserted
@@ -134,6 +135,7 @@ async def _dispatch_with_captured_command(
         system_prompt=None,
         temperature=None,
         response_format=None,
+        model=None,
     )
     return result, captured_commands[0]
 
@@ -155,6 +157,7 @@ async def test_absent_consumer_features_dispatch_through_runtime_bus(
     assert "system_prompt" not in command.payload
     assert "temperature" not in command.payload
     assert "response_format" not in command.payload
+    assert "model" not in command.payload
     request = ModelDelegationRequest.model_validate(command.payload)
     assert request.requested_timeout_seconds == 240
     assert "terminal_delivery_margin_seconds" not in command.payload

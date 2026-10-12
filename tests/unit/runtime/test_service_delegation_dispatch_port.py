@@ -419,6 +419,7 @@ async def test_runtime_delegation_dispatch_port_forwards_response_contract(
     [
         ({"system_prompt": "Answer tersely."}, "system_prompt"),
         ({"temperature": 0.2}, "temperature"),
+        ({"model": "google/gemini-2.5-flash-lite"}, "model"),
         (
             {"response_format": {"type": "json_object"}},
             "response_format",

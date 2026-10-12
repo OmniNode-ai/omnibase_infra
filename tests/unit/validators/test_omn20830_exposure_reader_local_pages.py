@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 """OMN-20830: the exposure-reader gate sees the readers that exist.
 
@@ -31,6 +31,7 @@ import pytest
 from omnibase_infra.validators.bus_backed_exposure_readers import (
     Finding,
     ReaderSurfaceError,
+    ReaderSurfacePaths,
     check_exposure_readers,
     collect_backend_reader_surface,
     collect_bus_backed_exposures,
@@ -119,7 +120,9 @@ def _gate(root: Path, contracts: Path, pages: Path) -> tuple[int, str]:
     registry, layouts = _omnidash(root)
     out = io.StringIO()
     code = check_exposure_readers(
-        [contracts], registry, layouts, _surface(root), pages, stream=out
+        [contracts],
+        ReaderSurfacePaths(registry, layouts, _surface(root), pages),
+        stream=out,
     )
     return code, out.getvalue()
 
