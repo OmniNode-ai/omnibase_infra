@@ -1,0 +1,20 @@
+{
+  "_provenance": {
+    "source": "onex_change_control default branch (dev) commit f403414d4cffe628193807e090779ca48ee2f090, file drift/dod_receipts/OMN-18595/dod-OmniNode-ai-omnibase_infra-pr-4845/command.yaml; release PR record from the PR watcher state of 2026-10-11T09:36:23Z for OmniNode-ai/omnibase_infra#4845",
+    "captured_utc": "2026-10-11T09:37:30Z",
+    "receipt_sha256": "16d8e6ec4a3d6c1870383001c8898eb84d572990eb9290e5538563e6651025ac"
+  },
+  "response": {
+    "release_pr": {
+      "number": 4845,
+      "state": "MERGED",
+      "title": "chore: release omnibase_infra 0.38.70 (OMN-18595)",
+      "head_ref": "automation/release-0.38.70-omn-18595",
+      "head_sha": "8ab93772c7f6e70974af001cb08e8294c2d77d27",
+      "merge_commit": "37d5520950c1b7ea4c279caf2286f96845f1c875"
+    },
+    "receipt_path": "drift/dod_receipts/OMN-18595/dod-OmniNode-ai-omnibase_infra-pr-4845/command.yaml",
+    "receipt_yaml": "---\nschema_version: 1.0.0\nticket_id: OMN-18595\nevidence_item_id: dod-OmniNode-ai-omnibase_infra-pr-4845\ncheck_type: command\ncheck_value: gh api repos/OmniNode-ai/omnibase_infra/contents/CHANGELOG.md?ref=8ab93772c7f6e70974af001cb08e8294c2d77d27\n  --jq '.content' | base64 -d | grep -cF '## v0.38.70'\ncontract_sha256: sha256:f1cfdc5904bcaacb584e9f8618d57b98aa016639c49d1d7006ef30dd3b210e19\ncontract_entry_sha256: sha256:336c0f999c61eac149b09fcfcb93773c54560d25ac5f7a9cdf3f796067aaf36f\nstatus: PASS\ncommit_sha: 8ab93772c7f6e70974af001cb08e8294c2d77d27\nrunner: docker-localup-a-9f8a\nverifier: occ-probe-capture-v1\nprobe_command: gh api repos/OmniNode-ai/omnibase_infra/contents/CHANGELOG.md?ref=8ab93772c7f6e70974af001cb08e8294c2d77d27\n  --jq '.content' | base64 -d | grep -cF '## v0.38.70'\nactual_output: 'PASS: content-bound and falsifiable for OMN-18595 from OmniNode-ai/omnibase_infra#4845.\n  The released version''s changelog heading is present at the PR head and absent at the merge base 802667543040,\n  so the probe tells this release PR apart from its own base.'\npr_number: 4845\nbranch: automation/release-0.38.70-omn-18595\nprobe_stdout: '{\"evidence_ref\":\"8ab93772c7f6e70974af001cb08e8294c2d77d27\",\"green_exit\":0,\"red_exit\":1,\"red_ref\":\"802667543040b271e9c3c0cecf948b179d3ebb1d\"}'\nexit_code: 0\nrun_timestamp: '2026-10-11T07:36:41Z'\nduration_ms: 15535\nartifact_sha256:\n  - sha256:6477b3ca45fff6ab43eb007b0b9290ebe20856e691771f43c3fbf1cad1449e12\n  - sha256:6a26cb127e13eb8f144d66735b91fee139780e42769d27e730da5b10a361ed26\n",
+    "receipt_dir_last_commit": "f403414d4cffe628193807e090779ca48ee2f090"
+  }
+}

@@ -342,6 +342,9 @@ migrations:
   forward/nodes/node_projection_routing_decision/0023_grant_tenant_projection_writer_agent_routing_decisions.sql: expand-only
   forward/nodes/node_projection_routing_feedback/0000_create_delegation_routing_feedback.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT
   forward/nodes/node_projection_routing_feedback/0001_grant_tenant_projection_writer_delegation_routing_feedback.sql: expand-only # additive
+  forward/nodes/node_projection_run_trace/0000_create_run_trace.sql: forward-only # ALTER TABLE public.run_trace ALTER COLUMN SET NOT NULL; ENABLE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
+  forward/nodes/node_projection_run_trace/0001_grant_tenant_projection_writer_run_trace.sql: expand-only
+  forward/nodes/node_projection_run_trace/0002_force_rls_run_trace.sql: forward-only # ALTER TABLE public.run_trace FORCE ROW LEVEL (ROW LEVEL SECURITY); DROP POLICY
   forward/nodes/node_projection_runner_fleet/0000_create_runner_fleet_liveness.sql: forward-only # UNIQUE INDEX on an existing table
   forward/nodes/node_projection_runner_fleet/0001_grant_omninode_runtime_runner_fleet_liveness.sql: expand-only
   forward/nodes/node_projection_demo_readiness/0000_create_demo_readiness_latest.sql: forward-only # UNIQUE INDEX on created table
@@ -398,6 +401,8 @@ migrations:
   forward/nodes/node_projection_tenant_credentials/0001_relax_name_provider_not_null.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
   forward/nodes/node_projection_tenant_credentials/0002_credential_identity_not_null.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_INFEREN
   forward/nodes/node_projection_tenant_credentials/0005_tenant_credentials_fingerprint_and_set_at.sql: expand-only
+  forward/nodes/node_projection_tenant_credentials/0006_tenant_credentials_expires_at.sql: expand-only
+  forward/nodes/node_projection_tenant_credentials/0007_tenant_credentials_bound_host.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/003_grant_tenant_projection_writer_tenant_inference_credentials.sql: expand-only
   forward/nodes/node_projection_tenant_credentials/004_drop_empty_tenant_schema.sql: forward-only # DROP
   forward/nodes/node_projection_tenant_registry/0000_create_tenant_registry_mirror.sql: forward-only # UPDATE; ALTER TABLE ALTER COLUMN; DROP; ALTER TABLE DROP CONSTRAINT; ALTER TABLE ADD CONSTRAINT TENANT_REGISTR

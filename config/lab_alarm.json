@@ -41,7 +41,7 @@
   "effects_group_prefix": "local.omnimarket.node_delegate_skill_orchestrator.consume.",
   "effects_group_suffix": ".__i.runtime-effects.__t.onex.cmd.omnimarket.delegate-skill.v1",
 
-  "lane_manifest": "../deploy/lane-census/lane-manifest.yaml",
+  "lane_manifest": "${ONEX_WORKSPACE_CONFIG_ROOT}/config/lab/lane-census/lane-manifest.yaml",
   "census_lane": "dev",
 
   "consumer_groups": [

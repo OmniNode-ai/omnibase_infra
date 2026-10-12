@@ -18,7 +18,11 @@ Exit 0 when both hold; exit 1 naming every problem otherwise.
 ``--pin REPO KIND`` prints, as JSON, the profile id, version and mandatory checks
 the registry declares for one repository's variant of that proof kind (OMN-19566:
 what the ``lab-proof-receipt`` workflow judges a receipt against). Exit 1 when the
-registry has no such row or variant.
+registry has no such row or variant. ``--changed-files FILE`` (one path per line,
+the PR's merge-base-to-head diff) resolves the variant's conditional checks: one
+whose surface the diff does not touch is listed under ``inapplicable_checks``
+instead of ``mandatory_checks``. Without it, or with an empty file, every
+conditional check is mandatory.
 
 ``--self-test`` proves the gate is not vacuous: it removes each row in turn from
 an in-memory copy of the registry and exits 0 only if every copy is refused,
@@ -83,18 +87,38 @@ def main(argv: list[str] | None = None) -> int:
         metavar=("REPO", "KIND"),
         help="print the registry's profile pin for OmniNode-ai/<repo> and a proof kind",
     )
+    parser.add_argument(
+        "--changed-files",
+        type=Path,
+        help=(
+            "with --pin: the PR's changed paths, one per line, which decide its "
+            "conditional checks (OMN-19566)"
+        ),
+    )
     args = parser.parse_args(argv)
     if args.self_test:
         return self_test(args.registry)
     if args.pin:
         repo, kind = args.pin
         try:
+            changed = (
+                None
+                if args.changed_files is None
+                else [
+                    line.strip()
+                    for line in args.changed_files.read_text(
+                        encoding="utf-8"
+                    ).splitlines()
+                    if line.strip()
+                ]
+            )
             pin = profile_pin(
                 load_lab_proof_profile_registry(args.registry),
                 repo,
                 EnumLabProofKind(kind),
+                changed,
             )
-        except (KeyError, ValidationError, ValueError) as exc:
+        except (KeyError, OSError, ValidationError, ValueError) as exc:
             print(f"no profile pin for {repo} {kind}: {exc}", file=sys.stderr)
             return 1
         print(pin.model_dump_json())

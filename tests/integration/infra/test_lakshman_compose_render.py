@@ -47,6 +47,8 @@ COMPOSE_PROJECT = "omnibase-infra-lakshman"
 #: letting this module prove the lane renders. They are obvious non-secrets and
 #: are never written to disk.
 RENDER_ONLY_SECRETS = {
+    # OMN-20932: lane overlays are private; the mount refuses without this.
+    "ONEX_LANE_OVERLAY_DIR": "/nonexistent/onex-lane-overlays",
     "POSTGRES_PASSWORD": "render-only-not-a-secret",
     "VALKEY_PASSWORD": "render-only-not-a-secret",
     "OMNINODE_RUNTIME_PASSWORD": "render-only-not-a-secret",

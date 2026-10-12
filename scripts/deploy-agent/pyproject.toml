@@ -73,6 +73,7 @@ markers = [
     "deps_recreate: test drives the real supervised deps recreate (OMN-18692)",
     "deps_convergence: test drives the real deps-convergence observation (OMN-18640)",
     "real_settle_pool: test drives the real settle worker thread instead of the inline stand-in (OMN-19501)",
+    "lab_overlay: test reads the lab's own lane manifest, private config under ONEX_WORKSPACE_CONFIG_ROOT (OMN-20934); deselected from the deploy-agent unit job and selected by the Lane Census Staleness job, which fetches the overlay",
 ]
 
 [tool.setuptools.packages.find]

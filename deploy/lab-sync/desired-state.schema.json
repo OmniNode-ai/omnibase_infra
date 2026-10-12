@@ -227,7 +227,7 @@
           ]
         },
         "host": {
-          "description": "A host id from the lane manifest's hosts registry (deploy/lane-census/lane-manifest.yaml).",
+          "description": "A host id from the lane manifest's hosts registry (config/lab/lane-census/lane-manifest.yaml under the workspace config root).",
           "type": "string",
           "pattern": "^[a-z0-9][a-z0-9-]*$"
         },

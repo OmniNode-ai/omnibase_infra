@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20991"
+title: "omnibase_infra vendors the tenant-credentials expiry and bound-host migrations"
+summary: "omnibase_infra vendors omnimarket's node_projection_tenant_credentials migrations 0006_tenant_credentials_expires_at.sql and 0007_tenant_credentials_bound_host.sql byte-identical, binds each in the application-migration ledger and declares each expand-only, ahead of the omnimarket pull requests that add them. omnimarket's Sibling Release Compatibility Gate refuses those pull requests until an omnibase_infra release carries the same git blobs."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn20991-vendor-tenant-credentials-0006-0007"
+    statement: "Both tenant-credentials migrations are vendored byte-identical, bound in the ledger and classified expand-only."
+    acceptance:
+      - id: "AC5"
+        statement: "AC5: docker/migrations/forward/nodes/node_projection_tenant_credentials carries 0006 and 0007 as the omnimarket git blobs, each bound in the application-migration ledger by sha256 and declared expand-only -- falsifier: uv run pytest tests/unit/migrations/test_omn20991_tenant_credentials_expiry_and_host_vendor.py -q fails at the merge base, where neither file is vendored"
+evidence_requirements:
+  - kind: "tests"
+    description: "The vendor test passes at the head and fails at the merge base."
+    command: "uv run pytest tests/unit/migrations/test_omn20991_tenant_credentials_expiry_and_host_vendor.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20991-ac5-vendor-0006-0007"
+    description: "AC5. Both migrations are vendored as the omnimarket blobs, bound in the ledger and classified expand-only."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/migrations/test_omn20991_tenant_credentials_expiry_and_host_vendor.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC5"]

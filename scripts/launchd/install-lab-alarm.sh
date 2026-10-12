@@ -69,6 +69,9 @@ fi
 # reaching the first condition).
 : "${ONEX_INFRA_HOST:?set ONEX_INFRA_HOST to the lab host this alarm reads}"
 : "${ONEX_RUNTIME_SSH_HOST:?set ONEX_RUNTIME_SSH_HOST to the ssh target the docker probe rewrites through}"
+# OMN-20934: the lane manifest is private config; config/lab_alarm.json reads
+# it under this root and raises at load when it is unset.
+: "${ONEX_WORKSPACE_CONFIG_ROOT:?set ONEX_WORKSPACE_CONFIG_ROOT to the private config root that holds config/lab/lane-census/lane-manifest.yaml}"
 
 # The brew interpreter, by literal resolved path. launchd runs with a
 # restricted PATH and no login shell, so neither 'python3' nor a
@@ -96,6 +99,7 @@ sed -e "s|@OMNI_HOME@|${OMNI_HOME}|g" \
     -e "s|@HOME@|${HOME}|g" \
     -e "s|@ONEX_INFRA_HOST@|${ONEX_INFRA_HOST}|g" \
     -e "s|@ONEX_RUNTIME_SSH_HOST@|${ONEX_RUNTIME_SSH_HOST}|g" \
+    -e "s|@ONEX_WORKSPACE_CONFIG_ROOT@|${ONEX_WORKSPACE_CONFIG_ROOT}|g" \
     "${TEMPLATE}" > "${TARGET}"
 
 if [[ "${RENDER_ONLY}" == "1" ]]; then

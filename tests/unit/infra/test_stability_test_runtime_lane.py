@@ -464,9 +464,14 @@ def test_stability_lane_runtime_services_preserve_image_runtime_contracts() -> N
 
     for service_name in RUNTIME_SERVICES:
         volumes = services[service_name]["volumes"]
-        assert "../contracts:/app/contracts:ro" not in volumes
-        assert all(":/app/contracts" not in volume for volume in volumes)
-        assert any(volume.endswith(":/app/skills:ro") for volume in volumes)
+        short_volumes = [volume for volume in volumes if isinstance(volume, str)]
+        mount_targets = [
+            volume["target"] for volume in volumes if isinstance(volume, dict)
+        ]
+        assert "../contracts:/app/contracts:ro" not in short_volumes
+        assert all(":/app/contracts" not in volume for volume in short_volumes)
+        assert all(not target.startswith("/app/contracts") for target in mount_targets)
+        assert any(volume.endswith(":/app/skills:ro") for volume in short_volumes)
 
 
 @pytest.mark.unit

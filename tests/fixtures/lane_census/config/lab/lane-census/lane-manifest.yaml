@@ -1,0 +1,79 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# A NEUTRAL lane manifest for tests (OMN-20934). It describes no real lab.
+#
+# The real lane manifest and committed census are private deployment config
+# (operator RULING 2026-10-10T21:57:38Z): they live in config/lab/lane-census
+# under the workspace config root and this repository ships neither. Tests that
+# exercise the census tools point ONEX_WORKSPACE_CONFIG_ROOT (or LANE_MANIFEST)
+# at tests/fixtures/lane_census, whose layout mirrors that root. Hosts and
+# containers are placeholders; the lane names are keys the CLAUDE.md lane
+# block generator already declares, so a clean census of this file is clean
+# for every checker.
+#
+# Shape: host-a runs `judge` (required) and `dev` (optional, with declared
+# restart bounds, the lane the lab alarm reads); host-b runs `dogfood`
+# (optional), which is therefore not applicable on host-a.
+schema_version: "1.0.0"
+default_image_tag_pattern: '.+'
+
+hosts:
+  host-a:
+    aliases: [box-a]
+  host-b:
+    aliases: [box-b]
+
+lanes:
+  judge:
+    hosts: [host-a]
+    compose_file: docker/docker-compose.example-judge.yml
+    compose_project: example-judge
+    network: example-judge-network
+    image_tag_pattern: '.+'
+    services:
+      - name: example-judge-postgres
+        kind: service
+        replicas: 1
+      - name: example-judge-redpanda
+        kind: service
+        replicas: 1
+      - name: example-judge-forward-migration
+        kind: oneshot
+      - name: example-judge-migration-gate
+        kind: keepalive
+      - name: example-judge-runtime
+        kind: service
+        replicas: 1
+      - name: example-judge-runtime-effects
+        kind: service
+        replicas: 1
+      - name: example-judge-agent-actions-consumer
+        kind: profile_gated
+  dev:
+    optional: true
+    hosts: [host-a]
+    compose_file: docker/docker-compose.example-dev.yml
+    compose_project: example-dev
+    network: example-dev-network
+    image_tag_pattern: '.+'
+    services:
+      - name: example-dev-redpanda
+        kind: service
+        replicas: 1
+        restart_bound: 1
+      - name: example-dev-runtime
+        kind: service
+        replicas: 1
+        restart_bound: 3
+  dogfood:
+    optional: true
+    hosts: [host-b]
+    compose_file: docker/docker-compose.example-dogfood.yml
+    compose_project: example-dogfood
+    network: example-dogfood-network
+    image_tag_pattern: '.+'
+    services:
+      - name: example-dogfood-runtime
+        kind: service
+        replicas: 1

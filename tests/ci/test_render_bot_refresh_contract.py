@@ -5,9 +5,15 @@
 The Repo Evidence Gate refuses a PR that cites a ticket without
 ``contracts/<ticket>.yaml`` at its head, refuses a contract carried unchanged
 from the merge base, and runs each bound check at the merge base, where it must
-fail. The lane census and omnimarket contract-pin producers render that
-contract inline in the step that opens their PR. These tests run the rendering
-lines of each workflow, as written, against a refreshed and a pre-refresh file.
+fail. The omnimarket contract-pin producer renders that contract inline in
+the step that opens its PR. These tests run the rendering lines of the
+workflow, as written, against a refreshed and a pre-refresh file.
+
+OMN-20934: the lane census producer no longer opens its PR here. The census is
+private config committed to the CI overlay repository, which runs no Repo
+Evidence Gate, so that producer renders no contract;
+tests/unit/scripts/test_lane_census_refresh_decision_omn18606.py pins that it
+stages the census file alone.
 """
 
 from __future__ import annotations
@@ -23,15 +29,6 @@ import yaml
 REPO = Path(__file__).resolve().parents[2]
 
 PRODUCERS = [
-    pytest.param(
-        "lane-census-refresh.yml",
-        "OMN-18606",
-        "deploy/lane-census/census-snapshot.json",
-        {"EMITTED": "2026-10-09T12:56:14.434338+00:00"},
-        '{"emitted_at": "2026-10-07T18:52:47.150843+00:00"}\n',
-        '{"emitted_at": "2026-10-09T12:56:14.434338+00:00"}\n',
-        id="lane-census",
-    ),
     pytest.param(
         "omnimarket-contract-pin-refresh.yml",
         "OMN-17292",
@@ -144,10 +141,11 @@ def test_each_recorded_refusal_names_the_contract_its_producer_now_renders(
     recording = recorded_response["response"]
     assert isinstance(recording, dict)
     producers = {
-        "omnibase_infra#4772": "lane-census-refresh.yml",
         "omnibase_infra#4816": "omnimarket-contract-pin-refresh.yml",
     }
-    assert set(recording) == set(producers)
+    # The recording also holds the retired lane census producer's refusal
+    # (OMN-20934 moved that producer's PR out of this repository).
+    assert set(producers) < set(recording)
     for pr, workflow in producers.items():
         messages = [a["message"] for a in recording[pr]["annotations"]]
         refusals = [

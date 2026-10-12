@@ -24,6 +24,14 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.lane_census_fixtures import (
+    NEUTRAL_CONFIG_ROOT,
+    NEUTRAL_HOSTNAME,
+    NEUTRAL_LANE,
+    NEUTRAL_LANE_NETWORK,
+    NEUTRAL_MANIFEST,
+)
+
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
@@ -71,7 +79,7 @@ def _run(
     )
     _shim(bin_dir, "docker", docker_body, calllog)
     _shim(bin_dir, "rpk", "exit 0", calllog)
-    _shim(bin_dir, "hostname", 'echo "omninode-pc"', calllog)
+    _shim(bin_dir, "hostname", f'echo "{NEUTRAL_HOSTNAME}"', calllog)
 
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
@@ -80,6 +88,9 @@ def _run(
     # fallback against the shim, hermetically and on any host.
     env["LANE_CENSUS_DOCKER_SOCKET"] = "/nonexistent/lane-census-test.sock"
     env["HOME"] = str(tmp_path)  # log dir under tmp, never ~
+    # OMN-20934: the census reads the neutral manifest, never a lab's.
+    env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(NEUTRAL_CONFIG_ROOT)
+    env.pop("LANE_MANIFEST", None)
     env.pop("LANE_MEMORY_BROKER_CONTAINER", None)
     if broker:
         env["LANE_MEMORY_BROKER_CONTAINER"] = broker
@@ -101,20 +112,14 @@ def _run(
 # replaced the `{{json .}}` inventory format, which silently requested per-
 # container size (90.363 s vs 0.150 s on .201's 111 containers).
 #
-# OMN-18320: this fixture was shaped on the `prod` lane until 2026-09-13, when the
-# lab compose prod lane was shut down under an operator consent row and removed
-# from the manifest. These four tests drive the real script as a subprocess
-# against the real manifest file, so unlike the pure-planner tests they cannot
-# pin a frozen lane — the lane has to be one the script can still resolve. `judge`
-# is used because the assertions here are about CLI behaviour (exit codes and
-# whether anything is published), never about which lane it is; the 2026-06-11
-# prod incident replay lives in test_lane_census_plan.py and keeps its own frozen
-# prod fixture. This is the lab compose lane only; production is the AWS
-# `onex-prod` namespace.
-_LANE = "judge"
+# OMN-20934: the lane is the neutral fixture's required lane. These tests drive
+# the real script as a subprocess, so the lane must be one the manifest it reads
+# declares; the assertions are about CLI behaviour (exit codes and whether
+# anything is published), never about which lane it is.
+_LANE = NEUTRAL_LANE
 _LANE_OUTAGE_PS = (
-    "omnibase-infra-judge-postgres\trunning\tUp 2 hours\tpostgres:16"
-    "\tcom.omninode.lane=judge\n"
+    "example-judge-postgres\trunning\tUp 2 hours\tpostgres:16"
+    f"\tcom.omninode.lane={_LANE}\n"
 )
 _NO_NETWORKS = "bridge\nhost\n"
 
@@ -160,9 +165,7 @@ def test_clean_lane_exits_zero(tmp_path: Path) -> None:
     # Build a healthy inventory for the lane from the manifest.
     import yaml
 
-    manifest = yaml.safe_load(
-        (_REPO / "deploy" / "lane-census" / "lane-manifest.yaml").read_text()
-    )
+    manifest = yaml.safe_load(NEUTRAL_MANIFEST.read_text())
     rows = []
     for svc in manifest["lanes"][_LANE]["services"]:
         name = svc["name"]
@@ -179,7 +182,7 @@ def test_clean_lane_exits_zero(tmp_path: Path) -> None:
         else:
             rows.append(f"{name}\trunning\tUp 1 hour\tx:1\tcom.omninode.lane={_LANE}")
     ps = "\n".join(rows) + "\n"
-    networks = "omnibase-infra-judge-network\nbridge\n"
+    networks = f"{NEUTRAL_LANE_NETWORK}\nbridge\n"
     proc, calls = _run(
         ["--lane", _LANE],
         tmp_path,

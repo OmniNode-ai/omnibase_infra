@@ -56,12 +56,13 @@ from scripts.preflight_lane_deploy_attribution import (
     GOVERNED_LANES,
     GRANT_INTERLOCK_LANES,
 )
+from tests.helpers.lane_census_fixtures import LAB_MANIFEST
 
 pytestmark = pytest.mark.ci
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_PATH = ROOT / "contracts" / "services" / "runtime_policy.contract.yaml"
-MANIFEST_PATH = ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
+MANIFEST_PATH = LAB_MANIFEST  # OMN-20934: private config
 DEPLOY_RUNTIME_PATH = (
     ROOT / "src" / "omnibase_infra" / "handlers" / "handler_runtime_deploy.sh"
 )
@@ -226,6 +227,7 @@ def test_sanctioned_deploy_script_refuses_the_collaborator_lane() -> None:
     )
 
 
+@pytest.mark.lab_overlay
 def test_collaborator_lane_declares_itself_optional_in_the_census() -> None:
     """A declared-but-unbuilt optional lane must not emit census drift.
 

@@ -64,6 +64,12 @@
         <string>@ONEX_INFRA_HOST@</string>
         <key>ONEX_RUNTIME_SSH_HOST</key>
         <string>@ONEX_RUNTIME_SSH_HOST@</string>
+        <!-- OMN-20934: the lane manifest the restart bounds come from is
+             private config, so config/lab_alarm.json names it under
+             ${ONEX_WORKSPACE_CONFIG_ROOT}, expanded and refused-if-unset
+             like the two keys above. -->
+        <key>ONEX_WORKSPACE_CONFIG_ROOT</key>
+        <string>@ONEX_WORKSPACE_CONFIG_ROOT@</string>
     </dict>
 
     <!-- Hourly, at :25. A Minute-only StartCalendarInterval matches every

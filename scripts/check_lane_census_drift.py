@@ -89,9 +89,7 @@ from typing import Any
 
 import yaml
 
-_REPO = Path(__file__).resolve().parent.parent
-_DEFAULT_MANIFEST = _REPO / "deploy" / "lane-census" / "lane-manifest.yaml"
-_DEFAULT_SNAPSHOT = _REPO / "deploy" / "lane-census" / "census-snapshot.json"
+_SCRIPTS = Path(__file__).resolve().parent
 
 
 @dataclass(frozen=True)
@@ -292,8 +290,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Fail when the committed lane census disagrees with the manifest (OMN-18949)"
     )
-    parser.add_argument("--manifest", type=Path, default=_DEFAULT_MANIFEST)
-    parser.add_argument("--snapshot", type=Path, default=_DEFAULT_SNAPSHOT)
+    # OMN-20934: both inputs are private config; with no flag they resolve to
+    # the lane census directory under the workspace config root.
+    parser.add_argument("--manifest", type=Path, default=None)
+    parser.add_argument("--snapshot", type=Path, default=None)
     parser.add_argument(
         "--json",
         action="store_true",
@@ -304,10 +304,28 @@ def main(argv: list[str] | None = None) -> int:
     # The inputs are loaded before anything is evaluated, and an unreadable or
     # empty one exits 2 rather than producing an empty finding list. An empty
     # sweep and a clean sweep are the same output otherwise.
+    if str(_SCRIPTS) not in sys.path:
+        sys.path.insert(0, str(_SCRIPTS))
+    from lane_census_plan import (
+        LaneCensusConfigError,
+        default_manifest_path,
+        default_snapshot_path,
+    )
+
     try:
+        if args.manifest is None:
+            args.manifest = default_manifest_path()
+        if args.snapshot is None:
+            args.snapshot = default_snapshot_path()
         manifest = load_manifest(args.manifest)
         snapshot = load_snapshot(args.snapshot)
-    except (OSError, ValueError, yaml.YAMLError, json.JSONDecodeError) as exc:
+    except (
+        OSError,
+        ValueError,
+        yaml.YAMLError,
+        json.JSONDecodeError,
+        LaneCensusConfigError,
+    ) as exc:
         print(f"ERROR: could not read the census inputs: {exc}", file=sys.stderr)
         print(
             "  An unreadable input is an error, never a clean census.",
@@ -332,7 +350,6 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     # Imported here so the module is usable without the generator on the path.
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
     from generate_claude_lane_block import (
         orphan_map_entries,
         undeclared_lanes,
