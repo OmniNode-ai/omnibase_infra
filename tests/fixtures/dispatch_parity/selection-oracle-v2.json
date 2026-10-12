@@ -339,7 +339,7 @@
     "dispatcher.auto.node_coding_agent_fsm_reducer.HandlerCodingAgentFsm.coding_agent_fsm_advance_7c118795": {
       "category": "event",
       "contract_name": "node_coding_agent_fsm_reducer",
-      "event_model_module": "omnibase_infra.nodes.node_coding_agent_fsm_reducer.models.model_coding_agent_fsm_advance",
+      "event_model_module": "omnibase_infra.models.coding_agent.model_coding_agent_fsm_advance",
       "event_model_name": "ModelCodingAgentFsmAdvance",
       "handler_id": "dispatcher.auto.node_coding_agent_fsm_reducer.HandlerCodingAgentFsm.coding_agent_fsm_advance_7c118795",
       "handler_module": "omnibase_infra.nodes.node_coding_agent_fsm_reducer.handlers.handler_coding_agent_fsm",
@@ -6854,7 +6854,7 @@
     "P4::dispatcher.auto.node_coding_agent_fsm_reducer.HandlerCodingAgentFsm.coding_agent_fsm_advance_7c118795::onex.evt.omnibase-infra.coding-agent-fsm-advance.v1": {
       "construct_only": true,
       "dispatcher_id": "dispatcher.auto.node_coding_agent_fsm_reducer.HandlerCodingAgentFsm.coding_agent_fsm_advance_7c118795",
-      "event_model": "omnibase_infra.nodes.node_coding_agent_fsm_reducer.models.model_coding_agent_fsm_advance.ModelCodingAgentFsmAdvance",
+      "event_model": "omnibase_infra.models.coding_agent.model_coding_agent_fsm_advance.ModelCodingAgentFsmAdvance",
       "family": "P4_payload_type_scoping",
       "input": {
         "event_type": "omnibase-infra.coding-agent-fsm-advance",
