@@ -21,6 +21,9 @@ from omnibase_infra.handlers.handler_ci_live_contact import (
 from omnibase_infra.models.model_ci_live_contact_request import (
     ModelCILiveContactRequest,
 )
+from omnibase_infra.models.model_ci_live_contact_result import (
+    ModelCILiveContactResult,
+)
 
 
 @pytest.fixture
@@ -467,3 +470,175 @@ async def test_renaming_tooling_out_of_scope_still_requires_evidence(
     )
     assert not result.success, result
     assert "scripts/ci/check.py" in result.changed_tooling
+
+
+OLD_SHA = "9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+NEW_SHA = "60178094be3ca82abb6a64498600f7909e247584"
+PINNED_WORKFLOW = f"""name: Pinned
+on:
+  pull_request:
+    branches: [dev]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@{OLD_SHA} # v7.0.0
+        with:
+          repository: OmniNode-ai/omnibase_core
+          # Auto-bumped by publish-downstream-pin-bump.yml to {OLD_SHA[:12]}.
+          ref: {OLD_SHA}
+          sparse-checkout: |
+            src
+      - run: uv run pytest tests/ -q
+"""
+
+
+def git_in(repo: Path, *args: str) -> None:
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            *args,
+        ],
+        check=True,
+        capture_output=True,
+        env=scrub_git_location_env(os.environ),
+    )
+
+
+@pytest.fixture
+def pinned(tmp_path: Path) -> Path:
+    git_in(tmp_path, "init", "--quiet")
+    workflow = tmp_path / ".github/workflows/pinned.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(PINNED_WORKFLOW)
+    (tmp_path / "scripts/ci").mkdir(parents=True)
+    (tmp_path / "scripts/ci/check.py").write_text("print('gate')\n")
+    git_in(tmp_path, "add", ".")
+    git_in(tmp_path, "commit", "-m", "base")
+    return tmp_path
+
+
+async def admit_edit(
+    repo: Path, edit: dict[str, str], *, commit: bool = True
+) -> ModelCILiveContactResult:
+    for path, text in edit.items():
+        (repo / path).parent.mkdir(parents=True, exist_ok=True)
+        (repo / path).write_text(text)
+    git_in(repo, "add", ".")
+    if commit:
+        git_in(repo, "commit", "-m", "head")
+    return await HandlerCILiveContact().handle(
+        ModelCILiveContactRequest(
+            repository=str(repo), base_ref="HEAD~1" if commit else None
+        )
+    )
+
+
+WORKFLOW = ".github/workflows/pinned.yml"
+PIN_SWAP = PINNED_WORKFLOW.replace(OLD_SHA, NEW_SHA).replace(OLD_SHA[:12], NEW_SHA[:12])
+
+
+@pytest.mark.parametrize("commit", [True, False], ids=["pr-diff", "index"])
+@pytest.mark.parametrize(
+    "text",
+    [
+        PIN_SWAP,
+        PINNED_WORKFLOW.replace(f"ref: {OLD_SHA}", f"ref: {NEW_SHA}"),
+        PINNED_WORKFLOW.replace(f"checkout@{OLD_SHA}", f"checkout@{NEW_SHA}"),
+    ],
+    ids=["ref-and-comment", "ref-only", "uses-only"],
+)
+async def test_pin_only_workflow_edit_is_admitted_from_diff_content(
+    pinned: Path, text: str, commit: bool
+) -> None:
+    result = await admit_edit(pinned, {WORKFLOW: text}, commit=commit)
+    assert result.success, result
+    assert result.reason.startswith("Pin-only workflow edit"), result
+    assert result.changed_tooling == (WORKFLOW,)
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        # Labelled positive control: a seam-only CI-tooling logic change.
+        {"scripts/ci/check.py": "print('gate changed')\n"},
+        {WORKFLOW: PIN_SWAP, "scripts/ci/check.py": "print('gate changed')\n"},
+        {WORKFLOW: PIN_SWAP + "      - run: curl https://example.invalid\n"},
+        {
+            WORKFLOW: PIN_SWAP.replace(
+                "- run: uv run pytest", "- run: uv run --no-sync pytest"
+            )
+        },
+        {WORKFLOW: PIN_SWAP.replace("branches: [dev]", "branches: [dev, main]")},
+        {WORKFLOW: PIN_SWAP.replace("contents: read", "contents: write")},
+        {
+            WORKFLOW: PIN_SWAP.replace(
+                "            src\n", "            src\n            docs\n"
+            )
+        },
+        {WORKFLOW: PINNED_WORKFLOW.replace(f"checkout@{OLD_SHA}", "checkout@v5")},
+        {WORKFLOW: PINNED_WORKFLOW.replace(f"ref: {OLD_SHA}", "ref: dev")},
+        {WORKFLOW: PINNED_WORKFLOW.replace(f"ref: {OLD_SHA}", f"ref: {NEW_SHA[:12]}")},
+        {
+            WORKFLOW: PINNED_WORKFLOW.replace(
+                f"ref: {OLD_SHA}", f"ref: {NEW_SHA}"
+            ).replace("uv run pytest", f"git checkout {OLD_SHA} && uv run pytest")
+        },
+        {WORKFLOW: PINNED_WORKFLOW.replace(f"ref: {OLD_SHA}", f"ref: {NEW_SHA} && x")},
+        {".github/workflows/new.yml": f"      - uses: actions/checkout@{NEW_SHA}\n"},
+    ],
+    ids=[
+        "positive-control-seam-only-script",
+        "pin-plus-script-logic",
+        "added-step",
+        "changed-command",
+        "changed-trigger",
+        "changed-permission",
+        "pin-plus-sparse-checkout-path",
+        "tag-not-sha",
+        "branch-not-sha",
+        "abbreviated-ref",
+        "sha-in-run-command",
+        "pin-line-gains-text",
+        "added-workflow-file",
+    ],
+)
+async def test_any_non_pin_ci_tooling_change_still_refuses(
+    pinned: Path, edit: dict[str, str]
+) -> None:
+    result = await admit_edit(pinned, edit)
+    assert not result.success, result
+    assert "live-contact" in result.reason, result
+
+
+def test_bus_runtime_admits_pin_only_workflow_edit(
+    pinned: Path, tmp_path: Path
+) -> None:
+    (pinned / WORKFLOW).write_text(PIN_SWAP)
+    git_in(pinned, "commit", "-am", "pin swap")
+    request = tmp_path / "request.json"
+    request.write_text(
+        ModelCILiveContactRequest(
+            repository=str(pinned), base_ref="HEAD~1"
+        ).model_dump_json()
+    )
+    from omnibase_core.runtime.runtime_local import RuntimeLocal
+
+    runtime = RuntimeLocal(
+        workflow_path=CONTRACT,
+        state_root=tmp_path / "state",
+        input_path=request,
+        backend_overrides={"event_bus": "inmemory"},
+        timeout=10,
+    )
+    runtime.run()
+    assert runtime.exit_code == 0, runtime.last_error
+    assert runtime._handlers_wired, "the proof must cross the contract-declared bus"
