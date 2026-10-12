@@ -46,6 +46,11 @@ requirements:
     acceptance:
       - id: AC6
         statement: 'AC6: the harness output and the committed selection-oracle-v2.json compare equal after strip_volatile_header_fields, the same comparison the gate runs -- falsifier: uv run python -m tests.fixtures.dispatch_parity.harness --out /tmp/omn20867-parity-live.json, then compare as the dispatch-parity-gate stale step does'
+  - id: req-omn20867-lane-class-scope
+    statement: A dev-lane instance whose deployment names a registered lane class and the class contracts it takes attaches those contracts that its declared lane excluded; a refused or unmatched selection attaches nothing and is a discovery error, and a runtime that sets neither variable is unchanged.
+    acceptance:
+      - id: AC7
+        statement: 'AC7: an instance takes only the named class contract whose scope admits the class, every refused selection (a class without contracts, contracts without a class, an unregistered class, a lane that is not an instance of the class, a named contract nobody discovered, a named contract whose scope excludes the class) is a discovery error that borrows nothing, no selection leaves the lane as before, and the class never keys health -- falsifier: uv run pytest tests/integration/runtime/test_lane_class_attaches_landing_nodes_omn20867.py tests/unit/runtime/auto_wiring/test_runtime_lane_class_omn20867.py -q -p no:randomly'
 evidence_requirements:
   - kind: tests
     description: The scheduler wiring test covers the dev lane overlay.
@@ -196,6 +201,22 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
+  - id: dod-omn20867-lane-class-scope-tests
+    description: AC7. The lane-class selection tests are added by this pull request. On the merge base the unit file fails collection, because runtime_lane_identity has no ENV_RUNTIME_LANE_CLASS, and four of the five integration cases fail, because the ownership result has no runtime_lane_class and none of the three per-host dev instance overlays attaches the two landing nodes; all seventeen cases pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_lane_class_attaches_landing_nodes_omn20867.py tests/unit/runtime/auto_wiring/test_runtime_lane_class_omn20867.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
+  - id: dod-omn20867-lane-class-scope-deploy-probe
+    description: Deploy probe. The auto-wiring ownership module at the checked-out commit carries the lane-class selection resolver this change adds; the probe reads it from GitHub at that commit, tests the decoded content inside jq and exits nonzero on a tree without it, so it fails at the merge base. The readout after the deploy agent rolls the image to a lane instance whose overlay names a class is that runtime's log line that begins with the words Auto-wiring runtime lane scope and lists node_pr_landing_orchestrator and node_pr_landing_github_effect under attached_by_class.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/auto_wiring/profile_ownership.py?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n"; "") | @base64d | contains("def resolve_runtime_lane_class_selection(")' | grep -qx true
+        cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn20867-mirror-source-consume-only
     description: AC4, consume-only source slice. The mirror-only forwarder's source transport starts its Kafka consumer without constructing an idempotent producer and rejects publishing with a typed configuration error, while a destination transport keeps its producer. The integration cases are added by this pull request; seven of nine fail on the merge base, where KafkaTransport has no consume_only parameter and the real mirror-only entrypoint raises ClusterAuthorizationFailedError on the source producer start, and all nine pass at the pull request head.
     source: manual
