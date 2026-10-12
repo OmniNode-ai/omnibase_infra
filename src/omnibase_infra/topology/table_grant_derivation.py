@@ -345,6 +345,47 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
     #
+    # OMN-20604: the two lab job read models, vendored infra-first ahead of
+    # omnimarket#3434. Both carry the source contract's read_write access and
+    # table-name role. Inert, then removable, once the pin advances past that
+    # pull request; the expiry module names both.
+    ContractTableDeclaration(
+        node="legacy_migration:lab_job_state",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_lab_job/"
+            "0000_create_lab_job.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="lab_job_state",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_lab_job/"
+                "0000_create_lab_job.sql"
+            ),
+            access="read_write",
+            role="lab_job_state",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:lab_job_transitions",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_lab_job/"
+            "0000_create_lab_job.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="lab_job_transitions",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_lab_job/"
+                "0000_create_lab_job.sql"
+            ),
+            access="read_write",
+            role="lab_job_transitions",
+        ),
+    ),
+    #
     # OMN-19861: same infra-first window; this repo vendors
     # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
     # package that declares the relation. The source contract declares access
@@ -368,50 +409,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="demo_readiness",
-        ),
-    ),
-    # OMN-20578: infra vendors delegation_routing_feedback before omnimarket#3416
-    # lands the node_projection_routing_feedback contract. This bridge keeps the
-    # shipped grants derivable until the pin advances; the expiry test then
-    # requires its removal.
-    # Retired by: omnimarket#3416 merging and the pin advancing past it.
-    ContractTableDeclaration(
-        node="legacy_migration:delegation_routing_feedback",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_routing_feedback/"
-            "0000_create_delegation_routing_feedback.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_routing_feedback",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_routing_feedback/"
-                "0000_create_delegation_routing_feedback.sql"
-            ),
-            access="read_write",
-            role="routing_feedback",
-        ),
-    ),
-    # OMN-20613: delegation_budget_applied_events is vendored here first; no
-    # pinned omnimarket contract declares it yet, so the derivation cannot
-    # reproduce the shipped writer grant until the retiring pull request lands.
-    ContractTableDeclaration(
-        node="legacy_migration:delegation_budget_applied_events",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_delegation/"
-            "0056_delegation_budget_applied_events.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="delegation_budget_applied_events",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_delegation/"
-                "0056_delegation_budget_applied_events.sql"
-            ),
-            access="read_write",
-            role="budget_applied_events",
         ),
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to

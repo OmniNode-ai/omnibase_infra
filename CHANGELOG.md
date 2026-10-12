@@ -1,3 +1,39 @@
+## v0.38.70 (2026-10-11)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.70 by the scheduled release train.
+- 27 release-relevant commit(s) merged since v0.38.69.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.69
+- feat: public bundle renderer, port bridge, remove_volumes and optional build for onex local up (#4831)
+- feat: onex delegate takes --model and the C29 probe grades the chosen model (#4798)
+- feat: webhook ingress folds red check runs and workflow names (#4801)
+- feat: retire hot-patch ledger rows through a reconcile node (#4776)
+- fix: preserve typed broker timeout cause (#4789)
+- fix: name --timeout and the ceiling in the timeout refusal line (#4797)
+- chore: omnibase_infra names the renamed public repository knowledge_base (#4794)
+- fix: check every cloud row of the pricing manifest against the provider's published rate (#4631)
+- fix: the dev refresh gate probes runtime-effects :8086 and runtime-effects mounts the operator-named skill overlay roots (#4778)
+- Add typed manifest.skips for contract discovery (#4739)
+- fix: bound auto-wired route and dispatcher ids to the ModelDispatchRoute limits (#4767)
+- revert: restore runtime boot on the compose dev lane (reverts #4750) (#4766)
+- fix: C28 probe counts the marker on the seam's declared DLQ (#4762)
+- fix: refuse unresolved runtime lanes before discovery (#4750)
+- fix: the effects runtime names its lane, so a lane-scoped effects contract attaches (#4752)
+- : Render deterministic lab desired state for a target ref (#4746)
+- fix: a developer workspace finds its runtime config without the private sibling repo (#4754)
+- feat: the chain writer labels an in-process terminal-only chain instead of incomplete (#4753)
+- fix: use fast safe YAML reads throughout cold handler wiring (#4743)
+- : Name fully ticked started tickets in the sweep (#4741)
+- fix: stop settling rootless terminals (#4738)
+- : Consolidate Linear transport to single GraphQL adapter (#4726)
+- fix: rebase bounded consumer commits onto dev (#4693)
+- : Move rpk SASL credentials from argv to environment (#4731)
+- feat: vendor node_projection_work_ledger 0003_work_ledger_seq.sql (#4733)
+- fix: repoint shared guard and roster callers (#4628)
+- fix: diagnose local servers with no served models (#4730)
+
 ## v0.38.69 (2026-10-08)
 
 ### Release

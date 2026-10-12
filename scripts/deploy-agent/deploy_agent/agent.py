@@ -39,6 +39,7 @@ from deploy_agent.events import (
     EnumRejectionReason,
     EnumRuntimeLane,
     EnumSelfUpdateBoundary,
+    ModelLaneMirrorReceipt,
     ModelOnexApiDelivery,
     ModelRebuildRejected,
     ModelRebuildRequested,
@@ -66,6 +67,7 @@ from deploy_agent.executor import (
     resolve_prod_target_service,
     restore_rollback_point,
     select_dev_instance,
+    set_lane_overlay_clone,
 )
 from deploy_agent.health import create_health_app
 from deploy_agent.host_slot import (
@@ -78,13 +80,23 @@ from deploy_agent.idle_converge import (
     CHECK_INTERVAL_SECONDS as IDLE_CONVERGE_CHECK_INTERVAL_SECONDS,
 )
 from deploy_agent.idle_converge import (
+    FOLLOWED_REPOSITORIES as IDLE_CONVERGE_REPOSITORIES,
+)
+from deploy_agent.idle_converge import (
     EnumIdleConvergeVerdict,
+    EnumIdleRestoreVerdict,
+    EnumRuntimePresence,
+    ModelIdleConvergeDecision,
     ModelIdleConvergeInputs,
+    ModelIdleRestoreInputs,
     converge_command,
+    decide_restore,
     load_probe_windows,
     probe_blocking,
-    read_omnimarket_dev_head,
-    read_running_omnimarket_ref,
+    read_dev_head,
+    read_running_ref,
+    read_runtime_presence,
+    restore_command,
 )
 from deploy_agent.idle_converge import decide as decide_idle_converge
 from deploy_agent.job_state import EnumJobSettlingStage, JobState, JobStore
@@ -157,16 +169,20 @@ def _runtime_container_for_lane(lane: EnumRuntimeLane) -> str:
     return lane_config_for(lane).main_runtime_container
 
 
-def _read_omnimarket_dev_head() -> str | None:
-    """The omnimarket dev head, read in the clone a workspace build stages from.
+def _read_dev_head(repository: str) -> str | None:
+    """A followed repository's dev head, read in the clone its build uses.
 
-    OMN-19509. ``OMNI_HOME`` has no default here, as in the executor's
-    workspace build: unset, the head is unread and the converge refuses.
+    OMN-19509. omnimarket's is the clone a workspace build stages from, under
+    ``OMNI_HOME``, which has no default here, as in the executor's workspace
+    build: unset, the head is unread and the converge refuses. OMN-20867:
+    omnibase_infra's is the deploy-source clone the git phase pulls.
     """
-    omni_home = os.environ.get("OMNI_HOME", "").strip()
-    if not omni_home:
+    if repository == "omnibase_infra":
+        return read_dev_head(Path(REPO_DIR))
+    registry_root = os.environ.get("OMNI_HOME", "").strip()
+    if not registry_root:
         return None
-    return read_omnimarket_dev_head(Path(omni_home) / "omnimarket")
+    return read_dev_head(Path(registry_root) / repository)
 
 
 STATE_DIR = Path(
@@ -332,6 +348,7 @@ class _TerminalFacts:
     compose_invocations: list[Any]
     verify_recreate: list[Any]
     sibling_refs: dict[str, str]
+    lane_mirror: ModelLaneMirrorReceipt | None = None
 
 
 #: Milliseconds a rejection publish may spend resolving broker metadata
@@ -389,22 +406,33 @@ class DeployAgent:
             # Selected here, once, before anything reads a lane config; an
             # instance with no composition refuses start (ValueError).
             select_dev_instance(self._router.instance.name)
+            # OMN-20867: the instance's lane env fragment is read from the
+            # clone the lab-overlay apply archives from, so there is one answer
+            # to which deployment overlay this host deploys.
+            set_lane_overlay_clone(LAB_OVERLAY_SOURCE_DIR)
         # OMN-19509. The idle converge's state and its reads, each a seam a test
         # replaces. See _maybe_idle_converge.
         self._idle_converge_started_at = datetime.now(UTC)
         self._idle_converge_last_check: float | None = None
         self._idle_converge_attempted: set[str] = set()
         self._idle_converge_last_verdict: EnumIdleConvergeVerdict | None = None
+        self._idle_converge_last_verdicts: dict[str, EnumIdleConvergeVerdict] = {}
         self._migration_converge_last_check: float | None = None
         self._migration_converge_attempted: set[str] = set()
         self._migration_converge_last_verdict: str | None = None
         self._idle_converge_now: Callable[[], datetime] = lambda: datetime.now(UTC)
-        self._idle_read_running_ref: Callable[[], str | None] = lambda: (
-            read_running_omnimarket_ref(
-                _runtime_container_for_lane(EnumRuntimeLane.DEV)
-            )
+        self._idle_read_running_ref: Callable[[str], str | None] = lambda repo: (
+            read_running_ref(_runtime_container_for_lane(EnumRuntimeLane.DEV), repo)
         )
-        self._idle_read_head_ref: Callable[[], str | None] = _read_omnimarket_dev_head
+        self._idle_read_head_ref: Callable[[str], str | None] = _read_dev_head
+        # OMN-20864: the restore of a lane with no running runtime, and its seams.
+        self._idle_restore_last_attempt: datetime | None = None
+        self._idle_restore_last_verdict: EnumIdleRestoreVerdict | None = None
+        self._idle_read_runtime_presence: Callable[
+            [], tuple[EnumRuntimePresence, str]
+        ] = lambda: read_runtime_presence(
+            _runtime_container_for_lane(EnumRuntimeLane.DEV)
+        )
         self._idle_probe_blocker: Callable[[datetime], str | None] = lambda now: (
             probe_blocking(now, load_probe_windows(AGENT_CLONE_ROOT))
         )
@@ -1018,14 +1046,16 @@ class DeployAgent:
             )
 
     def _maybe_idle_converge(self) -> None:
-        """Converge .201 on the omnimarket dev head when idle (OMN-19509).
+        """Converge on a followed repository's dev head when idle (OMN-19509).
 
         See ``deploy_agent.idle_converge`` for the rule and the model behind
-        it. Throttled to one check per interval. Every refusal is logged once
-        per change of verdict, not once per second. A converge runs as an
-        ordinary job through ``_execute_command``, under the same single-flight
-        and lane locks, with its own job record and terminal event named
-        ``agent/idle-converge``.
+        it. Throttled to one check per interval. Each followed repository is
+        decided in turn (OMN-20867) and the first that says converge runs; a
+        converge builds every repository at its dev head, so one is enough.
+        Every refusal is logged once per change of verdict, not once per
+        second. A converge runs as an ordinary job through ``_execute_command``,
+        under the same single-flight and lane locks, with its own job record and
+        terminal event named ``agent/idle-converge``.
         """
         if self._router is None:
             return
@@ -1038,49 +1068,31 @@ class DeployAgent:
             return
         self._idle_converge_last_check = tick
 
-        routed_to = self._router.table.route(
-            EnumRuntimeLane.DEV, "gha/omnimarket/idle-converge"
-        )
-        routed_elsewhere = routed_to != self._router.instance.name
         now = self._idle_converge_now()
-        running_ref = head_ref = probe_blocker = windows_error = None
-        if routed_elsewhere:
-            try:
-                probe_blocker = self._idle_probe_blocker(now)
-            except Exception as exc:  # noqa: BLE001 - an unread schedule refuses
-                windows_error = (
-                    f"probe schedule unreadable: {type(exc).__name__}: {exc}"
-                )
-            running_ref = self._idle_read_running_ref()
-            head_ref = self._idle_read_head_ref()
-        decision = decide_idle_converge(
-            ModelIdleConvergeInputs(
-                now=now,
-                omnimarket_routed_elsewhere=routed_elsewhere,
-                job_active=self.job_store.has_active_job(),
-                last_activity=max(
-                    self.job_store.last_completed_at()
-                    or self._idle_converge_started_at,
-                    self._idle_converge_started_at,
-                ),
-                running_ref=running_ref,
-                head_ref=head_ref,
-                probe_blocker=probe_blocker,
-                windows_error=windows_error,
-                attempted_heads=frozenset(self._idle_converge_attempted),
-                frozen_reason=getattr(
-                    self, "_lane_flags", ModelLaneFlags()
-                ).frozen_reason(now),
-            )
-        )
-        if decision.verdict is not EnumIdleConvergeVerdict.CONVERGE:
-            if decision.verdict is not self._idle_converge_last_verdict:
-                logger.info(
-                    "idle converge: %s (%s)", decision.verdict.value, decision.detail
-                )
-            self._idle_converge_last_verdict = decision.verdict
+        # OMN-20864: a lane with no running runtime is restored, not followed.
+        # Evaluated first: the converge below reads the running revision out
+        # of that container and can only refuse while it is down.
+        if self._maybe_idle_restore(now):
             return
+        decision: ModelIdleConvergeDecision | None = None
+        for repository in IDLE_CONVERGE_REPOSITORIES:
+            decision = self._decide_idle_converge(repository, now)
+            if decision.verdict is not self._idle_converge_last_verdicts.get(
+                repository
+            ):
+                if decision.verdict is not EnumIdleConvergeVerdict.CONVERGE:
+                    logger.info(
+                        "idle converge: %s (%s)",
+                        decision.verdict.value,
+                        decision.detail,
+                    )
+                self._idle_converge_last_verdicts[repository] = decision.verdict
+            if decision.verdict is EnumIdleConvergeVerdict.CONVERGE:
+                break
+        assert decision is not None  # FOLLOWED_REPOSITORIES is never empty
         self._idle_converge_last_verdict = decision.verdict
+        if decision.verdict is not EnumIdleConvergeVerdict.CONVERGE:
+            return
         assert decision.head_ref is not None  # CONVERGE always names the head
         # OMN-19507: a converge is a deploy like any other, so it waits for the
         # load gate too. The head is not marked attempted, so it runs once the
@@ -1097,6 +1109,96 @@ class DeployAgent:
         )
         self.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
         self._execute_command(cmd)
+
+    def _maybe_idle_restore(self, now: datetime) -> bool:
+        """Restore the lane when its main runtime is not running (OMN-20864).
+
+        Returns True when the lane is DOWN, whatever the decision, so the
+        converge rule is not evaluated against a container that is not there.
+        See ``deploy_agent.idle_converge`` (decide_restore) for the rule.
+        """
+        presence, presence_detail = self._idle_read_runtime_presence()
+        decision = decide_restore(
+            ModelIdleRestoreInputs(
+                now=now,
+                presence=presence,
+                presence_detail=presence_detail,
+                job_active=self.job_store.has_active_job(),
+                last_activity=max(
+                    self.job_store.last_completed_at()
+                    or self._idle_converge_started_at,
+                    self._idle_converge_started_at,
+                ),
+                last_attempt=self._idle_restore_last_attempt,
+                frozen_reason=getattr(
+                    self, "_lane_flags", ModelLaneFlags()
+                ).frozen_reason(now),
+            )
+        )
+        if decision.verdict is not self._idle_restore_last_verdict:
+            if decision.verdict is not EnumIdleRestoreVerdict.RESTORE:
+                logger.info(
+                    "idle restore: %s (%s)", decision.verdict.value, decision.detail
+                )
+            self._idle_restore_last_verdict = decision.verdict
+        if presence is not EnumRuntimePresence.DOWN:
+            return False
+        if decision.verdict is not EnumIdleRestoreVerdict.RESTORE:
+            return True
+        if not self._idle_converge_gate_open():
+            return True
+        self._idle_restore_last_attempt = now
+        cmd = restore_command()
+        logger.warning(
+            "idle restore: running %s as %s: %s",
+            cmd.correlation_id,
+            cmd.requested_by,
+            decision.detail,
+        )
+        self.job_store.accept(cmd.correlation_id, cmd.model_dump(mode="json"))
+        self._execute_command(cmd)
+        return True
+
+    def _decide_idle_converge(
+        self, repository: str, now: datetime
+    ) -> ModelIdleConvergeDecision:
+        """One followed repository's decision, every read taken first."""
+        assert self._router is not None
+        routed_to = self._router.table.route(
+            EnumRuntimeLane.DEV, f"gha/{repository}/idle-converge"
+        )
+        routed_elsewhere = routed_to != self._router.instance.name
+        running_ref = head_ref = probe_blocker = windows_error = None
+        if routed_elsewhere:
+            try:
+                probe_blocker = self._idle_probe_blocker(now)
+            except Exception as exc:  # noqa: BLE001 - an unread schedule refuses
+                windows_error = (
+                    f"probe schedule unreadable: {type(exc).__name__}: {exc}"
+                )
+            running_ref = self._idle_read_running_ref(repository)
+            head_ref = self._idle_read_head_ref(repository)
+        return decide_idle_converge(
+            ModelIdleConvergeInputs(
+                now=now,
+                repository=repository,
+                routed_elsewhere=routed_elsewhere,
+                job_active=self.job_store.has_active_job(),
+                last_activity=max(
+                    self.job_store.last_completed_at()
+                    or self._idle_converge_started_at,
+                    self._idle_converge_started_at,
+                ),
+                running_ref=running_ref,
+                head_ref=head_ref,
+                probe_blocker=probe_blocker,
+                windows_error=windows_error,
+                attempted_heads=frozenset(self._idle_converge_attempted),
+                frozen_reason=getattr(
+                    self, "_lane_flags", ModelLaneFlags()
+                ).frozen_reason(now),
+            )
+        )
 
     def _maybe_converge_forward_migration(self) -> None:
         """Apply changed checkout migrations once per fingerprint on an idle dev lane."""
@@ -1206,6 +1308,8 @@ class DeployAgent:
         # method has always discarded the return, which is why every terminal
         # event reported services_restarted=[] for a scope-default deploy.
         services_restarted: list[str] = []
+        # OMN-20867: the lane-mirror step's receipt; None until it runs.
+        lane_mirror: ModelLaneMirrorReceipt | None = None
         # OMN-18545: the resolved sha is a PROPERTY OF THIS JOB, cleared here
         # like the two above. It lives on the agent, which outlives the job, and
         # the lab overlay is now reachable from the failing path too (see the
@@ -1373,6 +1477,15 @@ class DeployAgent:
                             ) from exc
                         raise
 
+                # OMN-20867: the lane's mirror forwarders, on the image the
+                # runtime phase just verified, under this lane's lock. The
+                # agent is the one process that may join this lane's network.
+                # Never part of the verdict: the receipt rides the terminal
+                # event and a failure is logged at ERROR.
+                lane_mirror = self.executor.run_lane_mirror(
+                    lane=cmd.runtime_lane, materialize_root=STATE_DIR / "lane-mirror"
+                )
+
                 # Complete -- AND SAY WHAT IS STILL RUNNING (OMN-18636 AC5).
                 #
                 # The verdict below is final and is deliberately not affected by
@@ -1431,7 +1544,9 @@ class DeployAgent:
                     # settle re-acquires this same lock for it.
                     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
                     capture = self._capture_lab_overlay_inputs(sha=lab_sha, stamp=stamp)
-                    facts = self._terminal_facts(health_checks, services_restarted)
+                    facts = self._terminal_facts(
+                        health_checks, services_restarted, lane_mirror
+                    )
                     settle = functools.partial(
                         self._settle_success,
                         cmd,
@@ -1549,13 +1664,16 @@ class DeployAgent:
 
         self._publish_terminal(
             cid,
-            facts=self._terminal_facts(health_checks, services_restarted),
+            facts=self._terminal_facts(health_checks, services_restarted, lane_mirror),
             onex_api_delivery=None,
         )
         self._state = "idle"
 
     def _terminal_facts(
-        self, health_checks: list[Any], services_restarted: list[str]
+        self,
+        health_checks: list[Any],
+        services_restarted: list[str],
+        lane_mirror: ModelLaneMirrorReceipt | None = None,
     ) -> _TerminalFacts:
         """Freeze what the terminal event reports, before the next job resets it."""
         return _TerminalFacts(
@@ -1579,6 +1697,8 @@ class DeployAgent:
             # OMN-17135: which sibling commits this build actually vendored. The
             # command's git_ref pins omnibase_infra alone.
             sibling_refs=dict(self.executor.sibling_source_refs),
+            # OMN-20867: what the lane-mirror step did, or None when not reached.
+            lane_mirror=lane_mirror,
         )
 
     def _settle_success(
@@ -1652,6 +1772,7 @@ class DeployAgent:
                 # reader had no way to tell a lane running the merged image
                 # from one running a two-day-old pin.
                 onex_api_delivery=onex_api_delivery,
+                lane_mirror=facts.lane_mirror,
             )
             if publish_result(payload, self._kafka_config):
                 job.phase_results[Phase.PUBLISH] = PhaseStatus.SUCCESS

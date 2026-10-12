@@ -15,10 +15,8 @@ and a process that delivers are different claims, and OMN-18691's failure class
 between them. Only the two broker transports are faked, because a broker is not
 available in this tier; every layer above them is the shipped code path.
 
-The last test is the honest half: the tenant-edge entrypoint REFUSES a
-mirror-only config today. Wiring a mirror-only process is phase 3 step 3 and is
-a change to the live gateway process, so the refusal is asserted rather than
-left to be discovered by whoever deploys it.
+The process entrypoint that runs this shape is covered beside the loader in
+``tests/unit/runtime/test_gateway_forwarder_mirror_only_omn20867.py`` (OMN-20867).
 """
 
 from __future__ import annotations
@@ -252,27 +250,3 @@ async def test_redelivery_after_a_lane_rebuild_does_not_duplicate_the_command(
         await store.close()
 
     assert len(dev.sent) == 1
-
-
-@pytest.mark.asyncio
-async def test_the_tenant_edge_entrypoint_refuses_a_mirror_only_config() -> None:
-    """Refused loudly, because half a tenant edge reports ready and moves nothing.
-
-    Making ``run_gateway_forwarder`` build a mirror-only edge is phase 3 step 3
-    and is a change to the live gateway process. Until it lands, a mirror-only
-    config handed to this entrypoint must fail at the door rather than start
-    with its trust-boundary legs unwired.
-    """
-    import asyncio
-
-    from omnibase_infra.runtime.gateway_forwarder import run_gateway_forwarder
-
-    async def _never_resolves(_ref: str) -> str | None:  # pragma: no cover - unused
-        raise AssertionError("the refusal must precede any secret resolution")
-
-    with pytest.raises(ValueError, match="requires a declared cloud_bus"):
-        await run_gateway_forwarder(
-            _mirror_only_runtime_config(),
-            shutdown_event=asyncio.Event(),
-            resolve_secret=_never_resolves,
-        )

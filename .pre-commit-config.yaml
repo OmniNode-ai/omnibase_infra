@@ -23,6 +23,13 @@
 repos:
   - repo: local
     hooks:
+      - id: mirror-source-consume-only
+        name: Mirror source consume-only regression (OMN-20867)
+        entry: uv run --frozen pytest tests/integration/gateway/test_mirror_source_consume_only_omn20867.py -q
+        language: system
+        pass_filenames: false
+        files: ^(src/omnibase_infra/(event_bus/kafka_transport|runtime/gateway_forwarder)\.py|tests/integration/gateway/test_mirror_source_consume_only_omn20867\.py|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
+        stages: [pre-commit]
       - id: lab-reconcile-model-evidence
         name: Reviewed lab reconcile model evidence (OMN-19421)
         entry: uv run --frozen pytest tests/ci/test_lab_reconcile_model.py -q --no-cov
@@ -289,7 +296,8 @@ repos:
         files: ^\.github/workflows/.*\.ya?ml$
         pass_filenames: false
         require_serial: true
-  # Hardcoded topic guard — sourced from onex_change_control (OMN-5256/OMN-5259)
+  # Hardcoded topic guard — sourced from omnibase_core (OMN-20074, OCC retirement
+  # S8; originally onex_change_control OMN-5256/OMN-5259)
   # Pre-existing violations excluded pending migration to canonical constants (OMN-5259)
   # OMN-13195 (phase A4): dropped the redundant `event_bus/topic_constants.py`
   # exclude — the hook already approves that basename via its internal
@@ -299,8 +307,8 @@ repos:
   # local topic-literal gate (check_topic_literals.py) after OMN-13202 deleted its
   # last TOPIC_* literals. The file holds DLQ builders only and the gate now fails
   # closed on any reintroduced literal — A5-full is complete.
-  - repo: https://github.com/OmniNode-ai/onex_change_control
-    rev: 8d7e85bc00e7f1b1306d1cb40949be1ab6e7e91a # pragma: allowlist secret
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: 6f70e56604a9f9d98b34bb9c3768a4468aeca71e
     hooks:
       # OMN-18691 adds ONE path to this exclude: docker/docker-compose.ci-bus.yml.
       # Read the reason before adding a second — an allowlist entry is never a way
@@ -334,6 +342,11 @@ repos:
       - id: no-hardcoded-topics
         require_serial: true
         exclude: ^(src/omnibase_infra/(enums/generated|cli|tui|models/registration/model_event_bus_topic_entry\.py|nodes/.*/handlers|nodes/.*/services|nodes/.*/contracts|runtime/contract_registration_event_router\.py|services/observability|services/service_timeout_emitter\.py|topics/service_topic_registry\.py|validation|contracts/)|scripts/|tests/|contracts/|src/dep_health_allowlist\.yaml|docker/docker-compose\.ci-bus\.yml)
+  # no-bare-feature-flags comes from omnibase_core (omnibase_core#1936, OMN-20919,
+  # OCC retirement S8). A separate block keeps no-hardcoded-topics on the rev above.
+  - repo: https://github.com/OmniNode-ai/omnibase_core
+    rev: 9218fe703b08d329f76eecd37fabbbc7b0c2baad # pragma: allowlist secret
+    hooks:
       - id: no-bare-feature-flags
         require_serial: true
         # YAML formatting (standard across ecosystem)
@@ -2076,7 +2089,7 @@ repos:
         stages: [pre-commit]
       # Skip-token rejection gate (OMN-11412 / OMN-10414)
       # Blocks [skip-*] bypass tokens in staged markdown/yaml/txt files.
-      # Escape hatch: add '# skip-token-allowed: <receipt-id>' with a traceable approval receipt.
+      # There is no escape hatch (OMN-20074): a skip token is rejected whatever comment accompanies it.
       - id: reject-deploy-gate-skip-token
         require_serial: true
         name: Reject skip-gate bypass tokens (OMN-10414)
@@ -2307,10 +2320,18 @@ repos:
   # absence-locally is never treated as proof-of-absence). FAIL-LOUD (root
   # CLAUDE.md Rule #8 / OMN-14655 principle #4): hard-errors (exit 1) if the diff
   # base or the canonical validator cannot resolve; never a green skip.
+  #
+  # OMN-20870: the same hook also mirrors the hosted repo-evidence / dod-verify
+  # refusals it can decide locally. A ticket cited in the branch's commit
+  # subjects with no contracts/<ticket>.yaml in the pushed HEAD fails and names
+  # the file; a command / test_passes check value the released verifier's own
+  # shape guard calls prose fails and names the check. The guard runs from
+  # omnimarket==<verifier-version>, read from call-repo-evidence-gate.yml, so
+  # local and hosted share one pin. It judges shape only and runs no check.
   - repo: local
     hooks:
       - id: prepush-deploy-scope-dod
-        name: Deploy-scope DoD parity (pre-push, OMN-14681)
+        name: Deploy-scope DoD and ticket-contract parity (pre-push, OMN-14681, OMN-20870)
         entry: uv run --frozen python scripts/ci/check_deploy_scope_dod.py
         language: system
         pass_filenames: false
@@ -2471,9 +2492,11 @@ repos:
   # denylist from the file named by OMNI_HYGIENE_VOCAB_PATH, with the lab
   # vocabulary beside it, and fails closed without them.
   - repo: https://github.com/OmniNode-ai/omniclaude
-    rev: 6e47aa311ac5d177d116d9597b07966a233d2463
+    rev: 0c9f9146d8dd0446fc5c10952aa57247b3a880ae
     hooks:
       - id: public-repo-hygiene
+        require_serial: true
+      - id: deployment-config
         require_serial: true
   # OMN-19666: VCS-backed additional_dependencies can inherit GIT_INDEX_FILE
   # during a cold-cache commit and overwrite the committing worktree index.

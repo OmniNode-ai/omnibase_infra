@@ -109,6 +109,9 @@ class _FakeExecutorRealDeployAndVerify:
         self.calls.append("deploy_and_verify")
         return self._real.deploy_and_verify(**kwargs)
 
+    def run_lane_mirror(self, **kwargs: object) -> None:
+        return None
+
 
 @pytest.mark.asyncio
 async def test_digest_mismatch_produces_truthful_failed_completion(

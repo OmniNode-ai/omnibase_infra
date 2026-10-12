@@ -1,0 +1,27 @@
+{
+  "_provenance": {
+    "source": "gh api repos/OmniNode-ai/omnibase_infra/actions/jobs/114305609339/logs",
+    "captured_utc": "2026-10-10T21:56:33Z",
+    "source_sha256": "7ac28e71bc3bef1eb56549105773e34f6aac87c73807b48185d6e7792de100ec",
+    "note": "Version Pin Compliance job log of Actions run 38083680793 on omnibase_infra dev, check run started 2026-10-10T20:25:23Z. Lines are verbatim; the sha256 is of the full log. The ls-tree entry is the output of git ls-tree -r --name-only 802b5f7101f4c49f8b30e8deda3d4c5d024c5710 in the onex_change_control clone, filtered to check_version_pins."
+  },
+  "response": {
+    "run_id": 38083680793,
+    "job_id": 114305609339,
+    "job_name": "Version Pin Compliance",
+    "log_lines": {
+      "checkout_ref": "2026-10-10T20:25:31.1105121Z   ref: 802b5f7101f4c49f8b30e8deda3d4c5d024c5710",
+      "step_group": "2026-10-10T20:25:43.2302876Z ##[group]Run SCRIPT=\"onex_change_control/scripts/check_version_pins.py\"",
+      "skip_warning": "2026-10-10T20:25:43.2491954Z ##[warning]onex_change_control/scripts/check_version_pins.py not found \u2014 skipping version pin check",
+      "dockerfile_pin_check": "2026-10-10T20:25:44.6642389Z Dockerfile pin check passed (39 pip + 3 npm entries validated).",
+      "image_identity_check": "2026-10-10T20:25:44.7436372Z Runtime image identity check passed (OMN-12965)."
+    },
+    "onex_change_control_tree_at_pin": {
+      "pin": "802b5f7101f4c49f8b30e8deda3d4c5d024c5710",
+      "paths_named_check_version_pins": [
+        "standards/check_version_pins.py",
+        "tests/unit/test_check_version_pins.py"
+      ]
+    }
+  }
+}

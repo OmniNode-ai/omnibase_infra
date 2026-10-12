@@ -171,15 +171,17 @@ def load_gateway_forwarder_runtime_config(
     config_path: Path,
     *,
     contract_path: Path = _DEFAULT_GATEWAY_CONTRACT_PATH,
-    broker_ref_map_path: Path,
+    broker_ref_map_path: Path | None,
     lane_credential_map_path: Path | None = None,
 ) -> ModelGatewayForwarderRuntimeConfig:
     """Load and validate one explicit two-leg forwarder configuration.
 
-    ``broker_ref_map_path`` is required (no default): the cloud broker
-    endpoint is resolved from the node contract's ``cloud_broker_ref`` at
-    this effect boundary, never hardcoded into compose or tenant config. See
+    ``broker_ref_map_path`` has no default: the cloud broker endpoint is
+    resolved from the node contract's ``cloud_broker_ref`` at this effect
+    boundary, never hardcoded into compose or tenant config. See
     ``_materialize_cloud_broker_ref`` for the fail-closed resolution rules.
+    ``None`` is accepted only by a mirror-only deployment (OMN-20867), which
+    has no cloud leg to resolve; a config that declares one refuses it.
 
     ``lane_credential_map_path`` is the same idea for the one class of value
     that must never be committed -- a lane broker's SASL credential. It is
@@ -191,6 +193,20 @@ def load_gateway_forwarder_runtime_config(
     if not isinstance(raw_object, dict):
         raise ValueError("gateway forwarder config must be a YAML mapping")
     raw: dict[str, object] = {str(key): value for key, value in raw_object.items()}
+    if _declares_no_cloud_leg(raw):
+        # OMN-20867: a mirror-only deployment names no cloud leg, so there is no
+        # contract cloud set, canary, broker ref or ingest route to resolve. The
+        # lane mirror and its credentials are the whole of its configuration.
+        _refuse_cloud_selectors_without_cloud_bus(raw)
+        _materialize_contract_lane_mirror(raw, contract_path)
+        _materialize_lane_broker_credentials(raw, lane_credential_map_path)
+        return ModelGatewayForwarderRuntimeConfig.model_validate(raw)
+    if broker_ref_map_path is None:
+        raise ValueError(
+            "this gateway config declares a cloud leg, so the process needs "
+            "--broker-ref-map (fail-closed -- there is no hardcoded fallback "
+            "broker endpoint)"
+        )
     _materialize_contract_mirror_topics(raw, contract_path)
     _materialize_contract_canary_config(raw, contract_path)
     _materialize_contract_lane_mirror(raw, contract_path)
@@ -198,6 +214,46 @@ def load_gateway_forwarder_runtime_config(
     _materialize_contract_https_ingest(raw, contract_path, broker_ref_map_path)
     _materialize_lane_broker_credentials(raw, lane_credential_map_path)
     return ModelGatewayForwarderRuntimeConfig.model_validate(raw)
+
+
+_CLOUD_SELECTOR_KEYS = ("mirror_topic_set", "canary_topic_set", "https_ingest_set")
+
+
+def _declares_no_cloud_leg(raw: dict[str, object]) -> bool:
+    """Whether the resolved deployment YAML carries no trust-boundary input.
+
+    Mirror-only is the ABSENCE of every cloud key, resolved or declared. A
+    config naming only some of them is not mirror-only; it keeps the tenant
+    edge path, whose loaders refuse the partial declaration with their own
+    messages.
+    """
+    forwarder = raw.get("forwarder")
+    if not isinstance(forwarder, dict):
+        return False
+    declared = ("cloud_bus", "mirror_topics", "canary")
+    return (
+        all(forwarder.get(key) is None for key in declared)
+        and raw.get("cloud_bus") is None
+        and raw.get("local_bus") is None
+    )
+
+
+def _refuse_cloud_selectors_without_cloud_bus(raw: dict[str, object]) -> None:
+    """A selector for a cloud set on a deployment with no cloud bus is a typo.
+
+    Silently dropping it would turn a tenant edge that lost its ``cloud_bus``
+    key into a mirror-only process that moves none of the cloud traffic the
+    operator meant it to.
+    """
+    forwarder = raw["forwarder"]
+    assert isinstance(forwarder, dict)
+    named = sorted(key for key in _CLOUD_SELECTOR_KEYS if forwarder.get(key))
+    if named:
+        raise ValueError(
+            f"resolved gateway config names {named} but declares no cloud_bus; "
+            "a mirror-only deployment names no cloud set, and a tenant edge "
+            "must declare its cloud_bus"
+        )
 
 
 def _load_gateway_forwarder_config_block(
@@ -339,9 +395,11 @@ def _materialize_contract_lane_mirror(
 
     The resolved deployment YAML names the contract via ``lane_mirror_set``
     (OMN-17034) and selects source/mirror lanes and named topic sets via
-    ``lane_mirror_binding`` (OMN-19983). The contract owns ``declared_lanes``
-    and the topic-set definitions; lane membership is checked only when the
-    config model is constructed. Selected topics are concatenated in binding
+    ``lane_mirror_binding`` (OMN-19983). The contract owns the topic-set
+    definitions and the default ``declared_lanes``; a binding may carry its own
+    ``declared_lanes`` (OMN-20867) to name an installation's lanes without
+    shipping them. Lane membership is checked only when the config model is
+    constructed. Selected topics are concatenated in binding
     order, preserving the first occurrence of each topic.
 
     Populated inline ``lane_mirror`` blocks remain refused. Broker addresses
@@ -385,8 +443,9 @@ def _materialize_contract_lane_mirror(
     if not isinstance(binding, Mapping):
         raise ValueError("lane_mirror_binding must be a mapping")
     required_keys = {"source_lane", "mirror_lanes", "topic_sets"}
+    optional_keys = {"declared_lanes"}
     missing = required_keys - binding.keys()
-    extra = binding.keys() - required_keys
+    extra = binding.keys() - required_keys - optional_keys
     if missing or extra:
         raise ValueError(
             f"lane_mirror_binding has missing keys {sorted(missing)!r} and "
@@ -409,6 +468,16 @@ def _materialize_contract_lane_mirror(
             "lane_mirror_binding.topic_sets must be a non-empty list of strings"
         )
 
+    overlay_lanes = binding.get("declared_lanes")
+    if overlay_lanes is not None and (
+        not isinstance(overlay_lanes, list)
+        or not overlay_lanes
+        or not all(isinstance(lane, str) for lane in overlay_lanes)
+    ):
+        raise ValueError(
+            "lane_mirror_binding.declared_lanes must be a non-empty list of strings"
+        )
+
     gateway_config = _load_gateway_forwarder_config_block(contract_path, selector)
     lane_mirror_object = gateway_config.get("lane_mirror")
     if not isinstance(lane_mirror_object, dict):
@@ -416,7 +485,14 @@ def _materialize_contract_lane_mirror(
             "resolved gateway config names lane_mirror_set but the node contract "
             "has no config.gateway_forwarder.lane_mirror block"
         )
-    declared_lanes = lane_mirror_object.get("declared_lanes")
+    # The deployment overlay names its own lanes (OMN-20867): the contract's
+    # list is the default for a deployment that names none, so an installation's
+    # lane names never have to be shipped in the contract.
+    declared_lanes = (
+        overlay_lanes
+        if overlay_lanes is not None
+        else lane_mirror_object.get("declared_lanes")
+    )
     topic_sets = lane_mirror_object.get("topic_sets")
     if not isinstance(declared_lanes, list):
         raise ValueError("contract lane_mirror.declared_lanes must be a list")
@@ -1143,6 +1219,9 @@ def build_gateway_transports(
                 if name == "cloud"
                 else None
             ),
+            # A mirror-only source is never used for publishing. Keep the
+            # cloud composition's existing producer lifecycle unchanged.
+            consume_only=name == "lane_source" and forwarder.cloud_bus is None,
         )
         for name, (broker, bus, group) in legs.items()
     }
@@ -1166,24 +1245,18 @@ async def run_gateway_forwarder(
     declares. A default would let a mis-wired process silently fall back to the
     direct-MSK leg ruling 39 (OMN-15692) retires.
     """
-    # OMN-18691: this entrypoint builds a TENANT EDGE -- both trust-boundary
-    # transports, the delivery node over them, and the cloud heartbeat loop.
-    # A mirror-only forwarder (the CI-bus topology: consume the dedicated
-    # broker, republish onto the dev lane, no cloud leg at all) is now
-    # EXPRESSIBLE and fully validated, but running one needs this function to
-    # make the two trust-boundary legs conditional, which is a change to the
-    # live gateway process and is deliberately NOT bundled with the model work.
-    #
-    # Refused loudly and here, rather than tolerated. A process that started
-    # with half its legs unwired would report ready and move nothing, which is
-    # the green-and-silent failure the dedicated CI bus exists to remove.
+    # OMN-20867: no declared cloud_bus means a mirror-only forwarder -- consume
+    # the source lane, republish onto the mirror lanes, nothing else. The config
+    # model refuses a forwarder with neither a cloud leg nor a lane mirror, so
+    # this branch never starts a process with no leg at all.
     if config.forwarder.cloud_bus is None:
-        raise ValueError(
-            "run_gateway_forwarder builds a tenant edge and requires a declared "
-            "cloud_bus; this config declares a lane_mirror only. Running a "
-            "mirror-only forwarder is OMN-18691 phase 3 step 3 and is a "
-            "separate change to this entrypoint"
+        await _run_mirror_only_forwarder(
+            config,
+            shutdown_event=shutdown_event,
+            ready_path=ready_path,
+            lane_mirror_health_path=lane_mirror_health_path,
         )
+        return
     assert config.local_bus is not None
     assert config.cloud_bus is not None
     mirror_topics = config.forwarder.mirror_topics
@@ -1259,33 +1332,13 @@ async def run_gateway_forwarder(
             name="gateway-forwarder-heartbeat",
         )
         if lane_mirror_config is not None and lane_mirror_source is not None:
-            lane_mirror = NodeLaneMirror(
-                config=lane_mirror_config,
-                source_consumer=lane_mirror_source,
-                mirror_producers={
-                    lane: TransportGatewayBus(transport, identity=identity)
-                    for lane, transport in lane_mirror_producers.items()
-                },
+            lane_mirror_task, lane_mirror_guard_task = _launch_lane_mirror(
+                config=config,
+                source=lane_mirror_source,
+                producers=lane_mirror_producers,
                 idempotency_store=idempotency_store,
-            )
-            lane_mirror_task = asyncio.create_task(
-                lane_mirror.run(shutdown_event),
-                name="gateway-forwarder-lane-mirror",
-            )
-            # OMN-17201: publishes the delivery-verification counters and is the
-            # only thing that can clear a lane the mirror refused. A refusal
-            # means that lane's producer is talking to the source broker, and
-            # the only in-process repair is to drop the connection and
-            # re-bootstrap at the CONFIGURED address.
-            lane_mirror_guard_task = asyncio.create_task(
-                _run_lane_mirror_guard(
-                    mirror=lane_mirror,
-                    producers=lane_mirror_producers,
-                    shutdown_event=shutdown_event,
-                    interval_seconds=config.forwarder.heartbeat_interval_seconds,
-                    health_path=lane_mirror_health_path,
-                ),
-                name="gateway-forwarder-lane-mirror-guard",
+                shutdown_event=shutdown_event,
+                health_path=lane_mirror_health_path,
             )
 
         if ready_path is not None:
@@ -1324,6 +1377,146 @@ async def run_gateway_forwarder(
             await transport.close()
         if ingest_client is not None:
             await ingest_client.aclose()
+        if store_started:
+            await idempotency_store.close()
+
+
+def _launch_lane_mirror(
+    *,
+    config: ModelGatewayForwarderRuntimeConfig,
+    source: KafkaTransport,
+    producers: Mapping[str, KafkaTransport],
+    idempotency_store: StoreIdempotencySqlite,
+    shutdown_event: asyncio.Event,
+    health_path: Path | None,
+) -> tuple[asyncio.Task[None], asyncio.Task[None]]:
+    """Start the mirror loop and its guard; return both tasks."""
+    lane_mirror_config = config.forwarder.lane_mirror
+    if lane_mirror_config is None:
+        raise ValueError("a lane mirror launch requires a declared lane_mirror")
+    identity = config.forwarder.tenant_identity
+    lane_mirror = NodeLaneMirror(
+        config=lane_mirror_config,
+        source_consumer=source,
+        mirror_producers={
+            lane: TransportGatewayBus(transport, identity=identity)
+            for lane, transport in producers.items()
+        },
+        idempotency_store=idempotency_store,
+    )
+    mirror_task = asyncio.create_task(
+        lane_mirror.run(shutdown_event),
+        name="gateway-forwarder-lane-mirror",
+    )
+    # OMN-17201: publishes the delivery-verification counters and is the
+    # only thing that can clear a lane the mirror refused. A refusal
+    # means that lane's producer is talking to the source broker, and
+    # the only in-process repair is to drop the connection and
+    # re-bootstrap at the CONFIGURED address.
+    guard_task = asyncio.create_task(
+        _run_lane_mirror_guard(
+            mirror=lane_mirror,
+            producers=producers,
+            shutdown_event=shutdown_event,
+            interval_seconds=config.forwarder.heartbeat_interval_seconds,
+            health_path=health_path,
+        ),
+        name="gateway-forwarder-lane-mirror-guard",
+    )
+    return mirror_task, guard_task
+
+
+async def _run_mirror_only_forwarder(
+    config: ModelGatewayForwarderRuntimeConfig,
+    *,
+    shutdown_event: asyncio.Event,
+    ready_path: Path | None,
+    lane_mirror_health_path: Path | None,
+) -> None:
+    """Run the source and mirror-lane legs of a forwarder with no cloud leg.
+
+    There is no delivery node, heartbeat or canary here: those serve the trust
+    boundary, and this process has none. Readiness is written once every lane
+    transport has started. A mirror loop that stops without a shutdown signal
+    ends the process with its own error, so the container restarts loudly
+    instead of reporting ready while moving nothing.
+    """
+    lane_mirror_config = config.forwarder.lane_mirror
+    if lane_mirror_config is None:
+        raise ValueError(
+            "a mirror-only forwarder requires a lane_mirror; this config "
+            "declares neither a cloud leg nor a mirror leg"
+        )
+    _bindings, transports = build_gateway_transports(config)
+    source = transports["lane_source"]
+    producers = {
+        name.removeprefix("lane:"): transport
+        for name, transport in transports.items()
+        if name.startswith("lane:")
+    }
+    idempotency_store = StoreIdempotencySqlite(config.forwarder.dedupe_store_path)
+
+    if ready_path is not None:
+        ready_path.unlink(missing_ok=True)
+
+    store_started = False
+    started_transports: list[KafkaTransport] = []
+    mirror_task: asyncio.Task[None] | None = None
+    guard_task: asyncio.Task[None] | None = None
+    shutdown_wait_task: asyncio.Task[bool] | None = None
+    try:
+        await idempotency_store.start()
+        store_started = True
+        for transport in (source, *producers.values()):
+            await transport.start()
+            started_transports.append(transport)
+        mirror_task, guard_task = _launch_lane_mirror(
+            config=config,
+            source=source,
+            producers=producers,
+            idempotency_store=idempotency_store,
+            shutdown_event=shutdown_event,
+            health_path=lane_mirror_health_path,
+        )
+        if ready_path is not None:
+            ready_path.write_text("ready\n", encoding="utf-8")
+        logger.info(
+            "Gateway forwarder ready (mirror-only) tenant_slug=%s source_lane=%s "
+            "mirror_lanes=%s",
+            config.forwarder.tenant_identity.tenant_slug,
+            lane_mirror_config.source_lane,
+            ",".join(lane_mirror_config.mirror_lanes),
+        )
+        shutdown_wait_task = asyncio.create_task(
+            shutdown_event.wait(), name="gateway-shutdown-wait"
+        )
+        done, _ = await asyncio.wait(
+            {mirror_task, guard_task, shutdown_wait_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in (mirror_task, guard_task):
+            if task in done and not task.cancelled():
+                failure = task.exception()
+                if failure is not None:
+                    raise failure
+        if not shutdown_event.is_set():
+            raise RuntimeError(
+                "gateway lane mirror loop exited without a shutdown signal"
+            )
+    finally:
+        if ready_path is not None:
+            ready_path.unlink(missing_ok=True)
+        pending: list[asyncio.Task[object]] = [
+            task
+            for task in (shutdown_wait_task, guard_task, mirror_task)
+            if task is not None
+        ]
+        for leftover in pending:
+            if not leftover.done():
+                leftover.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        for transport in reversed(started_transports):
+            await transport.close()
         if store_started:
             await idempotency_store.close()
 
@@ -1697,12 +1890,13 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--broker-ref-map",
         type=Path,
-        required=True,
+        default=None,
         help=(
             "Path to the operator-supplied broker-ref resolution map (YAML "
             "mapping of contract cloud_broker_ref names to resolved "
             "bootstrap_servers strings). Resolved at the effect boundary; "
-            "required, no default -- the process fails closed without it"
+            "no default -- a config with a cloud leg fails closed without it. "
+            "A mirror-only config has no cloud leg and takes none"
         ),
     )
     parser.add_argument(

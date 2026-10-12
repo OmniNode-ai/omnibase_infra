@@ -54,6 +54,29 @@ hook imports the ``OMNI_HOME/omniclaude`` sibling clone (tracking ``dev``). For
 ``RUNTIME_PATH_PATTERNS`` and the evidence rule these are effectively identical,
 but a same-session ``git -C "$OMNI_HOME/omniclaude" pull`` keeps them converged.
 
+Ticket-contract leg (OMN-20870). The hosted ``repo-evidence / dod-verify``
+context (omnibase_core ``receipt-gate.yml``, job ``dod-verify``, called by
+``.github/workflows/call-repo-evidence-gate.yml``) refuses a pull request whose
+cited ticket has no ``contracts/<ticket>.yaml`` at the head, and the verifier it
+installs refuses a check whose value is prose
+(``INVALID_CHECK_VALUE_NOT_A_COMMAND``). Both reds were reaching CI on every new
+PR that missed them. This leg refuses the same two classes at ``git push``:
+
+  * ``FAIL_NO_CONTRACT`` -- a ticket cited in the branch's commit subjects (the
+    local stand-in for the PR title the hosted job reads) has no
+    ``contracts/<ticket>.yaml`` in the pushed HEAD commit. The file is named.
+  * ``FAIL_CHECK_NOT_A_COMMAND`` -- a ``command`` / ``test_passes`` check in a
+    head-side contract is judged prose by the verifier's own shape guard. The
+    check is named by contract and evidence id.
+
+The shape verdict is not re-implemented here. It is the released verifier's
+``_invalid_check_value_reason``, run from ``omnimarket==<verifier-version>``,
+where the version is read from the caller workflow so the local and hosted
+verdicts use one pin. The leg runs no bound check: it only judges shape. Bot
+authorship is not consulted -- a push has no GitHub-verified author, and the
+hosted job's bot exemptions are derived from that metadata alone, so they stay
+CI-only.
+
 Manual / test invocation (all git+gh gathering is bypassed when the three
 override args are supplied, which is how the unit test drives the pure core):
 
@@ -67,12 +90,17 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
+import re
 import subprocess
 import sys
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
+
+import yaml
 
 # Relative location of the canonical deploy-gate validator inside the omniclaude
 # sibling clone. This is the SAME file the hosted reusable workflow sparse-checks
@@ -419,11 +447,282 @@ def render(decision: DeployScopeDecision, validator: ModuleType) -> None:
         )
 
 
+# ---------------------------------------------------------------------------
+# Ticket-contract leg (OMN-20870)
+# ---------------------------------------------------------------------------
+
+#: The repo-evidence caller; its ``verifier-version`` input is the one pin.
+_REPO_EVIDENCE_CALLER_RELPATH = Path(".github/workflows/call-repo-evidence-gate.yml")
+#: The same ticket pattern the hosted job greps out of the PR title.
+_CITED_TICKET_RE = re.compile(r"OMN-[0-9]+")
+#: The check types the verifier hands to its shape guard before running them.
+_COMMAND_CHECK_TYPES = ("command", "test_passes")
+#: The Python the hosted job installs the verifier into.
+_VERIFIER_PYTHON = "3.13"
+#: Runs inside the released verifier's environment: reads a JSON list of
+#: check values on stdin, writes the guard's reason (or null) for each.
+_VERIFIER_SHAPE_PROGRAM = (
+    "import json, sys\n"
+    "from omnimarket.nodes.node_dod_verify.services.evidence_collector "
+    "import _invalid_check_value_reason\n"
+    "request = json.load(sys.stdin)\n"
+    "json.dump([_invalid_check_value_reason(v, cwd=request['cwd']) "
+    "for v in request['values']], sys.stdout)\n"
+)
+
+PASS_CONTRACTS = "PASS_CONTRACTS"
+NOTICE_NO_TICKET_CITED = "NOTICE_NO_TICKET_CITED"
+FAIL_NO_CONTRACT = "FAIL_NO_CONTRACT"
+FAIL_CHECK_NOT_A_COMMAND = "FAIL_CHECK_NOT_A_COMMAND"
+
+#: Judges a batch of check values; returns one reason (or ``None``) per value.
+ShapeJudge = Callable[[Sequence[str]], list[str | None]]
+
+
+@dataclass(frozen=True)
+class TicketContractDecision:
+    """Outcome of judging the cited tickets' head-side contracts."""
+
+    outcome: str
+    exit_code: int
+    tickets: tuple[str, ...]
+    findings: tuple[str, ...]
+
+
+def cited_tickets(subjects: str) -> list[str]:
+    """Ticket ids cited in ``subjects``, sorted and unique like the hosted grep."""
+    return sorted(set(_CITED_TICKET_RE.findall(subjects)))
+
+
+def resolve_branch_subjects(repo_root: Path, base_ref: str) -> str:
+    """Commit subjects on this branch's own line since ``base_ref``.
+
+    ``--first-parent --no-merges`` keeps the subjects of a merged-in base
+    branch out, so a branch that merged dev does not cite dev's tickets.
+    """
+    base_sha = _resolve_base_sha(repo_root, base_ref)
+    return _run_git(
+        ["log", "--first-parent", "--no-merges", "--format=%s", f"{base_sha}..HEAD"],
+        repo_root,
+    )
+
+
+def read_head_contract(repo_root: Path, ticket: str) -> str | None:
+    """``contracts/<ticket>.yaml`` as committed at HEAD, or ``None`` if absent.
+
+    Reads the commit being pushed, not the working tree, so an uncommitted
+    contract does not pass a push that does not carry it.
+    """
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "show", f"HEAD:contracts/{ticket}.yaml"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def command_checks(contract_text: str) -> list[tuple[str, str]]:
+    """``(evidence id, check value)`` for every check the verifier shape-guards.
+
+    Mirrors the verifier's selection: ``check_type`` in ``command`` /
+    ``test_passes``, value from ``command`` else ``check_value``.
+    """
+    try:
+        contract = yaml.safe_load(contract_text)
+    except yaml.YAMLError as exc:
+        raise DeployScopeHookError(f"contract is not valid YAML: {exc}") from exc
+    if not isinstance(contract, dict):
+        raise DeployScopeHookError("contract is not a YAML mapping")
+    items = contract.get("dod_evidence") or []
+    if not isinstance(items, list):
+        raise DeployScopeHookError("dod_evidence is not a list")
+    found: list[tuple[str, str]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        evidence_id = str(item.get("id", "unknown"))
+        for check in item.get("checks") or []:
+            if not isinstance(check, dict):
+                continue
+            if check.get("check_type") not in _COMMAND_CHECK_TYPES:
+                continue
+            value = check.get("command") or check.get("check_value") or ""
+            found.append((evidence_id, str(value)))
+    return found
+
+
+def classify_ticket_contracts(
+    tickets: Sequence[str],
+    read_contract: Callable[[str], str | None],
+    judge: ShapeJudge,
+) -> TicketContractDecision:
+    """Pure decision core: presence first, then the verifier's shape guard."""
+    if not tickets:
+        return TicketContractDecision(
+            outcome=NOTICE_NO_TICKET_CITED,
+            exit_code=0,
+            tickets=(),
+            findings=(
+                "No OMN-XXXX ticket in this branch's commit subjects. The hosted "
+                "repo-evidence / dod-verify reads the PR title, which must cite one.",
+            ),
+        )
+
+    contracts: dict[str, str] = {}
+    missing: list[str] = []
+    for ticket in tickets:
+        text = read_contract(ticket)
+        if text is None:
+            missing.append(ticket)
+        else:
+            contracts[ticket] = text
+    if missing:
+        return TicketContractDecision(
+            outcome=FAIL_NO_CONTRACT,
+            exit_code=1,
+            tickets=tuple(tickets),
+            findings=tuple(
+                f"this push cites {t} but carries no contracts/{t}.yaml"
+                for t in missing
+            ),
+        )
+
+    labelled: list[tuple[str, str]] = []
+    values: list[str] = []
+    for ticket, text in contracts.items():
+        try:
+            checks = command_checks(text)
+        except DeployScopeHookError as exc:
+            return TicketContractDecision(
+                outcome=FAIL_CHECK_NOT_A_COMMAND,
+                exit_code=1,
+                tickets=tuple(tickets),
+                findings=(f"contracts/{ticket}.yaml: {exc}",),
+            )
+        for evidence_id, value in checks:
+            labelled.append(
+                (f"contracts/{ticket}.yaml dod_evidence {evidence_id}", value)
+            )
+            values.append(value)
+
+    reasons = judge(values) if values else []
+    if len(reasons) != len(values):
+        raise DeployScopeHookError(
+            f"the verifier judged {len(reasons)} of {len(values)} check values"
+        )
+    findings = [
+        f"{label}: INVALID_CHECK_VALUE_NOT_A_COMMAND: {reason} (check value: {value!r})"
+        for (label, value), reason in zip(labelled, reasons, strict=True)
+        if reason is not None
+    ]
+    if findings:
+        return TicketContractDecision(
+            outcome=FAIL_CHECK_NOT_A_COMMAND,
+            exit_code=1,
+            tickets=tuple(tickets),
+            findings=tuple(findings),
+        )
+    return TicketContractDecision(
+        outcome=PASS_CONTRACTS,
+        exit_code=0,
+        tickets=tuple(tickets),
+        findings=(),
+    )
+
+
+def read_verifier_version(repo_root: Path) -> str:
+    """The ``verifier-version`` the repo-evidence caller pins."""
+    caller = repo_root / _REPO_EVIDENCE_CALLER_RELPATH
+    try:
+        workflow = yaml.safe_load(caller.read_text(encoding="utf-8"))
+        version = workflow["jobs"]["repo-evidence"]["with"]["verifier-version"]
+    except (OSError, yaml.YAMLError, KeyError, TypeError) as exc:
+        raise DeployScopeHookError(
+            f"cannot read verifier-version from {_REPO_EVIDENCE_CALLER_RELPATH}: {exc}"
+        ) from exc
+    if not isinstance(version, str) or not version.strip():
+        raise DeployScopeHookError(
+            f"{_REPO_EVIDENCE_CALLER_RELPATH} pins no verifier-version"
+        )
+    return version.strip()
+
+
+def verifier_shape_argv(verifier_version: str) -> list[str]:
+    """The command that runs the released verifier's shape guard."""
+    return [
+        "uv",
+        "run",
+        "--no-project",
+        "--python",
+        _VERIFIER_PYTHON,
+        "--with",
+        f"omnimarket=={verifier_version}",
+        "python",
+        "-I",
+        "-c",
+        _VERIFIER_SHAPE_PROGRAM,
+    ]
+
+
+def pinned_verifier_judge(verifier_version: str, cwd: Path) -> ShapeJudge:
+    """A judge that asks the pinned released verifier, failing loud if it cannot."""
+
+    def judge(values: Sequence[str]) -> list[str | None]:
+        result = subprocess.run(
+            verifier_shape_argv(verifier_version),
+            input=json.dumps({"values": list(values), "cwd": str(cwd)}),
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=str(cwd),
+        )
+        if result.returncode != 0:
+            raise DeployScopeHookError(
+                f"omnimarket=={verifier_version} shape guard did not run "
+                f"(rc={result.returncode}): {result.stderr.strip()[-2000:]}"
+            )
+        try:
+            reasons = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise DeployScopeHookError(
+                f"omnimarket=={verifier_version} shape guard returned no JSON: {exc}"
+            ) from exc
+        if not isinstance(reasons, list) or not all(
+            r is None or isinstance(r, str) for r in reasons
+        ):
+            raise DeployScopeHookError(
+                f"omnimarket=={verifier_version} shape guard returned {reasons!r}"
+            )
+        return list(reasons)
+
+    return judge
+
+
+def render_ticket_contracts(decision: TicketContractDecision) -> None:
+    """Print the ticket-contract leg's verdict to stderr."""
+    if decision.outcome == PASS_CONTRACTS:
+        _log(f"ticket contracts: {list(decision.tickets)} present and command-shaped")
+        return
+    _log(f"outcome={decision.outcome}")
+    for finding in decision.findings:
+        _log(finding)
+    if decision.exit_code != 0:
+        _log(
+            "This is the LOCAL mirror of the required hosted `repo-evidence / "
+            "dod-verify` check, which refuses the same head. Commit "
+            "contracts/<ticket>.yaml with command-shaped check values before pushing."
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Local pre-push mirror of the hosted deploy-gate deploy-scope DoD "
-            "check (OMN-14681)."
+            "check (OMN-14681) and of repo-evidence / dod-verify's ticket-contract "
+            "presence and check-shape refusals (OMN-20870)."
         )
     )
     parser.add_argument(
@@ -445,6 +744,11 @@ def main(argv: list[str] | None = None) -> int:
         "--omni-home",
         default=None,
         help="OMNI_HOME override for locating the canonical validator.",
+    )
+    parser.add_argument(
+        "--subjects",
+        default=None,
+        help="Commit-subject override for the ticket-contract leg (bypasses git).",
     )
     parser.add_argument(
         "--base-ref",
@@ -497,7 +801,23 @@ def main(argv: list[str] | None = None) -> int:
         contracts_dir=contracts_dir,
     )
     render(decision, validator)
-    return decision.exit_code
+
+    try:
+        subjects = (
+            args.subjects
+            if args.subjects is not None
+            else resolve_branch_subjects(repo_root, args.base_ref)
+        )
+        contract_decision = classify_ticket_contracts(
+            tickets=cited_tickets(subjects),
+            read_contract=lambda ticket: read_head_contract(repo_root, ticket),
+            judge=pinned_verifier_judge(read_verifier_version(repo_root), repo_root),
+        )
+    except DeployScopeHookError as exc:
+        _log(f"ERROR (fail-loud): {exc}")
+        return 1
+    render_ticket_contracts(contract_decision)
+    return max(decision.exit_code, contract_decision.exit_code)
 
 
 if __name__ == "__main__":

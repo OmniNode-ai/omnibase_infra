@@ -61,10 +61,13 @@ def test_pin_resolves_the_runtime_image_variant_from_the_committed_registry() ->
     assert pin.profile_version.isdigit()
     assert len(pin.mandatory_checks) > 0
     assert all(isinstance(check, EnumLabProofCheck) for check in pin.mandatory_checks)
-    # OMN-19566's finding for the profile: a migration-only PR has no runtime
-    # log line, so `changed_path_live` must stay pinned as mandatory here --
-    # weakening that pin is exactly what `profile_pin` exists to prevent.
+    # `changed_path_live` and `forwarder_refused_topic` are conditional on the
+    # PR's changed paths (OMN-19566). A pin taken with no diff waives neither:
+    # a caller that omits the diff cannot shorten the list, which is exactly
+    # what `profile_pin` exists to prevent.
     assert EnumLabProofCheck.CHANGED_PATH_LIVE in pin.mandatory_checks
+    assert EnumLabProofCheck.FORWARDER_REFUSED_TOPIC in pin.mandatory_checks
+    assert pin.inapplicable_checks == ()
 
 
 def test_pin_resolves_a_second_proof_kind_on_the_same_repo_row() -> None:

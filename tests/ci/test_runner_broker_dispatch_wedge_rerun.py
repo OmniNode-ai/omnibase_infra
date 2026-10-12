@@ -114,8 +114,12 @@ SUCCESS_JOB = {
 class _StubState:
     """Records what the stub server observed (thread-shared)."""
 
-    def __init__(self, jobs: list[dict[str, object]]) -> None:
+    def __init__(
+        self, jobs: list[dict[str, object]], run_conclusion: str | None = None
+    ) -> None:
         self.jobs = jobs
+        self.run_conclusion = run_conclusion
+        self.jobs_reads = 0
         self.rerun_job_ids: list[int] = []
         self.lock = threading.Lock()
 
@@ -129,16 +133,17 @@ def _make_handler(state: _StubState) -> type[http.server.BaseHTTPRequestHandler]
             parsed = urlparse(self.path)
             path = parsed.path
             if path == f"/repos/{ORG}/{REPO}/actions/runs":
-                body = {
-                    "workflow_runs": [
-                        {
-                            "id": RUN_ID,
-                            "status": "completed",
-                            "created_at": "2026-08-08T20:00:00Z",
-                        }
-                    ]
+                run: dict[str, object] = {
+                    "id": RUN_ID,
+                    "status": "completed",
+                    "created_at": "2026-08-08T20:00:00Z",
                 }
+                if state.run_conclusion is not None:
+                    run["conclusion"] = state.run_conclusion
+                body = {"workflow_runs": [run]}
             elif path == f"/repos/{ORG}/{REPO}/actions/runs/{RUN_ID}/jobs":
+                with state.lock:
+                    state.jobs_reads += 1
                 body = {"jobs": state.jobs}
             else:
                 self.send_response(404)
@@ -168,9 +173,9 @@ def _make_handler(state: _StubState) -> type[http.server.BaseHTTPRequestHandler]
 
 
 def _run_script(
-    jobs: list[dict[str, object]], *, dry_run: bool
+    jobs: list[dict[str, object]], *, dry_run: bool, run_conclusion: str | None = None
 ) -> tuple[subprocess.CompletedProcess[str], _StubState]:
-    state = _StubState(jobs)
+    state = _StubState(jobs, run_conclusion)
     handler = _make_handler(state)
     server = http.server.HTTPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -466,3 +471,108 @@ class TestOmn15776IncidentReplay:
             f"the real captured wedge job must be rejected (flagged + rerun): "
             f"out={result.stdout} err={result.stderr}"
         )
+
+
+class TestOnlyFailedRunsAreRead:
+    """OMN-19998: the scan reads jobs only of runs that can hold a wedge job.
+
+    A wedge job concludes failure or cancelled, so its run concludes failure, cancelled or timed_out. Every
+    10 minutes the scan listed up to 30 completed runs per repository over 6 hours and read every one's jobs on
+    the operator's personal token; a run that concluded success, skipped or neutral is now never read.
+    """
+
+    @pytest.mark.parametrize("conclusion", ["success", "skipped", "neutral"])
+    def test_a_run_that_cannot_hold_a_wedge_is_not_read(self, conclusion: str) -> None:
+        result, state = _run_script(
+            [WEDGE_JOB], dry_run=True, run_conclusion=conclusion
+        )
+        assert result.returncode == 0, result.stderr
+        assert state.jobs_reads == 0
+        assert "CANDIDATE" not in result.stdout
+
+    @pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out", None])
+    def test_a_run_that_can_hold_a_wedge_is_read_and_flagged(
+        self, conclusion: str | None
+    ) -> None:
+        result, state = _run_script(
+            [WEDGE_JOB], dry_run=True, run_conclusion=conclusion
+        )
+        assert result.returncode == 0, result.stderr
+        assert state.jobs_reads == 1
+        assert f"CANDIDATE job_id={WEDGE_JOB['id']}" in result.stdout
+
+
+def _serve_runs(
+    runs: list[dict[str, object]], reads: list[int]
+) -> http.server.HTTPServer:
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args: object) -> None:
+            pass
+
+        def do_GET(self) -> None:
+            path = urlparse(self.path).path
+            prefix = f"/repos/{ORG}/{REPO}/actions/runs"
+            if path == prefix:
+                body: dict[str, object] = {"workflow_runs": runs}
+            elif path.startswith(prefix + "/") and path.endswith("/jobs"):
+                reads.append(int(path[len(prefix) + 1 : -len("/jobs")]))
+                body = {"jobs": []}
+            else:
+                self.send_response(404)
+                self.end_headers()
+                return
+            payload = json.dumps(body).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(payload)
+
+    return http.server.HTTPServer(("127.0.0.1", 0), Handler)
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/omn19998_wedge_runs_list.json")
+def test_recorded_runs_list_reads_only_runs_that_can_hold_a_wedge(
+    recorded_response: dict[str, object],
+) -> None:
+    """OMN-19998, on a recorded live runs list (100 runs at one head, OMN-15550): the scan reads the jobs of
+    the failed and cancelled runs only. Before, it read all 100."""
+    provenance = recorded_response["_provenance"]
+    assert isinstance(provenance, dict)
+    source = json.loads((REPO_ROOT / str(provenance["source_file"])).read_text())
+    runs = source["workflow_runs"]
+    expected = sorted(
+        int(r["id"])
+        for r in runs
+        if r.get("conclusion") not in ("success", "skipped", "neutral")
+    )
+    assert len(runs) == 100 and 0 < len(expected) < 10
+    reads: list[int] = []
+    server = _serve_runs(runs, reads)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        env = {
+            **os.environ,
+            "GITHUB_API_URL": f"http://127.0.0.1:{server.server_port}",
+            "RUNNER_GITHUB_TOKEN": "test-token-not-real",
+            "REPOS_CSV": REPO,
+            "GITHUB_ORG": ORG,
+            "LOOKBACK_HOURS": "87600",
+            "MAX_RUNS_PER_REPO": "100",
+            "ONEX_STATE_DIR": "",
+        }
+        with tempfile.TemporaryDirectory(prefix="omn19998-test-state-") as state_dir:
+            result = subprocess.run(
+                ["bash", str(SCRIPT), "--state-dir", state_dir, "--dry-run"],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=REPO_ROOT,
+                timeout=120,
+            )
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert sorted(reads) == expected

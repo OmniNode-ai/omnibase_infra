@@ -34,7 +34,8 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Awaitable, Coroutine
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from unittest.mock import AsyncMock, _Call, patch
 from uuid import UUID, uuid4
 
@@ -817,11 +818,12 @@ class TestRuntimeSchedulerTickEmission:
         published = mock_event_bus.publish_envelope.call_count
         assert published >= 2
 
-        # Every published tick was preceded by one interval wait, and every
-        # interval wait used the configured tick interval (jitter is 0).
+        # Every published tick was preceded by one wait, and every wait ran to
+        # the next slot, never past one tick interval (jitter is 0, OMN-20867).
         loop_waits = recorder.tick_loop_waits()
         assert len(loop_waits) >= published
-        assert set(loop_waits) == {scheduler_config.tick_interval_ms / 1000.0}
+        interval_s = scheduler_config.tick_interval_ms / 1000.0
+        assert all(w is not None and 0.0 <= w <= interval_s for w in loop_waits)
 
     async def test_wait_for_ticks_fails_within_bound_when_loop_never_emits(
         self, scheduler: RuntimeScheduler
@@ -1395,3 +1397,117 @@ class TestRuntimeSchedulerIntegration:
         # The envelope carries the tick's correlation_id
         assert isinstance(envelope.correlation_id, UUID)
         assert envelope.correlation_id == envelope.payload.correlation_id
+
+
+# ============================================================================
+# Slot Alignment Tests (OMN-20867)
+# ============================================================================
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+
+
+def _slot_after(when: datetime, interval_ms: int) -> datetime:
+    slot = timedelta(milliseconds=interval_ms)
+    return _EPOCH + ((when - _EPOCH) // slot + 1) * slot
+
+
+def _on_slot(when: datetime, interval_ms: int) -> bool:
+    return (when - _EPOCH) % timedelta(milliseconds=interval_ms) == timedelta(0)
+
+
+def _assert_spans_tile(ticks: list[ModelRuntimeTick], interval_ms: int) -> None:
+    """Consecutive spans ``(scheduled_at - interval, now]`` leave no slot uncovered.
+
+    Each tick is stamped with an epoch-aligned slot no later than its ``now``, and
+    the next tick's slot is the first slot after this tick's ``now``, so every slot
+    from the first tick's to the last tick's ``now`` lies in exactly one span.
+    """
+    for tick in ticks:
+        assert _on_slot(tick.scheduled_at, interval_ms), tick
+        assert tick.scheduled_at <= tick.now, tick
+    for earlier, later in pairwise(ticks):
+        assert later.scheduled_at == _slot_after(earlier.now, interval_ms), (
+            earlier,
+            later,
+        )
+
+
+def test_next_tick_slot_is_the_first_epoch_aligned_slot_after() -> None:
+    next_tick_slot = runtime_scheduler_module.next_tick_slot
+    on_slot = datetime(2026, 10, 10, 16, 50, tzinfo=UTC)
+    assert next_tick_slot(on_slot, 1000) == on_slot + timedelta(seconds=1)
+    late = datetime(2026, 10, 10, 16, 49, 59, 446634, tzinfo=UTC)
+    assert next_tick_slot(late, 1000) == on_slot
+    assert next_tick_slot(late, 100) == late.replace(microsecond=500000)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+class TestRuntimeSchedulerSlotAlignment:
+    """A slow tick loop still stamps every slot exactly once (OMN-20867)."""
+
+    async def test_tick_loop_stamps_each_tick_with_the_slot_it_was_due_on(
+        self,
+        scheduler: RuntimeScheduler,
+        scheduler_config: ModelRuntimeSchedulerConfig,
+        mock_event_bus: AsyncMock,
+    ) -> None:
+        await scheduler.start()
+        await _wait_for_ticks(scheduler, minimum=4)
+        await scheduler.stop()
+
+        ticks = [
+            _published_tick(c) for c in mock_event_bus.publish_envelope.call_args_list
+        ]
+        assert len(ticks) >= 4
+        _assert_spans_tile(ticks, scheduler_config.tick_interval_ms)
+
+    async def test_a_publish_slower_than_the_interval_leaves_no_slot_uncovered(
+        self,
+        scheduler: RuntimeScheduler,
+        scheduler_config: ModelRuntimeSchedulerConfig,
+        mock_event_bus: AsyncMock,
+    ) -> None:
+        # The dev lane's tick period ran 1.12x its interval; here each publish
+        # alone takes 1.12 intervals, so the loop wakes past its slot every time.
+        interval_s = scheduler_config.tick_interval_ms / 1000.0
+
+        async def _slow_publish(**_kwargs: object) -> None:
+            await asyncio.sleep(interval_s * 1.12)
+
+        mock_event_bus.publish_envelope.side_effect = _slow_publish
+        await scheduler.start()
+        await _wait_for_ticks(scheduler, minimum=5)
+        await scheduler.stop()
+
+        ticks = [
+            _published_tick(c) for c in mock_event_bus.publish_envelope.call_args_list
+        ]
+        assert len(ticks) >= 5
+        _assert_spans_tile(ticks, scheduler_config.tick_interval_ms)
+        assert any(t.now - t.scheduled_at > timedelta(0) for t in ticks)
+
+    async def test_a_failed_publish_hands_its_slot_to_the_next_tick(
+        self,
+        scheduler: RuntimeScheduler,
+        scheduler_config: ModelRuntimeSchedulerConfig,
+        mock_event_bus: AsyncMock,
+    ) -> None:
+        calls: list[ModelRuntimeTick] = []
+
+        async def _fail_first(**kwargs: object) -> None:
+            envelope = kwargs["envelope"]
+            assert isinstance(envelope, ModelEventEnvelope)
+            calls.append(ModelRuntimeTick.model_validate(envelope.payload))
+            if len(calls) == 1:
+                raise ConnectionError("broker unavailable")
+
+        mock_event_bus.publish_envelope.side_effect = _fail_first
+        await scheduler.start()
+        await _wait_for_ticks(scheduler, minimum=2)
+        await scheduler.stop()
+
+        failed, carried = calls[0], calls[1]
+        assert carried.scheduled_at == failed.scheduled_at
+        assert carried.now > failed.now
+        _assert_spans_tile(calls[1:], scheduler_config.tick_interval_ms)

@@ -301,6 +301,9 @@ class _FakeExecutor:
         self.calls.append("verify")
         return []
 
+    def run_lane_mirror(self, **kwargs: object) -> None:
+        return None
+
     def deliver_onex_api_pin(self, **kwargs: object) -> object:
         self.calls.append("deliver_onex_api_pin")
         raise AssertionError("the onex-api pin delivery must not run here")
@@ -469,12 +472,17 @@ class TestDev202PhasesOff:
             disabled_by_overlay | set(DEV_LANE_GATEWAY_SERVICES)
         )
 
-    def test_dev_202_phases_off_restarted_services_exclude_disabled(self) -> None:
+    def test_dev_202_phases_off_restarted_services_exclude_disabled(
+        self, tmp_path: Path
+    ) -> None:
         select_dev_instance("dev-202")
         executor = DeployExecutor()
         with (
             patch.object(executor, "_compose_build"),
             patch.object(executor, "_compose_up"),
+            patch.object(
+                executor_mod, "_reconcile_lock_roots", return_value=[str(tmp_path)]
+            ),
         ):
             restarted = executor.rebuild_scope(
                 Scope.RUNTIME, [], _noop, git_sha=SHA, lane=EnumRuntimeLane.DEV

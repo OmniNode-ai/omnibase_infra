@@ -29,6 +29,10 @@ class ModelLabProofProfilePin(BaseModel):
     profile_key: str = Field(pattern=r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_-]*$")
     profile_version: str = Field(pattern=r"^[1-9][0-9]*$")
     mandatory_checks: tuple[EnumLabProofCheck, ...] = Field(min_length=1)
+    # The variant's conditional checks this PR's diff does not make mandatory
+    # (OMN-19566). Empty when the diff was not supplied: then every conditional
+    # check is in ``mandatory_checks``.
+    inapplicable_checks: tuple[EnumLabProofCheck, ...] = ()
 
 
 __all__ = ["ModelLabProofProfilePin"]
