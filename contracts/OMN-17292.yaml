@@ -12,9 +12,9 @@ requirements:
       - id: AC1
         statement: "AC1: .github/omnimarket-contract-pin.yaml carries the refreshed value -- falsifier: grep -qF -- 'omnimarket_contract_ref: d2956e320e9bfcc8f26c6525a7c7a9352464472b' .github/omnimarket-contract-pin.yaml"
 evidence_requirements:
-  - kind: command
-    description: .github/omnimarket-contract-pin.yaml carries the refreshed value.
-    command: "grep -qF -- 'omnimarket_contract_ref: d2956e320e9bfcc8f26c6525a7c7a9352464472b' .github/omnimarket-contract-pin.yaml"
+  - kind: tests
+    description: The pin file, the sibling-pins entry and every inline omnimarket checkout ref carry the advanced sha.
+    command: uv run pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -24,7 +24,7 @@ dod_evidence:
     description: .github/omnimarket-contract-pin.yaml carries the refreshed value.
     source: manual
     checks:
-      - check_type: command
-        check_value: "grep -qF -- 'omnimarket_contract_ref: d2956e320e9bfcc8f26c6525a7c7a9352464472b' .github/omnimarket-contract-pin.yaml"
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
