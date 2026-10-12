@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: OMN-18606
+title: "The lane census snapshot is refreshed to emitted_at 2026-10-12T01:27:52.145516+00:00"
+summary: The automated refresh moves deploy/lane-census/census-snapshot.json to a value the merge base does not carry.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn18606
+    statement: deploy/lane-census/census-snapshot.json carries the value this refresh produced.
+    acceptance:
+      - id: AC1
+        statement: "AC1: deploy/lane-census/census-snapshot.json carries the refreshed value -- falsifier: grep -qF -- '2026-10-12T01:27:52.145516+00:00' deploy/lane-census/census-snapshot.json"
+evidence_requirements:
+  - kind: command
+    description: deploy/lane-census/census-snapshot.json carries the refreshed value.
+    command: "grep -qF -- '2026-10-12T01:27:52.145516+00:00' deploy/lane-census/census-snapshot.json"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-18606-ac1
+    description: deploy/lane-census/census-snapshot.json carries the refreshed value.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: "grep -qF -- '2026-10-12T01:27:52.145516+00:00' deploy/lane-census/census-snapshot.json"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
