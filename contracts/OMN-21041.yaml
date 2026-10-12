@@ -46,6 +46,7 @@ dod_evidence:
   - id: "dod-omn21041-ac1-live-readback"
     description: "AC1, pending the deploy agent rolling the fix onto the dev lane, and not claimed by the in-process items above. It publishes one start command through onex run-node, which polls the contract's terminal_event for the same correlation id, and requires a health verdict in the completed event."
     source: "manual"
+    execution_scope: "local_done_gate"
     checks:
       - check_type: "command"
         check_value: >-
