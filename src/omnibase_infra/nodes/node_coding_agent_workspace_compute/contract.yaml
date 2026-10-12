@@ -28,11 +28,11 @@ handler_routing:
 input_model:
   name: ModelWorkspaceValidateCommand
   module: omnibase_infra.models.coding_agent
-  description: "Workspace policy inputs (path, allowed roots, sandbox, prompt)."
+  description: "Workspace policy inputs (path, allowed roots, sandbox, prompt) plus the invoke command the pre-flight gates."
 output_model:
   name: ModelWorkspaceValidateResult
   module: omnibase_infra.models.coding_agent
-  description: "Deterministic validation verdict (valid + rejection reason)."
+  description: "Deterministic validation verdict (valid + rejection reason), echoing the gated invoke command so the stateless orchestrator can invoke or reject from the verdict alone."
 descriptor:
   node_archetype: compute
   purity: pure
@@ -61,3 +61,4 @@ metadata:
   related_tickets:
     - "OMN-13247"
     - "OMN-13245"
+    - "OMN-21052"
