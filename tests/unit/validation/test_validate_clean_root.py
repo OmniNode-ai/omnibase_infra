@@ -146,6 +146,69 @@ class TestAllowedFilesPassValidation:
         assert len(result.violations) == 0
 
 
+class TestGuardConfiguration:
+    """Only configuration declared by the reusable guard belongs at the root."""
+
+    @pytest.mark.parametrize(
+        ("uses", "declared", "admitted"),
+        [
+            (
+                "OmniNode-ai/omnibase_core/.github/workflows/imperative-contract-guard.yml@"
+                "031148215620031436cba30619bbae67c0bb38ad",
+                "imperative-contract-allowlist.yaml",
+                True,
+            ),
+            (
+                "OmniNode-ai/another_repo/.github/workflows/imperative-contract-guard.yml@dev",
+                "imperative-contract-allowlist.yaml",
+                False,
+            ),
+            (
+                "OmniNode-ai/omnibase_core/.github/workflows/imperative-contract-guard.yml@dev",
+                "imperative-contract-allowlist.yaml",
+                False,
+            ),
+            (
+                "./.github/workflows/imperative-contract-guard.yml",
+                "imperative-contract-allowlist.yaml",
+                False,
+            ),
+            (
+                "OmniNode-ai/omnibase_core/.github/workflows/imperative-contract-guard.yml@"
+                "031148215620031436cba30619bbae67c0bb38ad",
+                "config/imperative-contract-allowlist.yaml",
+                False,
+            ),
+        ],
+    )
+    def test_declared_guard_config(
+        self, tmp_path: Path, uses: str, declared: str, admitted: bool
+    ) -> None:
+        workflow_dir = tmp_path / ".github/workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "guard.yml").write_text(
+            f"jobs:\n  guard:\n    uses: {uses}\n    with:\n      allowlist-path: {declared}\n"
+        )
+        (tmp_path / "imperative-contract-allowlist.yaml").write_text(
+            "allowlisted_handlers: []\n"
+        )
+        assert validate_root_directory(tmp_path).is_valid is admitted
+
+    def test_undeclared_guard_config_is_refused(self, tmp_path: Path) -> None:
+        (tmp_path / "imperative-contract-allowlist.yaml").touch()
+        assert not validate_root_directory(tmp_path).is_valid
+
+    @pytest.mark.parametrize("workflow", ["jobs: [", "jobs: []", "[]"])
+    def test_malformed_declaration_is_refused(
+        self, tmp_path: Path, workflow: str
+    ) -> None:
+        workflow_dir = tmp_path / ".github/workflows"
+        workflow_dir.mkdir(parents=True)
+        (workflow_dir / "guard.yml").write_text(workflow)
+        (tmp_path / "imperative-contract-allowlist.yaml").touch()
+        assert not validate_root_directory(tmp_path).is_valid
+
+
 class TestAllowedDirectoriesPassValidation:
     """Test that allowed directories pass validation without violations."""
 

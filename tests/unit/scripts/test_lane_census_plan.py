@@ -22,11 +22,12 @@ from typing import Any
 
 import pytest
 
+from tests.helpers.lane_census_fixtures import NEUTRAL_SNAPSHOT
+
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
 _PLAN_PATH = _REPO / "scripts" / "lane_census_plan.py"
-_MANIFEST_PATH = _REPO / "deploy" / "lane-census" / "lane-manifest.yaml"
 
 
 def _load_planner() -> Any:
@@ -38,7 +39,6 @@ def _load_planner() -> Any:
 
 
 PLAN = _load_planner()
-MANIFEST = PLAN.load_manifest(_MANIFEST_PATH)
 
 # OMN-18320 — the `prod` lane fixture is FROZEN here instead of read from the live
 # manifest.
@@ -85,11 +85,167 @@ _RETIRED_PROD_LANE: dict[str, Any] = {
     ],
 }
 
-MANIFEST["lanes"]["prod"] = copy.deepcopy(_RETIRED_PROD_LANE)
-
 # OMN-19088: the planner resolves the host it runs on through the manifest's
 # hosts registry. The lab host's hostname, as the census reports it there.
 _LAB_HOST = "omninode-pc"
+
+_LAB_SYNC_FIXTURES = _REPO / "tests" / "fixtures" / "lab_sync"
+
+
+def _lane_from_capture(capture: Path) -> tuple[str, dict[str, Any]]:
+    """A lane declaration read off a recorded inventory, kind by observed state.
+
+    A container the capture saw Exited is a run-to-completion ``oneshot``, a
+    migration gate is a ``keepalive`` sentinel, and every other one a required
+    ``service``. Network and compose project are the capture's own.
+    """
+    envelope = json.loads(capture.read_text(encoding="utf-8"))["envelope"]
+    lane = str(envelope["lane"])
+    rows = envelope["containers"]
+    services: list[dict[str, Any]] = []
+    for row in rows:
+        if row["Names"].endswith("-migration-gate"):
+            services.append({"name": row["Names"], "kind": "keepalive"})
+        elif row["State"] == "exited":
+            services.append({"name": row["Names"], "kind": "oneshot"})
+        else:
+            services.append({"name": row["Names"], "kind": "service", "replicas": 1})
+    return lane, {
+        "hosts": list(_RETIRED_PROD_LANE["hosts"]),
+        "compose_project": rows[0]["Labels"]["com.docker.compose.project"],
+        "network": next(n for n in envelope["networks"] if lane in n),
+        "image_tag_pattern": ".+",
+        "services": services,
+    }
+
+
+# OMN-20934 -- the manifest is FROZEN here instead of read from disk.
+#
+# The lab's lane manifest is private deployment config and this repository no
+# longer ships it. These are pure-planner tests: they pin the planner's
+# behaviour over a declaration, and the 2026-06-11 replay and the lab-sync
+# captures below need only the lanes they were recorded on. So the manifest is
+# built here, the way the retired `prod` lane already was: the `dev` lane's
+# declaration as it stood in the manifest at the move, verbatim, and the
+# second captured lane read off its own capture. Which lanes the lab declares
+# today is a fact about the lab, checked where its manifest lives.
+_DEV_LANE: dict[str, Any] = {
+    "optional": True,
+    "hosts": list(_RETIRED_PROD_LANE["hosts"]),
+    "compose_file": "docker/docker-compose.generated.yml",
+    "compose_project": "omnibase-infra",
+    "network": "omnibase-infra-network",
+    "image_tag_pattern": ".+",
+    "services": [
+        {
+            "name": "omnibase-infra-postgres",
+            "kind": "service",
+            "replicas": 1,
+            "restart_bound": 5,
+        },
+        {
+            "name": "omnibase-infra-redpanda",
+            "kind": "service",
+            "replicas": 1,
+            "restart_bound": 5,
+        },
+        {
+            "name": "omnibase-infra-valkey",
+            "kind": "service",
+            "replicas": 1,
+            "restart_bound": 5,
+        },
+        {
+            "name": "omnimarket-projection-api",
+            "kind": "service",
+            "replicas": 1,
+            "restart_bound": 5,
+        },
+        {
+            "name": "omninode-runtime",
+            "kind": "service",
+            "replicas": 1,
+            "restart_bound": 5,
+        },
+        {
+            "name": "omninode-runtime-effects",
+            "kind": "service",
+            "replicas": 1,
+            "restart_bound": 5,
+        },
+        {
+            "name": "omnimarket-projection-tenant-registry-writer",
+            "kind": "service",
+            "replicas": 1,
+            "restart_bound": 5,
+        },
+        {
+            "name": "omnimarket-projection-delegation-writer",
+            "kind": "service",
+            "replicas": 1,
+            "restart_bound": 5,
+        },
+        {
+            "name": "omnimarket-projection-registration-writer",
+            "kind": "service",
+            "replicas": 1,
+            "restart_bound": 5,
+        },
+        {
+            "name": "omnimarket-projection-savings-writer",
+            "kind": "service",
+            "replicas": 1,
+            "restart_bound": 2,
+        },
+        {
+            "name": "omnimarket-projection-tenant-credentials-writer",
+            "kind": "service",
+            "replicas": 1,
+            "restart_bound": 5,
+        },
+        {
+            "name": "omnimarket-projection-live-events-writer",
+            "kind": "service",
+            "replicas": 1,
+            "restart_bound": 5,
+        },
+        {
+            "name": "omnimarket-tenant-projection-writer",
+            "kind": "service",
+            "replicas": 1,
+        },
+        {"name": "omnibase-infra-forward-migration", "kind": "oneshot", "replicas": 1},
+        {"name": "omnibase-infra-cloud-migration", "kind": "oneshot", "replicas": 1},
+        {
+            "name": "omnibase-infra-cloud-migration-files",
+            "kind": "oneshot",
+            "replicas": 1,
+        },
+        {"name": "onex-api", "kind": "service", "replicas": 1},
+        {
+            "name": "omninode-infra-routing-decisions-consumer",
+            "kind": "service",
+            "replicas": 1,
+        },
+    ],
+}
+
+_CAPTURED_LANE, _CAPTURED_LANE_SPEC = _lane_from_capture(
+    _LAB_SYNC_FIXTURES / "inventory_container_unhealthy.json"
+)
+
+MANIFEST: dict[str, Any] = {
+    "schema_version": "1.0.0",
+    "default_image_tag_pattern": ".+",
+    "hosts": {_RETIRED_PROD_LANE["hosts"][0]: {"aliases": [_LAB_HOST]}},
+    "lanes": {
+        "prod": copy.deepcopy(_RETIRED_PROD_LANE),
+        "dev": copy.deepcopy(_DEV_LANE),
+        _CAPTURED_LANE: _CAPTURED_LANE_SPEC,
+    },
+}
+PLAN.validate_hosts(MANIFEST)
+PLAN.validate_service_bounds(MANIFEST)
 
 
 def _container(
@@ -314,29 +470,6 @@ def test_keepalive_exited_nonzero_is_still_critical_drift() -> None:
     assert failed and failed[0]["severity"] == "critical", plan["findings"]
 
 
-def test_migration_gate_is_keepalive_in_every_compose_lane() -> None:
-    """Manifest ratchet: migration-gate must stay `keepalive` (OMN-13772).
-
-    Flipping it back to `oneshot` reintroduces the census false-positive on
-    every healthy lane; flipping it to `service` would hard-require a
-    container whose restart policy is `restart: "no"` on some lanes.
-    """
-    # OMN-18320: `prod` removed — this ratchet reads the LIVE manifest, and the lab
-    # compose prod lane was retired 2026-09-13 and is no longer declared there. The
-    # frozen fixture above is deliberately not consulted here: this test exists to
-    # catch a regression in a lane someone can still deploy.
-    for lane in ("stability-test", "judge"):
-        gate = next(
-            svc
-            for svc in MANIFEST["lanes"][lane]["services"]
-            if svc["name"].endswith("-migration-gate")
-        )
-        assert gate["kind"] == "keepalive", (
-            f"lane {lane!r}: migration-gate kind is {gate['kind']!r}, expected "
-            f"'keepalive' (long-running healthcheck sentinel, OMN-13772)"
-        )
-
-
 def test_unexpected_lane_labeled_container_is_drift() -> None:
     """A container labeled for the lane but not declared is unexpected_container."""
     containers = _healthy_prod_containers()
@@ -362,8 +495,7 @@ def test_image_tag_mismatch_is_drift() -> None:
     # module-level MANIFEST, so it needs its own copy of the frozen retired-lane
     # spec — and a DEEP copy, because it mutates image_tag_pattern and would
     # otherwise corrupt the shared fixture for every test that runs after it.
-    manifest = PLAN.load_manifest(_MANIFEST_PATH)
-    manifest["lanes"]["prod"] = copy.deepcopy(_RETIRED_PROD_LANE)
+    manifest = copy.deepcopy(MANIFEST)
     manifest["lanes"]["prod"]["image_tag_pattern"] = r"0\.37\..+"
     containers = _healthy_prod_containers()
     for c in containers:
@@ -915,13 +1047,10 @@ def test_schema_version_observed_event_is_1_1_0() -> None:
     assert observed["schema_version"] == "1.1.0"
 
 
-def test_schema_version_committed_1_0_0_snapshot_still_validates() -> None:
+def test_schema_version_census_snapshot_still_validates() -> None:
+    """A census snapshot in the committed shape validates (OMN-20934: neutral copy)."""
     events = _load_event_module()
-    snapshot = json.loads(
-        (_REPO / "deploy" / "lane-census" / "census-snapshot.json").read_text(
-            encoding="utf-8"
-        )
-    )
+    snapshot = json.loads(NEUTRAL_SNAPSHOT.read_text(encoding="utf-8"))
     assert (
         events.validate_event(snapshot, kind_severity=PLAN.FINDING_KIND_SEVERITY) == []
     )

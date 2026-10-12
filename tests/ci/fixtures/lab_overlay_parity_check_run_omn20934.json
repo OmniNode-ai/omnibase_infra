@@ -1,0 +1,17 @@
+{
+  "_provenance": {
+    "source": "OmniNode-ai/omnibase_infra pull request 4869, head 4f00630d8c8c9d1c3e4cade53055f0c375edfd91: the check-run the Lane Census Parity workflow reported to GitHub, read from the PR watcher record (ci.detail and ci.red_facts)",
+    "captured_utc": "2026-10-11T21:42:54Z"
+  },
+  "response": {
+    "head_sha": "4f00630d8c8c9d1c3e4cade53055f0c375edfd91",
+    "check_run": {
+      "name": "Lab-overlay parity tests (OMN-20934)",
+      "job_id": "114570974351",
+      "run_id": "38173529488",
+      "started_at": "2026-10-11T20:45:22Z",
+      "completed_at": "2026-10-11T20:45:43Z",
+      "conclusion": "failure"
+    }
+  }
+}

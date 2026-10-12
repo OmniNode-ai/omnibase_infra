@@ -11,9 +11,16 @@ lane's broker off the air.
 
 A test that runs ``docker compose`` against a real daemon therefore uses a
 project of its own and proves, before ``up``, that nothing it would create or
-remove belongs to a declared lane. The lane set is read from
-``deploy/lane-census/lane-manifest.yaml``, the one place lanes are declared, so a
-new lane is covered the day it is declared.
+remove belongs to anything else.
+
+OMN-20934: that proof is an ALLOWLIST, not a list of lanes. It used to read the
+lane set from the lane manifest, which is private deployment config this
+repository no longer ships, and a denylist is only as current as the list it
+reads. Now every name a test's compose document owns (its project, and any
+container, volume or network name it sets) must carry this module's
+``onex-test-`` prefix, which no lane, lab or otherwise, ever uses. A name the
+test did not mint is refused whatever it is, so a lane is covered without
+anyone declaring it here.
 """
 
 from __future__ import annotations
@@ -21,108 +28,58 @@ from __future__ import annotations
 import copy
 import os
 import uuid
-from functools import lru_cache
-from pathlib import Path
 
-import yaml
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-LANE_MANIFEST = REPO_ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
 ISOLATED_PREFIX = "onex-test-"
 
 
-@lru_cache(maxsize=1)
-def _lanes() -> dict[str, dict[str, object]]:
-    data = yaml.safe_load(LANE_MANIFEST.read_text(encoding="utf-8"))
-    lanes = data.get("lanes") if isinstance(data, dict) else None
-    if not isinstance(lanes, dict) or not lanes:
-        raise AssertionError(f"{LANE_MANIFEST} declares no lanes")
-    return {str(k): v for k, v in lanes.items() if isinstance(v, dict)}
-
-
-def declared_lane_projects() -> frozenset[str]:
-    """Every declared lane's compose project, from the lane manifest."""
-    projects = {
-        str(lane["compose_project"])
-        for lane in _lanes().values()
-        if lane.get("compose_project")
-    }
-    if not projects:
-        raise AssertionError(f"{LANE_MANIFEST} declares no compose_project")
-    return frozenset(projects)
-
-
-def declared_lane_object_names() -> frozenset[str]:
-    """Container and network names the lane manifest declares for any lane."""
-    names: set[str] = set()
-    for lane in _lanes().values():
-        network = lane.get("network")
-        if isinstance(network, str) and network:
-            names.add(network)
-        services = lane.get("services")
-        if isinstance(services, list):
-            for svc in services:
-                if isinstance(svc, dict) and svc.get("name"):
-                    names.add(str(svc["name"]))
-    return frozenset(names)
-
-
-def is_lane_owned(name: str) -> bool:
-    """True when a Docker object name belongs to a declared lane.
-
-    A lane's project name, any name the manifest declares, and any name that
-    starts with a lane project followed by ``-`` or ``_`` (compose's own
-    container, volume and network naming) all count.
-    """
-    if name.startswith(ISOLATED_PREFIX):
-        return False
-    if name in declared_lane_object_names():
-        return True
-    return any(
-        name == project or name.startswith((f"{project}-", f"{project}_"))
-        for project in declared_lane_projects()
-    )
+def is_isolated(name: str) -> bool:
+    """True when a Docker object name was minted by a test (carries the prefix)."""
+    return name.startswith(ISOLATED_PREFIX)
 
 
 def isolated_project_name(purpose: str) -> str:
     """A compose project unique to one test run and never a lane's."""
     slug = "".join(c if c.isalnum() else "-" for c in purpose.lower()).strip("-")
     name = f"{ISOLATED_PREFIX}{slug}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
-    assert not is_lane_owned(name), name
+    assert is_isolated(name), name
     return name
 
 
 def compose_isolation_violations(compose: dict[str, object]) -> list[str]:
-    """Why a compose document would touch a declared lane; empty when isolated."""
+    """Why a compose document could touch something it does not own; empty when isolated."""
     problems: list[str] = []
     project = compose.get("name")
     if not isinstance(project, str) or not project:
         problems.append("the compose document names no project")
-    elif project in declared_lane_projects() or is_lane_owned(project):
-        problems.append(f"project {project!r} is a declared lane")
+    elif not is_isolated(project):
+        problems.append(
+            f"project {project!r} is not a test project (no {ISOLATED_PREFIX!r} prefix)"
+        )
     services = compose.get("services")
     for svc_name, svc in (services if isinstance(services, dict) else {}).items():
         if not isinstance(svc, dict):
             continue
         cname = svc.get("container_name")
-        if isinstance(cname, str) and is_lane_owned(cname):
+        if isinstance(cname, str) and not is_isolated(cname):
             problems.append(
-                f"service {svc_name} container_name {cname!r} is a lane's container"
+                f"service {svc_name} container_name {cname!r} is not a test container"
             )
     for kind in ("volumes", "networks"):
         block = compose.get(kind)
         for key, spec in (block if isinstance(block, dict) else {}).items():
             name = spec.get("name") if isinstance(spec, dict) else None
-            if isinstance(name, str) and is_lane_owned(name):
-                problems.append(f"{kind[:-1]} {key} is named {name!r}, a lane's")
+            if isinstance(name, str) and not is_isolated(name):
+                problems.append(
+                    f"{kind[:-1]} {key} is named {name!r}, not a test {kind[:-1]}"
+                )
     return problems
 
 
 def assert_compose_isolated(compose: dict[str, object]) -> None:
     problems = compose_isolation_violations(compose)
     assert not problems, (
-        "refusing to run docker compose on a document that touches a declared "
-        "lane (OMN-17427): " + "; ".join(problems)
+        "refusing to run docker compose on a document that names something a "
+        "test did not mint (OMN-17427, OMN-20934): " + "; ".join(problems)
     )
 
 

@@ -112,6 +112,7 @@ _INTERIM_ENTRIES: dict[str, str] = {
     "automation_liveness_state": "omnimarket OMN-20802 (node_projection_automation_liveness)",
     "automation_run_history": "omnimarket OMN-20802 (node_projection_automation_liveness)",
     "automation_alarm_episodes": "omnimarket OMN-20802 (node_projection_automation_liveness)",
+    "run_trace": "omnimarket OMN-19987 (node_projection_run_trace)",
 }
 
 _SKIP_REASON = (

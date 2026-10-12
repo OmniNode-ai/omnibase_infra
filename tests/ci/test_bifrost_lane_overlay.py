@@ -1,10 +1,9 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""CI gates for the schema-v2, overlay-only Bifrost dev lane."""
+"""CI gates for typed Bifrost overlays and private compose mounts."""
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -12,9 +11,6 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
-OVERLAY_YAML = ROOT / "docker" / "lane-overlays" / "dev.bifrost.yaml"
-PARITY_FIXTURE = ROOT / "tests" / "fixtures" / "bifrost_lane_overlay_v3.yaml"
-PROBE_FIXTURE = ROOT / "tests" / "fixtures" / "bifrost_served_models_probe.json"
 COMPOSE_INFRA = ROOT / "docker" / "docker-compose.infra.yml"
 OVERLAY_ENV = ROOT / "docker" / "lane-overlays" / "dev.bifrost.env"
 RENDER_SCRIPT = ROOT / "scripts" / "render_bifrost_lane_overlay_env.py"
@@ -42,77 +38,20 @@ _RUNTIME_SERVICES = frozenset({"omninode-runtime", "runtime-effects", "runtime-w
 pytestmark = pytest.mark.unit
 sys.path.insert(0, str(ROOT / "src"))
 
-from omnibase_infra.runtime.models.enum_bifrost_lane_locale import (
-    EnumBifrostLaneLocale,
-)
 from omnibase_infra.runtime.models.model_bifrost_lane_overlay import (
     ModelBifrostLaneOverlay,
+)
+from tests.helpers.lane_overlay_fixtures import (
+    LANE_OVERLAY_MOUNT,
+    LANE_OVERLAY_TARGET,
+    lane_overlay_mounts,
+    load_compose,
 )
 
 
 def _load(path: Path) -> ModelBifrostLaneOverlay:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     return ModelBifrostLaneOverlay.model_validate(raw)
-
-
-def test_dev_overlay_carries_every_parity_fixture_binding_unchanged() -> None:
-    """Infra's real binding and the shared parser fixture cannot drift.
-
-    OMN-17099: a lab lane may now ADD a backend (a lab host registered by a
-    lane-overlay-only change), so the dev overlay is a SUPERSET of the fixture
-    rather than equal to it. Every binding the fixture pins must still appear in
-    the dev overlay byte-for-byte in meaning, and the header fields must agree.
-    """
-    overlay = _load(OVERLAY_YAML)
-    fixture = _load(PARITY_FIXTURE)
-
-    assert (overlay.schema_version, overlay.lane, overlay.locale) == (
-        fixture.schema_version,
-        fixture.lane,
-        fixture.locale,
-    )
-    overlay_bindings = {
-        binding.backend_key: binding.model_dump(mode="json")
-        for binding in overlay.backends
-    }
-    for binding in fixture.backends:
-        assert overlay_bindings.get(binding.backend_key) == binding.model_dump(
-            mode="json"
-        ), binding.backend_key
-
-    # OMN-16833: the lane serves more than one local rung, so these are pinned
-    # per-backend rather than as single-valued sets.
-    by_id = {binding.backend_key: binding for binding in overlay.backends}
-    assert set(by_id) >= {"local-coder", "local-heavy-reasoning"}
-
-    # OMN-18626: the served id is read from the RECORDED PROBE, not restated.
-    # A literal here is a second copy of a value that already lives in the
-    # overlay, and two copies of a wrong value
-    # agree with each other perfectly -- which is how the .201 served id stayed
-    # wrong through two flips while every static test passed. The probe fixture
-    # is the only site in this repo with an EXTERNAL referent: it is a
-    # transcript of what the endpoint answered. Pin to that.
-    served_by_endpoint = {
-        probe["endpoint"]: probe["served_model_ids"]
-        for probe in json.loads(PROBE_FIXTURE.read_text(encoding="utf-8"))["probes"]
-    }
-    for backend_key in ("local-coder", "local-heavy-reasoning"):
-        binding = by_id[backend_key]
-        assert binding.endpoint_url == "http://192.168.86.201:8000/v1/chat/completions"
-        assert (
-            binding.advertised_model
-            in served_by_endpoint["http://192.168.86.201:8000/v1/models"]
-        ), (
-            f"{backend_key} advertises {binding.advertised_model!r}, which the "
-            f"recorded /v1/models readback does not list. Re-probe the endpoint "
-            f"and update tests/fixtures/bifrost_served_models_probe.json in the "
-            f"same commit as the lane overlay."
-        )
-        # OMN-18570: parameter_count is NOT restated here. This assertion
-        # carried "27B" for two weeks after the endpoint moved off the Qwen3.8
-        # 27B, agreeing with an overlay that was also wrong; the served id is
-        # its referent, checked by test_bifrost_parameter_count_matches_served_id.
-        assert binding.context_window == 131_072
 
 
 def test_bifrost_lane_has_no_dotenv_sidecar_or_renderer() -> None:
@@ -132,10 +71,13 @@ def test_compose_mounts_typed_overlay_without_model_endpoint_env_wiring() -> Non
     for service_name in _RUNTIME_SERVICES:
         service = services[service_name]
         assert "env_file" not in service
-        assert (
-            "./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro"
-            in service["volumes"]
+        assert service["environment"]["BIFROST_LANE_OVERLAY_PATH"] == (
+            LANE_OVERLAY_TARGET
         )
+    assert lane_overlay_mounts(COMPOSE_INFRA) == {
+        service: [LANE_OVERLAY_MOUNT]
+        for service in _RUNTIME_SERVICES | {"tenant-projection-writer"}
+    }
 
 
 def test_receipt_mode_has_no_legacy_home_dotenv_loader() -> None:
@@ -166,11 +108,8 @@ def test_renderer_has_no_legacy_source_or_reseed_compatibility() -> None:
 
 LANE_OVERLAYS_DIR = ROOT / "docker" / "lane-overlays"
 COMPOSE_STABILITY = ROOT / "docker" / "docker-compose.stability-test.yml"
-_DEV_OVERLAY_PIN = "/app/config/delegation/dev.bifrost.yaml"
-#: Standalone single-lane compose files that render the Bifrost contract
-#: (their runtime env sets a non-empty BIFROST_CONTRACT_PATH). Each must pin
-#: and mount ITS OWN overlay. docker-compose.prod.yml and dev-lane.yml layer
-#: docker-compose.infra.yml and inherit the dev pin + mount from its anchor.
+#: Standalone recipes render the Bifrost contract and bind their project's
+#: overlay at the shared target. Layered recipes inherit the base environment.
 _STANDALONE_RENDERING_LANE_FILES = {
     "judge": ROOT / "docker" / "docker-compose.judge.yml",
     "lakshman": ROOT / "docker" / "docker-compose.lakshman.yml",
@@ -189,135 +128,50 @@ def test_renderer_has_no_default_lane_overlay_path() -> None:
     assert "BIFROST_LANE_OVERLAY_PATH" in renderer_source
 
 
-def test_every_lane_overlay_is_typed_and_named_for_its_lane() -> None:
-    """Each overlay file parses against the v2 schema and its ``lane`` field
-    matches its filename, so a lane can never mount a file that attributes its
-    rendered contract to a different lane."""
-    overlays = sorted(LANE_OVERLAYS_DIR.glob("*.bifrost.yaml"))
-    assert {path.name for path in overlays} >= {
-        "dev.bifrost.yaml",
-        "judge.bifrost.yaml",
-        "lakshman.bifrost.yaml",
-        "onex-dev.bifrost.yaml",
-    }
-    for path in overlays:
-        overlay = _load(path)
-        expected_lane = path.name.removesuffix(".bifrost.yaml")
-        assert overlay.lane == expected_lane, (
-            f"{path.name} declares lane {overlay.lane!r}; the filename says "
-            f"{expected_lane!r} — a mis-attributed overlay is exactly the "
-            "cross-lane confusion OMN-17150 removed"
-        )
+def test_shipped_overlay_directory_contains_only_a_typed_local_template() -> None:
+    """Deployment overlays are private; the shipped template names its local lane."""
+    assert sorted(LANE_OVERLAYS_DIR.glob("*.bifrost.yaml")) == []
+    overlay = _load(LANE_OVERLAYS_DIR / "local.bifrost.example.yaml")
+    assert overlay.lane == "local"
 
 
 def test_dev_runtime_anchor_pins_the_overlay_it_mounts() -> None:
     data = yaml.safe_load(COMPOSE_INFRA.read_text(encoding="utf-8"))
     anchor = data["x-runtime-env"]
-    assert anchor["BIFROST_LANE_OVERLAY_PATH"] == _DEV_OVERLAY_PIN
+    assert anchor["BIFROST_LANE_OVERLAY_PATH"] == LANE_OVERLAY_TARGET
 
 
-def test_stability_lane_mounts_the_dev_overlay_at_the_pinned_path() -> None:
-    """stability-test layers infra.yml, inheriting the dev pin — sharing the
-    dev binding is a deliberate, legible decision, so the mount must provide
-    the file at exactly the pinned path for every runtime-kernel service.
-
-    FOUR since OMN-18114: the three shared kernels plus the tenant-projection
-    carrier, which overrides its `volumes:` wholesale (it needs a lane-scoped
-    state root) and would therefore LOSE this mount silently if the override
-    omitted it. An exact count rather than a `>=` is the point — a service
-    dropping out of the pin is the regression this asserts against, and an
-    inequality would not see it.
-    """
-    text = COMPOSE_STABILITY.read_text(encoding="utf-8")
-    mount = f"./lane-overlays/dev.bifrost.yaml:{_DEV_OVERLAY_PIN}:ro"
-    assert text.count(mount) == 4
+def test_stability_lane_mounts_the_overlay_at_the_pinned_path() -> None:
+    """All four runtime services, including the carrier, bind the shared path."""
+    runtime_services = _RUNTIME_SERVICES | {"tenant-projection-writer"}
+    assert lane_overlay_mounts(COMPOSE_STABILITY) == {
+        service: [LANE_OVERLAY_MOUNT] for service in runtime_services
+    }
+    base_environment = load_compose(COMPOSE_INFRA)["x-runtime-env"]
+    services = load_compose(COMPOSE_STABILITY)["services"]
+    for service in runtime_services:
+        environment = {**base_environment, **services[service]["environment"]}
+        assert environment["BIFROST_LANE_OVERLAY_PATH"] == LANE_OVERLAY_TARGET
 
 
 def test_standalone_lane_files_pin_and_mount_their_own_overlay() -> None:
-    """A standalone lane that renders must pin and mount ITS lane's overlay —
-    never reach for another lane's file (the OMN-17150 class)."""
-    for lane, path in _STANDALONE_RENDERING_LANE_FILES.items():
-        text = path.read_text(encoding="utf-8")
-        container_path = f"/app/config/delegation/{lane}.bifrost.yaml"
-
-        assert f"BIFROST_LANE_OVERLAY_PATH: {container_path}" in text, (
-            f"{path.name} must pin {container_path} in its runtime env anchor"
-        )
-        mount = f"./lane-overlays/{lane}.bifrost.yaml:{container_path}:ro"
-        assert text.count(mount) == 2, (
-            f"{path.name} must mount the {lane} overlay on both runtime "
-            "services (main + effects)"
-        )
-        assert "dev.bifrost.yaml" not in text, (
-            f"{path.name} references the dev lane's overlay — a standalone "
-            "lane must carry its own"
-        )
-        assert (LANE_OVERLAYS_DIR / f"{lane}.bifrost.yaml").is_file()
+    """Each standalone recipe binds its project's overlay at the shared path."""
+    runtime_services = {"omninode-runtime", "runtime-effects"}
+    for path in _STANDALONE_RENDERING_LANE_FILES.values():
+        assert lane_overlay_mounts(path) == {
+            service: [LANE_OVERLAY_MOUNT] for service in runtime_services
+        }
+        services = load_compose(path)["services"]
+        for service in runtime_services:
+            assert services[service]["environment"]["BIFROST_LANE_OVERLAY_PATH"] == (
+                LANE_OVERLAY_TARGET
+            )
 
 
-# ---------------------------------------------------------------------------
-# OMN-17502: execution locale. Every overlay states where its lane runs, and a
-# CLOUD lane states its zero local backends as a fact rather than mounting
-# another lane's lab bindings to satisfy a schema.
-# ---------------------------------------------------------------------------
-
-_CLOUD_OVERLAY = LANE_OVERLAYS_DIR / "onex-dev.bifrost.yaml"
-#: Lanes whose runtime is the .201/.200 lab itself.
-_LAB_LANE_OVERLAYS = ("dev", "judge", "lakshman")
-
-
-def test_onex_dev_overlay_is_cloud_only_with_zero_local_backends() -> None:
-    """The onex-dev lane is cloud-only (beta axiom 9: cloud execution locale,
-    BYOK), and the .201/.200 lab endpoints are not reachable from the cluster.
-    Its overlay must say exactly that — not carry a lab binding it cannot use."""
-    overlay = _load(_CLOUD_OVERLAY)
-
-    assert overlay.lane == "onex-dev"
-    assert overlay.locale is EnumBifrostLaneLocale.CLOUD
-    assert overlay.backends == ()
-
-    # No lab endpoint may appear anywhere in the file, comments included: a
-    # cloud lane that names one is advertising a rung it cannot reach, which is
-    # the OMN-17150 defect class done explicitly (OMN-17502).
-    text = _CLOUD_OVERLAY.read_text(encoding="utf-8")
-    assert "chat/completions" not in text
-    for backend_key in sorted(_lab_backend_keys()):
-        assert backend_key not in text
-
-
-def _lab_backend_keys() -> set[str]:
-    """Every backend id any committed lab lane overlay binds."""
-    return {
-        binding.backend_key
-        for lane in _LAB_LANE_OVERLAYS
-        for binding in _load(LANE_OVERLAYS_DIR / f"{lane}.bifrost.yaml").backends
-    }
-
-
-def test_lab_lane_overlays_declare_the_lab_locale_and_bind_the_routed_rungs() -> None:
-    """Every lab lane states its locale and binds the rungs routing depends on.
-
-    OMN-17099 removed the set-equality rule against a list shipped in the
-    product; the renderer now derives the required set from the base contract.
-    The committed lab overlays still bind the two .201 rungs every task class
-    routes through, stated here so a lane dropping one fails before a render.
-    """
-    assert _lab_backend_keys() >= {"local-coder", "local-heavy-reasoning"}
-    for lane in _LAB_LANE_OVERLAYS:
-        overlay = _load(LANE_OVERLAYS_DIR / f"{lane}.bifrost.yaml")
-        assert overlay.locale is EnumBifrostLaneLocale.LAB, lane
-        assert {binding.backend_key for binding in overlay.backends} >= {
-            "local-coder",
-            "local-heavy-reasoning",
-        }, lane
-
-
-def test_every_lane_overlay_declares_an_explicit_locale() -> None:
-    """No overlay may inherit its locale: the model has no default, so a file
-    that omits it fails to parse here rather than defaulting to lab."""
-    for path in sorted(LANE_OVERLAYS_DIR.glob("*.bifrost.yaml")):
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-        assert "locale" in raw, f"{path.name} does not state its execution locale"
-        assert raw["locale"] in {member.value for member in EnumBifrostLaneLocale}, (
-            f"{path.name} declares an unknown locale {raw['locale']!r}"
-        )
+def test_local_template_declares_an_explicit_locale() -> None:
+    """The template states its locale instead of relying on a model default."""
+    raw = yaml.safe_load(
+        (LANE_OVERLAYS_DIR / "local.bifrost.example.yaml").read_text(encoding="utf-8")
+    )
+    assert "locale" in raw
+    assert raw["locale"] == "lab"

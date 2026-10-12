@@ -11,7 +11,8 @@
 #   - 2026-06-11: prod runtime containers + broker network silently absent, no alert
 #
 # This script gathers the live docker inventory, diffs it against the versioned
-# lane manifest (deploy/lane-census/lane-manifest.yaml) via the pure planner
+# lane manifest (config/lab/lane-census/lane-manifest.yaml under the workspace
+# config root, private since OMN-20934) via the pure planner
 # (scripts/lane_census_plan.py), and on drift publishes a typed bus event
 # (scripts/lane_census_event.py) so the sweep auto-ticket path opens a Linear
 # ticket naming exactly what is missing/extra.
@@ -51,12 +52,15 @@
 # produce a file that gate accepts. The snapshot the gate reads is the typed
 # EVENT document, and `--snapshot` is the only supported way to write it:
 #
-#   ./scripts/lane-census-check.sh --snapshot deploy/lane-census/census-snapshot.json
+#   ./scripts/lane-census-check.sh --snapshot "$ONEX_WORKSPACE_CONFIG_ROOT/config/lab/lane-census/census-snapshot.json"
 #
 # `--snapshot` writes the file whether or not there is drift, and leaves the
 # drift verdict and exit code below untouched.
 #
-# Exit codes: 0 no drift, 30 drift detected (event emitted), 2 bad args, 3 missing deps,
+# Exit codes: 0 no drift, 30 drift detected (event emitted), 2 bad args, 3 missing deps
+#             (an interpreter without PyYAML, or no lane manifest under
+#             ONEX_WORKSPACE_CONFIG_ROOT/config/lab/lane-census and no
+#             LANE_MANIFEST. OMN-20934),
 #             4 inventory unobservable (BOTH Engine API and bounded CLI failed —
 #               fail-loud, NO drift event; deliberately distinct from 30 so a host
 #               we cannot see is never reported as a host that is down. OMN-15466),

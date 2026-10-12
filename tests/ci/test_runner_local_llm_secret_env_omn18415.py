@@ -12,7 +12,7 @@ defect (OMN-18409) then laundered that hard failure into a non-blocking
 ``degraded`` verdict, so the gate reported reviews it had never performed.
 
 Coverage:
-- Every one of the 60 ``omninode-runner-N`` fleet services -- config-resolved
+- Every one of the 26 fleet services in both pool files -- config-resolved
   through the real YAML merge keys, never regexed -- carries the key.
 - The interpolation is FAIL-CLOSED (``:?``), not a soft default. An empty
   value still satisfies the transport's "is it set" check and yields a wrong
@@ -55,7 +55,8 @@ SECRET_ENV_VAR = "LOCAL_LLM_SHARED_SECRET"
 CIDR_ENV_VAR = "LLM_ENDPOINT_CIDR_ALLOWLIST"
 REQUIRED_REVIEWER_ENV_VARS = (SECRET_ENV_VAR, CIDR_ENV_VAR)
 # OMN-18411: fleet capped 88 -> 60.
-FLEET_SERVICE_COUNT = 60
+# OMN-19077: the primary host's pool cut 44 -> 10, so the fleet is 10 + 16.
+FLEET_SERVICE_COUNT = 26
 # OMN-19895: the 60 are spread across two hosts -- 44 in the primary file and
 # 16 in .202's pool file -- and every one of them carries the same wiring, so
 # both files are read as one fleet here.

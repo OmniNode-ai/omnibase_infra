@@ -51,8 +51,8 @@
 # by the compose project -- so all four are re-namespaced together.
 #
 # Guarded by tests/unit/docker/test_e2e_compose_lane_isolation.py, which
-# derives the protected lane namespaces from deploy/lane-census/lane-manifest.yaml
-# and the lane compose files rather than hardcoding them.
+# derives the protected lane namespaces from the lab's lane manifest (private
+# config, OMN-20934) and the lane compose files rather than hardcoding them.
 # ==========================================================================
 name: ${OMNIBASE_INFRA_COMPOSE_PROJECT:-omnibase-infra-e2e}
 # ==========================================================================

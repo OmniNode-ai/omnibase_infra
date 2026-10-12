@@ -42,7 +42,7 @@
 #   * runtime-effects leaves the external omnimemory-network, which does not
 #     exist on .105;
 #   * the four runtime-kernel services mount this lane's own Bifrost overlay
-#     (docker/lane-overlays/dev-105.bifrost.yaml: cloud locale, no local model
+#     (its private overlay: cloud locale, no local model
 #     rung), never the dev lane's, which binds the .201 model server;
 #   * host credential mounts (Vertex token, Codex and Claude logins) are pinned
 #     to /dev/null; this lane carries no operator login.
@@ -84,6 +84,20 @@ x-omninode-contract-overlay:
   dev-105-redpanda:
     advertised_kafka_addr: &dev_105_redpanda_advertised_kafka_addr "internal://redpanda:9092,external://127.0.0.1:43192"
     advertised_pandaproxy_addr: &dev_105_redpanda_advertised_pandaproxy_addr "internal://redpanda:8082,external://127.0.0.1:43182"
+# OMN-20932: a lane's Bifrost overlay is private deployment config; this
+# repository ships none (only lane-overlays/local.bifrost.example.yaml, the
+# neutral template). Every runtime service mounts the overlay named for its
+# compose project from ONEX_LANE_OVERLAY_DIR at one lane-neutral path, and
+# compose refuses when the directory is unset or the file is absent. The deploy
+# paths resolve the directory (scripts/runtime_build/compose_files.sh and the
+# deploy agent's _compose_env).
+x-lane-overlay-mount: &lane-overlay-mount
+  type: bind
+  source: "${ONEX_LANE_OVERLAY_DIR:?ONEX_LANE_OVERLAY_DIR must name the directory holding your COMPOSE_PROJECT_NAME.bifrost.yaml (config/lab/lane-overlays under ONEX_WORKSPACE_CONFIG_ROOT); this repository ships no lab lane overlay}/${COMPOSE_PROJECT_NAME}.bifrost.yaml"
+  target: /app/config/delegation/lane.bifrost.yaml
+  read_only: true
+  bind:
+    create_host_path: false
 services:
   postgres:
     container_name: omnibase-infra-dev-105-postgres
@@ -186,14 +200,14 @@ services:
     environment:
       ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
       ONEX_RUNTIME_LANE: "compose-dev-105"
-      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-105.bifrost.yaml
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/lane.bifrost.yaml
     ports: !override
       - "127.0.0.1:43085:8085"
     volumes: !override
       - runtime_logs:/app/logs
       - runtime_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/dev-105.bifrost.yaml:/app/config/delegation/dev-105.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - /dev/null:/run/secrets/vertex_access_token:ro
   runtime-effects:
@@ -202,7 +216,7 @@ services:
       # OMN-19812: effects names its lane too (lane-scoped effects contracts, OMN-19408).
       ONEX_RUNTIME_LANE: "compose-dev-105"
       ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
-      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-105.bifrost.yaml
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/lane.bifrost.yaml
       # OMN-20533: docker-compose.dev-lane.yml binds runtime-effects to the .201
       # dev lane's tenant-credential READ config and its own Infisical identity.
       # This lane holds no such identity, so it rebinds the house-only config
@@ -232,31 +246,31 @@ services:
       - effects_logs:/app/logs
       - effects_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/dev-105.bifrost.yaml:/app/config/delegation/dev-105.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - /dev/null:/run/secrets/vertex_access_token:ro
   runtime-worker:
     container_name: omninode-dev-105-runtime-worker
     environment:
       ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
-      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-105.bifrost.yaml
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/lane.bifrost.yaml
     volumes: !override
       - worker_logs:/app/logs
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/dev-105.bifrost.yaml:/app/config/delegation/dev-105.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
   tenant-projection-writer:
     container_name: omnimarket-dev-105-tenant-projection-writer
     environment:
       ONEX_TRAJECTORY_EVALUATION_BACKEND: "off"
-      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/dev-105.bifrost.yaml
+      BIFROST_LANE_OVERLAY_PATH: /app/config/delegation/lane.bifrost.yaml
     labels:
       com.omninode.lane: dev-105
     volumes: !override
       - tenant_projection_logs:/app/logs
       - tenant_projection_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/dev-105.bifrost.yaml:/app/config/delegation/dev-105.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
   projection-api:
     container_name: omnimarket-dev-105-projection-api

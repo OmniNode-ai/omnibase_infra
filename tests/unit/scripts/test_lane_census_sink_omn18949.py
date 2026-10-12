@@ -30,10 +30,18 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.helpers.lane_census_fixtures import (
+    NEUTRAL_MANIFEST,
+    generator_consistent_manifest,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = REPO_ROOT / "deploy" / "maintenance" / "omninode-system-slack-report.sh"
 CHECKER = REPO_ROOT / "scripts" / "check_lane_census_drift.py"
-MANIFEST = REPO_ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
+# OMN-20934: the lab's manifest is private config; the probe reads the neutral
+# one, with a stub for every lane the table generator maps so the checker's
+# generator-map rules agree with it (see generator_consistent_manifest).
+MANIFEST = NEUTRAL_MANIFEST
 
 pytestmark = pytest.mark.unit
 
@@ -134,7 +142,9 @@ def _run(tmp_path: Path, **extra: str) -> str:
             "OMNINODE_FLEET_PROBE_ENABLED": "0",
             # The census probe is the subject, so it is ON.
             "OMNINODE_CENSUS_PROBE_ENABLED": "1",
-            "OMNINODE_CENSUS_MANIFEST": str(MANIFEST),
+            "OMNINODE_CENSUS_MANIFEST": str(
+                generator_consistent_manifest(tmp_path / "lane-manifest.yaml")
+            ),
             "OMNINODE_CENSUS_CHECKER": str(CHECKER),
             # The checker parses YAML, so it needs an interpreter with PyYAML.
             # The host's bare python3 may not have one, which is exactly why the

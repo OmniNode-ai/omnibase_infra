@@ -10,6 +10,7 @@ import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 import yaml
@@ -46,9 +47,64 @@ from omnibase_infra.runtime.rsd_live_delegation_overlay import (
     prepare_rsd_live_delegation_authority,
 )
 
-_ROOT = Path(__file__).parents[3]
-_OVERLAY_PATH = _ROOT / "docker/lane-overlays/dev.rsd-live-delegation.yaml"
-_POSTGRES_OVERLAY_PATH = _ROOT / "docker/lane-overlays/dev.rsd-postgres-acceptance.yaml"
+_OVERLAY_TEXT = """\
+# OMN-17861: Inert RSD live-delegation composition. Capability identifiers are
+# opaque names only; none is resolved by this record or by its pure preflight.
+schema_version: rsd_live_delegation_overlay.v1
+lane: dev
+locale: lab
+execute_enabled: false
+rsd_distribution_ref: omninode-rsd/0.1.0
+public_rsd_revision_sha: 3177c31ed7db4e5551e93dadfd0f9a034728b8ab
+delegation_policy_schema: rsd.delegation-overlay.v1
+dispatch_outcome_schema: rsd.dispatch-outcome-attestation.v1
+claim_binding_schema: rsd.delegation-claim-binding.v1
+route_ref: logical://delegation/qwen3.8-27b
+backend_id: local-coder
+model_id: Qwen/Qwen3.8-27B
+dispatch_policy: backend-pinned-single-attempt.v1
+one_shot_endpoint_capability_ref: capability://rsd/one-shot-dispatch/inert
+root_authority_capability_ref: capability://rsd/root-authority/inert
+root_authority_key_id: 00000000-0000-4000-8000-000000000001
+root_authority_public_key_fingerprint_sha256: 8345171ccec637fe7fb72786bcde5a8a8517a393ed65ead3104cc920abb37bb9
+result_attestor_signer_capability_ref: capability://rsd/result-attestor/signer
+result_attestor_key_capability_ref: capability://rsd/result-attestor/key
+result_attestor_fingerprint_capability_ref: capability://rsd/result-attestor/fingerprint
+result_attestor_key_id: 00000000-0000-4000-8000-000000000002
+result_attestor_public_key_fingerprint_sha256: 24f6ed6acbfe1009c030d7ca567c33ca4830911498236b5561a6c82abec5de28
+postgres_capability_ref: capability://rsd/postgres/acceptance
+observed_model_attestation_capability_ref: capability://rsd/model-attestation/inert
+observed_model_id: Qwen3.6-35B-A3B
+observed_model_attestation_sha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+model_match_status: model_id_mismatch
+authority_envelope:
+  schema_version: rsd.live-delegation-authority-envelope.v1
+  authority_domain: omninode-rsd.inert-live-delegation.v1
+  authority_root_id: 00000000-0000-4000-8000-000000000001
+  authority_root_public_key_fingerprint_sha256: 8345171ccec637fe7fb72786bcde5a8a8517a393ed65ead3104cc920abb37bb9
+  overlay_schema_version: rsd_live_delegation_overlay.v1
+  overlay_digest_sha256: ee7a3fed3212c8dbdd387b5dcfd776b14e40c3757102cbc693a7e464b9455fbc
+  delegation_policy_schema: rsd.delegation-overlay.v1
+  dispatch_outcome_schema: rsd.dispatch-outcome-attestation.v1
+  claim_binding_schema: rsd.delegation-claim-binding.v1
+  route_ref: logical://delegation/qwen3.8-27b
+  backend_id: local-coder
+  model_id: Qwen/Qwen3.8-27B
+  attestor_key_id: 00000000-0000-4000-8000-000000000002
+  attestor_public_key_fingerprint_sha256: 24f6ed6acbfe1009c030d7ca567c33ca4830911498236b5561a6c82abec5de28
+  observed_model_id: Qwen3.6-35B-A3B
+  observed_model_attestation_sha256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  issued_at: "2026-01-01T00:00:00Z"
+  expires_at: "2030-01-01T00:00:00Z"
+  signature_base64: N9Eiaa5K2V9Ay9uS09n8Gh-KmtdsiOjle1bypnfa_CEj1y-zZkvMulCu5ZlHHLSZ364R_qeoX9pejwGHI_ijCw==
+"""
+_POSTGRES_OVERLAY_TEXT = """\
+schema_version: rsd_postgres_acceptance_overlay.v1
+lane: dev
+locale: lab
+rsd_distribution_ref: omninode-rsd/0.1.0
+postgres_capability_ref: capability://rsd/postgres/acceptance
+"""
 _NOW = datetime(2026, 9, 4, tzinfo=UTC)
 _STATIC_ROOT = base64.urlsafe_b64decode("H2zlhxa8wHzcxiYxsm5pPkwnd-KQP7qhF8xlXyLNqMU=")
 _STATIC_ATTESTOR = base64.urlsafe_b64decode(
@@ -68,12 +124,14 @@ class _KeyProvider:
         return self._nodes.get(node_id)
 
 
-def _overlay() -> ModelRsdLiveDelegationOverlay:
-    return load_rsd_live_delegation_overlay(_OVERLAY_PATH)
+def _overlay(tmp_path: Path) -> ModelRsdLiveDelegationOverlay:
+    path = tmp_path / "live-delegation.yaml"
+    path.write_text(_OVERLAY_TEXT, encoding="utf-8")
+    return load_rsd_live_delegation_overlay(path)
 
 
 def _postgres_overlay() -> ModelRsdPostgresAcceptanceOverlay:
-    raw = yaml.safe_load(_POSTGRES_OVERLAY_PATH.read_text(encoding="utf-8"))
+    raw = yaml.safe_load(_POSTGRES_OVERLAY_TEXT)
     return ModelRsdPostgresAcceptanceOverlay.model_validate(raw, strict=True)
 
 
@@ -108,9 +166,11 @@ def _static_provider(overlay: ModelRsdLiveDelegationOverlay) -> _KeyProvider:
     )
 
 
-def _signed_overlay() -> tuple[ModelRsdLiveDelegationOverlay, _KeyProvider]:
+def _signed_overlay(
+    tmp_path: Path,
+) -> tuple[ModelRsdLiveDelegationOverlay, _KeyProvider]:
     """Create test-only keys; only non-secret fingerprints enter the overlay."""
-    template = _overlay().model_dump(mode="json")
+    template = _overlay(tmp_path).model_dump(mode="json")
     root_private = Ed25519PrivateKey.generate()
     root = root_private.public_key().public_bytes_raw()
     attestor = Ed25519PrivateKey.generate().public_key().public_bytes_raw()
@@ -155,9 +215,11 @@ def _prepare(
 
 
 @pytest.mark.unit
-def test_overlay_is_inert_pinned_and_contains_no_key_bytes_or_topology() -> None:
-    overlay = _overlay()
-    text = _OVERLAY_PATH.read_text(encoding="utf-8")
+def test_overlay_is_inert_pinned_and_contains_no_key_bytes_or_topology(
+    tmp_path: Path,
+) -> None:
+    overlay = _overlay(tmp_path)
+    text = _OVERLAY_TEXT
     assert overlay.execute_enabled is False
     assert overlay.model_match_status == "model_id_mismatch"
     assert "issuer_public_key" not in text
@@ -169,8 +231,10 @@ def test_overlay_is_inert_pinned_and_contains_no_key_bytes_or_topology() -> None
 
 
 @pytest.mark.unit
-def test_static_overlay_uses_stable_canonical_json_digest_and_uuid4_key_ids() -> None:
-    overlay = _overlay()
+def test_static_overlay_uses_stable_canonical_json_digest_and_uuid4_key_ids(
+    tmp_path: Path,
+) -> None:
+    overlay = _overlay(tmp_path)
     assert overlay_digest_sha256(overlay) == (
         "ee7a3fed3212c8dbdd387b5dcfd776b14e40c3757102cbc693a7e464b9455fbc"
     )
@@ -202,9 +266,9 @@ def test_static_overlay_uses_stable_canonical_json_digest_and_uuid4_key_ids() ->
     ],
 )
 def test_key_ids_reject_noncanonical_uuid4_json_values(
-    invalid_key_id: str, path: tuple[str, ...]
+    tmp_path: Path, invalid_key_id: str, path: tuple[str, ...]
 ) -> None:
-    candidate = _overlay().model_dump(mode="json")
+    candidate = _overlay(tmp_path).model_dump(mode="json")
     target: dict[str, object] = candidate
     for key in path[:-1]:
         target = target[key]  # type: ignore[assignment,index]
@@ -245,9 +309,10 @@ def test_result_anchor_and_missing_refs_are_strictly_canonical() -> None:
     ],
 )
 def test_authority_signature_rejects_noncanonical_or_wrong_length_values(
+    tmp_path: Path,
     signature: str,
 ) -> None:
-    candidate = _overlay().model_dump(mode="json")
+    candidate = _overlay(tmp_path).model_dump(mode="json")
     candidate["authority_envelope"]["signature_base64"] = signature
     with pytest.raises(ValidationError):
         ModelRsdLiveDelegationOverlay.model_validate_json(
@@ -257,8 +322,10 @@ def test_authority_signature_rejects_noncanonical_or_wrong_length_values(
 
 @pytest.mark.unit
 @pytest.mark.parametrize("domain", ["https://invalid.example", "192.0.2.1", "lab-host"])
-def test_authority_domain_rejects_url_ip_and_host_like_inputs(domain: str) -> None:
-    candidate = _overlay().model_dump(mode="python")
+def test_authority_domain_rejects_url_ip_and_host_like_inputs(
+    tmp_path: Path, domain: str
+) -> None:
+    candidate = _overlay(tmp_path).model_dump(mode="python")
     candidate["authority_envelope"]["authority_domain"] = domain
     with pytest.raises(ValidationError):
         ModelRsdLiveDelegationOverlay.model_validate(candidate, strict=True)
@@ -278,9 +345,10 @@ def test_authority_domain_rejects_url_ip_and_host_like_inputs(domain: str) -> No
     ],
 )
 def test_capability_references_reject_noncanonical_or_topological_values(
+    tmp_path: Path,
     reference: str,
 ) -> None:
-    overlay = _overlay()
+    overlay = _overlay(tmp_path)
     candidate = overlay.model_dump(mode="python")
     candidate["one_shot_endpoint_capability_ref"] = reference
     with pytest.raises(ValidationError):
@@ -293,8 +361,10 @@ def test_capability_references_reject_noncanonical_or_topological_values(
 
 
 @pytest.mark.unit
-def test_static_authority_derives_anchor_only_from_injected_provider_keys() -> None:
-    overlay = _overlay()
+def test_static_authority_derives_anchor_only_from_injected_provider_keys(
+    tmp_path: Path,
+) -> None:
+    overlay = _overlay(tmp_path)
     provider = _static_provider(overlay)
     sealed, prepared = _prepare(overlay, provider)
     result = preflight_rsd_live_delegation_overlay(
@@ -325,8 +395,10 @@ def test_static_authority_derives_anchor_only_from_injected_provider_keys() -> N
         "delegation_policy_schema",
     ],
 )
-def test_verifier_fails_closed_for_forged_semantic_authority(field: str) -> None:
-    overlay, provider = _signed_overlay()
+def test_verifier_fails_closed_for_forged_semantic_authority(
+    tmp_path: Path, field: str
+) -> None:
+    overlay, provider = _signed_overlay(tmp_path)
     value = "d" * 64 if field == "overlay_digest_sha256" else "forged"
     authority = ModelRsdLiveDelegationAuthorityEnvelope.model_construct(
         **(overlay.authority_envelope.model_dump(mode="python") | {field: value})
@@ -339,8 +411,8 @@ def test_verifier_fails_closed_for_forged_semantic_authority(field: str) -> None
 
 
 @pytest.mark.unit
-def test_root_and_attestor_substitution_and_self_sign_fail() -> None:
-    overlay, provider = _signed_overlay()
+def test_root_and_attestor_substitution_and_self_sign_fail(tmp_path: Path) -> None:
+    overlay, provider = _signed_overlay(tmp_path)
     attacker = Ed25519PrivateKey.generate()
     attacker_root = attacker.public_key().public_bytes_raw()
     with pytest.raises(
@@ -376,8 +448,8 @@ def test_root_and_attestor_substitution_and_self_sign_fail() -> None:
 
 
 @pytest.mark.unit
-def test_pure_preflight_rejects_expired_or_unsealed_receipts() -> None:
-    overlay, provider = _signed_overlay()
+def test_pure_preflight_rejects_expired_or_unsealed_receipts(tmp_path: Path) -> None:
+    overlay, provider = _signed_overlay(tmp_path)
     sealed, prepared = _prepare(overlay, provider)
     expired = preflight_rsd_live_delegation_overlay(
         overlay,
@@ -402,12 +474,12 @@ def test_pure_preflight_rejects_expired_or_unsealed_receipts() -> None:
         in fabricated.failures
     )
     with pytest.raises(TypeError, match="minted by preparation"):
-        SealedRsdLiveDelegationAuthorityReceipt()  # type: ignore[call-arg]
+        SealedRsdLiveDelegationAuthorityReceipt()
 
 
 @pytest.mark.unit
-def test_preparation_rejects_current_attestor_substitution() -> None:
-    overlay, provider = _signed_overlay()
+def test_preparation_rejects_current_attestor_substitution(tmp_path: Path) -> None:
+    overlay, provider = _signed_overlay(tmp_path)
     changed = _KeyProvider(
         provider._roots, {str(overlay.result_attestor_key_id): b"x" * 32}
     )
@@ -416,8 +488,10 @@ def test_preparation_rejects_current_attestor_substitution() -> None:
 
 
 @pytest.mark.unit
-def test_preparation_rejects_rotated_root_before_emitting_receipt() -> None:
-    overlay, provider = _signed_overlay()
+def test_preparation_rejects_rotated_root_before_emitting_receipt(
+    tmp_path: Path,
+) -> None:
+    overlay, provider = _signed_overlay(tmp_path)
     rotated_root = Ed25519PrivateKey.generate().public_key().public_bytes_raw()
     with pytest.raises(ProtocolConfigurationError, match="root is unavailable"):
         _prepare(
@@ -430,8 +504,8 @@ def test_preparation_rejects_rotated_root_before_emitting_receipt() -> None:
 
 
 @pytest.mark.unit
-def test_preflight_rejects_a_sentinel_forged_receipt() -> None:
-    overlay, provider = _signed_overlay()
+def test_preflight_rejects_a_sentinel_forged_receipt(tmp_path: Path) -> None:
+    overlay, provider = _signed_overlay(tmp_path)
     sealed, prepared = _prepare(overlay, provider)
     forged = object.__new__(SealedRsdLiveDelegationAuthorityReceipt)
     for field in (
@@ -455,7 +529,9 @@ def test_preflight_rejects_a_sentinel_forged_receipt() -> None:
 
 
 @pytest.mark.unit
-def test_preflight_uses_no_provider_and_binds_the_exact_prepared_observation() -> None:
+def test_preflight_uses_no_provider_and_binds_the_exact_prepared_observation(
+    tmp_path: Path,
+) -> None:
     class _CountingProvider(_KeyProvider):
         root_calls: int = 0
         attestor_calls: int = 0
@@ -468,7 +544,7 @@ def test_preflight_uses_no_provider_and_binds_the_exact_prepared_observation() -
             self.attestor_calls += 1
             return super().get_node_identity_key(node_id)
 
-    overlay = _overlay()
+    overlay = _overlay(tmp_path)
     provider = _CountingProvider(
         {overlay.authority_envelope.authority_domain: _STATIC_ROOT},
         {str(overlay.result_attestor_key_id): _STATIC_ATTESTOR},
@@ -495,8 +571,8 @@ def test_preflight_uses_no_provider_and_binds_the_exact_prepared_observation() -
 
 
 @pytest.mark.unit
-def test_preflight_requires_a_fresh_preparation_snapshot() -> None:
-    overlay = _overlay()
+def test_preflight_requires_a_fresh_preparation_snapshot(tmp_path: Path) -> None:
+    overlay = _overlay(tmp_path)
     sealed, prepared = _prepare(overlay, _static_provider(overlay))
     result = preflight_rsd_live_delegation_overlay(
         overlay,
@@ -513,8 +589,8 @@ def test_preflight_requires_a_fresh_preparation_snapshot() -> None:
 
 
 @pytest.mark.unit
-def test_public_models_have_explicit_canonical_json_roundtrips() -> None:
-    overlay = _overlay()
+def test_public_models_have_explicit_canonical_json_roundtrips(tmp_path: Path) -> None:
+    overlay = _overlay(tmp_path)
     sealed, prepared = _prepare(overlay, _static_provider(overlay))
     result = preflight_rsd_live_delegation_overlay(
         overlay, prepared, _postgres_overlay(), sealed, now=_NOW
@@ -550,11 +626,11 @@ def test_loader_rejects_duplicate_keys_aliases_and_non_json_scalars(
 ) -> None:
     candidate = tmp_path / "invalid-overlay.yaml"
     if "authority_envelope:" in body:
-        text = _OVERLAY_PATH.read_text(encoding="utf-8").replace(
+        text = _OVERLAY_TEXT.replace(
             'issued_at: "2026-01-01T00:00:00Z"', "issued_at: 2026-01-01"
         )
     else:
-        text = _OVERLAY_PATH.read_text(encoding="utf-8") + body
+        text = _OVERLAY_TEXT + body
     candidate.write_text(text, encoding="utf-8")
     with pytest.raises(ProtocolConfigurationError):
         load_rsd_live_delegation_overlay(candidate)
@@ -601,8 +677,10 @@ def test_loader_errors_are_exactly_safe_and_do_not_expose_caller_input(
 
 
 @pytest.mark.unit
-def test_preparation_normalizes_invalid_clock_and_provider_errors() -> None:
-    overlay = _overlay()
+def test_preparation_normalizes_invalid_clock_and_provider_errors(
+    tmp_path: Path,
+) -> None:
+    overlay = _overlay(tmp_path)
 
     class _ExplodingProvider:
         def get_domain_trust_root(self, domain_id: str) -> bytes | None:
@@ -616,7 +694,7 @@ def test_preparation_normalizes_invalid_clock_and_provider_errors() -> None:
             overlay,
             _observation(overlay),
             _static_provider(overlay),
-            now="not-a-datetime",  # type: ignore[arg-type]
+            now=cast("datetime", "not-a-datetime"),
         )
     with pytest.raises(ProtocolConfigurationError):
         prepare_rsd_live_delegation_authority(
@@ -626,9 +704,10 @@ def test_preparation_normalizes_invalid_clock_and_provider_errors() -> None:
 
 @pytest.mark.unit
 def test_preparation_suppresses_provider_and_crypto_failure_causes(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    overlay = _overlay()
+    overlay = _overlay(tmp_path)
     sentinel = "secret-provider-topology-sentinel"
 
     class _ExplodingRootProvider(_KeyProvider):

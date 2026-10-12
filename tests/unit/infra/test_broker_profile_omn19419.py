@@ -15,6 +15,8 @@ import pytest
 import yaml
 from dotenv import dotenv_values
 
+from tests.helpers.lane_census_fixtures import LAB_MANIFEST
+
 _ROOT = Path(__file__).resolve().parents[3]
 _DOCKER = _ROOT / "docker"
 _PROFILE = {
@@ -23,8 +25,12 @@ _PROFILE = {
     "retention_bytes": "REDPANDA_RETENTION_BYTES",
     "memory": "REDPANDA_PROFILE_MEMORY",
 }
-_MANIFEST = yaml.safe_load(
-    (_ROOT / "deploy/lane-census/lane-manifest.yaml").read_text()
+# OMN-20934: the lane manifest is private config. Read at collection only
+# where the overlay is present; the lab_overlay cases below fail loud without it.
+_MANIFEST = (
+    yaml.safe_load(LAB_MANIFEST.read_text())
+    if LAB_MANIFEST.is_file()
+    else {"lanes": {}}
 )
 _LANES = tuple(
     name
@@ -98,6 +104,14 @@ def _render(lane: str, overrides: dict[str, str] | None = None) -> dict[str, Any
 
 
 @pytest.mark.unit
+@pytest.mark.lab_overlay
+def test_the_lab_manifest_declares_broker_lanes() -> None:
+    assert LAB_MANIFEST.is_file(), f"{LAB_MANIFEST} is absent (OMN-20934)"
+    assert _LANES, "the lab manifest declares no broker lane"
+
+
+@pytest.mark.unit
+@pytest.mark.lab_overlay
 @pytest.mark.parametrize("lane", _LANES)
 def test_broker_profile_is_shared_in_every_broker_lane(lane: str) -> None:
     services = _render(lane)["services"]
@@ -115,9 +129,7 @@ def test_broker_profile_is_shared_in_every_broker_lane(lane: str) -> None:
     assert f"--memory {env[_PROFILE['memory']]}" in command
     shared = _render("dev")["services"]["redpanda-partition-cap"]["command"]
     assert settings["command"] == shared
-    manifest = yaml.safe_load(
-        (_ROOT / "deploy/lane-census/lane-manifest.yaml").read_text()
-    )
+    manifest = yaml.safe_load(LAB_MANIFEST.read_text())
     profile = manifest["lanes"][lane]["broker_profile"]
     assert set(profile["keys"]) == set(_PROFILE)
     assert profile["settings_service"] == "redpanda-partition-cap"
