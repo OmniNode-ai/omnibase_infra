@@ -39,10 +39,9 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-escalation-deploy
-    description: The deployed runtime container imports the escalation rule this change adds.
+    description: The deployed runtime container imports the escalation rule this change adds. It reads the runtime container after the deploy agent rolls it, which a hosted runner does not have, so only the local Done gate runs it and it binds no acceptance criterion.
     source: manual
+    execution_scope: local_done_gate
     checks:
       - check_type: command
         check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.nodes.node_runtime_error_triage_effect.models.model_escalation_rule import ModelEscalationRule'
-    binds_ac:
-      - AC1
