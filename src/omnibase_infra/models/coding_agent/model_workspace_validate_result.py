@@ -13,6 +13,10 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from omnibase_infra.models.coding_agent.model_coding_agent_invoke_command import (
+    ModelCodingAgentInvokeCommand,
+)
+
 
 class ModelWorkspaceValidateResult(BaseModel):
     """Deterministic verdict of the workspace pre-flight check."""
@@ -26,6 +30,11 @@ class ModelWorkspaceValidateResult(BaseModel):
     )
     rejection_reason: str | None = Field(
         default=None, description="Why validation failed; None if valid."
+    )
+    invoke_command: ModelCodingAgentInvokeCommand = Field(
+        ...,
+        description="The invoke command this verdict gates, echoed from the "
+        "validate command so the orchestrator needs no stored state.",
     )
 
     def __bool__(self) -> bool:
