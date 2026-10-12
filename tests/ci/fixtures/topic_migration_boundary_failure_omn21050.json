@@ -1,0 +1,31 @@
+{
+  "_provenance": {
+    "source": "lab dev lane (compose project omnibase-infra): onex.evt.omnibase-infra.topic-migration-lifecycle.v1 partition 0 offset 6, read with an aiokafka consumer inside the omninode-runtime-effects container after one topic-migration-execute command (target phase DUAL_WRITE, synthetic pair onex.evt.labproof.omn21050-old.v1 to onex.evt.labproof.omn21050-new.v1) was published; the event is the runtime's own terminal for that command, trimmed of null metadata fields",
+    "captured_utc": "2026-10-12T13:24:00Z",
+    "ticket": "OMN-21050"
+  },
+  "recorded_lifecycle_event": {
+    "payload": {
+      "correlation_id": "720a23c6-9cee-4559-b20e-75a2f8de6b20",
+      "status": "failed",
+      "failure_class": "ModelOnexError",
+      "failure_code": "ONEX_CORE_095_HANDLER_EXECUTION_ERROR",
+      "retryable": true,
+      "failure_reason": "Auto-wired handler HandlerTopicMigrationExecutor does not expose a callable handle() or handle_async() dispatch entrypoint.",
+      "origin_topic": "onex.cmd.omnibase-infra.topic-migration-execute.v1",
+      "terminalized_at": "2026-10-12T13:22:53.808981Z"
+    },
+    "envelope_id": "d30fd7d0-b30f-4504-b322-941ceaca1de5",
+    "envelope_timestamp": "2026-10-12T13:22:53.808986Z",
+    "correlation_id": "720a23c6-9cee-4559-b20e-75a2f8de6b20",
+    "source_tool": "auto-wiring-boundary",
+    "target_tool": "onex.evt.omnibase-infra.topic-migration-lifecycle.v1",
+    "event_type": "omnibase-infra.topic-migration-lifecycle",
+    "payload_type": "ModelBoundaryFailureTerminal"
+  },
+  "recorded_topic_state": {
+    "topics_matching_labproof": [],
+    "lifecycle_events_for_correlation_id": 6,
+    "command_topic_copies_for_correlation_id": 6
+  }
+}

@@ -98,6 +98,21 @@ class HandlerTopicMigrationExecutor:
         )
         return compute_consumer_group_id(identity)
 
+    async def handle(
+        self,
+        request: ModelTopicMigrationCommand,
+    ) -> ModelTopicMigrationLifecycleEvent:
+        """Canonical dispatch entrypoint: advance the migration one phase.
+
+        The runtime's auto-wiring resolves ``handle_async`` or ``handle`` on the
+        handler class. Until OMN-21050 this handler exposed only ``execute``, so
+        every command on the topic-migration-execute topic was terminalized with
+        "does not expose a callable handle() or handle_async() dispatch
+        entrypoint" and no lifecycle event was emitted. The phase logic stays in
+        :meth:`execute`, unchanged.
+        """
+        return await self.execute(request)
+
     async def execute(
         self,
         command: ModelTopicMigrationCommand,

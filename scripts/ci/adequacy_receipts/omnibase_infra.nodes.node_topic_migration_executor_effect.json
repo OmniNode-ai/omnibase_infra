@@ -1,0 +1,18 @@
+{
+  "branch_coverage_pct": 80.77,
+  "candidate_count": 2,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_topic_migration_executor_effect.handlers.handler_topic_migration_executor",
+  "handler_module_sha256": "sha256:c9577fd5d89beb180dacf12d7b64d08fe6e969cbfb1c22cb92cf1a0518bce4de",
+  "meets_target": true,
+  "node_id": "omnibase_infra.nodes.node_topic_migration_executor_effect",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-10-12T13:50:00+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 2,
+  "selected_input_hashes": [
+    "sha256:ada5c4dbadd4da37e67771cbf52a85e29d8eaabdba50e024bbc698529bd7f2ce",
+    "sha256:5ff23894e27d7effeffba95ca3542644d6b9c1acd08294bb733400e55c8c638b"
+  ],
+  "volatile_mask": []
+}

@@ -1,0 +1,23 @@
+{
+  "base_ref": "ae5fca1228a34d61f76d1cbfdd1babbe64b7392d",
+  "canonical_handler_module": "omnibase_infra.nodes.node_topic_migration_executor_effect.handlers.handler_topic_migration_executor",
+  "legacy_handler_module": "omnibase_infra.nodes.node_topic_migration_executor_effect.handlers.handler_topic_migration_executor",
+  "node_id": "omnibase_infra.nodes.node_topic_migration_executor_effect",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:ada5c4dbadd4da37e67771cbf52a85e29d8eaabdba50e024bbc698529bd7f2ce",
+      "sha256:5ff23894e27d7effeffba95ca3542644d6b9c1acd08294bb733400e55c8c638b"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_topic_migration_executor_effect/test_handler_topic_migration_executor.py::test_runtime_resolves_a_dispatch_entrypoint",
+      "tests/unit/nodes/node_topic_migration_executor_effect/test_handler_topic_migration_executor.py::test_runtime_resolves_the_typed_input_model",
+      "tests/unit/nodes/node_topic_migration_executor_effect/test_handler_topic_migration_executor.py::test_dual_write_through_runtime_entrypoint_emits_dual_write_event",
+      "tests/unit/nodes/node_topic_migration_executor_effect/test_handler_topic_migration_executor.py::test_cutover_with_residual_lag_emits_no_event_through_runtime_entrypoint"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerTopicMigrationExecutor.execute"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

@@ -1,0 +1,40 @@
+schema_version: 1.0.0
+ticket_id: OMN-21050
+title: A topic-migration execute command on the dev lane reaches a DUAL_WRITE lifecycle event
+summary: The topic-migration executor handler exposes the handle() dispatch entrypoint the runtime resolves, so a topic-migration-execute command is dispatched instead of terminalized, and a CUTOVER with residual lag emits no lifecycle event through that same entrypoint.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-executor-dispatchable
+    statement: The runtime can dispatch a topic-migration-execute command to the executor and the drain-proof gate still blocks CUTOVER.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the runtime resolver finds a dispatch entrypoint on HandlerTopicMigrationExecutor with ModelTopicMigrationCommand as its request model, and a DUAL_WRITE command driven through it returns a DUAL_WRITE lifecycle event carrying the command correlation id with the new topic provisioned -- falsifier: the tests added by this PR fail at the merge base (uv run pytest on the executor test file)'
+      - id: AC2
+        statement: 'AC2: a CUTOVER command whose old group has residual lag, driven through the same runtime entrypoint, raises and returns no lifecycle event -- falsifier: the cutover test added by this PR fails at the merge base (uv run pytest on the executor test file)'
+evidence_requirements:
+  - kind: tests
+    description: Runtime entrypoint resolution, DUAL_WRITE event through the entrypoint, and the drain-gate refusal through the entrypoint.
+    command: uv run pytest tests/unit/nodes/node_topic_migration_executor_effect -q -n 0
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21050-ac1-dispatch-entrypoint
+    description: The resolver finds the entrypoint and a DUAL_WRITE command through it returns the DUAL_WRITE event with the correlation id.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_topic_migration_executor_effect -q -n 0 -k 'runtime_resolves or dual_write_through_runtime_entrypoint'
+    binds_ac:
+      - AC1
+  - id: dod-omn21050-ac2-drain-gate-through-entrypoint
+    description: CUTOVER with residual lag through the runtime entrypoint emits no lifecycle event.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/nodes/node_topic_migration_executor_effect -q -n 0 -k cutover_with_residual_lag
+    binds_ac:
+      - AC2
