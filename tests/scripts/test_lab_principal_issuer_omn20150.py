@@ -115,8 +115,42 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
         "onex.evt.omnimarket.delegate-skill-failed.v1",
         "onex.cmd.omnimarket.work-ledger-append-requested.v1",
         "onex.cmd.omnimarket.pr-handoff-requested.v1",
+        "onex.cmd.omnimarket.github-repo-gateway-read-requested.v1",
     }
     assert all(g.resource == "topic" and g.pattern == "literal" for g in writable)
+
+
+def test_scm_read_caller_reads_the_gateway_terminal_and_never_its_serve_group(
+    declaration: lpi.Declaration,
+) -> None:
+    # OMN-21000: `onex scm job-log` (and every gateway read verb) publishes the
+    # gateway read command and reads the one completed terminal under its own
+    # per-call group. Without these three grants the dev broker refused the
+    # terminal subscribe with TopicAuthorizationFailedError.
+    grants = {g.name: g for g in declaration.grants}
+    command = grants["onex.cmd.omnimarket.github-repo-gateway-read-requested.v1"]
+    assert (command.resource, command.pattern) == ("topic", "literal")
+    assert set(command.operations) == {"write", "describe"}
+    terminal = grants["onex.evt.omnimarket.github-repo-gateway-read-completed.v1"]
+    assert (terminal.resource, terminal.pattern) == ("topic", "literal")
+    assert set(terminal.operations) == {"read", "describe"}
+
+    prefix = "local.omnimarket.scm_command_client.consume.v1."
+    caller = grants[prefix]
+    assert (caller.resource, caller.pattern) == ("group", "prefixed")
+    assert set(caller.operations) == {"read", "describe"}
+    # The bus client consumes as <group>.__t.<topic>; the per-call group adds a
+    # 12-hex suffix to the derived caller group.
+    assert (
+        f"{prefix}0123456789ab.__t.onex.evt.omnimarket."
+        "github-repo-gateway-read-completed.v1"
+    ).startswith(caller.name)
+    for version in ("1.0.0", "1.1.0", "1.2.0"):
+        serve = f"local.omnimarket.node_github_repo_gateway_effect.consume.{version}"
+        assert not serve.startswith(caller.name)
+
+    # The write node mutates GitHub; a developer principal holds none of it.
+    assert not any("github-repo-write" in g.name for g in declaration.grants)
 
 
 def test_handoff_caller_can_read_replies_without_writing_them(

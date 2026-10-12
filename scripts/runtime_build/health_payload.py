@@ -541,6 +541,8 @@ def wait_for_verdict(
     *,
     bound: VerdictWaitBound,
     sleep_fn: Callable[[float], None] | None = None,
+    boot_window_seconds: float = 0.0,
+    monotonic_fn: Callable[[], float] = time.monotonic,
 ) -> tuple[HealthVerdict, str]:
     """Re-probe until a monitor verdict exists, for a bounded window.
 
@@ -554,6 +556,17 @@ def wait_for_verdict(
     returned. A lane that never produces a verdict inside the window is a
     genuine, accurately-reported finding -- not a reason to pass.
 
+    ``boot_window_seconds`` (OMN-20864): how much longer the runtime's OWN
+    declared start budget runs. While the runtime answers "still starting"
+    inside it, a probe does not spend one of the verdict bound's attempts --
+    the monitor's clock has not started, so the bound derived from it has not
+    either. MEASURED on the lab dev lane 2026-10-11: the runtime started at
+    19:30:41Z and answered 503 "still starting" for the gate's whole 600 s
+    window, so the refresh receipt said FAILED at 19:37Z over a runtime that
+    read HEALTHY at 19:41:22Z, inside its declared 2000 s budget. ``0`` keeps
+    the previous behaviour. The window is a ceiling, never a pass: a runtime
+    still starting when it ends goes on to the ordinary bound.
+
     Returns the verdict and the human-readable bound for the receipt (AC3).
     """
     sleep = sleep_fn or time.sleep
@@ -564,17 +577,39 @@ def wait_for_verdict(
         details_healthy=None,
         detail="health never probed",
     )
-    for attempt in range(1, bound.attempts + 1):
+    started = monotonic_fn()
+    boot_waits = 0
+
+    def described(text: str) -> str:
+        if boot_window_seconds <= 0:
+            return text
+        return (
+            f"{text}; boot window {int(boot_window_seconds)}s: {boot_waits} "
+            f"still-starting probe(s) not counted against the bound"
+        )
+
+    attempt = 0
+    while attempt < bound.attempts:
         verdict = probe()
         if verdict.ok:
-            return verdict, f"{bound.describe()} satisfied on attempt {attempt}"
+            return verdict, described(
+                f"{bound.describe()} satisfied on attempt {attempt + 1}"
+            )
         normalised_reason = _normalise_verdict_reason(verdict.reason)
+        if (
+            normalised_reason is HealthVerdictReason.RUNTIME_STARTING
+            and monotonic_fn() - started < boot_window_seconds
+        ):
+            boot_waits += 1
+            sleep(bound.interval_seconds)
+            continue
+        attempt += 1
         if normalised_reason not in _WAITABLE_REASONS:
             # Waiting helps a verdict that has not been published yet, and it
             # can also help a stale verdict race where the monitor writes a
             # fresher block inside this bound. An unreadable body, unknown
             # reason, or dead endpoint is terminal at this boundary.
-            return verdict, (
+            return verdict, described(
                 f"{bound.describe()} not waited: failure is terminal "
                 f"(reason={verdict.reason!r}) on attempt {attempt}"
             )
@@ -584,7 +619,7 @@ def wait_for_verdict(
     # second look, so "without a verdict" is no longer the only way to arrive
     # here. Name the verdict that actually settled, or the next reader will
     # take a persistent DEGRADED for a monitor that never published.
-    return verdict, (
+    return verdict, described(
         f"{bound.describe()} exhausted; last verdict "
         f"status={verdict.status!r} reason={verdict.reason!r}"
     )

@@ -129,53 +129,146 @@ jobs:
         with:
           python-version: '3.12'
 
-      # OMN-16286 / OMN-18596: the dependency cascade opens PRs in downstream
-      # repositories, and those PRs must carry the SAME Evidence-Ticket and
-      # Evidence-Source pair that already proved this release. Resolving it here
-      # rather than in the cascade means a release that cannot produce an honest
-      # pair fails BEFORE anything is published, not after.
+      # OMN-16286 / OMN-18596 / OMN-20959: the dependency cascade carries the
+      # release's own ticket into each downstream bump branch and title, so the
+      # release must name the ticket that closed its merged PR and the evidence
+      # record that proved it. Resolving that here means a release that cannot
+      # name honest evidence fails BEFORE anything is published, not after.
       #
-      # Ported from omnibase_core's copy so the two repos cannot disagree about
-      # what an honest cascade PR looks like.
+      # OMN-20959: after the S6 cut-over (omnibase_infra#4792) this repository
+      # runs no change-control autobind, so no bot writes a citation line into
+      # the release PR's body any more and the body is not an evidence source.
+      # Evidence is read from where it now lives, in this order:
+      #   1. repo-contract: contracts/<ticket>.yaml at the release commit, with
+      #      a non-empty dod_evidence list. evidence_source = the release commit.
+      #   2. change-control receipt: a PASS receipt on onex_change_control's
+      #      default branch (where its evidence PRs merge) under drift/dod_receipts/<ticket>/dod-<owner>-<repo>-pr-<n>/ whose
+      #      pr_number is the release PR and whose commit_sha is its head.
+      #      evidence_source = the onex_change_control default-branch commit
+      #      that last wrote that receipt directory.
+      # Neither found: exit 1 before the build (the OMN-16286 refusal).
+      # The ticket comes from the merged PR's title, else its head branch.
       - name: Resolve release ticket + evidence (OMN-16286)
         id: release_evidence
         env:
           GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
         run: |
+          # >>> OMN-20959 release evidence >>>
           set -euo pipefail
           head_sha="$(git rev-parse HEAD)"
+          scratch="$(mktemp -d)"
 
           # /commits/{sha}/pulls returns EVERY PR associated with this commit,
-          # including OPEN ones, with no documented ordering. Taking a bare
-          # .[0] risks propagating evidence from an open, unreviewed PR instead
-          # of the merged release PR that actually proved this code, so filter
-          # to merged explicitly and fail loud when none qualifies.
-          pr_number="$(gh api "repos/${{ github.repository }}/commits/${head_sha}/pulls" \
-            --jq '[.[] | select(.state == "closed" and .merged_at != null)][0].number // empty' 2>/dev/null || true)"
+          # including OPEN ones, with no documented ordering. Filter to merged
+          # explicitly and fail loud when none qualifies.
+          if ! gh api "repos/${REPOSITORY}/commits/${head_sha}/pulls" > "${scratch}/pulls.json"; then
+            echo "::error::OMN-16286: could not list the PRs of release commit ${head_sha}."
+            exit 1
+          fi
+          python3 - "${scratch}/pulls.json" "${scratch}/pr.env" <<'PY'
+          import json, re, sys
+          pulls = json.load(open(sys.argv[1], encoding="utf-8"))
+          merged = [p for p in pulls if p.get("state") == "closed" and p.get("merged_at")]
+          out = {"pr_number": "", "pr_head_sha": "", "ticket": ""}
+          if merged:
+              pr = merged[0]
+              out["pr_number"] = str(pr.get("number") or "")
+              out["pr_head_sha"] = str((pr.get("head") or {}).get("sha") or "")
+              for text in (pr.get("title") or "", (pr.get("head") or {}).get("ref") or ""):
+                  m = re.search(r"OMN-[0-9]+", text, re.IGNORECASE)
+                  if m:
+                      out["ticket"] = m.group(0).upper()
+                      break
+          with open(sys.argv[2], "w", encoding="utf-8") as fh:
+              for k, v in out.items():
+                  if not re.fullmatch(r"[A-Za-z0-9-]*", v):
+                      raise SystemExit(f"unsafe {k} value in the PR record")
+                  fh.write(f"{k}={v}\n")
+          PY
+          pr_number="$(sed -n 's/^pr_number=//p' "${scratch}/pr.env")"
+          pr_head_sha="$(sed -n 's/^pr_head_sha=//p' "${scratch}/pr.env")"
+          ticket="$(sed -n 's/^ticket=//p' "${scratch}/pr.env")"
+
           if [ -z "$pr_number" ]; then
-            echo "::error::OMN-16286: could not resolve a MERGED PR for release commit ${head_sha}. The dependency cascade requires a real Evidence-Ticket/Evidence-Source pair sourced from the release's own merged PR; a tag with no associated merged PR cannot cascade honestly."
+            echo "::error::OMN-16286: could not resolve a MERGED PR for release commit ${head_sha}. A tag with no associated merged PR has no evidence to cascade."
+            exit 1
+          fi
+          if [ -z "$ticket" ]; then
+            echo "::error::OMN-16286: merged release PR #${pr_number} (commit ${head_sha}) names no OMN ticket in its title or head branch."
             exit 1
           fi
 
-          pr_state="$(gh pr view "$pr_number" --repo "${{ github.repository }}" --json state --jq '.state' 2>/dev/null || true)"
-          if [ "$pr_state" != "MERGED" ]; then
-            echo "::error::OMN-16286: PR #${pr_number} (commit ${head_sha}) resolved to state='${pr_state:-<unknown>}', not MERGED. Refusing to propagate evidence from a non-merged PR."
-            exit 1
+          evidence_source=""
+          evidence_kind=""
+
+          # 1. repo-contract: the in-repo contract at the release commit.
+          contract="contracts/${ticket}.yaml"
+          if [ -f "$contract" ] && python3 - "$contract" <<'PY'
+          import re, sys
+          text = open(sys.argv[1], encoding="utf-8").read()
+          # dod_evidence must be a non-empty block list: the first content
+          # line after the key is a list item. "dod_evidence: []" or a missing
+          # key is no evidence.
+          m = re.search(r"^dod_evidence:[ \t]*$", text, re.MULTILINE)
+          rest = text[m.end():].splitlines() if m else []
+          items = [l for l in rest if l.strip() and not l.lstrip().startswith("#")]
+          raise SystemExit(0 if items and re.match(r"^\s*- ", items[0]) else 1)
+          PY
+          then
+            evidence_source="${head_sha}"
+            evidence_kind="repo-contract:${contract}"
           fi
 
-          pr_body="$(gh pr view "$pr_number" --repo "${{ github.repository }}" --json body --jq '.body' 2>/dev/null || true)"
+          # 2. change-control receipt bound to the release PR's head.
+          if [ -z "$evidence_source" ] && [ -n "$pr_head_sha" ]; then
+            receipt_dir="drift/dod_receipts/${ticket}/dod-${REPOSITORY%%/*}-${REPOSITORY##*/}-pr-${pr_number}"
+            occ="repos/${REPOSITORY%%/*}/onex_change_control"
+            if gh api "${occ}/contents/${receipt_dir}" > "${scratch}/dir.json"; then
+              for path in $(python3 -c 'import json,sys; [print(e["path"]) for e in json.load(open(sys.argv[1])) if isinstance(e, dict) and e.get("type") == "file" and e.get("name", "").endswith(".yaml")]' "${scratch}/dir.json"); do
+                gh api "${occ}/contents/${path}" > "${scratch}/receipt.json" || continue
+                if python3 - "${scratch}/receipt.json" "$pr_number" "$pr_head_sha" "$ticket" <<'PY'
+          import base64, json, re, sys
+          doc = json.load(open(sys.argv[1], encoding="utf-8"))
+          text = base64.b64decode(doc.get("content", "")).decode("utf-8")
+          def field(name):
+              m = re.search(rf"^{name}:[ \t]*['\"]?([^'\"\n]*?)['\"]?[ \t]*$", text, re.MULTILINE)
+              return m.group(1) if m else ""
+          ok = (
+              field("status") == "PASS"
+              and field("pr_number") == sys.argv[2]
+              and field("commit_sha") == sys.argv[3]
+              and field("ticket_id") == sys.argv[4]
+          )
+          raise SystemExit(0 if ok else 1)
+          PY
+                then
+                  occ_sha=""
+                  if gh api "${occ}/commits?path=${receipt_dir}&per_page=1" > "${scratch}/occ_commits.json"; then
+                    occ_sha="$(python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); print(c[0]["sha"] if c else "")' "${scratch}/occ_commits.json")"
+                  fi
+                  if [[ "$occ_sha" =~ ^[0-9a-f]{40}$ ]]; then
+                    evidence_source="${occ_sha}"
+                    evidence_kind="change-control-receipt:${path}"
+                  fi
+                  break
+                fi
+              done
+            else
+              echo "No change-control receipt directory ${receipt_dir} on onex_change_control."
+            fi
+          fi
 
-          ticket="$(printf '%s' "$pr_body" | grep -oiE '^Evidence-Ticket:[[:space:]]*OMN-[0-9]+' | head -1 | grep -oiE 'OMN-[0-9]+' | tr '[:lower:]' '[:upper:]' || true)"
-          evidence_source="$(printf '%s' "$pr_body" | grep -iE '^Evidence-Source:[[:space:]]+\S' | head -1 | sed -E 's/^Evidence-Source:[[:space:]]*//; s/[[:space:]]+$//' || true)"
-
-          if [ -z "$ticket" ] || [ -z "$evidence_source" ]; then
-            echo "::error::OMN-16286: release PR #${pr_number} (commit ${head_sha}) is missing a resolvable Evidence-Ticket/Evidence-Source pair (ticket='${ticket:-<none>}', evidence_source='${evidence_source:-<none>}'). Fix the release PR's evidence trailer before the dependency cascade can open honest downstream PRs."
+          if [ -z "$evidence_source" ]; then
+            echo "::error::OMN-16286: release PR #${pr_number} (commit ${head_sha}, ticket ${ticket}) has no evidence: no contracts/${ticket}.yaml with dod_evidence at the release commit, and no PASS change-control receipt bound to PR #${pr_number} at head ${pr_head_sha:-<unknown>}. Add the ticket's in-repo contract, or release from an evidenced commit."
             exit 1
           fi
 
           echo "ticket=${ticket}" >> "$GITHUB_OUTPUT"
           echo "evidence_source=${evidence_source}" >> "$GITHUB_OUTPUT"
-          echo "::notice::OMN-16286: resolved cascade evidence from PR #${pr_number} -- ticket=${ticket} evidence_source=${evidence_source}"
+          echo "evidence_kind=${evidence_kind}" >> "$GITHUB_OUTPUT"
+          echo "::notice::OMN-20959: resolved release evidence for PR #${pr_number} -- ticket=${ticket} source=${evidence_source} kind=${evidence_kind}"
+          # <<< OMN-20959 release evidence <<<
 
       - name: Build wheel + sdist
         run: uv build
