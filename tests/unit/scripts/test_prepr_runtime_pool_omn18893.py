@@ -27,6 +27,8 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.helpers.lane_census_fixtures import NEUTRAL_MANIFEST
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 POOL_PY = REPO_ROOT / "scripts" / "runtime_build" / "prepr_runtime_pool.py"
 PROVE_SH = REPO_ROOT / "scripts" / "runtime_build" / "prepr_pool_prove.sh"
@@ -174,6 +176,27 @@ def test_declared_manifest_hosts_reads_the_manifest_host_keys(tmp_path: Path) ->
     assert {h.machine for h in CFG.hosts} - declared == {"pool-d", "pool-e"}
 
 
+def test_the_slot_project_is_never_a_declared_lane_in_the_neutral_manifest(
+    tmp_path: Path,
+) -> None:
+    # OMN-20934: the same invariant over the neutral manifest every checkout
+    # carries, so it runs where the lab's private manifest is absent; the test
+    # below holds it against the lab's own manifest where that is fetched.
+    declared = pool.declared_lane_projects(NEUTRAL_MANIFEST)
+    assert declared, "the reader found no lane to compare the slot project with"
+    assert CFG.compose_project not in declared
+    isolated = [h for h in CFG.hosts if h.kind == "isolated"]
+    assert {h.compose_project for h in isolated} == {CFG.compose_project}
+    # control: a manifest that does declare the slot project as a lane is seen
+    colliding = tmp_path / "lane-manifest.yaml"
+    colliding.write_text(
+        yaml.safe_dump({"lanes": {"slot": {"compose_project": CFG.compose_project}}}),
+        encoding="utf-8",
+    )
+    assert CFG.compose_project in pool.declared_lane_projects(colliding)
+
+
+@pytest.mark.lab_overlay
 def test_the_slot_project_is_never_a_declared_lane() -> None:
     assert CFG.compose_project not in pool.declared_lane_projects()
     isolated = [h for h in CFG.hosts if h.kind == "isolated"]

@@ -8,8 +8,19 @@
 # (judge was live but absent from the map for hours during 2026-06-11 demo
 # prep). This job is the CI ratchet that makes stale documentation a hard gate.
 #
+# WHERE THE CENSUS LIVES (OMN-20934). The lane manifest and the committed
+# census describe one lab's hosts, lanes and addresses, so they are private
+# deployment config (operator RULING 2026-10-10T21:57:38Z) and this repository
+# ships neither. .github/actions/fetch-census-overlay reads config/lab/lane-census
+# from the CI overlay repository the org Actions variable OMNI_CI_OVERLAY_REPO
+# names (the pattern hostile-reviewer.yml uses) and points
+# ONEX_WORKSPACE_CONFIG_ROOT at it; every checker below resolves its inputs
+# from there. No overlay, or an unreadable
+# one, fails the job: there is no in-repo census to fall back to, and a gate
+# that checked nothing must not read as one that checked a clean census.
+#
 # What this checks:
-#   1. STALENESS: deploy/lane-census/census-snapshot.json must be present and
+#   1. STALENESS: the committed census-snapshot.json must be present and
 #      have an emitted_at timestamp within MAX_AGE_DAYS (7) of the PR merge date.
 #      A census older than 7 days means the .201 timer stopped or the snapshot
 #      was never committed — either is a documentation failure.
@@ -46,21 +57,25 @@ on:
   push:
     branches: [main, dev]
     paths:
-      - "deploy/lane-census/**"
+      - ".github/workflows/lane-census-staleness.yml"
+      - ".github/actions/fetch-census-overlay/**"
       - "docker/docker-compose*.yml"
       - "scripts/check_lane_census_age.py"
       - "scripts/check_lane_census_drift.py"
       - "scripts/check_lane_env_drift.py"
       - "scripts/generate_claude_lane_block.py"
+      - "tests/helpers/lane_census_fixtures.py"
   pull_request:
     branches: [main, dev]
     paths:
-      - "deploy/lane-census/**"
+      - ".github/workflows/lane-census-staleness.yml"
+      - ".github/actions/fetch-census-overlay/**"
       - "docker/docker-compose*.yml"
       - "scripts/check_lane_census_age.py"
       - "scripts/check_lane_census_drift.py"
       - "scripts/check_lane_env_drift.py"
       - "scripts/generate_claude_lane_block.py"
+      - "tests/helpers/lane_census_fixtures.py"
   workflow_dispatch:
     inputs:
       max_age_days:
@@ -80,7 +95,8 @@ jobs:
   lane-census-staleness:
     name: Lane Census Staleness + E-5 Env Drift (OMN-13034)
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci;
-    # public fork PRs use ubuntu-latest (no secrets needed — pure file checks).
+    # public fork PRs use ubuntu-latest. A fork PR has no secrets, so it cannot
+    # read the private census and this job fails there, closed (OMN-20934).
     runs-on: >-
       ${{
         (github.event_name == 'pull_request' &&
@@ -102,6 +118,14 @@ jobs:
           cache-version: "0.6.0"
           cache-enabled: "false"
 
+      # OMN-20934: the census is private config, supplied by the CI overlay.
+      - name: Fetch the private lane census
+        uses: ./.github/actions/fetch-census-overlay
+        with:
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+
       - name: Check census snapshot staleness
         env:
           MAX_AGE_DAYS: ${{ inputs.max_age_days || '7' }}
@@ -111,8 +135,7 @@ jobs:
           echo "A census > ${MAX_AGE_DAYS} days old fails this gate."
           echo "================================================================"
           uv run python scripts/check_lane_census_age.py \
-            --max-age-days "${MAX_AGE_DAYS}" \
-            --snapshot deploy/lane-census/census-snapshot.json
+            --max-age-days "${MAX_AGE_DAYS}"
 
       - name: Check census-vs-manifest drift (OMN-18949)
         run: |
@@ -123,9 +146,7 @@ jobs:
           echo "manifest or remove it from the lane; refreshing the snapshot to"
           echo "lower the count is the one remedy that is not a remedy."
           echo "================================================================"
-          uv run python scripts/check_lane_census_drift.py \
-            --manifest deploy/lane-census/lane-manifest.yaml \
-            --snapshot deploy/lane-census/census-snapshot.json
+          uv run python scripts/check_lane_census_drift.py
 
       - name: Check E-5 env-vs-manifest drift (OMN-13018)
         run: |
@@ -134,7 +155,6 @@ jobs:
           echo "Lane manifest topology must agree with compose file declarations."
           echo "================================================================"
           uv run python scripts/check_lane_env_drift.py \
-            --manifest deploy/lane-census/lane-manifest.yaml \
             --compose-dir docker/
 
       - name: Verify the lane table generator renders every declared lane
@@ -148,15 +168,13 @@ jobs:
           echo "entry for every manifest lane, which is the half of that claim"
           echo "this repository can enforce without checking out another one."
           echo "================================================================"
-          uv run python scripts/generate_claude_lane_block.py \
-            --manifest deploy/lane-census/lane-manifest.yaml \
-            --snapshot deploy/lane-census/census-snapshot.json > /tmp/lane-block.md
+          uv run python scripts/generate_claude_lane_block.py > /tmp/lane-block.md
           echo "--- rendered block ---"
           cat /tmp/lane-block.md
           # One row per declared lane, counted from the manifest rather than
           # from the output, so a generator that silently dropped a lane fails
           # here instead of rendering a shorter table that still looks whole.
-          declared=$(uv run python -c "import yaml,sys; print(len(yaml.safe_load(open('deploy/lane-census/lane-manifest.yaml'))['lanes']))")
+          declared=$(uv run python -c "import os,yaml; print(len(yaml.safe_load(open(os.path.join(os.environ['ONEX_WORKSPACE_CONFIG_ROOT'], 'config/lab/lane-census/lane-manifest.yaml')))['lanes']))")
           rendered=$(grep -c '^| [a-z]' /tmp/lane-block.md || true)
           echo "declared lanes: ${declared}  rendered rows: ${rendered}"
           if [ "${declared}" -ne "${rendered}" ]; then

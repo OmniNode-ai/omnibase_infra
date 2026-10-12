@@ -73,12 +73,29 @@ from scripts.lab_alarm import (
     run_once,
     select_new_alarms,
 )
+from tests.helpers.lane_census_fixtures import (
+    NEUTRAL_HOSTNAME,
+    NEUTRAL_MANIFEST,
+    NEUTRAL_OPTIONAL_LANE,
+    use_neutral_lane_census,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LAUNCHD_DIR = REPO_ROOT / "scripts" / "launchd"
 PLIST_TEMPLATE = LAUNCHD_DIR / "com.omninode.lab-alarm.plist.template"
 INSTALLER = LAUNCHD_DIR / "install-lab-alarm.sh"
 CONFIG = REPO_ROOT / "config" / "lab_alarm.json"
+
+
+@pytest.fixture(autouse=True)
+def _neutral_lane_census(monkeypatch: pytest.MonkeyPatch) -> None:
+    """OMN-20934: the shipped config names the lane manifest under the config root.
+
+    The lab's manifest is private config, so every case here loads the neutral
+    one; the installer cases prove an unset root is refused.
+    """
+    use_neutral_lane_census(monkeypatch)
+
 
 SHA = "a" * 40
 CHANNEL = "#omninode-notifications"
@@ -2786,16 +2803,13 @@ def test_the_shipped_config_hardcodes_no_machine_address() -> None:
     assert "/Users/" not in raw
     payload = json.loads(raw)
     assert "${ONEX_INFRA_HOST}" in payload["ready_url"]
-    # The container that crash-looped unobserved for nine days carries the
-    # tightest bound, so the alarm is actually armed against its own case.
+    # Restart bounds are the manifest's, never a second copy here.
     assert "container_restart_bounds" not in payload
-    from scripts.lane_census_plan import load_manifest, restart_bounds_for_lane
-
-    bounds = restart_bounds_for_lane(load_manifest(), payload["census_lane"])
-    assert (
-        bounds["omnimarket-projection-savings-writer"]
-        < bounds["omnibase-infra-redpanda"]
-    )
+    # OMN-20934: the manifest is private config, named under the config root
+    # and never by a path into this repository. Which container carries the
+    # tightest bound is a fact about the lab, checked where its manifest lives.
+    assert payload["lane_manifest"].startswith("${ONEX_WORKSPACE_CONFIG_ROOT}/")
+    assert "deploy/" not in payload["lane_manifest"]
 
 
 @pytest.mark.unit
@@ -2832,46 +2846,59 @@ def test_the_shipped_config_loads_and_declares_every_condition_a_subject(
 def test_alarm_and_detector_read_changed_manifest_restart_bound(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import yaml
+    """The alarm and the census detector read one restart bound, the manifest's.
 
+    OMN-20934: driven over the neutral manifest's census lane, whose services
+    declare restart bounds, rather than the lab's private manifest.
+    """
     from scripts.lane_census_plan import build_plan, load_manifest
 
     monkeypatch.setenv("ONEX_INFRA_HOST", "lab.invalid")
     monkeypatch.setenv("ONEX_RUNTIME_SSH_HOST", "user@lab.invalid")
     monkeypatch.setenv("OMNI_HOME", str(tmp_path))
     manifest = load_manifest()
-    for service in manifest["lanes"]["dev"]["services"]:
-        if service["name"] == "omnimarket-projection-savings-writer":
+    lane = NEUTRAL_OPTIONAL_LANE
+    services = manifest["lanes"][lane]["services"]
+    target = services[-1]["name"]
+    for service in services:
+        if service["name"] == target:
             service["restart_bound"] = 1
     manifest_path = tmp_path / "manifest.yaml"
     manifest_path.write_text(yaml.safe_dump(manifest))
     payload = json.loads(CONFIG.read_text())
+    assert payload["census_lane"] == lane, (
+        "the neutral manifest names the config's lane"
+    )
     payload["lane_manifest"] = str(manifest_path)
     config_path = tmp_path / "alarm.json"
     config_path.write_text(json.dumps(payload))
     config = ModelAlarmConfig.load(config_path)
-    assert config.container_restart_bounds["omnimarket-projection-savings-writer"] == 1
+    assert config.container_restart_bounds[target] == 1
     report = evaluate_container_restarts(
-        {
-            "omnimarket-projection-savings-writer": config.container_restart_bounds[
-                "omnimarket-projection-savings-writer"
-            ]
-        },
-        runner=_docker_runner(
-            {"omnimarket-projection-savings-writer": _completed("2 running")}
-        ),
+        {target: config.container_restart_bounds[target]},
+        runner=_docker_runner({target: _completed("2 running")}),
     )
     assert report.outcome is EnumConditionOutcome.ALARM
-    fixture = json.loads(
-        (REPO_ROOT / "tests/fixtures/lab_sync/inventory_clean.json").read_text()
-    )
-    for row in fixture["envelope"]["containers"]:
-        if row["Names"] == "omnimarket-projection-savings-writer":
-            row["RestartCount"] = 2
-    findings = build_plan(fixture["envelope"], load_manifest(manifest_path))["findings"]
+    envelope = {
+        "lane": lane,
+        "host": NEUTRAL_HOSTNAME,
+        "containers": [
+            {
+                "Names": svc["name"],
+                "State": "running",
+                "Status": "Up 1 hour",
+                "Image": "example:1",
+                "Labels": f"com.omninode.lane={lane}",
+                "RestartCount": 2 if svc["name"] == target else 0,
+            }
+            for svc in services
+        ],
+        "networks": [manifest["lanes"][lane]["network"]],
+        "runtime_tag": None,
+    }
+    findings = build_plan(envelope, load_manifest(manifest_path))["findings"]
     assert any(
-        f["kind"] == "container_restart_loop"
-        and f["container"] == "omnimarket-projection-savings-writer"
+        f["kind"] == "container_restart_loop" and f["container"] == target
         for f in findings
     )
 
@@ -2936,6 +2963,7 @@ def _render_lab_alarm_plist(
         "OMNI_HOME": str(fake_omni_home),
         "ONEX_INFRA_HOST": "lab.fixture.invalid",
         "ONEX_RUNTIME_SSH_HOST": "fixture-user@lab.fixture.invalid",
+        "ONEX_WORKSPACE_CONFIG_ROOT": str(tmp_path / "config-root"),
     }
     if drop_env is not None:
         del env[drop_env]
@@ -2970,10 +2998,16 @@ def test_a_render_carries_the_lab_host_and_ssh_target_from_the_installing_env(
     assert "fixture-user@lab.fixture.invalid" in rendered
     assert "@ONEX_INFRA_HOST@" not in rendered
     assert "@ONEX_RUNTIME_SSH_HOST@" not in rendered
+    # OMN-20934: the config names the lane manifest under this root.
+    assert str(tmp_path / "config-root") in rendered
+    assert "@ONEX_WORKSPACE_CONFIG_ROOT@" not in rendered
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("missing", ["ONEX_INFRA_HOST", "ONEX_RUNTIME_SSH_HOST"])
+@pytest.mark.parametrize(
+    "missing",
+    ["ONEX_INFRA_HOST", "ONEX_RUNTIME_SSH_HOST", "ONEX_WORKSPACE_CONFIG_ROOT"],
+)
 def test_the_installer_refuses_rather_than_render_an_empty_lab_host(
     tmp_path: Path, missing: str
 ) -> None:
@@ -3332,11 +3366,26 @@ def test_recorded_manifest_unhealthy_runtime_readings_replay_census_threshold(
     recorded_response: dict[str, Any],
 ) -> None:
     """Replay the captured healthy runtime, then vary only its health readings."""
-    from scripts.lane_census_plan import build_plan, load_manifest
+    from scripts.lane_census_plan import build_plan
 
-    manifest = load_manifest(REPO_ROOT / "deploy/lane-census/lane-manifest.yaml")
     envelope = copy.deepcopy(recorded_response["response"])
     runtime = envelope["containers"][0]
+    # OMN-20934: the lab's manifest is private config. The replay needs only the
+    # declaration of the one recorded container at the planner's default health
+    # bound, so that declaration is derived from the recording itself.
+    manifest = {
+        "schema_version": "1.0.0",
+        "hosts": {"recorded-host": {"aliases": [envelope["host"]]}},
+        "lanes": {
+            envelope["lane"]: {
+                "hosts": ["recorded-host"],
+                "network": envelope["networks"][0],
+                "services": [
+                    {"name": runtime["Names"], "kind": "service", "replicas": 1}
+                ],
+            }
+        },
+    }
     assert runtime["Health"] == {"Status": "healthy", "FailingStreak": 0}
     assert runtime["HealthcheckIntervalSeconds"] == 30.0
     assert runtime["RestartCount"] == 0

@@ -4,8 +4,8 @@
 """The lane census is host-aware (OMN-19088).
 
 Until this change the manifest had no notion of WHERE a lane runs, so the
-census evaluated every lane on whatever host it was run on. Measured on the
-.101 proof surface on 2026-09-21: one lane genuinely present and clean, and 25
+census evaluated every lane on whatever host it was run on. Measured on a
+proof surface on 2026-09-21: one lane genuinely present and clean, and 25
 critical ``container_absent`` / ``network_detached`` findings for lanes that
 live on another host. Those lanes were not missing, they were elsewhere, and the
 one real signal was a line in the noise.
@@ -21,6 +21,10 @@ What these tests pin:
 * a host the manifest does not declare is refused loudly, never evaluated as if
   it were every host (the pre-fix behaviour) and never as if it were none (a
   silent clean).
+
+OMN-20934: the lab's manifest is private config, so these run over the neutral
+manifest (two hosts, three lanes). Which lab hosts carry which lanes is a fact
+about the lab, checked where its manifest lives.
 """
 
 from __future__ import annotations
@@ -36,11 +40,21 @@ from typing import Any
 
 import pytest
 
+from tests.helpers.lane_census_fixtures import (
+    NEUTRAL_CONFIG_ROOT,
+    NEUTRAL_HOST_ID,
+    NEUTRAL_HOSTNAME,
+    NEUTRAL_LANE,
+    NEUTRAL_MANIFEST,
+    NEUTRAL_OPTIONAL_LANE,
+    NEUTRAL_OTHER_HOST_LANE,
+    NEUTRAL_OTHER_HOSTNAME,
+)
+
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
 _PLAN_PATH = _REPO / "scripts" / "lane_census_plan.py"
-_MANIFEST_PATH = _REPO / "deploy" / "lane-census" / "lane-manifest.yaml"
 _SCRIPT = _REPO / "scripts" / "lane-census-check.sh"
 
 
@@ -55,39 +69,13 @@ def _load_planner() -> Any:
 
 
 PLAN = _load_planner()
-MANIFEST = PLAN.load_manifest(_MANIFEST_PATH)
+MANIFEST = PLAN.load_manifest(NEUTRAL_MANIFEST)
 
-# The hostnames the three measured hosts report (read 2026-09-23 over read-only
-# ssh: `hostname`). The .101 and .200 hosts are macOS and report a `.local`
-# suffix; the runner container on .201 reports the daemon name instead, which
-# is the same short name.
-_HOST_201 = "omninode-pc"
-_HOST_101 = "Stickybeatz.local"
-_HOST_105 = "omnibook"
-
-_LANES_201 = {
-    "stability-test",
-    "judge",
-    "dev",
-    "lakshman",
-    "prepr-1",
-    "prepr-2",
-    "ci-bus",
-    "principal-issuer",
-}
-
-# OMN-19339: the .202 host carries the sim-202 lane, and since OMN-19505 the
-# second deployed dev lane dev-202. From a dogfood surface host both are as
-# not-applicable as any .201 lane.
-_LANES_202 = {"sim-202", "dev-202"}
-# OMN-19543: the .200 host also carries the third deployed dev lane dev-200, so
-# from the .101 and .105 dogfood hosts it is not-applicable too.
-_LANES_200_ONLY = {"dev-200"}
-_LANES_OFF_DOGFOOD_HOSTS = _LANES_201 | _LANES_202 | _LANES_200_ONLY
-
-# OMN-19544: the .105 host also carries the time-shared deployed dev lane
-# dev-105, which is not applicable on the other dogfood hosts.
-_LANES_105 = {"dev-105"}
+_HOST_A = NEUTRAL_HOSTNAME
+_HOST_B = NEUTRAL_OTHER_HOSTNAME
+_HOST_B_ID = "host-b"
+_LANES_A = {NEUTRAL_LANE, NEUTRAL_OPTIONAL_LANE}
+_LANES_B = {NEUTRAL_OTHER_HOST_LANE}
 
 
 def _row(
@@ -101,7 +89,7 @@ def _row(
         "Names": name,
         "State": "running" if running else "exited",
         "Status": "Up 2 hours" if running else f"Exited ({exit_code}) 1 hour ago",
-        "Image": "omninode-runtime:dogfood",
+        "Image": "example-runtime:1",
         "Labels": labels or {},
     }
 
@@ -140,11 +128,15 @@ def _envelope(
     return env
 
 
-def _dogfood_on(host: str) -> dict[str, Any]:
+def _lane_on(lane: str, host: str) -> dict[str, Any]:
     return _envelope(
-        host,
-        _healthy_lane_rows("dogfood"),
-        [MANIFEST["lanes"]["dogfood"]["network"]],
+        host, _healthy_lane_rows(lane), [MANIFEST["lanes"][lane]["network"]]
+    )
+
+
+def _runtime(lane: str) -> str:
+    return next(
+        s["name"] for s in MANIFEST["lanes"][lane]["services"] if "runtime" in s["name"]
     )
 
 
@@ -165,48 +157,40 @@ def test_every_lane_declares_at_least_one_registered_host() -> None:
             )
 
 
-def test_the_201_lanes_and_the_dogfood_surfaces_are_declared_where_they_run() -> None:
-    lanes = MANIFEST["lanes"]
-    assert {lane for lane, s in lanes.items() if s["hosts"] == ["lab-201"]} == (
-        _LANES_201
-    )
-    assert sorted(lanes["dogfood"]["hosts"]) == ["lab-101", "lab-105", "lab-200"]
-
-
 def test_the_manifest_validates() -> None:
     PLAN.validate_hosts(MANIFEST)
 
 
 def test_an_alias_claimed_by_two_hosts_is_refused() -> None:
     manifest = copy.deepcopy(MANIFEST)
-    manifest["hosts"]["lab-105"]["aliases"].append("omninode-pc")
-    with pytest.raises(PLAN.HostDeclarationError, match="omninode-pc"):
+    manifest["hosts"][_HOST_B_ID]["aliases"].append(_HOST_A)
+    with pytest.raises(PLAN.HostDeclarationError, match=_HOST_A):
         PLAN.validate_hosts(manifest)
 
 
 def test_the_docker_desktop_daemon_name_is_refused_as_an_alias() -> None:
     """Every Docker Desktop host reports the daemon name ``docker-desktop``.
 
-    Three of the four hosts run Docker Desktop, so that name identifies none of
-    them; declaring it would attribute one host's census to another.
+    That name identifies no host; declaring it would attribute one host's
+    census to another.
     """
     manifest = copy.deepcopy(MANIFEST)
-    manifest["hosts"]["lab-101"]["aliases"].append("docker-desktop")
+    manifest["hosts"][_HOST_B_ID]["aliases"].append("docker-desktop")
     with pytest.raises(PLAN.HostDeclarationError, match="docker-desktop"):
         PLAN.validate_hosts(manifest)
 
 
 def test_a_lane_without_hosts_is_refused() -> None:
     manifest = copy.deepcopy(MANIFEST)
-    del manifest["lanes"]["dogfood"]["hosts"]
-    with pytest.raises(PLAN.HostDeclarationError, match="dogfood"):
+    del manifest["lanes"][NEUTRAL_OTHER_HOST_LANE]["hosts"]
+    with pytest.raises(PLAN.HostDeclarationError, match=NEUTRAL_OTHER_HOST_LANE):
         PLAN.validate_hosts(manifest)
 
 
 def test_a_lane_naming_an_unregistered_host_is_refused() -> None:
     manifest = copy.deepcopy(MANIFEST)
-    manifest["lanes"]["dogfood"]["hosts"] = ["lab-999"]
-    with pytest.raises(PLAN.HostDeclarationError, match="lab-999"):
+    manifest["lanes"][NEUTRAL_OTHER_HOST_LANE]["hosts"] = ["host-999"]
+    with pytest.raises(PLAN.HostDeclarationError, match="host-999"):
         PLAN.validate_hosts(manifest)
 
 
@@ -216,13 +200,11 @@ def test_a_lane_naming_an_unregistered_host_is_refused() -> None:
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        (_HOST_201, "lab-201"),
-        ("omninode-pc.tail75df5e.ts.net", "lab-201"),
-        (_HOST_101, "lab-101"),
-        (_HOST_105, "lab-105"),
-        ("Stickybeatz-Studio.local", "lab-200"),
-        ("lab-105", "lab-105"),
-        ("  OMNIBOOK  ", "lab-105"),
+        (_HOST_A, NEUTRAL_HOST_ID),
+        (f"{_HOST_A}.tailnet.ts.net", NEUTRAL_HOST_ID),
+        (f"{_HOST_B}.local", _HOST_B_ID),
+        (_HOST_B_ID, _HOST_B_ID),
+        (f"  {_HOST_B.upper()}  ", _HOST_B_ID),
     ],
 )
 def test_a_declared_host_resolves(raw: str, expected: str) -> None:
@@ -243,24 +225,18 @@ def test_an_envelope_without_a_host_is_refused() -> None:
 # --- AC-1: evaluate only the lanes declared for this host -----------------------
 
 
-def test_the_101_replay_reports_only_its_own_lane() -> None:
-    """The ticket's measurement, replayed: 25 criticals become zero.
-
-    The inventory is the dogfood surface healthy and nothing else, which is what
-    the .101 host carries. Before this change the same envelope produced a
-    ``container_absent`` for every .201 service and a ``network_detached`` for
-    every .201 network.
-    """
-    plan = PLAN.build_plan(_dogfood_on(_HOST_101), MANIFEST)
-    assert plan["host"] == "lab-101"
-    assert plan["lanes_checked"] == ["dogfood"]
-    assert set(plan["lanes_not_applicable"]) == _LANES_OFF_DOGFOOD_HOSTS | _LANES_105
+def test_a_host_reports_only_its_own_lane() -> None:
+    """The ticket's measurement, replayed: the other host's lanes are not absent."""
+    plan = PLAN.build_plan(_lane_on(NEUTRAL_OTHER_HOST_LANE, _HOST_B), MANIFEST)
+    assert plan["host"] == _HOST_B_ID
+    assert plan["lanes_checked"] == [NEUTRAL_OTHER_HOST_LANE]
+    assert set(plan["lanes_not_applicable"]) == _LANES_A
     assert plan["findings"] == []
     assert plan["has_drift"] is False
 
 
 def test_checked_and_not_applicable_partition_the_manifest() -> None:
-    plan = PLAN.build_plan(_dogfood_on(_HOST_105), MANIFEST)
+    plan = PLAN.build_plan(_lane_on(NEUTRAL_LANE, _HOST_A), MANIFEST)
     checked = set(plan["lanes_checked"])
     not_applicable = set(plan["lanes_not_applicable"])
     assert checked.isdisjoint(not_applicable)
@@ -271,50 +247,43 @@ def test_two_hosts_each_return_findings_only_for_their_own_lanes() -> None:
     """AC-1's falsifier: two hosts, and each answers only for itself.
 
     Both inventories are EMPTY, the harshest input: every declared service is
-    absent. The .201 run must file its criticals against .201 lanes only, and
-    the .105 run against no .201 lane at all.
+    absent. Each run files its findings against its own lanes only.
     """
-    plan_201 = PLAN.build_plan(_envelope(_HOST_201, [], []), MANIFEST)
-    plan_105 = PLAN.build_plan(_envelope(_HOST_105, [], []), MANIFEST)
+    plan_a = PLAN.build_plan(_envelope(_HOST_A, [], []), MANIFEST)
+    plan_b = PLAN.build_plan(_envelope(_HOST_B, [], []), MANIFEST)
 
-    lanes_201 = {f["lane"] for f in plan_201["findings"]}
-    assert lanes_201, "positive control: an empty .201 inventory must be drift"
-    assert lanes_201 <= _LANES_201
-    assert "dogfood" in plan_201["lanes_not_applicable"]
+    lanes_a = {f["lane"] for f in plan_a["findings"]}
+    assert lanes_a, "positive control: an empty inventory on host A must be drift"
+    assert lanes_a <= _LANES_A
+    assert NEUTRAL_OTHER_HOST_LANE in plan_a["lanes_not_applicable"]
 
-    assert {f["lane"] for f in plan_105["findings"]} <= {"dogfood"}
-    assert set(plan_105["lanes_not_applicable"]) == _LANES_OFF_DOGFOOD_HOSTS
+    assert {f["lane"] for f in plan_b["findings"]} <= _LANES_B
+    assert set(plan_b["lanes_not_applicable"]) == _LANES_A
 
 
 def test_a_stopped_container_in_a_declared_lane_is_still_critical() -> None:
     """AC-1's negative control: scoping must not hide a real outage."""
-    rows = [
-        r
-        for r in _healthy_lane_rows("dogfood")
-        if r["Names"] != "omninode-dogfood-runtime"
-    ]
-    rows.append(_row("omninode-dogfood-runtime", running=False, exit_code=137))
+    runtime = _runtime(NEUTRAL_LANE)
+    rows = [r for r in _healthy_lane_rows(NEUTRAL_LANE) if r["Names"] != runtime]
+    rows.append(_row(runtime, running=False, exit_code=137))
     plan = PLAN.build_plan(
-        _envelope(_HOST_101, rows, [MANIFEST["lanes"]["dogfood"]["network"]]),
+        _envelope(_HOST_A, rows, [MANIFEST["lanes"][NEUTRAL_LANE]["network"]]),
         MANIFEST,
     )
     absent = [
         f
         for f in plan["findings"]
-        if f["kind"] == "container_absent"
-        and f["container"] == "omninode-dogfood-runtime"
+        if f["kind"] == "container_absent" and f["container"] == runtime
     ]
     assert len(absent) == 1, plan["findings"]
     assert absent[0]["severity"] == "critical"
-    assert absent[0]["lane"] == "dogfood"
+    assert absent[0]["lane"] == NEUTRAL_LANE
 
 
 def test_a_requested_lane_off_this_host_is_not_applicable() -> None:
-    plan = PLAN.build_plan(
-        _envelope(_HOST_101, [], [], lane="stability-test"), MANIFEST
-    )
+    plan = PLAN.build_plan(_envelope(_HOST_B, [], [], lane=NEUTRAL_LANE), MANIFEST)
     assert plan["lanes_checked"] == []
-    assert plan["lanes_not_applicable"] == ["stability-test"]
+    assert plan["lanes_not_applicable"] == [NEUTRAL_LANE]
     assert plan["findings"] == []
 
 
@@ -322,40 +291,42 @@ def test_a_requested_lane_off_this_host_is_not_applicable() -> None:
 
 
 def test_a_lane_running_on_an_undeclared_host_is_named() -> None:
-    """dogfood is not declared for .201; a dogfood stack there is a finding."""
+    """A lane declared for host B, running on host A, is a finding."""
+    lane = NEUTRAL_OTHER_HOST_LANE
     plan = PLAN.build_plan(
         _envelope(
-            _HOST_201,
-            _healthy_lane_rows("dogfood"),
-            [MANIFEST["lanes"]["dogfood"]["network"]],
-            lane="dogfood",
+            _HOST_A,
+            _healthy_lane_rows(lane),
+            [MANIFEST["lanes"][lane]["network"]],
+            lane=lane,
         ),
         MANIFEST,
     )
-    assert plan["lanes_not_applicable"] == ["dogfood"]
+    assert plan["lanes_not_applicable"] == [lane]
     undeclared = [f for f in plan["findings"] if f["kind"] == "lane_on_undeclared_host"]
     assert len(undeclared) == 1, plan["findings"]
     finding = undeclared[0]
-    assert finding["lane"] == "dogfood"
+    assert finding["lane"] == lane
     assert finding["severity"] == "critical"
-    assert "lab-201" in finding["detail"]
-    assert "omninode-dogfood-runtime" in finding["detail"]
+    assert NEUTRAL_HOST_ID in finding["detail"]
+    assert _runtime(lane) in finding["detail"]
     assert plan["has_drift"] is True
 
 
 def test_the_finding_clears_when_the_declaration_is_corrected() -> None:
+    lane = NEUTRAL_OTHER_HOST_LANE
     manifest = copy.deepcopy(MANIFEST)
-    manifest["lanes"]["dogfood"]["hosts"].append("lab-201")
+    manifest["lanes"][lane]["hosts"].append(NEUTRAL_HOST_ID)
     plan = PLAN.build_plan(
         _envelope(
-            _HOST_201,
-            _healthy_lane_rows("dogfood"),
-            [manifest["lanes"]["dogfood"]["network"]],
-            lane="dogfood",
+            _HOST_A,
+            _healthy_lane_rows(lane),
+            [manifest["lanes"][lane]["network"]],
+            lane=lane,
         ),
         manifest,
     )
-    assert plan["lanes_checked"] == ["dogfood"]
+    assert plan["lanes_checked"] == [lane]
     assert plan["lanes_not_applicable"] == []
     assert plan["findings"] == []
 
@@ -364,27 +335,34 @@ def test_an_undeclared_lane_is_recognised_by_its_compose_project_alone() -> None
     """A renamed container still carries the project it was started under."""
     row = _row(
         "some-renamed-runtime",
-        labels={"com.docker.compose.project": "omnibase-infra-judge"},
+        labels={
+            "com.docker.compose.project": MANIFEST["lanes"][NEUTRAL_LANE][
+                "compose_project"
+            ]
+        },
     )
-    plan = PLAN.build_plan(_envelope(_HOST_105, [row], []), MANIFEST)
-    judge = [
+    plan = PLAN.build_plan(_envelope(_HOST_B, [row], []), MANIFEST)
+    found = [
         f
         for f in plan["findings"]
-        if f["kind"] == "lane_on_undeclared_host" and f["lane"] == "judge"
+        if f["kind"] == "lane_on_undeclared_host" and f["lane"] == NEUTRAL_LANE
     ]
-    assert len(judge) == 1, plan["findings"]
-    assert "some-renamed-runtime" in judge[0]["detail"]
+    assert len(found) == 1, plan["findings"]
+    assert "some-renamed-runtime" in found[0]["detail"]
 
 
 def test_an_exited_leftover_is_not_a_lane_running_there() -> None:
+    lane = NEUTRAL_OTHER_HOST_LANE
     rows = [
         _row(
-            "omninode-dogfood-runtime",
+            _runtime(lane),
             running=False,
-            labels={"com.docker.compose.project": "omnibase-infra-dogfood"},
+            labels={
+                "com.docker.compose.project": MANIFEST["lanes"][lane]["compose_project"]
+            },
         )
     ]
-    plan = PLAN.build_plan(_envelope(_HOST_201, rows, [], lane="dogfood"), MANIFEST)
+    plan = PLAN.build_plan(_envelope(_HOST_A, rows, [], lane=lane), MANIFEST)
     assert plan["findings"] == []
 
 
@@ -406,6 +384,8 @@ def _run_driver(tmp_path: Path, hostname: str) -> subprocess.CompletedProcess[st
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
     env["LANE_CENSUS_DOCKER_SOCKET"] = "/nonexistent/lane-census-test.sock"
     env["HOME"] = str(tmp_path)
+    env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(NEUTRAL_CONFIG_ROOT)
+    env.pop("LANE_MANIFEST", None)
     env.pop("KAFKA_BOOTSTRAP_SERVERS", None)
     env.pop("LANE_CENSUS_HOST", None)
     return subprocess.run(
@@ -429,19 +409,27 @@ def test_the_driver_exits_5_on_a_host_the_manifest_does_not_declare(
 
 def test_the_driver_scopes_to_the_host_it_runs_on(tmp_path: Path) -> None:
     """Positive control for the refusal above: a declared host yields a plan."""
-    proc = _run_driver(tmp_path, _HOST_105)
+    proc = _run_driver(tmp_path, _HOST_B)
     assert proc.returncode in (0, 30), (proc.returncode, proc.stderr)
     plan = json.loads(proc.stdout.splitlines()[0])
-    assert plan["host"] == "lab-105"
-    assert sorted(plan["lanes_checked"]) == ["dev-105", "dogfood"]
+    assert plan["host"] == _HOST_B_ID
+    assert sorted(plan["lanes_checked"]) == sorted(_LANES_B)
 
 
 # --- the planner run on its own, as the manifest's hand recipe runs it ----------
 
 
-def _run_planner(host: str) -> subprocess.CompletedProcess[str]:
+def _run_planner(
+    host: str, *, config_root: Path | None
+) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env["LANE_CENSUS_HOST"] = host
+    env.pop("LANE_MANIFEST", None)
+    env.pop("OMNI_HOME", None)
+    if config_root is None:
+        env.pop("ONEX_WORKSPACE_CONFIG_ROOT", None)
+    else:
+        env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(config_root)
     return subprocess.run(
         [sys.executable, str(_PLAN_PATH)],
         input=json.dumps({"lane": None, "containers": [], "networks": []}),
@@ -454,13 +442,24 @@ def _run_planner(host: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_the_planner_resolves_the_host_from_the_environment() -> None:
-    proc = _run_planner(_HOST_105)
+    proc = _run_planner(_HOST_B, config_root=NEUTRAL_CONFIG_ROOT)
     assert proc.returncode == 0, proc.stderr
-    assert json.loads(proc.stdout)["host"] == "lab-105"
+    assert json.loads(proc.stdout)["host"] == _HOST_B_ID
 
 
 def test_the_planner_exits_5_on_an_undeclared_host() -> None:
-    proc = _run_planner("docker-desktop")
+    proc = _run_planner("docker-desktop", config_root=NEUTRAL_CONFIG_ROOT)
     assert proc.returncode == PLAN.EXIT_HOST_UNDECLARED == 5
     assert "docker-desktop" in proc.stderr
     assert proc.stdout == ""
+
+
+def test_the_planner_exits_3_with_no_manifest_to_read(tmp_path: Path) -> None:
+    """OMN-20934: no config root, no manifest, no plan, and a loud reason."""
+    proc = _run_planner(_HOST_B, config_root=None)
+    assert proc.returncode == PLAN.EXIT_NOT_CONFIGURED == 3
+    assert "ONEX_WORKSPACE_CONFIG_ROOT" in proc.stderr
+    assert proc.stdout == ""
+    empty = _run_planner(_HOST_B, config_root=tmp_path)
+    assert empty.returncode == 3
+    assert "does not exist" in empty.stderr

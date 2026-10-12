@@ -17,7 +17,8 @@ names and network names are four separate global namespaces on the Docker
 daemon -- renaming only one of them does not isolate anything.
 
 This module is the ratchet. The protected namespaces are derived from
-`deploy/lane-census/lane-manifest.yaml` (the versioned desired-state census) and
+the lab's lane manifest (the versioned desired-state census, private config
+under ONEX_WORKSPACE_CONFIG_ROOT since OMN-20934) and
 from the lane compose files it names, so a lane added later is covered without
 editing this file. Nothing about lane identity is hardcoded here.
 
@@ -40,11 +41,15 @@ from typing import Any
 import pytest
 import yaml
 
-pytestmark = [pytest.mark.unit]
+from tests.helpers.lane_census_fixtures import LAB_MANIFEST
+
+# OMN-20934: the protected set is the lab's lane manifest, which is private
+# config, so the module runs only where the overlay is fetched (lab_overlay).
+pytestmark = [pytest.mark.unit, pytest.mark.lab_overlay]
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 E2E_COMPOSE_PATH = REPO_ROOT / "docker" / "docker-compose.e2e.yml"
-LANE_MANIFEST_PATH = REPO_ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
+LANE_MANIFEST_PATH = LAB_MANIFEST
 WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 DOCKER_DIR = REPO_ROOT / "docker"
 
@@ -214,7 +219,7 @@ def test_e2e_project_default_is_not_a_censused_lane() -> None:
     lane_projects = _lane_projects()
     assert project not in lane_projects, (
         f"docker/docker-compose.e2e.yml resolves to compose project {project!r}, "
-        f"which is a live lane in deploy/lane-census/lane-manifest.yaml "
+        f"which is a live lane in the lab's lane manifest "
         f"({sorted(lane_projects)}). A bare `docker compose -f "
         f"docker/docker-compose.e2e.yml down -v --remove-orphans` would then "
         f"delete that lane's containers and data volumes (OMN-15565)."
@@ -373,6 +378,7 @@ def _run_teardown_with_stubs(
         "GITHUB_RUN_ATTEMPT": "2",
         "GITHUB_RUN_ID": "314159",
         "OMNIBASE_INFRA_COMPOSE_PROJECT": project,
+        "ONEX_WORKSPACE_CONFIG_ROOT": str(LANE_MANIFEST_PATH.parents[3]),
         "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
         "TEST_PYTHON": sys.executable,
     }
@@ -390,9 +396,26 @@ def _run_teardown_with_stubs(
     return result, calls
 
 
+def _collected_lane_projects() -> list[str]:
+    """The protected projects at collection, or none where no overlay is present.
+
+    Collection must not fail in the generic test splits, which deselect this
+    module; ``test_the_lab_manifest_is_present`` fails loud wherever it runs
+    without the overlay, so an empty list here is never a silent pass.
+    """
+    return sorted(_lane_projects()) if LANE_MANIFEST_PATH.is_file() else []
+
+
+def test_the_lab_manifest_is_present() -> None:
+    assert LANE_MANIFEST_PATH.is_file(), (
+        f"{LANE_MANIFEST_PATH} is absent: set ONEX_WORKSPACE_CONFIG_ROOT to the "
+        "config root holding config/lab/lane-census (OMN-20934)"
+    )
+
+
 @pytest.mark.parametrize(
     "project",
-    ["", *sorted(_lane_projects()), "some-other-uncensused-project"],
+    ["", *_collected_lane_projects(), "some-other-uncensused-project"],
 )
 def test_nightly_teardown_rejects_every_non_run_project_without_docker(
     project: str, tmp_path: Path
@@ -445,7 +468,10 @@ def test_nightly_teardown_rederives_run_identity_before_manifest_and_down() -> N
 
     expected_project = 'expected_project="omnibase-infra-${e2e_id}"'
     identity_guard = 'if [[ "$project" != "$expected_project" ]]; then'
-    manifest_load = 'open("deploy/lane-census/lane-manifest.yaml", encoding="utf-8")'
+    manifest_load = (
+        'open(os.path.join(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"], '
+        '"config/lab/lane-census/lane-manifest.yaml"), encoding="utf-8")'
+    )
     membership_guard = "if project in protected:"
     rejection = "sys.exit("
     destructive_down = (

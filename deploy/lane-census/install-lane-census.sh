@@ -152,7 +152,6 @@ if [[ ! -f "${REPO_ROOT}/scripts/lane-census-check.sh" ]]; then
   echo "ERROR: ${REPO_ROOT}/scripts/lane-census-check.sh not found; pass --repo-root <omnibase_infra clone>" >&2
   exit 2
 fi
-
 # resolve_unit_dir -- the private directory that holds the units, or rc=1 with
 # the reason on stderr. There is no fallback directory.
 resolve_unit_dir() {
@@ -176,16 +175,28 @@ DROPIN_SRC="${UNIT_DIR}/${DROPIN_REL}"
 STANDALONE_SERVICE_SRC="${UNIT_DIR}/${STANDALONE_SERVICE_REL}"
 STANDALONE_TIMER_SRC="${UNIT_DIR}/${STANDALONE_TIMER_REL}"
 
-# Render a shipped unit: the clone path, then the broker container as the last
-# [Service] setting (every shipped unit ends inside its [Service] section or
-# carries [Install] after it, so the line is inserted before [Install] if any).
+# OMN-20934: the census reads the lane manifest from the same private config
+# root, never from this repository, and a unit runs under a bare interpreter
+# that cannot resolve that root itself. The unit carries the root this install
+# was run with; there is no default (resolve_unit_dir refused an unset root).
+CENSUS_MANIFEST_REL="config/lab/lane-census/lane-manifest.yaml"
+if [[ ! -f "${ONEX_WORKSPACE_CONFIG_ROOT}/${CENSUS_MANIFEST_REL}" ]]; then
+  echo "ERROR: ${ONEX_WORKSPACE_CONFIG_ROOT}/${CENSUS_MANIFEST_REL} not found; set ONEX_WORKSPACE_CONFIG_ROOT to the private config root that holds it, or the census has no desired state" >&2
+  exit 2
+fi
+
+# Render a shipped unit: the clone path, then the broker container and the
+# config root as the last [Service] settings (every shipped unit ends inside its
+# [Service] section or carries [Install] after it, so the lines are inserted
+# before [Install] if any).
 render_unit() {
   local src="$1" dst="$2"
   local env_line="Environment=LANE_MEMORY_BROKER_CONTAINER=${BROKER_CONTAINER}"
-  sed "s#${SHIPPED_REPO_ROOT}#${REPO_ROOT}#g" "$src" | awk -v line="$env_line" '
-    /^\[Install\]/ && !done { print line; print ""; done=1 }
+  local root_line="Environment=ONEX_WORKSPACE_CONFIG_ROOT=${ONEX_WORKSPACE_CONFIG_ROOT}"
+  sed "s#${SHIPPED_REPO_ROOT}#${REPO_ROOT}#g" "$src" | awk -v line="$env_line" -v root="$root_line" '
+    /^\[Install\]/ && !done { print line; print root; print ""; done=1 }
     { print }
-    END { if (!done) print line }
+    END { if (!done) { print line; print root } }
   ' >"$dst"
 }
 
