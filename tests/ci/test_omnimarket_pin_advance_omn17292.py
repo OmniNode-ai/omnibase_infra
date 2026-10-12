@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import re
 from pathlib import Path
 
@@ -44,3 +46,15 @@ def test_no_workflow_reads_the_previous_ref() -> None:
         if _PREVIOUS_PIN in path.read_text(encoding="utf-8")
     ]
     assert stale == []
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/omnimarket_pin_commit_omn17292.json")
+def test_pin_is_the_recorded_omnimarket_commit(
+    recorded_response: dict[str, object],
+) -> None:
+    assert recorded_response["object_type"] == "commit"
+    content = base64.b64decode(str(recorded_response["content"]))
+    object_id = hashlib.sha1(
+        b"commit %d\0" % len(content) + content, usedforsecurity=False
+    ).hexdigest()
+    assert object_id == _pin()
