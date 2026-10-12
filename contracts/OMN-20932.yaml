@@ -1,0 +1,52 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20932"
+title: "omnibase_infra lane overlays move to the private overlay; the shipped repo keeps the loader and a neutral example"
+summary: "The lab lane overlays (every docker/lane-overlays/<lane>.bifrost.yaml and the three dev.rsd-* overlays) leave this repository for the private workspace-config owner's config/lab/lane-overlays/. Every lane compose file mounts ${ONEX_LANE_OVERLAY_DIR:?...}/${COMPOSE_PROJECT_NAME}.bifrost.yaml at the lane-neutral /app/config/delegation/lane.bifrost.yaml with create_host_path false; compose_files.sh (every shell deploy path, prepr_verify_lane.sh strictly) and the deploy agent's _compose_env resolve that directory as ONEX_LANE_OVERLAY_DIR, else config/lab/lane-overlays under the workspace-config owner, and leave it unset (compose refuses, naming both variables) when none exists. docker/lane-overlays/ keeps only the neutral local.bifrost.example.yaml."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-no-lab-overlay-shipped"
+    statement: "omnibase_infra tracks no lab lane overlay; the neutral local template remains."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: omnibase_infra at dev tracks no lane-overlays file other than local.bifrost.example.yaml -- falsifier: uv run pytest tests/unit/docker/test_lane_overlay_dir_resolution.py tests/ci/test_bifrost_lane_overlay.py -q -k 'shipped_overlay_directory'"
+  - id: "req-readers-resolve-private-overlay"
+    statement: "Every reader resolves the private overlay directory, and refuses naming how to supply one when none is configured."
+    acceptance:
+      - id: "AC2"
+        statement: "AC2: every reader of the lane overlays resolves our current values from the private overlay and, with no private overlay, uses the neutral example or fails naming how to supply one -- falsifier: uv run pytest tests/unit/docker/test_lane_overlay_dir_resolution.py -q and uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_overlay_dir.py -q"
+evidence_requirements:
+  - kind: "tests"
+    description: "The shipped-directory, compose-mount and resolver tests pass at the head."
+    command: "uv run pytest tests/unit/docker/test_lane_overlay_dir_resolution.py tests/ci/test_bifrost_lane_overlay.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20932-ac1-no-lab-overlay-shipped"
+    description: "docker/lane-overlays holds only the neutral local template."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/docker/test_lane_overlay_dir_resolution.py tests/ci/test_bifrost_lane_overlay.py -q -k 'shipped_overlay_directory'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "command"
+        check_value: "gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/lane-overlays?ref=e5fd55de6910beaa451fdea9ce2aa10397f588f8' --jq '[.[].name | select(endswith(\".bifrost.yaml\") and . != \"local.bifrost.example.yaml\")] | length' | grep -qx 0"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn20932-ac2-readers-resolve-private-overlay"
+    description: "The shell and deploy-agent resolvers find the private directory and refuse loudly without one."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/docker/test_lane_overlay_dir_resolution.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "test_passes"
+        check_value: "uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_lane_overlay_dir.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "command"
+        check_value: "gh api 'repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=e5fd55de6910beaa451fdea9ce2aa10397f588f8' --jq .content | base64 -d | grep -c 'x-lane-overlay-mount: &lane-overlay-mount'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]

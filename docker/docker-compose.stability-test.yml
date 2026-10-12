@@ -108,6 +108,20 @@ x-stability-test-tenant-projection-env: &stability_test_tenant_projection_env
   ONEX_TENANT_DB_URL: "postgresql://tenant_projection_writer:${TENANT_PROJECTION_WRITER_PASSWORD:?TENANT_PROJECTION_WRITER_PASSWORD must be set for the stability-test tenant projection binding}@postgres:5432/omnidash_analytics"
 x-stability-test-internal-projection-env: &stability_test_internal_projection_env
   OMNINODE_INTERNAL_DB_URL: "postgresql://omninode_runtime:${OMNINODE_RUNTIME_PASSWORD:?OMNINODE_RUNTIME_PASSWORD must be set for the stability-test internal projection binding}@postgres:5432/omnidash_analytics"
+# OMN-20932: a lane's Bifrost overlay is private deployment config; this
+# repository ships none (only lane-overlays/local.bifrost.example.yaml, the
+# neutral template). Every runtime service mounts the overlay named for its
+# compose project from ONEX_LANE_OVERLAY_DIR at one lane-neutral path, and
+# compose refuses when the directory is unset or the file is absent. The deploy
+# paths resolve the directory (scripts/runtime_build/compose_files.sh and the
+# deploy agent's _compose_env).
+x-lane-overlay-mount: &lane-overlay-mount
+  type: bind
+  source: "${ONEX_LANE_OVERLAY_DIR:?ONEX_LANE_OVERLAY_DIR must name the directory holding your COMPOSE_PROJECT_NAME.bifrost.yaml (config/lab/lane-overlays under ONEX_WORKSPACE_CONFIG_ROOT); this repository ships no lab lane overlay}/${COMPOSE_PROJECT_NAME}.bifrost.yaml"
+  target: /app/config/delegation/lane.bifrost.yaml
+  read_only: true
+  bind:
+    create_host_path: false
 services:
   postgres:
     container_name: omnibase-infra-stability-test-postgres
@@ -264,7 +278,7 @@ services:
     volumes: !override
       - runtime_logs:/app/logs
       - runtime_data:/app/data
-      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
     # OMN-15217: strict semantic healthcheck — this lane's green is cited as
@@ -357,7 +371,7 @@ services:
     volumes: !override
       - effects_logs:/app/logs
       - effects_data:/app/data
-      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
     # OMN-15217: strict semantic healthcheck — this lane's green is cited as
@@ -451,7 +465,7 @@ services:
     volumes: !override
       - worker_logs:/app/logs
       - stability_test_worker_data:/app/data
-      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
       - "${OMNI_HOME:?OMNI_HOME required for stability session health probes}:${OMNI_HOME:?OMNI_HOME required for stability session health probes}:ro"
     # OMN-15217: strict semantic healthcheck — see omninode-runtime above for the
@@ -973,7 +987,7 @@ services:
       - stability_test_tenant_projection_logs:/app/logs
       - stability_test_tenant_projection_data:/app/data
       - ../contracts:/app/contracts:ro
-      - ./lane-overlays/dev.bifrost.yaml:/app/config/delegation/dev.bifrost.yaml:ro
+      - *lane-overlay-mount
       - ${OMNICLAUDE_SKILLS_DIR:-./skills}:/app/skills:ro
     # OMN-15217: the strict semantic probe, for the same reason the three shared
     # kernels on this lane carry it -- `curl -sf /health` returns 200 on a body

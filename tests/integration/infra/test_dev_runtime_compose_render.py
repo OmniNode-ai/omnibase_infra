@@ -82,6 +82,8 @@ _RENDER_ONLY = "render-only"
 # Every :?-required var in docker-compose.infra.yml EXCEPT
 # DEV_REDPANDA_ADVERTISE_HOST, which each test sets (or omits) explicitly.
 BASE_REQUIRED_ENV: dict[str, str] = {
+    # OMN-20932: lane overlays are private; the mount refuses without this.
+    "ONEX_LANE_OVERLAY_DIR": "/nonexistent/onex-lane-overlays",
     "POSTGRES_PASSWORD": "test",
     "VALKEY_PASSWORD": "test",
     "INFISICAL_ENCRYPTION_KEY": "0" * 64,

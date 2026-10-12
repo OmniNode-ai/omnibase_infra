@@ -27,6 +27,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from omnibase_core.models.ticket.model_ticket_contract import ModelTicketContract
 from omnibase_infra.runtime.auto_wiring.discovery import discover_contracts_from_paths
 from omnibase_infra.runtime.auto_wiring.models import ModelAutoWiringManifest
 from omnibase_infra.runtime.auto_wiring.profile_ownership import (
@@ -44,6 +45,39 @@ LANDING = (ORCHESTRATOR, GITHUB_EFFECT)
 # A dev-lane-scoped contract the overlay does NOT select: it stays off an
 # instance (the lab lane-health fold keys rows for the lab lanes only).
 LAB_HEALTH = "node_projection_lab_lane_health"
+
+
+def test_ticket_contract_retains_lane_class_and_mirror_source_evidence() -> None:
+    # These changes share a ticket and collided in dod_evidence. Both test
+    # commands and both deployment probes must survive a base merge.
+    contract = ModelTicketContract.from_yaml(
+        (REPO_ROOT / "contracts/OMN-20867.yaml").read_text(encoding="utf-8")
+    )
+    evidence = {item.id: item for item in contract.dod_evidence}
+    assert len(evidence) == len(contract.dod_evidence)
+    for prefix, criterion, test_path, source_path in (
+        (
+            "lane-class-scope",
+            "AC7",
+            "tests/integration/runtime/test_lane_class_attaches_landing_nodes_omn20867.py",
+            "src/omnibase_infra/runtime/auto_wiring/profile_ownership.py",
+        ),
+        (
+            "mirror-source-consume-only",
+            "AC4",
+            "tests/integration/gateway/test_mirror_source_consume_only_omn20867.py",
+            "src/omnibase_infra/event_bus/kafka_transport.py",
+        ),
+    ):
+        test_id = f"dod-omn20867-{prefix}"
+        if prefix == "lane-class-scope":
+            test_id += "-tests"
+        tests = evidence[test_id]
+        assert criterion in tests.binds_ac
+        assert any(test_path in check.check_value for check in tests.checks)
+        probe_prefix = prefix.replace("mirror-source-", "mirror-")
+        probe = evidence[f"dod-omn20867-{probe_prefix}-deploy-probe"]
+        assert any(source_path in check.check_value for check in probe.checks)
 
 
 def _render_runtime_environment(

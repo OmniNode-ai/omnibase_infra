@@ -36,6 +36,14 @@
 #                  the scheduler (OMN-19569) runs it; recipes live in the omni_home
 #                  operator workspace, lab-proof-all-prs-2026-09-25/interim-recipes.md.
 #   none           nothing runs (not_safe or exempt).
+#
+# CONDITIONAL CHECKS (OMN-19566)
+#   A check in conditional_checks is mandatory for a PR whose changed paths
+#   (merge base to head) match one of its when_changed globs, and only then.
+#   The pin (validate_lab_proof_profiles.py --pin --changed-files) and the lab
+#   pool driver both resolve it from the PR's own diff, never from a caller's
+#   word; an unread or empty diff makes every conditional check mandatory.
+#   Only manual_recipe rows may carry them (the node path does not resolve them).
 schema_version: 1
 registry_source: "omni_home CLAUDE.md, Repository Registry table and the private-clone paragraph under it (read 2026-09-25)"
 registry_repos:
@@ -76,7 +84,8 @@ change_control_companion:
     - "evidence/**"
 profiles:
   - profile_key: omnimarket.runtime_image
-    profile_version: 1
+    # 2 (OMN-19566): changed_path_live moved from mandatory to conditional.
+    profile_version: 2
     repo: OmniNode-ai/omnimarket
     exempt_classes: [docs_only]
     docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
@@ -102,7 +111,11 @@ profiles:
           - runtime_main_healthy
           - runtime_effects_healthy
           - focused_tests
-          - changed_path_live
+        conditional_checks:
+          - check: changed_path_live
+            when_changed: ["src/omnimarket/nodes/*/**"]
+            reason: >-
+              the PR changes a node, and the prover reads every runtime's log for each changed node that exists at the head running (its consumer group or its own logger, never its discovery line; LIVE_GREP derived from the diff); a pin, lock, workflow or test-only PR changes no node of this repository, and identity, health and wiring carry it
         negative_control:
           kind: base_rerun
         timeout_minutes: 45
@@ -110,7 +123,9 @@ profiles:
         budget_basis: measured
         budget_source: "STATUS ledger:3897 and TERMINAL ledger:3839 (13 to 16 min on .202 and .101)"
   - profile_key: omnibase_infra.runtime_and_scripts
-    profile_version: 1
+    # 2 (OMN-19566): changed_path_live and forwarder_refused_topic moved from
+    # mandatory to conditional on the PR's changed paths.
+    profile_version: 2
     repo: OmniNode-ai/omnibase_infra
     exempt_classes: [docs_only]
     docs_globs: ["**/*.md", "docs/**", "**/*.rst", "LICENSE"]
@@ -138,12 +153,29 @@ profiles:
           - runtime_effects_healthy
           - no_wiring_failures
           - focused_tests
-          - changed_path_live
-          # OMN-19930 (plan task S5): the lab dev lane's gateway forwarder is up
-          # and the cloud broker its lane declares refuses no inbound topic.
-          # Read by node_board_probe_effect (surface class lab_hardware) on the
-          # host that runs the forwarder; INDETERMINATE fails, like FAIL.
-          - forwarder_refused_topic
+        conditional_checks:
+          - check: changed_path_live
+            when_changed: ["src/omnibase_infra/nodes/*/**"]
+            reason: >-
+              the PR changes a node, and the prover reads every runtime's log for each changed node that exists at the head running (its consumer group or its own logger, never its discovery line; LIVE_GREP derived from the diff); a pin, lock, Dockerfile, migration, workflow or test-only PR changes no node, and identity, health, the migration gate and wiring carry it
+          # OMN-19930 (plan task S5): the gateway forwarder is up and the cloud
+          # broker its lane declares refuses no inbound topic. Read by
+          # node_board_probe_effect (surface class lab_hardware) on the host
+          # that runs the forwarder; INDETERMINATE fails, like FAIL. Mandatory
+          # for a PR that changes the forwarder, its topic set, the transport's
+          # refused-topic handling, its deployment or the check itself. The lab
+          # pool's stacks run no forwarder, so such a PR is MISSING this check
+          # until a forwarder-bearing lane proves it: fail closed by design.
+          - check: forwarder_refused_topic
+            when_changed:
+              - "src/omnibase_infra/nodes/node_bus_forwarder_effect/**"
+              - "src/omnibase_infra/nodes/node_board_probe_effect/**"
+              - "src/omnibase_infra/runtime/gateway_forwarder.py"
+              - "src/omnibase_infra/event_bus/kafka_transport.py"
+              - "docker/docker-compose.gateway.yml"
+              - "docker/gateway/**"
+            reason: >-
+              the check reads the gateway forwarder; a PR that changes none of its code, topic contract, transport handling or deployment cannot change what the forwarder's cloud leg refuses
         negative_control:
           kind: base_rerun
         timeout_minutes: 45

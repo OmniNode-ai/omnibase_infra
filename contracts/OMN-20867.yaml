@@ -122,6 +122,15 @@ dod_evidence:
       - check_type: command
         check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_bus_forwarder_effect/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'lab_capacity:'
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20867-ci-run-failed-topic-set
+    description: AC4, CI failure topic-set slice. The contract names exactly the ci-run-failed topic in ci_run_failed, and the loader selects it together with pr_state without selecting lab_capacity. The two focused tests fail on the merge base's forwarder contract, which has no ci_run_failed topic set, and pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_gateway_forwarder_mirror_only_omn20867.py -q -p no:randomly -k ci_run_failed
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
   - id: dod-omn-20867-ac2-tick-slot
     description: The runtime tick carries the slot it was due on; ticks tile the clock when a publish runs late or fails (omnibase_infra#4815).
     source: manual
@@ -207,4 +216,20 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/auto_wiring/profile_ownership.py?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n"; "") | @base64d | contains("def resolve_runtime_lane_class_selection(")' | grep -qx true
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn20867-mirror-source-consume-only
+    description: AC4, consume-only source slice. The mirror-only forwarder's source transport starts its Kafka consumer without constructing an idempotent producer and rejects publishing with a typed configuration error, while a destination transport keeps its producer. The integration cases are added by this pull request; seven of nine fail on the merge base, where KafkaTransport has no consume_only parameter and the real mirror-only entrypoint raises ClusterAuthorizationFailedError on the source producer start, and all nine pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/gateway/test_mirror_source_consume_only_omn20867.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
+  - id: dod-omn20867-mirror-consume-only-deploy-probe
+    description: Deploy probe. The Kafka transport module at the checked-out commit carries the consume-only constructor assignment this change adds; the probe reads it from GitHub at that commit, tests the decoded content inside jq and exits nonzero on a tree without it, so it fails at the merge base. The readout after the deploy agent rolls the image is the capacity-a lane mirror container reaching healthy with its read-only source login and no InitProducerId authorization error in its log.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/event_bus/kafka_transport.py?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n"; "") | @base64d | contains("self._consume_only = consume_only")' | grep -qx true
         cwd: ${OMNI_HOME}/omnibase_infra
