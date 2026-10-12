@@ -25,7 +25,11 @@ import logging
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumUpdateTriggerType,
+)
 from omnibase_infra.nodes.node_artifact_change_detector_effect.models.model_manual_reconcile_command import (
     ModelManualReconcileCommand,
 )
@@ -58,10 +62,12 @@ class HandlerManualTrigger:
         """Return the behavioral classification: EFFECT (command ingestion)."""
         return EnumHandlerTypeCategory.EFFECT
 
-    def build_reconcile_trigger(
-        self, command: ModelManualReconcileCommand
-    ) -> ModelUpdateTrigger:
+    def handle(self, command: ModelManualReconcileCommand) -> ModelUpdateTrigger:
         """Convert a manual reconcile command to a ModelUpdateTrigger.
+
+        Canonical definition-B entrypoint: the runtime validates the wire payload
+        into ``ModelManualReconcileCommand`` and publishes the returned trigger to
+        ``onex.evt.artifact.change-detected.v1``.
 
         Args:
             command: The manual reconcile command to convert.
@@ -73,7 +79,7 @@ class HandlerManualTrigger:
 
         trigger = ModelUpdateTrigger(
             trigger_id=uuid4(),
-            trigger_type="manual_plan_request",
+            trigger_type=EnumUpdateTriggerType.MANUAL_PLAN_REQUEST,
             source_repo=command.source_repo,
             source_ref=None,
             changed_files=list(command.changed_files),

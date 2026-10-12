@@ -70,6 +70,21 @@ class HandlerPlanToYaml:
         """Behavioral classification: pure compute transformation."""
         return EnumHandlerTypeCategory.COMPUTE
 
+    def handle(self, plan: ModelUpdatePlan) -> ModelYamlEmitResult:
+        """Serialize one update plan for ``onex.evt.artifact.update-plan-emitted.v1``.
+
+        Canonical definition-B entrypoint (OMN-21053): the runtime validates the
+        wire payload into ``ModelUpdatePlan`` and publishes the returned result to
+        the topic it names.
+
+        Args:
+            plan: The update plan to serialize.
+
+        Returns:
+            The YAML payload, plan id and target topic.
+        """
+        return self.serialize_plan(plan)
+
     def serialize_plan(
         self,
         plan: ModelUpdatePlan,

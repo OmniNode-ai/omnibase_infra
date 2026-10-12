@@ -61,6 +61,7 @@ Exports:
     EnumTopicType: Topic types (EVENTS, COMMANDS, INTENTS, SNAPSHOTS)
     EnumValidationSeverity: Validation error severity levels (ERROR, CRITICAL, WARNING)
     EnumUpdatePlanState: Update plan lifecycle FSM states (IDLE, CREATED, COMMENT_POSTED, YAML_EMITTED, CLOSED, WAIVED)
+    EnumUpdateTriggerType: Artifact update trigger types (PR_OPENED through MANUAL_PLAN_REQUEST)
     EnumValidationVerdict: Validation pipeline verdict (PASS, FAIL, QUARANTINE)
     EnumLifecycleTier: Pattern lifecycle promotion tiers (OBSERVED through DEFAULT, SUPPRESSED)
 """
@@ -148,6 +149,7 @@ from omnibase_infra.enums.enum_session_lifecycle_state import (
 )
 from omnibase_infra.enums.enum_topic_standard import EnumTopicStandard
 from omnibase_infra.enums.enum_update_plan_state import EnumUpdatePlanState
+from omnibase_infra.enums.enum_update_trigger_type import EnumUpdateTriggerType
 from omnibase_infra.enums.enum_validation_severity import EnumValidationSeverity
 from omnibase_infra.enums.enum_validation_verdict import EnumValidationVerdict
 
@@ -221,6 +223,7 @@ __all__: list[str] = [
     "EnumTopicStandard",
     "EnumTopicType",
     "EnumUpdatePlanState",
+    "EnumUpdateTriggerType",
     "EnumValidationSeverity",
     "EnumValidationVerdict",
 ]

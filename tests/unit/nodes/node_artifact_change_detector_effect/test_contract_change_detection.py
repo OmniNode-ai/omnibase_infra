@@ -42,70 +42,70 @@ class TestHandlerManualTrigger:
     def test_trigger_type_is_manual_plan_request(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command()
-        trigger = handler.build_reconcile_trigger(cmd)
+        trigger = handler.handle(cmd)
         assert trigger.trigger_type == "manual_plan_request"
 
     def test_source_repo_preserved(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command(source_repo="omnibase_infra")
-        trigger = handler.build_reconcile_trigger(cmd)
+        trigger = handler.handle(cmd)
         assert trigger.source_repo == "omnibase_infra"
 
     def test_empty_changed_files(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command(changed_files=[])
-        trigger = handler.build_reconcile_trigger(cmd)
+        trigger = handler.handle(cmd)
         assert trigger.changed_files == []
 
     def test_changed_files_with_paths(self) -> None:
         files = ["src/omnibase_infra/nodes/foo/contract.yaml"]
         handler = HandlerManualTrigger()
         cmd = self._make_command(changed_files=files)
-        trigger = handler.build_reconcile_trigger(cmd)
+        trigger = handler.handle(cmd)
         assert list(trigger.changed_files) == files
 
     def test_reason_preserved(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command(reason="Post-migration check")
-        trigger = handler.build_reconcile_trigger(cmd)
+        trigger = handler.handle(cmd)
         assert "Post-migration check" in trigger.reason
 
     def test_default_reason_includes_command_id(self) -> None:
         handler = HandlerManualTrigger()
         specific_id = UUID("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
         cmd = self._make_command(command_id=specific_id, reason="")
-        trigger = handler.build_reconcile_trigger(cmd)
+        trigger = handler.handle(cmd)
         assert str(specific_id) in trigger.reason
 
     def test_actor_preserved(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command(actor="dev-agent")
-        trigger = handler.build_reconcile_trigger(cmd)
+        trigger = handler.handle(cmd)
         assert trigger.actor == "dev-agent"
 
     def test_source_ref_is_none(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command()
-        trigger = handler.build_reconcile_trigger(cmd)
+        trigger = handler.handle(cmd)
         assert trigger.source_ref is None
 
     def test_ticket_ids_is_empty(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command()
-        trigger = handler.build_reconcile_trigger(cmd)
+        trigger = handler.handle(cmd)
         assert trigger.ticket_ids == []
 
     def test_unique_trigger_id_per_call(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command()
-        t1 = handler.build_reconcile_trigger(cmd)
-        t2 = handler.build_reconcile_trigger(cmd)
+        t1 = handler.handle(cmd)
+        t2 = handler.handle(cmd)
         assert t1.trigger_id != t2.trigger_id
 
     def test_timestamp_is_set(self) -> None:
         handler = HandlerManualTrigger()
         cmd = self._make_command()
-        trigger = handler.build_reconcile_trigger(cmd)
+        trigger = handler.handle(cmd)
         assert trigger.timestamp is not None
 
     def test_handler_type_and_category(self) -> None:

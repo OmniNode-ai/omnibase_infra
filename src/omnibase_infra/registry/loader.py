@@ -3,12 +3,27 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
 
 from omnibase_infra.registry.models.model_artifact_registry import ModelArtifactRegistry
+
+PACKAGED_ARTIFACT_REGISTRY_PATH: Path = Path(__file__).with_name(
+    "artifact_registry.yaml"
+)
+
+
+@lru_cache(maxsize=1)
+def load_packaged_artifact_registry() -> ModelArtifactRegistry:
+    """Load the registry shipped with the package, once per process.
+
+    The impact analyzer receives only a change trigger on the bus, so the
+    registry it scores against is bound here rather than carried on the wire.
+    """
+    return load_artifact_registry(PACKAGED_ARTIFACT_REGISTRY_PATH)
 
 
 def load_artifact_registry(path: Path) -> ModelArtifactRegistry:
