@@ -498,6 +498,14 @@ repos:
         types: [shell]
         pass_filenames: true
         stages: [pre-commit]
+      - id: release-train-nightly-tests
+        require_serial: true
+        name: Release train decision surface (OMN-20715)
+        entry: uv run --frozen pytest tests/scripts/test_release_train_nightly.py -q --no-cov
+        language: system
+        pass_filenames: false
+        files: ^(config/release_train_policy\.yaml|scripts/ci/release_train\.py|\.github/workflows/release-train-nightly\.yml|tests/scripts/test_release_train_nightly\.py)$
+        stages: [pre-commit]
       - id: runner-disk-admission-self-pause
         require_serial: true
         name: Runner disk admission retries a marked self-pause (OMN-19070)

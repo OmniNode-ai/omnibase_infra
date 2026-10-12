@@ -2579,6 +2579,14 @@ jobs:
       - name: Verify cloud migration failure scope (OMN-18496)
         run: uv run --frozen pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py -q
 
+      # OMN-20715: the change-aware selector does not pick tests/scripts/ for a
+      # config/ or scripts/ change, so a release-train policy edit merged with no
+      # job running the tests that pin it. One split runs them, by name; this
+      # job's result feeds the required "CI Summary" through "CI Tests Gate".
+      - name: Verify release train decision surface (OMN-20715)
+        if: matrix.split == 1
+        run: uv run --frozen pytest tests/scripts/test_release_train_nightly.py -q --no-cov
+
       - name: Run pytest (smart selection)
         if: vars.ENABLE_SMART_TESTS == 'true' && needs.detect-changes.outputs.is_full_suite == 'false'
         # OMN-15233: tests/integration/ci/test_workflow_uses_refs_resolve_live.py
