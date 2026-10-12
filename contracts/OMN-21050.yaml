@@ -49,8 +49,9 @@ dod_evidence:
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC2"]
   - id: "dod-omn21050-ac3-deploy-readback"
-    description: "AC3. Deploy readback on the lab dev lane broker: the synthetic new topic exists after the DUAL_WRITE command."
+    description: "AC3. Deploy readback on the lab dev lane broker: the synthetic new topic exists after the DUAL_WRITE command. It reads the lab dev lane broker container after the deploy agent rolls the runtime, which a hosted runner does not have, so only the local Done gate runs it."
     source: "manual"
+    execution_scope: "local_done_gate"
     checks:
       - check_type: "command"
         check_value: "docker exec omnibase-infra-redpanda sh -c 'RPK_USER=\"$DEV_KAFKA_SASL_USERNAME\" RPK_PASS=\"$DEV_KAFKA_SASL_PASSWORD\" RPK_SASL_MECHANISM=SCRAM-SHA-256 rpk topic list' | grep -q onex.evt.labproof.omn21050-new.v1"
