@@ -11,6 +11,7 @@
 # Related Tickets:
 #   - OMN-12623: migration executor + lag/drain + projection + replay harness
 #   - OMN-12621: ModelTopicMigrationContract (core)
+#   - OMN-21050: handle() dispatch entrypoint on HandlerTopicMigrationExecutor
 name: "node_topic_migration_executor_effect"
 contract_name: "node_topic_migration_executor_effect"
 node_name: "node_topic_migration_executor_effect"
