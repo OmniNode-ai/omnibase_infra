@@ -15,6 +15,9 @@ evidence_requirements:
   - kind: command
     description: .github/omnimarket-contract-pin.yaml carries the refreshed value.
     command: "grep -qF -- 'omnimarket_contract_ref: 04d9f428d146f9d2d3a4a11b2ef6fb40119468d6' .github/omnimarket-contract-pin.yaml"
+  - kind: tests
+    description: The pin moved off e286bd296e373e8e17e11c735393613a227f7972 and sibling-pins and every workflow moved with it.
+    command: uv run pytest tests/ci/test_omnimarket_pin_advance_omn17292.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -26,5 +29,8 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: "grep -qF -- 'omnimarket_contract_ref: 04d9f428d146f9d2d3a4a11b2ef6fb40119468d6' .github/omnimarket-contract-pin.yaml"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_omnimarket_pin_advance_omn17292.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
