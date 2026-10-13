@@ -599,6 +599,15 @@ repos:
         files: ^(src/omnibase_infra/handlers/handler_runtime_deploy\.sh|scripts/runtime_build/compose_files\.sh|docker/docker-compose\.(infra|dev-lane)\.yml|tests/scripts/test_deploy_runtime_cloud_gate_omn18496\.py)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-20112: no pull-request gate may require the staging plane. Mirrors the
+      # arch-invariants step in ci.yml.
+      - id: no-staging-pr-gate
+        name: No pull-request gate requires the staging plane (OMN-20112)
+        entry: uv run --frozen pytest tests/ci/test_no_staging_pr_gate_omn20112.py tests/ci/test_no_staging_pr_gate_wired_omn20112.py -q
+        language: system
+        files: ^(\.github/workflows/.*\.ya?ml|tests/ci/test_no_staging_pr_gate_(wired_)?omn20112\.py|tests/ci/fixtures/no_staging_pr_gate_wiring_omn20112\.json)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-16367: per-run compose proof images must be evicted at source
       # (always() teardown with --volumes --rmi local) and labeled
       # org.omninode.retention=disposable. Mirrors the ci.yml step in the

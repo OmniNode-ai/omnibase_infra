@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: OMN-15361
+title: Resolve migration ownership during the infra-first vendor window
+summary: This check correction makes the SQL ownership gate consume the typed migration declarations already used by runtime grant derivation, while retaining exact catalog identity checks.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-migration-ownership
+    statement: A table created by its declared local migration resolves ownership before its downstream manifest arrives; missing or conflicting declarations remain failures.
+    acceptance:
+      - id: AC1
+        statement: The infra-first ownership control passes only with one exact declaration and rejects a wrong schema, wrong table, duplicate declaration, undeclared objects, and a downstream declaration of the wrong object kind.
+evidence_requirements:
+  - kind: tests
+    description: Exercise exact local migration ownership and downstream authority handover with seeded rejection controls.
+    command: uv run --frozen pytest tests/ci/test_application_database_sql_gate.py -k infra_first_ownership -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-infra-first-sql-ownership
+    description: The new ownership control fails against the original gate when the exact migration declaration cannot resolve its created table.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_application_database_sql_gate.py -k infra_first_ownership -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]

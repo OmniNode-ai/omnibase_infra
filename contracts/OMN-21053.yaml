@@ -43,3 +43,10 @@ dod_evidence:
         check_value: "uv run pytest tests/unit/nodes/test_artifact_reconciliation_handle_entrypoints_omn21053.py tests/unit/runtime/auto_wiring/test_handler_dispatch_entrypoint_coverage_omn14489.py -q"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC3"]
+  - id: "dod-deploy"
+    description: "Deploy-scope readback, bound to no criterion: after the deploy agent rolls the dev lane, the runtime image imports the impact analyzer handler that now exposes handle(). It reads the dev lane's runtime container, which a hosted runner does not have, so only the local Done gate runs it and the hosted must-fail control does not control it."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.nodes.node_impact_analyzer_compute.handlers.handler_impact_analysis import HandlerImpactAnalysis; assert callable(getattr(HandlerImpactAnalysis, \"handle\"))'"

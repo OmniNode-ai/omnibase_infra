@@ -5,6 +5,17 @@
       "/onex-golden-fixture-root"
     ],
     "correlation_id": "33333333-3333-3333-3333-333333333333",
+    "invoke_command": {
+      "agent": "claude",
+      "allow_dirty_tree": false,
+      "correlation_id": "33333333-3333-3333-3333-333333333333",
+      "model": null,
+      "network": false,
+      "prompt": "do the thing",
+      "sandbox": "read_only",
+      "timeout_ms": 60000,
+      "workspace_path": "/onex-golden-fixture-root/nested/../../escape"
+    },
     "prompt": "do the thing",
     "sandbox": "read_only",
     "workspace_path": "/onex-golden-fixture-root/nested/../../escape"
@@ -12,6 +23,17 @@
   "input_type": "ModelWorkspaceValidateCommand",
   "output": {
     "correlation_id": "33333333-3333-3333-3333-333333333333",
+    "invoke_command": {
+      "agent": "claude",
+      "allow_dirty_tree": false,
+      "correlation_id": "33333333-3333-3333-3333-333333333333",
+      "model": null,
+      "network": false,
+      "prompt": "do the thing",
+      "sandbox": "read_only",
+      "timeout_ms": 60000,
+      "workspace_path": "/onex-golden-fixture-root/nested/../../escape"
+    },
     "rejection_reason": "workspace path resolves outside every allowed root (symlink-escape or traversal rejected)",
     "resolved_path": "/escape",
     "valid": false

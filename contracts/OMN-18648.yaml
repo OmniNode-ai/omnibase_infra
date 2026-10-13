@@ -1,0 +1,36 @@
+schema_version: "1.0.0"
+ticket_id: OMN-18648
+title: "CI Live Contact admits a pin-only workflow edit, decided from the diff content"
+summary: 'The CI-tooling admission gate refused every pin-only workflow edit (a commit sha swapped on an existing uses:/ref: line) for want of a live-contact test. It now admits a modified workflow file whose every changed line only swaps a full commit sha on an existing uses:/ref: line or the comment naming it; any added or changed step, command, trigger, permission or logic still refuses.'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn18648-pin-only
+    statement: 'The admission handler admits a pin-only workflow edit and refuses every other CI-tooling change that carries no live-contact evidence.'
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a pin-only uses:/ref: sha swap is admitted and a step, command, trigger, permission, tag, branch, abbreviated-sha, sparse-checkout, added-file or script change still refuses -- falsifier: uv run pytest tests/ci/test_ci_live_contact.py -q -k "pin_only or non_pin"'
+evidence_requirements:
+  - kind: tests
+    description: The admitting and refusing pin-only cases, and the existing seam-only refusal, pass through the handler and the bus runtime.
+    command: uv run pytest tests/ci/test_ci_live_contact.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-18648-ac1
+    description: The pin-only admission and its refusing cases pass.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_ci_live_contact.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/ci/test_ci_live_contact_integration_omn18648.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_ci_live_contact.py?ref=54e6ac032ff0f826d60b0108cc92e9663cd6192e --jq .content | base64 -d | grep -c 'def _is_pin_only_diff'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]

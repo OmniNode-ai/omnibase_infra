@@ -98,11 +98,17 @@ class HandlerTopicMigrationExecutor:
         )
         return compute_consumer_group_id(identity)
 
-    async def execute(
+    async def handle(
         self,
-        command: ModelTopicMigrationCommand,
+        request: ModelTopicMigrationCommand,
     ) -> ModelTopicMigrationLifecycleEvent:
-        """Advance the migration to ``command.target_phase`` and emit the event."""
+        """Advance the migration to ``request.target_phase`` and emit the event.
+
+        ``handle`` is the entrypoint the runtime dispatches to (OMN-21050); the
+        executor previously exposed only ``execute``, which nothing called, so a
+        command on the bus was retried into a failure terminal.
+        """
+        command = request
         contract = command.contract
         self._validate_forward(contract.phase, command.target_phase)
 

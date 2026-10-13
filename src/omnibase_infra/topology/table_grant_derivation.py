@@ -411,6 +411,67 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             role="demo_readiness",
         ),
     ),
+    # OMN-20802: the automation-liveness projection's three relations are
+    # vendored here first. The source contract
+    # (node_projection_automation_liveness) declares each omninode_internal,
+    # access read_write, with the role named after the relation; 0001 grants
+    # omninode_runtime SELECT, INSERT, UPDATE on all three. Retired by the
+    # omnimarket OMN-20802 pull request merging and the pin advancing past it;
+    # the expiry module names all three.
+    ContractTableDeclaration(
+        node="legacy_migration:automation_liveness_state",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_automation_liveness/"
+            "0000_create_automation_liveness.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="automation_liveness_state",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_automation_liveness/"
+                "0000_create_automation_liveness.sql"
+            ),
+            access="read_write",
+            role="automation_liveness_state",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:automation_run_history",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_automation_liveness/"
+            "0000_create_automation_liveness.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="automation_run_history",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_automation_liveness/"
+                "0000_create_automation_liveness.sql"
+            ),
+            access="read_write",
+            role="automation_run_history",
+        ),
+    ),
+    ContractTableDeclaration(
+        node="legacy_migration:automation_alarm_episodes",
+        contract_path=Path(
+            "docker/migrations/forward/nodes/node_projection_automation_liveness/"
+            "0000_create_automation_liveness.sql"
+        ),
+        table=ModelDbTableDeclaration(
+            name="automation_alarm_episodes",
+            database_ref="application",
+            schema="omninode_internal",
+            migration=(
+                "docker/migrations/forward/nodes/node_projection_automation_liveness/"
+                "0000_create_automation_liveness.sql"
+            ),
+            access="read_write",
+            role="automation_alarm_episodes",
+        ),
+    ),
     # OMN-19987: run_trace is vendored here first; no pinned omnimarket contract
     # declares it yet, so the derivation cannot reproduce the shipped writer
     # grant until omnimarket's node_projection_run_trace lands and the pin

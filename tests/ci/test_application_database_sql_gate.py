@@ -148,6 +148,170 @@ def test_gate_checks_only_real_changed_sql_files(tmp_path: Path) -> None:
     assert all("unchanged_legacy.sql" not in violation for violation in violations)
 
 
+@pytest.mark.parametrize(
+    ("declared_schema", "declared_name", "duplicate", "passes"),
+    [
+        ("omninode_internal", "automation_liveness_state", False, True),
+        ("public", "automation_liveness_state", False, False),
+        ("omninode_internal", "another_table", False, False),
+        ("omninode_internal", "automation_liveness_state", True, False),
+    ],
+)
+def test_infra_first_ownership_requires_one_exact_migration_declaration(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    declared_schema: str,
+    declared_name: str,
+    duplicate: bool,
+    passes: bool,
+) -> None:
+    from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
+        ModelDbTableDeclaration,
+    )
+    from omnibase_infra.topology.table_grant_derivation import ContractTableDeclaration
+    from scripts.ci import check_application_database_sql as gate
+
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    _git(repository, "init", "--initial-branch=main")
+    (repository / "baseline.txt").write_text("baseline\n", encoding="utf-8")
+    base = _commit(repository, "baseline")
+    migration = Path("migrations/create.sql")
+    (repository / migration).parent.mkdir()
+    (repository / migration).write_text(
+        "CREATE TABLE omninode_internal.automation_liveness_state (id uuid);\n",
+        encoding="utf-8",
+    )
+    declaration = ContractTableDeclaration(
+        node="legacy_migration:automation_liveness_state",
+        contract_path=migration,
+        table=ModelDbTableDeclaration(
+            name=declared_name,
+            database_ref="application",
+            schema=declared_schema,
+            migration=str(migration),
+            access="read_write",
+            role="automation_liveness_state",
+        ),
+    )
+    monkeypatch.setattr(gate, "STATE_IO_TABLE_DECLARATIONS", (), raising=False)
+    monkeypatch.setattr(
+        gate,
+        "LEGACY_MIGRATION_TABLE_DECLARATIONS",
+        (declaration, declaration) if duplicate else (declaration,),
+        raising=False,
+    )
+    head = _commit(repository, "infra-first table")
+    outcome = gate.validate_changed_sql(
+        repository, base, head, ownership_manifest_paths=()
+    )
+    assert (outcome.violations == ()) is passes, outcome.violations
+    if not passes:
+        return
+
+    # A declaration for this table never authorizes another table or a view.
+    (repository / "unowned.sql").write_text(
+        "CREATE TABLE omninode_internal.unowned (id uuid);\n"
+        "CREATE VIEW omninode_internal.automation_liveness_state "
+        "AS SELECT 1 AS id;\n",
+        encoding="utf-8",
+    )
+    red_head = _commit(repository, "undeclared objects")
+    red = gate.validate_changed_sql(
+        repository, head, red_head, ownership_manifest_paths=()
+    )
+    assert any("unowned" in violation for violation in red.violations)
+    assert any("VIEW" in violation for violation in red.violations)
+
+    # Upstream manifest authority replaces the temporary bridge, rather than
+    # introducing a second owner when the downstream projection lands.
+    manifest = _ownership_manifest(repository, "automation_liveness_state")
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "schema: public", "schema: omninode_internal"
+        ),
+        encoding="utf-8",
+    )
+    assert not gate.validate_changed_sql(
+        repository, base, head, ownership_manifest_paths=(manifest,)
+    ).violations
+
+    manifest.write_text(
+        'schema_version: "1.0"\n'
+        "service: sql_gate_test\n"
+        "target_database_ref: application\n"
+        "db_io:\n  db_tables: []\n"
+        "relation_evidence:\n"
+        "  - name: automation_liveness_state\n"
+        "    kind: view\n"
+        "    database_ref: application\n"
+        "    schema: omninode_internal\n"
+        "    domain: OMNINODE_INTERNAL\n"
+        "    owner_declaration: service:sql_gate_test\n",
+        encoding="utf-8",
+    )
+    wrong_kind = gate.validate_changed_sql(
+        repository, base, head, ownership_manifest_paths=(manifest,)
+    )
+    assert any(
+        "lacks an authoritative ownership declaration" in violation
+        for violation in wrong_kind.violations
+    )
+
+    # Deleting the declared source makes its ownership unavailable.
+    (repository / migration).unlink()
+    assert not gate._supplemental_ownership_identities(
+        repository, (), declarations=(declaration,)
+    )
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/omn15361_infra_first_ownership.json")
+def test_recorded_infra_first_ownership_incident(
+    recorded_response: dict[str, object], tmp_path: Path
+) -> None:
+    """Replay the actual migration declarations behind the dispatched CI red."""
+    from omnibase_core.models.contracts.subcontracts.model_db_table_declaration import (
+        ModelDbTableDeclaration,
+    )
+    from omnibase_infra.topology.table_grant_derivation import ContractTableDeclaration
+    from scripts.ci.check_application_database_sql import (
+        _supplemental_ownership_identities,
+    )
+
+    rows = recorded_response["declarations"]
+    assert isinstance(rows, list)
+    declarations = tuple(
+        ContractTableDeclaration(
+            node=row["node"],
+            contract_path=Path(row["contract_path"]),
+            table=ModelDbTableDeclaration.model_validate(row["table"]),
+        )
+        for row in rows
+    )
+    migrations = recorded_response["migrations"]
+    assert isinstance(migrations, dict)
+    for relative, sql in migrations.items():
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(sql, encoding="utf-8")
+    resolved = _supplemental_ownership_identities(
+        tmp_path, (), declarations=declarations
+    )
+    assert {item.name for item in resolved} == {
+        "automation_liveness_state",
+        "automation_run_history",
+        "automation_alarm_episodes",
+    }
+    original_output = recorded_response["original_gate_stdout"]
+    assert isinstance(original_output, str)
+    for identity in resolved:
+        assert (
+            f"application target {identity.schema}.{identity.name} "
+            "requires exactly one ownership declaration"
+        ) in original_output
+    assert "application_database_sql_gate=FAIL" in original_output
+
+
 def test_gate_exempts_only_the_omn15503_legacy_node_migration_path(
     tmp_path: Path,
 ) -> None:

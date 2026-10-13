@@ -117,14 +117,32 @@ event_bus:
     patch: 0
   publish_topics:
     - "onex.evt.platform.validation-adjudication-completed.v1"
-  # OMN-18013: subscription DELETED. This contract declares no handler_routing,
-  # so _topics_for_handler_entry assigned these topics to no entry and ZERO
-  # dispatch routes ever existed for them: every message was consumed, found
-  # NO_DISPATCHER, and was DLQ'd or dropped while the container booted green.
-  # A subscribe declaration that can never dispatch is a lie in the contract
-  # graph, not a feature awaiting wiring. Re-add it together with the
-  # handler_routing entry that consumes it, in the same diff.
-  subscribe_topics: []
+  # OMN-18013 deleted the subscription because this contract declared no
+  # handler_routing, so no dispatch route existed for it. OMN-21056 re-adds it
+  # together with the handler_routing entry below that consumes it, in the same
+  # diff, as that note required.
+  subscribe_topics:
+    - "onex.evt.platform.validation-adjudication-requested.v1"
+# Handler routing: the adjudication request is folded into a verdict by the
+# scoring policy. The returned event class is declared under published_events,
+# which is what makes the runtime publish it as an event instead of capturing a
+# bare reducer return as a projection.
+handler_routing:
+  routing_strategy: "operation_match"
+  handlers:
+    - operation: "validation.adjudicate"
+      topic: "onex.evt.platform.validation-adjudication-requested.v1"
+      event_model:
+        name: "ModelValidationAdjudicationRequested"
+        module: "omnibase_infra.models.validation.model_validation_adjudication_requested"
+      handler:
+        name: "HandlerAdjudicate"
+        module: "omnibase_infra.handlers.handler_validation_adjudicate"
+      description: "Adjudicate a plan's check results into a PASS/FAIL/QUARANTINE verdict."
+# The key is the returned event class name with its `Model` prefix stripped.
+published_events:
+  - topic: "onex.evt.platform.validation-adjudication-completed.v1"
+    event_type: "ValidationAdjudicationCompleted"
 # Intent Emission Configuration
 # ============================
 intent_emission:
@@ -133,12 +151,12 @@ intent_emission:
     - intent_type: "validation.verdict.emit"
       target_pattern: "orchestrator://validation/{candidate_id}/verdict"
       payload_model: "ModelVerdict"
-      payload_module: "omnibase_infra.nodes.node_validation_adjudicator.models"
+      payload_module: "omnibase_infra.models.validation"
       description: "Emit the computed validation verdict"
 # State Model Configuration
 state_model:
   name: "ModelAdjudicatorState"
-  module: "omnibase_infra.nodes.node_validation_adjudicator.models"
+  module: "omnibase_infra.models.validation"
   description: "Immutable state model for validation adjudicator FSM"
 # Idempotency Configuration
 idempotency:

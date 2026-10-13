@@ -36,7 +36,7 @@ from omnibase_infra.enums import (
 from omnibase_infra.errors import ModelInfraErrorContext, RuntimeHostError
 
 if TYPE_CHECKING:
-    from omnibase_infra.nodes.node_validation_adjudicator.models.model_adjudicator_state import (
+    from omnibase_infra.models.validation.model_adjudicator_state import (
         ModelAdjudicatorState,
     )
 

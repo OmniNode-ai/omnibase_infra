@@ -12,15 +12,18 @@ the handler queries consumer_health_triage for active incidents with the
 same consumer identity.
 
 The triage outcome is persisted to the ``runtime_error_triage`` table and
-returned to the caller. This handler publishes nothing: the OMN-5650
-``error-triaged.v1`` emission was removed in OMN-17187 because no contract in
-any repo subscribed to that topic and the omnidash projection it claimed to
-feed was never built, making it an unwired path.
+returned to the caller. The only event this node publishes is the escalation
+event: an open incident that crosses the ``escalation`` rule declared in
+``contract.yaml`` is moved to ``escalated`` in one atomic UPDATE and exactly one
+``ModelRuntimeErrorEscalatedEvent`` is returned for the dispatcher to publish
+on the contract-declared topic. The OMN-5650 ``error-triaged.v1`` emission stays
+removed (OMN-17187).
 
 Related Tickets:
     - OMN-5522: Create NodeRuntimeErrorTriageEffect
     - OMN-5529: Runtime Health Event Pipeline (epic)
     - OMN-17187: Remove the orphaned error-triaged.v1 emission
+    - OMN-21029: Escalate incidents that cross the contract-declared rule
 """
 
 from __future__ import annotations
@@ -38,6 +41,13 @@ from omnibase_infra.models.health.enum_runtime_error_category import (
 )
 from omnibase_infra.models.health.model_runtime_error_event import (
     ModelRuntimeErrorEvent,
+)
+from omnibase_infra.nodes.node_runtime_error_triage_effect.models.model_escalation_rule import (
+    ModelEscalationRule,
+    load_escalation_rule,
+)
+from omnibase_infra.nodes.node_runtime_error_triage_effect.models.model_runtime_error_escalated_event import (
+    ModelRuntimeErrorEscalatedEvent,
 )
 from omnibase_infra.nodes.node_runtime_error_triage_effect.models.model_triage_rule import (
     DEFAULT_TRIAGE_RULES,
@@ -77,6 +87,13 @@ class ModelRuntimeErrorTriageResult(BaseModel):
         default=None,
         description="Fingerprint of correlated Layer 1 consumer health incident.",
     )
+    escalation: ModelRuntimeErrorEscalatedEvent | None = Field(
+        default=None,
+        description=(
+            "Set only on the one occurrence that moved the incident to "
+            "'escalated'; this is the event the dispatcher publishes."
+        ),
+    )
 
 
 class HandlerRuntimeErrorTriage:
@@ -85,6 +102,8 @@ class HandlerRuntimeErrorTriage:
     Dependencies (injected via constructor):
         - db_pool: asyncpg connection pool for PostgreSQL
         - rules: Optional list of triage rules (defaults to DEFAULT_TRIAGE_RULES)
+        - escalation_rule: Optional escalation rule (defaults to the ``escalation``
+          block of this node's contract.yaml)
         - slack_handler: Optional callable for Slack notifications
         - linear_handler: Optional callable for Linear ticket creation
     """
@@ -94,6 +113,7 @@ class HandlerRuntimeErrorTriage:
         db_pool: Pool | None = None,
         *,
         rules: list[ModelTriageRule] | None = None,
+        escalation_rule: ModelEscalationRule | None = None,
         slack_handler: Callable[[str], Awaitable[None]] | None = None,
         linear_handler: Callable[..., Awaitable[None]] | None = None,
     ) -> None:
@@ -103,11 +123,14 @@ class HandlerRuntimeErrorTriage:
             db_pool: asyncpg connection pool. When None (auto-wired path),
                 handle() returns a suppressed result with a warning log.
             rules: Triage rules in priority order. Defaults to DEFAULT_TRIAGE_RULES.
+            escalation_rule: When an open incident escalates. Defaults to the
+                contract-declared rule.
             slack_handler: Async callable accepting a message string.
             linear_handler: Async callable accepting title and description kwargs.
         """
         self._db_pool = db_pool
         self._rules = sorted(rules or DEFAULT_TRIAGE_RULES, key=lambda r: r.priority)
+        self._escalation_rule = escalation_rule or load_escalation_rule()
         self._slack_handler = slack_handler
         self._linear_handler = linear_handler
 
@@ -122,19 +145,21 @@ class HandlerRuntimeErrorTriage:
         return EnumHandlerTypeCategory.EFFECT
 
     async def handle(self, event: ModelRuntimeErrorEvent) -> ModelHandlerOutput[None]:
-        """Run triage as a DB-writing effect with no bus output.
+        """Run triage as a DB-writing effect whose only bus output is an escalation.
 
         The persisted triage details are available from
         :meth:`triage_runtime_error` for direct callers. The auto-wired Kafka
-        boundary must receive an effect output with no events: this contract
-        declares no ``publish_topics``, so returning the details as a bare
-        ``BaseModel`` would make them an undeliverable bus output.
+        boundary receives an effect output carrying at most one event, the
+        escalation event, which the contract declares in ``published_events``.
+        Returning the details as a bare ``BaseModel`` would make them an
+        undeliverable bus output, so they are never part of the output.
         """
-        await self.triage_runtime_error(event)
+        result = await self.triage_runtime_error(event)
         return ModelHandlerOutput.for_effect(
             input_envelope_id=event.event_id,
             correlation_id=event.correlation_id,
             handler_id=type(self).__name__,
+            events=(result.escalation,) if result.escalation is not None else (),
         )
 
     async def triage_runtime_error(
@@ -147,7 +172,7 @@ class HandlerRuntimeErrorTriage:
 
         Returns:
             Persisted triage details for a direct caller. This value is not a
-            Kafka output; :meth:`handle` wraps it in an empty effect output.
+            Kafka output; :meth:`handle` publishes only its ``escalation``.
         """
         if self._db_pool is None:
             logger.warning(
@@ -233,9 +258,68 @@ class HandlerRuntimeErrorTriage:
                 incident_state=incident_state,
                 occurrence_count=occurrence_count,
                 correlated_consumer_fingerprint=correlated_fingerprint,
+                escalation=await self._escalate_if_crossed(
+                    event,
+                    matched_rule,
+                    incident_state=incident_state,
+                    occurrence_count=occurrence_count,
+                    correlated_fingerprint=correlated_fingerprint,
+                ),
             )
 
         return result
+
+    async def _escalate_if_crossed(
+        self,
+        event: ModelRuntimeErrorEvent,
+        rule: ModelTriageRule,
+        *,
+        incident_state: str,
+        occurrence_count: int,
+        correlated_fingerprint: str | None,
+    ) -> ModelRuntimeErrorEscalatedEvent | None:
+        """Move the incident to ``escalated`` and build its one event.
+
+        The decision is the pure :meth:`ModelEscalationRule.evaluate`. The
+        write is a single conditional UPDATE, so of several consumers that see
+        the rule crossed at once only one matches the ``open`` row and gets an
+        event; every later occurrence sees ``escalated`` and decides no.
+        """
+        reason = self._escalation_rule.evaluate(
+            incident_state=incident_state,
+            occurrence_count=occurrence_count,
+            severity=event.severity,
+            action=rule.action,
+        )
+        if reason is None:
+            return None
+        assert self._db_pool is not None  # guarded by handle() None-check
+        async with self._db_pool.acquire() as conn:
+            claimed = await conn.fetchrow(
+                """
+                UPDATE runtime_error_triage
+                SET incident_state = 'escalated', escalated_at = NOW()
+                WHERE fingerprint = $1 AND incident_state = 'open'
+                RETURNING id
+                """,
+                event.fingerprint,
+            )
+        if claimed is None:
+            return None
+        return ModelRuntimeErrorEscalatedEvent(
+            correlation_id=event.correlation_id,
+            fingerprint=event.fingerprint,
+            logger_family=event.logger_family,
+            error_category=event.error_category,
+            severity=event.severity,
+            message_template=event.message_template,
+            occurrence_count=occurrence_count,
+            reason=reason,
+            matched_rule=rule.name,
+            service_label=event.service_label,
+            hostname=event.hostname,
+            correlated_consumer_fingerprint=correlated_fingerprint or "",
+        )
 
     def _find_matching_rule(
         self, event: ModelRuntimeErrorEvent
@@ -292,7 +376,7 @@ class HandlerRuntimeErrorTriage:
                     correlated_consumer_fingerprint, service_name,
                     hostname, correlation_id
                 ) VALUES ($1, $2, $3, $4, $5, 1, $6, NOW(), NOW(), $7, $8, $9, $10)
-                ON CONFLICT (fingerprint) WHERE incident_state IN ('open', 'suppressed')
+                ON CONFLICT (fingerprint) WHERE incident_state IN ('open', 'suppressed', 'escalated')
                 DO UPDATE SET
                     occurrence_count = runtime_error_triage.occurrence_count + 1,
                     last_seen_at = NOW(),

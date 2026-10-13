@@ -1,0 +1,32 @@
+{
+  "node_id": "omnibase_infra.nodes.node_runner_health_snapshot_effect",
+  "receipt_schema": "handflip_proof.v1",
+  "canonical_handler_module": "omnibase_infra.nodes.node_runner_health_snapshot_effect.handlers.handler_runner_fleet_snapshot",
+  "legacy_handler_module": "omnibase_infra.nodes.node_runner_health_snapshot_effect.handlers.handler_runner_fleet_snapshot",
+  "base_ref": "ae5fca1228a34d61f76d1cbfdd1babbe64b7392d",
+  "preserved_symbols": [
+    "_optional_count",
+    "HandlerRunnerFleetSnapshot.handler_type",
+    "HandlerRunnerFleetSnapshot.handler_category",
+    "HandlerRunnerFleetSnapshot._runner_index",
+    "HandlerRunnerFleetSnapshot._fetch_github_runners",
+    "HandlerRunnerFleetSnapshot._fetch_docker_facts",
+    "HandlerRunnerFleetSnapshot._fetch_host_disk_used_percent",
+    "HandlerRunnerFleetSnapshot._fetch_queue_facts",
+    "HandlerRunnerFleetSnapshot._fetch_buildx_available",
+    "HandlerRunnerFleetSnapshot._fetch_codeload_throttle_signals"
+  ],
+  "parity": {
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_maintain_dispatch_chain_omn21041.py::test_snapshot_effect_hop_dispatches_through_the_real_callback[healthy]",
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_maintain_dispatch_chain_omn21041.py::test_snapshot_effect_hop_dispatches_through_the_real_callback[crash_loop_orphan_listener]",
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_maintain_dispatch_chain_omn21041.py::test_snapshot_effect_hop_dispatches_through_the_real_callback[probes_unreachable]",
+      "tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_maintain_dispatch_chain_omn21041.py::test_snapshot_effect_hop_dispatches_through_the_real_callback[wedged_queue_codeload]"
+    ],
+    "selected_input_hashes": [
+      "sha256:ca75f71781d7bc935702a8234c1be80317ceb921a17869b1b5badb365c368efd",
+      "sha256:c40b41c71f81d21d350da738dd3cc68bcb75773b679a787f0961a39b57e8c059"
+    ]
+  }
+}

@@ -120,6 +120,7 @@ migrations:
   forward/108_create_pr_landing_workflow_state.sql: forward-only # CREATE OR REPLACE; DROP; TRIGGER on an existing table
   forward/109_delegation_workflow_state_updated_at_only_on_transition.sql: forward-only # CREATE OR REPLACE FUNCTION on an existing trigger function
   forward/110_add_ledger_chain_chain_state.sql: forward-only # DROP; ALTER TABLE public.ledger_chain DROP CONSTRAINT IF; ALTER TABLE public.ledger_chain ADD CONSTRAINT CK_LEDGER_CHAIN_CHAIN_STATE (ADD CONSTRAINT class)
+  forward/111_widen_runtime_error_triage_active_unique_to_escalated.sql: forward-only # UNIQUE INDEX on an existing table; DROP
   forward/nodes/node_canary_score_reducer/0001_create_capability_scores.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0002_capability_scores_tenant_id_and_rls.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_PKEY; ALTER TABLE ADD CONSTRAINT CAPABILITY_SCORES_MODEL
   forward/nodes/node_canary_score_reducer/0003_capability_scores_tenant_id_to_uuid.sql: forward-only # DROP; ALTER TABLE ALTER COLUMN
@@ -165,6 +166,8 @@ migrations:
   forward/nodes/node_pr_review_bot/001_create_review_bot_bypass_log.sql: expand-only
   forward/nodes/node_projection_alert_channel_liveness/0000_create_alert_channel_liveness_verdicts.sql: forward-only # CREATE UNIQUE INDEX idx_alert_channel_liveness_cursor on omninode_internal.alert_channel_liveness_verdicts (UNIQUE INDEX class)
   forward/nodes/node_projection_alert_channel_liveness/0001_grant_omninode_runtime_alert_channel_liveness_verdicts.sql: expand-only # additive
+  forward/nodes/node_projection_automation_liveness/0000_create_automation_liveness.sql: forward-only # UNIQUE INDEX on an existing table (omninode_internal.automation_liveness_state); UNIQUE INDEX on an existing table (omninode_internal.automation_run_history)
+  forward/nodes/node_projection_automation_liveness/0001_grant_omninode_runtime_automation_liveness.sql: expand-only # additive
   forward/nodes/node_projection_baselines/0001_create_baselines_tables.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT BASELINES_SNAPSHOTS_PKEY; ALTER TABLE ADD CONSTRAINT BASELINES_COMPARISONS
   forward/nodes/node_projection_baselines/0002_realign_child_tables_to_producer_schema.sql: forward-only # DROP; EXECUTE; ALTER TABLE ADD CONSTRAINT BASELINES_COMPARISONS_PKEY; ALTER TABLE ADD CONSTRAINT BASELINES_TRE
   forward/nodes/node_projection_baselines/0003_grant_omninode_runtime_baselines_tables.sql: expand-only
