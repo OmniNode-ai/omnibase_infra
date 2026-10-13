@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20963
+title: omnibase_infra's migration-conflict-check job calls omnibase_core's validate-boundaries action, not onex_change_control's
+summary: The migration-conflict-check job in ci.yml (check-run context "Cross-Repo Migration Conflicts") changes only its uses line, from the onex_change_control validate-boundaries action to omnibase_core's copy at merge de3398d1fcf7a6f48451f680b74b1a6c6c383b8a. Job id, job name, context and the inputs (checks migration-conflicts, warn-only false, repos omniclaude,omnidash,omniintelligence,omnibase_core,omnimemory) are unchanged.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20963
+    statement: omnibase_infra's ci.yml must call omnibase_core's validate-boundaries action at de3398d1fcf7a6f48451f680b74b1a6c6c383b8a and no workflow may call the onex_change_control copy, with the job, its name and its required context unchanged.
+    acceptance:
+      - id: AC1
+        statement: "AC1: omnibase_infra .github/workflows/ci.yml job migration-conflict-check has uses OmniNode-ai/omnibase_core/.github/actions/validate-boundaries@de3398d1fcf7a6f48451f680b74b1a6c6c383b8a and no workflow references the onex_change_control validate-boundaries action, with its inputs and the context name unchanged. -- falsifier: uv run pytest tests/ci/test_validate_boundaries_caller_omn20963.py tests/ci/test_ci_workflow_resilience.py tests/ci/test_sibling_reads_pinned_omn20331.py -q -p no:randomly"
+      - id: AC2
+        statement: "AC2: omnibase_core's boundary-parity and migration-conflicts handlers exit 0 on a clean fixture and nonzero on an injected undeclared topic or conflicting migration. -- falsifier: uv run pytest tests/ci/test_validate_boundaries_caller_omn20963.py -q -p no:randomly"
+evidence_requirements:
+  - kind: tests
+    description: "omnibase_infra ci.yml calls omnibase_core's action at the merge sha, with a positive control that the retired reference is detected."
+    command: "uv run pytest tests/ci/test_validate_boundaries_caller_omn20963.py tests/ci/test_ci_workflow_resilience.py tests/ci/test_sibling_reads_pinned_omn20331.py -q -p no:randomly"
+  - kind: tests
+    description: "The core handlers the action runs pass a clean fixture and fail a drifted one, as recorded from the real handlers in tests/ci/fixtures/omn20963_migration_conflicts_core_vs_occ.json."
+    command: "uv run pytest tests/ci/test_validate_boundaries_caller_omn20963.py -q -p no:randomly"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20963-ac1
+    description: omnibase_infra ci.yml calls omnibase_core's validate-boundaries action at the merge sha and names no onex_change_control copy.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_validate_boundaries_caller_omn20963.py tests/ci/test_ci_workflow_resilience.py tests/ci/test_sibling_reads_pinned_omn20331.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20963-ac2
+    description: The core handlers the action runs pass a clean fixture and fail a drifted one.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_validate_boundaries_caller_omn20963.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

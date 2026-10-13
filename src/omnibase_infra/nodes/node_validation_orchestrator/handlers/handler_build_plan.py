@@ -26,8 +26,15 @@ Coroutine Safety:
     This handler is stateless and coroutine-safe for concurrent calls
     with different candidate instances.
 
+This module also hosts the orchestrator's three later workflow hops
+(``HandlerRequestExecution``, ``HandlerRequestAdjudication``,
+``HandlerPublishResult``). They live here because
+``scripts/ci/infra-node-allowlist.txt`` is shrink-only: a new file under
+``nodes/*/handlers/`` is refused, and this module is already allowlisted.
+
 Related Tickets:
     - OMN-2147: Validation Skeleton Orchestrator + Executor
+    - OMN-21056: Validation pipeline end to end on the lab
 """
 
 from __future__ import annotations
@@ -40,6 +47,21 @@ from omnibase_infra.enums import (
     EnumCheckSeverity,
     EnumHandlerType,
     EnumHandlerTypeCategory,
+)
+from omnibase_infra.models.validation.model_validation_adjudication_completed import (
+    ModelValidationAdjudicationCompleted,
+)
+from omnibase_infra.models.validation.model_validation_adjudication_requested import (
+    ModelValidationAdjudicationRequested,
+)
+from omnibase_infra.models.validation.model_validation_checks_completed import (
+    ModelValidationChecksCompleted,
+)
+from omnibase_infra.models.validation.model_validation_execution_requested import (
+    ModelValidationExecutionRequested,
+)
+from omnibase_infra.models.validation.model_validation_result_published import (
+    ModelValidationResultPublished,
 )
 from omnibase_infra.nodes.node_validation_orchestrator.models import (
     ModelPatternCandidate,
@@ -176,4 +198,113 @@ class HandlerBuildPlan:
         return plan
 
 
-__all__: list[str] = ["HandlerBuildPlan"]
+class HandlerRequestExecution:
+    """Turns a created validation plan into an execution request.
+
+    Consumes the plan ``HandlerBuildPlan`` published (``validation-plan-created``)
+    and returns the execution request the executor subscribes to. Pure compute:
+    the returned event class selects the publish topic through the contract's
+    ``published_events``.
+
+    Related Tickets:
+        - OMN-21056: Validation pipeline end to end on the lab
+    """
+
+    @property
+    def handler_id(self) -> str:
+        """Unique identifier for this handler."""
+        return "handler-request-execution"
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role: node-level orchestration step."""
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification: pure transformation."""
+        return EnumHandlerTypeCategory.COMPUTE
+
+    async def handle(
+        self, request: ModelValidationPlan
+    ) -> ModelValidationExecutionRequested:
+        """Return the execution request carrying every field of ``request``."""
+        return ModelValidationExecutionRequested.model_validate(request)
+
+
+class HandlerRequestAdjudication:
+    """Turns completed checks into an adjudication request.
+
+    Consumes the executor's ``validation-checks-completed`` event and returns
+    the adjudication request the adjudicator subscribes to. Pure compute.
+
+    Related Tickets:
+        - OMN-21056: Validation pipeline end to end on the lab
+    """
+
+    @property
+    def handler_id(self) -> str:
+        """Unique identifier for this handler."""
+        return "handler-request-adjudication"
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role: node-level orchestration step."""
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification: pure transformation."""
+        return EnumHandlerTypeCategory.COMPUTE
+
+    async def handle(
+        self, request: ModelValidationChecksCompleted
+    ) -> ModelValidationAdjudicationRequested:
+        """Return the adjudication request for ``request``'s check results."""
+        return ModelValidationAdjudicationRequested(
+            plan_id=request.plan_id,
+            candidate_id=request.candidate_id,
+            score_threshold=request.score_threshold,
+            check_results=request.check_results,
+        )
+
+
+class HandlerPublishResult:
+    """Turns an adjudicated verdict into the published validation result.
+
+    Consumes the adjudicator's ``validation-adjudication-completed`` verdict and
+    returns the pipeline's terminal ``validation-result-published`` event. Pure
+    compute.
+
+    Related Tickets:
+        - OMN-21056: Validation pipeline end to end on the lab
+    """
+
+    @property
+    def handler_id(self) -> str:
+        """Unique identifier for this handler."""
+        return "handler-publish-result"
+
+    @property
+    def handler_type(self) -> EnumHandlerType:
+        """Architectural role: node-level orchestration step."""
+        return EnumHandlerType.NODE_HANDLER
+
+    @property
+    def handler_category(self) -> EnumHandlerTypeCategory:
+        """Behavioral classification: pure transformation."""
+        return EnumHandlerTypeCategory.COMPUTE
+
+    async def handle(
+        self, request: ModelValidationAdjudicationCompleted
+    ) -> ModelValidationResultPublished:
+        """Return the published result carrying every field of the verdict."""
+        return ModelValidationResultPublished.model_validate(request)
+
+
+__all__: list[str] = [
+    "HandlerBuildPlan",
+    "HandlerPublishResult",
+    "HandlerRequestAdjudication",
+    "HandlerRequestExecution",
+]

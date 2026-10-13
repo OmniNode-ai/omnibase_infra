@@ -5,9 +5,11 @@
 from __future__ import annotations
 
 import logging
-from uuid import UUID
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.models.model_runner_fleet_maintain_start_command import (
+    ModelRunnerFleetMaintainStartCommand,
+)
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot_gather_command import (
     ModelRunnerFleetSnapshotGatherCommand,
 )
@@ -31,20 +33,23 @@ class HandlerRunnerFleetMaintainStart:
         return EnumHandlerTypeCategory.COMPUTE
 
     async def handle(
-        self, correlation_id: UUID
+        self, request: ModelRunnerFleetMaintainStartCommand
     ) -> ModelRunnerFleetSnapshotGatherCommand:
         """Start a runner-fleet-maintain tick.
 
         Args:
-            correlation_id: Workflow correlation ID for this tick.
+            request: The start command; its correlation ID is the tick's.
 
         Returns:
             ModelRunnerFleetSnapshotGatherCommand for the snapshot EFFECT node.
         """
         logger.info(
-            "Starting runner-fleet-maintain tick (correlation_id=%s)", correlation_id
+            "Starting runner-fleet-maintain tick (correlation_id=%s)",
+            request.correlation_id,
         )
-        return ModelRunnerFleetSnapshotGatherCommand(correlation_id=correlation_id)
+        return ModelRunnerFleetSnapshotGatherCommand(
+            correlation_id=request.correlation_id
+        )
 
 
 __all__ = ["HandlerRunnerFleetMaintainStart"]

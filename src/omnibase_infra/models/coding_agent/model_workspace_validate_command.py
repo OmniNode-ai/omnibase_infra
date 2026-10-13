@@ -14,6 +14,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from omnibase_infra.models.coding_agent.enum_agent_sandbox import EnumAgentSandbox
+from omnibase_infra.models.coding_agent.model_coding_agent_invoke_command import (
+    ModelCodingAgentInvokeCommand,
+)
 
 
 class ModelWorkspaceValidateCommand(BaseModel):
@@ -29,6 +32,12 @@ class ModelWorkspaceValidateCommand(BaseModel):
     )
     sandbox: EnumAgentSandbox = Field(..., description="Requested write posture.")
     prompt: str = Field(..., description="The task prompt (shape-validated).")
+    invoke_command: ModelCodingAgentInvokeCommand = Field(
+        ...,
+        description="The invoke command this pre-flight gates. The verdict echoes "
+        "it so the stateless orchestrator can invoke or reject from the verdict "
+        "alone.",
+    )
 
 
 __all__: list[str] = ["ModelWorkspaceValidateCommand"]

@@ -32,6 +32,8 @@
 #   * operations are only read, write and describe;
 #   * `*` (every resource) may carry describe only;
 #   * a prefixed group grant with read must be at least 16 characters long.
+#   * `{principal}` is the only placeholder, exactly once in a literal topic;
+#   * `create_topic` is a bool, allowed only on a templated topic grant;
 schema: developer-principal-grants.v1
 lane: dev
 # Principals are named <principal_prefix><login>-<device>, lower-case, [a-z0-9-].
@@ -58,18 +60,25 @@ grants:
     name: local.omnibase_core.runtime_local_
     pattern: prefixed
     operations: [read, describe]
-  # THE LEDGER WRITE PATH (OMN-20275). A developer machine or lab host writes a
-  # rolling-work-ledger row by publishing an append command; the one serve process
-  # on the ledger host appends it and answers on the two terminals, which the
-  # caller reads under its own group (omnimarket work_ledger_bus
+  # THE LEDGER WRITE PATH (OMN-20275). A machine writes a ledger row by publishing
+  # the append command on its own writer topic. Only its principal may write that
+  # topic, so the ledger host attributes the row to the principal named by the
+  # topic: the topic WRITE ACL is the attestation, since Redpanda does not stamp
+  # the producer principal on records. The shared requested.v1 topic is no longer
+  # granted; the ledger host refuses anything on it as unattributed. No signing
+  # key exists. The ledger host's own read grants are declared with its login in
+  # the deployment's broker ACL declaration, not here. The one serve process
+  # appends the row and answers on the two terminals, which the caller reads
+  # under its own group (omnimarket work_ledger_bus
   # WorkLedgerAppendCaller: `local.omnimarket.work_ledger_append_client.consume.v1.`
   # plus a per-call suffix). The serve group,
   # `local.omnimarket.node_work_ledger_append_effect.consume.v1`, does not start
   # with that prefix, so a developer principal cannot join it and take commands.
   - resource: topic
-    name: onex.cmd.omnimarket.work-ledger-append-requested.v1
+    name: onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1
     pattern: literal
     operations: [write, describe]
+    create_topic: true
   - resource: topic
     name: onex.evt.omnimarket.work-ledger-append-completed.v1
     pattern: literal
@@ -104,6 +113,26 @@ grants:
     operations: [read, describe]
   - resource: group
     name: pr-handoff-request.
+    pattern: prefixed
+    operations: [read, describe]
+  # SOURCE-CONTROL READS (OMN-21000): `onex scm <read verb>` (job-log, run-view,
+  # pr-checks and the rest) publishes one github-repo-gateway read command and
+  # reads its one terminal, which only the gateway node writes. The caller reads
+  # under `local.omnimarket.scm_command_client.consume.v1.` plus a per-call suffix
+  # (omnimarket handlers/scm ScmBusCaller); the node's serve group,
+  # `local.omnimarket.node_github_repo_gateway_effect.consume...`, does not start
+  # with that prefix. The write node's topics are deliberately not granted: a
+  # developer machine does not mutate GitHub through the lab runtime.
+  - resource: topic
+    name: onex.cmd.omnimarket.github-repo-gateway-read-requested.v1
+    pattern: literal
+    operations: [write, describe]
+  - resource: topic
+    name: onex.evt.omnimarket.github-repo-gateway-read-completed.v1
+    pattern: literal
+    operations: [read, describe]
+  - resource: group
+    name: local.omnimarket.scm_command_client.consume.v1.
     pattern: prefixed
     operations: [read, describe]
   - resource: group

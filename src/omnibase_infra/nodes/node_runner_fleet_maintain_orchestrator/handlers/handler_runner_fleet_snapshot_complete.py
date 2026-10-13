@@ -33,24 +33,24 @@ class HandlerRunnerFleetSnapshotComplete:
         return EnumHandlerTypeCategory.COMPUTE
 
     async def handle(
-        self, snapshot: ModelRunnerFleetSnapshot
+        self, request: ModelRunnerFleetSnapshot
     ) -> ModelRunnerFleetHealthEvaluateCommand:
         """Transform a gathered snapshot into a health-evaluate command.
 
         Args:
-            snapshot: Facts-only snapshot from node_runner_health_snapshot_effect.
+            request: Facts-only snapshot from node_runner_health_snapshot_effect.
 
         Returns:
             ModelRunnerFleetHealthEvaluateCommand for the health COMPUTE node.
         """
         logger.info(
             "Snapshot gathered: %d runners observed (correlation_id=%s)",
-            len(snapshot.runners),
-            snapshot.correlation_id,
+            len(request.runners),
+            request.correlation_id,
         )
         return ModelRunnerFleetHealthEvaluateCommand(
-            correlation_id=snapshot.correlation_id,
-            snapshot=snapshot,
+            correlation_id=request.correlation_id,
+            snapshot=request,
         )
 
 

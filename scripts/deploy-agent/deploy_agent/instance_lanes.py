@@ -180,7 +180,9 @@ LANE_ENV_FRAGMENT_SUFFIX: Final = ".runtime.env.json"
 #: Each schema version and the only keys a fragment of that version may set.
 #: ``runtime_lane_env.v1``: omnimarket's landing orchestrator and CI-red triage
 #: act switches, read through contract ``${env.VAR:default}`` references whose
-#: inline default is the shipped behaviour.
+#: inline default is the shipped behaviour; and the lane class the runtime is an
+#: instance of with the class contracts it takes, read by the auto-wiring
+#: ownership filter.
 LANE_ENV_FRAGMENT_SCHEMA_KEYS: Final[dict[str, frozenset[str]]] = {
     "runtime_lane_env.v1": frozenset(
         {
@@ -190,6 +192,8 @@ LANE_ENV_FRAGMENT_SCHEMA_KEYS: Final[dict[str, frozenset[str]]] = {
             "ONEX_CI_RED_TRIAGE_ACT_PR_OWN",
             "ONEX_CI_RED_TRIAGE_ACT_SHARED_CAUSE",
             "ONEX_CI_RED_TRIAGE_ACT_DEV_HEAD",
+            "ONEX_RUNTIME_LANE_CLASS",
+            "ONEX_RUNTIME_LANE_CLASS_CONTRACTS",
         }
     ),
 }

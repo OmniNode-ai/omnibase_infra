@@ -81,7 +81,9 @@ REPO_ROOT = SCRIPT_DIR.parents[1]
 # never ships here. Whoever runs the pool supplies it under their workspace
 # config root, resolved by the runtime's workspace config owner resolver.
 POOL_CONFIG_RELATIVE = Path("config") / "lab" / "prepr_runtime_pool.yaml"
-LANE_MANIFEST = REPO_ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
+# OMN-20934: the lane manifest is private config too; the census planner owns
+# where it is read from.
+LANE_CENSUS_PLAN_PY = SCRIPT_DIR.parent / "lane_census_plan.py"
 PROVE_SH = SCRIPT_DIR / "prepr_pool_prove.sh"
 SLOT_POLICY_PY = SCRIPT_DIR / "prepr_slot_policy.py"
 # OMN-19566: the receipt module, the fact publisher and the profile registry
@@ -102,6 +104,10 @@ EXIT_USAGE = 5
 
 PHASES = ("snap-pre", "clone", "build", "probe", "tests", "teardown", "snap-post")
 NO_FOCUSED_TESTS_MARKER = "no-focused-tests: the PR changes no test files"
+#: The literal dot prepr_pool_prove.sh puts on each side of a LIVE_GREP term it
+#: derives from a changed node (OMN-19566): a runtime logs ``.<node>.`` only once
+#: the node runs (its consumer group, its own loggers), never on discovery.
+LIVE_TERM_DOT = "[.]"
 
 # Prepended to every remote command: a non-login ssh shell on a Docker Desktop
 # Mac has no docker on PATH, and a bare `docker ps` there reads zero containers
@@ -287,13 +293,28 @@ def load_pool_config(path: Path | None = None) -> PoolConfig:
     )
 
 
-def declared_manifest_hosts(path: Path = LANE_MANIFEST) -> set[str]:
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+def _lane_manifest(path: Path | None) -> Path:
+    """``path``, else the lane manifest the census planner resolves."""
+    if path is not None:
+        return path
+    spec = importlib.util.spec_from_file_location(
+        "lane_census_plan", LANE_CENSUS_PLAN_PY
+    )
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot load {LANE_CENSUS_PLAN_PY}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    resolved: Path = module.default_manifest_path()
+    return resolved
+
+
+def declared_manifest_hosts(path: Path | None = None) -> set[str]:
+    raw = yaml.safe_load(_lane_manifest(path).read_text(encoding="utf-8"))
     return set(raw.get("hosts", {}))
 
 
-def declared_lane_projects(path: Path = LANE_MANIFEST) -> set[str]:
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+def declared_lane_projects(path: Path | None = None) -> set[str]:
+    raw = yaml.safe_load(_lane_manifest(path).read_text(encoding="utf-8"))
     return {
         str(lane["compose_project"])
         for lane in raw.get("lanes", {}).values()
@@ -874,13 +895,17 @@ def judge(
         notes.append(
             "wiring failures the base does not have: " + ", ".join(new_failures[:8])
         )
-    # OMN-19566: the runtime profiles name changed_path_live as mandatory. The
-    # probe prints one mention count per LIVE_GREP name per runtime; a name no
-    # runtime mentions is a changed path that never ran. With no LIVE_GREP there
-    # is no line and no check, and the receipt's verifier then names the check
-    # as missing rather than this judge inventing a pass.
+    # OMN-19566: changed_path_live. The probe prints one mention count per
+    # LIVE_GREP name per runtime; a name no runtime mentions is a changed path
+    # that never ran. A caller may name LIVE_GREP; otherwise the probe derives
+    # it from the diff, one name per changed node that exists at the head. With
+    # no name there is no line and no check: the profile makes the check
+    # mandatory only for a PR that changes a node, and for such a PR the
+    # receipt's verifier then names it as missing rather than this judge
+    # inventing a pass.
     mentions: dict[str, int] = {}
     for _, name, count in re.findall(r"^\s+(\S+) mentions (\S+): (\d+)$", probe, re.M):
+        name = name.removeprefix(LIVE_TERM_DOT).removesuffix(LIVE_TERM_DOT)
         mentions[name] = mentions.get(name, 0) + int(count)
     if mentions:
         dead = sorted(n for n, c in mentions.items() if c == 0)
@@ -1041,29 +1066,46 @@ class RuntimeProfile:
     profile_id: str
     profile_version: str
     mandatory_checks: frozenset[str]
+    #: conditional checks this PR's diff leaves out (OMN-19566)
+    inapplicable_checks: frozenset[str] = frozenset()
 
 
 def runtime_profile(
-    repo: str, registry: Path = PROFILE_REGISTRY
+    repo: str,
+    registry: Path = PROFILE_REGISTRY,
+    changed_paths: Sequence[str] | None = None,
 ) -> RuntimeProfile | None:
     """The ``runtime_image`` variant of ``OmniNode-ai/<repo>``'s profile, or None.
 
     The registry (``config/lab_proof_profiles.yaml``, OMN-19565) is the one place
     a profile's mandatory checks are declared; a receipt judged against any other
-    list would be judged against a policy nobody reviewed.
+    list would be judged against a policy nobody reviewed. It is read through the
+    typed registry's own pin, the one the ``lab-proof-receipt`` workflow pins,
+    so the driver and the workflow judge a receipt by one resolution of the
+    profile's conditional checks against the PR's ``changed_paths``. None for
+    the paths (an older clone phase printed none) makes every one mandatory.
     """
-    raw = yaml.safe_load(registry.read_text(encoding="utf-8")) or {}
-    for profile in raw.get("profiles") or []:
-        if profile.get("repo") != f"OmniNode-ai/{repo}":
-            continue
-        for variant in profile.get("variants") or []:
-            if variant.get("proof_kind") == RUNTIME_PROOF_KIND:
-                return RuntimeProfile(
-                    profile_id=str(profile["profile_key"]),
-                    profile_version=str(profile["profile_version"]),
-                    mandatory_checks=frozenset(variant.get("mandatory_checks") or ()),
-                )
-    return None
+    from omnibase_infra.lab_proof.enum_lab_proof_kind import EnumLabProofKind
+    from omnibase_infra.lab_proof.lab_proof_profile_registry import (
+        load_lab_proof_profile_registry,
+        profile_pin,
+    )
+
+    try:
+        pin = profile_pin(
+            load_lab_proof_profile_registry(registry),
+            f"OmniNode-ai/{repo}",
+            EnumLabProofKind(RUNTIME_PROOF_KIND),
+            changed_paths,
+        )
+    except (KeyError, ValueError):
+        return None
+    return RuntimeProfile(
+        profile_id=pin.profile_key,
+        profile_version=pin.profile_version,
+        mandatory_checks=frozenset(str(c) for c in pin.mandatory_checks),
+        inapplicable_checks=frozenset(str(c) for c in pin.inapplicable_checks),
+    )
 
 
 PR_SUBJECT_RE = re.compile(
@@ -1090,6 +1132,23 @@ def pr_subject_facts(clone: str) -> list[PrSubjectFacts]:
         PrSubjectFacts(repo, int(pr), head, base, merge_base, digest)
         for repo, pr, head, base, merge_base, digest in PR_SUBJECT_RE.findall(clone)
     ]
+
+
+#: One line per path the PR changes, merge base to head, printed by the clone
+#: phase beside its ``pr-subject`` line (OMN-19566).
+PR_CHANGED_RE = re.compile(r"^pr-changed (\S+)#(\d+) (\S.*)$", re.M)
+
+
+def pr_changed_paths(clone: str) -> dict[tuple[str, int], list[str]]:
+    """``(repo, pr) -> changed paths`` as the clone phase printed them.
+
+    A PR with no line is absent, and its profile then demands every conditional
+    check: absence of evidence about the diff never waives one.
+    """
+    changed: dict[tuple[str, int], list[str]] = {}
+    for repo, pr, path in PR_CHANGED_RE.findall(clone):
+        changed.setdefault((repo, int(pr)), []).append(path.strip())
+    return changed
 
 
 def _lines(text: str, pattern: str) -> str:
@@ -1144,7 +1203,10 @@ def _check_map(
         "focused_tests": ("focused_tests", _lines(tests, r"^\S+ focused rc=.*$")),
         "changed_path_live": (
             "changed_path_live",
-            _lines(probe, r"^\s+\S+ mentions \S+: \d+$"),
+            _lines(
+                probe,
+                r"^(?:live-grep derived from the diff: .*|\s+\S+ mentions \S+: \d+)$",
+            ),
         ),
     }
 
@@ -1226,14 +1288,17 @@ def mint_pr_head_receipts(
     ``subject_head_identity`` FAIL, recorded against the head actually proved.
     Each receipt is verified at mint time against its profile's mandatory
     checks, and the token is written into its bus event. A PASS that lacks a
-    mandatory check (no ``LIVE_GREP``, so no ``changed_path_live``) is minted
-    as what it is and carries ``MISSING_MANDATORY_CHECK``.
+    mandatory check (a changed node and no ``changed_path_live`` line, say) is
+    minted as what it is and carries ``MISSING_MANDATORY_CHECK``. Which of the
+    profile's conditional checks are mandatory is decided by that PR's own
+    changed paths, as the clone phase printed them (OMN-19566).
     """
     receipts = _receipts()
     minted: list[MintedReceipt] = []
     notes: list[str] = []
     ports = (host.main_port, host.effects_port)
     facts = pr_subject_facts(outputs.get("clone", ""))
+    changed = pr_changed_paths(outputs.get("clone", ""))
     if not facts:
         return minted, ["no pr-subject line in the clone output: no receipt minted"]
     checks = receipt_checks(rb, outputs, ports)
@@ -1244,13 +1309,25 @@ def mint_pr_head_receipts(
     )
     out_dir.mkdir(parents=True, exist_ok=True)
     for fact in facts:
-        profile = runtime_profile(fact.repo, registry)
+        paths = changed.get((fact.repo, fact.pr_number))
+        profile = runtime_profile(fact.repo, registry, paths)
         if profile is None:
             notes.append(
                 f"no receipt for {fact.repo}#{fact.pr_number}: the registry has no "
                 f"{RUNTIME_PROOF_KIND} profile for it"
             )
             continue
+        if paths is None:
+            notes.append(
+                f"{fact.repo}#{fact.pr_number}: no changed paths in the clone "
+                "output, so every conditional check is mandatory"
+            )
+        elif profile.inapplicable_checks:
+            notes.append(
+                f"{fact.repo}#{fact.pr_number}: its {len(paths)} changed path(s) "
+                "touch no surface of conditional check(s) "
+                f"{sorted(profile.inapplicable_checks)}, so they are not mandatory"
+            )
         try:
             subject = receipts.ModelLabProofSubject(
                 repo=f"OmniNode-ai/{fact.repo}",

@@ -36,6 +36,12 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.lane_census_fixtures import (
+    NEUTRAL_CONFIG_ROOT,
+    NEUTRAL_HOSTNAME,
+    NEUTRAL_LANE,
+)
+
 pytestmark = pytest.mark.unit
 
 _REPO = Path(__file__).resolve().parents[3]
@@ -43,10 +49,11 @@ _SCRIPT = _REPO / "scripts" / "lane-census-check.sh"
 
 _DRIFT_TOPIC = "onex.evt.infra.lane-census-drift.v1"
 _BROKER = "test-broker-container"
-_LANE = "judge"
+# OMN-20934: the neutral fixture's required lane, read from its manifest.
+_LANE = NEUTRAL_LANE
 _LANE_OUTAGE_PS = (
-    "omnibase-infra-judge-postgres\trunning\tUp 2 hours\tpostgres:16"
-    "\tcom.omninode.lane=judge\n"
+    "example-judge-postgres\trunning\tUp 2 hours\tpostgres:16"
+    f"\tcom.omninode.lane={_LANE}\n"
 )
 _NO_NETWORKS = "bridge\nhost\n"
 
@@ -90,12 +97,14 @@ def _run(
     )
     _shim(bin_dir, "docker", docker_body, calllog)
     _shim(bin_dir, "rpk", "exit 0", calllog)
-    _shim(bin_dir, "hostname", 'echo "omninode-pc"', calllog)
+    _shim(bin_dir, "hostname", f'echo "{NEUTRAL_HOSTNAME}"', calllog)
 
     env = dict(os.environ)
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
     env["LANE_CENSUS_DOCKER_SOCKET"] = "/nonexistent/lane-census-test.sock"
     env["HOME"] = str(tmp_path)
+    env["ONEX_WORKSPACE_CONFIG_ROOT"] = str(NEUTRAL_CONFIG_ROOT)
+    env.pop("LANE_MANIFEST", None)
     for name in ("KAFKA_BOOTSTRAP_SERVERS", "LANE_MEMORY_BROKER_CONTAINER"):
         env.pop(name, None)
     if bootstrap:

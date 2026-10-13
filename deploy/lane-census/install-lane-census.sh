@@ -26,6 +26,13 @@
 # omnibase-infra-redpanda and .202's is omnibase-infra-dev-202-redpanda, and a
 # guessed name would publish nowhere while looking installed.
 #
+# THE UNITS (OMN-20933). The units are lab configuration, so they ship from the
+# operator's private config root, never from this repository (operator ruling
+# 2026-10-10T21:57:38Z): $ONEX_WORKSPACE_CONFIG_ROOT/systemd/lane-census/. There
+# is no fallback and no default root: with the variable unset, or with a unit
+# absent there, an install refuses and names how to supply them. --uninstall,
+# --verify and --status read no unit source and need no config root.
+#
 # THE CLONE. The shipped units name %h/Code/omni_home/omnibase_infra, which is
 # the clone on .201 but not on .202 (/data/omninode/omnibase_infra there). The
 # installer rewrites that path to the clone it is run from, or to --repo-root.
@@ -41,9 +48,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DROPIN_SRC="${SCRIPT_DIR}/onex-disk-gc.service.d/20-lane-census.conf"
-STANDALONE_SERVICE_SRC="${SCRIPT_DIR}/standalone/onex-lane-census.service"
-STANDALONE_TIMER_SRC="${SCRIPT_DIR}/standalone/onex-lane-census.timer"
+UNITS_REL="systemd/lane-census"
+DROPIN_REL="onex-disk-gc.service.d/20-lane-census.conf"
+STANDALONE_SERVICE_REL="standalone/onex-lane-census.service"
+STANDALONE_TIMER_REL="standalone/onex-lane-census.timer"
 USER_UNIT_DIR="${HOME}/.config/systemd/user"
 BASE_SERVICE="${USER_UNIT_DIR}/onex-disk-gc.service"
 DROPIN_DST_DIR="${USER_UNIT_DIR}/onex-disk-gc.service.d"
@@ -144,17 +152,51 @@ if [[ ! -f "${REPO_ROOT}/scripts/lane-census-check.sh" ]]; then
   echo "ERROR: ${REPO_ROOT}/scripts/lane-census-check.sh not found; pass --repo-root <omnibase_infra clone>" >&2
   exit 2
 fi
+# resolve_unit_dir -- the private directory that holds the units, or rc=1 with
+# the reason on stderr. There is no fallback directory.
+resolve_unit_dir() {
+  local dir rel
+  if [[ -z "${ONEX_WORKSPACE_CONFIG_ROOT:-}" ]]; then
+    echo "ERROR: lane-census units are not configured: set ONEX_WORKSPACE_CONFIG_ROOT to the private config root that holds ${UNITS_REL}/" >&2
+    return 1
+  fi
+  dir="${ONEX_WORKSPACE_CONFIG_ROOT}/${UNITS_REL}"
+  for rel in "$DROPIN_REL" "$STANDALONE_SERVICE_REL" "$STANDALONE_TIMER_REL"; do
+    if [[ ! -f "${dir}/${rel}" ]]; then
+      echo "ERROR: lane-census unit ${dir}/${rel} not found; set ONEX_WORKSPACE_CONFIG_ROOT to the private config root that holds ${UNITS_REL}/" >&2
+      return 1
+    fi
+  done
+  printf '%s' "$dir"
+}
 
-# Render a shipped unit: the clone path, then the broker container as the last
-# [Service] setting (every shipped unit ends inside its [Service] section or
-# carries [Install] after it, so the line is inserted before [Install] if any).
+UNIT_DIR="$(resolve_unit_dir)" || exit 2
+DROPIN_SRC="${UNIT_DIR}/${DROPIN_REL}"
+STANDALONE_SERVICE_SRC="${UNIT_DIR}/${STANDALONE_SERVICE_REL}"
+STANDALONE_TIMER_SRC="${UNIT_DIR}/${STANDALONE_TIMER_REL}"
+
+# OMN-20934: the census reads the lane manifest from the same private config
+# root, never from this repository, and a unit runs under a bare interpreter
+# that cannot resolve that root itself. The unit carries the root this install
+# was run with; there is no default (resolve_unit_dir refused an unset root).
+CENSUS_MANIFEST_REL="config/lab/lane-census/lane-manifest.yaml"
+if [[ ! -f "${ONEX_WORKSPACE_CONFIG_ROOT}/${CENSUS_MANIFEST_REL}" ]]; then
+  echo "ERROR: ${ONEX_WORKSPACE_CONFIG_ROOT}/${CENSUS_MANIFEST_REL} not found; set ONEX_WORKSPACE_CONFIG_ROOT to the private config root that holds it, or the census has no desired state" >&2
+  exit 2
+fi
+
+# Render a shipped unit: the clone path, then the broker container and the
+# config root as the last [Service] settings (every shipped unit ends inside its
+# [Service] section or carries [Install] after it, so the lines are inserted
+# before [Install] if any).
 render_unit() {
   local src="$1" dst="$2"
   local env_line="Environment=LANE_MEMORY_BROKER_CONTAINER=${BROKER_CONTAINER}"
-  sed "s#${SHIPPED_REPO_ROOT}#${REPO_ROOT}#g" "$src" | awk -v line="$env_line" '
-    /^\[Install\]/ && !done { print line; print ""; done=1 }
+  local root_line="Environment=ONEX_WORKSPACE_CONFIG_ROOT=${ONEX_WORKSPACE_CONFIG_ROOT}"
+  sed "s#${SHIPPED_REPO_ROOT}#${REPO_ROOT}#g" "$src" | awk -v line="$env_line" -v root="$root_line" '
+    /^\[Install\]/ && !done { print line; print root; print ""; done=1 }
     { print }
-    END { if (!done) print line }
+    END { if (!done) { print line; print root } }
   ' >"$dst"
 }
 

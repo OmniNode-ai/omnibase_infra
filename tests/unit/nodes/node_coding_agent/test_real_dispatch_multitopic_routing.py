@@ -310,11 +310,19 @@ class TestComputeConsumesValidateAndEmitsValidated:
         applier = _real_applier_for("node_coding_agent_workspace_compute", mock_bus)
 
         command = ModelWorkspaceValidateCommand(
-            correlation_id=uuid4(),
+            correlation_id=(corr := uuid4()),
             workspace_path=str(tmp_path),
             allowed_roots=(str(tmp_path),),
             sandbox=EnumAgentSandbox.READ_ONLY,
             prompt="add a docstring to foo.py",
+            invoke_command=ModelCodingAgentInvokeCommand(
+                correlation_id=corr,
+                agent=EnumCodingAgent.CLAUDE,
+                prompt="add a docstring to foo.py",
+                workspace_path=str(tmp_path),
+                sandbox=EnumAgentSandbox.READ_ONLY,
+                timeout_ms=60000,
+            ),
         )
         envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
             payload=command,
@@ -353,7 +361,7 @@ class TestOrchestratorHop3RoutesToEffectInvoke:
             route_id="route.coding-agent-orchestrator-validated",
             topic_pattern="*.evt.omnibase-infra.coding-agent-workspace-validated.*",
             event_model=entry.event_model,  # type: ignore[attr-defined]
-            # The validated event payload is a {verdict, command} dict, not the
+            # The validated event payload is the verdict dict, not the
             # entrypoint ModelCodingAgentInvokeCommand; this single-handler
             # orchestrator matches by topic, so disable the payload matcher.
             use_payload_matcher=False,
@@ -371,14 +379,14 @@ class TestOrchestratorHop3RoutesToEffectInvoke:
             timeout_ms=60000,
         )
         verdict = ModelWorkspaceValidateResult(
-            correlation_id=corr, valid=True, resolved_path=str(tmp_path)
+            correlation_id=corr,
+            invoke_command=command,
+            valid=True,
+            resolved_path=str(tmp_path),
         )
         validated_topic = "onex.evt.omnibase-infra.coding-agent-workspace-validated.v1"
         envelope: ModelEventEnvelope[object] = ModelEventEnvelope(
-            payload={
-                "verdict": verdict.model_dump(mode="json"),
-                "command": command.model_dump(mode="json"),
-            },
+            payload=verdict.model_dump(mode="json"),
             correlation_id=corr,
             event_type=derive_event_type_alias_for_topic(validated_topic),
         )

@@ -40,6 +40,8 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.helpers.lane_census_fixtures import LAB_MANIFEST
+
 _REPO = Path(__file__).resolve().parents[2]
 _SCRIPTS = _REPO / "scripts"
 sys.path.insert(0, str(_SCRIPTS))
@@ -143,16 +145,16 @@ def test_the_guard_rejects_the_captured_artifact() -> None:
     assert "reused by something else" in orphan_findings[0].detail
 
 
+@pytest.mark.lab_overlay
 def test_the_guard_does_NOT_reject_the_current_tree() -> None:
     """The discriminator.
 
     A guard that refused every input would satisfy the case above trivially and
-    red every future change. The same two functions, over the live committed
-    manifest and the live maps, must return nothing.
+    red every future change. The same two functions, over the live manifest and
+    the live maps, must return nothing. OMN-20934: the live manifest is private
+    config, so this runs where the overlay is fetched (lab_overlay).
     """
-    manifest = yaml.safe_load(
-        (_REPO / "deploy/lane-census/lane-manifest.yaml").read_text(encoding="utf-8")
-    )
+    manifest = yaml.safe_load(LAB_MANIFEST.read_text(encoding="utf-8"))
     assert orphan_map_entries(manifest) == []
     assert undeclared_lanes(manifest) == []
     # Positive control for those two zeros: the inputs are non-empty, so the

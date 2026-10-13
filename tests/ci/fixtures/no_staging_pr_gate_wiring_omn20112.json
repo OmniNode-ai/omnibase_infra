@@ -1,0 +1,24 @@
+{
+  "_provenance": {
+    "source": "omni plugin skills/queue-status/scripts/ruling_mechanisms.py wiring_for(), the auditor that reads whether a ruling's mechanism is wired",
+    "source_sha256": "2031887205cdeeefe004a91a429e427bedc90a5d527b006002dc1b658550c91a",
+    "captured_utc": "2026-10-13T04:58:28Z",
+    "base_revision": "eed16cd5eb95905938409d7a384e99ac2ed09f4a",
+    "required_contexts_input": "a synthetic required-contexts.json for omnibase_infra:dev listing CI Summary, deploy-gate / deploy-gate and call-reject-skip-token / scan / reject-skip-gate-token, taken from scripts/enforcement_parity_manifest.yaml",
+    "command": "env -u PYTHONPATH python3 -I capture.py <ruling_mechanisms.py>, wiring_for('omnibase_infra/tests/ci/test_no_staging_pr_gate_omn20112.py', <registry root>, Evidence(landing_dir=<synthetic>)) over a clone at the base revision and over the tree of this change"
+  },
+  "wiring": {
+    "base_eed16cd5e": {
+      "path": "omnibase_infra/tests/ci/test_no_staging_pr_gate_omn20112.py",
+      "kind": "check",
+      "wired": false,
+      "detail": "no workflow runs it; no pre-commit hook references it"
+    },
+    "head": {
+      "path": "omnibase_infra/tests/ci/test_no_staging_pr_gate_omn20112.py",
+      "kind": "check",
+      "wired": true,
+      "detail": "required workflow context and pre-commit hook reference it"
+    }
+  }
+}

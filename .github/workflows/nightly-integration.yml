@@ -341,6 +341,15 @@ jobs:
             echo "E2E_REDPANDA_ADVERTISE_HOST=${e2e_advertise_host}"
           } >> "$GITHUB_ENV"
 
+      # OMN-20934: the lane manifest is private config, supplied by the CI
+      # overlay; the two guards below read it from ONEX_WORKSPACE_CONFIG_ROOT.
+      - name: Fetch the private lane census
+        uses: ./.github/actions/fetch-census-overlay
+        with:
+          overlay-repo: ${{ vars.OMNI_CI_OVERLAY_REPO }}
+          app-id: ${{ secrets.ONEXBOT_APP_ID }}
+          private-key: ${{ secrets.ONEXBOT_APP_PRIVATE_KEY }}
+
       # Fail closed at run time, not just at review time: the protected set is
       # read from the lane census manifest, so a lane added later is covered
       # without editing this workflow.
@@ -354,7 +363,7 @@ jobs:
           import yaml
 
           project = os.environ["OMNIBASE_INFRA_COMPOSE_PROJECT"]
-          manifest = yaml.safe_load(open("deploy/lane-census/lane-manifest.yaml", encoding="utf-8"))
+          manifest = yaml.safe_load(open(os.path.join(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"], "config/lab/lane-census/lane-manifest.yaml"), encoding="utf-8"))
           protected = {
               lane["compose_project"]
               for lane in manifest["lanes"].values()
@@ -578,12 +587,13 @@ jobs:
             exit 1
           fi
           uv run python - "$project" <<'PY'
+          import os
           import sys
 
           import yaml
 
           project = sys.argv[1]
-          manifest = yaml.safe_load(open("deploy/lane-census/lane-manifest.yaml", encoding="utf-8"))
+          manifest = yaml.safe_load(open(os.path.join(os.environ["ONEX_WORKSPACE_CONFIG_ROOT"], "config/lab/lane-census/lane-manifest.yaml"), encoding="utf-8"))
           protected = {
               lane["compose_project"]
               for lane in manifest["lanes"].values()

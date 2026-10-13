@@ -76,6 +76,9 @@ databases:
           - object_type: TABLE
             objects:
               - alert_channel_liveness_verdicts
+              - automation_alarm_episodes
+              - automation_liveness_state
+              - automation_run_history
               - board_probe_results
               - ci_attempt_outcome
               - claude_agent_spans
@@ -206,6 +209,7 @@ databases:
               - pattern_learning_artifacts
               - projection_delegation_inference_response_text
               - provider_quota_state
+              - run_trace
               - savings_estimates
               - skill_execution_snapshots
               - tenant_inference_credentials

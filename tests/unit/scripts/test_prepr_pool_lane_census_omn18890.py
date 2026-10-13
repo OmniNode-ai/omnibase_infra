@@ -55,11 +55,14 @@ from scripts.preflight_lane_deploy_attribution import (
     GOVERNED_LANES,
     GRANT_INTERLOCK_LANES,
 )
+from tests.helpers.lane_census_fixtures import LAB_MANIFEST, LAB_SNAPSHOT
 
-pytestmark = pytest.mark.unit
+# OMN-20934: the pool lanes are declared in the lab's lane manifest, which is
+# private config, so the module runs only where the overlay is fetched.
+pytestmark = [pytest.mark.unit, pytest.mark.lab_overlay]
 
 _REPO = Path(__file__).resolve().parents[3]
-_MANIFEST_PATH = _REPO / "deploy" / "lane-census" / "lane-manifest.yaml"
+_MANIFEST_PATH = LAB_MANIFEST
 _PLAN_PATH = _REPO / "scripts" / "lane_census_plan.py"
 _GENERATOR_PATH = _REPO / "scripts" / "generate_claude_lane_block.py"
 
@@ -94,7 +97,16 @@ def _load_module(path: Path, name: str) -> Any:
 
 PLAN = _load_module(_PLAN_PATH, "lane_census_plan")
 GENERATOR = _load_module(_GENERATOR_PATH, "generate_claude_lane_block")
-MANIFEST = PLAN.load_manifest(_MANIFEST_PATH)
+MANIFEST = (
+    PLAN.load_manifest(_MANIFEST_PATH)
+    if _MANIFEST_PATH.is_file()
+    else {"hosts": {}, "lanes": {}}
+)
+
+
+def test_the_lab_manifest_is_present() -> None:
+    """Without the overlay every case below would fail on an empty manifest."""
+    assert _MANIFEST_PATH.is_file(), f"{_MANIFEST_PATH} is absent (OMN-20934)"
 
 
 def _container(name: str, *, running: bool = True) -> dict[str, str]:
@@ -297,9 +309,7 @@ def test_pool_project_names_trip_no_governed_matcher() -> None:
 
 def test_generated_lane_block_carries_both_slots_with_their_ports() -> None:
     """The generated table states the pool truthfully, ports and boundary."""
-    snapshot = GENERATOR._load_snapshot(
-        _REPO / "deploy" / "lane-census" / "census-snapshot.json"
-    )
+    snapshot = GENERATOR._load_snapshot(LAB_SNAPSHOT)
     block = GENERATOR.generate_block(MANIFEST, snapshot)
     for lane, ports in POOL_PORTS.items():
         assert f"| {lane} (optional) |" in block, (

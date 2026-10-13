@@ -36,6 +36,10 @@ description: >
 
 runtime_profiles:
   - effects
+# OMN-21041: `onex run-node` reads this top-level key (it does not read
+# runtime_dispatch.terminal_events) and the result applier uses it as the
+# fallback publish topic for a returned model with no published_events entry.
+terminal_event: "onex.evt.omnibase-infra.runner-fleet-maintain-completed.v1"
 event_bus:
   version:
     major: 1
@@ -132,7 +136,19 @@ workflow_coordination:
       failure_recovery_strategy: fail_fast
       max_retries: 0
       timeout_ms: 120000
+# OMN-21041: the result applier routes a returned model by class name
+# (event_type with the Model prefix) through this list. The two command entries
+# were missing, so ModelRunnerFleetHealthEvaluateCommand fell back to
+# publish_topics[0] -- the snapshot-gather topic -- and the evaluate hop dropped.
 published_events:
+  - topic: "onex.cmd.omnibase-infra.runner-fleet-snapshot-gather.v1"
+    event_type: "RunnerFleetSnapshotGatherCommand"
+    message_category: "COMMAND"
+    description: "Command asking the snapshot effect for one read-only fleet snapshot"
+  - topic: "onex.cmd.omnibase-infra.runner-fleet-health-evaluate.v1"
+    event_type: "RunnerFleetHealthEvaluateCommand"
+    message_category: "COMMAND"
+    description: "Command asking the health compute node to classify one snapshot"
   - topic: "onex.evt.omnibase-infra.runner-fleet-maintain-completed.v1"
     event_type: "RunnerFleetMaintainCompletedEvent"
     message_category: "EVENT"

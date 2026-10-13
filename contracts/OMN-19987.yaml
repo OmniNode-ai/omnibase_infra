@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19987
+title: Vendor the run_trace projection migrations, one row per step of one run per tenant
+summary: omnimarket's node_projection_run_trace stores one row per step of one delegation run, keyed by tenant, run and the step sequence the delegate orchestrator assigned, so the Workflow page can show one run's ordered path. This change vendors its three migrations byte-identical, declares them in the application-migrations ledger and the migration classes, fences the FORCE ROW LEVEL SECURITY step, and declares the tenant projection writer's grant on the table, ahead of the omnimarket node.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19987-ac2-infra-tenant-table
+    statement: The run_trace table is vendored into omnibase_infra byte-identical to omnimarket's source with its key on tenant, run and step sequence, row-level security enabled on creation under a tenant_isolation policy on tenant_id, and the writer granted no DELETE, so a step is stored under its own tenant and another tenant's step cannot be stored or read as this tenant's.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: Another tenant''s event mixed into that chain never appears -- falsifier: the same pytest finds it'
+evidence_requirements:
+  - kind: tests
+    description: The three vendored files match omnimarket's source byte for byte, are declared in the ledger and the migration classes, create the table with its tenant key and its tenant_isolation policy, grant the writer exactly SELECT, INSERT and UPDATE, and pass the application-database SQL gate on every shipped profile.
+    command: uv run pytest tests/unit/migrations/test_omn19987_run_trace_vendor.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19987-ac2-vendor-run-trace-tenant-table
+    description: The vendor test passes at this head and fails at the merge base, where the three files, their ledger rows and their classes do not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn19987_run_trace_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

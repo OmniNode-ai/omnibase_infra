@@ -1,0 +1,29 @@
+{
+  "base_ref": "ae5fca1228a34d61f76d1cbfdd1babbe64b7392d",
+  "canonical_handler_module": "omnibase_infra.nodes.node_topic_migration_executor_effect.handlers.handler_topic_migration_executor",
+  "legacy_handler_module": "omnibase_infra.nodes.node_topic_migration_executor_effect.handlers.handler_topic_migration_executor",
+  "node_id": "omnibase_infra.nodes.node_topic_migration_executor_effect",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:711556bd41573b8774b0cee101c4381941f77123b2d1ccc23ab3424f1f8e4823",
+      "sha256:818652fb9310aec3c901c40897dbf1dde4d2ba0d22e0e5f732a829f5b1d95b2f",
+      "sha256:38bc86a73da5a02a13d82dfa96892767792d7345c29d9b00fa2e6c4d6caad49b",
+      "sha256:5a32caadea29e728bdea31ea3fcc6299a844064aa4ad2dd79c5f9437c1c842d6",
+      "sha256:239caa81dfa1f706be3ccc48300db286178a6e2142ab16d141fe5f2a4941d93a",
+      "sha256:923fd9bd5f2dfb911dd2d9bf7a3a6ee99b5ac8ece2228fde9c3a4a545b166150",
+      "sha256:9bc6dbf90cc6242ca4d76c007522e582f082a61f44ac36500e4665d2562bbaf5"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/runtime/auto_wiring/test_topic_migration_executor_dispatch_omn21050.py::test_dual_write_command_reaches_a_dual_write_lifecycle_event",
+      "tests/unit/runtime/auto_wiring/test_topic_migration_executor_dispatch_omn21050.py::test_cutover_with_residual_lag_emits_no_cutover_lifecycle_event",
+      "tests/integration/test_topic_migration_executor_bus_omn21050.py::test_dual_write_command_on_the_bus_publishes_a_dual_write_lifecycle_event"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerTopicMigrationExecutor._phase_index",
+    "HandlerTopicMigrationExecutor._validate_forward",
+    "HandlerTopicMigrationExecutor._mint_new_group"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

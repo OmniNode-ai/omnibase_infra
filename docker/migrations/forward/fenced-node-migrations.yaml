@@ -900,3 +900,10 @@ fenced_node_migrations:
   # lane release is added here.
   - id: "node:node_projection_delegation:0057_delegation_budget_applied_events_rls.sql"
     ticket: "OMN-20613"
+  # OMN-19987: 0002 enables FORCE ROW LEVEL SECURITY on run_trace. It is split
+  # out of 0000 (the create) and fenced on arrival, so 0000 and the 0001 grants
+  # apply on a fresh database while only the FORCE step waits. Its release is a
+  # separate operator-sequenced step that needs an operator ruling. No lane
+  # release is added here.
+  - id: "node:node_projection_run_trace:0002_force_rls_run_trace.sql"
+    ticket: "OMN-19987"

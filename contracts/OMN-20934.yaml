@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-20934
 title: omnibase_infra lab tables, lane manifests and lab defaults move to the private overlay
-summary: The pre-merge runtime pool table (config/prepr_runtime_pool.yaml) leaves the shipped repository; scripts/runtime_build/prepr_runtime_pool.py reads config/lab/prepr_runtime_pool.yaml under the workspace config root (ONEX_WORKSPACE_CONFIG_ROOT, else the runtime's workspace config owner) and refuses with the way to supply one when no overlay is present. Its tests run on a synthetic RFC 5737 fixture. The scripts/runner_fleet_event.py docstring stops naming a lab host.
+summary: The lane census manifest and committed snapshot (deploy/lane-census/lane-manifest.yaml, census-snapshot.json) leave the shipped repository for config/lab/lane-census under the workspace config root; the census planner, the staleness, drift and env-drift checkers, the CLAUDE.md lane block generator, the lab alarm, the desired-state renderer and the refresh leg resolve or write them there and refuse loudly without them, and the tests that cross-check them against this repository run as lab_overlay where the overlay is fetched. Earlier, the pre-merge runtime pool table (config/prepr_runtime_pool.yaml) left the shipped repository; scripts/runtime_build/prepr_runtime_pool.py reads config/lab/prepr_runtime_pool.yaml under the workspace config root (ONEX_WORKSPACE_CONFIG_ROOT, else the runtime's workspace config owner) and refuses with the way to supply one when no overlay is present. Its tests run on a synthetic RFC 5737 fixture. The scripts/runner_fleet_event.py docstring stops naming a lab host.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -9,23 +9,62 @@ requirements:
   - id: req-omn20934
     statement: A lab table read by a shipped tool is resolved from the workspace config root and never from the shipped repository; without an overlay the tool fails loud and names how to supply one.
     acceptance:
+      - id: AC1
+        statement: "AC1: omnibase_infra at dev carries none of the listed lab tables and no lab address as a default value -- falsifier: uv run pytest tests/unit/scripts/test_lane_census_private_config_omn20934.py -k ships_no_lane_census"
       - id: AC2
         statement: "AC2: each table's validator and reader reads the private copy and fails loud without it, and generate_claude_lane_block.py regenerates the lane block from the private manifest -- falsifier: pytest focused tests for each repointed reader with and without ONEX_WORKSPACE_CONFIG_ROOT"
 evidence_requirements:
   - kind: tests
+    description: The repository ships no lane census, and each census reader resolves it under ONEX_WORKSPACE_CONFIG_ROOT and refuses without it.
+    command: uv run pytest tests/unit/scripts/test_lane_census_private_config_omn20934.py -q -p no:randomly
+  - kind: tests
     description: The pre-merge runtime pool reader resolves its table under ONEX_WORKSPACE_CONFIG_ROOT or the runtime's workspace config owner, and refuses with no overlay.
-    command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_pool_pr_head_receipt_omn19566.py -q -p no:randomly
+    command: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_pool_pr_head_receipt_omn19566.py -q -p no:randomly -m "not lab_overlay"
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-20934-ac2-prepr-pool
-    description: The pool reader's tests prove resolution under ONEX_WORKSPACE_CONFIG_ROOT, under the runtime's workspace config owner, and the loud refusal with neither.
+    description: The pool reader's tests prove resolution under ONEX_WORKSPACE_CONFIG_ROOT, under the runtime's workspace config owner, and the loud refusal with neither. The one case that holds the slot project against the lab's own lane manifest carries the lab_overlay marker and runs in the Lab-overlay parity job, which fetches that manifest; here the same invariant runs over the neutral manifest, with a control that a manifest declaring the slot project is seen.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_pool_pr_head_receipt_omn19566.py -q -p no:randomly
+        check_value: uv run pytest tests/unit/scripts/test_prepr_runtime_pool_omn18893.py tests/unit/scripts/test_prepr_pool_pr_head_receipt_omn19566.py -q -p no:randomly -m "not lab_overlay"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-20934-ac1-lane-census-out
+    description: The lane manifest and the committed census are absent from the repository.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_lane_census_private_config_omn20934.py -q -p no:randomly -k ships_no_lane_census
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20934-ac2-lane-census-readers
+    description: Each lane census reader resolves the private census under ONEX_WORKSPACE_CONFIG_ROOT and refuses loudly without it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_lane_census_private_config_omn20934.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-20934-lane-census-planner-deploy-probe
+    description: Deploy probe. scripts/lane_census_plan.py at the checked-out commit carries lane_census_dir, the resolver every census reader now takes the private census directory from; the probe reads the file from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base. The lab readout after the deploy agent rolls this commit is the census driver on the lab host refusing, naming ONEX_WORKSPACE_CONFIG_ROOT, when no private census is configured, and running when one is.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/lane_census_plan.py?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("def lane_census_dir")' | grep -qx true
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-20934-sibling-verifier-fetches-census
+    description: The sibling lane verifier job in runtime-rebuild-trigger-reusable.yml fetches the private census overlay before the probe and keeps the probe and emitter always-running. The test does not exist at the merge base, so the control fails there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_deploy_lane_verify_route_omn19507.py -q -p no:randomly -k sibling_verifier_fetches_private_census_before_probing
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2

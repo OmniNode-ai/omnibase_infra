@@ -1,0 +1,24 @@
+{
+  "_provenance": {
+    "source": "omni plugin skills/queue-status/scripts/ruling_mechanisms.py wiring_for(), the auditor that reads whether a ruling's mechanism is wired",
+    "source_sha256": "84f41f71767c0b20e3f386e5edd1ff81f5a779a08f9ef40aa17d55df0ceb4947",
+    "captured_utc": "2026-10-12T09:36:00Z",
+    "base_revision": "0ba1a61d34b50513491f161d82ba187b582e4dfb",
+    "required_contexts_input": "a synthetic required-contexts.json for omnibase_infra:dev listing CI Summary, deploy-gate / deploy-gate and call-reject-skip-token / scan / reject-skip-gate-token, taken from scripts/enforcement_parity_manifest.yaml; the cache the audit reads on the launching host was not reachable from the lab host that captured this",
+    "command": "env -u PYTHONPATH python3 -I capture.py <ruling_mechanisms.py>, wiring_for('omnibase_infra/tests/scripts/test_release_train_nightly.py', <registry root>, Evidence(landing_dir=<synthetic>)) over a clone at the base revision and over the working tree of this change"
+  },
+  "wiring": {
+    "base_0ba1a61d3": {
+      "path": "omnibase_infra/tests/scripts/test_release_train_nightly.py",
+      "kind": "check",
+      "wired": false,
+      "detail": "no workflow running it has a job that is a required context; no pre-commit hook references it"
+    },
+    "head": {
+      "path": "omnibase_infra/tests/scripts/test_release_train_nightly.py",
+      "kind": "check",
+      "wired": true,
+      "detail": "required workflow context and pre-commit hook reference it"
+    }
+  }
+}

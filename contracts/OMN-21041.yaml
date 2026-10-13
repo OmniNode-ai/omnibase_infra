@@ -1,0 +1,62 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21041"
+title: "one read-only runner-fleet-maintain-start command reaches a runner-fleet-maintain-completed event with a health verdict"
+summary: "On the dev lane the runner-fleet-maintain workflow dropped at its first hop: the deployed start handler and snapshot effect handler took a bare UUID while the runtime hands them the whole command, so pydantic rejected it. Past that, the health-evaluate command had no published_events entry and fell back to the snapshot-gather topic, and the orchestrator contract carried no top-level terminal_event, which onex run-node requires. The two handlers now take their typed command, the contract maps both commands to their topics and declares its terminal event, and a test carries one start command through the real contracts, real dispatch callbacks and real result appliers to the completed event with only gh and ssh mocked."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn21041-start-reaches-completed"
+    statement: "One runner-fleet-maintain-start.v1 reaches one runner-fleet-maintain-completed.v1 carrying the same correlation id and a health verdict, and the workflow performs no mutation."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: one runner-fleet-maintain-start.v1 command published on the dev lane bus produces the snapshot-gather command, the runner-health-snapshot event, the health-evaluate command, the fleet-health-verdict event and exactly one runner-fleet-maintain-completed.v1 carrying the same correlation id -- falsifier: rpk topic consume on the runner-fleet topics filtered by that correlation id returns no runner-fleet-maintain-completed record"
+      - id: "AC2"
+        statement: "AC2: every hop that drops or refuses the command on the lab has a failing test written first at the seam that drops it, and the test passes after the fix -- falsifier: uv run pytest tests/unit/nodes/node_runner_fleet_maintain -q"
+      - id: "AC3"
+        statement: "AC3: no code path of the workflow performs a mutation, and a test pins that the completed event carries recommended actions only and that no snapshot probe issues a write call -- falsifier: uv run pytest tests/unit/nodes/node_runner_fleet_maintain -q -k read_only"
+evidence_requirements:
+  - kind: "tests"
+    description: "The dispatch-chain tests pass at the head and fail at the merge base on their own assertions."
+    command: "uv run pytest tests/unit/nodes/node_runner_fleet_maintain -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21041-ac2-hops-reachable"
+    description: "AC2. Each hop is driven through its real dispatch callback and its contract's real result applier, and one start command reaches the completed event. The tests fail at the merge base with the start handler rejecting the command, and pass at the head."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_maintain_dispatch_chain_omn21041.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_runner_fleet_maintain_flip_proof_omn21041.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-omn21041-ac3-read-only"
+    description: "AC3. Every gh call is a read and every ssh command an inspect, ps or df across four fleet scenarios, a detector with positive controls refuses a write, and the completed event holds a report and recommended actions with no field a mutation could fill."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_maintain_dispatch_chain_omn21041.py -q -k read_only"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC3"]
+  - id: "dod-omn21041-ac1-chain-in-process"
+    description: "AC1, in process. One start command is carried through the three real contracts, real dispatch callbacks and real result appliers to exactly one completed event with the same correlation id and a health verdict, each output lands on the topic its contract declares, and the orchestrator declares the terminal event onex run-node polls. At the merge base the start handler rejects the command and the chain stops at the first hop."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_maintain_dispatch_chain_omn21041.py -q -k 'reaches_completed_event or lands_on_the_topic or terminal_event'"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn21041-ac1-live-readback"
+    description: "AC1 live, pending the deploy agent rolling the fix onto the dev lane. The local Done gate runs it; it binds no criterion because the hosted gate never runs a local_done_gate item, so dod-omn21041-ac1-chain-in-process binds AC1. It publishes one start command through onex run-node, which polls the contract's terminal_event for the same correlation id, and requires a health verdict in the completed event."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: >-
+          onex run-node node_runner_fleet_maintain_orchestrator --input '{}' --timeout 180 | python3 -c 'import json,sys; d=json.load(sys.stdin); v=d["verdict"]; assert v["correlation_id"]==d["correlation_id"]; assert "recommended_actions" in v and "fleet_ready" in v'
+        cwd: "${OMNI_HOME}/omnibase_infra"

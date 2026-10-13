@@ -37,6 +37,8 @@ from check_lane_census_drift import (
 from generate_claude_lane_block import (
     _LANE_BOUNDARY,
     _LANE_PORT_MAP,
+    _PORTS_NONE,
+    _PORTS_UNDECLARED,
     comparable,
     extract_block,
     generate_block,
@@ -44,7 +46,23 @@ from generate_claude_lane_block import (
     undeclared_lanes,
 )
 
+from tests.helpers.lane_census_fixtures import (
+    NEUTRAL_SNAPSHOT,
+    generator_consistent_manifest,
+)
+
 pytestmark = pytest.mark.unit
+
+
+def _consistent_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A config root holding the neutral census and a manifest it agrees with."""
+    census = tmp_path / "root" / "config" / "lab" / "lane-census"
+    census.mkdir(parents=True)
+    generator_consistent_manifest(census / "lane-manifest.yaml")
+    (census / "census-snapshot.json").write_text(NEUTRAL_SNAPSHOT.read_text())
+    monkeypatch.setenv("ONEX_WORKSPACE_CONFIG_ROOT", str(tmp_path / "root"))
+    monkeypatch.delenv("LANE_MANIFEST", raising=False)
+    return tmp_path / "root"
 
 
 def _manifest(**lanes: Any) -> dict[str, Any]:
@@ -216,18 +234,18 @@ def test_a_generator_map_entry_for_a_retired_lane_is_drift() -> None:
     assert set(_kinds(findings)) == {"generator_map_orphan"}
 
 
-def test_every_real_manifest_lane_is_declared_in_both_generator_maps() -> None:
-    """The live assertion, over the committed manifest rather than a fixture.
+def test_a_manifest_declaring_every_mapped_lane_has_no_map_disagreement(
+    tmp_path: Path,
+) -> None:
+    """The agreement direction, over a manifest that declares every mapped lane.
 
-    Both of these were absent before this ticket: the dogfood lane from both
-    maps, the fleet CI bus from the port map. Each rendered an em-dash for that
-    reason alone.
+    OMN-20934: the lab's manifest is private config, so the live assertion
+    over it runs where it lives (the staleness job, which fetches it, and the
+    operator repository's own tests). Here the same two functions must return
+    nothing for a manifest that declares exactly the generator's lanes.
     """
     manifest = yaml.safe_load(
-        (
-            Path(__file__).resolve().parents[3]
-            / "deploy/lane-census/lane-manifest.yaml"
-        ).read_text()
+        generator_consistent_manifest(tmp_path / "m.yaml").read_text()
     )
     assert undeclared_lanes(manifest) == []
     assert orphan_map_entries(manifest) == []
@@ -241,20 +259,21 @@ def test_every_real_manifest_lane_is_declared_in_both_generator_maps() -> None:
 def test_an_undeclared_port_block_renders_as_undeclared_not_as_an_em_dash() -> None:
     """Silence and a declared absence must not render the same.
 
-    The fleet CI bus declares no runtime ports and says so; the dogfood lane's
-    ports have simply never been recorded. Both used to render an em-dash.
+    A lane that declares no runtime ports says so; a lane whose ports have
+    simply never been recorded is undeclared. Both used to render an em-dash.
+    The two lanes are read out of the generator's own map by their sentinel.
     """
-    manifest = yaml.safe_load(
-        (
-            Path(__file__).resolve().parents[3]
-            / "deploy/lane-census/lane-manifest.yaml"
-        ).read_text()
+    undeclared = next(k for k, v in _LANE_PORT_MAP.items() if v == _PORTS_UNDECLARED)
+    none = next(k for k, v in _LANE_PORT_MAP.items() if v == _PORTS_NONE)
+    block = generate_block(_manifest(**{undeclared: {}, none: {}}), None)
+    undeclared_row = next(
+        line for line in block.splitlines() if line.startswith(f"| {undeclared} ")
     )
-    block = generate_block(manifest, None)
-    dogfood = next(line for line in block.splitlines() if line.startswith("| dogfood"))
-    ci_bus = next(line for line in block.splitlines() if line.startswith("| ci-bus"))
-    assert "not declared" in dogfood
-    assert "not declared" not in ci_bus and "`—`" in ci_bus
+    none_row = next(
+        line for line in block.splitlines() if line.startswith(f"| {none} ")
+    )
+    assert "not declared" in undeclared_row
+    assert "not declared" not in none_row and "`—`" in none_row
 
 
 # ---------------------------------------------------------------------------
@@ -310,18 +329,26 @@ def test_a_clean_pair_still_passes() -> None:
     assert _run(m, s) == []
 
 
-def test_the_committed_tree_passes_the_gate() -> None:
-    """The gate is armed against the real files, not only against fixtures.
+def test_an_agreeing_tree_passes_the_gate_through_the_default_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gate passes a clean pair it found itself, not only one it was handed.
 
-    This is also the AC-1 falsifier read the other way: it holds only while
-    the committed snapshot reports zero drift, so the five dev-lane items the
-    ticket names cannot return without turning this red.
+    OMN-20934: the real pair is private config under the workspace config
+    root, and the staleness job runs this same call against it. Here the
+    root holds the neutral census beside a manifest declaring every mapped
+    lane, so the default resolution and the zero-drift verdict are both
+    exercised.
     """
+    _consistent_root(tmp_path, monkeypatch)
     assert main([]) == 0
 
 
-def test_every_run_prints_the_input_sizes_it_derived_its_verdict_from(capsys) -> None:
+def test_every_run_prints_the_input_sizes_it_derived_its_verdict_from(
+    capsys, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A zero reported bare is indistinguishable from a sweep that read nothing."""
+    _consistent_root(tmp_path, monkeypatch)
     assert main([]) == 0
     out = capsys.readouterr().out
     assert "manifest lane(s)" in out and "declared container(s)" in out
@@ -365,12 +392,8 @@ def test_check_fails_on_an_unreadable_target(tmp_path: Path) -> None:
 
 
 def test_check_passes_on_a_target_holding_the_current_block(tmp_path: Path) -> None:
-    manifest_path = (
-        Path(__file__).resolve().parents[3] / "deploy/lane-census/lane-manifest.yaml"
-    )
-    snapshot_path = (
-        Path(__file__).resolve().parents[3] / "deploy/lane-census/census-snapshot.json"
-    )
+    manifest_path = generator_consistent_manifest(tmp_path / "lane-manifest.yaml")
+    snapshot_path = NEUTRAL_SNAPSHOT
     manifest = yaml.safe_load(manifest_path.read_text())
     snapshot = json.loads(snapshot_path.read_text())
     target = tmp_path / "CLAUDE.md"
@@ -391,12 +414,8 @@ def test_check_passes_on_a_target_holding_the_current_block(tmp_path: Path) -> N
 
 def test_check_fails_when_the_target_block_names_a_stale_lane(tmp_path: Path) -> None:
     """The positive control for the two passes above."""
-    manifest_path = (
-        Path(__file__).resolve().parents[3] / "deploy/lane-census/lane-manifest.yaml"
-    )
-    snapshot_path = (
-        Path(__file__).resolve().parents[3] / "deploy/lane-census/census-snapshot.json"
-    )
+    manifest_path = generator_consistent_manifest(tmp_path / "lane-manifest.yaml")
+    snapshot_path = NEUTRAL_SNAPSHOT
     manifest = yaml.safe_load(manifest_path.read_text())
     snapshot = json.loads(snapshot_path.read_text())
     block = generate_block(manifest, snapshot)
@@ -429,10 +448,8 @@ def test_declared_containers_reads_every_lane() -> None:
 
 @pytest.mark.parametrize("count", [0, 1])
 def test_drift_count_one_refuses_and_zero_passes(count, tmp_path):
-    repo = _SCRIPTS.parent
-    snapshot = json.loads(
-        (repo / "deploy/lane-census/census-snapshot.json").read_text()
-    )
+    manifest = generator_consistent_manifest(tmp_path / "lane-manifest.yaml")
+    snapshot = json.loads(NEUTRAL_SNAPSHOT.read_text())
     snapshot["drift_count"] = count
     snapshot["findings"] = (
         [
@@ -448,4 +465,4 @@ def test_drift_count_one_refuses_and_zero_passes(count, tmp_path):
     )
     path = tmp_path / "census.json"
     path.write_text(json.dumps(snapshot))
-    assert main(["--snapshot", str(path)]) == count
+    assert main(["--manifest", str(manifest), "--snapshot", str(path)]) == count

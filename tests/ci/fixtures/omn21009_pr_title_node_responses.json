@@ -1,0 +1,45 @@
+{
+  "_provenance": {
+    "source": "PyPI published omnimarket 0.4.310; isolated Python CLI on lab host h201",
+    "captured_utc": "2026-10-11T21:25:27.253454Z",
+    "source_sha256": "07563ae53503c9f6659b12f6268436628ff3ab8eab62dc908eb7c508105a8b32",
+    "omnimarket_version": "0.4.310",
+    "command": "python -I -m omnimarket.nodes.node_pr_title_check_compute",
+    "lane": "occ-ret-prtitleinfra-i4-8e80"
+  },
+  "responses": [
+    {
+      "request": {
+        "title": "ci(OMN-21009): port title check",
+        "author": "contributor"
+      },
+      "response": {
+        "exit_code": 0,
+        "stdout": "[PASS] PR title contains ticket reference: OMN-21009\n",
+        "stderr": ""
+      }
+    },
+    {
+      "request": {
+        "title": "bare title",
+        "author": "contributor"
+      },
+      "response": {
+        "exit_code": 1,
+        "stdout": "[FAIL] PR title must contain an OMN-XXXX ticket reference.\n\nTitle: bare title\n\nExempt categories (no ticket needed):\n  - Any GitHub App bot (author ends with [bot])\n  - Titles starting with: chore(deps, build(deps, Bump\n  - Titles starting with: chore: release, chore(release), release:\n\nTo fix: add [OMN-XXXX] or OMN-XXXX to the PR title.\n",
+        "stderr": ""
+      }
+    },
+    {
+      "request": {
+        "title": "chore(deps): bump library",
+        "author": "contributor"
+      },
+      "response": {
+        "exit_code": 0,
+        "stdout": "[PASS] Exempt: dependency bump\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

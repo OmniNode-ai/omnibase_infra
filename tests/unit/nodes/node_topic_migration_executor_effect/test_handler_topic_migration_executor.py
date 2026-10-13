@@ -125,7 +125,7 @@ def _command(
 async def test_dual_write_provisions_new_topic() -> None:
     prov = _RecordingProvisioner()
     handler = HandlerTopicMigrationExecutor(prov, _FakeGate(allowed=True, residual=0))
-    event = await handler.execute(
+    event = await handler.handle(
         _command(
             _contract(EnumMigrationPhase.PLANNED),
             EnumMigrationPhase.DUAL_WRITE,
@@ -151,7 +151,7 @@ async def test_cutover_blocks_while_old_lag_remains() -> None:
         _RecordingProvisioner(), _FakeGate(allowed=False, residual=4)
     )
     with pytest.raises(ValueError, match="cutover blocked"):
-        await handler.execute(
+        await handler.handle(
             _command(
                 _contract(EnumMigrationPhase.DUAL_READ), EnumMigrationPhase.CUTOVER
             )
@@ -163,7 +163,7 @@ async def test_cutover_allowed_after_drain_proof() -> None:
     handler = HandlerTopicMigrationExecutor(
         _RecordingProvisioner(), _FakeGate(allowed=True, residual=0)
     )
-    event = await handler.execute(
+    event = await handler.handle(
         _command(_contract(EnumMigrationPhase.DUAL_READ), EnumMigrationPhase.CUTOVER)
     )
     assert event.phase is EnumMigrationPhase.CUTOVER
@@ -177,7 +177,7 @@ async def test_backward_transition_rejected() -> None:
         _RecordingProvisioner(), _FakeGate(allowed=True, residual=0)
     )
     with pytest.raises(ValueError, match="not strictly forward"):
-        await handler.execute(
+        await handler.handle(
             _command(
                 _contract(EnumMigrationPhase.CUTOVER),
                 EnumMigrationPhase.DUAL_WRITE,

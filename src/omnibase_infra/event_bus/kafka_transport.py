@@ -95,7 +95,7 @@ logger = logging.getLogger(__name__)
 
 
 class KafkaTransport:
-    """Concrete Kafka transport: one instance is both consumer and producer.
+    """Concrete Kafka transport, optionally restricted to consumption.
 
     Consumer identity (``group`` + assigned ``topics``) is construction-time config
     supplied by the composition root — there is no runtime ``subscribe`` call,
@@ -104,6 +104,10 @@ class KafkaTransport:
     with the topics it is assigned. A "restart" is simply a new instance on the same
     ``group``: with ``enable_auto_commit=False`` it resumes from the committed
     offset, so every uncommitted offset is redelivered.
+
+    ``consume_only=True`` never constructs a producer and rejects publishing with
+    ``ProtocolConfigurationError``. This lets a source leg use a read-only login
+    without requesting Kafka's idempotent-producer authorization at startup.
     """
 
     # Bounds for the post-position-change prefetch (see _prime). One batch only —
@@ -119,6 +123,7 @@ class KafkaTransport:
         group: str = "onex.transport.kafka",
         topics: Sequence[str] = (),
         auto_offset_reset: str = "earliest",
+        consume_only: bool = False,
         refused_topic_retry_seconds: float | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -153,6 +158,7 @@ class KafkaTransport:
             for t in self._topics
         )
         self._auto_offset_reset = auto_offset_reset
+        self._consume_only = consume_only
         self._refused_topic_retry_seconds = refused_topic_retry_seconds
         self._clock = clock
         self._refused_physical_topics: set[str] = set()
@@ -209,21 +215,22 @@ class KafkaTransport:
     # -- lifecycle --------------------------------------------------------------
 
     async def start(self) -> None:
-        """Start the producer and, if ``topics`` were assigned, the consumer."""
+        """Start the permitted clients; consume-only never initializes a producer."""
         if self._started:
             return
 
         try:
-            self._producer = AIOKafkaProducer(
-                bootstrap_servers=self._config.bootstrap_servers,
-                acks=self._config.acks_aiokafka,
-                enable_idempotence=self._config.enable_idempotence,
-                max_request_size=self._config.max_request_size,
-                retry_backoff_ms=self._config.reconnect_backoff_ms,
-                **self._client_version_kwargs(AIOKafkaProducer),
-                **self._auth_kwargs(),
-            )
-            await self._producer.start()
+            if not self._consume_only:
+                self._producer = AIOKafkaProducer(
+                    bootstrap_servers=self._config.bootstrap_servers,
+                    acks=self._config.acks_aiokafka,
+                    enable_idempotence=self._config.enable_idempotence,
+                    max_request_size=self._config.max_request_size,
+                    retry_backoff_ms=self._config.reconnect_backoff_ms,
+                    **self._client_version_kwargs(AIOKafkaProducer),
+                    **self._auth_kwargs(),
+                )
+                await self._producer.start()
 
             if self._topics:
                 await self._start_consumer()
@@ -755,18 +762,6 @@ class KafkaTransport:
         headers: Mapping[str, bytes],
     ) -> None:
         """Publish one event to ``topic`` and await the broker acknowledgement."""
-        if self._producer is None:
-            context = ModelInfraErrorContext.with_correlation(
-                transport_type=EnumInfraTransportType.KAFKA,
-                operation="send",
-                target_name="kafka_transport",
-            )
-            raise ProtocolConfigurationError(
-                "KafkaTransport producer used before start(); await start() first.",
-                context=context,
-                parameter="producer",
-                value=None,
-            )
         await self.send_with_coordinate(topic, key, value, headers)
 
     async def send_with_coordinate(
@@ -787,6 +782,18 @@ class KafkaTransport:
         source consumer later reads. ``AIOKafkaProducer.send_and_wait`` has
         always returned this metadata; this method stops discarding it.
         """
+        if self._consume_only:
+            context = ModelInfraErrorContext.with_correlation(
+                transport_type=EnumInfraTransportType.KAFKA,
+                operation="send",
+                target_name="kafka_transport",
+            )
+            raise ProtocolConfigurationError(
+                "KafkaTransport is consume-only; publishing is disabled.",
+                context=context,
+                parameter="consume_only",
+                value=True,
+            )
         if self._producer is None:
             context = ModelInfraErrorContext.with_correlation(
                 transport_type=EnumInfraTransportType.KAFKA,

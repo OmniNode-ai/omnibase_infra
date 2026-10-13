@@ -34,7 +34,7 @@ from omnibase_core.nodes.node_reducer import NodeReducer
 
 if TYPE_CHECKING:
     from omnibase_core.models.container.model_onex_container import ModelONEXContainer
-    from omnibase_infra.nodes.node_validation_adjudicator.models.model_adjudicator_state import (
+    from omnibase_infra.models.validation.model_adjudicator_state import (
         ModelAdjudicatorState,
     )
 

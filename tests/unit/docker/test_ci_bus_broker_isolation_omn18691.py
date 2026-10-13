@@ -19,7 +19,7 @@ lane's data volumes for at least eight consecutive nights. The collision was
 invisible at review time. It is not invisible to a test.
 
 NOTHING ABOUT LANE IDENTITY IS HARDCODED HERE. Every protected name is derived
-from `deploy/lane-census/lane-manifest.yaml` and the lane compose files it
+from the lab's lane manifest (private config, OMN-20934) and the lane compose files it
 names, so a lane added later is covered without editing this file -- the same
 construction `test_e2e_compose_lane_isolation.py` uses, and for the same reason.
 
@@ -38,6 +38,8 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.helpers.lane_census_fixtures import LAB_MANIFEST
+
 pytestmark = [pytest.mark.unit]
 
 #: `${VAR:-default}` -> `default`, and a bare `${VAR}` -> nothing (it binds an
@@ -47,7 +49,7 @@ _BARE_VAR = re.compile(r"\$\{[^}]*\}")
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CI_BUS_COMPOSE = REPO_ROOT / "docker" / "docker-compose.ci-bus.yml"
-LANE_MANIFEST = REPO_ROOT / "deploy" / "lane-census" / "lane-manifest.yaml"
+LANE_MANIFEST = LAB_MANIFEST  # OMN-20934: private config
 
 #: The manifest entry this file is about. It is a lane entry for census
 #: purposes only -- it runs no runtime -- so it must be excluded from the set of
@@ -173,6 +175,7 @@ def test_ci_bus_declares_its_own_compose_project(ci_bus: dict[str, Any]) -> None
     )
 
 
+@pytest.mark.lab_overlay
 def test_ci_bus_project_is_not_any_lane_project(
     ci_bus: dict[str, Any], lane_manifest: dict[str, Any]
 ) -> None:
@@ -187,6 +190,7 @@ def test_ci_bus_project_is_not_any_lane_project(
     )
 
 
+@pytest.mark.lab_overlay
 def test_ci_bus_network_is_not_any_lane_network(
     ci_bus: dict[str, Any], lane_manifest: dict[str, Any]
 ) -> None:
@@ -210,6 +214,7 @@ def test_ci_bus_network_is_not_any_lane_network(
     )
 
 
+@pytest.mark.lab_overlay
 def test_ci_bus_volume_is_named_and_distinct(
     ci_bus: dict[str, Any], lane_manifest: dict[str, Any]
 ) -> None:
@@ -244,6 +249,7 @@ def test_ci_bus_volume_is_named_and_distinct(
     )
 
 
+@pytest.mark.lab_overlay
 def test_ci_bus_container_names_are_distinct_from_every_lane(
     ci_bus: dict[str, Any], lane_manifest: dict[str, Any]
 ) -> None:
@@ -307,6 +313,7 @@ def test_ci_bus_publishes_no_port_any_lane_publishes(ci_bus: dict[str, Any]) -> 
     )
 
 
+@pytest.mark.lab_overlay
 def test_ci_bus_is_declared_in_the_lane_census(lane_manifest: dict[str, Any]) -> None:
     """A running-but-undeclared container is the dangerous direction.
 
@@ -316,8 +323,8 @@ def test_ci_bus_is_declared_in_the_lane_census(lane_manifest: dict[str, Any]) ->
     """
     lanes = lane_manifest.get("lanes") or {}
     assert CI_BUS_LANE_KEY in lanes, (
-        "the CI-bus project must be declared in deploy/lane-census/"
-        "lane-manifest.yaml, or the census cannot see it and a container that "
+        "the CI bus project must be declared in the lab's lane manifest "
+        "(config/lab/lane-census), or the census cannot see it and a container that "
         "is running is invisible."
     )
     spec = lanes[CI_BUS_LANE_KEY]
