@@ -34,5 +34,5 @@ dod_evidence:
         check_value: env -u PYTHONPATH uv run --frozen pytest tests/integration/gateway/test_forwarder_cold_broker_topic_provisioning_omn15629.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: command
-        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/gateway_forwarder.py?ref=dev --jq .content | base64 -d | grep -qF 'async def ensure_topics_exist'
+        check_value: gh api repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/gateway_forwarder.py?ref=460332a56d0491d23f4313207399ac2b476cd11d --jq .content | base64 -d | grep -qF 'async def ensure_topics_exist'
     binds_ac: [AC1]
