@@ -2049,6 +2049,9 @@ jobs:
       - name: Operator script topic namespace gate (OMN-18913)
         run: uv run --frozen pytest tests/ci/test_operator_script_topic_namespace_omn18913.py -q
 
+      - name: No pull-request gate requires the staging plane (OMN-20112)
+        run: uv run --frozen pytest tests/ci/test_no_staging_pr_gate_omn20112.py tests/ci/test_no_staging_pr_gate_wired_omn20112.py -q
+
   plugin-env-service-completeness:
     name: "Plugin ENV->Service Completeness (OMN-4313)"
     # OMNI_RUNNER_SELECTOR_V1 — trusted CI defaults to self-hosted omnibase-ci; public forks default to ubuntu-latest
