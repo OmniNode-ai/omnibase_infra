@@ -721,38 +721,6 @@
       "package": "omnibase_infra",
       "type_scoped": false
     },
-    "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a": {
-      "category": "intent",
-      "contract_name": "node_github_pr_poller_effect",
-      "event_model_module": "omnibase_infra.runtime.models.model_runtime_tick",
-      "event_model_name": "ModelRuntimeTick",
-      "handler_id": "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
-      "handler_module": "omnibase_infra.nodes.node_github_pr_poller_effect.handlers.handler_github_api_poll",
-      "handler_name": "HandlerGitHubApiPoll",
-      "message_types": [
-        "ModelRuntimeTick",
-        "onex.intent.platform.runtime-tick.v1",
-        "platform.runtime-tick"
-      ],
-      "package": "omnibase_infra",
-      "type_scoped": true
-    },
-    "dispatcher.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5": {
-      "category": "command",
-      "contract_name": "node_github_webhook_ingress_effect",
-      "event_model_module": "omnibase_infra.nodes.node_github_webhook_ingress_effect.models",
-      "event_model_name": "ModelGitHubWebhookDelivery",
-      "handler_id": "dispatcher.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5",
-      "handler_module": "omnibase_infra.nodes.node_github_webhook_ingress_effect.handlers.handler_github_webhook_ingress",
-      "handler_name": "HandlerGitHubWebhookIngress",
-      "message_types": [
-        "ModelGitHubWebhookDelivery",
-        "github.webhook-delivery",
-        "onex.cmd.github.webhook-delivery.v1"
-      ],
-      "package": "omnibase_infra",
-      "type_scoped": true
-    },
     "dispatcher.auto.node_gmail_intent_poller_effect.HandlerGmailIntentPoll.gmail_poll_inbox_b096b6d9": {
       "category": "event",
       "contract_name": "node_gmail_intent_poller_effect",
@@ -3679,16 +3647,16 @@
     "corpus": {
       "contracts_by_package": {
         "omnibase_core": 21,
-        "omnibase_infra": 137,
+        "omnibase_infra": 135,
         "onex-change-control": 4
       },
-      "contracts_discovered": 162,
+      "contracts_discovered": 160,
       "discovery_errors": 0,
-      "distinct_subscribe_topics": 98,
-      "probe_count": 1101,
-      "registered_dispatchers": 131,
-      "registered_routes": 115,
-      "type_scoped_dispatchers": 76
+      "distinct_subscribe_topics": 97,
+      "probe_count": 1097,
+      "registered_dispatchers": 129,
+      "registered_routes": 113,
+      "type_scoped_dispatchers": 74
     },
     "duplicate_winners": [],
     "epic": "OMN-12525",
@@ -3728,10 +3696,10 @@
       "omnimemory"
     ],
     "fixture_version": "v2",
-    "generated_at_utc": "2026-10-12T14:07:48.225104+00:00",
+    "generated_at_utc": "2026-10-13T13:38:32.457249+00:00",
     "installed_package_versions": {
       "omnibase-core": "0.47.39",
-      "omnibase-infra": "0.38.71",
+      "omnibase-infra": "0.38.72",
       "omniclaude": null,
       "omniintelligence": null,
       "omnimarket": null,
@@ -3815,21 +3783,6 @@
         "status": "success"
       },
       "topic": "onex.cmd.core.compliance-scan-requested.v1"
-    },
-    "P1a::onex.cmd.github.webhook-delivery.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": "github.webhook-delivery",
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.github.v1",
-        "message_category": "command",
-        "message_type": "github.webhook-delivery",
-        "status": "no_dispatcher"
-      },
-      "topic": "onex.cmd.github.webhook-delivery.v1"
     },
     "P1a::onex.cmd.omnibase-infra.baselines-batch-compute.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -5351,21 +5304,6 @@
         "status": "no_dispatcher"
       },
       "topic": "onex.cmd.core.compliance-scan-requested.v1"
-    },
-    "P1b::onex.cmd.github.webhook-delivery.v1": {
-      "family": "P1_topic_event_type_matrix",
-      "input": {
-        "event_type": null,
-        "payload": "_DictPayload"
-      },
-      "selection": {
-        "dispatcher_ids": [],
-        "dlq_topic": "onex.dlq.omnibase-infra.commands.v1",
-        "message_category": "command",
-        "message_type": "_DictPayload",
-        "status": "no_dispatcher"
-      },
-      "topic": "onex.cmd.github.webhook-delivery.v1"
     },
     "P1b::onex.cmd.omnibase-infra.baselines-batch-compute.v1": {
       "family": "P1_topic_event_type_matrix",
@@ -7300,47 +7238,6 @@
         "status": "success"
       },
       "topic": "onex.evt.omnimarket.delegate-skill-failed.v1"
-    },
-    "P4::dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a::onex.intent.platform.runtime-tick.v1": {
-      "construct_only": true,
-      "dispatcher_id": "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
-      "event_model": "omnibase_infra.runtime.models.model_runtime_tick.ModelRuntimeTick",
-      "family": "P4_payload_type_scoping",
-      "input": {
-        "event_type": "platform.runtime-tick",
-        "payload": "ModelRuntimeTick"
-      },
-      "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
-          "dispatcher.auto.node_registration_orchestrator.HandlerRuntimeTick"
-        ],
-        "dlq_topic": null,
-        "message_category": "intent",
-        "message_type": "platform.runtime-tick",
-        "status": "success"
-      },
-      "topic": "onex.intent.platform.runtime-tick.v1"
-    },
-    "P4::dispatcher.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5::onex.cmd.github.webhook-delivery.v1": {
-      "construct_only": true,
-      "dispatcher_id": "dispatcher.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5",
-      "event_model": "omnibase_infra.nodes.node_github_webhook_ingress_effect.models.ModelGitHubWebhookDelivery",
-      "family": "P4_payload_type_scoping",
-      "input": {
-        "event_type": "github.webhook-delivery",
-        "payload": "ModelGitHubWebhookDelivery"
-      },
-      "selection": {
-        "dispatcher_ids": [
-          "dispatcher.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5"
-        ],
-        "dlq_topic": null,
-        "message_category": "command",
-        "message_type": "github.webhook-delivery",
-        "status": "success"
-      },
-      "topic": "onex.cmd.github.webhook-delivery.v1"
     },
     "P4::dispatcher.auto.node_hotpatch_ledger_reconcile_effect.HandlerHotpatchLedgerReconcile.hotpatch_ledger_reconcile_c37d9bb6::onex.cmd.platform.hotpatch-ledger-reconcile.v1": {
       "construct_only": true,
@@ -23728,7 +23625,6 @@
       },
       "selection": {
         "dispatcher_ids": [
-          "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
           "dispatcher.auto.node_registration_orchestrator.HandlerRuntimeTick"
         ],
         "dlq_topic": null,
@@ -25187,26 +25083,6 @@
       "topic": "onex.cmd.omnibase-infra.gateway-link-health-upsert.v1",
       "topic_pattern": "*.cmd.omnibase-infra.gateway-link-health-upsert.*",
       "type_scoped": false
-    },
-    {
-      "contract_name": "node_github_pr_poller_effect",
-      "dispatcher_id": "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
-      "handler_id": "dispatcher.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a",
-      "message_category": "intent",
-      "route_id": "route.auto.node_github_pr_poller_effect.HandlerGitHubApiPoll.github_poll_prs_7786448a.onex_intent_platform_runtime_tick_v1",
-      "topic": "onex.intent.platform.runtime-tick.v1",
-      "topic_pattern": "*.intent.platform.runtime-tick.*",
-      "type_scoped": true
-    },
-    {
-      "contract_name": "node_github_webhook_ingress_effect",
-      "dispatcher_id": "dispatcher.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5",
-      "handler_id": "dispatcher.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5",
-      "message_category": "command",
-      "route_id": "route.auto.node_github_webhook_ingress_effect.HandlerGitHubWebhookIngress.github_webhook_ingest_539008c5.onex_cmd_github_webhook_delivery_v1",
-      "topic": "onex.cmd.github.webhook-delivery.v1",
-      "topic_pattern": "*.cmd.github.webhook-delivery.*",
-      "type_scoped": true
     },
     {
       "contract_name": "node_hotpatch_ledger_reconcile_effect",
