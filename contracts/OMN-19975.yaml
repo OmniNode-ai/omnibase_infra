@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-19975"
+title: "A developer principal's live ACLs can be audited against the rows deploy/lab/developer-principal-grants.yaml derives for it"
+summary: "The lab principal issuer only ever adds ACL rows, and nothing compared a developer principal's live rows with the grant file, so a row the file does not derive (or a derived row the broker lost) was invisible. This change adds an audit-grants command to scripts/lab_principal_issuer.py: read-only, it lists each issued principal's ACLs with rpk, derives the expected rows from the file, and exits 1 naming every MISSING and EXTRA row. It creates and deletes nothing. The ticket's own AC1 readback on the dev lane broker, and the developer.principal overlay key, are not part of this change."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-audit-grants-falsifier"
+    statement: "The issuer can say, for any issued developer principal, which derived ACL rows the broker lacks and which allowed rows the grant file does not derive."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: scripts/lab_principal_issuer.py audit-grants exits 0 with missing=0 extra=0 when a principal's live ALLOW rows equal the rows derived from deploy/lab/developer-principal-grants.yaml, and exits 1 naming each MISSING or EXTRA row otherwise, without creating or deleting any ACL -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -k audit fails at the merge base and passes at the head"
+evidence_requirements:
+  - kind: "tests"
+    description: "The audit tests pin the derived rows, a clean listing, an extra row, a missing row, DENY and other-principal rows ignored, a host-bound ALLOW row as extra, and the command's exit codes."
+    command: "uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn19975-ac1-audit-grants"
+    description: "The audit-grants command compares a principal's listed ACLs with the rows the grant file derives and reports missing and extra rows."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k audit"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
