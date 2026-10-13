@@ -61,6 +61,7 @@ Failure asymmetry (capture vs telemetry):
 from __future__ import annotations
 
 import functools
+import importlib
 import json
 import logging
 import os
@@ -76,21 +77,38 @@ from pathlib import Path
 from typing import cast
 
 import click
-from pydantic import JsonValue, ValidationError
+from pydantic import BaseModel, JsonValue, ValidationError
 
 from omnibase_core.artifacts.artifact_store import (
     ARTIFACT_STORE_ROOT_ENV,
     ArtifactStore,
 )
+from omnibase_core.enums.enum_core_error_code import EnumCoreErrorCode
 from omnibase_core.enums.enum_skill_result_status import EnumSkillResultStatus
 from omnibase_core.enums.enum_workflow_result import EnumWorkflowResult
 from omnibase_core.models.artifacts.model_artifact_ref import ModelArtifactRef
 from omnibase_core.models.dispatch.model_skill_result import ModelSkillResult
+from omnibase_core.models.errors.model_onex_error import ModelOnexError
 from omnibase_core.protocols.runtime.protocol_local_runtime_bus import (
     ProtocolLocalRuntimeBus,
     UnsubscribeCallback,
 )
-from omnibase_core.runtime.runtime_local import RuntimeLocal
+from omnibase_core.protocols.runtime.protocol_local_runtime_callable_target import (
+    ProtocolLocalRuntimeCallableTarget,
+)
+from omnibase_core.runtime.runtime_local import (
+    RuntimeLocal,
+    derive_runtime_local_group_id,
+    load_workflow_contract,
+)
+from omnibase_core.runtime.runtime_local_adapter import (
+    LocalRuntimeBusAdapter,
+    multi_event_publish_seam_enabled,
+)
+from omnibase_infra.cli.contract_registry import (
+    RegistryUnresolvedError,
+    node_contract_path,
+)
 from omnibase_infra.cli.model_delegate_locus_decision import (
     ModelDelegateLocusDecision,
 )
@@ -121,6 +139,7 @@ __all__ = [
     "DelegatePhaseStopwatch",
     "DelegatePhaseTimedBus",
     "DelegatePhaseTimedRuntime",
+    "ExecutionGraphHostingRuntime",
     "capture_log_path",
     "default_emit_socket_path",
     "run_receipt_mode",
@@ -1010,7 +1029,191 @@ class DelegatePhaseTimedBus:
             return await subscribe(topic, *args, **kwargs)
 
 
-class DelegatePhaseTimedRuntime(RuntimeLocal):
+class ExecutionGraphHostingRuntime(RuntimeLocal):
+    """Host the stage nodes an orchestrator's execution graph names (OMN-21071).
+
+    ``RuntimeLocal`` hosts only the selected contract's ``handler_routing``.
+    An orchestrator whose stages are bus hops therefore had no consumer for
+    them when one ``onex node <orchestrator>`` call ran it: its stage commands
+    went unanswered until its own deadline. This runtime resolves every
+    ``workflow_coordination.workflow_definition.execution_graph.nodes[]
+    .step_config.node`` through the same registry ``onex node`` resolves names
+    with, and hosts each stage contract's routing on the run's bus exactly as
+    ``onex node <stage>`` would host it, before the orchestrator subscribes to
+    its own terminal and publishes its command.
+
+    * A stage contract that declares no ``handler_routing`` or no
+      ``event_bus.subscribe_topics`` has no bus surface to host; its
+      orchestrator calls it in process, so it is skipped by name in the log.
+    * A stage node the registry cannot resolve fails the run before anything
+      is published, naming the node: the contract names a node this install
+      does not have.
+    * Only a run that hosts its own handlers on the in-memory bus hosts its
+      stages. That bus lives and dies with this run, so every stage command on
+      it is this run's. On a broker the deployed runtime consumes the stage
+      topics, and hosting them here would make the caller a second consumer
+      group of them (the OMN-17295 hazard ``host_handlers=False`` exists for).
+
+    Awaiting a stage's correlated terminal, and turning one that never comes
+    into a typed result, is the orchestrator handler's own work: the runtime
+    hosts the consumers and does not read the stage results.
+    """
+
+    async def _run_event_driven(self, bus: ProtocolLocalRuntimeBus) -> None:
+        hosted = await self._host_execution_graph(bus)
+        try:
+            await super()._run_event_driven(bus)
+        finally:
+            for unsubscribe in hosted:
+                await unsubscribe()
+
+    def _execution_graph_stage_nodes(self) -> list[str]:
+        """Each distinct stage node name the graph names, in graph order."""
+        definition = self._as_workflow_map(
+            self._as_workflow_map(self._contract.get("workflow_coordination")).get(
+                "workflow_definition"
+            )
+        )
+        graph = self._as_workflow_map(definition.get("execution_graph"))
+        own_name = self._contract.get("name")
+        names: list[str] = []
+        for node in self._as_workflow_maps(graph.get("nodes", [])):
+            name = self._as_workflow_map(node.get("step_config")).get("node")
+            if (
+                isinstance(name, str)
+                and name
+                and name != own_name
+                and name not in names
+            ):
+                names.append(name)
+        return names
+
+    def _refuse_stage(self, message: str) -> ModelOnexError:
+        self._last_error = message
+        logger.error("ExecutionGraphHostingRuntime: %s", message)
+        return ModelOnexError(
+            error_code=EnumCoreErrorCode.CONTRACT_VALIDATION_ERROR, message=message
+        )
+
+    async def _host_execution_graph(
+        self, bus: ProtocolLocalRuntimeBus
+    ) -> list[UnsubscribeCallback]:
+        stage_nodes = self._execution_graph_stage_nodes()
+        if not stage_nodes:
+            return []
+        if not self.host_handlers:
+            logger.info(
+                "ExecutionGraphHostingRuntime: client mode hosts no stage of %s",
+                stage_nodes,
+            )
+            return []
+        if self.backend_overrides.get("event_bus", "inmemory") != "inmemory":
+            logger.info(
+                "ExecutionGraphHostingRuntime: the deployed runtime hosts the "
+                "stages %s on the broker; hosting none here",
+                stage_nodes,
+            )
+            return []
+
+        hosted: list[UnsubscribeCallback] = []
+        try:
+            for stage_node in stage_nodes:
+                hosted.extend(await self._host_stage(stage_node, bus))
+        except BaseException:
+            for unsubscribe in hosted:
+                await unsubscribe()
+            raise
+        return hosted
+
+    async def _host_stage(
+        self, stage_node: str, bus: ProtocolLocalRuntimeBus
+    ) -> list[UnsubscribeCallback]:
+        own_name = self._contract.get("name", "<orchestrator>")
+        try:
+            contract_path = node_contract_path(stage_node)
+        except RegistryUnresolvedError as exc:
+            raise self._refuse_stage(
+                f"{own_name} execution_graph names stage node {stage_node!r}, "
+                f"which this install cannot resolve: {exc}"
+            ) from exc
+
+        # The stage is read and routed by RuntimeLocal's own rules, so it is
+        # hosted exactly as ``onex node <stage>`` would host it.
+        stage = RuntimeLocal(
+            workflow_path=contract_path,
+            state_root=self.state_root,
+            timeout=self.timeout,
+            run_id=self.run_id,
+        )
+        stage._contract = load_workflow_contract(contract_path)
+        event_bus_spec = stage._as_workflow_map(stage._contract.get("event_bus"))
+        subscribe_topics = stage._as_string_list(
+            event_bus_spec.get("subscribe_topics", [])
+        )
+        publish_topics = stage._as_string_list(event_bus_spec.get("publish_topics", []))
+        if not stage._has_event_routing() or not subscribe_topics:
+            logger.info(
+                "ExecutionGraphHostingRuntime: stage %s declares no bus surface; "
+                "%s calls it in process",
+                stage_node,
+                own_name,
+            )
+            return []
+        routing = stage._as_workflow_map(stage._contract.get("handler_routing"))
+        errors = stage._validate_routing(routing, subscribe_topics, publish_topics)
+        if errors:
+            raise self._refuse_stage(
+                f"{own_name} execution_graph stage {stage_node!r} has invalid "
+                f"routing: {'; '.join(errors)}"
+            )
+
+        published_events = stage._load_published_events_map()
+        multi_event_seam_enabled = multi_event_publish_seam_enabled()
+        hosted: list[UnsubscribeCallback] = []
+        for entry in stage._resolve_routing_entries(
+            routing, subscribe_topics, publish_topics
+        ):
+            if not entry.input_topic:
+                continue
+            handler = self._instantiate_handler(
+                entry.handler_module, entry.handler_class, bus=bus
+            )
+            input_model_type: type[BaseModel] | None = None
+            if entry.event_model_module:
+                module = importlib.import_module(entry.event_model_module)
+                input_model_type = getattr(module, entry.event_model_class)
+            adapter = LocalRuntimeBusAdapter(
+                handler=cast("ProtocolLocalRuntimeCallableTarget", handler),
+                handler_name=f"{stage_node}.{entry.handler_name}",
+                input_model_cls=input_model_type,
+                output_topic=entry.output_topic or None,
+                bus=bus,
+                on_error=functools.partial(
+                    self._record_event, f"(stage-error:{stage_node})"
+                ),
+                published_events=published_events,
+                multi_event_seam_enabled=multi_event_seam_enabled,
+            )
+            hosted.append(
+                await bus.subscribe(
+                    entry.input_topic,
+                    on_message=adapter.on_message,
+                    group_id=derive_runtime_local_group_id(
+                        f"{stage_node}.{entry.handler_name}_run_{self.run_id.hex[:12]}"
+                    ),
+                )
+            )
+            logger.info(
+                "ExecutionGraphHostingRuntime: hosting stage %s: [%s] -> %s -> [%s]",
+                stage_node,
+                entry.input_topic,
+                entry.handler_name,
+                entry.output_topic,
+            )
+        return hosted
+
+
+class DelegatePhaseTimedRuntime(ExecutionGraphHostingRuntime):
     """Build a timed bus for all operations performed by the local runtime."""
 
     def __init__(
@@ -1047,9 +1250,12 @@ class DelegatePhaseTimedRuntime(RuntimeLocal):
 def _runtime_factory(
     phase_stopwatch: DelegatePhaseStopwatch | None,
 ) -> Callable[..., RuntimeLocal]:
-    """Select the runtime class: timed when a stopwatch is supplied (OMN-19452)."""
+    """Select the runtime class: timed when a stopwatch is supplied (OMN-19452).
+
+    Both host the stage nodes of an orchestrator's execution graph (OMN-21071).
+    """
     if phase_stopwatch is None:
-        return RuntimeLocal
+        return ExecutionGraphHostingRuntime
     return functools.partial(DelegatePhaseTimedRuntime, phase_stopwatch=phase_stopwatch)
 
 

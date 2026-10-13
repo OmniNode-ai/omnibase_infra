@@ -1123,7 +1123,9 @@ class TestNoReceiptIsNotAJoinRefusal:
             def handler_result(self) -> object | None:
                 return None
 
-        monkeypatch.setattr(receipt_mode_module, "RuntimeLocal", _StubRuntime)
+        monkeypatch.setattr(
+            receipt_mode_module, "ExecutionGraphHostingRuntime", _StubRuntime
+        )
 
         def _submit(correlation: uuid.UUID, *, lands: bool) -> dict[str, object]:
             _StubRuntime.next_correlation = correlation
@@ -1289,7 +1291,9 @@ class TestReceiptModeInProcessIsolation:
                     str(message)
                 )
 
-        monkeypatch.setattr(receipt_mode_module, "RuntimeLocal", BlockingRuntime)
+        monkeypatch.setattr(
+            receipt_mode_module, "ExecutionGraphHostingRuntime", BlockingRuntime
+        )
         monkeypatch.setattr(receipt_mode_module.click, "echo", record_echo)
 
         def worker(marker: str) -> None:
