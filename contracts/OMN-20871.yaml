@@ -18,6 +18,9 @@ evidence_requirements:
     description: The two moved nodes are not omnibase_infra entry points; the positive control reads a node this package does own.
     command: uv run pytest tests/unit/runtime/auto_wiring/test_omn20871_moved_scm_nodes_not_advertised.py -q -p no:randomly
   - kind: tests
+    description: The entry-point generator leaves the two omnimarket-owned nodes out and the repo's table matches it.
+    command: uv run pytest tests/scripts/test_generate_entry_points.py -q -p no:randomly
+  - kind: tests
     description: The regenerated parity oracle matches the live dispatch engine.
     command: uv run pytest tests/integration/runtime/test_dispatch_selection_parity.py -q -p no:randomly
 emergency_bypass:
@@ -31,6 +34,14 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/runtime/auto_wiring/test_omn20871_moved_scm_nodes_not_advertised.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn20871-ac1-generator
+    description: scripts/generate_entry_points.py excludes the two omnimarket-owned node directories, and the repo's entry-point table matches its output.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_generate_entry_points.py -q -p no:randomly
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
   - id: dod-omn20871-ac2-parity-oracle
