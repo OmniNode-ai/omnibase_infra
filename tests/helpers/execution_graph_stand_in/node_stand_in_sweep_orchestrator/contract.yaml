@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Stand-in orchestrator for the onex node execution-graph hosting tests
+# (OMN-21071). Its graph names two answering stages.
+# Its handler calls each stage over the bus and hosts no consumer of them.
+name: node_stand_in_sweep_orchestrator
+node_type: orchestrator
+input_model:
+  name: ModelStandInSweepRequest
+  module: tests.helpers.execution_graph_stand_in.model_stand_in_sweep
+output_model:
+  name: ModelStandInSweepResult
+  module: tests.helpers.execution_graph_stand_in.model_stand_in_sweep
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: run_stand_in_sweep
+      handler:
+        name: HandlerStandInSweep
+        module: tests.helpers.execution_graph_stand_in.handler_stand_in_sweep
+workflow_coordination:
+  workflow_definition:
+    execution_graph:
+      nodes:
+        - node_id: alpha
+          node_type: COMPUTE_GENERIC
+          step_config:
+            node: node_stand_in_stage_alpha
+            operation: answer_stand_in_stage
+        - node_id: beta
+          node_type: COMPUTE_GENERIC
+          depends_on: [alpha]
+          step_config:
+            node: node_stand_in_stage_beta
+            operation: answer_stand_in_stage
+event_bus:
+  subscribe_topics:
+    - onex.cmd.platform.stand-in-sweep-orchestrator-requested.v1
+  publish_topics:
+    - onex.evt.platform.stand-in-sweep-orchestrator-completed.v1
+terminal_event: onex.evt.platform.stand-in-sweep-orchestrator-completed.v1
