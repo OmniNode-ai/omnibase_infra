@@ -31,6 +31,13 @@ WHAT IT GRANTS
     its password: the password is never stored here, so re-issue is the only way
     to hand one back, and the device asking is the one that will use it.
 
+HOW A PRINCIPAL IS HELD TO THE FILE (OMN-19975)
+    ``audit-grants`` lists each principal's live ACLs read-only and compares them with
+    the rows this file derives for that principal (:func:`expected_acl_rows`). A derived
+    row the broker lacks is MISSING; an ALLOW row the file does not derive is EXTRA.
+    Either one exits 1. It never creates or deletes an ACL: revoking an extra is a
+    separate, consented act.
+
 WHAT IT RECORDS
     One JSON line per issuance in the ledger: when, which login and device, which
     principal, created or rotated, and the digest of the grant file applied. Never
@@ -47,6 +54,7 @@ Usage::
     lab_principal_issuer.py check --grants FILE
     lab_principal_issuer.py serve --grants FILE --ledger FILE --socket PATH --proxy-uid N
     lab_principal_issuer.py apply-grants --grants FILE --ledger FILE [--principal NAME ...]
+    lab_principal_issuer.py audit-grants --grants FILE --ledger FILE [--principal NAME ...]
     lab_principal_issuer.py health --socket PATH
 """
 
@@ -265,6 +273,76 @@ def principal_name(declaration: Declaration, login: str, device: str) -> str:
     return name
 
 
+@dataclasses.dataclass(frozen=True, order=True)
+class AclRow:
+    """One ACL row as the broker lists it, one per operation, lower-cased."""
+
+    resource: str
+    name: str
+    pattern: str
+    operation: str
+    host: str = "*"
+
+
+def expected_acl_rows(declaration: Declaration, principal: str) -> frozenset[AclRow]:
+    """The exact rows the grant file derives for one principal."""
+    return frozenset(
+        AclRow(grant.resource, grant.name, grant.pattern, operation)
+        for declared in declaration.grants
+        for grant in [declared.for_principal(principal)]
+        for operation in grant.operations
+    )
+
+
+ACL_LISTING_HEADER = (
+    "PRINCIPAL",
+    "HOST",
+    "RESOURCE-TYPE",
+    "RESOURCE-NAME",
+    "RESOURCE-PATTERN-TYPE",
+    "OPERATION",
+    "PERMISSION",
+    "ERROR",
+)
+
+
+def parse_acl_listing(text: str, principal: str) -> frozenset[AclRow]:
+    """Read the ALLOW rows of one principal from ``rpk security acl list`` output."""
+    if not text.strip():
+        return frozenset()
+    held: set[AclRow] = set()
+    header_found = False
+    for line in text.splitlines():
+        columns = line.split()
+        if tuple(columns) == ACL_LISTING_HEADER:
+            header_found = True
+            continue
+        if not header_found or not columns:
+            continue
+        if len(columns) < 7:
+            raise IssuerError(
+                HTTPStatus.BAD_GATEWAY, f"unreadable rpk ACL row: {line!r}"
+            )
+        who, host, resource, name, pattern, operation, permission = columns[:7]
+        if who == f"User:{principal}" and permission == "ALLOW":
+            held.add(
+                AclRow(resource.lower(), name, pattern.lower(), operation.lower(), host)
+            )
+    if not header_found:
+        raise IssuerError(
+            HTTPStatus.BAD_GATEWAY, "rpk ACL list output is missing its header"
+        )
+    return frozenset(held)
+
+
+def audit_acl_rows(
+    declaration: Declaration, principal: str, live: frozenset[AclRow]
+) -> tuple[tuple[AclRow, ...], tuple[AclRow, ...]]:
+    """Return (derived rows the broker lacks, live rows the file does not derive)."""
+    expected = expected_acl_rows(declaration, principal)
+    return tuple(sorted(expected - live)), tuple(sorted(live - expected))
+
+
 @dataclasses.dataclass(frozen=True)
 class BrokerConfig:
     admin_url: str
@@ -349,6 +427,18 @@ class Broker:
                 HTTPStatus.BAD_GATEWAY,
                 f"the broker refused grant {grant.resource}:{grant.name}: {result.stderr.strip()[:300]}",
             )
+
+    def list_acls(self, principal: str) -> str:
+        """The broker's own listing of one principal's ACLs (read-only)."""
+        result = self._run(
+            ["rpk", "security", "acl", "list", "--allow-principal", f"User:{principal}"]
+        )
+        if result.returncode != 0:
+            raise IssuerError(
+                HTTPStatus.BAD_GATEWAY,
+                f"the broker refused the ACL listing for {principal}: {result.stderr.strip()[:300]}",
+            )
+        return result.stdout
 
 
 class Ledger:
@@ -655,6 +745,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     apply.add_argument("--grants", type=Path, required=True)
     apply.add_argument("--ledger", type=Path, required=True)
     apply.add_argument("--principal", action="extend", nargs="+")
+    audit = sub.add_parser(
+        "audit-grants",
+        help="compare each principal's live ACLs with the rows the grant file derives",
+    )
+    audit.add_argument("--grants", type=Path, required=True)
+    audit.add_argument("--ledger", type=Path, required=True)
+    audit.add_argument("--principal", action="extend", nargs="+")
     health_parser = sub.add_parser(
         "health", help="check the Unix socket health endpoint"
     )
@@ -703,6 +800,36 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"lab_principal_issuer: {exc}", file=sys.stderr)
             return 2
         return 0
+
+    if args.command == "audit-grants":
+        try:
+            principals = sorted(
+                set(args.principal or ledger.principals_in_lane(declaration.lane))
+            )
+            for principal in principals:
+                if not broker.user_exists(principal):
+                    raise IssuerError(
+                        HTTPStatus.NOT_FOUND, f"the broker has no principal {principal}"
+                    )
+            drifted = False
+            for principal in principals:
+                live = parse_acl_listing(broker.list_acls(principal), principal)
+                missing, extra = audit_acl_rows(declaration, principal, live)
+                print(
+                    f"principal={principal} expected={len(expected_acl_rows(declaration, principal))} "
+                    f"live={len(live)} missing={len(missing)} extra={len(extra)}"
+                )
+                for label, rows in (("MISSING", missing), ("EXTRA", extra)):
+                    for row in rows:
+                        print(
+                            f"{label} {principal} {row.resource} {row.pattern} {row.name} {row.operation}"
+                            + ("" if row.host == "*" else f" host={row.host}")
+                        )
+                drifted = drifted or bool(missing or extra)
+        except (OSError, IssuerError, urllib.error.URLError) as exc:
+            print(f"lab_principal_issuer: {exc}", file=sys.stderr)
+            return 2
+        return int(drifted)
 
     issuer = Issuer(declaration, broker, ledger)
     with UnixHTTPServer(args.socket, make_handler(issuer, args.proxy_uid)) as server:
