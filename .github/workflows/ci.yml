@@ -319,6 +319,10 @@ jobs:
       - name: Caller-owned imperative guard regression (OMN-21004)
         run: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
 
+      # OMN-20910: paired with the review-voter-model-from-overlay pre-commit hook.
+      - name: Review voter model comes from the overlay (OMN-20910)
+        run: uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -p no:randomly
+
       # OMN-17678: same focused suite as the pre-commit transport gate.
       - name: Linear transport consolidation regression (OMN-17678)
         run: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q
