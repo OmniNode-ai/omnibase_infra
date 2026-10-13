@@ -31,6 +31,7 @@ dod_evidence:
   - id: dod-omn21071-deploy
     description: Post-merge deploy smoke -- the deployed runtime image imports the execution-graph hosting runtime that `onex node` now runs a contract on.
     source: manual
+    execution_scope: local_done_gate
     checks:
       - check_type: command
         check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.cli.receipt_mode import ExecutionGraphHostingRuntime; print('deploy smoke ok', ExecutionGraphHostingRuntime.__name__)\""
