@@ -1,0 +1,44 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0.0"
+ticket_id: "OMN-20275"
+title: "Issued developer principals write the work ledger only on their own writer topic"
+summary: "The developer principal grant file replaces the shared work-ledger append topic grant with one templated literal topic, onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1, created on issue. The issuer resolves the template per principal, creates that topic, and gains an apply-grants command that re-applies the declared grants to issued principals without setting or rotating a password. The ledger host's own read grants are declared with its login, not in this file."
+is_seam_ticket: false
+interface_change: true
+interfaces_touched: ["public_api"]
+requirements:
+  - id: "req-per-principal-writer-topic-grants"
+    statement: "Each issued principal holds WRITE on its own writer topic only, and grants can be re-applied without a password change."
+    acceptance:
+      - id: "AC10"
+        statement: |-
+          AC10: issuance resolves the {principal} template, creates the writer topic and grants WRITE on it to that principal only; a declaration with any other placeholder, a repeated placeholder, a templated non-literal or non-topic grant, or create_topic on an untemplated grant is refused -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "each_principal_can_write_only_its_own_ledger_topic or issuance_creates_the_user or placeholder or create_topic or templated"
+      - id: "AC11"
+        statement: |-
+          AC11: apply-grants re-applies every declared grant to every issued principal in the lane (or the named ones), refuses a principal the broker does not hold, and never sets a password -- falsifier: uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -k "apply_grants or ensuring_an_existing_topic_is_success or other_rpk_failures_are_bad_gateway"
+evidence_requirements:
+  - kind: "tests"
+    description: "AC10 and AC11: issuer tests."
+    command: "uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -p no:randomly"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20275-ac10-writer-topic-grant"
+    description: "AC10: the templated writer topic grant resolves per principal, is created, and malformed templates are refused."
+    source: "manual"
+    binds_ac: ["AC10"]
+    checks:
+      - check_type: "test_passes"
+        check_value: 'uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -p no:randomly -k "each_principal_can_write_only_its_own_ledger_topic or issuance_creates_the_user or placeholder or create_topic or templated"'
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: "dod-omn20275-ac11-apply-grants"
+    description: "AC11: apply-grants re-applies grants without a password change and refuses unknown principals."
+    source: "manual"
+    binds_ac: ["AC11"]
+    checks:
+      - check_type: "test_passes"
+        check_value: 'uv run pytest tests/scripts/test_lab_principal_issuer_omn20150.py -q -p no:randomly -k "apply_grants or ensuring_an_existing_topic_is_success or other_rpk_failures_are_bad_gateway"'
+        cwd: "${OMNI_HOME}/omnibase_infra"

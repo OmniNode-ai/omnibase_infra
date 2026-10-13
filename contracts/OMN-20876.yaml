@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20876
+title: A warm refresh of the dev lane reads the lane census and removes leftover lane containers
+summary: refresh_dev_lane.sh ends by reading the lane census through lane-census-check.sh, exits with the census's code on drift, and first removes the dev lane's leftover recreate containers; --census-gate runs that closing step alone.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-refresh-reads-census
+    statement: A warm refresh of the dev lane must end by reading the lane census, fail on drift, and remove the leftover recreate containers of its own lane.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a warm refresh of the dev lane ends by reading the lane census and fails when a required container is absent or an unexpected container carries the lane label -- falsifier: uv run pytest tests -q -k refresh_dev_lane_fails_on_census_drift'
+      - id: AC2
+        statement: 'AC2: the refresh removes leftover temp-hash containers that carry com.omninode.lane=dev, and never another lane''s -- falsifier: uv run pytest tests -q -k refresh_removes_leftover_lane_containers'
+evidence_requirements:
+  - kind: tests
+    description: The closing census exits 30 for an absent required container and for an unexpected lane-labelled container, passes a clean lane, and fails loud when the inventory is unobservable.
+    command: uv run pytest tests/unit/scripts/test_refresh_dev_lane_census_omn20876.py -q -k refresh_dev_lane_fails_on_census_drift
+  - kind: tests
+    description: The leftover recreate container is removed, a foreign-lane container of the same shape is not, and plan mode removes nothing.
+    command: uv run pytest tests/unit/scripts/test_refresh_dev_lane_census_omn20876.py -q -k refresh_removes_leftover_lane_containers
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-refresh-census-drift-ac1
+    description: The refresh script's closing census exits with the census's drift code when a required container is absent or an unexpected container carries the lane label.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_refresh_dev_lane_census_omn20876.py -q -k refresh_dev_lane_fails_on_census_drift
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-refresh-removes-leftovers-ac2
+    description: The refresh removes the dev lane's leftover recreate containers and leaves a labelled foreign-lane container of the same shape in place.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_refresh_dev_lane_census_omn20876.py -q -k refresh_removes_leftover_lane_containers
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

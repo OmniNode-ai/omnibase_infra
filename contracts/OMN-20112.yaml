@@ -1,0 +1,52 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20112"
+title: "Remove staging dependencies from every repository except the cloud infra repository"
+summary: "The omnibase_infra release/deploy drift monitor carried one deploy target, the staging deploy workflow of the cloud infra repository, so a red or unreachable staging deploy turned the scheduled run red. The target is removed (DEPLOY_TARGETS is empty) and a test replays a red staging deploy verdict and shows the monitor report does not change and no probe leaves the monitored repositories."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn20112-no-staging-gate-wired"
+    statement: "The no-staging pull-request gate tests run from CI and pre-commit."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: .github/workflows/ci.yml and .pre-commit-config.yaml both name tests/ci/test_no_staging_pr_gate_omn20112.py -- falsifier: tests/ci/test_no_staging_pr_gate_wired_omn20112.py::test_the_ci_workflow_and_the_hook_config_still_name_the_file passes at the head and fails with the merge-base wiring."
+evidence_requirements:
+  - kind: "tests"
+    description: "The no-staging test passes at the head and fails at the merge base."
+    command: "uv run pytest tests/scripts/test_release_drift_monitor_no_staging.py tests/scripts/test_release_drift_monitor.py -q"
+  - kind: tests
+    description: The no-staging gate and its wiring tests pass at the head.
+    command: uv run --frozen pytest tests/ci/test_no_staging_pr_gate_omn20112.py tests/ci/test_no_staging_pr_gate_wired_omn20112.py -q
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20112-drift-monitor-reads-no-staging"
+    description: "AC-DRIFT-MONITOR. The drift monitor configures no deploy target and ignores a red staging deploy verdict."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/scripts/test_release_drift_monitor_no_staging.py tests/scripts/test_release_drift_monitor.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+  - id: dod-001
+    description: The guarding tests pass at the PR head
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: 'uv run --frozen pytest tests/ci/test_no_staging_pr_gate_omn20112.py tests/ci/test_no_staging_pr_gate_wired_omn20112.py -q'
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: dod-002
+    description: The arch-invariants CI job runs the guarding tests
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'grep -q test_no_staging_pr_gate_omn20112 .github/workflows/ci.yml'
+  - id: dod-003
+    description: A check-only pre-commit hook runs the guarding tests
+    source: generated
+    checks:
+      - check_type: command
+        check_value: 'grep -q test_no_staging_pr_gate_omn20112 .pre-commit-config.yaml'

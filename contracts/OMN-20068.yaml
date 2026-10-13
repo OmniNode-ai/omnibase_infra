@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20068
+title: "The omnimarket pin refresh bot PR carries test-side evidence the Repo Evidence Gate can control"
+summary: The pin refresh producer writes and stages a target-sha fixture and renders a contract binding tests that pass at the PR head and fail with the test side overlaid at the merge base.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20068
+    statement: The pin refresh bot PR carries its own bound test evidence and a changed test-side fixture that makes the merge-base control fail.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the pin refresh renders a contract binding tests/ci/test_omnimarket_contract_pin_advance_omn17292.py with check_type test_passes, writes and stages the test-side fixture naming the target sha, and the bound test passes with the pins at the target and fails with the pins at the base -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_render_bot_refresh_contract.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The producer renders target-specific test evidence, writes and stages the test-side fixture, and the bound tests pass with target pins and fail with base pins.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_render_bot_refresh_contract.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20068-ac1
+    description: The renderer binds the pin tests and stages the target fixture; the overlaid tests pass at the target and fail at the base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_render_bot_refresh_contract.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]

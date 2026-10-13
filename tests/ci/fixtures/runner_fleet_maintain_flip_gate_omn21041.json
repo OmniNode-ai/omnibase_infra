@@ -1,0 +1,23 @@
+{
+  "_provenance": {
+    "base_ref": "ae5fca1228a34d61f76d1cbfdd1babbe64b7392d",
+    "captured_utc": "2026-10-12T11:58:16Z",
+    "omnibase_core_ref": "f43f97629182f463d233b564b19a2b27d4fc4888",
+    "source": "omnibase_core scripts/ci/canonical_handler_shape.py --full and scripts/ci/verify_flip_bundle.py, run against this tree",
+    "ticket": "OMN-21041"
+  },
+  "response": {
+    "artifact_sha256": {
+      "scripts/ci/adequacy_receipts/omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.handflip.json": "8ef34c50a369f9549f5ad5392933eb15052de470bc04214136fce56fc832b620",
+      "scripts/ci/adequacy_receipts/omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator.json": "cb5cc435b4b7661ed345f48d35119b3578ed387e2c491c6b5c805a24244d6053",
+      "scripts/ci/adequacy_receipts/omnibase_infra.nodes.node_runner_health_snapshot_effect.handflip.json": "2c2c31501e6d605389ea0ec8ab49a04523956363cff40ec3f992c2d73e51fe3f",
+      "scripts/ci/adequacy_receipts/omnibase_infra.nodes.node_runner_health_snapshot_effect.json": "a57928c0c6eb8839d0849068c3a6589c7403e989bec380b0af8a56eeb686d749"
+    },
+    "flip_bundle_nodes": {
+      "omnibase_infra.nodes.node_runner_fleet_maintain_orchestrator": "all seven flip-bundle assertions hold",
+      "omnibase_infra.nodes.node_runner_health_snapshot_effect": "all seven flip-bundle assertions hold"
+    },
+    "flip_bundle_total": "verify_flip_bundle OK (omnibase_infra) \u2014 2 flip bundle(s) coherent across all seven assertions.",
+    "ratchet": "Canonical handler-shape ratchet OK (full) \u2014 checked 140 node(s); new=0 unproven_flips=0 warn=69."
+  }
+}

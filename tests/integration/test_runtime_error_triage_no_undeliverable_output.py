@@ -44,6 +44,7 @@ from omnibase_infra.runtime.message_dispatch_engine import MessageDispatchEngine
 pytestmark = pytest.mark.integration
 
 _TOPIC = "onex.evt.omnibase-infra.runtime-error.v1"
+_ESCALATION_TOPIC = "onex.evt.omnibase-infra.runtime-error-escalated.v1"
 _CONTRACT_PATH = (
     Path(__file__).resolve().parents[2]
     / "src/omnibase_infra/nodes/node_runtime_error_triage_effect/contract.yaml"
@@ -55,7 +56,9 @@ def _triage_contract() -> ModelDiscoveredContract:
     contract = yaml.safe_load(_CONTRACT_PATH.read_text(encoding="utf-8"))
     assert "output_model" not in contract
     assert contract["event_bus"]["subscribe_topics"] == [_TOPIC]
-    assert contract["event_bus"]["publish_topics"] == []
+    # OMN-21029: the escalation event is the only declared output; the triage
+    # details of an ordinary occurrence are still never a bus output.
+    assert contract["event_bus"]["publish_topics"] == [_ESCALATION_TOPIC]
 
     return ModelDiscoveredContract(
         name=contract["name"],

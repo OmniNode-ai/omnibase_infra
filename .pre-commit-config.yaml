@@ -498,6 +498,14 @@ repos:
         types: [shell]
         pass_filenames: true
         stages: [pre-commit]
+      - id: release-train-nightly-tests
+        require_serial: true
+        name: Release train decision surface (OMN-20715)
+        entry: uv run --frozen pytest tests/scripts/test_release_train_nightly.py -q --no-cov
+        language: system
+        pass_filenames: false
+        files: ^(config/release_train_policy\.yaml|scripts/ci/release_train\.py|\.github/workflows/release-train-nightly\.yml|tests/scripts/test_release_train_nightly\.py)$
+        stages: [pre-commit]
       - id: runner-disk-admission-self-pause
         require_serial: true
         name: Runner disk admission retries a marked self-pause (OMN-19070)
@@ -589,6 +597,15 @@ repos:
         entry: uv run --frozen pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py -q
         language: system
         files: ^(src/omnibase_infra/handlers/handler_runtime_deploy\.sh|scripts/runtime_build/compose_files\.sh|docker/docker-compose\.(infra|dev-lane)\.yml|tests/scripts/test_deploy_runtime_cloud_gate_omn18496\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-20112: no pull-request gate may require the staging plane. Mirrors the
+      # arch-invariants step in ci.yml.
+      - id: no-staging-pr-gate
+        name: No pull-request gate requires the staging plane (OMN-20112)
+        entry: uv run --frozen pytest tests/ci/test_no_staging_pr_gate_omn20112.py tests/ci/test_no_staging_pr_gate_wired_omn20112.py -q
+        language: system
+        files: ^(\.github/workflows/.*\.ya?ml|tests/ci/test_no_staging_pr_gate_(wired_)?omn20112\.py|tests/ci/fixtures/no_staging_pr_gate_wiring_omn20112\.json)$
         pass_filenames: false
         stages: [pre-commit]
       # OMN-16367: per-run compose proof images must be evicted at source

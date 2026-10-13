@@ -1817,3 +1817,68 @@ class TestTheDecideJobCanReadWhatThePremiseNeeds:
                 "rewrite the gates it is checking is the one thing this premise "
                 "must not hold. Writes belong in the cut job"
             )
+
+
+# --------------------------------------------------------------------------- #
+# The decision surface is enforced where a merge is decided (OMN-20715).        #
+# --------------------------------------------------------------------------- #
+
+
+class TestTheNightlyTestsAreEnforcedInCIAndPrecommit:
+    """The nightly tests run in the PR gate and in a hook, by name.
+
+    ``tests/scripts/`` is not picked by the change-aware selector for a
+    ``scripts/`` or ``config/`` change, so a policy row edit (omnimarket's row
+    moving to ``mode: cut`` was one) merged with no job running the tests that
+    pin it. The path is named in a ``test-parallel`` step, whose result feeds the
+    required ``CI Summary`` context through ``CI Tests Gate``, and in a
+    pre-commit hook that fires when the policy, the train or the workflow moves.
+    """
+
+    TEST_PATH = "tests/scripts/test_release_train_nightly.py"
+    CI = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
+    PRECOMMIT = _REPO_ROOT / ".pre-commit-config.yaml"
+    TRIGGERS = (
+        "config/release_train_policy.yaml",
+        "scripts/ci/release_train.py",
+        ".github/workflows/release-train-nightly.yml",
+        TEST_PATH,
+    )
+
+    def _hooks(self) -> list[dict[str, Any]]:
+        import yaml as _yaml
+
+        parsed = _yaml.safe_load(self.PRECOMMIT.read_text(encoding="utf-8"))
+        return [hook for repo in parsed["repos"] for hook in repo.get("hooks", [])]
+
+    def test_a_required_ci_job_runs_the_file_by_name(self) -> None:
+        import yaml as _yaml
+
+        parsed = _yaml.safe_load(self.CI.read_text(encoding="utf-8"))
+        steps = parsed["jobs"]["test-parallel"]["steps"]
+        running = [s for s in steps if self.TEST_PATH in str(s.get("run", ""))]
+        assert running, (
+            f"no step of the ci.yml test-parallel job runs {self.TEST_PATH}; the "
+            "change-aware selector does not pick tests/scripts/ for a policy edit"
+        )
+        for step in running:
+            assert not step.get("continue-on-error"), (
+                f"step {step.get('name')!r} must fail the job, not continue past it"
+            )
+            assert "|| true" not in str(step["run"])
+
+    def test_a_precommit_hook_runs_the_file_by_name(self) -> None:
+        hooks = [h for h in self._hooks() if self.TEST_PATH in h.get("entry", "")]
+        assert len(hooks) == 1, f"expected one hook running {self.TEST_PATH}"
+        hook = hooks[0]
+        assert hook.get("language") == "system"
+        assert hook.get("pass_filenames") is False
+
+    def test_the_hook_fires_on_every_file_the_tests_pin(self) -> None:
+        import re
+
+        (hook,) = [h for h in self._hooks() if self.TEST_PATH in h.get("entry", "")]
+        pattern = re.compile(hook["files"])
+        missed = [path for path in self.TRIGGERS if not pattern.search(path)]
+        assert not missed, f"the hook does not fire when {missed} change"
+        assert not pattern.search("src/omnibase_infra/unrelated.py")

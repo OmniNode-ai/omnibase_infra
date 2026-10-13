@@ -25,11 +25,11 @@ handler_routing:
       description: "Fold one workflow event into the FSM state + trace projection."
       event_model:
         name: ModelCodingAgentFsmAdvance
-        module: omnibase_infra.nodes.node_coding_agent_fsm_reducer.models.model_coding_agent_fsm_advance
+        module: omnibase_infra.models.coding_agent.model_coding_agent_fsm_advance
         description: "Prior FSM state + event to fold."
 input_model:
   name: ModelCodingAgentFsmAdvance
-  module: omnibase_infra.nodes.node_coding_agent_fsm_reducer.models.model_coding_agent_fsm_advance
+  module: omnibase_infra.models.coding_agent.model_coding_agent_fsm_advance
   description: "Prior FSM state + the event to fold."
 output_model:
   name: ModelCodingAgentFsmState

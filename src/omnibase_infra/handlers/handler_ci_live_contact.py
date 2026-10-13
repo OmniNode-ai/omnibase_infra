@@ -28,6 +28,44 @@ if TYPE_CHECKING:
     from omnibase_core.container import ModelONEXContainer
 
 _EXCEPTION = re.compile(r"^Live-contact exception:[ \t]*(\S[^\n]*)$", re.MULTILINE)
+# A pin-only workflow edit swaps a full commit sha on an existing `uses:` or
+# `ref:` line (or the comment naming it) and changes nothing else: no step,
+# command, trigger, permission or logic, so it reaches no new contact surface.
+_SHA_TOKEN = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]{7,40}(?![0-9A-Za-z])")
+_FULL_SHA = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]{40}(?![0-9A-Za-z])")
+_PIN_LINE = re.compile(r"^\s*(?:-\s+)?(?:uses|ref):\s")
+_COMMENT_LINE = re.compile(r"^\s*#")
+
+
+def _is_pin_only_hunk(removed: list[str], added: list[str]) -> bool:
+    if not removed or len(removed) != len(added):
+        return False
+    for old, new in zip(removed, added, strict=True):
+        if old == new or _SHA_TOKEN.sub("<sha>", old) != _SHA_TOKEN.sub("<sha>", new):
+            return False
+        if _PIN_LINE.match(new):
+            if not (_FULL_SHA.search(old) and _FULL_SHA.search(new)):
+                return False
+        elif not _COMMENT_LINE.match(new):
+            return False
+    return True
+
+
+def _is_pin_only_diff(diff: str) -> bool:
+    """True when a zero-context diff of one modified file only swaps pins."""
+    hunks: list[tuple[list[str], list[str]]] = []
+    for line in diff.splitlines():
+        if line.startswith("@@"):
+            hunks.append(([], []))
+        elif not hunks:
+            continue
+        elif line.startswith("-"):
+            hunks[-1][0].append(line[1:])
+        elif line.startswith("+"):
+            hunks[-1][1].append(line[1:])
+        else:
+            return False
+    return bool(hunks) and all(_is_pin_only_hunk(r, a) for r, a in hunks)
 
 
 class HandlerCILiveContact:
@@ -101,6 +139,30 @@ class HandlerCILiveContact:
             if not tooling:
                 return ModelCILiveContactResult(
                     success=True, reason="No CI-tooling change in the inspected diff"
+                )
+            revisions = (f"{base}...{head}",) if request.base_ref else ("--cached",)
+            if all(
+                p.startswith(".github/workflows/")
+                and p.endswith((".yml", ".yaml"))
+                and _is_pin_only_diff(
+                    git(
+                        "diff",
+                        "--no-renames",
+                        "--no-ext-diff",
+                        "--no-color",
+                        "--diff-filter=M",
+                        "-U0",
+                        *revisions,
+                        "--",
+                        p,
+                    )
+                )
+                for p in tooling
+            ):
+                return ModelCILiveContactResult(
+                    success=True,
+                    reason="Pin-only workflow edit: every changed line swaps a full commit sha on an existing uses:/ref: line or its comment",
+                    changed_tooling=tooling,
                 )
             body = request.pr_body
             # The local hook has no PR event. A tracked PR body lets the same

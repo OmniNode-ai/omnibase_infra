@@ -157,7 +157,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: e286bd296e373e8e17e11c735393613a227f7972 # .github/sibling-pins.yaml
+          ref: f49213032b80b03e7c9a1a6656416cc5083b7cdc # .github/sibling-pins.yaml
           path: .ci-bus-overlay
           persist-credentials: false
           sparse-checkout: |
@@ -712,7 +712,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: e286bd296e373e8e17e11c735393613a227f7972 # .github/sibling-pins.yaml
+          ref: f49213032b80b03e7c9a1a6656416cc5083b7cdc # .github/sibling-pins.yaml
           path: .ci-bus-overlay
           persist-credentials: false
           sparse-checkout: |
@@ -742,16 +742,10 @@ jobs:
       # The probe function, its CLI flag and its tests are all still there for
       # that wiring.
 
-      # OMN-20934: the probe's lane_sync check runs the lane census, and since
-      # 222eebe0d the lane manifest is private config this checkout does not
-      # carry. The verify runners hold no OMNI_HOME and no private clone by
-      # design (tests/ci/test_verify_runner_credential_read_only_omn18408.py),
-      # so without this step the census exits 3 and every dev lab-pass receipt
-      # from 222eebe0d on read lane_sync indeterminate.
-      # The action exports ONEX_WORKSPACE_CONFIG_ROOT through GITHUB_ENV, which
-      # the probe's census inherits. A failed fetch leaves the check
-      # indeterminate, so the receipt stays non-PASS.
-      - name: Fetch the private lane census
+      # OMN-20008: lane_sync reads private configuration since OMN-20934.
+      # Fetch after convergence and receipt-directory setup so a failed fetch
+      # still reaches the always() probe and emitter with their inputs intact.
+      - name: Fetch the private lane census for the infra receipt
         if: always() && steps.converge.outputs.probe_lane != 'false'
         uses: ./.github/actions/fetch-census-overlay
         with:

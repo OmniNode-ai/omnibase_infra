@@ -1,0 +1,64 @@
+{
+  "_provenance": {
+    "source": "h202 standard lab_pass_receipt.py probe-lane and emit following deploy-agent command 558ffbf9-5ed7-4e25-a830-4bf6465a0c84",
+    "captured_utc": "2026-10-12T15:47:21.670634+00:00",
+    "source_sha256": "4c8c818fbdfb8915d456d3d9f4a8c391c85a593b03e48ad971ba0de6123304c6",
+    "probe_sha256": "3d1b7be9b3f255c5e4573627279cb54e6d770480f86148354e0538f80e0e33a0",
+    "projection": "Exact probe check rows and the emitted sibling_revision check and result; node inventory omitted.",
+    "redactions": "Private receipt-lane and container identifiers replaced; census host and lane identifiers consistently anonymized. Verdicts, findings, list lengths, timing and source hashes preserved."
+  },
+  "probe_checks": [
+    {
+      "name": "ready_main",
+      "ok": true,
+      "evidence": "GET http://localhost:61085/ready -> 200 {\"status\":\"healthy\",\"version\":\"0.38.71\",\"details\":{\"ready\":true,\"is_running\":true,\"is_draining\":false,\"event_bus_readiness\":{\"is_ready\":true,\"consumers_started\":true,\"assignments\":{\"onex.evt.omniclaude.pattern-enforcement.v1\":[0],\"onex.evt.... [lane ready after 1s of a 900s settle budget]"
+    },
+    {
+      "name": "ready_effects",
+      "ok": true,
+      "evidence": "GET http://localhost:61086/ready -> 200 {\"status\":\"healthy\",\"version\":\"0.38.71\",\"details\":{\"ready\":true,\"is_running\":true,\"is_draining\":false,\"event_bus_readiness\":{\"is_ready\":true,\"consumers_started\":true,\"assignments\":{\"onex.evt.omniclaude.pattern-enforcement.v1\":[0],\"onex.inte... [lane ready after 1s of a 900s settle budget]"
+    },
+    {
+      "name": "health_dimensions",
+      "ok": true,
+      "evidence": "GET http://localhost:61085/health -> 200, 10 dimensions, all healthy [dimensions observed after 0s of a 899s budget] [lane ready after 1s of a 900s settle budget]"
+    },
+    {
+      "name": "projection_ready",
+      "ok": true,
+      "evidence": "GET http://localhost:61002/projections -> 200, 71 topic(s) reported [lane ready after 1s of a 900s settle budget]"
+    },
+    {
+      "name": "node_inventory",
+      "ok": true,
+      "evidence": "GET http://localhost:61085/v1/introspection/manifest -> 200; the lane reports 411 wired contract(s), each with a content hash (e.g. ab_compare_reducer@1.0.0, aislop_sweep@1.0.0, baseline_capture@1.0.0, baseline_compare@1.0.0, build_loop@1.0.0, ...) [lane ready after 1s of a 900s settle budget]"
+    },
+    {
+      "name": "settle_budget_sufficient",
+      "ok": true,
+      "evidence": "declared 900s for lane <receipt-lane> (config/lab_pass_settle_budget.yaml); this job could afford 1720s (ceiling 2700s - elapsed 860s - reserved tail 120s); granted 900s -- the job could afford the declared budget"
+    },
+    {
+      "name": "timed_out_before_ready",
+      "ok": true,
+      "evidence": "lane answered every readiness endpoint after 1s of a 900s grant"
+    },
+    {
+      "name": "probe_generation_bound",
+      "ok": true,
+      "evidence": "probe bound to the generation convergence read: <runtime-container> id=d3cfab3e7e90 image=sha256:cc6d13fcefe82d3da revision=ae5fca1228a3"
+    },
+    {
+      "name": "lane_sync",
+      "ok": true,
+      "evidence": "{\"findings\": [], \"has_drift\": false, \"host\": \"<host>\", \"lanes_checked\": [\"lane-1\", \"lane-2\"], \"lanes_not_applicable\": [\"lane-3\", \"lane-4\", \"lane-5\", \"lane-6\", \"lane-7\", \"lane-8\", \"lane-9\", \"lane-10\", \"lane-11\", \"lane-12\", \"lane-13\"], \"lanes_skipped_optional_down\": [\"lane-1\"], \"schema_version\": \"1.1.0\"}"
+    }
+  ],
+  "sibling_revision": {
+    "name": "sibling_revision",
+    "ok": false,
+    "evidence": "INDETERMINATE: the lane's omnimarket revision could not be read (gh api repos/OmniNode-ai/omnimarket/compare/faaf296b83141fc266066721eace4ac25d4a483a...faaf296b83141fc266066721eace4ac25d4a483a failed (exit 1): REFUSED (OMN-20911): gh api GET repos/OmniNode-ai/omnimarket/compare/faaf296b83141fc266066721eace4ac25d4a483a...faaf296b83141fc266066721eace4ac25d4a483a is a GitHub read from a lane (environment ONEX_LANE). Lanes do not read GitHub; gh is for writes (RULING 2026-10-10T18:17:36Z, re-affirming RULING 2026-09-25T14:34:28Z). Read it locally instead: PR state, checks, reviews, mergeability: python3 <omni plugin>/skills/merge-drain/scripts/pr_state_local.py --pr OmniNode-ai/omnimarket#<n> (--status for the state file's age; the same records are on the bus as onex.evt.omnimarket.pr-state-observed.v1) files, contents, diffs, commits, tags, history: git -C SOMNI_HOME/omnimarket show|log|diff origin/dev... (the canonical clones, kept fetched by canonical-clone-sync) a failing-job log, one job's run id and steps, one check run's output: gh api repos/<o>/<r>/actions/jobs/<id>/logs, gh api repos/<o>/<r>/actions/jobs/<id>, gh api repos/<o>/<r>/check-runs/<id>[/annotations], gh run view <run> --log-failed; the job id is in the watcher record (ci.detail) and these are served by the cached read gateway with a per-hour budget Writes (pr create|edit|comment|review, workflow run, run rerun, api POST/PATCH/PUT/DELETE, graphql mutation) are unaffected.); whether it carries merge sha faaf296b8314 was not established after 0m01s; 0h13m since the deploy agent accepted 558ffbf9-5ed7-4e25-a830-4bf6465a0c84 at 2026-10-12T15:32:59.871561+00:00 (budget 1500s from that moment). Reason: this job could NOT afford the lane's declared budget: it watched for 0h13m of the 1500s granted from acceptance, bounded by its own 1s wall clock, so the lane still had budget left when the job had to stop and write the receipt. This asserts nothing about the lane; the receipt is still non-PASS.",
+    "outcome": "indeterminate"
+  },
+  "receipt_result": "FAIL"
+}

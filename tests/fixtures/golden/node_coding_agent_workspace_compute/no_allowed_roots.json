@@ -3,6 +3,17 @@
   "input": {
     "allowed_roots": [],
     "correlation_id": "66666666-6666-6666-6666-666666666666",
+    "invoke_command": {
+      "agent": "claude",
+      "allow_dirty_tree": false,
+      "correlation_id": "66666666-6666-6666-6666-666666666666",
+      "model": null,
+      "network": false,
+      "prompt": "do the thing",
+      "sandbox": "read_only",
+      "timeout_ms": 60000,
+      "workspace_path": "/onex-golden-fixture-root/workspace"
+    },
     "prompt": "do the thing",
     "sandbox": "read_only",
     "workspace_path": "/onex-golden-fixture-root/workspace"
@@ -10,6 +21,17 @@
   "input_type": "ModelWorkspaceValidateCommand",
   "output": {
     "correlation_id": "66666666-6666-6666-6666-666666666666",
+    "invoke_command": {
+      "agent": "claude",
+      "allow_dirty_tree": false,
+      "correlation_id": "66666666-6666-6666-6666-666666666666",
+      "model": null,
+      "network": false,
+      "prompt": "do the thing",
+      "sandbox": "read_only",
+      "timeout_ms": 60000,
+      "workspace_path": "/onex-golden-fixture-root/workspace"
+    },
     "rejection_reason": "no allowed roots configured; nothing is permitted",
     "resolved_path": "",
     "valid": false

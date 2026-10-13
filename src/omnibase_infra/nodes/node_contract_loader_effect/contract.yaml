@@ -211,6 +211,14 @@ profile_tags:
   - discovery
 subscriptions:
   topics: []
+# OMN-21031: the runtime announces every contract it discovered here once its
+# contract-registry consumers are attached; the contract registry reducer
+# (node_contract_registry_reducer) subscribes to this topic. The kernel owns the
+# bus and publishes what HandlerContractRegistrationEmit builds.
+event_bus:
+  version: {major: 1, minor: 0, patch: 0}
+  publish_topics:
+    - "onex.evt.platform.contract-registered.v1"
 # Metadata
 metadata:
   version: {major: 1, minor: 1, patch: 0}

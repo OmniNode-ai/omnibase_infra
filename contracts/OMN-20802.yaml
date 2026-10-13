@@ -1,0 +1,46 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20802
+title: "Vendor the automation-liveness migrations and runtime grants ahead of the projection"
+summary: This infra contribution supplies the two automation-liveness migrations, their manifest checksums and runtime TABLE grants. Its evidence covers the database prerequisite for the writer; the fold, writer restart and exposure criteria remain the responsibility of the paired omnimarket change.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-automation-liveness-vendor
+    statement: The automation-liveness projection's two migrations are vendored byte-identical, with manifest bindings and runtime grants on every shipped profile.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: both vendored migration checksums match their manifest rows and every shipped topology grants the runtime all three relations -- falsifier: uv run pytest tests/unit/migrations/test_vendor_automation_liveness_omn20802.py -q --no-cov fails on the merge-base tree without these migrations and grants'
+  - id: req-automation-liveness-migration-apply
+    statement: The vendored SQL delivers the persistence and runtime privileges the projection writer needs on a fresh PostgreSQL cluster.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: applying both migrations permits runtime inserts, reads and updates on all three relations, replay preserves persisted rows, and revoking UPDATE rejects the runtime upsert -- falsifier: uv run pytest tests/integration/migrations/test_automation_liveness_omn20802.py -q --no-cov fails on the merge-base tree without the vendored SQL'
+evidence_requirements:
+  - kind: tests
+    description: Exact vendored bytes, manifest bindings, migration classes and shipped topology grants.
+    command: uv run pytest tests/unit/migrations/test_vendor_automation_liveness_omn20802.py -q --no-cov
+  - kind: tests
+    description: Apply the real SQL using psql on disposable PostgreSQL and exercise the runtime role, replay and revoked-grant control.
+    command: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/migrations/test_automation_liveness_omn20802.py -q --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20802-infra-vendored-migrations
+    description: This PR's migration bytes and topology grants discriminate the vendor head from its merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/migrations/test_vendor_automation_liveness_omn20802.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn20802-infra-live-migration-apply
+    description: The vendored SQL delivers runtime privileges and replay preserves populated relations on real PostgreSQL.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run --frozen pytest tests/integration/migrations/test_automation_liveness_omn20802.py -q --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
