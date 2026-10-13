@@ -37,3 +37,10 @@ dod_evidence:
         check_value: grep -qF 'async def ensure_topics_exist' src/omnibase_infra/runtime/gateway_forwarder.py
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn15629-deploy
+    description: Post-deploy -- the running runtime container imports the forwarder's topic provisioning, so a runtime without the change fails this probe.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.runtime.gateway_forwarder import ensure_topics_exist'
+    binds_ac: [AC1]
