@@ -1,0 +1,54 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20871
+title: "Runtime Boot Laptop Profile (catalog local) fails merge groups: omnibase_infra still advertises two nodes omnimarket now owns"
+summary: omnimarket#3734 moved node_github_pr_poller_effect and node_github_webhook_ingress_effect into omnimarket and registered both as omnimarket onex.nodes entry points. The runtime image installs omnimarket dev beside omnibase_infra, and omnibase_infra's pyproject.toml still advertised the same two names, so auto-wiring discovery logged DUPLICATE_REGISTRATION prevented for each, recorded two discovery errors, and the runtime health monitor reported the discovery_errors dimension DEGRADED. The laptop profile's healthcheck runs with --degraded-policy fail, so "Boot the laptop profile (make up-local)" failed in merge-group run 38390505398. This change removes the two entry points from omnibase_infra's pyproject.toml (the modules stay importable) and regenerates the dispatch-selection parity oracle over the reduced corpus.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20871-single-owner
+    statement: Each of the two GitHub source-control nodes omnimarket owns has exactly one onex.nodes owner in the runtime image, so auto-wiring discovery records no duplicate-contract error for them.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: omnibase_infra pyproject.toml advertises neither node_github_pr_poller_effect nor node_github_webhook_ingress_effect as an onex.nodes entry point, and still advertises its own nodes -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_omn20871_moved_scm_nodes_not_advertised.py -q -p no:randomly'
+      - id: AC2
+        statement: 'AC2: the committed dispatch-selection parity oracle matches the live engine over the corpus without the two entry points -- falsifier: uv run pytest tests/integration/runtime/test_dispatch_selection_parity.py -q -p no:randomly'
+evidence_requirements:
+  - kind: tests
+    description: The two moved nodes are not omnibase_infra entry points; the positive control reads a node this package does own.
+    command: uv run pytest tests/unit/runtime/auto_wiring/test_omn20871_moved_scm_nodes_not_advertised.py -q -p no:randomly
+  - kind: tests
+    description: The entry-point generator leaves the two omnimarket-owned nodes out and the repo's table matches it.
+    command: uv run pytest tests/scripts/test_generate_entry_points.py -q -p no:randomly
+  - kind: tests
+    description: The regenerated parity oracle matches the live dispatch engine.
+    command: uv run pytest tests/integration/runtime/test_dispatch_selection_parity.py -q -p no:randomly
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20871-ac1-entry-points
+    description: The two omnimarket-owned nodes are not advertised by omnibase_infra, and an omnibase_infra-owned node still is.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/auto_wiring/test_omn20871_moved_scm_nodes_not_advertised.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn20871-ac1-generator
+    description: scripts/generate_entry_points.py excludes the two omnimarket-owned node directories, and the repo's entry-point table matches its output.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_generate_entry_points.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn20871-ac2-parity-oracle
+    description: The dispatch-selection parity oracle regenerated over the reduced corpus matches the live engine.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_dispatch_selection_parity.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
