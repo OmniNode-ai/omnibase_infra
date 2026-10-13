@@ -5,8 +5,9 @@
 #
 # WHAT THIS IS
 #   The PRODUCER for beta criterion C12: "Provider catalogue equals the
-#   handler-backed set; no Claude entry; no house entry", proven by "catalogue
-#   readback + negative test". This job's EXIT CODE is that criterion's
+#   handler-backed set; no house entry", proven by "catalogue readback +
+#   negative test". (The "no Claude entry" clause was lifted by the operator
+#   ruling of 2026-10-11T15:05:50Z; OMN-17353.) This job's EXIT CODE is that criterion's
 #   verdict — the shape C11 (chain-canary-c11-negative-paths.yml) and C15
 #   (chain-canary.yml) already use, so the board reads a conclusion and needs
 #   no second grader anywhere.

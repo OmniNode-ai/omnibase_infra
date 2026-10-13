@@ -1,0 +1,177 @@
+{
+  "_provenance": {
+    "captured_utc": "2026-10-13T14:51:15Z",
+    "image": "omnicloud-core:21675c9e-20261012T230253Z",
+    "omnimarket_version": "0.4.312",
+    "source": "docker exec -i -u appuser onex-api python - /app (dev-201 lab lane, h201)",
+    "transport": "scripts/ci/c12_provider_catalogue_observe.py piped to the deployed onex-api container"
+  },
+  "response": {
+    "files": {
+      "catalogue": "f4cea3626374b797d0c07a5d11a3c230affa02433595a41c1b6395bc201abf9e",
+      "catalogue_module": "aa43e61ad7dd61578fc4628e12d8a709b3abe25384288b8ccc09fca2a9b5decb",
+      "house_validator": "1892d497a6de63b86f01e9fcee1050f4414445ca9dc8bef9f0bddc01a6bd5805",
+      "platform_contract": "cf756bd8b6b288837841f5ff30142d76f24198b386a84412ce541755a3ceb305"
+    },
+    "finding_classes": {
+      "declared_house_ref": "declared_house_ref",
+      "house_rung_identity_collision": "house_rung_identity_collision",
+      "no_customer_registerable_key": "no_customer_registerable_key"
+    },
+    "intake": {
+      "anthropic": {
+        "accepted": true
+      },
+      "gemini": {
+        "accepted": true
+      },
+      "glm": {
+        "accepted": true
+      },
+      "mistral": {
+        "accepted": false,
+        "errors": [
+          {
+            "loc": [
+              "provider"
+            ],
+            "msg": "Value error, 'mistral' is not a provider a key may be registered for. Offered: anthropic, gemini, glm, openai, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
+            "type": "value_error"
+          }
+        ],
+        "exception": "ValidationError"
+      },
+      "openai": {
+        "accepted": true
+      },
+      "openrouter": {
+        "accepted": true
+      },
+      "typesafe": {
+        "accepted": false,
+        "errors": [
+          {
+            "loc": [
+              "provider"
+            ],
+            "msg": "Value error, 'typesafe' is not a provider a key may be registered for. Offered: anthropic, gemini, glm, openai, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
+            "type": "value_error"
+          }
+        ],
+        "exception": "ValidationError"
+      },
+      "vertex": {
+        "accepted": false,
+        "errors": [
+          {
+            "loc": [
+              "provider"
+            ],
+            "msg": "Value error, 'vertex' is not a provider a key may be registered for. Offered: anthropic, gemini, glm, openai, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
+            "type": "value_error"
+          }
+        ],
+        "exception": "ValidationError"
+      }
+    },
+    "negative": {
+      "customer_only_self_exemption": {
+        "customer_only": [
+          "anthropic",
+          "mistral",
+          "openai"
+        ],
+        "injected": "mistral"
+      },
+      "empty_rungs_fail_closed": {
+        "raised": {
+          "message": "no platform rungs supplied; the house-keyed set would be empty and every conjunct would pass vacuously",
+          "type": "HouseCatalogueError"
+        }
+      },
+      "house_declared_ref": {
+        "findings": [
+          {
+            "finding_class": "declared_house_ref",
+            "provider": "openrouter"
+          }
+        ],
+        "provider": "openrouter",
+        "value": "llm.openrouter.api_key"
+      },
+      "house_rung_collision": {
+        "findings": [
+          {
+            "finding_class": "house_rung_identity_collision",
+            "provider": "openrouter"
+          }
+        ],
+        "provider": "openrouter",
+        "value": "openrouter-nemotron-ultra"
+      },
+      "no_registerable_key": {
+        "findings": [
+          {
+            "finding_class": "no_customer_registerable_key",
+            "provider": "c12probe"
+          }
+        ],
+        "provider": "c12probe"
+      },
+      "parity_missing": {
+        "dropped": "gemini",
+        "missing_from_catalogue": [
+          "gemini"
+        ],
+        "unbacked_in_catalogue": []
+      },
+      "parity_unbacked": {
+        "injected": "mistral",
+        "missing_from_catalogue": [],
+        "unbacked_in_catalogue": [
+          "mistral"
+        ]
+      }
+    },
+    "omnimarket_version": "0.4.312",
+    "route": {
+      "body_models": [
+        "omnimarket.projection.credential_publisher.ModelInferenceCredentialCreateRequest"
+      ],
+      "bound_to_catalogue_model": true,
+      "prefix": "/v1/tenants/me/inference-credentials"
+    },
+    "shipped": {
+      "customer_only": [
+        "anthropic",
+        "openai"
+      ],
+      "house_entry": {
+        "findings": []
+      },
+      "house_keyed_slugs": [
+        "gemini",
+        "glm",
+        "openrouter",
+        "typesafe",
+        "vertex"
+      ],
+      "not_offered": [
+        "typesafe",
+        "vertex"
+      ],
+      "offered": [
+        "anthropic",
+        "gemini",
+        "glm",
+        "openai",
+        "openrouter"
+      ],
+      "parity_gap": {
+        "missing_from_catalogue": [],
+        "unbacked_in_catalogue": []
+      },
+      "rung_count": 13
+    }
+  }
+}

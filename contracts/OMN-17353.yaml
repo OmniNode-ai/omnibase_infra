@@ -1,0 +1,46 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-17353"
+title: "C12 provider-catalogue probe allows an anthropic catalogue row"
+summary: "The C12 observer and probe stop importing FORBIDDEN_PROVIDER_PATTERN (omnimarket removed it when it added the anthropic row) and grade the deployed catalogue against the amended criterion: anthropic is an allowed customer-only provider and every other check stays. Operator ruling 2026-10-11T15:05:50Z lifted the no-Claude requirement."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-omn17353-c12-allows-anthropic"
+    statement: "The C12 probe grades the deployed catalogue green with anthropic offered, and still grades red when a required provider is missing or an entry is malformed."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: the probe's own command exits 0 against the deployed dev-201 catalogue and writes c12-provider-catalogue.json grading green -- falsifier: uv run pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q fails at the merge base, where the recorded dev-201 reading offering anthropic grades red"
+      - id: "AC2"
+        statement: "AC2: the probe still grades red for a catalogue missing a required provider -- falsifier: uv run pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q fails if the missing-provider case grades green"
+evidence_requirements:
+  - kind: "tests"
+    description: "The C12 probe tests pass at the head."
+    command: "uv run pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn17353-ac1-probe-green-with-anthropic"
+    description: "AC1. The recorded dev-201 reading (omnimarket 0.4.312, anthropic offered) grades green through the probe."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1"]
+  - id: "dod-omn17353-ac2-probe-red-missing-provider"
+    description: "AC2. A catalogue missing a required provider, and a malformed entry, grade red."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/ci/test_c12_provider_catalogue_probe_omn19195.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC2"]
+  - id: "dod-deploy"
+    description: "No runtime deploy is required: the change is the CI probe and its offline tests; it changes no container, image or deployed service."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "echo 'deploy-gate: OMN-17353 changes the C12 CI probe and its tests only; no runtime deploy or restart required'"
