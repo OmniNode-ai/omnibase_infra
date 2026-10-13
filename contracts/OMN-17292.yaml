@@ -1,6 +1,6 @@
 schema_version: "1.0.0"
 ticket_id: OMN-17292
-title: "The omnimarket contract pin advances to d2956e320e9bfcc8f26c6525a7c7a9352464472b"
+title: "The omnimarket contract pin advances to f49213032b80b03e7c9a1a6656416cc5083b7cdc"
 summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
 is_seam_ticket: false
 interface_change: false
@@ -10,21 +10,21 @@ requirements:
     statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
     acceptance:
       - id: AC1
-        statement: "AC1: .github/omnimarket-contract-pin.yaml carries the refreshed value -- falsifier: grep -qF -- 'omnimarket_contract_ref: d2956e320e9bfcc8f26c6525a7c7a9352464472b' .github/omnimarket-contract-pin.yaml"
+        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry f49213032b80b03e7c9a1a6656416cc5083b7cdc -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
 evidence_requirements:
   - kind: tests
-    description: The pin file, the sibling-pins entry and every inline omnimarket checkout ref carry the advanced sha.
-    command: uv run pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry f49213032b80b03e7c9a1a6656416cc5083b7cdc.
+    command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
 emergency_bypass:
   enabled: false
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-17292-ac1
-    description: .github/omnimarket-contract-pin.yaml carries the refreshed value.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry f49213032b80b03e7c9a1a6656416cc5083b7cdc.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
