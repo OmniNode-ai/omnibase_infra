@@ -36,6 +36,9 @@ pytestmark = pytest.mark.unit
 SWEEP = "node_stand_in_sweep_orchestrator"
 STALLED_SWEEP = "node_stand_in_stalled_sweep_orchestrator"
 CALLER_TIMEOUT_S = 900
+# Short enough that the dod-verify base control, where no stage is hosted and
+# every wait runs to this deadline, ends inside the per-check budget.
+STAGE_DEADLINE_S = 2
 
 
 def _invoke(
@@ -86,7 +89,9 @@ def test_one_call_receives_both_stage_terminals_and_exits_with_its_own(
 ) -> None:
     install_execution_graph_stand_ins(monkeypatch)
 
-    result, correlation_id, _ = _invoke(tmp_path, SWEEP, stage_deadline_s=10)
+    result, correlation_id, _ = _invoke(
+        tmp_path, SWEEP, stage_deadline_s=STAGE_DEADLINE_S
+    )
 
     assert result.exit_code == 0, result.output
     terminal = _terminal(tmp_path)
@@ -140,7 +145,9 @@ def test_an_uncorrelated_stage_terminal_is_ignored(
 
     monkeypatch.setattr(RuntimeLocal, "_create_event_bus", _bus_with_another_sweep)
 
-    result, correlation_id, _ = _invoke(tmp_path, SWEEP, stage_deadline_s=10)
+    result, correlation_id, _ = _invoke(
+        tmp_path, SWEEP, stage_deadline_s=STAGE_DEADLINE_S
+    )
 
     assert result.exit_code == 0, result.output
     assert len(decoys) == 1
@@ -178,7 +185,7 @@ def test_a_stage_node_the_registry_cannot_resolve_fails_the_run_by_name(
         monkeypatch, withhold=("node_stand_in_stage_beta",)
     )
 
-    result, _, elapsed = _invoke(tmp_path, SWEEP, stage_deadline_s=10)
+    result, _, elapsed = _invoke(tmp_path, SWEEP, stage_deadline_s=STAGE_DEADLINE_S)
 
     assert result.exit_code == 1, result.output
     envelope = json.loads(result.output[result.output.index("{") :])
@@ -198,7 +205,7 @@ def test_receipt_mode_runs_the_same_sweep_to_its_terminal(
     result, correlation_id, _ = _invoke(
         tmp_path,
         SWEEP,
-        stage_deadline_s=10,
+        stage_deadline_s=STAGE_DEADLINE_S,
         extra=(
             "--output",
             "receipt",
