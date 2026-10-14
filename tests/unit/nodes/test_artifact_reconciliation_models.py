@@ -225,6 +225,8 @@ class TestImpactAnalysisResult:
         )
         result = ModelImpactAnalysisResult(
             source_trigger_id=_TRIGGER_1,
+            trigger_type="pr_opened",
+            source_repo="omnibase_infra",
             impacted_artifacts=[artifact],
             highest_merge_policy="require",
         )
@@ -238,6 +240,8 @@ class TestImpactAnalysisResult:
 
         result = ModelImpactAnalysisResult(
             source_trigger_id=_TRIGGER_EMPTY,
+            trigger_type="pr_opened",
+            source_repo="omnibase_infra",
             impacted_artifacts=[],
             highest_merge_policy="none",
         )
@@ -310,6 +314,7 @@ class TestUpdatePlan:
         plan = ModelUpdatePlan(
             plan_id=_PLAN_1,
             source_trigger_id=_TRIGGER_1,
+            trigger_type="pr_opened",
             source_entity_ref="pr/omnibase_infra/123",
             summary="PR #123 modified contract.yaml",
             impacted_artifacts=[],
@@ -330,6 +335,7 @@ class TestUpdatePlan:
             ModelUpdatePlan(
                 plan_id=_PLAN_BAD,
                 source_trigger_id=_TRIGGER_1,
+                trigger_type="pr_opened",
                 source_entity_ref="pr/test/1",
                 summary="Bad plan",
                 impacted_artifacts=[],
@@ -347,6 +353,7 @@ class TestUpdatePlan:
             ModelUpdatePlan(
                 plan_id=_PLAN_BAD,
                 source_trigger_id=_TRIGGER_1,
+                trigger_type="pr_opened",
                 source_entity_ref="pr/test/1",
                 summary="Bad plan",
                 impacted_artifacts=[],

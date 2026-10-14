@@ -9,6 +9,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from omnibase_infra.enums import EnumUpdateTriggerType
 from omnibase_infra.nodes.node_impact_analyzer_compute.models.model_impacted_artifact import (
     ModelImpactedArtifact,
 )
@@ -24,5 +25,8 @@ class ModelImpactAnalysisResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     source_trigger_id: UUID
+    trigger_type: EnumUpdateTriggerType
+    source_repo: str
+    source_ref: str | None = None
     impacted_artifacts: list[ModelImpactedArtifact]
     highest_merge_policy: Literal["none", "warn", "require", "strict"]

@@ -1,0 +1,52 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-21053"
+title: "A reconcile command published to the dev lane stops at the first hop: the artifact reconciliation handlers expose no dispatch entrypoint and the hops do not share a wire shape"
+summary: "One ModelManualReconcileCommand published to the reconcile command topic on the dev lane was answered by a boundary failure terminal because HandlerManualTrigger exposed no handle() or handle_async(); the other three nodes had the same defect or an input model the previous hop's output does not validate into. This change gives every handler of the four nodes the canonical handle(request) entrypoint, lets the impact analyzer read the bare change trigger the detector publishes (binding the packaged artifact registry), carries the trigger context through the impact result and the update plan, declares the update plan as the reducer's published event, and makes the PR comment handler return nothing for a plan that is not PR-triggered. A bus-chain test over the four real contracts proves one command yields one update-plan-emitted event and no pr-comment-posted event."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-reconcile-reaches-emitted"
+    statement: "A manual reconcile command reaches exactly one update-plan-emitted event through the four real contracts wired by wire_from_manifest, and posts no PR comment."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: tests/unit/nodes/test_artifact_reconciliation_bus_chain_omn21053.py publishes one reconcile command envelope to an in-memory bus carrying the four real contracts and reads exactly one update-plan-emitted event for its correlation id and none on pr-comment-posted -- falsifier: the test fails at the merge base with the change detector's missing handle() entrypoint and passes at the head"
+      - id: "AC2"
+        statement: "AC2: a PR webhook through the same four contracts yields one update-plan-emitted event and one pr-comment-posted event with the GitHub client mocked, so the empty comment topic of AC1 is not vacuous -- falsifier: uv run pytest tests/unit/nodes/test_artifact_reconciliation_bus_chain_omn21053.py -k pr_webhook"
+  - id: "req-handlers-expose-entrypoints"
+    statement: "Every handler named by the four contracts exposes handle(), and the dispatch entrypoint baseline no longer lists them."
+    acceptance:
+      - id: "AC3"
+        statement: "AC3: config/validation/handler_dispatch_entrypoint_baseline.yaml no longer lists HandlerManualTrigger, HandlerPRWebhookIngestion, HandlerPlanToPRComment, HandlerPlanToYaml or HandlerCreatePlan, and the entrypoint coverage test passes -- falsifier: uv run pytest tests/unit/runtime/auto_wiring/test_handler_dispatch_entrypoint_coverage_omn14489.py fails if a listed handler gains handle() and its row is kept"
+evidence_requirements:
+  - kind: "tests"
+    description: "The bus-chain test and the handle-entrypoint seam tests."
+    command: "uv run pytest tests/unit/nodes/test_artifact_reconciliation_bus_chain_omn21053.py tests/unit/nodes/test_artifact_reconciliation_handle_entrypoints_omn21053.py -q"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn21053-ac1-chain-reaches-emitted"
+    description: "The bus-chain test passes: one reconcile command yields one update-plan-emitted event and no pr-comment-posted event."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/test_artifact_reconciliation_bus_chain_omn21053.py -q -x"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC1", "AC2"]
+  - id: "dod-omn21053-ac3-entrypoints"
+    description: "The five handlers expose handle() and the dispatch entrypoint coverage gate passes with them removed from the baseline."
+    source: "manual"
+    checks:
+      - check_type: "command"
+        check_value: "uv run pytest tests/unit/nodes/test_artifact_reconciliation_handle_entrypoints_omn21053.py tests/unit/runtime/auto_wiring/test_handler_dispatch_entrypoint_coverage_omn14489.py -q"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC3"]
+  - id: "dod-deploy"
+    description: "Deploy-scope readback, bound to no criterion: after the deploy agent rolls the dev lane, the runtime image imports the impact analyzer handler that now exposes handle(). It reads the dev lane's runtime container, which a hosted runner does not have, so only the local Done gate runs it and the hosted must-fail control does not control it."
+    source: "manual"
+    execution_scope: "local_done_gate"
+    checks:
+      - check_type: "command"
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.nodes.node_impact_analyzer_compute.handlers.handler_impact_analysis import HandlerImpactAnalysis; assert callable(getattr(HandlerImpactAnalysis, \"handle\"))'"

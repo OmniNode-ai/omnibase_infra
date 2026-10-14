@@ -5,10 +5,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from omnibase_infra.enums import EnumUpdateTriggerType
 
 
 class ModelUpdateTrigger(BaseModel):
@@ -21,14 +22,7 @@ class ModelUpdateTrigger(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     trigger_id: UUID
-    trigger_type: Literal[
-        "pr_opened",
-        "pr_updated",
-        "pr_merged",
-        "contract_changed",
-        "schema_changed",
-        "manual_plan_request",
-    ]
+    trigger_type: EnumUpdateTriggerType
     source_repo: str
     source_ref: str | None = None
     changed_files: list[str] = Field(default_factory=list)

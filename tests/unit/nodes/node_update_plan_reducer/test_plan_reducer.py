@@ -69,6 +69,8 @@ def _make_result(
     """Build a minimal ModelImpactAnalysisResult for testing."""
     return ModelImpactAnalysisResult(
         source_trigger_id=uuid4(),
+        trigger_type="pr_opened",
+        source_repo="omnibase_infra",
         impacted_artifacts=artifacts or [_make_artifact()],
         highest_merge_policy=highest_merge_policy,  # type: ignore[arg-type]
     )
@@ -585,6 +587,8 @@ class TestHandlerCreatePlan:
         artifact = _make_artifact(required_action="none")
         result = ModelImpactAnalysisResult(
             source_trigger_id=uuid4(),
+            trigger_type="pr_opened",
+            source_repo="omnibase_infra",
             impacted_artifacts=[artifact],
             highest_merge_policy="none",
         )
@@ -708,6 +712,8 @@ class TestHandlerCreatePlan:
         handler = HandlerCreatePlan()
         result = ModelImpactAnalysisResult(
             source_trigger_id=uuid4(),
+            trigger_type="pr_opened",
+            source_repo="omnibase_infra",
             impacted_artifacts=[],
             highest_merge_policy="none",
         )

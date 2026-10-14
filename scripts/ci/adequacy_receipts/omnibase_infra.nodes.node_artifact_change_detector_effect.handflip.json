@@ -1,0 +1,26 @@
+{
+  "base_ref": "ae5fca1228a34d61f76d1cbfdd1babbe64b7392d",
+  "canonical_handler_module": "omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_pr_webhook_ingestion",
+  "legacy_handler_module": "omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_pr_webhook_ingestion",
+  "node_id": "omnibase_infra.nodes.node_artifact_change_detector_effect",
+  "parity": {
+    "selected_input_hashes": [
+      "sha256:e02a4b50b84a39b36e6ec0badedaf243f0e2b7446a63ef353eeb75a5dbd81382",
+      "sha256:a7eb30e049334ebaefafbf21c2a7a79d4ad19c4b79c5a0e29026018bd978f1d4",
+      "sha256:8b50f81772c19bcea7cfdd355ea55fa3038dc2faa17c4c78103585dda550aa71"
+    ],
+    "status": "pass",
+    "test_ids": [
+      "tests/unit/nodes/test_artifact_reconciliation_flip_parity_omn21053.py::test_webhook_handler_exposes_handle_entrypoint",
+      "tests/unit/nodes/test_artifact_reconciliation_flip_parity_omn21053.py::test_webhook_handle_keeps_the_action_mapping[event0-pr_opened]",
+      "tests/unit/nodes/test_artifact_reconciliation_flip_parity_omn21053.py::test_webhook_handle_keeps_the_action_mapping[event1-pr_updated]",
+      "tests/unit/nodes/test_artifact_reconciliation_flip_parity_omn21053.py::test_webhook_handle_keeps_the_action_mapping[event2-pr_merged]",
+      "tests/unit/nodes/test_artifact_reconciliation_flip_parity_omn21053.py::test_webhook_handle_keeps_the_action_mapping[event3-pr_updated]"
+    ]
+  },
+  "preserved_symbols": [
+    "HandlerPRWebhookIngestion.handler_type",
+    "HandlerPRWebhookIngestion.handler_category"
+  ],
+  "receipt_schema": "handflip_proof.v1"
+}

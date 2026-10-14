@@ -121,6 +121,9 @@ class HandlerImpactAnalysis:
 
         result = ModelImpactAnalysisResult(
             source_trigger_id=trigger.trigger_id,
+            trigger_type=trigger.trigger_type,
+            source_repo=trigger.source_repo,
+            source_ref=trigger.source_ref,
             impacted_artifacts=impacted,
             highest_merge_policy=highest_merge_policy,
         )

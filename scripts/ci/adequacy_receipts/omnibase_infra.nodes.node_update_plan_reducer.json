@@ -1,0 +1,23 @@
+{
+  "branch_coverage_pct": 25.27,
+  "candidate_count": 3,
+  "coverage_target": 80.0,
+  "handler_module": "omnibase_infra.nodes.node_update_plan_reducer.handlers.handler_create_plan",
+  "handler_module_sha256": "sha256:6c746fb0062cc00baaf3974f9f2c2ae7215a1044d98a952f8dd90fdbcb3af683",
+  "meets_target": false,
+  "node_id": "omnibase_infra.nodes.node_update_plan_reducer",
+  "receipt_schema": "adequacy_receipt.v1",
+  "recorded_at": "2026-10-12T14:21:41.060701+00:00",
+  "recorder_schema": "adequacy_receipt.v1",
+  "selected_count": 3,
+  "selected_input_hashes": [
+    "sha256:9ae61f88a508b9855cbc7cc3f6254ac4d935f39c7482e2c2a93c828eb37e37ab",
+    "sha256:cef7d5d8171997d83c02e2f09857d2538bad61056dffb807249be8a6c3491d4a",
+    "sha256:362e1ea636b5acb89645d91caa291ad42c0ddb25b7e8da2854b1202bb3f25297"
+  ],
+  "uncovered_waiver": {
+    "reason": "OMN-21053 hand-flips node_update_plan_reducer to canonical def-B (handle(request), OMN-14781 path): the op-method entrypoint is replaced by handle(), and the helpers named in the .handflip.json are preserved byte-identically base_ref<->HEAD, re-derived from git by the canonical-shape ratchet. Equivalence is proven by that git-verbatim preservation plus the parity tests over the corpus in tests/unit/nodes/test_artifact_reconciliation_flip_parity_omn21053.py, not by branch coverage.",
+    "uncovered_branch_count": 0
+  },
+  "volatile_mask": []
+}

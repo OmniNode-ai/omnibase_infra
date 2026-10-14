@@ -170,6 +170,26 @@ class HandlerPlanToPRComment:
         """Behavioral classification: effect (external I/O via GitHub API)."""
         return EnumHandlerTypeCategory.EFFECT
 
+    async def handle(self, plan: ModelUpdatePlan) -> ModelPRCommentResult | None:
+        """Post the comment for one update plan, or return nothing for a non-PR plan.
+
+        Canonical definition-B entrypoint (OMN-21053). A plan whose trigger is not
+        a PR trigger is a skip, not an outcome: it returns ``None`` so nothing is
+        published to ``onex.evt.artifact.pr-comment-posted.v1`` and no GitHub
+        client is constructed. A PR plan that could not be posted still returns its
+        result, so the failure is on the topic.
+
+        Args:
+            plan: The update plan to post, carrying its trigger type.
+
+        Returns:
+            The post or update result, or ``None`` when the plan is not PR-triggered.
+        """
+        result = await self.post_plan_comment(plan=plan, trigger_type=plan.trigger_type)
+        if result.skipped and result.error is None:
+            return None
+        return result
+
     async def post_plan_comment(
         self,
         plan: ModelUpdatePlan,
