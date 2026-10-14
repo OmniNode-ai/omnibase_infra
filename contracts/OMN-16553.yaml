@@ -1,0 +1,46 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0.0"
+ticket_id: OMN-16553
+title: Keep the runner image identity bound to the asyncpg dependency update
+summary: PR 4946 widens the asyncpg requirement to less than 0.33.0. The lockfile metadata carries the same constraint, and the runner image identity is regenerated from the rebased manifests.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn16553-asyncpg-range
+    statement: The dependency manifest and lockfile metadata permit asyncpg 0.32 releases while retaining the 0.29.0 lower bound.
+    acceptance:
+      - id: AC1
+        statement: The asyncpg requirement is at least 0.29.0 and less than 0.33.0 in both manifests, and uv accepts the lockfile.
+  - id: req-omn16553-runner-identity
+    statement: The recorded runner image identity matches the dependency manifests after rebasing onto dev.
+    acceptance:
+      - id: AC2
+        statement: Recomputing the runner identity and shared environment digest agrees with the recorded values.
+evidence_requirements:
+  - kind: tests
+    description: Focused runner identity and PostgreSQL pool and handler regression tests.
+    command: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/unit/runtime/providers/test_provider_postgres_pool.py tests/unit/handlers/test_handler_db.py -q -p no:randomly --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn16553-pr4946-ac1
+    description: Read the asyncpg constraints from both manifests and ask uv to verify the lockfile.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: |-
+          python3 -c 'import pathlib,tomllib; p=tomllib.loads(pathlib.Path("pyproject.toml").read_text()); l=tomllib.loads(pathlib.Path("uv.lock").read_text()); assert "asyncpg>=0.29.0,<0.33.0" in p["project"]["dependencies"]; root=next(x for x in l["package"] if x["name"]=="omnibase-infra"); assert next(x for x in root["metadata"]["requires-dist"] if x["name"]=="asyncpg")["specifier"]==">=0.29.0,<0.33.0"' && uv lock --check
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn16553-pr4946-ac2
+    description: The runner image identity and shared environment digest equal the recomputed binding.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_runner_image_identity.py -k 'recorded_identity_matches_recomputed_identity or identity_uses_shared_env_digest_as_a_binding_component' -q -p no:randomly --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
