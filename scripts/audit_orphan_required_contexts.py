@@ -5,16 +5,15 @@
 
 WHAT THIS IS, AND WHAT IT DELIBERATELY IS NOT
 ---------------------------------------------
-This is the ONE branch-protection check that the canonical auditor
-(`onex_change_control/scripts/audit_branch_protection.sh`, run by this repo's
-`branch-protection-audit.yml` at a pinned ref) does not carry: the ORPHANED
+This is the ONE branch-protection check that the shared auditor
+(the `branch-protection-audit.yml` of the repository that owns it, OMN-20955) does not carry: the ORPHANED
 direction — a required context on `main` that no check-run actually reports any
 more, so it can never go green and permanently blocks every PR targeting that
 branch.
 
 Everything else this repo used to audit locally — review enforcement, the
 release-synced-main pair, `enforce_admins`, the Receipt Gate,
-`delete_branch_on_merge`, the Merge Queue ruleset — is the canonical auditor's
+`delete_branch_on_merge`, the Merge Queue ruleset — is the shared auditor's
 job and is NOT duplicated here. Two copies of the same audit disagreeing is the
 condition OMN-18346 exists to end: the in-repo copy carried no
 `REVIEW_GATED_REPOS` carve-out, so it kept reporting `onex_change_control` as a

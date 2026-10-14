@@ -6,7 +6,7 @@
 These tests drive the pure ``classify_deploy_scope`` core against the REAL
 canonical deploy-gate validator (imported the same way the hook imports it),
 proving both the DRY import wiring and every tri-state outcome -- including the
-omnibase_infra#2319 gap (deploy-scoped surface + cited ticket whose OCC contract
+omnibase_infra#2319 gap (deploy-scoped surface + cited ticket whose contract
 declares no deploy-scope DoD evidence).
 """
 
@@ -19,7 +19,6 @@ import pytest
 from scripts.ci.check_deploy_scope_dod import (
     FAIL_NO_EVIDENCE,
     FAIL_NO_TICKET,
-    NOTICE_COMPANION_UNMERGED,
     PASS_EVIDENCE,
     SKIP_NO_RUNTIME,
     DeployScopeHookError,
@@ -131,18 +130,19 @@ def test_runtime_path_ticket_without_deploy_evidence_fails(
     assert "OMN-1234" in decision.tickets
 
 
-def test_runtime_path_ticket_without_local_contract_notices(
+def test_runtime_path_ticket_without_local_contract_fails(
     validator, tmp_path: Path
 ) -> None:
-    # Companion OCC contract not merged/authored locally -> NOTICE, never red.
+    # The hosted gate reads contracts/<ticket>.yaml at the head and fails when it
+    # is absent, so the local mirror fails on the same gap.
     decision = classify_deploy_scope(
         validator=validator,
         changed_files=[_RUNTIME_FILE],
         pr_body="Closes OMN-9999",
         contracts_dir=tmp_path,  # empty -> OMN-9999.yaml absent
     )
-    assert decision.outcome == NOTICE_COMPANION_UNMERGED
-    assert decision.exit_code == 0
+    assert decision.outcome == FAIL_NO_EVIDENCE
+    assert decision.exit_code == 1
     assert "OMN-9999" in decision.tickets
 
 

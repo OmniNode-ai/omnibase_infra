@@ -424,19 +424,15 @@ The runtime uses plugin-based handler loading from YAML contracts
 Never assert branch-protection state from memory or docs — probe it.
 
 **There is ONE auditor of record for the shared checks, and it is not in this repo**
-(OMN-18346). `onex_change_control/scripts/audit_branch_protection.sh` owns review
-enforcement (with the OMN-18287 code-owner carve-out), the release-synced-main pair,
+(OMN-18346, OMN-20955). The `branch-protection-audit.yml` of the repository that owns
+the shared audit runs it over an overlay that names this repo. It owns review enforcement (with the OMN-18287 code-owner carve-out), the release-synced-main pair,
 `enforce_admins`, the Receipt Gate, `delete_branch_on_merge` and the Merge Queue ruleset.
 This repo used to run a diverged second copy of the same checks; it never received the
-carve-out and failed 47 of 47 scheduled runs in seven days. Extend the canonical script,
-never re-add a local copy — `tests/ci/test_branch_protection_single_auditor.py` fails if
-one reappears.
+carve-out and failed 47 of 47 scheduled runs in seven days. Extend the shared auditor,
+never re-add a local copy or a fetch of one — `tests/ci/test_branch_protection_single_auditor.py`
+and `tests/ci/test_no_occ_residual_omn20074.py` fail if one reappears.
 
-```bash
-bash <onex_change_control clone>/scripts/audit_branch_protection.sh
-```
-
-Two checks the canonical auditor does NOT carry live here, both read-only:
+Two checks the shared auditor does NOT carry live here, both read-only:
 
 ```bash
 # ORPHANED direction — a required context no check-run reports any more.
@@ -451,9 +447,8 @@ as well as default-branch pushes — a PR-time gate binds its check-run to a PR 
 and can never appear on a post-merge push, which was the whole of the OMN-18346 defect.
 The declared parity policy lives in `scripts/enforcement_parity_manifest.yaml`
 (config-as-data: `{repo → branch → {load_bearing_gates[], merge_policy}}`); its assertion
-logic is `scripts/audit_required_context_parity_lib.py`. All three run on a schedule via
-`.github/workflows/branch-protection-audit.yml`, which pins the canonical auditor to a
-commit sha. Nothing in that workflow mutates protection, and the orphan auditor has no
+logic is `scripts/audit_required_context_parity_lib.py`. Both run on a schedule via
+`.github/workflows/branch-protection-audit.yml`. Nothing in that workflow mutates protection, and the orphan auditor has no
 `--fix` path: removing a stale required context is a deliberate operator change.
 
 ---
