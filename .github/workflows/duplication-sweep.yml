@@ -5,7 +5,7 @@
 #
 # D1 — Drizzle table name duplication across omnidash schema files.
 # D2 — Topic registration conflicts between omniclaude/topics.py and
-#      onex_change_control's kafka_boundaries.yaml.
+#      omnimarket's node_duplication_sweep kafka_boundaries.yaml (OMN-20949).
 #
 # Rule-5 gap this closes: the script has a full pytest fixture suite
 # (scripts/ci/tests/test_sweep_clis.py::TestDuplicationSweep) but, until this
@@ -96,15 +96,15 @@ jobs:
             src/omniclaude/hooks
           sparse-checkout-cone-mode: false
 
-      - name: Checkout onex_change_control (sibling — D2 boundary source)
+      - name: Checkout omnimarket (sibling — D2 boundary manifest source)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          repository: OmniNode-ai/onex_change_control
-          ref: 802b5f7101f4c49f8b30e8deda3d4c5d024c5710 # .github/sibling-pins.yaml
-          path: sweep-home/onex_change_control
+          repository: OmniNode-ai/omnimarket
+          ref: 60a07619058457b7371eff505ba09507a1edfbe5 # .github/sibling-pins.yaml
+          path: sweep-home/omnimarket
           token: ${{ secrets.OMNI_GITHUB_TOKEN || github.token }}
           sparse-checkout: |
-            src/onex_change_control/boundaries
+            src/omnimarket/nodes/node_duplication_sweep/contracts
           sparse-checkout-cone-mode: false
 
       - name: Run duplication sweep (D1 + D2, whole cross-repo comparison set)

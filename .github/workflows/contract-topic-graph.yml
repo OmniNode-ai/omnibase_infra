@@ -71,7 +71,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: OmniNode-ai/omnimarket
-          ref: 464634262791e35cd0e9f44552d54ea7fd97f1eb # .github/sibling-pins.yaml
+          ref: 60a07619058457b7371eff505ba09507a1edfbe5 # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.CROSS_REPO_PAT }}
       - uses: actions/checkout@v4
@@ -89,14 +89,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 64b950973a5686d33e0b439fb80749d66362d06d # .github/sibling-pins.yaml
+          ref: 3fcbf795087a79081c0ceeb676216bf64c5d49ae # .github/sibling-pins.yaml
           path: omniintelligence
-          token: ${{ secrets.CROSS_REPO_PAT }}
-      - uses: actions/checkout@v4
-        with:
-          repository: OmniNode-ai/onex_change_control
-          ref: 802b5f7101f4c49f8b30e8deda3d4c5d024c5710 # .github/sibling-pins.yaml
-          path: onex_change_control
           token: ${{ secrets.CROSS_REPO_PAT }}
 
       - uses: astral-sh/setup-uv@v5

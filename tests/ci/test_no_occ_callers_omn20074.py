@@ -31,19 +31,23 @@ REQUIRED_CHECKS = REPO_ROOT / ".github" / "required-checks.yaml"
 _OCC_REUSABLE = re.compile(r"^(?:call-)?occ-[a-z0-9-]+\.ya?ml$")
 _PREFLIGHT_WAIT = re.compile(r"occ-preflight")
 
-# The pinned skip-token reusable is the squash commit of omniclaude#2540, which
-# removed the nested change-control preflight job from it.
+# The pinned skip-token reusable descends from the squash commit of
+# omniclaude#2540, which removed the nested change-control preflight job from
+# it; ed4300f8a keeps that removal and also retires the skip-receipt registry.
 _SKIP_TOKEN_REUSABLE = "reject-deploy-gate-skip.yml"
-_PREFLIGHT_FREE_SKIP_TOKEN_SHA = "4358450ccbba0cee11e390208dd0b8b1728e94ab"
+_PREFLIGHT_FREE_SKIP_TOKEN_SHA = "ed4300f8a427ead7f099daf69cedc012907cdbd3"
 
 # The deploy-gate reusable reads the caller's own contracts/OMN-<n>.yaml at the
 # pull request head when the caller passes contract-source: caller. The pin is
 # the omniclaude commit that taught the reusable that input (omniclaude#2650);
-# the pin before it read onex_change_control only.
+# the pin before it read onex_change_control only. The recorded verdicts were
+# captured at that commit; the current pin carries a byte-identical reusable and
+# validate_pr_deploy_required.py (sha256 prefix 3dd77f9eb969a47b at both).
 _DEPLOY_GATE_REUSABLE = (
     "OmniNode-ai/omniclaude/.github/workflows/deploy-gate-reusable.yml"
 )
 _CALLER_CONTRACT_SOURCE_SHA = "0790179fc52759bd7354984fae45bb0e0486ef8a"
+_DEPLOY_GATE_PIN_SHA = "ed4300f8a427ead7f099daf69cedc012907cdbd3"
 _OCC_ONLY_DEPLOY_GATE_SHA = "0c0d91e5e10904db67d43ad537fdf6e65e219f21"
 
 _OCC_CONTEXTS = frozenset(
@@ -201,7 +205,7 @@ def test_no_occ_callers_deploy_gate_reads_caller_contracts() -> None:
     job = calls[0][2]
     pin = job["uses"].split("@", 1)[1].split()[0]
     assert pin != _OCC_ONLY_DEPLOY_GATE_SHA
-    assert pin == _CALLER_CONTRACT_SOURCE_SHA
+    assert pin == _DEPLOY_GATE_PIN_SHA
     options = job.get("with") or {}
     assert options.get("contract-source") == "caller", options
     assert "contracts-dir" not in options, "deprecated input; the source decides"

@@ -167,89 +167,25 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
 
-      # OMN-16373: CROSS_REPO_PAT retirement — mint a short-lived
-      # onexbot-occ-writer App installation token for the sibling-repo
-      # reads this job's uv/pip install performs.
-      # OMN-16414: continue-on-error is REQUIRED here, not optional polish.
-      # Fork-triggered pull_request runs receive no org secrets (app-id/
-      # private-key resolve empty), and create-github-app-token hard-fails
-      # the step ("Input required and not supplied: app-id") when that
-      # happens. Without this guard the job dies right here even though
-      # every downstream step already falls back to `github.token`
-      # (`steps.app-token.outputs.token || github.token`) -- the fallback
-      # was unreachable dead code until this line let the step fail soft.
-      - name: Mint onexbot-occ-writer app token
-        id: app-token
-        continue-on-error: true
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          app-id: ${{ secrets.ONEXBOT_OCC_APP_ID }}
-          private-key: ${{ secrets.ONEXBOT_OCC_PRIVATE_KEY }}
-          owner: OmniNode-ai
-          permission-contents: write
-
-      - name: Install onex_change_control (pinned)
-        env:
-          GIT_FETCH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+      - name: Install omnibase_core (pinned release)
+        # --no-config: [tool.uv] override-dependencies pins omnibase-core to the
+        # locked 0.47.x release, which predates the handler and would replace
+        # this install. 0.47.41 is the first PyPI release that ships it.
         run: |
           set -euo pipefail
-          # Authenticate the git+https fetch so it isn't anonymous-rate-limited
-          # on the self-hosted runner ("Empty reply from server"). Process-scoped
-          # insteadOf rewrite; never writes the token to disk. (OMN-12432)
-          if [ -n "${GIT_FETCH_TOKEN}" ]; then
-            export GIT_CONFIG_COUNT=1
-            export GIT_CONFIG_KEY_0="url.https://x-access-token:${GIT_FETCH_TOKEN}@github.com/.insteadOf"
-            export GIT_CONFIG_VALUE_0="https://github.com/"
-          fi
           uv venv .venv --python "${pythonLocation}/bin/python"
           . .venv/bin/activate
-          git config --global http.version HTTP/1.1
-          git config --global http.lowSpeedLimit 0
-          git config --global http.lowSpeedTime 999999
           export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"
-          python - <<'PY' > /tmp/onex-change-control-overrides.txt
-          import tomllib
-          from pathlib import Path
-
-          pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-          source = (
-              pyproject.get("tool", {})
-              .get("uv", {})
-              .get("sources", {})
-              .get("omnibase-core")
-          )
-          if isinstance(source, dict) and source.get("git"):
-              ref = source.get("rev") or source.get("tag") or source.get("branch")
-              if ref:
-                  print(f"omnibase-core @ git+{source['git']}@{ref}")
-          PY
-          install_args=(
-            "onex_change_control @ git+https://github.com/OmniNode-ai/onex_change_control.git@08a5194c6e587e8b2256c1f1edde236ad34cd397"
-          )
-          if [ -s /tmp/onex-change-control-overrides.txt ]; then
-            install_args=(--overrides /tmp/onex-change-control-overrides.txt "${install_args[@]}")
-          fi
           attempt=1
           max_attempts=3
           delay=10
-          until uv pip install "pydantic>=2.11.7" "pyyaml>=6.0.2"; do
+          until uv pip install --no-config "omnibase-core==0.47.43"; do
             status=$?
             if [[ "$attempt" -ge "$max_attempts" ]]; then
-              echo "::error::uv pip install pydantic/pyyaml failed after ${attempt} attempt(s)"
+              echo "::error::uv pip install omnibase-core failed after ${attempt} attempt(s)"
               exit "$status"
             fi
-            echo "::warning::uv pip install pydantic/pyyaml attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"
-            sleep "$delay"
-            attempt=$((attempt + 1))
-          done
-          attempt=1
-          until uv pip install --no-deps "${install_args[@]}"; do
-            status=$?
-            if [[ "$attempt" -ge "$max_attempts" ]]; then
-              echo "::error::uv pip install onex_change_control failed after ${attempt} attempt(s)"
-              exit "$status"
-            fi
-            echo "::warning::uv pip install onex_change_control attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"
+            echo "::warning::uv pip install omnibase-core attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${delay}s"
             sleep "$delay"
             attempt=$((attempt + 1))
           done
@@ -257,7 +193,7 @@ jobs:
       - name: Run handler contract compliance check
         run: |
           . .venv/bin/activate
-          python -m onex_change_control.validators.arch_handler_contract_compliance \
+          python -m omnibase_core.handlers.handler_arch_handler_contract_compliance \
             --repo-root . \
             --allowlist-path arch-handler-contract-compliance-allowlist.yaml
 

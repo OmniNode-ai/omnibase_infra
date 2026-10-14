@@ -642,7 +642,7 @@ else
   echo "   (bounded at ${DRIFT_REPAIR_TIMEOUT_SECONDS}s -- OMN-15590; override with PULL_ALL_DRIFT_REPAIR_TIMEOUT_SECONDS)"
   _drift_rc=0
   _run_bounded "$DRIFT_REPAIR_TIMEOUT_SECONDS" \
-    env OMNI_HOME="$OMNI_HOME" bash "$_reconciler" \
+    bash "$_reconciler" --workspace "$OMNI_HOME" \
     || _drift_rc=$?
 
   if [[ "$_drift_rc" -eq 0 ]]; then
@@ -678,7 +678,7 @@ else
     echo "# OmnimarketDriftError until this is fixed. Run it directly and"
     echo "# read the error (the reconciler names the exact failing command):"
     echo "#"
-    echo "#   OMNI_HOME=$OMNI_HOME bash $_reconciler"
+    echo "#   bash $_reconciler --workspace $OMNI_HOME"
     echo "#"
     echo "# See OMN-17190 / OMN-15590 / OMN-15242 / OMN-14060 for context."
     echo "############################################################"

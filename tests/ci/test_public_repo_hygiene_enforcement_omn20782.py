@@ -35,10 +35,11 @@ CONFIG = REPO_ROOT / ".public-repo-hygiene.yaml"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "public-repo-hygiene.yml"
 PRECOMMIT = REPO_ROOT / ".pre-commit-config.yaml"
 
-# omniclaude dev 0c9f9146d, a descendant of 6e47aa311 and of 9a58ef705 (added-lines
-# scope). It carries the deployment-config job and hook (OMN-20923) that the
-# required context public-repo-hygiene / deployment-config comes from (OMN-20940).
-GATE_REV = "0c9f9146d8dd0446fc5c10952aa57247b3a880ae"
+# omniclaude dev ed4300f8a, a descendant of 0c9f9146d, of 6e47aa311 and of
+# 9a58ef705 (added-lines scope). It carries the deployment-config job and hook
+# (OMN-20923) that the required context public-repo-hygiene / deployment-config
+# comes from (OMN-20940).
+GATE_REV = "ed4300f8a427ead7f099daf69cedc012907cdbd3"
 # The revision the recorded gate run below was made at (6e47aa311). The recording
 # is a captured response, so it keeps its own revision; the pin moves on.
 RECORDED_REV = "6e47aa311ac5d177d116d9597b07966a233d2463"
@@ -98,10 +99,18 @@ def test_precommit_runs_the_gate_hook_at_the_same_revision() -> None:
     assert isinstance(repo, dict) and isinstance(hook, dict)
     assert repo["repo"] == "https://github.com/OmniNode-ai/omniclaude"
     assert repo["rev"] == GATE_REV
-    # The exported hook already runs over the staged added lines (--diff-staged),
-    # always_run, in the pre-commit stage. An override here would narrow it.
-    narrowing = {"entry", "args", "files", "exclude", "stages", "always_run"}
-    assert not narrowing & set(hook), sorted(narrowing & set(hook))
+    # OMN-17427: the exported hook scans the whole tracked tree on every commit
+    # (~25 s). Under enforce_scope: added-lines the verdict is the findings on
+    # the lines the index adds, and every such line sits in a staged file, so the
+    # commit hands the same hook the staged paths (--staged). Nothing else may
+    # narrow it, and the config must keep enforcing added lines.
+    assert hook.get("args") == ["--staged"]
+    assert hook.get("pass_filenames") is True
+    assert hook.get("always_run") is False
+    assert hook.get("stages") == ["pre-commit"]
+    assert not {"entry", "files", "exclude"} & set(hook), sorted(set(hook))
+    config = yaml.safe_load(CONFIG.read_text())
+    assert config["enforce_scope"] == "added-lines"
 
 
 def test_hygiene_context_is_not_excluded_from_the_ci_summary_sweep() -> None:

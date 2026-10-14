@@ -96,7 +96,7 @@ def test_no_step_publishes_a_skip_output() -> None:
 
 
 APP_TOKEN_EXPR = "${{ steps.app-token.outputs.token }}"
-TARGET_REPOS = {"onex_change_control", "omnimarket"}
+TARGET_REPOS = {"omnimarket"}
 
 
 def test_the_detect_job_mints_the_onexbot_app_token_with_actions_write() -> None:

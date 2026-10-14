@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20737
+title: Grant the work-ledger parity check's read-only role SELECT on work_ledger_state
+summary: The work-ledger parity check connects as work_ledger_ro, which holds SELECT on omninode_internal.work_ledger_rows and not on work_ledger_state, so the state read fails with a permission error. This change adds the guarded GRANT SELECT as migration 0004 of node_projection_work_ledger, with its ledger row and migration class, and proves it on a throwaway PostgreSQL 16. The grant is a no-op where the role does not exist. Applying it to the dev-lane database and a live read as work_ledger_ro are post-merge steps this change does not perform.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20737-state-grant
+    statement: work_ledger_ro can SELECT omninode_internal.work_ledger_state and nothing more, and the migration does not fail on a database without that role.
+    acceptance:
+      - id: AC1
+        statement: "AC1: migration 0004 grants work_ledger_ro SELECT and no other privilege on omninode_internal.work_ledger_state, and is a no-op where the role is absent -- falsifier: the focused migration tests fail with the migration file, its ledger row or its class removed"
+evidence_requirements:
+  - kind: tests
+    description: The pin test checks the file bytes, ledger row, class, grant shape and the application database SQL gate; the real-PostgreSQL test applies the grant after 0000 and 0001 and reads the state table as the role.
+    command: uv run pytest tests/unit/migrations/test_omn20737_work_ledger_ro_state_grant.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20737-ac1-state-grant
+    description: The pin test passes at this head and fails at the merge base, where the 0004 file, its ledger row and its class do not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn20737_work_ledger_ro_state_grant.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

@@ -147,11 +147,17 @@ repos:
   - repo: https://github.com/OmniNode-ai/omnibase_core
     rev: 031148215620031436cba30619bbae67c0bb38ad
     hooks:
+      # OMN-17427: a whole-repo import-graph scan (~12s) run on every commit is
+      # the commit path's second-largest fixed cost, and ci.yml's
+      # node-boundary-imports job runs the same scan on every PR. It runs once per
+      # push instead, with growth judged against the merge base exactly as that CI
+      # job does (a pre-push tree equals HEAD, so --base HEAD would judge nothing).
+      # --bootstrap only takes effect while the base carries no baseline.
       - id: check-node-boundary-imports
         require_serial: true
-        # --bootstrap only takes effect while HEAD carries no baseline (the
-        # adoption commit). Once the baseline is committed, growth against HEAD
-        # fails here, and CI judges growth against the merge base.
+        stages: [pre-push]
+        entry: >-
+          bash -c 'exec "$VIRTUAL_ENV/bin/python" -m omnibase_core.nodes.node_boundary_import_check_compute.runtime_node_boundary_import_check "$@" --base "$(git merge-base HEAD origin/dev)"' --
         args: [--bootstrap]
   # OMN-20295: direct-model-call gate, BLOCKING. A model call (HTTP to a model
   # endpoint, provider or base_url; a model CLI exec such as crush, codex,
@@ -163,9 +169,17 @@ repos:
   - repo: https://github.com/OmniNode-ai/omnibase_core
     rev: 422e207e953841b11b7ae4919bd486f8c84b8c24
     hooks:
+      # OMN-17427: the gate always scans the whole repository (a new call site can
+      # be a new caller of an old one), ~40s on every commit; direct-model-call.yml
+      # runs the same scan on every PR. It runs once per push instead, with growth
+      # judged against the merge base as that CI job does (a pre-push tree equals
+      # HEAD, so --base HEAD would judge nothing).
       - id: check-direct-model-call
         require_serial: true
-        args: [--repo, omnibase_infra, --baseline, .onex_ratchets/direct_model_call_baseline.yaml, --base, HEAD]
+        stages: [pre-push]
+        entry: >-
+          bash -c 'exec "$VIRTUAL_ENV/bin/python" -m omnibase_core.nodes.node_direct_model_call_check_effect.runtime_direct_model_call "$@" --base "$(git merge-base HEAD origin/dev)"' --
+        args: [--repo, omnibase_infra, --baseline, .onex_ratchets/direct_model_call_baseline.yaml]
   # Stub implementation detection + receipt-honesty gate + transport-mock lint —
   # sourced from omnibase_core. Rev bumped to OMN-13026 (transport-mock-lint
   # hook added); OMN-13281 wires receipt-honesty to this block.
@@ -1332,14 +1346,14 @@ repos:
         always_run: true
         stages: [pre-commit]
       # OMN-14086: wire run_duplication_sweep.py (D1 Drizzle table dupes /
-      # D2 omniclaude-vs-occ topic-producer conflicts) as an ENFORCED gate —
+      # D2 omniclaude-vs-omnimarket-manifest topic-producer conflicts) as an ENFORCED gate —
       # it had a full pytest fixture suite but zero CI/pre-commit caller,
       # verified by `git log --all -S "run_duplication_sweep" --
       # .github/workflows/` returning no hits in omnibase_infra OR omnimarket
       # history (the OMN-8624/OMN-8625 "wire as pre-merge gate" tickets were
       # marked Done without this ever landing). MUST always_run for the same
       # reason as the migration-sync hook above: D1/D2 compare state ACROSS
-      # sibling repos (omnidash, omniclaude, onex_change_control), so a
+      # sibling repos (omnidash, omniclaude, omnimarket), so a
       # files:-scoped trigger on omnibase_infra's own diff would never fire —
       # this repo's diff never touches those sibling paths. Degrades to WARN
       # (not FAIL) when $OMNI_HOME or a sibling repo isn't present locally —
@@ -2049,12 +2063,13 @@ repos:
         entry: "Operational artifact detected — do not commit recovery/validation logs. These are auto-generated session files. See OMN-4569."
         stages: [pre-commit]
       # OMN-5063: Block untyped metadata dict fields
-      # Centralized in onex_change_control (OMN-5135)
+      # Runs omnibase_core's canonical COMPUTE node, which owns this check; the
+      # hook of the same id used to be the onex_change_control console script.
       - id: no-untyped-metadata
         require_serial: true
         name: No untyped metadata dict fields
         language: system
-        entry: uv run --frozen check-no-untyped-metadata
+        entry: uv run --frozen python -m omnibase_core.nodes.node_no_untyped_metadata_check_compute.runtime_no_untyped_metadata_check
         types: [python]
         exclude: ^tests/|^examples/|^scripts/
         stages: [pre-commit]
@@ -2561,10 +2576,20 @@ repos:
   # denylist from the file named by OMNI_HYGIENE_VOCAB_PATH, with the lab
   # vocabulary beside it, and fails closed without them.
   - repo: https://github.com/OmniNode-ai/omniclaude
-    rev: 0c9f9146d8dd0446fc5c10952aa57247b3a880ae
+    rev: ed4300f8a427ead7f099daf69cedc012907cdbd3
     hooks:
+      # OMN-17427: .public-repo-hygiene.yaml declares enforce_scope: added-lines, so
+      # the commit verdict is the findings on lines the index adds, and every such
+      # line sits in a staged file. Scanning the whole tracked tree (~25s) only
+      # re-reports the residue, which CI's public-repo-hygiene job still prints.
+      # The exported hook's pre-merge-commit stage is not installed here
+      # (default_install_hook_types), so the commit stage is the only local run.
       - id: public-repo-hygiene
         require_serial: true
+        args: [--staged]
+        pass_filenames: true
+        always_run: false
+        stages: [pre-commit]
       - id: deployment-config
         require_serial: true
   # OMN-19666: VCS-backed additional_dependencies can inherit GIT_INDEX_FILE

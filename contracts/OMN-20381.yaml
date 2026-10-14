@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20381
+title: Vendor claude_hook_events 0007, the guard, refusal_reason and token usage columns
+summary: omnimarket's node_projection_claude_hook_events migration 0007 adds seven nullable columns (guard, refusal_reason, four token counters and assistant_message_count) and three partial indexes to omninode_internal.claude_hook_events. This change vendors it byte-identical into the infra forward-migration surface with its ledger row and migration class, so an omnibase_infra release can carry it and the Sibling Release Compatibility Gate on the omnimarket PR that adds the events can pass once that release is pinned.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20381-vendor-0007
+    statement: The claude_hook_events 0007 migration is vendored into omnibase_infra byte-identical to omnimarket's source, declared in the application-migrations ledger and classified expand-only, so a released omnibase_infra carries it.
+    acceptance:
+      - id: AC1
+        statement: "AC1: The vendored 0007 file is byte-identical to the omnimarket source, adds only the seven nullable columns and three partial indexes, and is declared in the ledger and the migration classes -- falsifier: the vendor test fails with the file, its ledger row or its class removed"
+evidence_requirements:
+  - kind: tests
+    description: The vendored 0007 file matches the omnimarket source sha256, adds only the nullable columns and partial indexes, passes the application database SQL gate on every topology profile, and is declared in the ledger and the migration classes.
+    command: uv run pytest tests/unit/migrations/test_omn19513_claude_hook_events_vendor.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20381-ac1-vendor-0007
+    description: The vendor test passes at this head and fails at the merge base, where the 0007 file, its ledger row and its class do not exist.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn19513_claude_hook_events_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1

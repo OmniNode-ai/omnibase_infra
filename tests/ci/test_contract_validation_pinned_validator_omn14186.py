@@ -13,18 +13,14 @@ ModelTicketContract), so the recording stays as the history of that fix.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import cast
 
 import pytest
-import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github/workflows/contract-validation.yml"
-PINS = cast(
-    "dict[str, str]",
-    yaml.safe_load((ROOT / ".github/sibling-pins.yaml").read_text())["pins"],
-)
 
 
 @pytest.mark.live_contact(
@@ -35,7 +31,9 @@ def test_the_pinned_validator_admits_binds_ac_that_main_refuses(
 ) -> None:
     runs = cast("dict[str, dict[str, object]]", recorded_response["response"])
     pinned, main = runs["pinned"], runs["main"]
-    assert pinned["onex_change_control_sha"] == PINS["onex_change_control"]
+    # The sibling pin it recorded was removed with the last workflow that read it
+    # (OMN-20074); the recording keeps the sha it ran at.
+    assert re.fullmatch(r"[0-9a-f]{40}", cast("str", pinned["onex_change_control_sha"]))
     assert pinned["exit_code"] == 0
     assert main["exit_code"] == 1
     assert any(

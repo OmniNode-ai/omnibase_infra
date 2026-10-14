@@ -17,10 +17,20 @@ requirements:
       - id: "AC6"
         statement: |-
           AC6: the C29 probe requires --model, passes it on onex secret set with the key on stdin, records it, and names_provider fails unless the receipt model is the chosen model.
+  - id: "req-no-untyped-metadata-core-node"
+    statement: |-
+      The no-untyped-metadata pre-commit hook runs omnibase_core's canonical COMPUTE node, not the onex_change_control console script.
+    acceptance:
+      - id: "AC7"
+        statement: |-
+          AC7: the local no-untyped-metadata hook entry runs the omnibase_core node module and not check-no-untyped-metadata, and that module exits 1 on an untyped metadata field and 0 on a typed one.
 evidence_requirements:
   - kind: "tests"
     description: "The delegate CLI model option and the C29 probe's chosen-model grading, with the delegation and the customer machine faked."
     command: "uv run pytest tests/unit/cli/test_delegate_model_choice_omn20844.py tests/integration/cli/test_delegate_model_choice_cli_omn20844.py tests/ci/test_c29_probe_model_choice_omn20844.py -q -p no:randomly"
+  - kind: "tests"
+    description: "The no-untyped-metadata hook entry names the omnibase_core node module, and the module fails closed on a violation."
+    command: "uv run --frozen pytest tests/ci/test_precommit_hooks_local_omn20068.py -q -p no:randomly"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -34,3 +44,11 @@ dod_evidence:
         check_value: "uv run pytest tests/unit/cli/test_delegate_model_choice_omn20844.py tests/integration/cli/test_delegate_model_choice_cli_omn20844.py tests/ci/test_c29_probe_model_choice_omn20844.py -q -p no:randomly"
         cwd: "${OMNI_HOME}/omnibase_infra"
     binds_ac: ["AC2", "AC6"]
+  - id: "dod-omn20844-no-untyped-metadata-core-node"
+    description: "The hook entry runs the omnibase_core node module; the module returns 1 on an untyped metadata field and 0 on a typed one."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run --frozen pytest tests/ci/test_precommit_hooks_local_omn20068.py -q -p no:randomly"
+        cwd: "${OMNI_HOME}/omnibase_infra"
+    binds_ac: ["AC7"]

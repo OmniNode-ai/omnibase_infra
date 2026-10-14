@@ -120,6 +120,40 @@ for kind, items in (("missing", missing), ("differ", differ), ("stale-py", stale
         print("pkg-tree-diff %s %s %s %s" % (pkg, container, kind, rel))
 PY
 
+# What a node's contract says about where it runs (OMN-18893), run by the host's
+# python3 over one contract.yaml: prints "<contract name or -> <local|runtime>".
+# A node is local only when its contract declares no topic under any event_bus key
+# and no runtime profile (top level or descriptor): it is invoked directly, so no
+# runtime ever logs it. Anything else, and every contract this cannot read (no
+# PyYAML, a parse error, an unexpected shape), is runtime: a node is only waived
+# on evidence, never for want of it.
+IFS= read -r -d '' NODE_CONTRACT_PY <<'PY' || :
+import re, sys
+name, kind = "-", "runtime"
+try:
+    import yaml
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        doc = yaml.safe_load(fh)
+    if isinstance(doc, dict):
+        given = doc.get("name")
+        if isinstance(given, str) and re.fullmatch(r"[A-Za-z0-9_]+", given):
+            name = given
+        def empty(value):
+            return value is None or value == [] or value == {} or value == ""
+        bus = doc.get("event_bus")
+        descriptor = doc.get("descriptor")
+        profiles = [doc.get("runtime_profiles")]
+        if descriptor is not None:
+            profiles.append(descriptor.get("runtime_profiles") if isinstance(descriptor, dict) else "?")
+        no_topics = bus is None or (
+            isinstance(bus, dict) and all(empty(v) for k, v in bus.items() if k != "version"))
+        if no_topics and all(empty(p) for p in profiles):
+            kind = "local"
+except Exception:
+    name, kind = "-", "runtime"
+print(name, kind)
+PY
+
 # The facts a pr-head lab-proof receipt binds (OMN-19566): the proven head, the
 # dev sha it was proven against, their merge base, and the digest of the PR's own
 # diff. The digest is `git diff --no-color --no-ext-diff <merge-base>..<head>`
@@ -137,20 +171,46 @@ pr_subject() { # dir repo pr head base
   git -C "$d" diff --name-only --no-renames "$mb" "$h" | sed "s|^|pr-changed $repo#$pr |"
 }
 
-# changed_path_live, when the caller names no LIVE_GREP: one term per node the
-# PR changes (src/<repo>/nodes/<node>/...) that still exists at the head, so a
-# deleted node is not demanded live. The term is the node name between dots,
+# changed_path_live, when the caller names no LIVE_GREP: one term per runtime node
+# the PR changes (src/<repo>/nodes/<node>/...) that still exists at the head, so a
+# deleted node is not demanded live. The term is the node's names between dots,
 # which a runtime logs only once the node runs: its consumer group
-# (<lane>.<repo>.<node>.consume, on the Auto-wired subscription and group
-# lines) or its own modules' loggers (<repo>.nodes.<node>.handlers...).
-# Discovery ("Discovered contract: <node> (") and registration lines do not
-# match, so a node that is only discovered is not live, and node_x does not
-# match node_x_y. Printed for the reader; the judge reads the mention lines.
+# (<lane>.<repo>.<contract name>.consume, on the Auto-wired subscription and group
+# lines, and the node= field) or its own modules' loggers
+# (<repo>.nodes.<directory>.handlers...). The contract's name need not be the
+# directory's (node_host_reconcile_compute logs as host_reconcile_compute), so the
+# term carries both when they differ (OMN-18893). Discovery ("Discovered contract:
+# <node> (") and registration lines do not match, so a node that is only discovered
+# is not live, and node_x does not match node_x_y. A node whose contract declares no
+# topics and no runtime profile runs in no runtime: it gets no term and is listed by
+# derive_live_not_applicable instead. Printed for the reader; the judge reads the
+# mention lines. The terms are extended regular expressions (grep -E).
+changed_nodes() { # repo: each node directory the PR changes that exists at the head
+  local repo=$1 n
+  for n in $(git -C "$R/$repo" diff --name-only --no-renames origin/dev...HEAD -- "src/$repo/nodes/" | awk -F/ 'NF>=5{print $4}' | sort -u); do
+    if [ -f "$R/$repo/src/$repo/nodes/$n/contract.yaml" ]; then echo "$n"; fi
+  done
+}
+node_contract_facts() { # repo node -> "<contract name or -> <local|runtime>"
+  python3 -c "$NODE_CONTRACT_PY" "$R/$1/src/$1/nodes/$2/contract.yaml" || echo "- runtime"
+}
 derive_live_grep() { # repo... (each checked out at the tree under proof in $R)
-  local repo n
+  local repo n cname kind
   for repo in "$@"; do
-    for n in $(git -C "$R/$repo" diff --name-only --no-renames origin/dev...HEAD -- "src/$repo/nodes/" | awk -F/ 'NF>=5{print $4}' | sort -u); do
-      [ -f "$R/$repo/src/$repo/nodes/$n/contract.yaml" ] && printf '[.]%s[.] ' "$n"
+    for n in $(changed_nodes "$repo"); do
+      read -r cname kind <<<"$(node_contract_facts "$repo" "$n")"
+      if [ "$kind" = local ]; then continue; fi
+      if [ "$cname" = "-" ] || [ "$cname" = "$n" ]; then printf '[.]%s[.] ' "$n"
+      else printf '[.](%s|%s)[.] ' "$n" "$cname"; fi
+    done
+  done
+}
+derive_live_not_applicable() { # repo... -> the changed nodes that run in no runtime
+  local repo n cname kind
+  for repo in "$@"; do
+    for n in $(changed_nodes "$repo"); do
+      read -r cname kind <<<"$(node_contract_facts "$repo" "$n")"
+      if [ "$kind" = local ]; then printf '%s ' "$n"; fi
     done
   done
 }
@@ -398,7 +458,9 @@ print("status",d.get("status"),"healthy",det.get("healthy"),"failed_handlers",de
   docker ps -aq --filter label=com.docker.compose.project=$P | xargs docker inspect -f '{{.Name}} health={{if .State.Health}}{{.State.Health.Status}}{{end}} restarts={{.RestartCount}} {{.State.Status}} exit={{.State.ExitCode}}'
   if [ -z "${LIVE_GREP:-}" ]; then
     LIVE_GREP=$(derive_live_grep $SUBJECTS)
-    echo "live-grep derived from the diff: ${LIVE_GREP:-none (the PR changes no node that exists at its head)}"
+    LIVE_NA=$(derive_live_not_applicable $SUBJECTS)
+    echo "live-grep derived from the diff: ${LIVE_GREP:-none (${LIVE_NA:+every changed node declares no topics and no runtime profile}${LIVE_NA:-the PR changes no node that exists at its head})}"
+    if [ -n "$LIVE_NA" ]; then echo "live-grep not-applicable: ${LIVE_NA% } (contract declares no topics and no runtime profile)"; fi
   fi
   echo "== wiring"
   for c in $M $E; do L=$(docker logs $c 2>&1); echo "$c lines=$(echo "$L" | wc -l | tr -d ' ') autowire-fail=$(echo "$L" | grep -c 'Auto-wiring failed for') dup-dispatcher=$(echo "$L" | grep -c 'Cannot register duplicate dispatcher ID') ERROR=$(echo "$L" | grep -c ERROR) Traceback=$(echo "$L" | grep -c Traceback)"
@@ -409,7 +471,7 @@ print("status",d.get("status"),"healthy",det.get("healthy"),"failed_handlers",de
     echo "$L" | grep 'Auto-wiring failed for' | sed -E 's/.*enforce\): //' | awk -v RS='; ' 'NF{sub(/^ +/, ""); print}' \
       | sed -E "s/^([^:]+): .*failed: (.*)$/  failed-contract-reason $c \\1: \\2/" | cut -c1-260
     # noglob: a derived term carries a bracket class, never a file pattern
-    set -f; for n in ${LIVE_GREP:-}; do echo "  $c mentions $n: $(echo "$L" | grep -c "$n")"; done; set +f; done
+    set -f; for n in ${LIVE_GREP:-}; do echo "  $c mentions $n: $(echo "$L" | grep -cE "$n")"; done; set +f; done
   if [ "$KIND" = prepr-slot ] && { [ -n "${SQL:-}" ] || [ -n "${GROUP_GREP:-}" ]; }; then
     echo "== sql and consumer groups: not read on a prepr slot (its databases and groups live on the dev lane's shared servers)"
   elif [ -n "${SQL:-}" ]; then echo "== sql"; PG=$(docker ps --filter label=com.docker.compose.project=$P --format '{{.Names}}' | grep -m1 postgres)

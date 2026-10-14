@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
+from pydantic import BaseModel
+
 from omnibase_core.models.delegation.wire import (
     EnumDelegationTerminalFailureCause,
     ModelDelegationProvenance,
@@ -297,6 +299,7 @@ class RuntimeDelegationDispatchPort:
         response_format: dict[str, object] | None = None,
         attribution: Mapping[str, str] | None = None,
         model: str | None = None,
+        named_tests: BaseModel | None = None,
     ) -> dict[str, object]:
         """Dispatch a request; guard OMN-18931 faults, pass OMN-19124 routing pins.
 
@@ -309,6 +312,16 @@ class RuntimeDelegationDispatchPort:
         of its own and needs it.
         """
         del attribution
+
+        # Match the consumer's runtime port: the named-test runner operates on
+        # the caller's workspace through the in-process path, not the bus lane.
+        # Refuse before publication rather than accepting and dropping the spec.
+        if named_tests is not None:
+            raise ValueError(
+                "named tests are not run by this dispatch port; a code answer is "
+                "tested against its named tests only on the in-process path, "
+                "by the named-test runner that port is given"
+            )
 
         # OmniMarket's consumer-facing handler always supplies these optional
         # arguments. The deployed bus model does not expose the completion-shaping

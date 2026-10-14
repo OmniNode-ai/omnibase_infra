@@ -6,7 +6,8 @@
 
 Checks:
   D1 — Drizzle table name duplication across omnidash schema files
-  D2 — Topic registration conflicts between omniclaude/topics.py and kafka_boundaries.yaml
+  D2 — Topic registration conflicts between omniclaude/topics.py and omnimarket's
+       node_duplication_sweep/contracts/kafka_boundaries.yaml
 
 Both are BUCKET-2 relational checks (per
 docs/analyses/2026-07-06-validator-diff-scope-and-test-load-audit.md §1): a
@@ -25,7 +26,7 @@ Usage:
 ``--changed-files`` (OMN-14086): optional trigger-narrowing. Omit it (the
 default) to run every requested check unconditionally — this is what
 omnibase_infra's own CI/pre-commit wiring does, since a check comparing
-*sibling* repos (omnidash/omniclaude/onex_change_control) has no meaningful
+*sibling* repos (omnidash/omniclaude/omnimarket) has no meaningful
 signal in omnibase_infra's own diff. Pass it when this script is invoked from
 a context where the changed-file list DOES cover the relevant sibling paths
 (e.g. a future wiring inside omnidash's or omniclaude's own CI) — a check is
@@ -51,6 +52,12 @@ from typing import Any
 ALL_CHECKS = ["D1", "D2"]
 _SEVERITY_ORDER = {"error": 2, "warning": 1}
 
+# OMN-20949: the Kafka boundary manifest ships beside omnimarket's
+# node_duplication_sweep; D2 reads it there and from no change-control checkout.
+_D2_MANIFEST_RELPATH = (
+    "src/omnimarket/nodes/node_duplication_sweep/contracts/kafka_boundaries.yaml"
+)
+
 # OMN-14086: path substrings that make a --changed-files entry "relevant" to a
 # given check. Substring (not exact-prefix) match so this stays correct
 # whether the caller passes omni_home-relative paths, sibling-repo-relative
@@ -59,7 +66,7 @@ _RELEVANT_SUBSTRINGS: dict[str, tuple[str, ...]] = {
     "D1": ("omnidash/shared/",),
     "D2": (
         "omniclaude/src/omniclaude/hooks/topics.py",
-        "onex_change_control/src/onex_change_control/boundaries/kafka_boundaries.yaml",
+        f"omnimarket/{_D2_MANIFEST_RELPATH}",
     ),
 }
 
@@ -142,19 +149,12 @@ def check_d1_drizzle_tables(omni_home: Path) -> dict:
     }
 
 
-def check_d2_topic_conflicts(omni_home: Path) -> dict:
+def check_d2_topic_conflicts(sweep_home: Path) -> dict:
     """D2: Topic registration conflicts between omniclaude topics.py and kafka_boundaries.yaml."""
     topics_file = (
-        omni_home / "omniclaude" / "src" / "omniclaude" / "hooks" / "topics.py"
+        sweep_home / "omniclaude" / "src" / "omniclaude" / "hooks" / "topics.py"
     )
-    boundaries_file = (
-        omni_home
-        / "onex_change_control"
-        / "src"
-        / "onex_change_control"
-        / "boundaries"
-        / "kafka_boundaries.yaml"
-    )
+    boundaries_file = sweep_home / "omnimarket" / _D2_MANIFEST_RELPATH
 
     missing = []
     if not topics_file.is_file():

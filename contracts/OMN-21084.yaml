@@ -1,0 +1,62 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21084
+title: The release train's version bump moves pyproject.toml and uv.lock together
+summary: The release train's bump of a repo's version line wrote pyproject.toml alone, so the repo's own uv.lock entry stayed at the old version and every job that runs uv sync --locked failed on the release PR (omnimarket#3888, release 0.4.314). `release_train.py bump-version` moves both files and refuses a lockfile with no entry for the root package, and release-train-nightly.yml calls it. This tooling change is bound to this ticket, not to the release-cut ticket, because a release cut's changelog criterion holds only on a release head.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21084-bump-writes-both
+    statement: The bump writes the new version to both manifest and lockfile.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: `release_train.py bump-version` writes the new version to both `pyproject.toml` and the root package entry in `uv.lock` -- falsifier: uv run pytest on the release_train bump-version tests in omnibase_infra, which assert both files carry the new version after the command'
+  - id: req-omn21084-workflow-calls-bump
+    statement: The nightly workflow uses the subcommand.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the release-train workflow calls bump-version instead of editing pyproject.toml alone -- falsifier: uv run pytest on the workflow test that reads release-train-nightly.yml and asserts the bump step invokes `release_train.py bump-version`'
+  - id: req-omn21084-lock-passes-check
+    statement: A lock written by the bump is accepted by uv.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: a lock written by the bump passes `uv lock --check` -- falsifier: uv run pytest on the test that runs bump-version on a fixture repo and then `uv lock --check`, expecting exit 0'
+evidence_requirements:
+  - kind: tests
+    description: Bump-version writes the new version to pyproject.toml and the root package entry in uv.lock, touches no other lock entry, and prints both paths; the bump of the release head's omnimarket block equals the block uv wrote.
+    command: uv run --frozen pytest tests/scripts/test_release_train_nightly.py::TestTheVersionBumpMovesTheLockfileWithTheManifest::test_the_bump_writes_the_manifest_and_the_lockfile_together tests/scripts/test_release_train_nightly.py::TestTheVersionBumpMovesTheLockfileWithTheManifest::test_the_bump_touches_only_the_roots_own_entry tests/scripts/test_release_train_nightly.py::TestTheVersionBumpMovesTheLockfileWithTheManifest::test_the_subcommand_prints_what_it_wrote_one_path_per_line tests/ci/test_release_train_bump_lockfile_omn18595.py::test_the_trains_bump_of_the_release_heads_lock_equals_the_lock_uv_wrote -q -p no:randomly -n 0 --no-cov
+  - kind: tests
+    description: The release-train-nightly workflow bumps through release_train.py bump-version, carries no inline manifest rewrite, and stages what the subcommand printed.
+    command: uv run --frozen pytest tests/scripts/test_release_train_nightly.py::TestTheVersionBumpMovesTheLockfileWithTheManifest::test_the_workflow_bumps_through_the_subcommand_and_commits_what_it_wrote -q -p no:randomly -n 0 --no-cov
+  - kind: tests
+    description: uv writes a lock for a throwaway project, bump-version moves the version, and uv lock --check exits 0; a manifest-only bump of the same project is refused by uv lock --check.
+    command: uv run --frozen pytest tests/ci/test_release_train_bump_uv_lock_check_omn21084.py -q -p no:randomly -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21084-ac1
+    description: Bump-version writes the new version to pyproject.toml and the root package entry in uv.lock, touches no other lock entry, and prints both paths; the bump of the release head's omnimarket block equals the block uv wrote.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_release_train_nightly.py::TestTheVersionBumpMovesTheLockfileWithTheManifest::test_the_bump_writes_the_manifest_and_the_lockfile_together tests/scripts/test_release_train_nightly.py::TestTheVersionBumpMovesTheLockfileWithTheManifest::test_the_bump_touches_only_the_roots_own_entry tests/scripts/test_release_train_nightly.py::TestTheVersionBumpMovesTheLockfileWithTheManifest::test_the_subcommand_prints_what_it_wrote_one_path_per_line tests/ci/test_release_train_bump_lockfile_omn18595.py::test_the_trains_bump_of_the_release_heads_lock_equals_the_lock_uv_wrote -q -p no:randomly -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn21084-ac2
+    description: The release-train-nightly workflow bumps through release_train.py bump-version, carries no inline manifest rewrite, and stages what the subcommand printed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_release_train_nightly.py::TestTheVersionBumpMovesTheLockfileWithTheManifest::test_the_workflow_bumps_through_the_subcommand_and_commits_what_it_wrote -q -p no:randomly -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn21084-ac3
+    description: uv writes a lock for a throwaway project, bump-version moves the version, and uv lock --check exits 0; a manifest-only bump of the same project is refused by uv lock --check.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/ci/test_release_train_bump_uv_lock_check_omn21084.py -q -p no:randomly -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]

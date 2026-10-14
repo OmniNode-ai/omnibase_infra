@@ -4,6 +4,9 @@
 
 from __future__ import annotations
 
+import shlex
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -15,7 +18,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PRECOMMIT_CONFIG = REPO_ROOT / ".pre-commit-config.yaml"
 
 # Hooks whose behaviour lives in a repository other than onex_change_control.
-MOVED_HOOK_IDS = frozenset({"no-untracked-todos"})
+MOVED_HOOK_IDS = frozenset({"no-untracked-todos", "no-untyped-metadata"})
+
+NO_UNTYPED_METADATA_MODULE = (
+    "omnibase_core.nodes.node_no_untyped_metadata_check_compute"
+    ".runtime_no_untyped_metadata_check"
+)
 
 
 def _mapping(value: object) -> dict[str, object]:
@@ -70,3 +78,54 @@ def test_no_moved_hook_is_in_the_onex_change_control_block() -> None:
                 hook_id = hook["id"]
                 assert isinstance(hook_id, str)
                 assert hook_id not in MOVED_HOOK_IDS
+
+
+def _no_untyped_metadata_entry() -> str:
+    matches = _matching_hooks("no-untyped-metadata")
+    assert len(matches) == 1
+    repo, hook = matches[0]
+    assert repo == "local"
+    entry = hook["entry"]
+    assert isinstance(entry, str)
+    return entry
+
+
+def test_no_untyped_metadata_is_a_local_hook_running_the_core_node() -> None:
+    """Catch a return to the onex_change_control console script."""
+    entry = _no_untyped_metadata_entry()
+    assert NO_UNTYPED_METADATA_MODULE in entry
+    assert "check-no-untyped-metadata" not in entry
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_returncode"),
+    [
+        pytest.param(
+            "metadata: dict[str, Any] = Field(default_factory=dict)\n",
+            1,
+            id="untyped-metadata-fails",
+        ),
+        pytest.param("metadata: str = ''\n", 0, id="typed-metadata-passes"),
+    ],
+)
+def test_no_untyped_metadata_entry_module_judges_a_file(
+    tmp_path: Path, source: str, expected_returncode: int
+) -> None:
+    """The module the hook names is importable here and fails closed on a violation."""
+    assert NO_UNTYPED_METADATA_MODULE in _no_untyped_metadata_entry()
+    target = tmp_path / "sample.py"
+    target.write_text(source, encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, "-m", NO_UNTYPED_METADATA_MODULE, str(target)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == expected_returncode, result.stdout + result.stderr
+
+
+def test_no_untyped_metadata_entry_is_an_executable_command_line() -> None:
+    """The entry must tokenise to a runnable command that ends at the module name."""
+    tokens = shlex.split(_no_untyped_metadata_entry())
+    assert tokens[-1] == NO_UNTYPED_METADATA_MODULE
+    assert tokens[tokens.index("-m") + 1] == NO_UNTYPED_METADATA_MODULE

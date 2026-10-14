@@ -23,11 +23,13 @@ _CREATE = "0000_create_claude_hook_events.sql"
 _GRANT = "0001_grant_omninode_runtime_claude_hook_events.sql"
 _GOAL = "0005_add_goal_id.sql"
 _FIELDS = "0006_add_lane_model_host_exit_code.sql"
+_REFUSAL = "0007_add_guard_refusal_and_token_usage.sql"
 _SHA256 = {
     _CREATE: "388faf7f8d683a28341b306a5d67dc208b98aaf5b8f39789b97361cba4ed72ae",
     _GRANT: "c69298981a4a481d394c0f9cbf9c5374904644981073afa84ce87ae4ae4182d0",
     _GOAL: "14f1c5e67a51e1d30da1b21c5267de497e0bec7d2e443471a45d905b7de3708f",
     _FIELDS: "ec509c4d99d8daaf831c2ea4eebec209f64bfd45e57410b5916739c1e91b078b",
+    _REFUSAL: "9bb7e33b532d087da52bab2e93c84ae3b38f75772b6ad1ce46a7d81338b00975",
 }
 _TABLES = ("claude_agent_spans", "claude_hook_events")
 
@@ -40,7 +42,7 @@ def _statements(filename: str) -> str:
     )
 
 
-@pytest.mark.parametrize("filename", [_CREATE, _GRANT, _GOAL, _FIELDS])
+@pytest.mark.parametrize("filename", [_CREATE, _GRANT, _GOAL, _FIELDS, _REFUSAL])
 def test_vendor_bytes_and_manifest_binding_are_exact(filename: str) -> None:
     artifact_path = f"nodes/{_NODE}/{filename}"
     assert (
@@ -68,6 +70,7 @@ def test_migration_classes_match_the_classifier() -> None:
     assert classes[f"forward/nodes/{_NODE}/{_GRANT}"] == "expand-only"
     assert classes[f"forward/nodes/{_NODE}/{_GOAL}"] == "expand-only"
     assert classes[f"forward/nodes/{_NODE}/{_FIELDS}"] == "expand-only"
+    assert classes[f"forward/nodes/{_NODE}/{_REFUSAL}"] == "expand-only"
 
 
 def test_the_goal_migration_adds_nullable_uuid_columns_and_a_partial_index() -> None:
@@ -184,7 +187,7 @@ def test_every_issued_privilege_is_asserted_including_schema_usage() -> None:
         assert f"AS {table}_cursor_sequence_usage_assertion" in grants
 
 
-@pytest.mark.parametrize("filename", [_CREATE, _GRANT, _GOAL, _FIELDS])
+@pytest.mark.parametrize("filename", [_CREATE, _GRANT, _GOAL, _FIELDS, _REFUSAL])
 @pytest.mark.parametrize(
     "profile", ["local", "onex-dev", "onex-prod", "stability-test"]
 )
@@ -227,6 +230,36 @@ def test_the_fields_migration_adds_four_nullable_columns() -> None:
         assert re.search(
             rf"ALTER TABLE omninode_internal\.claude_hook_events\s+"
             rf"ADD COLUMN IF NOT EXISTS {column} {kind};",
+            sql,
+        )
+    assert _grants(sql) == set()
+
+
+def test_the_refusal_migration_adds_guard_and_token_usage_columns() -> None:
+    """OMN-20381: the omnimarket 0007, vendored byte for byte, declares its shape."""
+    sql = _statements(_REFUSAL)
+    for column, kind in (
+        ("guard", "TEXT"),
+        ("refusal_reason", "TEXT"),
+        ("input_tokens", "BIGINT"),
+        ("output_tokens", "BIGINT"),
+        ("cache_creation_input_tokens", "BIGINT"),
+        ("cache_read_input_tokens", "BIGINT"),
+        ("assistant_message_count", "INTEGER"),
+    ):
+        assert re.search(
+            rf"ALTER TABLE omninode_internal\.claude_hook_events\s+"
+            rf"ADD COLUMN IF NOT EXISTS {column} {kind};",
+            sql,
+        )
+    for index in (
+        "idx_claude_hook_events_guard_refusal",
+        "idx_claude_hook_events_refusal_call",
+        "idx_claude_hook_events_assistant_usage",
+    ):
+        assert re.search(
+            rf"CREATE INDEX IF NOT EXISTS {index}\s+"
+            r"ON omninode_internal\.claude_hook_events",
             sql,
         )
     assert _grants(sql) == set()
