@@ -33,6 +33,14 @@ MIGRATION_SETS = [
     ("docker", REPO_ROOT / "docker" / "migrations" / "forward"),
     ("src", REPO_ROOT / "src" / "omnibase_infra" / "migrations" / "forward"),
 ]
+# A freshly started postgres container can pass pg_isready and accept TCP, then
+# reset the connection while its init phase restarts the server.
+CONNECT_ATTEMPTS = 10
+CONNECT_RETRY_DELAY_SECONDS = 2.0
+TRANSIENT_CONNECT_ERRORS: tuple[type[BaseException], ...] = (
+    ConnectionError,
+    asyncpg.CannotConnectNowError,
+)
 CREATE_DATABASE_DIRECTIVE = re.compile(
     r"^--\s*onex-create-database:\s*([A-Za-z_][A-Za-z0-9_-]*)\s*$",
     re.IGNORECASE,
@@ -332,9 +340,30 @@ async def apply_migration(
     print(f"  applied: {mid}")
 
 
+async def connect_with_retry(
+    db_url: str,
+    *,
+    attempts: int = CONNECT_ATTEMPTS,
+    delay_seconds: float = CONNECT_RETRY_DELAY_SECONDS,
+) -> asyncpg.Connection:
+    """Open the first connection, retrying while the server is still starting."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return await asyncpg.connect(db_url)
+        except TRANSIENT_CONNECT_ERRORS as exc:
+            if attempt == attempts:
+                raise
+            print(
+                f"  postgres not ready (attempt {attempt}/{attempts}: "
+                f"{type(exc).__name__}); retrying in {delay_seconds}s"
+            )
+            await asyncio.sleep(delay_seconds)
+    raise AssertionError("unreachable")
+
+
 async def run(db_url: str, dry_run: bool, target: int | None) -> int:
     """Apply all pending migrations. Returns count of migrations applied."""
-    base_conn = await asyncpg.connect(db_url)
+    base_conn = await connect_with_retry(db_url)
     conns: dict[str, asyncpg.Connection] = {"": base_conn}
     applied_by_database: dict[str, set[str]] = {}
 

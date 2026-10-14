@@ -126,3 +126,64 @@ class TestCreateDatabaseDirective:
             runner.parse_create_database_directive(
                 "--   onex-create-database: bad/name\nSELECT 1;"
             )
+
+
+@pytest.mark.unit
+class TestConnectWithRetry:
+    def test_retries_a_reset_during_startup_then_connects(self, monkeypatch):
+        import asyncio
+
+        runner = load_runner()
+        calls: list[str] = []
+        sentinel = object()
+
+        async def fake_connect(db_url):
+            calls.append(db_url)
+            if len(calls) < 3:
+                raise ConnectionResetError(104, "Connection reset by peer")
+            return sentinel
+
+        monkeypatch.setattr(runner.asyncpg, "connect", fake_connect)
+        conn = asyncio.run(
+            runner.connect_with_retry("postgresql://db", attempts=5, delay_seconds=0)
+        )
+        assert conn is sentinel
+        assert len(calls) == 3
+
+    def test_raises_after_the_last_attempt(self, monkeypatch):
+        import asyncio
+
+        runner = load_runner()
+        calls: list[str] = []
+
+        async def fake_connect(db_url):
+            calls.append(db_url)
+            raise ConnectionResetError(104, "Connection reset by peer")
+
+        monkeypatch.setattr(runner.asyncpg, "connect", fake_connect)
+        with pytest.raises(ConnectionResetError):
+            asyncio.run(
+                runner.connect_with_retry(
+                    "postgresql://db", attempts=3, delay_seconds=0
+                )
+            )
+        assert len(calls) == 3
+
+    def test_does_not_retry_an_auth_failure(self, monkeypatch):
+        import asyncio
+
+        runner = load_runner()
+        calls: list[str] = []
+
+        async def fake_connect(db_url):
+            calls.append(db_url)
+            raise runner.asyncpg.InvalidPasswordError("bad password")
+
+        monkeypatch.setattr(runner.asyncpg, "connect", fake_connect)
+        with pytest.raises(runner.asyncpg.InvalidPasswordError):
+            asyncio.run(
+                runner.connect_with_retry(
+                    "postgresql://db", attempts=3, delay_seconds=0
+                )
+            )
+        assert len(calls) == 1

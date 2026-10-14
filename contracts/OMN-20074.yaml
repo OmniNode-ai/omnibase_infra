@@ -60,6 +60,11 @@ requirements:
     acceptance:
       - id: AC12
         statement: 'AC12: branch-protection-audit.yml fetches and runs no change-control auditor and keeps its orphan and parity checks, check_deploy_scope_dod.py reads this repository''s contracts/ and fails a cited ticket with no contract there, and run_contract_sweep.py and verify_error_triage_e2e.py are deleted -- falsifier: uv run pytest tests/ci/test_no_occ_residual_omn20074.py tests/ci/test_branch_protection_single_auditor.py tests/ci/test_check_deploy_scope_dod.py -q fails at the merge base'
+  - id: req-occ-residual-s6-infra-migration-connect
+    statement: scripts/run-migrations.py must retry its first postgres connection while a freshly started server resets it, so Runtime Boot Smoke (compose) does not fail on the startup race.
+    acceptance:
+      - id: AC13
+        statement: 'AC13: connect_with_retry retries ConnectionError and CannotConnectNowError up to its attempt limit, re-raises the last error, and does not retry an authentication failure -- falsifier: uv run pytest tests/unit/scripts/test_run_migrations.py -q -k ConnectWithRetry fails at the merge base'
 evidence_requirements:
   - kind: tests
     description: No workflow calls an OCC reusable workflow, waits on occ-preflight or requires an OCC companion context.
@@ -262,3 +267,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC12
+  - id: dod-occ-residual-s6-infra-ac13
+    description: The migration runner retries a connection reset during postgres startup and fails on an authentication error at once.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/scripts/test_run_migrations.py -q -k ConnectWithRetry
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC13
