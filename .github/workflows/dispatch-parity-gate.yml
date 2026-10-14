@@ -110,9 +110,9 @@ jobs:
           uv run python -m tests.fixtures.dispatch_parity.harness --out /tmp/parity-live.json
           uv run python - <<'PY'
           import json, sys
-          from tests.fixtures.dispatch_parity.harness import strip_volatile_header_fields
+          from tests.fixtures.dispatch_parity.harness import load_selection_oracle, strip_volatile_header_fields
           committed = strip_volatile_header_fields(
-              json.load(open("tests/fixtures/dispatch_parity/selection-oracle-v2.json"))
+              load_selection_oracle()
           )
           live = strip_volatile_header_fields(json.load(open("/tmp/parity-live.json")))
           if json.dumps(committed, sort_keys=True) != json.dumps(live, sort_keys=True):
