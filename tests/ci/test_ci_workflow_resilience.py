@@ -54,8 +54,10 @@ CODEQL_V4_SHA = "dc73d59c2d7bd4f8194098a91219eeee6d8a1719"
 # release-sync main move -- reachable from neither dev nor main after that
 # move landed) to omniclaude dev/main's current tip. Confirmed no checkout
 # step was added between the two commits (diff-reviewed): the invariant this
-# constant pins still holds at the new sha.
-OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "4358450ccbba0cee11e390208dd0b8b1728e94ab"
+# constant pins still holds at the new sha. Re-pinned again to ed4300f8a for
+# the Dependabot bump (#4948); that commit only retires the skip-receipt
+# registry (OMN-20074) and adds no checkout step.
+OMNICLAUDE_REJECT_SKIP_NO_CHECKOUT_SHA = "ed4300f8a427ead7f099daf69cedc012907cdbd3"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:

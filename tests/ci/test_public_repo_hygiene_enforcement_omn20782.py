@@ -35,10 +35,11 @@ CONFIG = REPO_ROOT / ".public-repo-hygiene.yaml"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "public-repo-hygiene.yml"
 PRECOMMIT = REPO_ROOT / ".pre-commit-config.yaml"
 
-# omniclaude dev 0c9f9146d, a descendant of 6e47aa311 and of 9a58ef705 (added-lines
-# scope). It carries the deployment-config job and hook (OMN-20923) that the
-# required context public-repo-hygiene / deployment-config comes from (OMN-20940).
-GATE_REV = "0c9f9146d8dd0446fc5c10952aa57247b3a880ae"
+# omniclaude dev ed4300f8a, a descendant of 0c9f9146d, of 6e47aa311 and of
+# 9a58ef705 (added-lines scope). It carries the deployment-config job and hook
+# (OMN-20923) that the required context public-repo-hygiene / deployment-config
+# comes from (OMN-20940).
+GATE_REV = "ed4300f8a427ead7f099daf69cedc012907cdbd3"
 # The revision the recorded gate run below was made at (6e47aa311). The recording
 # is a captured response, so it keeps its own revision; the pin moves on.
 RECORDED_REV = "6e47aa311ac5d177d116d9597b07966a233d2463"
