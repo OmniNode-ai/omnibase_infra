@@ -1,0 +1,62 @@
+schema_version: "1.0.0"
+ticket_id: OMN-16632
+title: The onex wrapper and the workspace reconciler resolve the workspace from OMNIBASE_PATH, never an inherited OMNI_HOME
+summary: scripts/onex preferred an inherited OMNI_HOME over its own location, and scripts/reconcile-workspace-venvs.sh read OMNI_HOME, so a tester's later shell with a stale OMNI_HOME pointed the CLI at the operator's private workspace. The wrapper now resolves OMNIBASE_PATH, else its own location; the reconciler takes OMNIBASE_PATH, --workspace or --omni-home; pull-all.sh passes its root as --workspace. reconcile_verify_movement.py keeps OMNI_HOME on its ledger-message path (internal orchestration).
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn16632-wrapper
+    statement: The wrapper resolves its workspace from OMNIBASE_PATH, else its own location.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: with OMNI_HOME set to a decoy tree and OMNIBASE_PATH unset, scripts/onex runs its own tree venv and hands the CLI its own tree as OMNIBASE_PATH -- falsifier: uv run pytest tests/scripts/test_onex_wrapper.py::test_inherited_omni_home_never_selects_the_workspace, which runs the decoy venv entrypoint if the wrapper reads OMNI_HOME'
+  - id: req-omn16632-reconciler
+    statement: The reconciler takes its root from --workspace, --omni-home or OMNIBASE_PATH and never from an inherited OMNI_HOME.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: with OMNI_HOME set and OMNIBASE_PATH unset the reconciler exits INDETERMINATE naming OMNIBASE_PATH, and --workspace and --omni-home both beat OMNIBASE_PATH -- falsifier: uv run pytest on the reconcile-workspace-venvs tests named below'
+  - id: req-omn16632-callers
+    statement: The in-repo caller of the reconciler passes the root explicitly.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: pull-all.sh invokes the reconciler with --workspace <root> -- falsifier: uv run pytest on the pull-all reconcile-after-pull test, which asserts the recorded argv'
+evidence_requirements:
+  - kind: tests
+    description: The wrapper ignores an inherited OMNI_HOME, honours OMNIBASE_PATH, and otherwise resolves its own tree.
+    command: uv run --frozen pytest tests/scripts/test_onex_wrapper.py::test_inherited_omni_home_never_selects_the_workspace tests/scripts/test_onex_wrapper.py::test_explicit_omnibase_path_wins_over_the_derived_root tests/scripts/test_onex_wrapper.py::test_an_explicit_omnibase_path_is_not_overwritten -q -p no:randomly -n 0 --no-cov
+  - kind: tests
+    description: The reconciler refuses an inherited OMNI_HOME as a root, and takes --workspace and --omni-home over OMNIBASE_PATH.
+    command: uv run --frozen pytest tests/scripts/test_reconcile_workspace_venvs.py::test_inherited_omni_home_never_selects_the_workspace tests/scripts/test_reconcile_workspace_venvs.py::test_explicit_root_flag_wins_over_omnibase_path tests/scripts/test_reconcile_workspace_venvs.py::test_unset_workspace_is_indeterminate_and_names_the_variable -q -p no:randomly -n 0 --no-cov
+  - kind: tests
+    description: pull-all.sh hands the reconciler the workspace root as --workspace.
+    command: uv run --frozen pytest tests/unit/scripts/test_pull_all.py::TestOmnimarketDriftRepair::test_repairs_omnimarket_venv_drift_after_successful_pull -q -p no:randomly -n 0 --no-cov
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn16632-ac1
+    description: The wrapper ignores an inherited OMNI_HOME, honours OMNIBASE_PATH, and otherwise resolves its own tree.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_onex_wrapper.py::test_inherited_omni_home_never_selects_the_workspace tests/scripts/test_onex_wrapper.py::test_explicit_omnibase_path_wins_over_the_derived_root tests/scripts/test_onex_wrapper.py::test_an_explicit_omnibase_path_is_not_overwritten -q -p no:randomly -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn16632-ac2
+    description: The reconciler refuses an inherited OMNI_HOME as a root, and takes --workspace and --omni-home over OMNIBASE_PATH.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/scripts/test_reconcile_workspace_venvs.py::test_inherited_omni_home_never_selects_the_workspace tests/scripts/test_reconcile_workspace_venvs.py::test_explicit_root_flag_wins_over_omnibase_path tests/scripts/test_reconcile_workspace_venvs.py::test_unset_workspace_is_indeterminate_and_names_the_variable -q -p no:randomly -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
+  - id: dod-omn16632-ac3
+    description: pull-all.sh hands the reconciler the workspace root as --workspace.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/unit/scripts/test_pull_all.py::TestOmnimarketDriftRepair::test_repairs_omnimarket_venv_drift_after_successful_pull -q -p no:randomly -n 0 --no-cov
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]

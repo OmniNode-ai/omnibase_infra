@@ -49,34 +49,34 @@ def _make_ordering_install_shim(path: Path) -> Path:
 
 
 def _run(tmp_path: Path, *, check_exit: int) -> list[str]:
-    omni_home = tmp_path / "omni_home"
-    _make_clone(omni_home, "omnimarket")
-    infra = omni_home / "omnibase_infra"
+    workspace = tmp_path / "workspace"
+    _make_clone(workspace, "omnimarket")
+    infra = workspace / "omnibase_infra"
     (infra / "scripts").mkdir(parents=True)
     (infra / "uv.lock").write_text("lock-v1\n", encoding="utf-8")
-    (omni_home / "omniclaude").mkdir(parents=True)
-    (omni_home / "omniclaude" / "uv.lock").write_text("c\n", encoding="utf-8")
+    (workspace / "omniclaude").mkdir(parents=True)
+    (workspace / "omniclaude" / "uv.lock").write_text("c\n", encoding="utf-8")
     _make_fake_venv(infra / ".venv", None)
-    dispatch_venv = omni_home / ".onex-dispatch-venv"
+    dispatch_venv = workspace / ".onex-dispatch-venv"
     _make_fake_venv(dispatch_venv, "0" * _SHA_LEN)
-    bin_dir = omni_home / "shimbin"
-    log = omni_home / "order.log"
+    bin_dir = workspace / "shimbin"
+    log = workspace / "order.log"
     install = infra / "scripts" / "install-node-skill-package.sh"
     _make_uv_shim(bin_dir, check_exit=check_exit)
     _make_ordering_install_shim(install)
     env = {
         **os.environ,
-        "OMNI_HOME": str(omni_home),
+        "OMNIBASE_PATH": str(workspace),
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "UV_SHIM_LOG": str(log),
         "ONEX_RECONCILE_INSTALL_SCRIPT": str(install),
-        "CLAUDE_PLUGIN_DATA": str(omni_home / "no-such-plugin-data"),
+        "CLAUDE_PLUGIN_DATA": str(workspace / "no-such-plugin-data"),
     }
     result = subprocess.run(
         ["bash", str(_SCRIPT)], capture_output=True, text=True, env=env, check=False
     )
     assert result.returncode == 0, result.stderr
-    assert _git("rev-parse", "HEAD", cwd=omni_home / "omnimarket")
+    assert _git("rev-parse", "HEAD", cwd=workspace / "omnimarket")
     return [
         line
         for line in _read_lines(log)
