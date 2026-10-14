@@ -30,6 +30,17 @@ repos:
         files: ^(\.github/workflows/imperative-contract-guard\.yml|imperative-contract-allowlist\.yaml|tests/ci/test_imperative_contract_guard_caller_omn21004\.py|tests/ci/fixtures/imperative_contract_guard_omn21004\.json|contracts/OMN-21004\.yaml|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-20864: a pin bump whose tests pass is evidence enough. The plugin pin
+      # cascade renders its own contract, floors fixture and probe, and refuses a
+      # diff that is not pin-only. SYNC with the ci.yml lint step "Plugin pin
+      # cascade renders its own evidence (OMN-20864)".
+      - id: plugin-pin-cascade-evidence
+        name: Plugin pin cascade renders its own evidence (OMN-20864)
+        entry: uv run --frozen pytest tests/ci/test_plugin_pin_cascade_evidence_omn20864.py tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q -n 0 --no-cov -p no:randomly
+        language: system
+        files: ^(\.github/workflows/(plugin-pin-cascade|ci)\.yml|docker/Dockerfile\.runtime|tests/ci/test_plugin_pin_cascade_evidence_omn20864\.py|tests/unit/docker/test_runtime_plugin_pin_floors_omn20864\.py|tests/ci/fixtures/runtime_plugin_pin_floors_omn20864\.yaml|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-20910: a review voter's model is declared only in the contract
       # overlay. SYNC with the ci.yml lint step "Review voter model comes from
       # the overlay (OMN-20910)".

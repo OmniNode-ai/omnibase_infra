@@ -319,6 +319,10 @@ jobs:
       - name: Caller-owned imperative guard regression (OMN-21004)
         run: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
 
+      # OMN-20864: paired with the plugin-pin-cascade-evidence pre-commit hook.
+      - name: Plugin pin cascade renders its own evidence (OMN-20864)
+        run: uv run --frozen pytest tests/ci/test_plugin_pin_cascade_evidence_omn20864.py tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q -n 0 --no-cov -p no:randomly
+
       # OMN-20910: paired with the review-voter-model-from-overlay pre-commit hook.
       - name: Review voter model comes from the overlay (OMN-20910)
         run: uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -p no:randomly

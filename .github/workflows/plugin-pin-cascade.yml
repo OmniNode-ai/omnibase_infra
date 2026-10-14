@@ -230,12 +230,111 @@ jobs:
             echo "changed=true" >> $GITHUB_OUTPUT
           fi
 
+      # OMN-20864: a pin bump whose tests pass is evidence enough (operator ruling
+      # 2026-10-12T22:05:22Z). The Repo Evidence Gate still needs a contract for the
+      # cited ticket that differs from the merge base, a changed test-side path and
+      # a bound check that fails at the merge base; docker/Dockerfile.runtime is a
+      # deploy-scoped path, so deploy-gate also needs a falsifiable probe. Render all
+      # of it here, from the pins the cascade just wrote, the way
+      # omnimarket-contract-pin-refresh.yml does (OMN-20068), so no lane writes
+      # per-cascade evidence by hand (omnibase_infra#4799).
+      #
+      # The render is conditioned on the diff, never on who opened the PR: the
+      # working tree must differ from the base in docker/Dockerfile.runtime alone,
+      # and every changed line there must be a plugin pin. Anything else is not a
+      # pin-only change and renders nothing.
+      - name: Render the pin evidence (OMN-20864)
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          PKG: ${{ steps.inputs.outputs.package }}
+          VER: ${{ steps.inputs.outputs.version }}
+          TICKET: ${{ steps.inputs.outputs.ticket }}
+        run: |
+          set -euo pipefail
+          DOCKERFILE=docker/Dockerfile.runtime
+          FIXTURE=tests/ci/fixtures/runtime_plugin_pin_floors_omn20864.yaml
+          STATUS="$(git status --porcelain --untracked-files=all)"
+          if [ "$STATUS" != " M $DOCKERFILE" ]; then
+            echo "::error::OMN-20864: not a pin-only change; the cascade changed paths other than $DOCKERFILE:" >&2
+            echo "$STATUS" >&2
+            exit 1
+          fi
+          PIN_LINE='^"?omninode-[A-Za-z0-9-]+(>=[0-9]+\.[0-9]+\.[0-9]+,<[0-9]+\.[0-9]+\.[0-9]+|==[0-9]+\.[0-9]+\.[0-9]+)"( \\)?$'
+          NON_PIN="$(git diff -U0 -- "$DOCKERFILE" | grep -E '^[+-]' | grep -vE '^(\+\+\+|---) ' \
+            | sed -E 's/^[+-][[:space:]]*//' | grep -vE "$PIN_LINE" || true)"
+          if [ -n "$NON_PIN" ]; then
+            echo "::error::OMN-20864: not a pin-only change; $DOCKERFILE changed lines that are not plugin pins:" >&2
+            echo "$NON_PIN" >&2
+            exit 1
+          fi
+          PIN="$(grep -oE "\"${PKG}(>=[0-9]+\.[0-9]+\.[0-9]+,<[0-9]+\.[0-9]+\.[0-9]+|==[0-9]+\.[0-9]+\.[0-9]+)\"" "$DOCKERFILE" || true)"
+          if [ "$(printf '%s\n' "$PIN" | grep -c .)" != 1 ]; then
+            echo "::error::OMN-20864: expected exactly one ${PKG} pin in $DOCKERFILE, found: ${PIN:-none}" >&2
+            exit 1
+          fi
+          {
+            echo "# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc."
+            echo "# SPDX-License-Identifier: MIT"
+            echo "# Written by .github/workflows/plugin-pin-cascade.yml on each cascade: the floor"
+            echo "# of every plugin pin tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py"
+            echo "# expects docker/Dockerfile.runtime to carry (OMN-20864)."
+            echo "floors:"
+            grep -oE '"omninode-[A-Za-z0-9-]+(>=|==)[0-9]+\.[0-9]+\.[0-9]+' "$DOCKERFILE" \
+              | sed -E 's/^"([^>=]+)(>=|==)(.*)$/  \1: "\3"/' | sort
+          } > "$FIXTURE"
+          PIN_BARE="${PIN//\"/}"
+          CHECK="env -u PYTHONPATH uv run --frozen pytest tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q"
+          PROBE="gh api \"repos/OmniNode-ai/omnibase_infra/contents/docker/Dockerfile.runtime?ref=\$(git rev-parse HEAD)\" --jq .content | base64 -d | grep -cF '${PIN}'"
+          cat > "contracts/${TICKET}.yaml" <<EOF_CONTRACT
+          schema_version: "1.0.0"
+          ticket_id: ${TICKET}
+          title: "The runtime image pins ${PKG} at ${VER} from the plugin pin cascade"
+          summary: The plugin pin cascade moved the ${PKG} pin in docker/Dockerfile.runtime to ${PIN_BARE}, a value the merge base does not carry.
+          is_seam_ticket: false
+          interface_change: false
+          interfaces_touched: []
+          requirements:
+            - id: req-plugin-pin-cascade
+              statement: docker/Dockerfile.runtime carries the plugin pins this cascade produced.
+              acceptance:
+                - id: AC1
+                  statement: "AC1: docker/Dockerfile.runtime pins ${PKG} as ${PIN_BARE} and every plugin at or above its recorded floor -- falsifier: ${CHECK}"
+          evidence_requirements:
+            - kind: tests
+              description: The unit test reads the plugin pins in docker/Dockerfile.runtime and asserts each floor is at least the one this cascade recorded for ${PKG} ${VER}.
+              command: "${CHECK}"
+          emergency_bypass:
+            enabled: false
+            justification: ''
+            follow_up_ticket_id: ''
+          dod_evidence:
+            - id: dod-plugin-pin-cascade-floors
+              description: The runtime image pins every plugin at or above the floor this cascade recorded, including ${PKG} ${PIN_BARE}.
+              source: manual
+              checks:
+                - check_type: test_passes
+                  check_value: "${CHECK}"
+                  cwd: \${OMNI_HOME}/omnibase_infra
+              binds_ac: [AC1]
+            - id: dod-plugin-pin-cascade-deploy-probe
+              description: Deploy probe. The runtime Dockerfile at the checked-out commit carries ${PIN_BARE}; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base.
+              source: manual
+              checks:
+                - check_type: command
+                  check_value: |-
+                    ${PROBE}
+                  cwd: \${OMNI_HOME}/omnibase_infra
+              binds_ac: [AC1]
+          EOF_CONTRACT
+
       - name: Commit and push
         if: steps.diff.outputs.changed == 'true'
         run: |
           git config user.name "onexbot-occ-writer[bot]"
           git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
-          git add docker/Dockerfile.runtime
+          git add docker/Dockerfile.runtime \
+            "contracts/${{ steps.inputs.outputs.ticket }}.yaml" \
+            tests/ci/fixtures/runtime_plugin_pin_floors_omn20864.yaml
           git commit -m "chore(deps): pin ${{ steps.inputs.outputs.package }} to ${{ steps.inputs.outputs.version }}" \
             -m "Automated Dockerfile.runtime pin update triggered by release of ${{ steps.inputs.outputs.package }} ${{ steps.inputs.outputs.version }} from ${{ steps.inputs.outputs.source_repo }}." \
             --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \

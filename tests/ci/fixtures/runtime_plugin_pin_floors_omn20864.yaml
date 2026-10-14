@@ -1,0 +1,9 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+# Written by .github/workflows/plugin-pin-cascade.yml on each cascade: the floor
+# of every plugin pin tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py
+# expects docker/Dockerfile.runtime to carry (OMN-20864).
+floors:
+  omninode-claude: "0.27.0"
+  omninode-intelligence: "0.24.0"
+  omninode-memory: "0.18.4"
