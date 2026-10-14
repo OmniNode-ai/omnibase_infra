@@ -54,6 +54,7 @@ STDERR_B = (
     "contract that declares delegate task classes cannot be resolved. "
     "Pass --task-type explicitly, or repair the co-install.\n"
 )
+_HOUSE_TENANT = "820272f9-4aaf-5add-a2df-0af942852ab2"
 FRONT_DOOR_STDERR = "Error: delegation terminal refused: quality_gate_failed"
 
 
@@ -511,23 +512,17 @@ def test_workflow_co_installs_omnimarket_before_the_probe_runs() -> None:
     assert "checkout -q -B dev" in script
 
 
-def test_workflow_mints_the_runner_install_tenant_before_the_probe_runs() -> None:
+def test_workflow_probe_declares_the_lab_house_tenant_and_mints_nothing() -> None:
     """OMN-19445 AC2: `onex delegate` refuses a deployed lane with no tenant.
 
     Every scheduled run from 2026-10-05 to 2026-10-14 exited 1 with "this
-    install has never minted a tenant identity" because the job's install had
-    none. The CLI's own remediation is `onex local init`; the job runs it from
-    the composed venv, ahead of the probe, and its outcome is graded.
+    install has never minted a tenant identity". Minting one on the runner is
+    refused by the lane (no provider key for that tenant), so the probe declares
+    the lab's one house tenant through the overlay `onex delegate` reads first.
     """
-    assert _index("Resolve the declared lane transport") < _index("Mint the runner")
-    assert _index("Mint the runner") < _index("Run the R1 front-door probe")
-    step = _step("Mint the runner")
-    assert step["id"] == "mint_tenant"
-    assert ".venv/bin/onex local init" in step["run"]
-    assert (
-        "steps.mint_tenant.outcome"
-        in (_step("Run the R1 front-door probe")["env"]["SETUP_OUTCOMES"])
-    )
+    step = _step("Run the R1 front-door probe")
+    assert step["env"]["ONEX_TENANT_ID"] == _HOUSE_TENANT
+    assert "mint_tenant" not in _WORKFLOW.read_text()
 
 
 def test_workflow_probe_step_uses_the_composed_cli_and_publishes_the_terminal() -> None:
@@ -557,7 +552,6 @@ def test_workflow_record_and_upload_still_run_after_a_failing_probe() -> None:
         ("checkout_provider", "runner-env"),
         ("coinstall_provider", "runner-env"),
         ("lane_transport", "lane-declaration"),
-        ("mint_tenant", "runner-env"),
     ],
 )
 def test_workflow_setup_failure_publishes_a_named_terminal_without_a_venv(
