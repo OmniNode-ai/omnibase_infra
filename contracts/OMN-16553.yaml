@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+schema_version: "1.0.0"
+ticket_id: OMN-16553
+title: Ruff requirement and runner image identity after the dev rebase
+summary: PR 4947 widens the Ruff development requirement to >=0.14.7,<0.18.0, synchronizes the lock metadata, and regenerates the runner image binding while retaining dev's package version.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-ruff-runner-binding
+    statement: The widened Ruff requirement is consistent across the dependency manifests and the runner image identity binds those manifests.
+    acceptance:
+      - id: AC1
+        statement: The development requirement in pyproject.toml and uv.lock is ruff>=0.14.7,<0.18.0.
+      - id: AC2
+        statement: The runner image identity verifies against the manifests carrying the widened Ruff requirement.
+evidence_requirements:
+  - kind: tests
+    description: Runner image identity and retained post-release version regressions run on the hosted runner.
+    command: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/ci/test_dev_ahead_of_v0_38_72_omn13912.py -q --no-cov -p no:randomly
+  - kind: manual
+    description: Deploy artifact check scoped to the runner image binding; no running container is required.
+    command: "deploy: python3 scripts/ci/runner_image_identity.py --mode verify"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn16553-ac1-ruff-manifests
+    description: Both manifests admit Ruff 0.17 and retain the 0.14.7 floor.
+    source: manual
+    binds_ac: [AC1]
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c 'import tomllib; p=tomllib.load(open("pyproject.toml", "rb")); l=tomllib.load(open("uv.lock", "rb")); assert "ruff>=0.14.7,<0.18.0" in p["dependency-groups"]["dev"]; m=next(x for x in l["package"] if x["name"] == "omnibase-infra"); assert next(x for x in m["metadata"]["requires-dev"]["dev"] if x["name"] == "ruff")["specifier"] == ">=0.14.7,<0.18.0"'
+  - id: dod-omn16553-ac2-runner-binding
+    description: The widened requirement and its runner artifact binding are checked together; reverting the ceiling or corrupting either digest fails the probe.
+    source: manual
+    binds_ac: [AC2]
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c 'import tomllib; p=tomllib.load(open("pyproject.toml", "rb")); assert "ruff>=0.14.7,<0.18.0" in p["dependency-groups"]["dev"]' && python3 scripts/ci/runner_image_identity.py --mode verify
