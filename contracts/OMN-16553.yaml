@@ -2,20 +2,37 @@
 # SPDX-License-Identifier: MIT
 schema_version: "1.0.0"
 ticket_id: OMN-16553
-title: Ruff requirement and runner image identity after the dev rebase
-summary: PR 4947 widens the Ruff development requirement to >=0.14.7,<0.18.0, synchronizes the lock metadata, and regenerates the runner image binding while retaining dev's package version.
+title: Dependency upper bounds and runner image identity for omnibase_infra PRs 4945 and 4947
+summary: PR 4945 permits FastAPI below 0.144.0 and PR 4947 widens the Ruff development requirement to >=0.14.7,<0.18.0. Each regenerates the runner image lock after rebasing onto dev. The package version follows dev. The changed dependency manifest and runner lock do not match the canonical deploy-gate runtime paths.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
 requirements:
+  - id: req-omn16553-pr4945-fastapi
+    statement: The dependency declaration permits FastAPI versions from 0.120.1 up to but excluding 0.144.0.
+    acceptance:
+      - id: AC1
+        statement: pyproject.toml and uv.lock declare fastapi>=0.120.1,<0.144.0; the prior upper bound fails the bound command.
+  - id: req-omn16553-pr4945-runner-lock
+    statement: The runner image lock binds the combined dependency manifest after the rebase.
+    acceptance:
+      - id: AC2
+        statement: The recorded shared environment and image identity digests equal the existing identity generator's recomputed values.
   - id: req-ruff-runner-binding
     statement: The widened Ruff requirement is consistent across the dependency manifests and the runner image identity binds those manifests.
     acceptance:
-      - id: AC1
+      - id: AC3
         statement: The development requirement in pyproject.toml and uv.lock is ruff>=0.14.7,<0.18.0.
-      - id: AC2
+      - id: AC4
         statement: The runner image identity verifies against the manifests carrying the widened Ruff requirement.
 evidence_requirements:
+  - kind: tests
+    description: The FastAPI dependency bound admits the updated upper limit.
+    command: >-
+      python3 -c 'import tomllib; d=tomllib.load(open("pyproject.toml", "rb")); assert "fastapi>=0.120.1,<0.144.0" in d["project"]["dependencies"]; lock=tomllib.load(open("uv.lock", "rb")); package=next(p for p in lock["package"] if p["name"] == "omnibase-infra"); assert any(r["name"] == "fastapi" and r["specifier"] == ">=0.120.1,<0.144.0" for r in package["metadata"]["requires-dist"])'
+  - kind: tests
+    description: The runner image identity matches the rebased manifest.
+    command: python3 scripts/ci/runner_image_identity.py --mode verify
   - kind: tests
     description: Runner image identity and retained post-release version regressions run on the hosted runner.
     command: uv run --frozen pytest tests/ci/test_runner_image_identity.py tests/ci/test_dev_ahead_of_v0_38_72_omn13912.py -q --no-cov -p no:randomly
@@ -27,10 +44,29 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
+  - id: dod-omn16553-pr4945-fastapi
+    description: The FastAPI declaration admits versions below 0.144.0 and refuses the old bound.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          python3 -c 'import tomllib; d=tomllib.load(open("pyproject.toml", "rb")); assert "fastapi>=0.120.1,<0.144.0" in d["project"]["dependencies"]; lock=tomllib.load(open("uv.lock", "rb")); package=next(p for p in lock["package"] if p["name"] == "omnibase-infra"); assert any(r["name"] == "fastapi" and r["specifier"] == ">=0.120.1,<0.144.0" for r in package["metadata"]["requires-dist"])'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn16553-pr4945-runner-lock
+    description: Recompute both runner lock digests from the dependency manifest.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: python3 scripts/ci/runner_image_identity.py --mode verify
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
   - id: dod-omn16553-ac1-ruff-manifests
     description: Both manifests admit Ruff 0.17 and retain the 0.14.7 floor.
     source: manual
-    binds_ac: [AC1]
+    binds_ac: [AC3]
     checks:
       - check_type: command
         check_value: >-
@@ -38,7 +74,7 @@ dod_evidence:
   - id: dod-omn16553-ac2-runner-binding
     description: The widened requirement and its runner artifact binding are checked together; reverting the ceiling or corrupting either digest fails the probe.
     source: manual
-    binds_ac: [AC2]
+    binds_ac: [AC4]
     checks:
       - check_type: command
         check_value: >-

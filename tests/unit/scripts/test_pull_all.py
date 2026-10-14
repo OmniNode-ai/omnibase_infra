@@ -1054,9 +1054,11 @@ class TestOmnimarketDriftRepair:
         call = calls_log.read_text()
         # No per-venv arguments: which venvs exist and how each is repaired is
         # the reconciler's business, not pull-all's. pull-all hands it the
-        # workspace root and nothing else -- that is the whole interface.
-        assert f"OMNI_HOME={omni_home}" in call
-        assert str(infra_dir) not in call.replace(f"OMNI_HOME={omni_home}", "")
+        # workspace root and nothing else -- that is the whole interface. The
+        # reconciler reads no OMNI_HOME (OMN-16632), so the root is an argument.
+        workspace = infra_dir.parent
+        assert f"--workspace {workspace} " in call
+        assert str(infra_dir) not in call.replace(f"--workspace {workspace}", "")
         # Attributable: pull-all.sh's own stdout names the action.
         assert "reconciling workspace venvs" in result.stdout.lower()
 

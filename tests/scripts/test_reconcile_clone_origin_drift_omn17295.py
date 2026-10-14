@@ -242,7 +242,7 @@ class _Workspace:
     def env(self) -> dict[str, str]:
         return {
             **os.environ,
-            "OMNI_HOME": str(self.root),
+            "OMNIBASE_PATH": str(self.root),
             "PATH": f"{self.bin_dir}:{os.environ['PATH']}",
             "UV_SHIM_LOG": str(self.uv_log),
             "INSTALL_SHIM_LOG": str(self.install_log),

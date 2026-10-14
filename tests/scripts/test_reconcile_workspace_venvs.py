@@ -326,7 +326,7 @@ class _Workspace:
     def env(self) -> dict[str, str]:
         return {
             **os.environ,
-            "OMNI_HOME": str(self.root),
+            "OMNIBASE_PATH": str(self.root),
             "PATH": f"{self.bin_dir}:{os.environ['PATH']}",
             "UV_SHIM_LOG": str(self.uv_log),
             "INSTALL_SHIM_LOG": str(self.install_log),
@@ -639,11 +639,12 @@ def test_script_exists_and_is_executable() -> None:
 # --------------------------------------------------------------------------- #
 # Fail-fast configuration (CLAUDE.md rule 8 -- no silent default)
 # --------------------------------------------------------------------------- #
-def test_unset_omni_home_is_indeterminate_and_names_the_variable(
+def test_unset_workspace_is_indeterminate_and_names_the_variable(
     ws: _Workspace,
 ) -> None:
     env = ws.env()
-    env.pop("OMNI_HOME")
+    env.pop("OMNIBASE_PATH")
+    env.pop("OMNI_HOME", None)
     result = subprocess.run(
         ["bash", str(_SCRIPT), "--check"],
         capture_output=True,
@@ -652,7 +653,44 @@ def test_unset_omni_home_is_indeterminate_and_names_the_variable(
         check=False,
     )
     assert result.returncode == _EXIT_INDETERMINATE
-    assert "OMNI_HOME" in result.stdout + result.stderr
+    assert "OMNIBASE_PATH" in result.stdout + result.stderr
+
+
+def test_inherited_omni_home_never_selects_the_workspace(ws: _Workspace) -> None:
+    """OMN-16632: OMNI_HOME is the operator's private workspace. With
+    OMNIBASE_PATH unset and no --workspace, an inherited OMNI_HOME must not
+    stand in for it: the run is INDETERMINATE and touches nothing there."""
+    env = ws.env()
+    env.pop("OMNIBASE_PATH")
+    env["OMNI_HOME"] = str(ws.root)
+    result = subprocess.run(
+        ["bash", str(_SCRIPT), "--check"],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert result.returncode == _EXIT_INDETERMINATE
+    assert "OMNIBASE_PATH" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("flag", ["--workspace", "--omni-home"])
+def test_explicit_root_flag_wins_over_omnibase_path(
+    ws: _Workspace, tmp_path: Path, flag: str
+) -> None:
+    """``--workspace`` and ``--omni-home`` are the same argument and both beat
+    the ambient OMNIBASE_PATH."""
+    env = ws.env()
+    env["OMNIBASE_PATH"] = str(tmp_path / "elsewhere")
+    result = subprocess.run(
+        ["bash", str(_SCRIPT), "--check", flag, str(ws.root)],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+    assert result.returncode != _EXIT_INDETERMINATE, result.stdout + result.stderr
+    assert "elsewhere" not in result.stdout + result.stderr
 
 
 # --------------------------------------------------------------------------- #
@@ -1337,10 +1375,12 @@ def test_the_reconciler_carries_no_machine_absolute_path_literal() -> None:
     )
 
 
-def test_unset_omni_home_is_still_fail_fast_with_no_default(tmp_path: Path) -> None:
+def test_unset_workspace_is_still_fail_fast_with_no_default(tmp_path: Path) -> None:
     """Pinned here rather than assumed: a silent default would reconcile some
     other checkout's venv and report success for a venv nobody is running."""
-    env = {k: v for k, v in os.environ.items() if k != "OMNI_HOME"}
+    env = {
+        k: v for k, v in os.environ.items() if k not in {"OMNIBASE_PATH", "OMNI_HOME"}
+    }
     result = subprocess.run(
         ["bash", str(_SCRIPT)],
         capture_output=True,
@@ -1350,7 +1390,7 @@ def test_unset_omni_home_is_still_fail_fast_with_no_default(tmp_path: Path) -> N
     )
     combined = result.stdout + result.stderr
     assert result.returncode == _EXIT_INDETERMINATE
-    assert "OMNI_HOME" in combined
+    assert "OMNIBASE_PATH" in combined
 
 
 def test_the_interpreter_requirement_is_exercised_off_macos(ws: _Workspace) -> None:
