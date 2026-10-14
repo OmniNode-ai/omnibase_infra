@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20298
+title: "The release train counts paths a downstream repo clones by tag as release-relevant"
+summary: The nightly release train counts only src, docker/migrations and pyproject.toml as unreleased work, so a fix that lives in a script a registry repo runs from a tag clone of omnibase_core (omnibase_core#1963, scripts/ci) sat on dev behind its tag and the train skipped with no_unreleased_release_relevant_work. config/release_train_policy.yaml now declares tag_clone_consumed_paths per repo, each entry citing the downstream workflow line that reads it, and the train counts those paths as release-relevant.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20298-train
+    statement: A commit that touches only a path a downstream repo reads from a tag clone is unreleased work for the train, a commit that touches only tests is not, and every consumed path is configuration that cites its reader.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a scripts/ci-only commit after the latest tag counts as unreleased release-relevant work for omnibase_core under the real policy, and a tests-only commit still does not -- falsifier: uv run pytest tests/scripts/test_release_train_nightly.py -q -p no:randomly -k "test_a_scripts_ci_only_commit_is_release_relevant_for_core or test_a_tests_only_commit_is_still_not_release_relevant"'
+      - id: AC2
+        statement: 'AC2: the consumed paths are policy configuration and each entry cites the downstream workflow line that consumes it; an entry with no citation, a malformed one, or a path already under a release path refuses at load -- falsifier: uv run pytest tests/scripts/test_release_train_nightly.py -q -p no:randomly -k "test_every_declared_consumed_path_cites_a_downstream_workflow_line or refuses_at_load"'
+evidence_requirements:
+  - kind: tests
+    description: The scripts/ci-only reproduction counts as release-relevant and the tests-only control still skips.
+    command: uv run pytest tests/scripts/test_release_train_nightly.py -q -p no:randomly -k "test_a_scripts_ci_only_commit_is_release_relevant_for_core or test_a_tests_only_commit_is_still_not_release_relevant"
+  - kind: tests
+    description: The consumed-path declarations are validated configuration with a cited consumer each.
+    command: uv run pytest tests/scripts/test_release_train_nightly.py -q -p no:randomly -k "test_every_declared_consumed_path_cites_a_downstream_workflow_line or refuses_at_load"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20298-ac1
+    description: A scripts/ci-only commit is unreleased work for omnibase_core and a tests-only commit is not.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_release_train_nightly.py -q -p no:randomly -k "test_a_scripts_ci_only_commit_is_release_relevant_for_core or test_a_tests_only_commit_is_still_not_release_relevant"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn20298-ac2
+    description: Consumed paths are configuration, each citing the downstream workflow line that reads it.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/scripts/test_release_train_nightly.py -q -p no:randomly -k "test_every_declared_consumed_path_cites_a_downstream_workflow_line or refuses_at_load"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]

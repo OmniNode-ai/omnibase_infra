@@ -27,6 +27,19 @@
 #   cut on a weaker premise pending an operator decision on what a library repo's
 #   equivalent premise should be.
 #
+# tag_clone_consumed_paths (OMN-20298)
+#   Paths OUTSIDE release_relevant_paths that a downstream repository reads from a
+#   TAG CLONE of this repo (`git clone --branch v<uv.lock version>` or a
+#   checkout with `ref: v...`). A wheel carries `src` and nothing else, so a
+#   change to such a path reaches the downstream job only when a new tag
+#   exists; counted as unreleased work, it lets the train cut that tag. Each
+#   entry cites every downstream workflow line that reads it as
+#   `<repo>:.github/workflows/<file>:<line>`, and the loader refuses an entry
+#   with no citation, a malformed one, or a path already under a release path.
+#   Clones pinned to a sha or `@main` are NOT listed: they track a commit, not
+#   a release, so a tag does not deliver them. Re-derive the list by reading
+#   the downstream workflows' tag clones; do not extend it from memory.
+#
 # release_relevant_paths
 #   What can change the published artifact. `src` is the packaged tree and
 #   `pyproject.toml` carries the dependency floor that ships with it. Commits
@@ -43,6 +56,21 @@ repos:
     lab_evidence_note: >-
       the compose dev lane on the lab host. runtime-rebuild-trigger.yml emits a lab-pass-receipt-compose-dev-<sha> artifact in this repo for a RUNTIME-AFFECTING merge only -- its receipt job is gated on published == 'true' and runtime_lane == 'dev' -- so a workflow-only or scripts-only merge has no receipt of its own, at any time, and never will. Measured 2026-09-18: seven of the eight most recent dev merges carried none, by design. The premise therefore asks for the receipt of the nearest runtime-affecting ancestor of the head, and accepts it only when no commit between that ancestor and the head is runtime-affecting by the trigger's own classifier (OMN-18664). One runtime-affecting commit in that gap voids the inheritance and the train refuses, naming it.
     mode: cut
+    tag_clone_consumed_paths:
+      - path: scripts/validation/lint_topic_names.py
+        consumers:
+          - omnimarket:.github/workflows/ci.yml:1602
+          - omnimarket:.github/workflows/ci.yml:1605
+      - path: scripts/check_dispatcher_route_coverage.py
+        consumers:
+          - omnimarket:.github/workflows/dispatcher-route-coverage.yml:134
+      - path: scripts/validate_pr_contracts.py
+        consumers:
+          - omniclaude:.github/workflows/validate-pr-contracts.yml:101
+          # NOT declared, though a tag clone reads it: scripts/trigger_rebuild_on_merge.py
+          # is consumed by two lines of one omnimarket workflow, and the public-repo
+          # hygiene gate (OMN-18014) refuses that workflow's filename on an added line
+          # in this repo. A change to that script does not yet count as unreleased work.
   omnimarket:
     package: omnimarket
     default_branch: dev
@@ -61,6 +89,28 @@ repos:
     lab_evidence_note: >-
       no lab lane of its own and no runtime-rebuild-trigger.yml; this repo reaches the lab only vendored into an omnibase_infra candidate, so no receipt is keyed by one of its shas
     mode: cut
+    tag_clone_consumed_paths:
+      # The whole directory, not the two scripts: canonical_handler_shape.py
+      # reads its sibling adequacy_receipts/ and adequacy_receipts_<package>/
+      # trees, and imports sibling modules.
+      - path: scripts/ci
+        consumers:
+          - omnimarket:.github/workflows/ci.yml:719
+          - omnimarket:.github/workflows/ci.yml:754
+          - omniclaude:.github/workflows/ci.yml:638
+      - path: scripts/validation/check_stub_implementations.py
+        consumers:
+          - omnimarket:.github/workflows/ci.yml:316
+      - path: architecture-handshakes
+        consumers:
+          - omniclaude:.github/workflows/ci.yml:550
+      # Clone at 4281 (core at the uv.lock version tag), run at 4327 by the
+      # whole-tree pre-commit suite: scripts/run-hook-bits-drift.sh executes
+      # scripts/gen_hook_bits.py from that clone.
+      - path: scripts/gen_hook_bits.py
+        consumers:
+          - omniclaude:.github/workflows/ci.yml:4281
+          - omniclaude:.github/workflows/ci.yml:4327
     mode_note: >-
       green dev CI on the candidate's gating commit is the cut premise here. A cut on this repo is a PyPI publish plus a main fast-forward, never a deploy, and no lab lane exists that could receipt it. The repos that DO reach a runtime pick these releases up through governed pin bumps carrying their own lab receipt, so the lab proof point sits with the consumer, which is where it belongs. Operator ruling 2026-09-17, the cut path. Ancestry verified 2026-09-17 before arming: main IS an ancestor of dev, main-only 0, dev-only 4, so the release fast- forward can succeed. Green verified live the same day, all 37 required contexts on dev reporting success for the gating commit.
   omnibase_spi:
@@ -103,3 +153,8 @@ repos:
     mode: report_only
     mode_note: >-
       65 unreleased source commits measured 2026-09-17 against a tag dated 2026-06-02, the same catch-up hazard as omniintelligence. NOT an ancestry blocker: CLAUDE.md records this repo's main as behind with 15 main-only commits and states the fast-forward cannot succeed, which was true on 2026-09-15 and is not true now; re-read 2026-09-17 gives main-only 0, dev-only 37, and git merge-base --is-ancestor returns true.
+    tag_clone_consumed_paths:
+      - path: .claude-plugin/marketplace.json
+        consumers:
+          - omnimarket:.github/workflows/install-canary-nightly.yml:76
+          - omnimarket:.github/workflows/install-canary-nightly.yml:112
