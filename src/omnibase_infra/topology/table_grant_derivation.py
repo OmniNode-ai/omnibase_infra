@@ -345,9 +345,13 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
     #
-    # OMN-20604: lab_job_state and lab_job_transitions were DELETED here by the
-    # pin advance past omnimarket#3434, whose node_projection_lab_job contract
-    # declares both relations. The expiry module went red naming both entries.
+    # OMN-20604, OMN-20802 and OMN-19987 added six more (lab_job_state,
+    # lab_job_transitions, automation_liveness_state, automation_run_history,
+    # automation_alarm_episodes and run_trace), and all six were DELETED here by
+    # the pin advance to 464634262791, which carries the retiring omnimarket
+    # pull requests each entry named in its own comment. Same mechanism and
+    # same proof: the expiry module went red on the bot's pin-advance pull
+    # request naming all six, and the deletion rode that pull request.
     #
     # OMN-19861: same infra-first window; this repo vendors
     # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
@@ -372,33 +376,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="demo_readiness",
-        ),
-    ),
-    # OMN-20802: automation_liveness_state, automation_run_history and
-    # automation_alarm_episodes were DELETED here by the pin advance past the
-    # omnimarket pull request whose node_projection_automation_liveness contract
-    # declares all three. The expiry module went red naming all three.
-    # OMN-19987: run_trace is vendored here first; no pinned omnimarket contract
-    # declares it yet, so the derivation cannot reproduce the shipped writer
-    # grant until omnimarket's node_projection_run_trace lands and the pin
-    # advances past it. The expiry module names the relation so that handover
-    # removes this bridge.
-    ContractTableDeclaration(
-        node="legacy_migration:run_trace",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_run_trace/"
-            "0000_create_run_trace.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="run_trace",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_run_trace/"
-                "0000_create_run_trace.sql"
-            ),
-            access="read_write",
-            role="run_trace",
         ),
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to
