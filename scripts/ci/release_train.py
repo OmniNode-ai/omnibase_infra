@@ -178,6 +178,11 @@ def _load_sibling(name: str) -> Any:
 #: The rule-24(b) receipt reader. Its primitives are the ONLY path to a receipt
 #: here; this module classifies what they return and never queries in parallel.
 lab_pass_receipt = _load_sibling("lab_pass_receipt")
+
+#: The table-scoped ``[project].version`` rewrite the post-release dev bump uses,
+#: so the train's bump and the reopen bump cannot disagree about where a
+#: manifest keeps its version.
+post_release_dev_bump = _load_sibling("post_release_dev_bump")
 instance_receipt_lanes = _load_sibling("instance_receipt_lanes")
 
 #: The runtime-change path classifier, in ``scripts/`` rather than ``scripts/ci``.
@@ -1757,6 +1762,73 @@ def render_changelog_entry(
     return "\n".join(lines)
 
 
+_LOCK_PACKAGE_HEADER: Final = "[[package]]"
+
+
+def _normalized_package_name(name: str) -> str:
+    """The name as ``uv.lock`` records it (PEP 503)."""
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def rewrite_lock_root_version(text: str, package: str, new_version: str) -> str:
+    """Return a ``uv.lock`` body with only ``package``'s own entry moved.
+
+    The entry is the ``[[package]]`` block whose ``name`` is ``package`` and
+    whose ``source`` is the checkout itself (``editable`` or ``virtual`` at
+    ``"."``). A dependency pinned at the same version string, or a requirement
+    specifier naming it, is left byte-identical.
+    """
+    wanted = _normalized_package_name(package)
+    lines = text.splitlines(keepends=True)
+    starts = [i for i, line in enumerate(lines) if line.strip() == _LOCK_PACKAGE_HEADER]
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(lines)
+        block = lines[start:end]
+        if not any(line.rstrip() == f'name = "{wanted}"' for line in block):
+            continue
+        if not any(
+            re.match(r'source = \{ (editable|virtual) = "\." \}\s*$', line)
+            for line in block
+        ):
+            continue
+        for offset, line in enumerate(block):
+            if re.match(r'version = "[^"]*"\s*$', line):
+                newline = "\n" if line.endswith("\n") else ""
+                lines[start + offset] = f'version = "{new_version}"{newline}'
+                return "".join(lines)
+    raise ReleaseTrainConfigError(
+        f"uv.lock has no [[package]] entry for the checkout's own package "
+        f"{package!r} with a local source; refusing to bump the manifest and "
+        "leave the lockfile stale, which fails every `uv sync --locked` check"
+    )
+
+
+def bump_declared_version(clone: Path, version: str) -> list[str]:
+    """Move ``[project].version`` and, when present, ``uv.lock``'s own entry.
+
+    Returns the clone-relative paths written. Both texts are computed before
+    either file is written, so a refusal leaves the manifest untouched.
+    """
+    pyproject = clone / "pyproject.toml"
+    raw = pyproject.read_text(encoding="utf-8")
+    name = tomllib.loads(raw).get("project", {}).get("name")
+    if not isinstance(name, str) or not name:
+        raise ReleaseTrainConfigError(f"{pyproject} has no [project].name")
+    try:
+        manifest = post_release_dev_bump.rewrite_project_version(raw, version)
+    except post_release_dev_bump.BumpConfigError as exc:
+        raise ReleaseTrainConfigError(str(exc)) from exc
+    writes = {"pyproject.toml": manifest}
+    lock = clone / "uv.lock"
+    if lock.exists():
+        writes["uv.lock"] = rewrite_lock_root_version(
+            lock.read_text(encoding="utf-8"), name, version
+        )
+    for relative, body in writes.items():
+        (clone / relative).write_text(body, encoding="utf-8")
+    return list(writes)
+
+
 # --------------------------------------------------------------------------- #
 # CLI.                                                                          #
 # --------------------------------------------------------------------------- #
@@ -1812,6 +1884,14 @@ def build_parser() -> argparse.ArgumentParser:
     changelog.add_argument("--clone", type=Path, required=True)
     changelog.add_argument("--version", required=True)
 
+    bump = sub.add_parser(
+        "bump-version",
+        help="move the manifest version and the lockfile's own entry together",
+    )
+    bump.add_argument("--policy", type=Path, default=DEFAULT_POLICY_PATH)
+    bump.add_argument("--clone", type=Path, required=True)
+    bump.add_argument("--version", required=True)
+
     return parser
 
 
@@ -1838,6 +1918,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         # runs' logs is about what changed rather than about dict ordering.
         for name in sorted(policies):
             print(name)
+        return 0
+
+    if args.command == "bump-version":
+        try:
+            written = bump_declared_version(args.clone, args.version)
+        except ReleaseTrainConfigError as exc:
+            print(f"::error::{exc}", file=sys.stderr)
+            return 2
+        for relative in written:
+            print(relative)
         return 0
 
     if args.command == "changelog":
