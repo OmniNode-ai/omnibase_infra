@@ -345,46 +345,13 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
     # module's _INTERIM_ENTRIES map in the same pull request. One line, no
     # baseline edit, and you will be told when to take it out.
     #
-    # OMN-20604: the two lab job read models, vendored infra-first ahead of
-    # omnimarket#3434. Both carry the source contract's read_write access and
-    # table-name role. Inert, then removable, once the pin advances past that
-    # pull request; the expiry module names both.
-    ContractTableDeclaration(
-        node="legacy_migration:lab_job_state",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_lab_job/"
-            "0000_create_lab_job.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="lab_job_state",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_lab_job/"
-                "0000_create_lab_job.sql"
-            ),
-            access="read_write",
-            role="lab_job_state",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:lab_job_transitions",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_lab_job/"
-            "0000_create_lab_job.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="lab_job_transitions",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_lab_job/"
-                "0000_create_lab_job.sql"
-            ),
-            access="read_write",
-            role="lab_job_transitions",
-        ),
-    ),
+    # OMN-20604, OMN-20802 and OMN-19987 added six more (lab_job_state,
+    # lab_job_transitions, automation_liveness_state, automation_run_history,
+    # automation_alarm_episodes and run_trace), and all six were DELETED here by
+    # the pin advance to 464634262791, which carries the retiring omnimarket
+    # pull requests each entry named in its own comment. Same mechanism and
+    # same proof: the expiry module went red on the bot's pin-advance pull
+    # request naming all six, and the deletion rode that pull request.
     #
     # OMN-19861: same infra-first window; this repo vendors
     # node_projection_demo_readiness/0000 and 0001 ahead of the omnimarket node
@@ -409,90 +376,6 @@ LEGACY_MIGRATION_TABLE_DECLARATIONS: tuple[ContractTableDeclaration, ...] = (
             ),
             access="read_write",
             role="demo_readiness",
-        ),
-    ),
-    # OMN-20802: the automation-liveness projection's three relations are
-    # vendored here first. The source contract
-    # (node_projection_automation_liveness) declares each omninode_internal,
-    # access read_write, with the role named after the relation; 0001 grants
-    # omninode_runtime SELECT, INSERT, UPDATE on all three. Retired by the
-    # omnimarket OMN-20802 pull request merging and the pin advancing past it;
-    # the expiry module names all three.
-    ContractTableDeclaration(
-        node="legacy_migration:automation_liveness_state",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_automation_liveness/"
-            "0000_create_automation_liveness.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="automation_liveness_state",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_automation_liveness/"
-                "0000_create_automation_liveness.sql"
-            ),
-            access="read_write",
-            role="automation_liveness_state",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:automation_run_history",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_automation_liveness/"
-            "0000_create_automation_liveness.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="automation_run_history",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_automation_liveness/"
-                "0000_create_automation_liveness.sql"
-            ),
-            access="read_write",
-            role="automation_run_history",
-        ),
-    ),
-    ContractTableDeclaration(
-        node="legacy_migration:automation_alarm_episodes",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_automation_liveness/"
-            "0000_create_automation_liveness.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="automation_alarm_episodes",
-            database_ref="application",
-            schema="omninode_internal",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_automation_liveness/"
-                "0000_create_automation_liveness.sql"
-            ),
-            access="read_write",
-            role="automation_alarm_episodes",
-        ),
-    ),
-    # OMN-19987: run_trace is vendored here first; no pinned omnimarket contract
-    # declares it yet, so the derivation cannot reproduce the shipped writer
-    # grant until omnimarket's node_projection_run_trace lands and the pin
-    # advances past it. The expiry module names the relation so that handover
-    # removes this bridge.
-    ContractTableDeclaration(
-        node="legacy_migration:run_trace",
-        contract_path=Path(
-            "docker/migrations/forward/nodes/node_projection_run_trace/"
-            "0000_create_run_trace.sql"
-        ),
-        table=ModelDbTableDeclaration(
-            name="run_trace",
-            database_ref="application",
-            schema="public",
-            migration=(
-                "docker/migrations/forward/nodes/node_projection_run_trace/"
-                "0000_create_run_trace.sql"
-            ),
-            access="read_write",
-            role="run_trace",
         ),
     ),
     # OMN-18862: migration 089 grants BOTH savings read views to

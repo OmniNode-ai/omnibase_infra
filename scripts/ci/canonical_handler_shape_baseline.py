@@ -17,8 +17,6 @@ RSD canonical rewrite regenerating these handlers, each with an adequacy receipt
 NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_architecture_validator",
     "omnibase_infra.nodes.node_architecture_validator.handlers",
-    "omnibase_infra.nodes.node_artifact_change_detector_effect",
-    "omnibase_infra.nodes.node_artifact_reconciliation_orchestrator",
     "omnibase_infra.nodes.node_build_loop_write_effect",
     "omnibase_infra.nodes.node_bus_forwarder_effect",
     "omnibase_infra.nodes.node_chain_orchestrator",
@@ -72,7 +70,6 @@ NON_CANONICAL: tuple[str, ...] = (
     "omnibase_infra.nodes.node_setup_preflight_effect",
     "omnibase_infra.nodes.node_setup_validate_effect",
     "omnibase_infra.nodes.node_topic_migration_projection",
-    "omnibase_infra.nodes.node_update_plan_reducer",
     "omnibase_infra.nodes.node_validation_adjudicator",
     "omnibase_infra.nodes.node_validation_executor",
     "omnibase_infra.nodes.node_validation_ledger_write_effect",

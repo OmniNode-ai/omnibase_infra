@@ -25,6 +25,7 @@ Tracking:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -49,6 +50,24 @@ logger = logging.getLogger(__name__)
 
 # Policies where review tasks are blocking
 _BLOCKING_REVIEW_POLICIES: frozenset[str] = frozenset({"require", "strict"})
+
+_PR_TRIGGER_TYPES: frozenset[str] = frozenset({"pr_opened", "pr_updated", "pr_merged"})
+_PR_REF_PATTERN: re.Pattern[str] = re.compile(r"^refs/pull/(\d+)/head$")
+
+
+def _source_entity_ref(result: ModelImpactAnalysisResult) -> str:
+    """Name the entity the plan is about: ``pr/<owner>/<repo>/<n>`` for a PR.
+
+    The PR comment handler parses this reference, so a PR trigger whose ref is
+    not ``refs/pull/<n>/head`` is named by repo instead and gets no comment.
+    """
+    if result.trigger_type in _PR_TRIGGER_TYPES and result.source_ref is not None:
+        match = _PR_REF_PATTERN.match(result.source_ref)
+        if match is not None:
+            return f"pr/{result.source_repo}/{match.group(1)}"
+    if result.trigger_type == "manual_plan_request":
+        return f"manual/{result.source_repo}"
+    return f"change/{result.source_repo}"
 
 
 class HandlerCreatePlan:
@@ -78,6 +97,28 @@ class HandlerCreatePlan:
         """Behavioral classification: pure compute."""
         return EnumHandlerTypeCategory.COMPUTE
 
+    def handle(self, result: ModelImpactAnalysisResult) -> ModelUpdatePlan:
+        """Create the update plan for one impact analysis result.
+
+        Canonical definition-B entrypoint: the runtime validates the wire payload
+        into ``ModelImpactAnalysisResult`` and publishes the returned plan to
+        ``onex.evt.artifact.update-plan-created.v1``.
+
+        Args:
+            result: The impact analysis result, carrying the trigger context.
+
+        Returns:
+            The update plan, named by the entity the trigger concerned.
+        """
+        return self.create_plan(
+            result=result,
+            source_entity_ref=_source_entity_ref(result),
+            summary=(
+                f"{result.trigger_type} on {result.source_repo}: "
+                f"{len(result.impacted_artifacts)} artifact(s) impacted"
+            ),
+        )
+
     def create_plan(
         self,
         result: ModelImpactAnalysisResult,
@@ -102,6 +143,7 @@ class HandlerCreatePlan:
         plan = ModelUpdatePlan(
             plan_id=effective_plan_id,
             source_trigger_id=result.source_trigger_id,
+            trigger_type=result.trigger_type,
             source_entity_ref=source_entity_ref,
             summary=summary,
             impacted_artifacts=list(result.impacted_artifacts),

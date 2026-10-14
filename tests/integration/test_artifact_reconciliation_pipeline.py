@@ -495,3 +495,30 @@ class TestArtifactReconciliationPipeline:
         assert parsed_yaml["merge_policy"] == "strict"
         assert len(parsed_yaml["impacted_artifacts"]) == 2
         assert len(parsed_yaml["tasks"]) >= 1
+
+    @pytest.mark.asyncio
+    async def test_manual_trigger_reaches_yaml_through_handle_entrypoints(
+        self,
+        manual_trigger: ModelUpdateTrigger,
+        test_registry: ModelArtifactRegistry,
+        impact_handler: HandlerImpactAnalysis,
+        plan_handler: HandlerCreatePlan,
+    ) -> None:
+        """OMN-21053: a manual trigger flows through the ``handle`` entrypoints the runtime binds.
+
+        The plan handler names a manual trigger by repo, so the PR comment handler
+        returns nothing (no ``pr-comment-posted`` event) and the YAML handler emits
+        the plan.
+        """
+        result = _impact(impact_handler, manual_trigger, test_registry)
+        assert result.trigger_type == manual_trigger.trigger_type
+
+        plan = plan_handler.handle(result)
+        assert plan.trigger_type == manual_trigger.trigger_type
+        assert plan.source_entity_ref == f"manual/{manual_trigger.source_repo}"
+
+        assert await HandlerPlanToPRComment().handle(plan) is None
+
+        emitted = HandlerPlanToYaml().handle(plan)
+        assert emitted.plan_id == plan.plan_id
+        assert emitted.topic == "onex.evt.artifact.update-plan-emitted.v1"

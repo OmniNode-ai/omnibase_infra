@@ -1,9 +1,23 @@
 # SPDX-FileCopyrightText: 2026 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
 #
-# OMN-12243: Block PRs targeting main unless they are promotion PRs
-# from dev with a promotion receipt, or hotfix PRs with evidence and
-# a backmerge link.
+# OMN-12243: Block PRs targeting main.
+#
+# OMN-17427: no exception is left. `main` is release-synced: the release
+# workflow (release.yml, "Sync main to release tag") advances it by a
+# fast-forward over the REST API and opens no pull request against it, and the
+# operator ruling of 2026-10-10T16:52:56Z re-affirms that dev is the default
+# branch and a PR that targets main violates the rule. The promotion-receipt
+# and hotfix shapes this guard used to admit exist nowhere in that workflow.
+# The release train opens its release PR from `automation/release-<version>-omn-18595`
+# and the post-release version bump comes from
+# `automation/post-release-dev-bump-<version>`; both target dev, where this
+# guard does not apply.
+#
+# Required through the CI Summary poller (EXPECTED_EXTERNAL_CONTEXTS in
+# scripts/ci/ci_summary_gate.py) and mirrored locally by the pre-push hook
+# `main-target-guard` in .pre-commit-config.yaml.
+# Pinned by tests/ci/test_main_target_guard_omn17427.py.
 
 name: Main target guard
 
@@ -37,7 +51,6 @@ jobs:
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           set -euo pipefail
 
@@ -46,45 +59,8 @@ jobs:
             exit 0
           fi
 
-          echo "PR targets main. Checking head ref: '${HEAD_REF}'"
-
-          if [[ "${HEAD_REF}" == "dev" ]]; then
-            if echo "${PR_BODY}" | grep -qE 'promotion-receipt:[[:space:]]*OCC-[0-9]+'; then
-              echo "::notice::Promotion PR from dev with valid promotion-receipt. Allowed."
-              exit 0
-            fi
-
-            echo "::error::PR is from dev but is missing a promotion receipt."
-            echo "::error::Add a line matching: promotion-receipt: OCC-<number>"
-            echo "::error::Retarget this PR to dev; main accepts only promotion or hotfix PRs."
-            exit 1
-          fi
-
-          if [[ "${HEAD_REF}" == hotfix/* ]]; then
-            MISSING=()
-
-            if ! echo "${PR_BODY}" | grep -qE 'hotfix-evidence:[[:space:]]*OCC-[0-9]+'; then
-              MISSING+=("hotfix-evidence: OCC-<number>")
-            fi
-
-            if ! echo "${PR_BODY}" | grep -qE 'backmerge:[[:space:]]*#[0-9]+'; then
-              MISSING+=("backmerge: #<pr-number>")
-            fi
-
-            if [[ "${#MISSING[@]}" -eq 0 ]]; then
-              echo "::notice::Hotfix PR from '${HEAD_REF}' with valid hotfix evidence and backmerge. Allowed."
-              exit 0
-            fi
-
-            echo "::error::Hotfix PR from '${HEAD_REF}' is missing required fields:"
-            for field in "${MISSING[@]}"; do
-              echo "::error::  - ${field}"
-            done
-            echo "::error::Retarget this PR to dev; main accepts only promotion or hotfix PRs."
-            exit 1
-          fi
-
-          echo "::error::PRs targeting main must come from dev or hotfix/*."
-          echo "::error::Head ref '${HEAD_REF}' is not permitted to target main directly."
-          echo "::error::Retarget this PR to dev; main accepts only promotion or hotfix PRs."
+          echo "::error::PR from '${HEAD_REF}' targets main, which is release-synced and never a pull-request target."
+          echo "::error::The release workflow moves main by fast-forwarding it to the published tag; it opens no PR against main."
+          echo "::error::Release PRs (automation/release-<version>-omn-18595) and the post-release bump (automation/post-release-dev-bump-<version>) target dev."
+          echo "::error::Retarget this PR to dev."
           exit 1

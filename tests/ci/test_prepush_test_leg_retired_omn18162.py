@@ -61,6 +61,7 @@ EXPECTED_PRE_PUSH_HOOK_IDS: tuple[str, ...] = (
     "mypy-type-check",
     "onex-validate-architecture-layers",
     "prepush-deploy-scope-dod",
+    "main-target-guard",
 )
 
 # Tokens that mean "this hook runs a test runner". Matched against a hook's

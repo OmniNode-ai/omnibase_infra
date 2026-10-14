@@ -30,18 +30,6 @@ known_entrypointless:
   # consumer, and it owned BOTH subscribe topics only because an operation_match entry
   # with no `topic:` is assigned every subscribe topic. It is no longer in this gate's
   # population, so its row is removed rather than left to go stale.
-  - contract: node_artifact_change_detector_effect
-    handler: HandlerManualTrigger
-    module: omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_manual_trigger
-  - contract: node_artifact_change_detector_effect
-    handler: HandlerPRWebhookIngestion
-    module: omnibase_infra.nodes.node_artifact_change_detector_effect.handlers.handler_pr_webhook_ingestion
-  - contract: node_artifact_reconciliation_orchestrator
-    handler: HandlerPlanToPRComment
-    module: omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.handlers.handler_plan_to_pr_comment
-  - contract: node_artifact_reconciliation_orchestrator
-    handler: HandlerPlanToYaml
-    module: omnibase_infra.nodes.node_artifact_reconciliation_orchestrator.handlers.handler_plan_to_yaml
   - contract: node_chain_verify_reducer
     handler: HandlerChainVerify
     module: omnibase_infra.nodes.node_chain_verify_reducer.handlers.handler_chain_verify
@@ -96,6 +84,3 @@ known_entrypointless:
   - contract: node_topic_migration_projection
     handler: HandlerTopicMigrationProjection
     module: omnibase_infra.nodes.node_topic_migration_projection.handlers.handler_topic_migration_projection
-  - contract: node_update_plan_reducer
-    handler: HandlerCreatePlan
-    module: omnibase_infra.nodes.node_update_plan_reducer.handlers.handler_create_plan

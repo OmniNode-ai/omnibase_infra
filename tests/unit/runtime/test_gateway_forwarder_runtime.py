@@ -620,6 +620,16 @@ async def test_process_starts_both_legs_and_cleans_readiness(
             super().__init__(path)
             stores.append(self)
 
+    async def _no_broker_admin(
+        _bus: ModelKafkaEventBusConfig, _topics: Sequence[str]
+    ) -> None:
+        # OMN-15629: startup provisions the local topics through a real admin
+        # client; this test is about the two legs, not the broker, so it dials
+        # nothing. The provisioning itself is covered in
+        # test_gateway_forwarder_topic_provisioning_omn15629.py.
+        return None
+
+    monkeypatch.setattr(gateway_forwarder, "ensure_topics_exist", _no_broker_admin)
     monkeypatch.setattr(gateway_forwarder, "KafkaTransport", _Factory)
     monkeypatch.setattr(gateway_forwarder, "StoreIdempotencySqlite", _StoreFactory)
     shutdown_event = asyncio.Event()

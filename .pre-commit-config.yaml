@@ -30,6 +30,17 @@ repos:
         files: ^(\.github/workflows/imperative-contract-guard\.yml|imperative-contract-allowlist\.yaml|tests/ci/test_imperative_contract_guard_caller_omn21004\.py|tests/ci/fixtures/imperative_contract_guard_omn21004\.json|contracts/OMN-21004\.yaml|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-20864: a pin bump whose tests pass is evidence enough. The plugin pin
+      # cascade renders its own contract, floors fixture and probe, and refuses a
+      # diff that is not pin-only. SYNC with the ci.yml lint step "Plugin pin
+      # cascade renders its own evidence (OMN-20864)".
+      - id: plugin-pin-cascade-evidence
+        name: Plugin pin cascade renders its own evidence (OMN-20864)
+        entry: uv run --frozen pytest tests/ci/test_plugin_pin_cascade_evidence_omn20864.py tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q -n 0 --no-cov -p no:randomly
+        language: system
+        files: ^(\.github/workflows/(plugin-pin-cascade|ci)\.yml|docker/Dockerfile\.runtime|tests/ci/test_plugin_pin_cascade_evidence_omn20864\.py|tests/unit/docker/test_runtime_plugin_pin_floors_omn20864\.py|tests/ci/fixtures/runtime_plugin_pin_floors_omn20864\.yaml|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
       # OMN-20910: a review voter's model is declared only in the contract
       # overlay. SYNC with the ci.yml lint step "Review voter model comes from
       # the overlay (OMN-20910)".
@@ -2374,6 +2385,23 @@ repos:
       - id: prepush-deploy-scope-dod
         name: Deploy-scope DoD and ticket-contract parity (pre-push, OMN-14681, OMN-20870)
         entry: uv run --frozen python scripts/ci/check_deploy_scope_dod.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        verbose: true
+        stages: [pre-push]
+  # OMN-17427: warn on a push to main. `main` is release-synced and never a
+  # pull-request target (operator ruling 2026-10-10T16:52:56Z); the hosted
+  # `main-target-guard` check refuses a PR whose base is main. A PR's base is not
+  # known at push time, so the one local signal is the remote ref being pushed
+  # (pre-commit exports it as PRE_COMMIT_REMOTE_BRANCH). It warns and exits 0:
+  # the hosted check is the refusal. Pinned by
+  # tests/ci/test_main_target_guard_omn17427.py.
+  - repo: local
+    hooks:
+      - id: main-target-guard
+        name: "main-target-guard: warn on a push to main (OMN-17427)"
+        entry: bash -c 'if [ "${PRE_COMMIT_REMOTE_BRANCH:-}" = "refs/heads/main" ]; then echo "WARNING main-target-guard (OMN-17427) - you are pushing to main. main is release-synced and no PR may target it; push a branch and open the PR against dev." >&2; fi'
         language: system
         pass_filenames: false
         always_run: true

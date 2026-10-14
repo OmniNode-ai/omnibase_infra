@@ -22,10 +22,13 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import Literal
 from uuid import uuid4
 
-from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
+from omnibase_infra.enums import (
+    EnumHandlerType,
+    EnumHandlerTypeCategory,
+    EnumUpdateTriggerType,
+)
 from omnibase_infra.nodes.node_artifact_change_detector_effect.models.model_pr_webhook_event import (
     ModelPRWebhookEvent,
 )
@@ -36,11 +39,11 @@ from omnibase_infra.nodes.node_artifact_change_detector_effect.models.model_upda
 logger = logging.getLogger(__name__)
 
 # Action → trigger_type mapping table
-_ACTION_TO_TRIGGER_TYPE: dict[str, str] = {
-    "opened": "pr_opened",
-    "synchronize": "pr_updated",
-    "reopened": "pr_updated",
-    "edited": "pr_updated",
+_ACTION_TO_TRIGGER_TYPE: dict[str, EnumUpdateTriggerType] = {
+    "opened": EnumUpdateTriggerType.PR_OPENED,
+    "synchronize": EnumUpdateTriggerType.PR_UPDATED,
+    "reopened": EnumUpdateTriggerType.PR_UPDATED,
+    "edited": EnumUpdateTriggerType.PR_UPDATED,
 }
 
 __all__ = ["HandlerPRWebhookIngestion"]
@@ -74,8 +77,12 @@ class HandlerPRWebhookIngestion:
         """Return the behavioral classification: EFFECT (external event ingestion)."""
         return EnumHandlerTypeCategory.EFFECT
 
-    def ingest_pr_webhook_event(self, event: ModelPRWebhookEvent) -> ModelUpdateTrigger:
+    def handle(self, event: ModelPRWebhookEvent) -> ModelUpdateTrigger:
         """Map a PR webhook event to a ModelUpdateTrigger.
+
+        Canonical definition-B entrypoint: the runtime validates the wire payload
+        into ``ModelPRWebhookEvent`` and publishes the returned trigger to
+        ``onex.evt.artifact.change-detected.v1``.
 
         Args:
             event: The incoming PR webhook event.
@@ -83,22 +90,17 @@ class HandlerPRWebhookIngestion:
         Returns:
             A ``ModelUpdateTrigger`` with trigger_type derived from the action.
         """
-        raw_trigger_type: str
+        trigger_type: EnumUpdateTriggerType
         if event.action == "closed":
-            raw_trigger_type = "pr_merged" if event.merged else "pr_updated"
+            trigger_type = (
+                EnumUpdateTriggerType.PR_MERGED
+                if event.merged
+                else EnumUpdateTriggerType.PR_UPDATED
+            )
         else:
-            raw_trigger_type = _ACTION_TO_TRIGGER_TYPE.get(event.action, "pr_updated")
-
-        # The mapping table only produces valid Literal values — cast for type checker
-        trigger_type: Literal[
-            "pr_opened",
-            "pr_updated",
-            "pr_merged",
-            "contract_changed",
-            "schema_changed",
-            "manual_plan_request",
-            # Why: Runtime compatibility requires assigning through a broader static type.
-        ] = raw_trigger_type  # type: ignore[assignment]
+            trigger_type = _ACTION_TO_TRIGGER_TYPE.get(
+                event.action, EnumUpdateTriggerType.PR_UPDATED
+            )
 
         trigger = ModelUpdateTrigger(
             trigger_id=uuid4(),

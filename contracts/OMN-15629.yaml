@@ -1,0 +1,46 @@
+schema_version: "1.0.0"
+ticket_id: OMN-15629
+title: "The gateway forwarder provisions its contract-declared local-bus topics before its consumers start"
+summary: The forwarder creates every topic its resolved contract bindings put on the local broker before the first consumer starts, so a cold or warm restart on a broker with topic auto-creation off no longer dies on an unknown topic.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn15629
+    statement: The gateway forwarder provisions the local-bus topics its contract declares, read from the contract bindings, before the first consumer starts.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: run_gateway_forwarder creates every topic the resolved contract bindings place on the local broker, heartbeat included, before any transport starts, and the topic list is read from node_bus_forwarder_effect/contract.yaml -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/unit/runtime/test_gateway_forwarder_topic_provisioning_omn15629.py -q'
+evidence_requirements:
+  - kind: tests
+    description: The shipped contract's local-leg topics are created before the first consumer starts; creation is idempotent and never fatal when the broker refuses it.
+    command: env -u PYTHONPATH uv run --frozen pytest tests/unit/runtime/test_gateway_forwarder_topic_provisioning_omn15629.py -q
+  - kind: manual
+    description: "Deploy evidence: the provisioning runs in the gateway forwarder process and is exercised by the same tests the hosted runner executes."
+    command: "deploy: env -u PYTHONPATH uv run --frozen pytest tests/unit/runtime/test_gateway_forwarder_topic_provisioning_omn15629.py -q --no-header"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn15629-ac1
+    description: The forwarder creates the contract-declared local topics before any consumer starts; the list comes from the contract.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/unit/runtime/test_gateway_forwarder_topic_provisioning_omn15629.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: env -u PYTHONPATH uv run --frozen pytest tests/integration/gateway/test_forwarder_cold_broker_topic_provisioning_omn15629.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -qF 'async def ensure_topics_exist' src/omnibase_infra/runtime/gateway_forwarder.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC1]
+  - id: dod-omn15629-deploy
+    description: Post-deploy -- the running runtime container imports the forwarder's topic provisioning, so a runtime without the change fails this probe. It reads the runtime container after the deploy agent rolls it, which a hosted runner does not have, so only the local Done gate runs it and it binds no acceptance criterion.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c 'from omnibase_infra.runtime.gateway_forwarder import ensure_topics_exist'

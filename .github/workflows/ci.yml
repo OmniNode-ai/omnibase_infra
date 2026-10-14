@@ -319,6 +319,10 @@ jobs:
       - name: Caller-owned imperative guard regression (OMN-21004)
         run: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
 
+      # OMN-20864: paired with the plugin-pin-cascade-evidence pre-commit hook.
+      - name: Plugin pin cascade renders its own evidence (OMN-20864)
+        run: uv run --frozen pytest tests/ci/test_plugin_pin_cascade_evidence_omn20864.py tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q -n 0 --no-cov -p no:randomly
+
       # OMN-20910: paired with the review-voter-model-from-overlay pre-commit hook.
       - name: Review voter model comes from the overlay (OMN-20910)
         run: uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -p no:randomly
@@ -1699,7 +1703,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: f49213032b80b03e7c9a1a6656416cc5083b7cdc # .github/sibling-pins.yaml
+          ref: 464634262791e35cd0e9f44552d54ea7fd97f1eb # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -1932,7 +1936,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: f49213032b80b03e7c9a1a6656416cc5083b7cdc # .github/sibling-pins.yaml
+          ref: 464634262791e35cd0e9f44552d54ea7fd97f1eb # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1948,7 +1952,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: f49213032b80b03e7c9a1a6656416cc5083b7cdc # .github/sibling-pins.yaml
+          ref: 464634262791e35cd0e9f44552d54ea7fd97f1eb # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4605,7 +4609,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: f49213032b80b03e7c9a1a6656416cc5083b7cdc # .github/sibling-pins.yaml
+          ref: 464634262791e35cd0e9f44552d54ea7fd97f1eb # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4621,7 +4625,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: f49213032b80b03e7c9a1a6656416cc5083b7cdc # .github/sibling-pins.yaml
+          ref: 464634262791e35cd0e9f44552d54ea7fd97f1eb # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 

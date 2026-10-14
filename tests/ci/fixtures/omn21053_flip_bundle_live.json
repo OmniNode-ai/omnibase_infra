@@ -1,0 +1,35 @@
+{
+  "_provenance": {
+    "source": "omnibase_core scripts/ci/verify_flip_bundle.py run in the omnibase_infra worktree against base_ref ae5fca1228a3 for each flipped node (OMN-21053)",
+    "captured_utc": "2026-10-13T10:35:05Z",
+    "source_file": "scripts/ci/canonical_handler_shape_baseline.py",
+    "source_sha256": "f5fb10ccefc1c02686be829a3bb92679157d09a1e9a62d0b062f245a60fe4a4f"
+  },
+  "base_ref": "ae5fca1228a3",
+  "runs": [
+    {
+      "node_id": "omnibase_infra.nodes.node_artifact_change_detector_effect",
+      "exit_code": 0,
+      "verdict_lines": [
+        "verify_flip_bundle OK \u2014 omnibase_infra.nodes.node_artifact_change_detector_effect: all seven flip-bundle assertions hold",
+        "verify_flip_bundle OK (omnibase_infra) \u2014 1 flip bundle(s) coherent across all seven assertions."
+      ]
+    },
+    {
+      "node_id": "omnibase_infra.nodes.node_artifact_reconciliation_orchestrator",
+      "exit_code": 0,
+      "verdict_lines": [
+        "verify_flip_bundle OK \u2014 omnibase_infra.nodes.node_artifact_reconciliation_orchestrator: all seven flip-bundle assertions hold",
+        "verify_flip_bundle OK (omnibase_infra) \u2014 1 flip bundle(s) coherent across all seven assertions."
+      ]
+    },
+    {
+      "node_id": "omnibase_infra.nodes.node_update_plan_reducer",
+      "exit_code": 0,
+      "verdict_lines": [
+        "verify_flip_bundle OK \u2014 omnibase_infra.nodes.node_update_plan_reducer: all seven flip-bundle assertions hold",
+        "verify_flip_bundle OK (omnibase_infra) \u2014 1 flip bundle(s) coherent across all seven assertions."
+      ]
+    }
+  ]
+}

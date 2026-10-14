@@ -102,7 +102,7 @@ evidence_artifacts:
     required_paths:
       - c12-provider-catalogue.json
     rationale: >-
-      One row per check over the deployed catalogue (parity both directions, no Claude entry, no house entry, the intake route's binding) plus the negative-test injections run in the same process, with the image and the sha256 of the catalogue, the platform contract and both deployed modules. The injections are what make a green readable: a checker that always answers clean produces the same shipped reading, and only the injections tell the two apart.
+      One row per check over the deployed catalogue (parity both directions, no house entry, the intake route's binding) plus the negative-test injections run in the same process, with the image and the sha256 of the catalogue, the platform contract and both deployed modules. The injections are what make a green readable: a checker that always answers clean produces the same shipped reading, and only the injections tell the two apart.
   # --- chain-canary-c28-consumer-flow.yml: the C28 verdict (OMN-19812) -----
   #
   # As with C11 and C12, the probe's EXIT CODE is the verdict and this record

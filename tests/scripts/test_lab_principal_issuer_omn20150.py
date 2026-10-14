@@ -896,3 +896,221 @@ def test_serve_refuses_a_path_that_is_not_a_socket(
     with pytest.raises(SystemExit, match="non-socket path"):
         lpi.UnixHTTPServer(path, lpi.make_handler(issuer, os.getuid()))
     assert path.read_text() == "leave this file untouched"
+
+
+# --- OMN-19975: a principal holds exactly the rows derived from the grant file ---
+
+ACL_HEADER = "PRINCIPAL  HOST  RESOURCE-TYPE  RESOURCE-NAME  RESOURCE-PATTERN-TYPE  OPERATION  PERMISSION  ERROR"
+
+
+def _derived_listing(principal: str) -> list[str]:
+    """Rows spelled from the raw YAML, independent of the issuer's own parser."""
+    doc = yaml.safe_load(GRANTS.read_text())
+    rows = []
+    for g in doc["grants"]:
+        name = g["name"].replace("{principal}", principal)
+        resource = g["resource"].upper()
+        for op in g["operations"]:
+            rows.append(
+                f"User:{principal}  *  {resource}  {name}  {g['pattern'].upper()}  {op.upper()}  ALLOW"
+            )
+    return rows
+
+
+def _listing(rows: Sequence[str]) -> str:
+    return "\n".join([ACL_HEADER, *rows]) + "\n"
+
+
+class ListingBroker(FakeBroker):
+    def __init__(self, listings: dict[str, str]) -> None:
+        super().__init__()
+        self.listings = listings
+        self.users = dict.fromkeys(listings, "x")
+
+    def list_acls(self, principal: str) -> str:
+        return self.listings[principal]
+
+
+def test_expected_rows_are_the_grant_file_spelled_per_operation(
+    declaration: lpi.Declaration,
+) -> None:
+    principal = "dev-a-mac"
+    assert lpi.expected_acl_rows(declaration, principal) == lpi.parse_acl_listing(
+        _listing(_derived_listing(principal)), principal
+    )
+    assert len(lpi.expected_acl_rows(declaration, principal)) == len(
+        _derived_listing(principal)
+    )
+
+
+def test_an_exact_listing_audits_clean(declaration: lpi.Declaration) -> None:
+    principal = "dev-a-mac"
+    live = lpi.parse_acl_listing(_listing(_derived_listing(principal)), principal)
+    assert lpi.audit_acl_rows(declaration, principal, live) == ((), ())
+
+
+def test_a_row_the_file_does_not_derive_is_reported_extra(
+    declaration: lpi.Declaration,
+) -> None:
+    principal = "dev-a-mac"
+    rows = [
+        *_derived_listing(principal),
+        f"User:{principal}  *  TOPIC  onex.cmd.omnimarket.not-declared.v1  LITERAL  WRITE  ALLOW",
+    ]
+    live = lpi.parse_acl_listing(_listing(rows), principal)
+    missing, extra = lpi.audit_acl_rows(declaration, principal, live)
+    assert missing == ()
+    assert extra == (
+        lpi.AclRow(
+            "topic", "onex.cmd.omnimarket.not-declared.v1", "literal", "write", "*"
+        ),
+    )
+
+
+def test_a_derived_row_the_broker_lacks_is_reported_missing(
+    declaration: lpi.Declaration,
+) -> None:
+    principal = "dev-a-mac"
+    rows = _derived_listing(principal)
+    dropped = rows.pop(0)
+    live = lpi.parse_acl_listing(_listing(rows), principal)
+    missing, extra = lpi.audit_acl_rows(declaration, principal, live)
+    assert extra == ()
+    assert [(r.resource, r.name, r.operation) for r in missing] == [
+        ("topic", "onex.cmd.omnimarket.delegate-skill.v1", "write")
+    ]
+    assert "delegate-skill.v1  LITERAL  WRITE" in dropped
+
+
+def test_only_allow_rows_of_the_audited_principal_count(
+    declaration: lpi.Declaration,
+) -> None:
+    principal = "dev-a-mac"
+    rows = [
+        *_derived_listing(principal),
+        f"User:{principal}  *  TOPIC  denied.v1  LITERAL  WRITE  DENY",
+        "User:dev-b-mac  *  TOPIC  someone.elses.v1  LITERAL  WRITE  ALLOW",
+    ]
+    live = lpi.parse_acl_listing(_listing(rows), principal)
+    assert lpi.audit_acl_rows(declaration, principal, live) == ((), ())
+
+
+def test_an_allow_row_bound_to_one_host_is_extra(declaration: lpi.Declaration) -> None:
+    principal = "dev-a-mac"
+    rows = [
+        *_derived_listing(principal),
+        f"User:{principal}  lab-host-b  TOPIC  onex.cmd.omnimarket.delegate-skill.v1  LITERAL  WRITE  ALLOW",
+    ]
+    live = lpi.parse_acl_listing(_listing(rows), principal)
+    _, extra = lpi.audit_acl_rows(declaration, principal, live)
+    assert [r.host for r in extra] == ["lab-host-b"]
+
+
+def test_a_listing_without_a_header_is_refused_and_an_empty_one_is_no_rows() -> None:
+    assert lpi.parse_acl_listing("", "dev-a-mac") == frozenset()
+    with pytest.raises(lpi.IssuerError, match="header") as exc:
+        lpi.parse_acl_listing("authorization failed\n", "dev-a-mac")
+    assert exc.value.status is HTTPStatus.BAD_GATEWAY
+
+
+def test_listing_acls_asks_rpk_for_one_principal_and_carries_no_secret() -> None:
+    seen: list[Sequence[str]] = []
+
+    def run(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        seen.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, ACL_HEADER, "")
+
+    broker = lpi.Broker(lpi.BrokerConfig("http://admin:9644", "su", "su-pass"), run=run)
+    assert broker.list_acls("dev-a-b") == ACL_HEADER
+    assert seen == [
+        ["rpk", "security", "acl", "list", "--allow-principal", "User:dev-a-b"]
+    ]
+
+
+def test_a_failed_listing_is_bad_gateway() -> None:
+    def run(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 1, "", "authorization failed")
+
+    broker = lpi.Broker(lpi.BrokerConfig("http://admin:9644", "su", "su-pass"), run=run)
+    with pytest.raises(lpi.IssuerError, match="authorization failed") as exc:
+        broker.list_acls("dev-a-b")
+    assert exc.value.status is HTTPStatus.BAD_GATEWAY
+
+
+def test_audit_grants_exits_zero_when_every_principal_holds_exactly_the_derived_rows(
+    apply_broker: FakeBroker,
+    monkeypatch: pytest.MonkeyPatch,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    broker = ListingBroker(
+        {p: _listing(_derived_listing(p)) for p in ("dev-a-mac", "dev-b-mac")}
+    )
+    monkeypatch.setattr(lpi, "Broker", lambda config: broker)
+    ledger = lpi.Ledger(ledger_path)
+    for principal in broker.listings:
+        ledger.append({"principal": principal, "lane": "dev", "action": "created"})
+    assert (
+        lpi.main(
+            ["audit-grants", "--grants", str(GRANTS), "--ledger", str(ledger_path)]
+        )
+        == 0
+    )
+    count = len(_derived_listing("dev-a-mac"))
+    assert capsys.readouterr().out.splitlines() == [
+        f"principal=dev-a-mac expected={count} live={count} missing=0 extra=0",
+        f"principal=dev-b-mac expected={count} live={count} missing=0 extra=0",
+    ]
+    assert broker.acl_argvs == [] and broker.set_calls == []
+
+
+def test_audit_grants_exits_one_and_names_each_drifted_row(
+    apply_broker: FakeBroker,
+    monkeypatch: pytest.MonkeyPatch,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rows = _derived_listing("dev-a-mac")
+    rows.pop(0)
+    rows.append("User:dev-a-mac  *  TOPIC  extra.v1  LITERAL  READ  ALLOW")
+    broker = ListingBroker({"dev-a-mac": _listing(rows)})
+    monkeypatch.setattr(lpi, "Broker", lambda config: broker)
+    code = lpi.main(
+        [
+            "audit-grants",
+            "--grants",
+            str(GRANTS),
+            "--ledger",
+            str(ledger_path),
+            "--principal",
+            "dev-a-mac",
+        ]
+    )
+    assert code == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].endswith("missing=1 extra=1")
+    assert (
+        "MISSING dev-a-mac topic literal onex.cmd.omnimarket.delegate-skill.v1 write"
+        in lines
+    )
+    assert "EXTRA dev-a-mac topic literal extra.v1 read" in lines
+
+
+def test_audit_grants_refuses_a_principal_the_broker_does_not_have(
+    apply_broker: FakeBroker,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = lpi.main(
+        [
+            "audit-grants",
+            "--grants",
+            str(GRANTS),
+            "--ledger",
+            str(ledger_path),
+            "--principal",
+            "dev-ghost-mac",
+        ]
+    )
+    assert code == 2
+    assert "the broker has no principal dev-ghost-mac" in capsys.readouterr().err

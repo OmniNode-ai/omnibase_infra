@@ -256,8 +256,6 @@ edges:
   - scripts/check_release_identity.py -> omnibase_infra.nodes.node_release_identity_compute:ModelReleaseIdentityRequest
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_architecture_validator.handlers:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_architecture_validator:'
-  - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_artifact_change_detector_effect:'
-  - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_artifact_reconciliation_orchestrator:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_build_loop_write_effect:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_bus_forwarder_effect:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_chain_orchestrator:'
@@ -311,7 +309,6 @@ edges:
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_setup_preflight_effect:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_setup_validate_effect:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_topic_migration_projection:'
-  - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_update_plan_reducer:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_validation_adjudicator:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_validation_executor:'
   - 'scripts/ci/canonical_handler_shape_baseline.py -> omnibase_infra.nodes.node_validation_ledger_write_effect:'
