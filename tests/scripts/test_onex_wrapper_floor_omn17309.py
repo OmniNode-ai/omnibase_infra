@@ -114,7 +114,7 @@ class _Workspace:
 
     def run(self, *args: str) -> subprocess.CompletedProcess[str]:
         env = dict(os.environ)
-        env["OMNI_HOME"] = str(self.root)
+        env["OMNIBASE_PATH"] = str(self.root)
         env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"  # no stray `onex` to shadow
         return subprocess.run(
             ["bash", str(self.wrapper), *args],
@@ -429,7 +429,7 @@ def test_check_works_with_no_python_and_no_uv_on_path(ws: _Workspace) -> None:
                 break
 
     env = dict(os.environ)
-    env["OMNI_HOME"] = str(ws.root)
+    env["OMNIBASE_PATH"] = str(ws.root)
     env["PATH"] = str(bin_dir)
     proc = subprocess.run(
         ["bash", str(ws.wrapper), "delegate", "x"],
@@ -471,7 +471,7 @@ def test_no_env_var_bypasses_the_refusal(ws: _Workspace) -> None:
     ws.write_floor({"omnibase_compat": "0.5.6"})
 
     env = dict(os.environ)
-    env["OMNI_HOME"] = str(ws.root)
+    env["OMNIBASE_PATH"] = str(ws.root)
     env["ONEX_WRAPPER_NO_RECONCILE"] = "1"
     proc = subprocess.run(
         ["bash", str(ws.wrapper), "delegate", "x"],

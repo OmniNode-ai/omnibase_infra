@@ -50,7 +50,8 @@ def test_lane_identity_module_sees_the_root_passed_by_flag(ws: _Workspace) -> No
         encoding="utf-8",
     )
     env = ws.env()
-    env.pop("OMNI_HOME")
+    env.pop("OMNIBASE_PATH")
+    env.pop("OMNI_HOME", None)
     fake_home = ws.root / "fakehome"
     fake_home.mkdir(exist_ok=True)
     env["HOME"] = str(fake_home)

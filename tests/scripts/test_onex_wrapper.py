@@ -58,12 +58,12 @@ _SENTINEL_OK = 41  # a status no shell/bash failure mode produces by accident
 
 
 class _Workspace:
-    """A throwaway ``$OMNI_HOME`` tree holding a copy of the wrapper.
+    """A throwaway workspace tree holding a copy of the wrapper.
 
-    The wrapper derives ``OMNI_HOME`` from its own location when the variable
-    is unset, so it must be *copied* into the fake tree rather than invoked
-    from the repo -- otherwise a test that omits ``OMNI_HOME`` would resolve
-    the real workspace and mutate it.
+    The wrapper derives its workspace from its own location when
+    ``OMNIBASE_PATH`` is unset, so it must be *copied* into the fake tree rather
+    than invoked from the repo -- otherwise a test that omits ``OMNIBASE_PATH``
+    would resolve the real workspace and mutate it.
     """
 
     def __init__(self, root: Path) -> None:
@@ -193,7 +193,7 @@ class _Workspace:
     def run(
         self,
         *args: str,
-        set_omni_home: bool = True,
+        set_workspace: bool = True,
         extra_env: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         env = {
@@ -204,10 +204,14 @@ class _Workspace:
             "PATH": f"{self.shim_bin}:/usr/bin:/bin",
             **(extra_env or {}),
         }
-        if set_omni_home:
-            env["OMNI_HOME"] = str(self.root)
+        if set_workspace:
+            env["OMNIBASE_PATH"] = str(self.root)
         else:
-            env.pop("OMNI_HOME", None)
+            env.pop("OMNIBASE_PATH", None)
+        # The wrapper must not read an inherited OMNI_HOME (OMN-16632): every
+        # test starts without one unless it names one in extra_env.
+        env.pop("OMNI_HOME", None)
+        env.update(extra_env or {})
         return subprocess.run(
             [str(self.wrapper), *args],
             capture_output=True,
@@ -451,13 +455,13 @@ def test_omni_home_is_derived_from_the_script_location_when_unset(
     launchd, and from any hook that does not export the variable."""
     workspace.install_entrypoint()
 
-    result = workspace.run("node", "x", set_omni_home=False)
+    result = workspace.run("node", "x", set_workspace=False)
 
     assert result.returncode == _SENTINEL_OK, result.stderr
     assert any(ln.startswith("ENTRYPOINT") for ln in workspace.witness_lines())
 
 
-def test_explicit_omni_home_wins_over_the_derived_root(tmp_path: Path) -> None:
+def test_explicit_omnibase_path_wins_over_the_derived_root(tmp_path: Path) -> None:
     """Two checkouts, one wrapper: the exported root selects which venv runs."""
     wrapper_home = _Workspace(tmp_path / "wrapper_home")
     target_home = _Workspace(tmp_path / "target_home")
@@ -465,10 +469,10 @@ def test_explicit_omni_home_wins_over_the_derived_root(tmp_path: Path) -> None:
     target_home.witness = wrapper_home.witness
 
     env = {
-        **os.environ,
+        **{k: v for k, v in os.environ.items() if k != "OMNI_HOME"},
         "WITNESS": str(wrapper_home.witness),
         "PATH": "/usr/bin:/bin",
-        "OMNI_HOME": str(target_home.root),
+        "OMNIBASE_PATH": str(target_home.root),
     }
     result = subprocess.run(
         [str(wrapper_home.wrapper), "node", "x"],
@@ -480,6 +484,38 @@ def test_explicit_omni_home_wins_over_the_derived_root(tmp_path: Path) -> None:
 
     assert result.returncode == _SENTINEL_OK, result.stderr
     assert any(ln.startswith("ENTRYPOINT") for ln in wrapper_home.witness_lines())
+
+
+def test_inherited_omni_home_never_selects_the_workspace(tmp_path: Path) -> None:
+    """OMN-16632: OMNI_HOME is the operator's private workspace. A stale one in a
+    tester's shell must not point the wrapper at that tree: with OMNIBASE_PATH
+    unset the wrapper resolves the tree it lives in, runs that tree's venv, and
+    hands the CLI that tree as OMNIBASE_PATH -- never the decoy."""
+    own = _Workspace(tmp_path / "own")
+    decoy = _Workspace(tmp_path / "decoy")
+    own.entrypoint.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "OWN OMNIBASE_PATH=%s OMNI_HOME=%s\\n" '
+        '"${OMNIBASE_PATH-<unset>}" "${OMNI_HOME-<unset>}" >> "$WITNESS"\n'
+        f"exit {_SENTINEL_OK}\n",
+        encoding="utf-8",
+    )
+    own.entrypoint.chmod(0o755)
+    decoy.entrypoint.write_text(
+        '#!/usr/bin/env bash\nprintf "DECOY\\n" >> "$WITNESS"\nexit 1\n',
+        encoding="utf-8",
+    )
+    decoy.entrypoint.chmod(0o755)
+
+    result = own.run(
+        "node",
+        "x",
+        set_workspace=False,
+        extra_env={"OMNI_HOME": str(decoy.root)},
+    )
+
+    assert result.returncode == _SENTINEL_OK, result.stderr
+    assert own.witness_lines() == [f"OWN OMNIBASE_PATH={own.root} OMNI_HOME={own.root}"]
 
 
 def test_wrapper_is_executable_in_the_repo() -> None:
@@ -587,7 +623,9 @@ def test_the_workspace_root_is_bound_for_the_cli(workspace: _Workspace) -> None:
     declaration or the workspace's tier-1 runtime config."""
     _install_root_reporting_entrypoint(workspace)
 
-    env_without = {k: v for k, v in os.environ.items() if k != "OMNIBASE_PATH"}
+    env_without = {
+        k: v for k, v in os.environ.items() if k not in {"OMNIBASE_PATH", "OMNI_HOME"}
+    }
     result = subprocess.run(
         [str(workspace.wrapper), "delegate", "x"],
         capture_output=True,
@@ -596,7 +634,6 @@ def test_the_workspace_root_is_bound_for_the_cli(workspace: _Workspace) -> None:
             **env_without,
             "WITNESS": str(workspace.witness),
             "PATH": f"{workspace.shim_bin}:/usr/bin:/bin",
-            "OMNI_HOME": str(workspace.root),
         },
         check=False,
     )
@@ -605,12 +642,17 @@ def test_the_workspace_root_is_bound_for_the_cli(workspace: _Workspace) -> None:
     assert workspace.witness_lines() == [f"OMNIBASE_PATH={workspace.root}"]
 
 
-def test_an_explicit_omnibase_path_is_not_overwritten(workspace: _Workspace) -> None:
-    _install_root_reporting_entrypoint(workspace)
+def test_an_explicit_omnibase_path_is_not_overwritten(tmp_path: Path) -> None:
+    """The operator's OMNIBASE_PATH is the workspace: the wrapper runs that
+    tree's venv and hands the CLI exactly that value."""
+    wrapper_home = _Workspace(tmp_path / "wrapper_home")
+    named = _Workspace(tmp_path / "named_by_the_operator")
+    _install_root_reporting_entrypoint(named)
+    named.witness = wrapper_home.witness
 
-    result = workspace.run(
-        "delegate", "x", extra_env={"OMNIBASE_PATH": "/named/by/the/operator"}
+    result = wrapper_home.run(
+        "delegate", "x", extra_env={"OMNIBASE_PATH": str(named.root)}
     )
 
     assert result.returncode == _SENTINEL_OK, result.stderr
-    assert workspace.witness_lines() == ["OMNIBASE_PATH=/named/by/the/operator"]
+    assert wrapper_home.witness_lines() == [f"OMNIBASE_PATH={named.root}"]
