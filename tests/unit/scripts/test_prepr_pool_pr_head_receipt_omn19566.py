@@ -623,6 +623,16 @@ def _shell_function(name: str) -> str:
     return script[start:end]
 
 
+def _derivation_script(function: str) -> str:
+    """One host-side node derivation function with what it calls (OMN-18893)."""
+    script = PROVE_SH.read_text(encoding="utf-8")
+    start = script.index("IFS= read -r -d '' NODE_CONTRACT_PY")
+    classifier = script[start : script.index("\nPY\n", start) + 4]
+    return classifier + "".join(
+        _shell_function(f) for f in ("changed_nodes", "node_contract_facts", function)
+    )
+
+
 def test_the_host_prints_the_changed_paths_the_workflow_reads(tmp_path: Path) -> None:
     repo = tmp_path / "r"
     repo.mkdir()
@@ -663,7 +673,9 @@ def test_live_terms_are_derived_from_changed_nodes_that_exist_at_the_head(
     nodes = repo / "src" / "omnibase_infra" / "nodes"
     for node in ("node_kept", "node_gone", "node_untouched"):
         (nodes / node).mkdir(parents=True)
-        (nodes / node / "contract.yaml").write_text("name: x\n", encoding="utf-8")
+        (nodes / node / "contract.yaml").write_text(
+            f"name: {node}\nevent_bus:\n  subscribe_topics: [t]\n", encoding="utf-8"
+        )
     (nodes / "__init__.py").write_text("", encoding="utf-8")
     (repo / "README.md").write_text("x\n", encoding="utf-8")
     _git(repo, "init", "-q", "-b", "dev")
@@ -677,7 +689,7 @@ def test_live_terms_are_derived_from_changed_nodes_that_exist_at_the_head(
     (repo / "README.md").write_text("y\n", encoding="utf-8")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "head")
-    script = _shell_function("derive_live_grep")
+    script = _derivation_script("derive_live_grep")
     out = subprocess.run(
         ["bash", "-c", f'R="{root}"\n' + script + "derive_live_grep omnibase_infra"],
         env=scrub_git_location_env(),
