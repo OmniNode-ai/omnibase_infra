@@ -1,0 +1,123 @@
+{
+  "ticket": "OMN-19215",
+  "criterion": "AC2",
+  "lane": "rem-19215",
+  "host": "h201",
+  "base_sha": "0b13814a973c805a5d87b24c27e8c2a48ccce39c",
+  "command": "BIFROST_OVERLAY_PATH=<overlay> onex delegate <prompt> --task-type document --ticket OMN-19215 --bus inmemory --locus in-process",
+  "overlays": {
+    "control": "a copy of the lab host default delegation overlay with the local-omnipc2-chat and local-studio-planner placements set to mode fallback, every endpoint unmodified",
+    "closed_port": "the control overlay with the endpoint_url of local-coder and local-heavy-reasoning moved from the rung host's model port to a port on the rung host that refuses connections"
+  },
+  "sibling_backend_id": "local-omnipc2-chat",
+  "rung_host": "rung-host",
+  "sibling_host": "sibling-host",
+  "runs": [
+    {
+      "kind": "control",
+      "run_id": "9575099e-f79c-4efe-ab99-71a5fde9d17e",
+      "status": "success",
+      "attempts": [
+        {
+          "backend_id": "local-heavy-reasoning",
+          "host": "rung-host",
+          "acceptance_decision": "accept",
+          "acceptance_reason": "quality_bar_met",
+          "failure_class": null
+        }
+      ]
+    },
+    {
+      "kind": "control",
+      "run_id": "de53831b-a4a3-45bc-85ba-9aed234cf5bd",
+      "status": "success",
+      "attempts": [
+        {
+          "backend_id": "local-heavy-reasoning",
+          "host": "rung-host",
+          "acceptance_decision": "accept",
+          "acceptance_reason": "quality_bar_met",
+          "failure_class": null
+        }
+      ]
+    },
+    {
+      "kind": "control",
+      "run_id": "8da7581e-a2d9-481d-acc4-6fe1ddde1e58",
+      "status": "success",
+      "attempts": [
+        {
+          "backend_id": "local-heavy-reasoning",
+          "host": "rung-host",
+          "acceptance_decision": "accept",
+          "acceptance_reason": "quality_bar_met",
+          "failure_class": null
+        }
+      ]
+    },
+    {
+      "kind": "closed_port",
+      "run_id": "bc386d6a-dc06-4bbe-b635-4a9dad2ab9af",
+      "status": "success",
+      "attempts": [
+        {
+          "backend_id": "local-heavy-reasoning",
+          "host": "rung-host",
+          "acceptance_decision": "climb",
+          "acceptance_reason": "provider_call_failed",
+          "failure_class": "model_unavailable"
+        },
+        {
+          "backend_id": "local-omnipc2-chat",
+          "host": "sibling-host",
+          "acceptance_decision": "accept",
+          "acceptance_reason": "quality_bar_met",
+          "failure_class": null
+        }
+      ]
+    },
+    {
+      "kind": "closed_port",
+      "run_id": "782f74e3-fc45-4e7a-b3b4-909f5e5b4cd6",
+      "status": "success",
+      "attempts": [
+        {
+          "backend_id": "local-heavy-reasoning",
+          "host": "rung-host",
+          "acceptance_decision": "climb",
+          "acceptance_reason": "provider_call_failed",
+          "failure_class": "model_unavailable"
+        },
+        {
+          "backend_id": "local-omnipc2-chat",
+          "host": "sibling-host",
+          "acceptance_decision": "accept",
+          "acceptance_reason": "quality_bar_met",
+          "failure_class": null
+        }
+      ]
+    },
+    {
+      "kind": "closed_port",
+      "run_id": "6a9ff357-cd67-459c-9678-ede7276d9d61",
+      "status": "success",
+      "attempts": [
+        {
+          "backend_id": "local-heavy-reasoning",
+          "host": "rung-host",
+          "acceptance_decision": "climb",
+          "acceptance_reason": "provider_call_failed",
+          "failure_class": "model_unavailable"
+        },
+        {
+          "backend_id": "local-omnipc2-chat",
+          "host": "sibling-host",
+          "acceptance_decision": "accept",
+          "acceptance_reason": "quality_bar_met",
+          "failure_class": null
+        }
+      ]
+    }
+  ],
+  "note": "The document task class routes to the local-heavy-reasoning rung, so that is the rung the closed port starves; local-coder is closed in the same overlay. A code_generation prompt was tried on both overlays and the quality gate vetoed it on the control as well, so it is not part of the pair."
+}
