@@ -484,8 +484,8 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
             is_failure = message.topic == instance.failed_topic
 
             if is_failure:
-                # Set exception for failed responses
-                error_message = response_data.get("error", "Request failed")
+                # Set exception for failed responses, carrying the terminal's own cause
+                error_message = self._failure_reason(response_data)
                 future.set_exception(RuntimeError(f"Request failed: {error_message}"))
             else:
                 # Set result for successful responses
@@ -514,6 +514,19 @@ class RequestResponseWiring(MixinAsyncCircuitBreaker):
                 message.topic,
                 e,
             )
+
+    @staticmethod
+    def _failure_reason(data: dict[str, object]) -> str:
+        """Return a failure terminal's cause: ``failure_reason`` (the delegation
+        terminal field) or a legacy ``error``, on the body or its envelope payload."""
+        for source in (data, data.get("payload")):
+            if not isinstance(source, dict):
+                continue
+            for key in ("failure_reason", "error"):
+                value = source.get(key)
+                if isinstance(value, str) and value:
+                    return value
+        return "failure terminal carried no failure_reason"
 
     def _extract_correlation_id(
         self,
