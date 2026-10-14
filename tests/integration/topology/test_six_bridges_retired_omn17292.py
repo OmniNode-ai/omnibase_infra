@@ -12,7 +12,7 @@ declare their relations landed, so hand-authored
   ``automation_alarm_episodes`` (OMN-20802)
 - ``run_trace`` (OMN-19987)
 
-The omnimarket contract pin advancing to 51eb10a9728b carries all three, so the
+The omnimarket contract pin advancing to 464634262791 carries all three, so the
 bridges are deleted. The vendored migration lineage and the exact shipped
 grants must survive. This proof uses committed repository state alone.
 """

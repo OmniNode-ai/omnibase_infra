@@ -11,6 +11,11 @@ requirements:
     acceptance:
       - id: AC1
         statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 464634262791e35cd0e9f44552d54ea7fd97f1eb -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
+  - id: req-omn17292-six-bridges
+    statement: The six retired supplemental table bridges stay retired and their shipped grants and vendored migrations survive.
+    acceptance:
+      - id: AC2
+        statement: "AC2: none of lab_job_state, lab_job_transitions, automation_liveness_state, automation_run_history, automation_alarm_episodes and run_trace has a LEGACY_MIGRATION_TABLE_DECLARATIONS entry, and every shipped topology instance still grants INSERT, SELECT and UPDATE on each -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_six_bridges_retired_omn17292.py -q"
 evidence_requirements:
   - kind: tests
     description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 464634262791e35cd0e9f44552d54ea7fd97f1eb.
@@ -28,3 +33,11 @@ dod_evidence:
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
+  - id: dod-omn-17292-ac2
+    description: No supplemental bridge remains for the six relations, their vendored migrations are in the tree and every shipped instance keeps the grants.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "env -u PYTHONPATH uv run --frozen pytest tests/integration/topology/test_six_bridges_retired_omn17292.py -q"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC2]
