@@ -188,10 +188,12 @@ class TestDuplicationSweep:
         )
         bounds_dir = (
             tmp_path
-            / "onex_change_control"
+            / "omnimarket"
             / "src"
-            / "onex_change_control"
-            / "boundaries"
+            / "omnimarket"
+            / "nodes"
+            / "node_duplication_sweep"
+            / "contracts"
         )
         bounds_dir.mkdir(parents=True)
         (bounds_dir / "kafka_boundaries.yaml").write_text(
@@ -201,6 +203,33 @@ class TestDuplicationSweep:
         )
         result = check_d2_topic_conflicts(tmp_path)
         assert result["status"] == "PASS"
+
+    def test_d2_ignores_the_change_control_manifest(self, tmp_path):
+        """OMN-20949: a manifest left at the retired change-control path is not read."""
+        from run_duplication_sweep import check_d2_topic_conflicts
+
+        hooks_dir = tmp_path / "omniclaude" / "src" / "omniclaude" / "hooks"
+        hooks_dir.mkdir(parents=True)
+        (hooks_dir / "topics.py").write_text(
+            'class T:\n    A = "onex.evt.omniclaude.session.v1"\n'
+        )
+        retired_dir = (
+            tmp_path
+            / "onex_change_control"
+            / "src"
+            / "onex_change_control"
+            / "boundaries"
+        )
+        retired_dir.mkdir(parents=True)
+        (retired_dir / "kafka_boundaries.yaml").write_text(
+            "boundaries:\n"
+            "  - topic_name: onex.evt.omniclaude.session.v1\n"
+            "    producer_repo: omnibase_infra\n"
+        )
+        result = check_d2_topic_conflicts(tmp_path)
+        assert result["status"] == "WARN"
+        assert "node_duplication_sweep" in result["detail"]
+        assert "onex_change_control" not in result["detail"]
 
     def test_d1_pass_when_no_duplicates(self, tmp_path):
         from run_duplication_sweep import check_d1_drizzle_tables
