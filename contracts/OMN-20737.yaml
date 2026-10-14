@@ -1,0 +1,29 @@
+schema_version: "1.0.0"
+ticket_id: "OMN-20737"
+title: "The ledger parity check's read-only role can read work_ledger_state"
+summary: "omnibase_infra adds a node_projection_work_ledger migration that grants SELECT on omninode_internal.work_ledger_state to the out-of-band read-only role work_ledger_ro, so the parity check run as that role reads the table instead of failing with InsufficientPrivilegeError."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: "req-work-ledger-ro-state-select"
+    statement: "The migration grants work_ledger_ro SELECT, and only SELECT, on work_ledger_state, and applies cleanly where the role does not exist."
+    acceptance:
+      - id: "AC1"
+        statement: "AC1: node_projection_work_ledger/0004 grants SELECT on omninode_internal.work_ledger_state to work_ledger_ro behind a role-exists guard, is bound in the application migration manifest by its sha256 and is classed expand-only -- falsifier: uv run pytest tests/unit/migrations/test_omn20737_work_ledger_ro_state_grant.py -q -n 0 fails when the file, its manifest row or its class is absent."
+evidence_requirements:
+  - kind: "tests"
+    description: "The grant test passes at the head and fails at the merge base."
+    command: "uv run pytest tests/unit/migrations/test_omn20737_work_ledger_ro_state_grant.py -q -n 0"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: "dod-omn20737-ac1-work-ledger-ro-state-grant"
+    description: "AC1 hosted probe. The migration, its manifest row and its class are present and the grant is SELECT-only behind the role guard."
+    source: "manual"
+    checks:
+      - check_type: "test_passes"
+        check_value: "uv run pytest tests/unit/migrations/test_omn20737_work_ledger_ro_state_grant.py -q -n 0"
+    binds_ac: ["AC1"]
