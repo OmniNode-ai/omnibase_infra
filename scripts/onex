@@ -62,12 +62,15 @@
 #
 # Usage:
 #   scripts/onex <args...>          # identical argv to the `onex` entrypoint
-#   alias onex='$OMNI_HOME/omnibase_infra/scripts/onex'
+#   alias onex='$OMNIBASE_PATH/omnibase_infra/scripts/onex'
 #
 # Env:
-#   OMNI_HOME   canonical registry root. Optional -- when unset it is derived
-#               from this script's own location, which is exact rather than
-#               guessed (this file lives at <omni_home>/omnibase_infra/scripts).
+#   OMNIBASE_PATH
+#               workspace root. Optional -- when unset it is derived from this
+#               script's own location, which is exact rather than guessed (this
+#               file lives at <workspace>/omnibase_infra/scripts). An inherited
+#               OMNI_HOME is never read: it is the operator's private workspace
+#               (OMN-16632).
 #   ONEX_WRAPPER_NO_RECONCILE=1
 #               skip the self-heal and refuse immediately on a missing
 #               entrypoint. For tests and for diagnosing the wrapper itself;
@@ -161,11 +164,17 @@ done
 SCRIPT_DIR="$(cd "$(dirname "$_self")" && pwd)"
 INFRA_DIR="$(dirname "$SCRIPT_DIR")"
 
-# $OMNI_HOME wins when set (an operator may run a wrapper from one checkout
-# against a registry root they named explicitly); otherwise derive it from this
+# $OMNIBASE_PATH wins when set (an operator may run a wrapper from one checkout
+# against a workspace root they named explicitly); otherwise derive it from this
 # file. Deriving is not a silent default -- it is the one answer that is always
 # right for the checkout this script is part of.
-OMNI_HOME="${OMNI_HOME:-$(dirname "$INFRA_DIR")}"
+#
+# An inherited $OMNI_HOME is never read (OMN-16632). It is the operator's private
+# workspace, not a product parameter: a tester's later shell with a stale
+# OMNI_HOME must not point the CLI at that tree. $OMNI_HOME below is this
+# script's own name for the resolved workspace, assigned unconditionally, so a
+# stale exported value is replaced rather than passed on to the CLI.
+OMNI_HOME="${OMNIBASE_PATH:-$(dirname "$INFRA_DIR")}"
 
 # Bind the workspace root for the CLI (OMN-19193). The CLI's --omnibase-path binds
 # $OMNIBASE_PATH, not $OMNI_HOME, and this wrapper never passed either on -- so
@@ -173,8 +182,8 @@ OMNI_HOME="${OMNI_HOME:-$(dirname "$INFRA_DIR")}"
 # find the lane declaration, and could not find the workspace's tier-1 runtime
 # config. This is a bootstrap pointer (WHERE configuration lives), the one kind
 # of env value the OMN-17304 ruling admits; it names no transport. An explicit
-# $OMNIBASE_PATH, or an explicit --omnibase-path, still wins.
-export OMNIBASE_PATH="${OMNIBASE_PATH:-$OMNI_HOME}"
+# --omnibase-path still wins.
+export OMNIBASE_PATH="$OMNI_HOME"
 
 # The DISPATCH venv, never the canonical clone's own `.venv` (OMN-17819).
 #

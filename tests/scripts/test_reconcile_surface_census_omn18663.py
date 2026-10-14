@@ -134,7 +134,7 @@ def _run(
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env["PATH"] = f"{ws.bin_dir}:{env['PATH']}"
-    env["OMNI_HOME"] = str(ws.root)
+    env["OMNIBASE_PATH"] = str(ws.root)
     env["UV_SHIM_LOG"] = str(ws.uv_log)
     env["ORDER_LOG"] = str(ws.order_log)
     env["ONEX_RECONCILE_INSTALL_SCRIPT"] = str(ws.install_script)
