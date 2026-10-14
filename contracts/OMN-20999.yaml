@@ -1,0 +1,54 @@
+schema_version: 1.0.0
+ticket_id: OMN-20999
+title: Autobind OCC evidence for OMN-20999
+summary: 'Hand-authored OCC Evidence-Source companion (OMN-15247) for the omnibase_infra change passing the seven v0.146 SMTP variables to the dev-lane Infisical container. docker/docker-compose.infra.yml is deploy-scoped, so the pre-push deploy-scope guard and the hosted deploy-gate both require a contract for the cited ticket. Every check reads the file hermetically through the GitHub API pinned to commit 6385c8808, the config commit this contract commit sits on top of, so the bytes a check reads cannot change under it and the check does not grep text inside its own diff (OMN-14505 falsifiability).'
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-transcribed-acceptance-criteria
+    statement: The acceptance criteria this ticket's author declared, transcribed from the ticket body. The ticket body is the source and this block is the copy. Only the two criteria this change can evidence are transcribed; AC2, AC3 and AC5 are host and IAM actions with no CI-reachable check and are recorded on the ticket by the operator.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: The dev-lane Infisical container receives the seven SMTP variables the v0.146 image reads and the instance reports email as configured -- falsifier: the status read against the running instance prints emailConfigured true'
+      - id: AC4
+        statement: 'AC4: A lane that sets no SMTP values starts exactly as before, so the change is inert for every other machine -- falsifier: the catalog unit suites exit 0 and a lane with no INFISICAL_SMTP_ override set still reports emailConfigured false'
+evidence_requirements:
+  - kind: ci
+    description: The compose service passes the SMTP variables at the pinned commit, read through the API rather than from the working tree.
+    command: "gh api -H 'Accept: application/vnd.github.raw' \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=6385c8808108b394e8e912d5cc45671e96a3d124\" | grep -cE '^      SMTP_[A-Z_]+: [$][{]INFISICAL_SMTP_'"
+  - kind: test
+    description: The catalog schema and runtime-validation suites accept the manifest.
+    command: uv run python -m pytest tests/unit/infra/test_catalog_validate_runtime.py tests/unit/infra/test_manifest_schema.py tests/unit/infra/test_catalog_duplicate_host_ports.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20999-ac1-smtp-username-reaches-the-container
+    description: 'AC1 mechanical half. The compose service passes SMTP_USERNAME, the spelling the running v0.146 image reads, as opposed to the SMTP_USER the Keycloak reconciler uses for the same SES sender -- so the variable actually reaches the container instead of being silently ignored. Read hermetically through the GitHub API at commit 6385c8808, which is immutable, so the bytes the check reads cannot change under it, and the commit is the parent of this one rather than part of its own diff. The live half of AC1 is the status read against the running instance, which CI cannot reach from a hosted runner; the operator records that reading on the ticket. Unbound corroboration (no binds_ac): it cannot fail at a merge base, so AC1 and AC4 are bound by dod-omn-20999-red-first-smtp-env-regression, which does.'
+    source: generated
+    checks:
+      - check_type: command
+        check_value: "gh api -H 'Accept: application/vnd.github.raw' \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=6385c8808108b394e8e912d5cc45671e96a3d124\" | grep -qE '^      SMTP_USERNAME: [$][{]INFISICAL_SMTP_USERNAME:-[}]$'"
+  - id: dod-omn-20999-ac4-every-smtp-line-is-override-backed
+    description: 'AC4. The change is inert on a lane that sets nothing only if EVERY SMTP line resolves from an INFISICAL_SMTP_ override -- a single hardcoded value would turn mail on for every machine running onex up core. Asserts the count of override-backed SMTP lines is exactly seven, so a missing variable and an added hardcoded one both go RED. Same immutable ref, same reason. Unbound corroboration (no binds_ac): it cannot fail at a merge base, so AC1 and AC4 are bound by dod-omn-20999-red-first-smtp-env-regression, which does.'
+    source: generated
+    checks:
+      - check_type: command
+        check_value: "gh api -H 'Accept: application/vnd.github.raw' \"repos/OmniNode-ai/omnibase_infra/contents/docker/docker-compose.infra.yml?ref=6385c8808108b394e8e912d5cc45671e96a3d124\" | grep -cE '^      SMTP_[A-Z_]+: [$][{]INFISICAL_SMTP_' | grep -qx 7"
+  - id: dod-omn-20999-red-first-smtp-env-regression
+    description: 'AC1 and AC4, red-first. tests/unit/infra/test_infisical_smtp_env_omn20999.py asserts the image-read SMTP names all reach the container, that no value is hardcoded, and that the Keycloak reconciler spellings are absent. Measured against the merge base 5fad64a9b: test_image_read_smtp_variables_are_all_passed FAILS there because the service passes no SMTP variable at all, and all three pass at this head. So the bound test is shown to fail without the change, which the sha-pinned API reads below cannot demonstrate -- they answer identically at the base and the head by construction.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run python -m pytest tests/unit/infra/test_infisical_smtp_env_omn20999.py -q
+    binds_ac:
+      - "AC1"
+      - "AC4"
+  - id: dod-omn-20999-ac4-catalog-suites
+    description: 'AC4 regression half. The catalog manifest schema, runtime validation and duplicate-host-port suites accept the amended manifest, run by a real runner rather than read out of text. Green at this head: 35 passed. Unbound corroboration (no binds_ac): it cannot fail at a merge base, so AC1 and AC4 are bound by dod-omn-20999-red-first-smtp-env-regression, which does.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run python -m pytest tests/unit/infra/test_catalog_validate_runtime.py tests/unit/infra/test_manifest_schema.py tests/unit/infra/test_catalog_duplicate_host_ports.py -q

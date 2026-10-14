@@ -70,7 +70,6 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # onex-api door (omninode_infra docker/onex-api, POST /v1/github/webhook,
     # OMN-19592) on the dev-system cluster, carried to the lab by the gateway
     # forwarder's inbound leg (OMN-19593) -- a gateway route, not a node.
-    "onex.cmd.github.webhook-delivery.v1": "Published by the onex-api GitHub webhook door (omninode_infra, OMN-19592) via the gateway forwarder inbound leg, not a node | owner: jonah | expiry: 2026-12-31",
     # Runner usage events are produced by self-hosted runner telemetry outside
     # contract-declared node publishers.
     "onex.evt.omninode.runner-usage-recorded.v1": "Published by runner telemetry outside node contracts | owner: jonah | expiry: 2026-12-01",
@@ -192,7 +191,6 @@ _EXTERNAL_PUBLISHER_ALLOWLIST: dict[str, str] = {
     # tests/unit/scripts/test_check_subscribe_wiring_health.py::
     # TestPatternBRouteEntries re-derives the routes, so an entry whose node stops
     # being a local-ingress route fails a test instead of waiting for its date.
-    "onex.cmd.omnibase-infra.pr-state-upsert.v1": "Published by RuntimePatternBBroker as the local-ingress route.command_topic of node_pr_state_write_effect (runtime_local_ingress discovery, OMN-17427); the in-process write path routes by intent | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omnibase-infra.chain-learn.v1": "Published by RuntimePatternBBroker as the local-ingress route.command_topic of node_chain_orchestrator and node_chain_retrieval_effect (runtime_local_ingress discovery, OMN-17427) | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omnibase-infra.llm-completion-request.v1": "Published by RuntimePatternBBroker as the local-ingress route.command_topic of node_llm_completion_effect (runtime_local_ingress discovery, OMN-17427) | owner: jonah | expiry: 2026-12-01",
     "onex.cmd.omnibase-infra.llm-embedding-request.v1": "Published by RuntimePatternBBroker as the local-ingress route.command_topic of node_llm_embedding_effect (runtime_local_ingress discovery, OMN-17427) | owner: jonah | expiry: 2026-12-01",
@@ -238,7 +236,7 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     # ("prove the publisher or delete the subscribe declaration") lapsed that day.
     # FIFTEEN event topics had no publisher anywhere in the fleet (every omni_home
     # clone grepped): their subscribe declarations, and the handler_routing
-    # entries that owned them, are deleted from node_merge_sweep_workflow_orchestrator,
+    # entries that owned them, are deleted from the merge-sweep workflow orchestrator (since removed),
     # node_scope_workflow_orchestrator, node_rsd_orchestrator,
     # node_routing_orchestrator, node_chain_orchestrator, node_chain_store_effect and
     # node_event_forward_effect, and the entries go with them. SEVEN command topics
@@ -274,7 +272,6 @@ _BASELINE_DEAD_LETTER_ALLOWLIST: dict[str, str] = {
     # RSD scoring — triggered externally
     "onex.cmd.rsd.score.v1": "RSD scoring triggered externally | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis]",
     # Skill commands — triggered by Claude skill invocations, not Kafka
-    "onex.cmd.skill.merge-sweep.v1": "Triggered by /merge-sweep skill, not Kafka | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis]",
     "onex.cmd.skill.scope-check.v1": "Triggered by /scope-check skill | owner: jonah | expiry: 2026-12-01 [OMN-16795 re-verified 2026-08-27: publisher is outside omnibase_infra, so this claim is NOT falsifiable from this repo; exemption kept on that basis]",
     # Build loop events — classify and fill phases not yet publishing
     # Infrastructure monitoring — published by runtime internals

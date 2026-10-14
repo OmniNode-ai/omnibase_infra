@@ -1,0 +1,66 @@
+# OMN-20915 contract file for omnibase_infra (the deletion half; the receiving half is omnimarket's contracts/OMN-20915.yaml).
+schema_version: "1.0.0"
+ticket_id: OMN-20915
+title: "GitHub source-control nodes live in omnimarket only: omnibase_infra drops the moved and the dead ones"
+summary: "node_github_pr_poller_effect and node_github_webhook_ingress_effect moved to omnimarket; the PR-state projection pair, the five merge-sweep nodes and the model-only directories were deleted as dead; the GitHub HTTP adapter, whose only source caller was the poller, is deleted. The kernel keeps the webhook secret's logical name so it still builds the resolver the omnimarket handler uses."
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20915-infra-removal
+    statement: "No moved or dead GitHub source-control node, and no GitHub HTTP adapter, remains in omnibase_infra's source tree or entry points."
+    acceptance:
+      - id: AC2
+        statement: "AC2: the omnibase_infra pr_state projection pair, the five node_merge_sweep_* nodes and the model-only directories are deleted, leaving node_projection_pr_state as the one pr_state writer -- falsifier: find over omnibase_infra src nodes returns none of them, and uv run pytest tests/nodes/node_projection_pr_state in omnimarket passes"
+      - id: AC3
+        statement: "AC3: omnibase_infra adapters/github folds into the omnimarket GitHub transport so one GitHub I/O path remains (OMN-14306) -- falsifier: a grep for api.github.com and subprocess gh across omnibase_infra src finds no source-control caller"
+# AC1 (the node move) is bound by the omnimarket pull request that receives the
+# nodes; this pull request carries the omnibase_infra half of AC1 (neither
+# directory remains) in the same test.
+evidence_requirements:
+  - kind: tests
+    description: "The moved and deleted node directories, their entry points, the GitHub adapter and every import of them are absent; the kernel owns the webhook secret logical name."
+    command: "uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q -p no:randomly"
+emergency_bypass:
+  enabled: false
+  justification: ""
+  follow_up_ticket_id: ""
+dod_evidence:
+  - id: dod-omn-20915-ac2-nodes-removed
+    description: "AC2: the dead PR-state, merge-sweep and model-only node directories are gone from omnibase_infra."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q -p no:randomly"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: "uv run pytest tests/integration/test_omn20915_github_scm_nodes_absent_from_discovery.py -q -p no:randomly"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn-20915-deploy-probe
+    description: "Package and runtime-discovery probe for the omnibase_infra deletion half only. The moved and dead node directories, entry points, adapter and source imports are absent, and the runtime's real contract discovery and profile filter find none of the removed nodes. These checks fail against the merge-base source tree with this head's tests overlaid. The receiving nodes' deployment remains the omnimarket receiving pull request's proof; this item does not claim that they are deployed or that the complete move is finished."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q -p no:randomly"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: "uv run pytest tests/integration/test_omn20915_github_scm_nodes_absent_from_discovery.py -q -p no:randomly"
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-20915-ac3-adapter-removed
+    description: "AC3: the GitHub HTTP adapter is gone and nothing in omnibase_infra's source imports it."
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: "uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q -p no:randomly"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-20915-deploy-readback
+    description: "Deploy-scope readback, bound to no criterion: after the deploy agent rolls the dev lane, the runtime image no longer ships the moved GitHub poller node. It reads the dev lane's runtime container, which a hosted runner does not have, so only the local Done gate runs it and the hosted must-fail control does not control it."
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} sh -c \"! python -c 'import omnibase_infra.nodes.node_github_pr_poller_effect' 2>/dev/null\""

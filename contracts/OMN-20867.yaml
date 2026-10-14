@@ -63,7 +63,7 @@ evidence_requirements:
     command: env -u PYTHONPATH uv run --frozen pytest tests/unit/runtime/test_runtime_scheduler.py tests/integration/runtime/test_runtime_tick_slot_alignment_omn20867.py -q
   - kind: tests
     description: The kernel-wired poller publishes only PR status events.
-    command: uv run pytest tests/integration/runtime/test_github_pr_poller_publishes_only_status_events.py -q
+    command: uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q -p no:randomly
 emergency_bypass:
   enabled: false
   justification: ''
@@ -179,16 +179,16 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/integration/runtime/test_github_pr_poller_publishes_only_status_events.py -q
+        check_value: uv run pytest tests/unit/nodes/test_omn20915_scm_nodes_removed.py -q -p no:randomly
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
   - id: dod-omn-20867-ac5-deploy
-    description: Deploy probe. The PR status poll event model at the checked-out commit exists; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base. The readout after the deploy agent rolls the image is the dev lane runtime importing that model and no longer finding the poll-cycle summary model module.
+    description: Deploy probe. OMN-20915 moved the GitHub PR poller to omnimarket, so at the checked-out commit omnibase_infra has no node_github_pr_poller_effect directory and the kernel-wired poller publishes nothing here; the probe lists the nodes directory from GitHub at that commit and exits nonzero on a tree that still has the directory, so it fails at the merge base. The readout after the deploy agent rolls the image is the dev lane runtime failing to import omnibase_infra.nodes.node_github_pr_poller_effect.
     source: manual
     checks:
       - check_type: command
-        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_github_pr_poller_effect/models/model_github_pr_status_poll_event.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'class ModelGitHubPrStatusPollEvent'
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes?ref=$(git rev-parse HEAD)" --jq '[.[].name | select(. == "node_github_pr_poller_effect")] | length' | grep -qx 0
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5

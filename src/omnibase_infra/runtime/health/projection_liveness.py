@@ -159,10 +159,11 @@ def select_projection_contracts(
       that exact contract name (``_raw_event_projection_enabled``), and the
       registry is not visible from a health cycle. Being unattached is their
       documented default, so selecting them would report a permanent fleet-wide
-      outage. Census 2026-08-29: the five contracts in this class
+      outage. Census 2026-08-29: the five contracts in this class (``node_pr_state_projection_compute``,
+      since moved out of the repository, was the fifth)
       (``node_build_loop_projection_compute``,
       ``node_gateway_link_health_projection_compute``,
-      ``node_ledger_projection_compute``, ``node_pr_state_projection_compute``,
+      ``node_ledger_projection_compute``,
       ``node_validation_ledger_projection_compute``) all live in
       ``omnibase_infra`` and NONE of them declares ``db_io.db_tables``, while
       all 49 ``db_io.db_tables`` projections live in ``omnimarket`` and NONE of

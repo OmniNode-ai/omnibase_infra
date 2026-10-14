@@ -291,7 +291,6 @@ def test_kernel_has_no_byname_projection_allowlist() -> None:
     regressed = byname & {
         "node_ledger_projection_compute",
         "node_build_loop_projection_compute",
-        "node_pr_state_projection_compute",
     }
     assert not regressed, (
         "service_kernel re-introduced a by-NAME result-applier allowlist entry for "

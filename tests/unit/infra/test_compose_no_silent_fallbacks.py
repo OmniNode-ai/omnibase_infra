@@ -30,6 +30,20 @@ ALLOWED_EMPTY_DEFAULTS = {
     # The fail-closed `:?` form lives on the CONSUMER of the credential,
     # OMNINODE_INTERNAL_DB_URL in x-runtime-env.
     "OMNINODE_RUNTIME_PASSWORD",
+    # OMN-20999: the same empty-means-skip contract, on Infisical's own
+    # transactional mail. Infisical reads a blank SMTP_HOST as "email not
+    # configured" and starts normally, so an unset lane must get mail OFF rather
+    # than wedge at compose render -- `onex up core` on a developer machine has no
+    # sender and wants none. These four carry no safe real default either: a host,
+    # a username, a password and a from-address are per-deployment facts, so
+    # `${VAR:-value}` has no value to give. The fail-loud `:?` form belongs on a
+    # consumer that genuinely cannot work without mail; the Infisical service can.
+    # SMTP_PORT, SMTP_FROM_NAME and SMTP_REQUIRE_TLS are NOT here because they do
+    # have real defaults (587, OmniNode, true) and so never take the banned form.
+    "INFISICAL_SMTP_HOST",
+    "INFISICAL_SMTP_USERNAME",
+    "INFISICAL_SMTP_PASSWORD",
+    "INFISICAL_SMTP_FROM_ADDRESS",
     # OMN-15425: the TENANT-domain half of the identical split, on the identical
     # contract as OMNINODE_RUNTIME_PASSWORD directly above — same postgres
     # first-startup seam (000_create_multiple_databases.sh LOGIN_ONLY_ROLE_MAP),
@@ -109,7 +123,7 @@ ALLOWED_EMPTY_DEFAULTS = {
     # on the identical contract as the OnexBot App identity above -- minted
     # onto a specific runtime host by the operator, so every other lane must
     # render and run without it. Empty is NOT "silently disabled": the
-    # consumer, node_github_webhook_ingress_effect's handler, resolves it
+    # consumer, omnimarket's node_github_webhook_ingress_effect handler, resolves it
     # through SecretResolver.get_secret_async(required=False) and treats an
     # absent or empty value as "no webhook secret configured", refusing
     # (dead-lettering) every delivery rather than substituting a default. A

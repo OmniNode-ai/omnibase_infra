@@ -35,7 +35,7 @@ event_bus:
   # (grep of every omni_home clone, 2026-10-01; the producers named by the
   # archive port were never built), so each subscription only minted a
   # permanently empty consumer group (OMN-16795). The node keeps one unscoped
-  # operation_match entry, the in-process shape of node_merge_sweep_pr_list_effect.
+  # operation_match entry, the in-process shape of the other unscoped effect nodes.
   # Re-add a subscription with its publisher and a topic-scoped handler entry, in
   # one diff (OMN-7897).
   publish_topics:

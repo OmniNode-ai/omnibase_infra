@@ -516,8 +516,6 @@ src/omnibase_infra/__init__.py
 src/omnibase_infra/adapters/_internal/__init__.py
 src/omnibase_infra/adapters/_internal/adapter_infisical.py
 src/omnibase_infra/adapters/adapter_onex_tool_execution.py
-src/omnibase_infra/adapters/github/__init__.py
-src/omnibase_infra/adapters/github/adapter_github_client.py
 src/omnibase_infra/adapters/llm/__init__.py
 src/omnibase_infra/adapters/llm/adapter_code_analysis_enrichment.py
 src/omnibase_infra/adapters/llm/adapter_code_review_analysis.py
@@ -1916,4 +1914,3 @@ src/omnibase_infra/verification/workflow_receipt/model_workflow_receipt_replay_r
 src/omnibase_infra/verification/workflow_receipt/receipt_hash.py
 src/omnibase_infra/verification/workflow_receipt/verifier.py
 src/omnibase_infra/verification/workflow_receipt/wire_shape.py
-src/omnibase_infra/workflows/__init__.py

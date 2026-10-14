@@ -6,8 +6,7 @@
 
 Companion to ``test_handler_checkpoint_validate.py``. Proves the OMN-14355
 Class-B hand-flip (OMN-14781 path) of ``node_checkpoint_validate_compute`` to
-canonical definition B, mirroring the merged siblings
-``node_pr_state_projection_compute`` (OMN-14826) and
+canonical definition B, mirroring the merged sibling
 ``node_ledger_projection_compute`` (OMN-14823).
 
 * **SHAPE (RED->GREEN / RED-vs-EXISTS-but-WRONG).** The auto-wiring dispatch

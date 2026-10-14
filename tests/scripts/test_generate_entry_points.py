@@ -4,7 +4,6 @@
 """Tests for the generate_entry_points.py script."""
 
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 
@@ -269,50 +268,3 @@ def test_current_repo_entry_points_match_contract_backed_nodes(script) -> None: 
 
     assert len(node_dirs) > 50, f"Expected >50 nodes, found {len(node_dirs)}"
     assert script.check_mode(repo_root, "omnibase_infra", node_dirs) == 0
-
-
-@pytest.mark.unit
-def test_entry_points_owned_elsewhere_are_not_collected(script: ModuleType) -> None:
-    """Nodes whose entry points are owned elsewhere should not be collected."""
-    repo_root = Path(__file__).parent.parent.parent
-    node_dirs = script.collect_node_dirs(repo_root, "omnibase_infra")
-    names = {p.name for p in node_dirs}
-
-    for name in script.ENTRY_POINTS_OWNED_ELSEWHERE["omnibase_infra"]:
-        assert name not in names
-
-
-@pytest.mark.unit
-def test_entry_points_owned_elsewhere_name_existing_contract_backed_dirs(
-    script: ModuleType,
-) -> None:
-    """Ownership exclusions should name existing contract-backed omnimarket nodes."""
-    repo_root = Path(__file__).parent.parent.parent
-    nodes_dir = repo_root / "src" / "omnibase_infra" / "nodes"
-
-    for name, owner in script.ENTRY_POINTS_OWNED_ELSEWHERE["omnibase_infra"].items():
-        assert (nodes_dir / name).is_dir()
-        assert (nodes_dir / name / "contract.yaml").is_file()
-        assert owner == "omnimarket"
-
-
-@pytest.mark.unit
-def test_collect_node_dirs_skips_entry_points_owned_elsewhere(
-    script: ModuleType, tmp_path: Path
-) -> None:
-    """Ownership exclusions should apply only to the named package."""
-    for package_name in ("omnibase_infra", "otherpkg"):
-        nodes_dir = tmp_path / "src" / package_name / "nodes"
-        for name in ("node_github_pr_poller_effect", "node_kept_effect"):
-            node_dir = nodes_dir / name
-            node_dir.mkdir(parents=True)
-            (node_dir / "contract.yaml").touch()
-
-    node_dirs = script.collect_node_dirs(tmp_path, "omnibase_infra")
-    assert [p.name for p in node_dirs] == ["node_kept_effect"]
-
-    node_dirs = script.collect_node_dirs(tmp_path, "otherpkg")
-    assert [p.name for p in node_dirs] == [
-        "node_github_pr_poller_effect",
-        "node_kept_effect",
-    ]
