@@ -12,6 +12,8 @@ from collections.abc import Mapping
 from typing import Protocol
 from uuid import UUID
 
+from pydantic import BaseModel
+
 from omnibase_core.models.delegation.wire import ModelDelegationProvenance
 
 #: The execution budget a caller that passes neither argument resolves to
@@ -90,6 +92,10 @@ class ProtocolDelegationDispatchPort(Protocol):
         # defaulted, per the note above, so a consumer that never passes it
         # keeps working.
         model: str | None = None,
+        # The consumer owns ModelNamedTestSpec. A BaseModel boundary accepts it
+        # without importing the higher-layer package; the deployed bus port
+        # refuses named tests because it cannot access the caller's workspace.
+        named_tests: BaseModel | None = None,
     ) -> dict[str, object]: ...
 
 
