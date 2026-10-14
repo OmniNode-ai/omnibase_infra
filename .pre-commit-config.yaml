@@ -2576,7 +2576,7 @@ repos:
   # denylist from the file named by OMNI_HYGIENE_VOCAB_PATH, with the lab
   # vocabulary beside it, and fails closed without them.
   - repo: https://github.com/OmniNode-ai/omniclaude
-    rev: 0c9f9146d8dd0446fc5c10952aa57247b3a880ae
+    rev: ed4300f8a427ead7f099daf69cedc012907cdbd3
     hooks:
       # OMN-17427: .public-repo-hygiene.yaml declares enforce_scope: added-lines, so
       # the commit verdict is the findings on lines the index adds, and every such

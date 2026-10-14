@@ -139,7 +139,7 @@ class _Workspace:
         overrides: dict[str, str | None] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         env = dict(os.environ)
-        env["OMNI_HOME"] = str(self.root)
+        env["OMNIBASE_PATH"] = str(self.root)
         env["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
         env["ONEX_FLOOR_LOCK_WAIT_S"] = str(wait_s)
         env["ONEX_FLOOR_LOCK_POLL_S"] = str(poll_s)

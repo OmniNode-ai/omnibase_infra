@@ -283,8 +283,8 @@
 #
 # ----------------------------------------------------------------------------
 # Usage:
-#   reconcile-workspace-venvs.sh [--check | --proven] [--verbose] [--omni-home PATH]
-#                                [--branch NAME]
+#   reconcile-workspace-venvs.sh [--check | --proven] [--verbose]
+#                                [--workspace PATH | --omni-home PATH] [--branch NAME]
 #
 #     --check       Report the verdict and mutate NOTHING. This is the mode the
 #                   SessionStart line and any read-only probe must use.
@@ -295,24 +295,29 @@
 #                   refuses a sha that is not in the clone HEAD's history.
 #                   Never stamp the floor. Invalid with --check.
 #     --verbose     Echo each collaborator command before running it.
-#     --omni-home   Canonical registry root, overriding $OMNI_HOME. An explicit
+#     --workspace   Workspace root, overriding $OMNIBASE_PATH. An explicit
 #                   argument exists so an in-process caller (the CLI drift
 #                   guard) can hand the root it already resolved without
 #                   rebuilding an environment for the subprocess.
+#     --omni-home   The same argument under the name the existing callers pass
+#                   (the CLI drift guard, onex-host-reconcile, scripts/onex).
 #     --branch      Branch the canonical clones are expected to track
 #                   (default: dev). Only the clone->origin/<branch> observation
 #                   reads it; it selects no behaviour and moves no ref.
 #
 # Env:
-#   OMNI_HOME                        (required unless --omni-home is passed --
-#                                    no default, CLAUDE.md rule 8)
+#   OMNIBASE_PATH                    workspace root (required unless --workspace
+#                                    or --omni-home is passed -- no default,
+#                                    CLAUDE.md rule 8). An inherited OMNI_HOME
+#                                    is never read: it is the operator's
+#                                    private workspace (OMN-16632).
 #   ONEX_RECONCILE_INSTALL_SCRIPT    override the provider co-install script
 #                                    (tests only; defaults to the sibling script)
 #   ONEX_RECONCILE_UV_BIN            absolute path to `uv`, tried FIRST. Not a
 #                                    bypass: it changes which uv runs, never
 #                                    whether the sync has to succeed.
 #   ONEX_DISPATCH_VENV               absolute path to the dispatch venv,
-#                                    overriding $OMNI_HOME/.onex-dispatch-venv.
+#                                    overriding $OMNIBASE_PATH/.onex-dispatch-venv.
 #                                    `scripts/onex` reads the same variable with
 #                                    the same default, so the two cannot point
 #                                    at different directories by accident. Not a
@@ -361,20 +366,26 @@ PROVEN=0
 VERBOSE=0
 OMNI_HOME_ARG=""
 BRANCH="dev"
+# $OMNI_HOME below is this script's own name for the resolved workspace root. It
+# starts from $OMNIBASE_PATH alone: an inherited $OMNI_HOME is the operator's
+# private workspace and must never select what this script reconciles (OMN-16632).
+OMNI_HOME="${OMNIBASE_PATH:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --check) MODE="check" ;;
     --proven) PROVEN=1 ;;
     --verbose) VERBOSE=1 ;;
-    --omni-home)
+    --omni-home|--workspace)
+      _root_flag="$1"
       shift
       if [[ $# -eq 0 ]]; then
-        echo "reconcile-workspace-venvs.sh: --omni-home requires a path" >&2
+        echo "reconcile-workspace-venvs.sh: $_root_flag requires a path" >&2
         exit "$EXIT_INDETERMINATE"
       fi
       OMNI_HOME_ARG="$1"
       ;;
     --omni-home=*) OMNI_HOME_ARG="${1#--omni-home=}" ;;
+    --workspace=*) OMNI_HOME_ARG="${1#--workspace=}" ;;
     --branch)
       shift
       if [[ $# -eq 0 ]]; then
@@ -417,15 +428,16 @@ trace() { [[ "$VERBOSE" -eq 1 ]] && printf '[reconcile]   $ %s\n' "$*"; return 0
 # Configuration: fail fast, never guess (CLAUDE.md rule 8)
 # --------------------------------------------------------------------------- #
 if [[ -z "${OMNI_HOME:-}" ]]; then
-  say "INDETERMINATE: OMNI_HOME is not set and --omni-home was not passed."
-  say "  Export OMNI_HOME to the canonical repo registry root, e.g."
-  say "    export OMNI_HOME=/path/to/omni_home"
+  say "INDETERMINATE: OMNIBASE_PATH is not set and --workspace was not passed."
+  say "  Export OMNIBASE_PATH to the workspace root, e.g."
+  say "    export OMNIBASE_PATH=/path/to/workspace"
   say "  or pass it explicitly:"
-  say "    reconcile-workspace-venvs.sh --omni-home /path/to/omni_home"
+  say "    reconcile-workspace-venvs.sh --workspace /path/to/workspace"
   say "  No default is applied: a guessed root would reconcile some other"
   say "  checkout's venv and report success for a venv nobody is running."
   exit "$EXIT_INDETERMINATE"
 fi
+export OMNIBASE_PATH="$OMNI_HOME"
 
 INFRA_DIR="$OMNI_HOME/omnibase_infra"
 MARKET_CLONE="$OMNI_HOME/omnimarket"
