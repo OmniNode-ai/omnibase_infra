@@ -1,12 +1,13 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""Doctor check for an OpenAI-compatible local delegation model."""
+"""Doctor check for OpenAI-compatible local delegation models."""
 
 from __future__ import annotations
 
 import json
 import os
 from collections.abc import Mapping
+from functools import partial
 from pathlib import Path
 from typing import ClassVar
 from urllib.parse import urlsplit, urlunsplit
@@ -42,7 +43,7 @@ _OVERLAY_ENV_KEYS = ("BIFROST_OVERLAY_PATH",)
 
 
 class CheckDelegationLocalModel(DoctorCheckBase):
-    """Verify the declared local model is present on its models endpoint."""
+    """Verify each declared local model is present on its models endpoint."""
 
     check_id: ClassVar[str] = "delegation_local_model"
     check_name: ClassVar[str] = "Delegation local model"
@@ -71,13 +72,14 @@ class CheckDelegationLocalModel(DoctorCheckBase):
                 return Path(value.strip()).expanduser()
         return Path.home() / ".omninode" / "delegation" / "bifrost_overrides.yaml"
 
-    def _load_backend(self) -> tuple[str, str | None] | None:
+    def _load_backends(self) -> list[tuple[str, str | None]]:
         raw: object = yaml.safe_load(self._overlay_path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raise ValueError("overlay root is not a mapping")
         backends = raw.get("backends")
         if not isinstance(backends, list):
-            return None
+            return []
+        local_backends: list[tuple[str, str | None]] = []
         for item in backends:
             if not isinstance(item, dict) or item.get("tier") != "local":
                 continue
@@ -95,8 +97,8 @@ class CheckDelegationLocalModel(DoctorCheckBase):
             declared = (
                 model.strip() if isinstance(model, str) and model.strip() else None
             )
-            return (endpoint.strip(), declared)
-        return None
+            local_backends.append((endpoint.strip(), declared))
+        return local_backends
 
     @staticmethod
     def _models_url(endpoint_url: str) -> tuple[str, str]:
@@ -145,72 +147,81 @@ class CheckDelegationLocalModel(DoctorCheckBase):
 
     def _evaluate(self) -> tuple[ModelDelegationDiagnosis, bool]:
         try:
-            backend = self._load_backend()
+            backends = self._load_backends()
         except FileNotFoundError:
             return self._no_local_model()
         except (OSError, UnicodeError, yaml.YAMLError, ValueError):
             return self._unknown("the overlay is unreadable or invalid")
-        if backend is None:
+        if not backends:
             return self._no_local_model()
-        endpoint_url, declared_model = backend
-        try:
-            models_url, origin = self._models_url(endpoint_url)
-        except ValueError:
-            return self._unknown("the local endpoint URL is invalid")
+        models_cache: dict[str, tuple[int, set[str]]] = {}
+        healthy_backends: set[tuple[str | None, str]] = set()
+        healthy_details: list[str] = []
+        for endpoint_url, declared_model in backends:
+            try:
+                models_url, origin = self._models_url(endpoint_url)
+            except ValueError:
+                return self._unknown("the local endpoint URL is invalid")
 
-        try:
-            status, served_models = run_async(
-                lambda: self._served_model_ids(models_url)
-            )
-        except InfraUnavailableError:
-            return (
-                ModelDelegationDiagnosis(
-                    fault=EnumDelegationDoctorFault.LOCAL_MODEL_NOT_SERVING,
-                    detail=f"The local model server at {origin} could not be reached.",
-                    fix=f"Start the model server at {origin}.",
-                ),
-                True,
-            )
-        except (ValueError, TypeError, json.JSONDecodeError):
-            return self._unknown("the models response was unreadable or invalid")
+            try:
+                if models_url not in models_cache:
+                    models_cache[models_url] = run_async(
+                        partial(self._served_model_ids, models_url)
+                    )
+                status, served_models = models_cache[models_url]
+            except InfraUnavailableError:
+                return (
+                    ModelDelegationDiagnosis(
+                        fault=EnumDelegationDoctorFault.LOCAL_MODEL_NOT_SERVING,
+                        detail=f"The local model server at {origin} could not be reached.",
+                        fix=f"Start the model server at {origin}.",
+                    ),
+                    True,
+                )
+            except (ValueError, TypeError, json.JSONDecodeError):
+                return self._unknown("the models response was unreadable or invalid")
 
-        if status != 200 or not served_models:
-            return (
-                ModelDelegationDiagnosis(
-                    fault=EnumDelegationDoctorFault.LOCAL_MODEL_NOT_SERVING,
-                    detail=(
-                        f"The local model server returned HTTP {status}."
-                        if status != 200
-                        else f"The local model server at {origin} reports no served model ids."
+            if status != 200 or not served_models:
+                return (
+                    ModelDelegationDiagnosis(
+                        fault=EnumDelegationDoctorFault.LOCAL_MODEL_NOT_SERVING,
+                        detail=(
+                            f"The local model server returned HTTP {status}."
+                            if status != 200
+                            else f"The local model server at {origin} reports no served model ids."
+                        ),
+                        fix=f"Start the model server at {origin}.",
                     ),
-                    fix=f"Start the model server at {origin}.",
-                ),
-                True,
-            )
-        if declared_model is not None and declared_model not in served_models:
-            served = ", ".join(sorted(served_models)) or "no model ids"
-            return (
-                ModelDelegationDiagnosis(
-                    fault=EnumDelegationDoctorFault.LOCAL_MODEL_ID_MISMATCH,
-                    detail=(
-                        f"The overlay declares '{declared_model}', but the server "
-                        f"reports {served}."
+                    True,
+                )
+            if declared_model is not None and declared_model not in served_models:
+                served = ", ".join(sorted(served_models)) or "no model ids"
+                return (
+                    ModelDelegationDiagnosis(
+                        fault=EnumDelegationDoctorFault.LOCAL_MODEL_ID_MISMATCH,
+                        detail=(
+                            f"The overlay declares '{declared_model}', but the server "
+                            f"reports {served}."
+                        ),
+                        fix=(
+                            f"Edit {self._overlay_path}: set model_name to one of the "
+                            "served ids, or serve the declared model."
+                        ),
                     ),
-                    fix=(
-                        f"Edit {self._overlay_path}: set model_name to one of the "
-                        "served ids, or serve the declared model."
-                    ),
-                ),
-                True,
-            )
-        return (
-            ModelDelegationDiagnosis(
-                fault=None,
-                detail=(
+                    True,
+                )
+            healthy_backend = (declared_model, origin)
+            if healthy_backend not in healthy_backends:
+                healthy_backends.add(healthy_backend)
+                healthy_details.append(
                     f"Local model '{declared_model}' is serving at {origin}."
                     if declared_model is not None
                     else f"A local model server is answering at {origin}."
-                ),
+                )
+        return (
+            ModelDelegationDiagnosis(
+                fault=None,
+                detail=" ".join(healthy_details),
                 fix="",
             ),
             True,
