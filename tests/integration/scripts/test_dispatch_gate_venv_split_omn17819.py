@@ -145,7 +145,7 @@ def test_reconciler_routes_provider_to_dispatch_venv_and_purifies_gate_venv(
 
     env = {
         **os.environ,
-        "OMNI_HOME": str(omni_home),
+        "OMNIBASE_PATH": str(infra.parent),
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "UV_SHIM_LOG": str(uv_log),
         "INSTALL_ARGV_LOG": str(install_argv_log),
