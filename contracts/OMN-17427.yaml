@@ -59,6 +59,13 @@ requirements:
         statement: "AC12: main-target-guard exits non-zero for a base-main PR from a feature head, a dev head with a promotion receipt, a hotfix head with evidence and the release workflows' own heads, and exits zero for those release heads onto dev -- falsifier: uv run pytest tests/ci/test_main_target_guard_omn17427.py -q -k 'refused or admitted or replays'"
       - id: AC13
         statement: "AC13: the pre-push hook main-target-guard prints a warning and exits zero for a push to refs/heads/main and prints nothing for dev or a feature branch, and the guard is registered in the CI Summary poller -- falsifier: uv run pytest tests/ci/test_main_target_guard_omn17427.py -q -k 'hook or push or poller'"
+  - id: req-omn17427-precommit-commit-path
+    statement: A commit no longer pays for whole-repo scans that CI runs on every pull request, and the staged-only hygiene scan returns the whole-tree verdict.
+    acceptance:
+      - id: AC14
+        statement: "AC14: check-direct-model-call and check-node-boundary-imports run at the pre-push stage with --base taken from the merge base with origin/dev, and the CI jobs that back them run on every pull request -- falsifier: uv run pytest tests/ci/test_precommit_commit_path_omn17427.py -q"
+      - id: AC15
+        statement: "AC15: the commit-stage public-repo-hygiene hook is handed the staged paths, the merge-commit stage keeps the whole-tree run, and the config still enforces added lines -- falsifier: uv run pytest tests/ci/test_public_repo_hygiene_enforcement_omn20782.py -q -k same_revision"
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -99,6 +106,12 @@ evidence_requirements:
   - kind: tests
     description: The pre-push hook warns on a push to main and the guard is registered in the CI Summary poller.
     command: uv run pytest tests/ci/test_main_target_guard_omn17427.py -q -k 'hook or push or poller'
+  - kind: tests
+    description: The two whole-repo scans run at push against the merge base and their CI jobs run on every pull request.
+    command: uv run pytest tests/ci/test_precommit_commit_path_omn17427.py -q
+  - kind: tests
+    description: The commit-stage hygiene hook scans the staged paths and the merge-commit stage keeps the whole tree.
+    command: uv run pytest tests/ci/test_public_repo_hygiene_enforcement_omn20782.py -q -k same_revision
 emergency_bypass:
   enabled: false
   justification: ''
@@ -221,3 +234,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC13
+  - id: dod-omn-17427-ac14
+    description: The two whole-repo scans run at push against the merge base, backed by CI jobs that run on every pull request.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_precommit_commit_path_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC14
+  - id: dod-omn-17427-ac15
+    description: The commit-stage hygiene hook scans the staged paths; the merge-commit stage keeps the whole-tree run.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_public_repo_hygiene_enforcement_omn20782.py -q -k same_revision
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC15
