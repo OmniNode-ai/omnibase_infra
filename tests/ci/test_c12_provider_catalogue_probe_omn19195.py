@@ -4,9 +4,14 @@
 """Offline grading tests for the C12 provider-catalogue producer (OMN-19195).
 
 ``tests/fixtures/omn19195/lane_healthy.json`` is the observer's output as
-recorded by running the observer against omnimarket d471dcb96d (the
-catalogue with the OMN-17373 customer-only openai row) on 2026-10-02. Every other case here is that recording with ONE observation
+recorded by running the observer in the dev-201 onex-api container (omnimarket
+0.4.312, the catalogue with the customer-only openai and anthropic rows) on
+2026-10-13. Every other case here is that recording with ONE observation
 broken, so each test says which property of the deployed subject the verdict turns on.
+
+Beta criterion C12 no longer says "no Claude entry": operator ruling
+2026-10-11T15:05:50Z lifted it (OMN-17353), so ``anthropic`` is an allowed
+customer-only provider and nothing here asks for its absence.
 Nothing here touches docker, the network or a lane.
 """
 
@@ -48,7 +53,44 @@ def test_the_recorded_lab_reading_grades_pass() -> None:
     assert record.verdict == "pass", record.failures
     assert record.exit_code == probe.EXIT_OK
     clauses = {c.clause for c in record.checks}
-    assert clauses == {"parity", "no_claude", "no_house", "surface", "negative"}
+    assert clauses == {"parity", "no_house", "surface", "negative"}
+
+
+@pytest.mark.unit
+def test_the_recorded_catalogue_offers_anthropic_and_grades_it_like_openai() -> None:
+    obs = _healthy()
+    assert "anthropic" in obs["shipped"]["offered"]
+    assert "anthropic" in obs["shipped"]["customer_only"]
+    assert "anthropic" in probe.CUSTOMER_ONLY_PROVIDERS
+    record = probe.grade(obs)
+    names = {c.name for c in record.checks}
+    assert "intake_accepts_anthropic" in names
+    assert record.verdict == "pass", record.failures
+
+
+@pytest.mark.unit
+@pytest.mark.live_contact("tests/ci/fixtures/omn17353_c12_dev201_observation.json")
+def test_the_recorded_dev201_container_reading_grades_pass(
+    recorded_response: dict[str, object],
+) -> None:
+    """The observer's output as the dev-201 onex-api container printed it
+    (omnimarket 0.4.312, anthropic offered), graded by the probe."""
+    observed = recorded_response["response"]
+    assert isinstance(observed, dict)
+    assert "anthropic" in observed["shipped"]["offered"]
+    record = probe.grade(observed)
+    assert record.verdict == "pass", record.failures
+    assert record.exit_code == probe.EXIT_OK
+
+
+@pytest.mark.unit
+def test_neither_script_names_the_removed_claude_pattern() -> None:
+    """The deployed catalogue module no longer exports FORBIDDEN_PROVIDER_PATTERN
+    (omnimarket#3777); importing it is what made C12 exit 2 on 2026-10-12."""
+    for path in (Path(observer.__file__), Path(probe.__file__)):
+        text = path.read_text(encoding="utf-8")
+        assert "FORBIDDEN_PROVIDER_PATTERN" not in text, path.name
+        assert "forbidden_pattern" not in text, path.name
 
 
 @pytest.mark.unit
@@ -93,13 +135,31 @@ BROKEN: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
     (
         "unbacked row shipped",
         _set(
-            ("shipped", "offered"), ["gemini", "glm", "mistral", "openai", "openrouter"]
+            ("shipped", "offered"),
+            ["anthropic", "gemini", "glm", "mistral", "openai", "openrouter"],
         ),
         "declared_equals_handler_backed",
     ),
     (
+        "a required provider missing from the offered set",
+        _set(("shipped", "offered"), ["anthropic", "glm", "openai", "openrouter"]),
+        "declared_equals_handler_backed",
+    ),
+    (
+        "a malformed offered entry",
+        _set(
+            ("shipped", "offered"), ["anthropic", "gemini", 7, "openai", "openrouter"]
+        ),
+        "declared_equals_handler_backed",
+    ),
+    (
+        "customer-only observation is not a list",
+        _set(("shipped", "customer_only"), "anthropic"),
+        "customer_only_exemptions_are_declared_here",
+    ),
+    (
         "a self-declared customer-only exemption the grader does not list",
-        _set(("shipped", "customer_only"), ["mistral", "openai"]),
+        _set(("shipped", "customer_only"), ["anthropic", "mistral", "openai"]),
         "customer_only_exemptions_are_declared_here",
     ),
     (
@@ -111,8 +171,19 @@ BROKEN: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
         "customer_only_has_no_house_rung",
     ),
     (
+        "anthropic backed by a house rung",
+        _set(
+            ("shipped", "house_keyed_slugs"),
+            ["anthropic", "gemini", "glm", "openrouter", "typesafe", "vertex"],
+        ),
+        "customer_only_has_no_house_rung",
+    ),
+    (
         "the self-exemption derivation stopped biting",
-        _set(("negative", "customer_only_self_exemption", "customer_only"), ["openai"]),
+        _set(
+            ("negative", "customer_only_self_exemption", "customer_only"),
+            ["anthropic", "openai"],
+        ),
         "customer_only_self_exemption_detected",
     ),
     (
@@ -129,30 +200,6 @@ BROKEN: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
         "deployed parity function disagrees",
         _set(("shipped", "parity_gap", "missing_from_catalogue"), ["vertex"]),
         "deployed_parity_gap_clean",
-    ),
-    # no Claude
-    (
-        "a Claude catalogue id",
-        _set(("shipped", "not_offered"), ["anthropic", "gemini", "vertex"]),
-        "no_claude_catalogue_id",
-    ),
-    (
-        "a Claude value on a row",
-        _set(("shipped", "claude_hits"), ["us.anthropic.opus"]),
-        "deployed_value_scan_empty",
-    ),
-    (
-        "intake admits Claude",
-        _set(("intake", "anthropic"), {"accepted": True}),
-        "intake_refuses_anthropic",
-    ),
-    (
-        "intake refuses Claude on the wrong field",
-        _set(
-            ("intake", "Claude-3", "errors"),
-            [{"loc": ["name"], "type": "missing", "msg": "x"}],
-        ),
-        "intake_refuses_Claude-3",
     ),
     # no house entry
     (
@@ -181,6 +228,11 @@ BROKEN: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
         "the wrong route was read",
         _set(("route", "prefix"), "/v1/whoami"),
         "route_is_the_intake_route",
+    ),
+    (
+        "intake refuses anthropic",
+        _set(("intake", "anthropic"), {"accepted": False, "errors": []}),
+        "intake_accepts_anthropic",
     ),
     (
         "intake refuses an offered provider",
@@ -212,11 +264,6 @@ BROKEN: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
         "parity check stops seeing a dropped row",
         _set(("negative", "parity_missing", "missing_from_catalogue"), []),
         "dropped_row_detected",
-    ),
-    (
-        "Claude scan stops biting",
-        _set(("negative", "claude_row", "claude_hits"), []),
-        "claude_row_detected",
     ),
     (
         "laundered house ref passes",
@@ -288,7 +335,6 @@ def test_the_finding_classes_are_declared_in_the_grader_not_read_back() -> None:
 @pytest.mark.unit
 def test_grader_and_observer_constants_agree() -> None:
     assert probe.UNBACKED_PROVIDER == observer.UNBACKED_PROVIDER
-    assert probe.CLAUDE_PROVIDERS == observer.CLAUDE_PROVIDERS
     assert probe.SYNTHETIC_TOKEN_PROVIDER == observer.SYNTHETIC_TOKEN_PROVIDER
     assert probe.ROUTE_PREFIX == observer.ROUTE_PREFIX
     assert Path(observer.__file__).resolve() == probe.OBSERVER

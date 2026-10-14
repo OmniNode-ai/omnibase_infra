@@ -19,6 +19,9 @@ import pytest
 from omnibase_infra.nodes.node_runner_health_snapshot_effect.handlers.handler_runner_fleet_snapshot import (
     HandlerRunnerFleetSnapshot,
 )
+from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot_gather_command import (
+    ModelRunnerFleetSnapshotGatherCommand,
+)
 from omnibase_infra.observability.runner_health.model_runner_fleet_config import (
     ModelRunnerFleetConfig,
 )
@@ -102,7 +105,9 @@ class TestHandlerRunnerFleetSnapshotGithubDockerReconciliation:
         )
         handler = HandlerRunnerFleetSnapshot(config=_config())
         with patch("asyncio.create_subprocess_exec", dispatcher):
-            snapshot = await handler.handle(correlation_id=cid)
+            snapshot = await handler.handle(
+                ModelRunnerFleetSnapshotGatherCommand(correlation_id=cid)
+            )
 
         assert snapshot.correlation_id == cid
         assert len(snapshot.runners) == 2
@@ -128,7 +133,9 @@ class TestHandlerRunnerFleetSnapshotGithubDockerReconciliation:
         )
         handler = HandlerRunnerFleetSnapshot(config=_config())
         with patch("asyncio.create_subprocess_exec", dispatcher):
-            snapshot = await handler.handle(correlation_id=cid)
+            snapshot = await handler.handle(
+                ModelRunnerFleetSnapshotGatherCommand(correlation_id=cid)
+            )
 
         assert len(snapshot.runners) == 1
         assert snapshot.runners[0].stale_registration is True
@@ -145,7 +152,9 @@ class TestHandlerRunnerFleetSnapshotGithubDockerReconciliation:
         )
         handler = HandlerRunnerFleetSnapshot(config=_config())
         with patch("asyncio.create_subprocess_exec", dispatcher):
-            snapshot = await handler.handle(correlation_id=cid)
+            snapshot = await handler.handle(
+                ModelRunnerFleetSnapshotGatherCommand(correlation_id=cid)
+            )
         assert snapshot.runners == ()
 
     @pytest.mark.asyncio
@@ -156,7 +165,9 @@ class TestHandlerRunnerFleetSnapshotGithubDockerReconciliation:
         )
         handler = HandlerRunnerFleetSnapshot(config=_config())
         with patch("asyncio.create_subprocess_exec", dispatcher):
-            snapshot = await handler.handle(correlation_id=cid)
+            snapshot = await handler.handle(
+                ModelRunnerFleetSnapshotGatherCommand(correlation_id=cid)
+            )
         assert snapshot.buildx_available is False
 
     @pytest.mark.asyncio
@@ -179,7 +190,9 @@ class TestHandlerRunnerFleetSnapshotGithubDockerReconciliation:
 
         handler = HandlerRunnerFleetSnapshot(config=_config())
         with patch("asyncio.create_subprocess_exec", AsyncMock(side_effect=_dispatch)):
-            snapshot = await handler.handle(correlation_id=cid)
+            snapshot = await handler.handle(
+                ModelRunnerFleetSnapshotGatherCommand(correlation_id=cid)
+            )
 
         assert snapshot.github_source_ok is False
         assert snapshot.source_errors != ()

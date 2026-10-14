@@ -57,11 +57,6 @@ ROUTE_PREFIX = "/v1/tenants/me/inference-credentials"
 # provider the catalogue does not carry, so it is ``mistral`` now.
 UNBACKED_PROVIDER = "mistral"
 
-# Claude ids the intake model must refuse. Two spellings, because the deployed
-# pattern is a case-insensitive substring match and a regression to an exact
-# match would pass the first and not the second.
-CLAUDE_PROVIDERS = ("anthropic", "Claude-3")
-
 # The synthetic provider used for the un-registerable-key injection. It is
 # synthetic ON PURPOSE: a real one exists today (vertex), but the probe must
 # still be able to exercise the conjunct on the day vertex is removed, and an
@@ -82,35 +77,10 @@ def _exc(exc: BaseException) -> dict[str, str]:
     return {"type": type(exc).__name__, "message": str(exc)[:600]}
 
 
-def _string_values(row: Any) -> list[str]:
-    """Every string VALUE anywhere in a row, keys excluded."""
-    out: list[str] = []
-    if isinstance(row, dict):
-        for value in row.values():
-            out.extend(_string_values(value))
-    elif isinstance(row, list):
-        for value in row:
-            out.extend(_string_values(value))
-    elif isinstance(row, str):
-        out.append(row)
-    return out
-
-
-def _claude_hits(pattern: Any, rows: list[dict[str, Any]]) -> list[str]:
-    """The Claude scan. The SAME function runs on the shipped rows and on the
-    injected row, so the injection is the scan's positive control."""
-    hits: list[str] = []
-    for row in rows:
-        for value in _string_values(row):
-            if pattern.search(value):
-                hits.append(value)
-    return hits
-
-
 def _customer_only(rows: list[dict[str, Any]]) -> list[str]:
     """Providers every one of whose rows declares ``mirrors_house_rung: false``.
 
-    The platform holds no key for these (OMN-17373, openai), so no house rung
+    The platform holds no key for these (OMN-17373 openai, omnimarket#3777 anthropic), so no house rung
     can back them. The SAME derivation the deployed omnimarket parity test and
     the no-house validator apply, read from the RAW rows. This reports which
     providers the catalogue exempts; whether the exemption is legitimate is the
@@ -174,7 +144,6 @@ def observe(app_root: str) -> dict[str, Any]:
             "catalogue_module": _sha256(Path(byok.__file__)),
             "house_validator": _sha256(Path(house.__file__)),
         },
-        "forbidden_pattern": byok.FORBIDDEN_PROVIDER_PATTERN.pattern,
     }
 
     # ---- the shipped reading ------------------------------------------------
@@ -198,10 +167,6 @@ def observe(app_root: str) -> dict[str, Any]:
             "missing_from_catalogue": list(gap.missing_from_catalogue),
             "unbacked_in_catalogue": list(gap.unbacked_in_catalogue),
         },
-        "claude_hits": _claude_hits(
-            byok.FORBIDDEN_PROVIDER_PATTERN,
-            rows + [{"provider": p} for p in not_offered],
-        ),
         "house_entry": _findings(house.find_house_keyed_catalogue_entries, rows, rungs),
     }
 
@@ -235,7 +200,7 @@ def observe(app_root: str) -> dict[str, Any]:
     }
     obs["intake"] = {
         p: _intake(ModelInferenceCredentialCreateRequest, p)
-        for p in [*offered, *not_offered, UNBACKED_PROVIDER, *CLAUDE_PROVIDERS]
+        for p in [*offered, *not_offered, UNBACKED_PROVIDER]
     }
 
     # ---- the negative test: each clause shown to bite, same process ---------
@@ -271,15 +236,6 @@ def observe(app_root: str) -> dict[str, Any]:
     neg["customer_only_self_exemption"] = {
         "injected": UNBACKED_PROVIDER,
         "customer_only": _customer_only([*rows, exempt_row]),
-    }
-
-    claude_row = copy.deepcopy(rows[0]) if rows else {}
-    claude_row["provider"] = CLAUDE_PROVIDERS[0]
-    neg["claude_row"] = {
-        "injected": CLAUDE_PROVIDERS[0],
-        "claude_hits": _claude_hits(
-            byok.FORBIDDEN_PROVIDER_PATTERN, [*rows, claude_row]
-        ),
     }
 
     # House-entry injections are built from REAL shipped values: the offered

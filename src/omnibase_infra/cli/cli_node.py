@@ -23,7 +23,7 @@ import click
 
 from omnibase_core.enums.enum_workflow_result import EnumWorkflowResult
 from omnibase_core.models.errors.model_onex_error import ModelOnexError
-from omnibase_core.runtime.runtime_local import RuntimeLocal, parse_backend_overrides
+from omnibase_core.runtime.runtime_local import parse_backend_overrides
 from omnibase_infra.cli.contract_registry import (
     RegistryUnresolvedError,
     node_contract_path,
@@ -34,6 +34,7 @@ from omnibase_infra.cli.omnimarket_drift_guard import (
     check_omnimarket_drift,
 )
 from omnibase_infra.cli.receipt_mode import (
+    ExecutionGraphHostingRuntime,
     default_emit_socket_path,
     run_receipt_mode,
 )
@@ -253,7 +254,9 @@ def run_node_by_name(
         datefmt="%H:%M:%S",
     )
 
-    runtime = RuntimeLocal(
+    # OMN-21071: an orchestrator's execution-graph stages are hosted on the
+    # same run, so one call runs a bus-hop workflow to its terminal.
+    runtime = ExecutionGraphHostingRuntime(
         workflow_path=resolved_contract,
         state_root=state_root,
         backend_overrides=backend_overrides,

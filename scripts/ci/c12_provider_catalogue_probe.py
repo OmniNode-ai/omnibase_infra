@@ -5,7 +5,7 @@
 
 WHAT THIS IS
     Beta criterion C12 reads "Provider catalogue equals the handler-backed
-    set; no Claude entry; no house entry", proven by "catalogue readback +
+    set; no house entry", proven by "catalogue readback +
     negative test". This producer takes both, on the deployed lane, every run,
     and its EXIT CODE is the verdict -- the shape C11 and C15 already use, so
     the board reads a workflow conclusion and needs no second grader.
@@ -32,18 +32,21 @@ WHAT IS CHECKED, BY CLAUSE
                 function agrees, and neither set is empty. The grader
                 re-derives the equality itself rather than trusting the
                 deployed function's own "clean".
-    no_claude   no catalogue id matches ``anthropic|claude`` by the grader's
-                own pattern, the deployed scan over every string VALUE on
-                every row found nothing, and the intake model refuses two
-                Claude spellings on the ``provider`` field.
+    (Claude)    not a clause. The criterion once read "no Claude entry"; the
+                operator ruling of 2026-10-11T15:05:50Z lifted it and
+                omnimarket#3777 offers ``anthropic`` as a customer-only
+                row. ``anthropic`` is an allowed BYOK provider, declared in
+                ``CUSTOMER_ONLY_PROVIDERS`` below, so it takes the same parity,
+                no-house-rung and intake-accepts checks as ``openai``.
     no_house    the deployed OMN-18311 validator returns zero findings.
     surface     the intake route's resolved body model IS the model that
                 validates against the catalogue; it ACCEPTS every offered
                 provider (the positive control: a gate that refuses
-                everything also refuses Claude) and refuses every not-offered
-                one and an unbacked one.
+                everything also refuses what it should) and refuses every
+                not-offered one and an unbacked one.
     negative    each clause is shown to bite in the same process: an unbacked
-                row, a dropped row, a Claude row, a laundered house reference,
+                row, a dropped row, a self-declared customer-only exemption,
+                a laundered house reference,
                 a house rung identity collision, an un-registerable provider,
                 and an empty rung set that must fail closed.
 
@@ -62,7 +65,6 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
-import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -77,21 +79,15 @@ DEFAULT_CONTAINER: Final[str] = "onex-api"
 DEFAULT_USER: Final[str] = "appuser"
 DEFAULT_APP_ROOT: Final[str] = "/app"
 
-# The grader's own Claude pattern. Independent of the deployed
-# FORBIDDEN_PROVIDER_PATTERN on purpose: if that constant were weakened, a scan
-# using it would weaken with it.
-CLAUDE_RE: Final[re.Pattern[str]] = re.compile(r"anthropic|claude", re.IGNORECASE)
-
 # Must match the observer's constants; pinned by a test.
 UNBACKED_PROVIDER: Final[str] = "mistral"
 
 # Providers the catalogue may offer with no house rung behind them: the platform
-# holds no key, the customer's own key pays (OMN-17373). Declared HERE, not read
+# holds no key, the customer's own key pays (OMN-17373 openai, omnimarket#3777 anthropic). Declared HERE, not read
 # back from the catalogue: a row that declares ``mirrors_house_rung: false`` on
 # its own authority would otherwise exempt itself from the parity clause. An
 # exemption the catalogue declares for a provider not on this list stays RED.
-CUSTOMER_ONLY_PROVIDERS: Final[tuple[str, ...]] = ("openai",)
-CLAUDE_PROVIDERS: Final[tuple[str, ...]] = ("anthropic", "Claude-3")
+CUSTOMER_ONLY_PROVIDERS: Final[tuple[str, ...]] = ("anthropic", "openai")
 SYNTHETIC_TOKEN_PROVIDER: Final[str] = "c12probe"
 ROUTE_PREFIX: Final[str] = "/v1/tenants/me/inference-credentials"
 
@@ -150,9 +146,8 @@ class Record:
         if self.verdict == "pass":
             return (
                 f"all {len(self.checks)} checks held: the deployed catalogue equals "
-                "the handler-backed set, carries no Claude entry and no house "
-                "entry, is bound to the intake route, and every injection was "
-                "refused in the same process"
+                "the handler-backed set, carries no house entry, is bound to the "
+                "intake route, and every injection was refused in the same process"
             )
         return f"{len(self.failures)} of {len(self.checks)} checks failed"
 
@@ -283,32 +278,6 @@ def grade(obs: dict[str, Any]) -> Record:
         f"missing_from_catalogue={gap_missing!r} unbacked_in_catalogue={gap_unbacked!r}",
     )
 
-    # ---- no Claude entry ----------------------------------------------------
-    ids = [*(offered or []), *(not_offered or [])]
-    add(
-        "no_claude",
-        "no_claude_catalogue_id",
-        offered is not None and not any(CLAUDE_RE.search(p) for p in ids),
-        f"ids={ids!r}",
-    )
-    hits = _get(obs, "shipped", "claude_hits")
-    add(
-        "no_claude",
-        "deployed_value_scan_empty",
-        hits == [],
-        f"claude_hits={hits if hits is not _ABSENT else '<absent>'!r}",
-    )
-    for provider in CLAUDE_PROVIDERS:
-        entry = _get(obs, "intake", provider)
-        add(
-            "no_claude",
-            f"intake_refuses_{provider}",
-            _refused_on_provider(entry),
-            f"intake[{provider!r}]={entry if entry is not _ABSENT else '<absent>'!r}"[
-                :500
-            ],
-        )
-
     # ---- no house entry -----------------------------------------------------
     house_entry = _get(obs, "shipped", "house_entry")
     add(
@@ -382,14 +351,6 @@ def grade(obs: dict[str, Any]) -> Record:
         and UNBACKED_PROVIDER in (_str_list(_get(ce, "customer_only")) or [])
         and UNBACKED_PROVIDER not in CUSTOMER_ONLY_PROVIDERS,
         f"customer_only_self_exemption={ce if ce is not _ABSENT else '<absent>'!r}",
-    )
-    cr = _get(neg, "claude_row")
-    cr_hits = _get(cr, "claude_hits")
-    add(
-        "negative",
-        "claude_row_detected",
-        isinstance(cr_hits, list) and CLAUDE_PROVIDERS[0] in cr_hits,
-        f"claude_row={cr if cr is not _ABSENT else '<absent>'!r}",
     )
     for key, klass in (
         ("house_declared_ref", DECLARED_HOUSE_REF),

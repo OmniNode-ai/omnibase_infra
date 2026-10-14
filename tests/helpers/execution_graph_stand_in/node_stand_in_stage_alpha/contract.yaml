@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+#
+# Stand-in stage node for the onex node execution-graph hosting tests
+# (OMN-21071). Answers every stage command.
+name: node_stand_in_stage_alpha
+node_type: compute
+input_model:
+  name: ModelStandInStageRequest
+  module: tests.helpers.execution_graph_stand_in.model_stand_in_sweep
+handler_routing:
+  routing_strategy: operation_match
+  handlers:
+    - operation: answer_stand_in_stage
+      handler:
+        name: HandlerStandInStageAlpha
+        module: tests.helpers.execution_graph_stand_in.handler_stand_in_stage
+event_bus:
+  subscribe_topics:
+    - onex.cmd.platform.stand-in-stage-alpha-requested.v1
+  publish_topics:
+    - onex.evt.platform.stand-in-stage-alpha-completed.v1
+runtime_dispatch:
+  command_topic: onex.cmd.platform.stand-in-stage-alpha-requested.v1
+terminal_event: onex.evt.platform.stand-in-stage-alpha-completed.v1

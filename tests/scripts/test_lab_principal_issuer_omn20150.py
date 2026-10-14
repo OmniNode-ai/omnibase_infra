@@ -44,6 +44,7 @@ class FakeBroker(lpi.Broker):
         self.users: dict[str, str] = {}
         self.acl_argvs: list[list[str]] = []
         self.set_calls: list[tuple[str, bool]] = []
+        self.topic_calls: list[str] = []
 
     def user_exists(self, name: str) -> bool:
         return name in self.users
@@ -53,9 +54,15 @@ class FakeBroker(lpi.Broker):
         self.users[name] = password
 
     def grant(self, principal: str, grant: lpi.Grant) -> None:
+        assert not grant.templated
+        if grant.create_topic:
+            assert grant.name in self.topic_calls
         self.acl_argvs.append(
             [principal, grant.resource, grant.name, grant.pattern, *grant.operations]
         )
+
+    def ensure_topic(self, name: str) -> None:
+        self.topic_calls.append(name)
 
 
 @pytest.fixture
@@ -78,6 +85,20 @@ def issuer(
     declaration: lpi.Declaration, broker: FakeBroker, ledger_path: Path
 ) -> lpi.Issuer:
     return lpi.Issuer(declaration, broker, lpi.Ledger(ledger_path))
+
+
+@pytest.fixture
+def apply_broker(broker: FakeBroker, monkeypatch: pytest.MonkeyPatch) -> FakeBroker:
+    monkeypatch.setenv("RPK_USER", "su")
+    monkeypatch.setenv("RPK_PASS", "su-pass")
+    monkeypatch.setenv("RPK_ADMIN_HOSTS", "admin:9644")
+
+    def configured_broker(config: lpi.BrokerConfig) -> FakeBroker:
+        assert config == lpi.BrokerConfig("http://admin:9644", "su", "su-pass")
+        return broker
+
+    monkeypatch.setattr(lpi, "Broker", configured_broker)
+    return broker
 
 
 def _grant_file(tmp_path: Path, grants: list[dict[str, object]]) -> Path:
@@ -113,7 +134,7 @@ def test_only_the_commands_and_the_delegate_terminals_are_writable(
         "onex.cmd.omnimarket.delegate-skill.v1",
         "onex.evt.omnimarket.delegate-skill-completed.v1",
         "onex.evt.omnimarket.delegate-skill-failed.v1",
-        "onex.cmd.omnimarket.work-ledger-append-requested.v1",
+        "onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1",
         "onex.cmd.omnimarket.pr-handoff-requested.v1",
         "onex.cmd.omnimarket.github-repo-gateway-read-requested.v1",
     }
@@ -207,6 +228,56 @@ def test_ledger_append_caller_group_cannot_join_the_serve_group(
 
 
 @pytest.mark.parametrize(
+    ("overrides", "refusal"),
+    [
+        ({"pattern": "prefixed"}, "literal topic"),
+        ({"resource": "group"}, "literal topic"),
+        ({"name": "t-{principal}-{principal}"}, "exactly once"),
+        ({"name": "t-{login}"}, "only the"),
+        ({"name": "t-{principal}-{login}"}, "only the"),
+        ({"name": "t-{principal"}, "only the"),
+        ({"name": "t-principal}"}, "only the"),
+        ({"name": "t", "create_topic": True}, "only on templated"),
+        ({"name": "t", "create_topic": False}, "only on templated"),
+        ({"create_topic": "true"}, "must be a bool"),
+        ({"create_topic": 1}, "must be a bool"),
+    ],
+)
+def test_invalid_writer_topic_templates_are_refused(
+    tmp_path: Path, overrides: dict[str, object], refusal: str
+) -> None:
+    grant = {
+        "resource": "topic",
+        "name": "t-{principal}",
+        "pattern": "literal",
+        "operations": ["write", "describe"],
+        **overrides,
+    }
+    with pytest.raises(lpi.DeclarationError, match=refusal):
+        lpi.load_declaration(_grant_file(tmp_path, [grant]))
+
+
+def test_a_template_without_topic_creation_defaults_to_false(tmp_path: Path) -> None:
+    grant = lpi.load_declaration(
+        _grant_file(
+            tmp_path,
+            [
+                {
+                    "resource": "topic",
+                    "name": "t-{principal}",
+                    "pattern": "literal",
+                    "operations": ["write"],
+                }
+            ],
+        )
+    ).grants[0]
+    assert grant.templated and not grant.create_topic
+    resolved = grant.for_principal("dev-a-b")
+    assert resolved.name == "t-dev-a-b"
+    assert not resolved.templated and not resolved.create_topic
+
+
+@pytest.mark.parametrize(
     ("grant", "refusal"),
     [
         (
@@ -259,8 +330,9 @@ def test_ledger_append_caller_group_cannot_join_the_serve_group(
 def test_a_grant_broader_than_the_rules_is_refused(
     tmp_path: Path, grant: dict[str, object], refusal: str
 ) -> None:
+    path = _grant_file(tmp_path, [grant])
     with pytest.raises(lpi.DeclarationError, match=refusal):
-        lpi.load_declaration(_grant_file(tmp_path, [grant]))
+        lpi.load_declaration(path)
 
 
 def test_check_command_validates_the_repo_file(
@@ -335,6 +407,14 @@ def test_issuance_creates_the_user_applies_every_declared_grant_and_records_it(
     assert [argv[0] for argv in broker.acl_argvs] == [principal] * len(
         declaration.grants
     )
+    assert broker.topic_calls == [
+        f"onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1"
+    ]
+    assert broker.acl_argvs == [
+        [principal, g.resource, g.name, g.pattern, *g.operations]
+        for declared in declaration.grants
+        for g in [declared.for_principal(principal)]
+    ]
     ledger = ledger_path.read_text()
     row = json.loads(ledger)
     assert (
@@ -344,6 +424,32 @@ def test_issuance_creates_the_user_applies_every_declared_grant_and_records_it(
     )
     assert row["grants_sha256"] == declaration.digest
     assert answer["password"] not in ledger
+
+
+def test_each_principal_can_write_only_its_own_ledger_topic(
+    issuer: lpi.Issuer,
+    broker: FakeBroker,
+) -> None:
+    a = issuer.issue(LOGIN, {"lane": "dev", "device": "mac-a"})["principal"]
+    b = issuer.issue(LOGIN, {"lane": "dev", "device": "mac-b"})["principal"]
+    for principal, other in ((a, b), (b, a)):
+        applied = [argv for argv in broker.acl_argvs if argv[0] == principal]
+        own_topic = f"onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1"
+        other_topic = f"onex.cmd.omnimarket.work-ledger-append-from-{other}.v1"
+        assert not any(argv[2] == other_topic for argv in applied)
+        writer_grants = [
+            argv for argv in applied if argv[1] == "topic" and "write" in argv[4:]
+        ]
+        assert own_topic in {argv[2] for argv in writer_grants}
+        for refused in (
+            other_topic,
+            "onex.cmd.omnimarket.work-ledger-append-requested.v1",
+        ):
+            assert not any(
+                argv[2] in {"*", refused}
+                or (argv[3] == "prefixed" and refused.startswith(argv[2]))
+                for argv in writer_grants
+            )
 
 
 def test_asking_again_for_the_same_device_rotates(
@@ -382,12 +488,54 @@ def test_acl_argv_carries_no_secret(declaration: lpi.Declaration) -> None:
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     broker = lpi.Broker(lpi.BrokerConfig("http://admin:9644", "su", "su-pass"), run=run)
-    for grant in declaration.grants:
+    for declared in declaration.grants:
+        grant = declared.for_principal("dev-a-b")
+        if grant.create_topic:
+            broker.ensure_topic(grant.name)
         broker.grant("dev-a-b", grant)
     flat = " ".join(" ".join(argv) for argv in seen)
     assert "su-pass" not in flat
     assert "--allow-principal User:dev-a-b" in flat
     assert "--resource-pattern-type prefixed" in flat
+    assert [
+        "rpk",
+        "topic",
+        "create",
+        "onex.cmd.omnimarket.work-ledger-append-from-dev-a-b.v1",
+        "--partitions",
+        "1",
+        "--replicas",
+        "1",
+    ] in seen
+
+
+@pytest.mark.parametrize(
+    ("stdout", "stderr"),
+    [("TOPIC_ALREADY_EXISTS", ""), ("", "TOPIC_ALREADY_EXISTS")],
+)
+def test_ensuring_an_existing_topic_is_success(stdout: str, stderr: str) -> None:
+    def run(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 1, stdout, stderr)
+
+    broker = lpi.Broker(lpi.BrokerConfig("http://admin:9644", "su", "su-pass"), run=run)
+    broker.ensure_topic("t")
+
+
+@pytest.mark.parametrize("operation", ["topic", "grant"])
+def test_other_rpk_failures_are_bad_gateway(
+    declaration: lpi.Declaration,
+    operation: str,
+) -> None:
+    def run(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 1, "", "authorization failed")
+
+    broker = lpi.Broker(lpi.BrokerConfig("http://admin:9644", "su", "su-pass"), run=run)
+    with pytest.raises(lpi.IssuerError, match="authorization failed") as exc:
+        if operation == "topic":
+            broker.ensure_topic("t")
+        else:
+            broker.grant("dev-a-b", declaration.grants[0])
+    assert exc.value.status is HTTPStatus.BAD_GATEWAY
 
 
 def test_user_password_travels_in_the_admin_api_body(
@@ -420,6 +568,128 @@ def test_user_password_travels_in_the_admin_api_body(
     assert create.get_method() == "POST"
     assert "new-secret" not in create.full_url
     assert json.loads(create.data)["password"] == "new-secret"  # type: ignore[arg-type]
+
+
+# --- grant re-application --------------------------------------------------
+
+
+def test_apply_grants_updates_every_issued_principal_in_the_lane(
+    issuer: lpi.Issuer,
+    apply_broker: FakeBroker,
+    declaration: lpi.Declaration,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    principals = [
+        issuer.issue(LOGIN, {"lane": "dev", "device": device})["principal"]
+        for device in ("mac-a", "mac-b", "mac-a")
+    ]
+    ledger = lpi.Ledger(ledger_path)
+    ledger.append({"principal": "other-lane", "lane": "other", "action": "created"})
+    apply_broker.users["dev-c-mac"] = "existing-secret"
+    ledger.append({"principal": "dev-c-mac", "lane": "dev", "action": "grants-applied"})
+    passwords = dict(apply_broker.users)
+    apply_broker.acl_argvs.clear()
+    apply_broker.topic_calls.clear()
+    apply_broker.set_calls.clear()
+    assert (
+        lpi.main(
+            ["apply-grants", "--grants", str(GRANTS), "--ledger", str(ledger_path)]
+        )
+        == 0
+    )
+    assert apply_broker.set_calls == []
+    assert apply_broker.users == passwords
+    expected = sorted({*principals, "dev-c-mac"})
+    assert capsys.readouterr().out.splitlines() == [
+        f"applied {len(declaration.grants)} grants to {principal}"
+        for principal in expected
+    ]
+    assert apply_broker.topic_calls == [
+        f"onex.cmd.omnimarket.work-ledger-append-from-{principal}.v1"
+        for principal in expected
+    ]
+    assert apply_broker.acl_argvs == [
+        [principal, g.resource, g.name, g.pattern, *g.operations]
+        for principal in expected
+        for declared in declaration.grants
+        for g in [declared.for_principal(principal)]
+    ]
+    rows = [json.loads(line) for line in ledger_path.read_text().splitlines()][
+        -len(expected) :
+    ]
+    for row, principal in zip(rows, expected, strict=True):
+        assert row == {
+            "at": row["at"],
+            "principal": principal,
+            "lane": "dev",
+            "action": "grants-applied",
+            "grants_sha256": declaration.digest,
+        }
+        assert row["at"]
+
+
+def test_apply_grants_accepts_multiple_names_and_deduplicates_them(
+    apply_broker: FakeBroker,
+    declaration: lpi.Declaration,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    apply_broker.users.update({"dev-a-mac": "a-secret", "dev-b-mac": "b-secret"})
+    assert (
+        lpi.main(
+            [
+                "apply-grants",
+                "--grants",
+                str(GRANTS),
+                "--ledger",
+                str(ledger_path),
+                "--principal",
+                "dev-a-mac",
+                "dev-b-mac",
+                "--principal",
+                "dev-a-mac",
+            ]
+        )
+        == 0
+    )
+    assert capsys.readouterr().out.splitlines() == [
+        f"applied {len(declaration.grants)} grants to dev-a-mac",
+        f"applied {len(declaration.grants)} grants to dev-b-mac",
+    ]
+    assert apply_broker.set_calls == []
+    assert len(ledger_path.read_text().splitlines()) == 2
+
+
+def test_apply_grants_refuses_a_principal_missing_from_the_broker(
+    apply_broker: FakeBroker,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    apply_broker.users["dev-known-mac"] = "existing-secret"
+    assert (
+        lpi.main(
+            [
+                "apply-grants",
+                "--grants",
+                str(GRANTS),
+                "--ledger",
+                str(ledger_path),
+                "--principal",
+                "dev-known-mac",
+                "--principal",
+                "unknown",
+            ]
+        )
+        == 2
+    )
+    output = capsys.readouterr()
+    assert "the broker has no principal unknown" in output.err
+    assert output.out == ""
+    assert apply_broker.set_calls == []
+    assert apply_broker.acl_argvs == []
+    assert apply_broker.topic_calls == []
+    assert not ledger_path.exists()
 
 
 # --- HTTP -----------------------------------------------------------------
@@ -626,3 +896,221 @@ def test_serve_refuses_a_path_that_is_not_a_socket(
     with pytest.raises(SystemExit, match="non-socket path"):
         lpi.UnixHTTPServer(path, lpi.make_handler(issuer, os.getuid()))
     assert path.read_text() == "leave this file untouched"
+
+
+# --- OMN-19975: a principal holds exactly the rows derived from the grant file ---
+
+ACL_HEADER = "PRINCIPAL  HOST  RESOURCE-TYPE  RESOURCE-NAME  RESOURCE-PATTERN-TYPE  OPERATION  PERMISSION  ERROR"
+
+
+def _derived_listing(principal: str) -> list[str]:
+    """Rows spelled from the raw YAML, independent of the issuer's own parser."""
+    doc = yaml.safe_load(GRANTS.read_text())
+    rows = []
+    for g in doc["grants"]:
+        name = g["name"].replace("{principal}", principal)
+        resource = g["resource"].upper()
+        for op in g["operations"]:
+            rows.append(
+                f"User:{principal}  *  {resource}  {name}  {g['pattern'].upper()}  {op.upper()}  ALLOW"
+            )
+    return rows
+
+
+def _listing(rows: Sequence[str]) -> str:
+    return "\n".join([ACL_HEADER, *rows]) + "\n"
+
+
+class ListingBroker(FakeBroker):
+    def __init__(self, listings: dict[str, str]) -> None:
+        super().__init__()
+        self.listings = listings
+        self.users = dict.fromkeys(listings, "x")
+
+    def list_acls(self, principal: str) -> str:
+        return self.listings[principal]
+
+
+def test_expected_rows_are_the_grant_file_spelled_per_operation(
+    declaration: lpi.Declaration,
+) -> None:
+    principal = "dev-a-mac"
+    assert lpi.expected_acl_rows(declaration, principal) == lpi.parse_acl_listing(
+        _listing(_derived_listing(principal)), principal
+    )
+    assert len(lpi.expected_acl_rows(declaration, principal)) == len(
+        _derived_listing(principal)
+    )
+
+
+def test_an_exact_listing_audits_clean(declaration: lpi.Declaration) -> None:
+    principal = "dev-a-mac"
+    live = lpi.parse_acl_listing(_listing(_derived_listing(principal)), principal)
+    assert lpi.audit_acl_rows(declaration, principal, live) == ((), ())
+
+
+def test_a_row_the_file_does_not_derive_is_reported_extra(
+    declaration: lpi.Declaration,
+) -> None:
+    principal = "dev-a-mac"
+    rows = [
+        *_derived_listing(principal),
+        f"User:{principal}  *  TOPIC  onex.cmd.omnimarket.not-declared.v1  LITERAL  WRITE  ALLOW",
+    ]
+    live = lpi.parse_acl_listing(_listing(rows), principal)
+    missing, extra = lpi.audit_acl_rows(declaration, principal, live)
+    assert missing == ()
+    assert extra == (
+        lpi.AclRow(
+            "topic", "onex.cmd.omnimarket.not-declared.v1", "literal", "write", "*"
+        ),
+    )
+
+
+def test_a_derived_row_the_broker_lacks_is_reported_missing(
+    declaration: lpi.Declaration,
+) -> None:
+    principal = "dev-a-mac"
+    rows = _derived_listing(principal)
+    dropped = rows.pop(0)
+    live = lpi.parse_acl_listing(_listing(rows), principal)
+    missing, extra = lpi.audit_acl_rows(declaration, principal, live)
+    assert extra == ()
+    assert [(r.resource, r.name, r.operation) for r in missing] == [
+        ("topic", "onex.cmd.omnimarket.delegate-skill.v1", "write")
+    ]
+    assert "delegate-skill.v1  LITERAL  WRITE" in dropped
+
+
+def test_only_allow_rows_of_the_audited_principal_count(
+    declaration: lpi.Declaration,
+) -> None:
+    principal = "dev-a-mac"
+    rows = [
+        *_derived_listing(principal),
+        f"User:{principal}  *  TOPIC  denied.v1  LITERAL  WRITE  DENY",
+        "User:dev-b-mac  *  TOPIC  someone.elses.v1  LITERAL  WRITE  ALLOW",
+    ]
+    live = lpi.parse_acl_listing(_listing(rows), principal)
+    assert lpi.audit_acl_rows(declaration, principal, live) == ((), ())
+
+
+def test_an_allow_row_bound_to_one_host_is_extra(declaration: lpi.Declaration) -> None:
+    principal = "dev-a-mac"
+    rows = [
+        *_derived_listing(principal),
+        f"User:{principal}  lab-host-b  TOPIC  onex.cmd.omnimarket.delegate-skill.v1  LITERAL  WRITE  ALLOW",
+    ]
+    live = lpi.parse_acl_listing(_listing(rows), principal)
+    _, extra = lpi.audit_acl_rows(declaration, principal, live)
+    assert [r.host for r in extra] == ["lab-host-b"]
+
+
+def test_a_listing_without_a_header_is_refused_and_an_empty_one_is_no_rows() -> None:
+    assert lpi.parse_acl_listing("", "dev-a-mac") == frozenset()
+    with pytest.raises(lpi.IssuerError, match="header") as exc:
+        lpi.parse_acl_listing("authorization failed\n", "dev-a-mac")
+    assert exc.value.status is HTTPStatus.BAD_GATEWAY
+
+
+def test_listing_acls_asks_rpk_for_one_principal_and_carries_no_secret() -> None:
+    seen: list[Sequence[str]] = []
+
+    def run(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        seen.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, ACL_HEADER, "")
+
+    broker = lpi.Broker(lpi.BrokerConfig("http://admin:9644", "su", "su-pass"), run=run)
+    assert broker.list_acls("dev-a-b") == ACL_HEADER
+    assert seen == [
+        ["rpk", "security", "acl", "list", "--allow-principal", "User:dev-a-b"]
+    ]
+
+
+def test_a_failed_listing_is_bad_gateway() -> None:
+    def run(argv: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(argv, 1, "", "authorization failed")
+
+    broker = lpi.Broker(lpi.BrokerConfig("http://admin:9644", "su", "su-pass"), run=run)
+    with pytest.raises(lpi.IssuerError, match="authorization failed") as exc:
+        broker.list_acls("dev-a-b")
+    assert exc.value.status is HTTPStatus.BAD_GATEWAY
+
+
+def test_audit_grants_exits_zero_when_every_principal_holds_exactly_the_derived_rows(
+    apply_broker: FakeBroker,
+    monkeypatch: pytest.MonkeyPatch,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    broker = ListingBroker(
+        {p: _listing(_derived_listing(p)) for p in ("dev-a-mac", "dev-b-mac")}
+    )
+    monkeypatch.setattr(lpi, "Broker", lambda config: broker)
+    ledger = lpi.Ledger(ledger_path)
+    for principal in broker.listings:
+        ledger.append({"principal": principal, "lane": "dev", "action": "created"})
+    assert (
+        lpi.main(
+            ["audit-grants", "--grants", str(GRANTS), "--ledger", str(ledger_path)]
+        )
+        == 0
+    )
+    count = len(_derived_listing("dev-a-mac"))
+    assert capsys.readouterr().out.splitlines() == [
+        f"principal=dev-a-mac expected={count} live={count} missing=0 extra=0",
+        f"principal=dev-b-mac expected={count} live={count} missing=0 extra=0",
+    ]
+    assert broker.acl_argvs == [] and broker.set_calls == []
+
+
+def test_audit_grants_exits_one_and_names_each_drifted_row(
+    apply_broker: FakeBroker,
+    monkeypatch: pytest.MonkeyPatch,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rows = _derived_listing("dev-a-mac")
+    rows.pop(0)
+    rows.append("User:dev-a-mac  *  TOPIC  extra.v1  LITERAL  READ  ALLOW")
+    broker = ListingBroker({"dev-a-mac": _listing(rows)})
+    monkeypatch.setattr(lpi, "Broker", lambda config: broker)
+    code = lpi.main(
+        [
+            "audit-grants",
+            "--grants",
+            str(GRANTS),
+            "--ledger",
+            str(ledger_path),
+            "--principal",
+            "dev-a-mac",
+        ]
+    )
+    assert code == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].endswith("missing=1 extra=1")
+    assert (
+        "MISSING dev-a-mac topic literal onex.cmd.omnimarket.delegate-skill.v1 write"
+        in lines
+    )
+    assert "EXTRA dev-a-mac topic literal extra.v1 read" in lines
+
+
+def test_audit_grants_refuses_a_principal_the_broker_does_not_have(
+    apply_broker: FakeBroker,
+    ledger_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = lpi.main(
+        [
+            "audit-grants",
+            "--grants",
+            str(GRANTS),
+            "--ledger",
+            str(ledger_path),
+            "--principal",
+            "dev-ghost-mac",
+        ]
+    )
+    assert code == 2
+    assert "the broker has no principal dev-ghost-mac" in capsys.readouterr().err

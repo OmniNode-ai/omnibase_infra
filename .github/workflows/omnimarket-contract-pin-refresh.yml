@@ -228,12 +228,21 @@ jobs:
           TARGET_PIN: ${{ steps.pins.outputs.target }}
         run: |
           set -euo pipefail
-          # The Repo Evidence Gate reads contracts/OMN-17292.yaml at this head (OMN-20074),
-          # refuses a contract carried unchanged from the merge base, and runs its check
-          # at the merge base, where it must fail: bind the value this refresh moved.
+          # The Repo Evidence Gate needs a changed test-side path, a bound check that
+          # fails at the merge base with the test side overlaid, and an evidence item
+          # that differs from the merge base's: write the target fixture and name the
+          # target sha in the item so each refresh carries its own evidence (OMN-20068).
           PATTERN="omnimarket_contract_ref: ${TARGET_PIN}"
           grep -qF -- "$PATTERN" .github/omnimarket-contract-pin.yaml
-          CHECK="grep -qF -- '$PATTERN' .github/omnimarket-contract-pin.yaml"
+          cat > tests/ci/fixtures/omnimarket_contract_pin_advance_omn17292.yaml <<EOF_FIXTURE
+          # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+          # SPDX-License-Identifier: MIT
+          # Written by .github/workflows/omnimarket-contract-pin-refresh.yml on each pin
+          # advance: the sha tests/ci/test_omnimarket_contract_pin_advance_omn17292.py
+          # expects every omnimarket pin to carry (OMN-17292, OMN-20068).
+          omnimarket_contract_ref: ${TARGET_PIN}
+          EOF_FIXTURE
+          CHECK="env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
           cat > contracts/OMN-17292.yaml <<EOF_CONTRACT
           schema_version: "1.0.0"
           ticket_id: OMN-17292
@@ -247,10 +256,10 @@ jobs:
               statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
               acceptance:
                 - id: AC1
-                  statement: "AC1: .github/omnimarket-contract-pin.yaml carries the refreshed value -- falsifier: $CHECK"
+                  statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry ${TARGET_PIN} -- falsifier: $CHECK"
           evidence_requirements:
-            - kind: command
-              description: .github/omnimarket-contract-pin.yaml carries the refreshed value.
+            - kind: tests
+              description: The contract pin, sibling pin and every inline omnimarket checkout ref carry ${TARGET_PIN}.
               command: "$CHECK"
           emergency_bypass:
             enabled: false
@@ -258,10 +267,10 @@ jobs:
             follow_up_ticket_id: ''
           dod_evidence:
             - id: dod-omn-17292-ac1
-              description: .github/omnimarket-contract-pin.yaml carries the refreshed value.
+              description: The contract pin, sibling pin and every inline omnimarket checkout ref carry ${TARGET_PIN}.
               source: manual
               checks:
-                - check_type: command
+                - check_type: test_passes
                   check_value: "$CHECK"
                   cwd: \${OMNI_HOME}/omnibase_infra
               binds_ac: [AC1]
@@ -269,6 +278,7 @@ jobs:
           # .proof-dependencies is a CI-only checkout; never let it into a commit.
           git add -- .github/omnimarket-contract-pin.yaml \
                      contracts/OMN-17292.yaml \
+                     tests/ci/fixtures/omnimarket_contract_pin_advance_omn17292.yaml \
                      .github/sibling-pins.yaml \
                      .github/workflows \
                      src/omnibase_infra/topology/instances \

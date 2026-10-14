@@ -1,42 +1,18 @@
 {
   "files": {
-    "catalogue": "b7f9fe5759dd68c5da1ae18b797d8a5c648371311de54891e6d3775d364a6d07",
-    "catalogue_module": "3f16221d9e7812b05514ff0084368b50ca8366230735822a57e4449b9ccbaa40",
+    "catalogue": "f4cea3626374b797d0c07a5d11a3c230affa02433595a41c1b6395bc201abf9e",
+    "catalogue_module": "aa43e61ad7dd61578fc4628e12d8a709b3abe25384288b8ccc09fca2a9b5decb",
     "house_validator": "1892d497a6de63b86f01e9fcee1050f4414445ca9dc8bef9f0bddc01a6bd5805",
-    "platform_contract": "f022d9c3b2e529ad496db62ba09ac62088218729b6ebcf6429ea5cc7af370c22"
+    "platform_contract": "cf756bd8b6b288837841f5ff30142d76f24198b386a84412ce541755a3ceb305"
   },
   "finding_classes": {
     "declared_house_ref": "declared_house_ref",
     "house_rung_identity_collision": "house_rung_identity_collision",
     "no_customer_registerable_key": "no_customer_registerable_key"
   },
-  "forbidden_pattern": "anthropic|claude",
   "intake": {
-    "Claude-3": {
-      "accepted": false,
-      "errors": [
-        {
-          "loc": [
-            "provider"
-          ],
-          "msg": "Value error, 'Claude-3' is not a provider a key may be registered for. Offered: gemini, glm, openai, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
-          "type": "value_error"
-        }
-      ],
-      "exception": "ValidationError"
-    },
     "anthropic": {
-      "accepted": false,
-      "errors": [
-        {
-          "loc": [
-            "provider"
-          ],
-          "msg": "Value error, 'anthropic' is not a provider a key may be registered for. Offered: gemini, glm, openai, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
-          "type": "value_error"
-        }
-      ],
-      "exception": "ValidationError"
+      "accepted": true
     },
     "gemini": {
       "accepted": true
@@ -51,7 +27,7 @@
           "loc": [
             "provider"
           ],
-          "msg": "Value error, 'mistral' is not a provider a key may be registered for. Offered: gemini, glm, openai, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
+          "msg": "Value error, 'mistral' is not a provider a key may be registered for. Offered: anthropic, gemini, glm, openai, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
           "type": "value_error"
         }
       ],
@@ -70,7 +46,7 @@
           "loc": [
             "provider"
           ],
-          "msg": "Value error, 'typesafe' is not a provider a key may be registered for. Offered: gemini, glm, openai, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
+          "msg": "Value error, 'typesafe' is not a provider a key may be registered for. Offered: anthropic, gemini, glm, openai, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
           "type": "value_error"
         }
       ],
@@ -83,7 +59,7 @@
           "loc": [
             "provider"
           ],
-          "msg": "Value error, 'vertex' is not a provider a key may be registered for. Offered: gemini, glm, openai, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
+          "msg": "Value error, 'vertex' is not a provider a key may be registered for. Offered: anthropic, gemini, glm, openai, openrouter. A provider the platform holds a house key for but does not offer to customers is declared not-offered in the catalogue with the ticket that owns lifting it; registering a key here for anything else would store a credential that can never be routed.",
           "type": "value_error"
         }
       ],
@@ -91,14 +67,9 @@
     }
   },
   "negative": {
-    "claude_row": {
-      "claude_hits": [
-        "anthropic"
-      ],
-      "injected": "anthropic"
-    },
     "customer_only_self_exemption": {
       "customer_only": [
+        "anthropic",
         "mistral",
         "openai"
       ],
@@ -128,7 +99,7 @@
         }
       ],
       "provider": "openrouter",
-      "value": "openrouter-qwen3-coder-480b"
+      "value": "openrouter-nemotron-ultra"
     },
     "no_registerable_key": {
       "findings": [
@@ -154,7 +125,7 @@
       ]
     }
   },
-  "omnimarket_version": "0.4.277",
+  "omnimarket_version": "0.4.312",
   "route": {
     "body_models": [
       "omnimarket.projection.credential_publisher.ModelInferenceCredentialCreateRequest"
@@ -163,8 +134,8 @@
     "prefix": "/v1/tenants/me/inference-credentials"
   },
   "shipped": {
-    "claude_hits": [],
     "customer_only": [
+      "anthropic",
       "openai"
     ],
     "house_entry": {
@@ -182,6 +153,7 @@
       "vertex"
     ],
     "offered": [
+      "anthropic",
       "gemini",
       "glm",
       "openai",
@@ -191,6 +163,6 @@
       "missing_from_catalogue": [],
       "unbacked_in_catalogue": []
     },
-    "rung_count": 14
+    "rung_count": 13
   }
 }

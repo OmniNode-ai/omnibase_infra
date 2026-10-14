@@ -30,6 +30,16 @@ repos:
         files: ^(\.github/workflows/imperative-contract-guard\.yml|imperative-contract-allowlist\.yaml|tests/ci/test_imperative_contract_guard_caller_omn21004\.py|tests/ci/fixtures/imperative_contract_guard_omn21004\.json|contracts/OMN-21004\.yaml|\.pre-commit-config\.yaml|\.github/workflows/ci\.yml)$
         pass_filenames: false
         stages: [pre-commit]
+      # OMN-20910: a review voter's model is declared only in the contract
+      # overlay. SYNC with the ci.yml lint step "Review voter model comes from
+      # the overlay (OMN-20910)".
+      - id: review-voter-model-from-overlay
+        name: Review voter model comes from the overlay (OMN-20910)
+        entry: uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -p no:randomly
+        language: system
+        files: ^(\.github/workflows/[^/]+\.ya?ml|tests/ci/test_hostile_reviewer_voters_overlay_omn20910\.py|\.pre-commit-config\.yaml)$
+        pass_filenames: false
+        stages: [pre-commit]
       - id: anthropic-key-prefix-workflows
         name: No Anthropic key value in a workflow (OMN-20967)
         entry: uv run --frozen pytest tests/ci/test_anthropic_key_prefix_workflows_omn20967.py -q -n 0 --no-cov
@@ -597,6 +607,15 @@ repos:
         entry: uv run --frozen pytest tests/scripts/test_deploy_runtime_cloud_gate_omn18496.py -q
         language: system
         files: ^(src/omnibase_infra/handlers/handler_runtime_deploy\.sh|scripts/runtime_build/compose_files\.sh|docker/docker-compose\.(infra|dev-lane)\.yml|tests/scripts/test_deploy_runtime_cloud_gate_omn18496\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
+      # OMN-20112: no pull-request gate may require the staging plane. Mirrors the
+      # arch-invariants step in ci.yml.
+      - id: no-staging-pr-gate
+        name: No pull-request gate requires the staging plane (OMN-20112)
+        entry: uv run --frozen pytest tests/ci/test_no_staging_pr_gate_omn20112.py tests/ci/test_no_staging_pr_gate_wired_omn20112.py -q
+        language: system
+        files: ^(\.github/workflows/.*\.ya?ml|tests/ci/test_no_staging_pr_gate_(wired_)?omn20112\.py|tests/ci/fixtures/no_staging_pr_gate_wiring_omn20112\.json)$
         pass_filenames: false
         stages: [pre-commit]
       # OMN-16367: per-run compose proof images must be evicted at source

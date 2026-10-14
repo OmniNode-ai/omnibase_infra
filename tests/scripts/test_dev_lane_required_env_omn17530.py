@@ -457,7 +457,11 @@ def test_refresh_dev_lane_runs_the_preflight() -> None:
         "overlay is where both variables that killed a deploy live."
     )
     call_index = source.index("if ! run_preflight_required_env; then")
-    lock_index = source.index("lane_lock_acquire")
+    # The refresh's own lock, not the one `--census-gate` takes (OMN-20876): that
+    # mode starts nothing and rebuilds nothing, so it has no compose env to check.
+    lock_index = source.index(
+        'lane_lock_acquire "${COMPOSE_PROJECT}" "${LANE}" "${REF}"'
+    )
     assert call_index < lock_index, (
         "the preflight must run BEFORE the lane lock is acquired. A refresh that "
         "cannot possibly validate must not hold the dev-lane window while it "

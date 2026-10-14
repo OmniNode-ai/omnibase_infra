@@ -319,6 +319,10 @@ jobs:
       - name: Caller-owned imperative guard regression (OMN-21004)
         run: uv run --frozen pytest tests/ci/test_imperative_contract_guard_caller_omn21004.py -q -n 0
 
+      # OMN-20910: paired with the review-voter-model-from-overlay pre-commit hook.
+      - name: Review voter model comes from the overlay (OMN-20910)
+        run: uv run --frozen pytest tests/ci/test_hostile_reviewer_voters_overlay_omn20910.py -q -n 0 --no-cov -p no:randomly
+
       # OMN-17678: same focused suite as the pre-commit transport gate.
       - name: Linear transport consolidation regression (OMN-17678)
         run: uv run --frozen pytest tests/ci/test_linear_transport_consolidation.py -q
@@ -1695,7 +1699,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: e286bd296e373e8e17e11c735393613a227f7972 # .github/sibling-pins.yaml
+          ref: f49213032b80b03e7c9a1a6656416cc5083b7cdc # .github/sibling-pins.yaml
           path: .probe-roots/omnimarket
           persist-credentials: false
           sparse-checkout: |
@@ -1928,7 +1932,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: e286bd296e373e8e17e11c735393613a227f7972 # .github/sibling-pins.yaml
+          ref: f49213032b80b03e7c9a1a6656416cc5083b7cdc # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1944,7 +1948,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: e286bd296e373e8e17e11c735393613a227f7972 # .github/sibling-pins.yaml
+          ref: f49213032b80b03e7c9a1a6656416cc5083b7cdc # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -2048,6 +2052,9 @@ jobs:
 
       - name: Operator script topic namespace gate (OMN-18913)
         run: uv run --frozen pytest tests/ci/test_operator_script_topic_namespace_omn18913.py -q
+
+      - name: No pull-request gate requires the staging plane (OMN-20112)
+        run: uv run --frozen pytest tests/ci/test_no_staging_pr_gate_omn20112.py tests/ci/test_no_staging_pr_gate_wired_omn20112.py -q
 
   plugin-env-service-completeness:
     name: "Plugin ENV->Service Completeness (OMN-4313)"
@@ -4598,7 +4605,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: e286bd296e373e8e17e11c735393613a227f7972 # .github/sibling-pins.yaml
+          ref: f49213032b80b03e7c9a1a6656416cc5083b7cdc # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4614,7 +4621,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omnimarket
-          ref: e286bd296e373e8e17e11c735393613a227f7972 # .github/sibling-pins.yaml
+          ref: f49213032b80b03e7c9a1a6656416cc5083b7cdc # .github/sibling-pins.yaml
           path: omnimarket
           token: ${{ secrets.GITHUB_TOKEN }}
 
