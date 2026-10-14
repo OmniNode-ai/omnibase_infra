@@ -1,0 +1,26 @@
+{
+  "_provenance": {
+    "source": "receipt.json inside the chain-lane receipt artifact keyed on sha d42575c82038bd644675c11de02298ea4873d77e, uploaded by the scheduled Chain Canary run 38642628709 (run_number 621) on omnibase_infra dev, fetched back with onex scm run-download --artifact-id 11931438076 from a lab host",
+    "captured_utc": "2026-10-14T23:45:00Z",
+    "source_sha256": "4d279b554519287820893052dd84047f306fbff1e0afc56fe3f92b36aeac80a0",
+    "source_revision": "OMN-18866 lane rem-18866; source_sha256 is the artifact zip digest the gateway reported; artifact created 2026-10-14T21:52:42Z",
+    "artifact_name": "lab-pass-receipt-<lane>-d42575c82038bd644675c11de02298ea4873d77e",
+    "lane_elision": "the lane id is replaced by the token <lane> in the receipt body and artifact_name because the public-repo hygiene gate refuses added lines that spell a lab lane id; the test restores it from EnumLabLane.COMPOSE_DEV_CHAIN before parsing"
+  },
+  "body": {
+    "receipt_version": "lab_pass_receipt.v1",
+    "sha": "d42575c82038bd644675c11de02298ea4873d77e",
+    "lane": "<lane>",
+    "started_at": "2026-10-14T21:45:23+00:00",
+    "finished_at": "2026-10-14T21:52:41+00:00",
+    "result": "PASS",
+    "checks": [
+      {
+        "name": "delegation_golden_chain",
+        "ok": true,
+        "evidence": "one live delegation through the deployed lane ingress: verdict=green; chain links proven 5 of 5 (NOT the bar for this check -- see OMN-16964); terminal read back off onex.evt.omnimarket.delegate-skill-completed.v1 for this run's correlation id; ingress answered ok in 699 ms (budget 120000 ms) and the q..."
+      }
+    ],
+    "agent_command_id": null
+  }
+}
