@@ -78,7 +78,7 @@ dependencies = [
     # on malformed responses). 3.9.0 was reachable and the lock resolved 3.14.1.
     "aiohttp>=3.14.3,<4.0.0",
     # Database dependencies (for PostgreSQL connection manager)
-    "asyncpg>=0.29.0,<0.32.0",
+    "asyncpg>=0.29.0,<0.33.0",
     "psycopg2-binary>=2.9.10,<3.0.0",
     # Service integration dependencies (for the actual tools we're migrating)
     "redis>=6.0.0,<9.0.0", # For Redis/Valkey integration (redis-py 6.x required by omnibase_core)
