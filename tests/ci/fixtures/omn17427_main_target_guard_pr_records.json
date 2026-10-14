@@ -1,0 +1,120 @@
+{
+  "_provenance": {
+    "source": "PR watcher state, prs[<repo>#<number>].facts, the launching host's tick at last_tick (every open or recently closed pull request the watcher tracks)",
+    "captured_utc": "2026-10-14T04:04:52Z",
+    "selection": "every record in a dev-default repository whose base is main (8); the first four release-train pull requests in the state (head automation/release-*, base dev); three ordinary dev-based pull requests in a dev-default repository",
+    "ticket": "OMN-17427",
+    "redaction": "the names of private repositories are replaced by private-repository (public-repo hygiene gate); the guard reads only base and head_ref, which are recorded unchanged"
+  },
+  "base_main": [
+    {
+      "pr": "private-repository#1786",
+      "base": "main",
+      "head_ref": "hotfix/omn-20068-grants-anchor-main",
+      "state": "OPEN",
+      "created_at": "2026-10-03T01:36:43Z"
+    },
+    {
+      "pr": "private-repository#1788",
+      "base": "main",
+      "head_ref": "hotfix/omn-20068-g4-grant-reader-switch-main",
+      "state": "OPEN",
+      "created_at": "2026-10-03T01:37:51Z"
+    },
+    {
+      "pr": "private-repository#1799",
+      "base": "main",
+      "head_ref": "hotfix/omn-20532-main-base-reds",
+      "state": "OPEN",
+      "created_at": "2026-10-04T18:34:30Z"
+    },
+    {
+      "pr": "private-repository#1802",
+      "base": "main",
+      "head_ref": "hotfix/omn-20068-grants-codeowners-security-main",
+      "state": "OPEN",
+      "created_at": "2026-10-04T23:55:03Z"
+    },
+    {
+      "pr": "private-repository#1872",
+      "base": "main",
+      "head_ref": "hotfix/omn-19049-codeowners-teams-main",
+      "state": "OPEN",
+      "created_at": "2026-10-11T19:16:14Z"
+    },
+    {
+      "pr": "private-repository#437",
+      "base": "main",
+      "head_ref": "jonah/omn-18635-remove-main-gated-public-deploy-job",
+      "state": "OPEN",
+      "created_at": "2026-09-25T14:53:51Z"
+    },
+    {
+      "pr": "private-repository#438",
+      "base": "main",
+      "head_ref": "jonah/omn-18635-omniweb-main-ci-to-lab-fleet",
+      "state": "OPEN",
+      "created_at": "2026-09-25T16:43:02Z"
+    },
+    {
+      "pr": "private-repository#439",
+      "base": "main",
+      "head_ref": "jonah/omn-18635-omniweb-main-placement-gate",
+      "state": "OPEN",
+      "created_at": "2026-09-25T17:06:33Z"
+    }
+  ],
+  "release_onto_dev": [
+    {
+      "pr": "omnibase_core#1965",
+      "base": "dev",
+      "head_ref": "automation/release-0.47.43-omn-18595",
+      "state": "MERGED",
+      "created_at": "2026-10-13T13:29:50Z"
+    },
+    {
+      "pr": "omnibase_spi#353",
+      "base": "dev",
+      "head_ref": "automation/release-0.23.6-omn-18595",
+      "state": "MERGED",
+      "created_at": "2026-10-10T07:29:38Z"
+    },
+    {
+      "pr": "omnimarket#3711",
+      "base": "dev",
+      "head_ref": "automation/release-0.4.310-omn-18595",
+      "state": "OPEN",
+      "created_at": "2026-10-10T16:31:03Z"
+    },
+    {
+      "pr": "omnimarket#3761",
+      "base": "dev",
+      "head_ref": "automation/release-0.4.311-omn-18595",
+      "state": "CLOSED",
+      "created_at": "2026-10-11T07:30:33Z"
+    }
+  ],
+  "ordinary_onto_dev": [
+    {
+      "pr": "omnibase_core#1962",
+      "base": "dev",
+      "head_ref": "jonah/omn-20068-wire-mechanism",
+      "state": "MERGED",
+      "created_at": "2026-10-13T04:54:48Z"
+    },
+    {
+      "pr": "omnibase_core#1963",
+      "base": "dev",
+      "head_ref": "jonah/omn-20298-no-legacy-flip",
+      "state": "MERGED",
+      "created_at": "2026-10-13T07:18:34Z"
+    },
+    {
+      "pr": "omnibase_core#1964",
+      "base": "dev",
+      "head_ref": "omn20068-7021-ci-step",
+      "state": "MERGED",
+      "created_at": "2026-10-13T11:00:07Z"
+    }
+  ]
+}
