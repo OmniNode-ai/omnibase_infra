@@ -36,6 +36,11 @@ requirements:
     acceptance:
       - id: AC6
         statement: 'AC6: the replay of job 114609134005 (GraphQL: API rate limit already exceeded) exits unreadable with no drift annotation, a finding in one live pass survives a rate limit in another, a non-rate-limit failure is not relabelled, and the combined step prints unreadable, drift, incomplete or clean for each outcome -- falsifier: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "rate_limit or not_relabelled or survive or combined_step_names"'
+  - id: req-omn20864-plugin-pin-cascade-evidence
+    statement: A plugin pin cascade PR whose diff is pin-only by its changed paths and lines carries the contract, floors fixture and deploy probe the Repo Evidence Gate and deploy-gate need, rendered by the cascade, so passing tests are its evidence; a cascade diff that also changes another path or a non-pin Dockerfile line renders nothing and fails.
+    acceptance:
+      - id: AC7
+        statement: 'AC7: the cascade renders contracts/<ticket>.yaml, a test-side floors fixture and a gh api deploy probe from the pins it wrote, the bound test passes at the head and fails at the merge base, the probe exits nonzero on the base Dockerfile, and a diff that also changes code or a non-pin Dockerfile line is refused with nothing rendered -- falsifier: uv run pytest tests/ci/test_plugin_pin_cascade_evidence_omn20864.py tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q'
 evidence_requirements:
   - kind: tests
     description: The outage replay and rule tests for the deploy agent.
@@ -49,6 +54,9 @@ evidence_requirements:
   - kind: tests
     description: The fake gh runner replays the rate-limited reply of job 114609134005 through the audit and runs the combined step's shell for each outcome.
     command: uv run pytest tests/ci/test_runner_routing_audit.py -q -k "rate_limit or not_relabelled or survive or combined_step_names"
+  - kind: tests
+    description: The cascade's rendered contract, floors fixture and deploy probe pass at the head and fail at the merge base, and a non-pin-only diff renders nothing.
+    command: uv run pytest tests/ci/test_plugin_pin_cascade_evidence_omn20864.py tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -92,3 +100,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC6
+  - id: dod-omn20864-ac7-plugin-pin-cascade-evidence
+    description: AC7 tests run the cascade's render step in a scratch repository at the head and at the merge base, run the probe against a fake gh, and plant a code change and a non-pin Dockerfile line; they fail on the merge base, which has no render step.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_plugin_pin_cascade_evidence_omn20864.py tests/unit/docker/test_runtime_plugin_pin_floors_omn20864.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC7
