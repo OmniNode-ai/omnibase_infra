@@ -270,10 +270,10 @@ def test_every_local_chat_backend_healthy_probes_each_server_once(
     diagnosis = check.diagnose()
 
     assert diagnosis.fault is None
-    assert diagnosis.detail.startswith(
-        f"Local model '{_MODEL}' is serving at https://model.invalid."
+    assert diagnosis.detail == (
+        f"Local model '{_MODEL}' is serving at https://model.invalid. "
+        f"Local model '{_MODEL}' is serving at https://second.invalid."
     )
-    assert "https://second.invalid" in diagnosis.detail
     assert transport.get.await_count == 2
 
 
