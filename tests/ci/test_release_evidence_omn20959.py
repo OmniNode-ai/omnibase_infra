@@ -15,10 +15,11 @@ The step now reads evidence from where it lives:
 
 1. ``contracts/<ticket>.yaml`` at the release commit, with a non-empty
    ``dod_evidence`` list (the in-repo contract the S6 cut-over moved to).
-2. A PASS change-control receipt on onex_change_control's default branch, bound to the
-   release PR by number, ticket and head sha.
 
-and refuses (exit 1, before the build) when neither exists. These tests run the
+and refuses (exit 1, before the build) when it does not exist. A change-control
+receipt is not evidence any more: the retirement of onex_change_control (OMN-20074)
+removed the receipt branch, so a release whose only evidence is a receipt refuses
+and the step never reads that repository. These tests run the
 shipped step, lifted from the workflow between its delimiters, under bash with a
 stub ``gh`` that serves canned API responses, inside a throwaway git repository
 standing in for the release checkout.
@@ -286,15 +287,14 @@ class TestReleaseEvidenceResolvesWithoutABodyCitation:
             "a repository with in-repo evidence must not depend on change control"
         )
 
-    def test_release_evidence_from_the_change_control_receipt(
+    def test_release_evidence_ignores_a_change_control_receipt(
         self, tmp_path: Path
     ) -> None:
-        """The v0.38.70 shape: no in-repo contract, a merged receipt bound to the PR head."""
-        code, output, parsed, _ = _run(tmp_path, extra_routes=_occ_routes(_receipt()))
-        assert code == 0, output
-        assert parsed["ticket"] == _TICKET
-        assert parsed["evidence_source"] == _OCC_COMMIT
-        assert parsed["evidence_kind"].startswith("change-control-receipt:")
+        """The v0.38.70 shape, a merged receipt bound to the PR head, is no evidence."""
+        code, output, parsed, log = _run(tmp_path, extra_routes=_occ_routes(_receipt()))
+        assert code == 1, output
+        assert "evidence_source" not in parsed
+        assert "onex_change_control" not in log
 
     def test_release_evidence_ticket_falls_back_to_the_head_branch(
         self, tmp_path: Path
@@ -325,15 +325,15 @@ class TestReleaseEvidenceResolvesWithoutABodyCitation:
 
 
 @pytest.mark.live_contact("tests/ci/fixtures/release_evidence_v0_38_70_omn20959.json")
-def test_release_evidence_resolves_the_recorded_v0_38_70_release(
+def test_release_evidence_refuses_the_recorded_v0_38_70_receipt_only_release(
     tmp_path: Path, recorded_response: dict[str, object]
 ) -> None:
-    """The real v0.38.70 release: its PR record and its merged change-control receipt.
+    """The real v0.38.70 release carried a change-control receipt and no in-repo contract.
 
     The receipt bytes are the file onex_change_control's default branch carries
-    for release PR #4845, and the PR record is the PR watcher's. The shipped
-    resolver must bind them by number, ticket and head sha, and name the
-    change-control commit that wrote the receipt as the evidence source.
+    for release PR #4845, and the PR record is the PR watcher's. The resolver
+    used to bind them by number, ticket and head sha. It now refuses that
+    release and never asks change control for the receipt.
     """
     recording = cast("dict[str, object]", recorded_response["response"])
     pr = cast("dict[str, object]", recording["release_pr"])
@@ -355,7 +355,7 @@ def test_release_evidence_resolves_the_recorded_v0_38_70_release(
         },
         f"{_OCC}/commits?path={receipt_dir}&per_page=1": [{"sha": occ_commit}],
     }
-    code, output, parsed, _ = _run(
+    code, output, parsed, log = _run(
         tmp_path,
         extra_routes=routes,
         pulls_kwargs={
@@ -365,16 +365,18 @@ def test_release_evidence_resolves_the_recorded_v0_38_70_release(
             "ref": pr["head_ref"],
         },
     )
-    assert code == 0, output
-    assert parsed["ticket"] == "OMN-18595"
-    assert parsed["evidence_source"] == occ_commit
-    assert parsed["evidence_kind"] == f"change-control-receipt:{receipt_path}"
+    assert code == 1, output
+    assert "OMN-16286" in output and "has no evidence" in output
+    assert "evidence_source" not in parsed
+    assert "onex_change_control" not in log
 
 
 class TestReleaseEvidenceRefuses:
-    """AC3: the OMN-16286 refusal still fires when neither form exists."""
+    """AC3: the OMN-16286 refusal still fires when the in-repo contract is absent."""
 
-    def test_release_evidence_refuses_with_neither_form(self, tmp_path: Path) -> None:
+    def test_release_evidence_refuses_without_an_in_repo_contract(
+        self, tmp_path: Path
+    ) -> None:
         code, output, parsed, _ = _run(tmp_path)
         assert code == 1, output
         assert "OMN-16286" in output and "has no evidence" in output
@@ -391,22 +393,6 @@ class TestReleaseEvidenceRefuses:
         bare = 'schema_version: "1.0.0"\nticket_id: OMN-18595\nrequirements: []\n'
         code, output, _, _ = _run(tmp_path, contract=bare)
         assert code == 1, output
-
-    @pytest.mark.parametrize(
-        "receipt",
-        [
-            pytest.param(_receipt(status="FAIL"), id="failing-receipt"),
-            pytest.param(_receipt(commit_sha="0" * 40), id="other-head"),
-            pytest.param(_receipt(pr_number=_PR + 7), id="other-pr"),
-            pytest.param(_receipt(ticket="OMN-1"), id="other-ticket"),
-        ],
-    )
-    def test_release_evidence_refuses_an_unbound_receipt(
-        self, tmp_path: Path, receipt: dict[str, object]
-    ) -> None:
-        code, output, parsed, _ = _run(tmp_path, extra_routes=_occ_routes(receipt))
-        assert code == 1, output
-        assert "evidence_source" not in parsed
 
     def test_release_evidence_refuses_without_a_merged_pr(self, tmp_path: Path) -> None:
         code, output, _, _ = _run(
@@ -428,7 +414,7 @@ class TestReleaseEvidenceRefuses:
 
 
 class TestDependencyCascadeEvidence:
-    """AC2 (first half): the cascade accepts both shapes the release now emits."""
+    """AC2 (first half): the cascade accepts the 40-hex source the release emits."""
 
     @staticmethod
     def _cascade_vars(evidence_source: str, tmp_path: Path) -> int:
@@ -452,14 +438,7 @@ class TestDependencyCascadeEvidence:
             },
         ).returncode
 
-    @pytest.mark.parametrize(
-        "evidence_source",
-        [
-            pytest.param("1" * 40, id="release-commit"),
-            pytest.param(_OCC_COMMIT, id="change-control-commit"),
-        ],
-    )
-    def test_dependency_cascade_evidence_accepts_the_release_shapes(
-        self, tmp_path: Path, evidence_source: str
+    def test_dependency_cascade_evidence_accepts_the_release_commit(
+        self, tmp_path: Path
     ) -> None:
-        assert self._cascade_vars(evidence_source, tmp_path) == 0
+        assert self._cascade_vars("1" * 40, tmp_path) == 0

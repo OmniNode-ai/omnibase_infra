@@ -2360,7 +2360,6 @@ dev = [
     { name = "kafka-python" },
     { name = "locust" },
     { name = "mypy" },
-    { name = "onex-change-control" },
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -2440,7 +2439,6 @@ dev = [
     { name = "kafka-python", specifier = ">=2.3.2,<4.0.0" },
     { name = "locust", specifier = ">=2.31.8,<3.0.0" },
     { name = "mypy", specifier = ">=1.13.0,<3.0.0" },
-    { name = "onex-change-control", git = "https://github.com/OmniNode-ai/onex_change_control.git?rev=2dd26ade7caaa7131e532473ec9d8a207d0e77ab" },
     { name = "pre-commit", specifier = ">=4.3.0,<5.0.0" },
     { name = "pytest", specifier = ">=8.4.0,<10.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.25.0,<1.5.0" },
@@ -2469,18 +2467,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e9/a9/28d8987ac0c255a0757df9739885a0a84dd417a75bf87aa1095ad5b963af/omnibase_spi-0.23.5.tar.gz", hash = "sha256:1b498740b81ef38f429aaa80e304d3b70e6d3cb5fea29029b617a39d0cdfe121", size = 1286800, upload-time = "2026-09-20T23:49:44.192Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/09/d6/0c48ba1ca4d7765819eb1123bb0a43cecb9e8153e49b3c8335e58f164e29/omnibase_spi-0.23.5-py3-none-any.whl", hash = "sha256:42991ff1223de123ea98774c27cc51ff20364189a552d1c0b0d1540cff1596c7", size = 737808, upload-time = "2026-09-20T23:49:42.567Z" },
-]
-
-[[package]]
-name = "onex-change-control"
-version = "0.5.1"
-source = { git = "https://github.com/OmniNode-ai/onex_change_control.git?rev=2dd26ade7caaa7131e532473ec9d8a207d0e77ab#2dd26ade7caaa7131e532473ec9d8a207d0e77ab" }
-dependencies = [
-    { name = "colorama" },
-    { name = "omnibase-core" },
-    { name = "pydantic" },
-    { name = "pyyaml" },
-    { name = "tomli-w" },
 ]
 
 [[package]]
@@ -3819,15 +3805,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/4b/cb/b3ff0e45d812997a527cb581a4cd602f0b28793450aa26201969fd6ce42c/textual-0.89.1.tar.gz", hash = "sha256:66befe80e2bca5a8c876cd8ceeaf01752267b6b1dc1d0f73071f1f1e15d90cc8", size = 1517074, upload-time = "2024-12-05T15:17:12.903Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8e/02/650adf160774a43c206011d23283d568d2dbcd43cf7b40dff0a880885b47/textual-0.89.1-py3-none-any.whl", hash = "sha256:0a5d214df6e951b4a2c421e13d0b608482882471c1e34ea74a3631adede8054f", size = 656019, upload-time = "2024-12-05T15:17:10.37Z" },
-]
-
-[[package]]
-name = "tomli-w"
-version = "1.2.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/19/75/241269d1da26b624c0d5e110e8149093c759b7a286138f4efd61a60e75fe/tomli_w-1.2.0.tar.gz", hash = "sha256:2dd14fac5a47c27be9cd4c976af5a12d87fb1f0b4512f81d69cce3b35ae25021", size = 7184, upload-time = "2025-01-15T12:07:24.262Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/18/c86eb8e0202e32dd3df50d43d7ff9854f8e0603945ff398974c1d91ac1ef/tomli_w-1.2.0-py3-none-any.whl", hash = "sha256:188306098d013b691fcadc011abd66727d3c414c571bb01b1a174ba8c983cf90", size = 6675, upload-time = "2025-01-15T12:07:22.074Z" },
 ]
 
 [[package]]

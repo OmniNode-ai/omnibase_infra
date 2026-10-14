@@ -265,8 +265,6 @@ dev = [
     "types-requests>=2.32.0.20250914,<3.0.0",
     "hypothesis>=6.148.7,<7.0.0",
     "pytest-split>=0.10.0,<0.12.0",
-    # Centralized governance hooks (OMN-5135)
-    "onex-change-control>=0.1.0",
 ]
 
 [tool.uv]
@@ -282,11 +280,6 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# OMN-13762 R3: pin occ to immutable main HEAD SHA (2dd26ad) so the lock is
-# reproducible from pure PyPI + immutable-rev sources; omnibase-core and
-# omnibase-spi git-rev overrides DELETED — resolved from PyPI once 0.46.1 /
-# 0.23.0 are published.
-onex-change-control = { git = "https://github.com/OmniNode-ai/onex_change_control.git", rev = "2dd26ade7caaa7131e532473ec9d8a207d0e77ab" }
 # OMN-19749: the temporary git-rev override to omnibase_core#1786's squash
 # (be874b620) is REMOVED. omnibase-core 0.47.24 is published on PyPI (OMN-18595)
 # and contains that squash as an ancestor; the override-dependencies pin above
