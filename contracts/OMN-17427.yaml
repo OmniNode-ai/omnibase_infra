@@ -71,6 +71,11 @@ requirements:
     acceptance:
       - id: AC16
         statement: 'AC16: .github/sibling-pins.yaml names omniintelligence at 3fcbf795087a79081c0ceeb676216bf64c5d49ae, the merge commit of omniintelligence#1072, and every workflow clone names it -- falsifier: uv run pytest tests/ci/test_hostile_reviewer_retry_budget_pin_omn17427.py tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q fails over the merge base, which pins 64b950973a5686d33e0b439fb80749d66362d06d'
+  - id: req-omn17427-rr-failure-reason
+    statement: A request-response failure terminal raises its own failure_reason instead of a doubled generic message.
+    acceptance:
+      - id: AC17
+        statement: "AC17: a failure terminal carrying failure_reason, flat or in its envelope payload, rejects the pending request with RuntimeError 'Request failed: <failure_reason>', and one without a reason says so instead of 'Request failed: Request failed' -- falsifier: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k TestFailureTerminalReason fails at the merge base"
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -120,6 +125,9 @@ evidence_requirements:
   - kind: tests
     description: The sibling pin names the omniintelligence revision with the larger retry budget, and every workflow clone follows it.
     command: uv run pytest tests/ci/test_hostile_reviewer_retry_budget_pin_omn17427.py tests/ci/test_hostile_reviewer_omniintelligence_pin_omn20947.py -q
+  - kind: tests
+    description: A failure terminal's failure_reason is the raised cause.
+    command: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k TestFailureTerminalReason
 emergency_bypass:
   enabled: false
   justification: ''
@@ -269,3 +277,20 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC16
+  - id: dod-omn-17427-ac17
+    description: A failure terminal's failure_reason is the raised cause.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_request_response_wiring.py -q -k TestFailureTerminalReason
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC17
+  - id: dod-omn-17427-ac17-deploy
+    description: Post-merge deploy smoke -- the deployed runtime image's request-response wiring returns a failure terminal's own failure_reason from its envelope payload and names a missing one, which an image without the fix cannot do.
+    source: manual
+    execution_scope: local_done_gate
+    checks:
+      - check_type: command
+        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.runtime.request_response_wiring import RequestResponseWiring as W; assert W._failure_reason({'payload': {'failure_reason': 'model timeout'}}) == 'model timeout'; assert W._failure_reason({}) == 'failure terminal carried no failure_reason'; print('deploy smoke ok')\""
+        cwd: ${OMNI_HOME}/omnibase_infra

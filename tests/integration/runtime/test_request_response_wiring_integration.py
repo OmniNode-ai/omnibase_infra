@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -44,6 +44,10 @@ from omnibase_infra.runtime.request_response_wiring import RequestResponseWiring
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from omnibase_core.protocols.event_bus.protocol_event_bus_publisher import (
+        ProtocolEventBusPublisher,
+    )
 
 
 # =============================================================================
@@ -395,6 +399,71 @@ class TestRequestResponseWiringIntegration:
                     instance_name="test-rpc",
                     payload={"action": "invalid"},
                 )
+
+            await wiring.cleanup()
+
+    async def test_failure_reason_response_flow(
+        self,
+        event_bus: EventBusInmemory,
+        environment: str,
+        app_name: str,
+        request_response_config: ModelRequestResponseConfig,
+    ) -> None:
+        """A delegation failure terminal carries failure_reason, not error.
+
+        Verifies the raised RuntimeError names that reason end to end, instead
+        of the doubled generic "Request failed: Request failed".
+        """
+        mock_consumer: MockAIOKafkaConsumer | None = None
+
+        def consumer_factory(*topics: str, **kwargs: object) -> MockAIOKafkaConsumer:
+            nonlocal mock_consumer
+            mock_consumer = MockAIOKafkaConsumer(*topics, **kwargs)
+            return mock_consumer
+
+        with patch(
+            "omnibase_infra.runtime.request_response_wiring.AIOKafkaConsumer",
+            side_effect=consumer_factory,
+        ):
+            wiring = RequestResponseWiring(
+                event_bus=cast("ProtocolEventBusPublisher", event_bus),
+                environment=environment,
+                app_name=app_name,
+                bootstrap_servers="localhost:9092",
+            )
+            await wiring.wire_request_response(request_response_config)
+            assert mock_consumer is not None
+            reason = "task class 'agent_delegation' is declared but not routable"
+
+            async def capture_and_fail(msg: object) -> None:
+                value = getattr(msg, "value", b"")
+                correlation_id = json.loads(value.decode("utf-8")).get("correlation_id")
+                await mock_consumer.inject_message(
+                    MockConsumerRecord(
+                        topic="onex.evt.test.failed.v1",
+                        value=json.dumps(
+                            {"correlation_id": correlation_id, "failure_reason": reason}
+                        ).encode("utf-8"),
+                    )
+                )
+
+            from omnibase_infra.models import ModelNodeIdentity
+
+            identity = ModelNodeIdentity(
+                env=environment,
+                service="responder",
+                node_name="failure-reason-responder",
+                version="v1",
+            )
+            await event_bus.subscribe(
+                "onex.cmd.test.request.v1", identity, capture_and_fail
+            )
+
+            with pytest.raises(RuntimeError) as exc_info:
+                await wiring.send_request(
+                    instance_name="test-rpc", payload={"action": "refused"}
+                )
+            assert str(exc_info.value) == f"Request failed: {reason}"
 
             await wiring.cleanup()
 
