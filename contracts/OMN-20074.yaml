@@ -168,5 +168,8 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/integration/runtime/test_dispatch_selection_parity.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_dispatch_parity_oracle_path_omn18648.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC11
