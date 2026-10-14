@@ -47,6 +47,11 @@ requirements:
         statement: 'AC9: the reconcile handler retires a row only when its commit is an ancestor and no .prepatch remains, and refuses otherwise -- falsifier: uv run pytest tests/unit/handlers/test_handler_hotpatch_ledger_reconcile.py -q'
       - id: AC10
         statement: 'AC10: the preflight reports every unusable merge_commit row with its reconcile command, and onex node runs that command -- falsifier: uv run pytest tests/unit/scripts/test_preflight_hotpatch_ledger.py tests/integration/hotpatch/test_hotpatch_ledger_reconcile_integration_omn17427.py -q'
+  - id: req-omn17427-boot-health-verdicts
+    statement: A failed pre-merge laptop boot names each kernel's health verdict inside the end of its own job log.
+    acceptance:
+      - id: AC11
+        statement: 'AC11: the laptop boot job prints the runner and, for each kernel, the Docker health state, the last healthcheck outputs and the /health body as the last step before teardown, always, and that step never fails the job -- falsifier: uv run pytest tests/ci/test_runtime_boot_catalog_local_health_verdicts_omn17427.py -q'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -78,6 +83,9 @@ evidence_requirements:
   - kind: tests
     description: The preflight prints the reconcile command and onex node runs it.
     command: uv run pytest tests/unit/scripts/test_preflight_hotpatch_ledger.py tests/integration/hotpatch/test_hotpatch_ledger_reconcile_integration_omn17427.py -q
+  - kind: tests
+    description: The laptop boot prints both kernels' health verdicts last before teardown and never fails on them.
+    command: uv run pytest tests/ci/test_runtime_boot_catalog_local_health_verdicts_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -173,3 +181,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC10
+  - id: dod-omn-17427-ac11
+    description: The laptop boot prints both kernels' health verdicts as the last step before teardown, and the step never fails the job.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_runtime_boot_catalog_local_health_verdicts_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC11
