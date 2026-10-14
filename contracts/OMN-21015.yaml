@@ -1,0 +1,43 @@
+schema_version: "1.0.0"
+ticket_id: OMN-21015
+title: Infra support for transactional per-run savings storage
+summary: >-
+  Infra half only: vendors delegation migration 0059 and provides a generic transactional derived-write capability. The per-run figure, its race-fix caller wiring and the page are the omnimarket and omnidash halves. These checks prove storage atomicity and deployment identity, not monetary or page acceptance of the whole criterion.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn21015-ac3-infra-storage
+    statement: >-
+      The four nullable columns are deployed byte-identical to the omnimarket source, and the topology adapter derives from the actual merged row, conditionally updates only its declared derived fields in the same transaction, and returns the final row after commit.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: The Runs list shows savings per run against the named baseline (requirement RU-1), and a typed not-measured state for an unmeasured run -- falsifier: a measured fixture row with no savings cell, or an unmeasured row that shows 0'
+evidence_requirements:
+  - kind: tests
+    description: Infra storage half only; real owned Postgres proves the generic atomic write and refusal controls. It does not calculate a saving or render the page.
+    command: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/runtime/test_projection_derived_write_omn21015.py tests/unit/runtime/auto_wiring/test_projection_derived_write_guards_omn21015.py -q
+  - kind: tests
+    description: Infra deployment half only; the vendored 0059 bytes, ledger checksum and expand-only class match the pinned omnimarket source.
+    command: uv run pytest tests/unit/migrations/test_omn21015_run_savings_vendor.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn21015-ac3-infra-transactional-derived-write
+    description: Infra half only. Generic real-Postgres two-writer, visibility, rollback and access/column controls; no monetary or page acceptance claim. An unavailable database is a failure, not a skipped proof.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: env ONEX_MIGRATION_PROOF_REQUIRE_PG=1 uv run pytest tests/integration/runtime/test_projection_derived_write_omn21015.py tests/unit/runtime/auto_wiring/test_projection_derived_write_guards_omn21015.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
+  - id: dod-omn21015-ac3-infra-vendor-0059
+    description: Infra half only. Pins source bytes, exact ledger checksum, expand-only classification and four nullable columns. It does not prove how the caller computes or serves the figure.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/migrations/test_omn21015_run_savings_vendor.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC3]
