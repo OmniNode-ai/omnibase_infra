@@ -74,7 +74,7 @@ evidence_requirements:
     command: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q
   - kind: tests
     description: The four workflows read no onex_change_control, the release resolves evidence from the in-repo contract alone, and the dev dependency and sibling pin are gone.
-    command: uv run pytest tests/ci/test_no_occ_readers_omn20074.py tests/ci/test_release_evidence_omn20959.py -q
+    command: uv run pytest tests/ci/test_no_occ_readers_omn20074.py tests/ci/test_release_evidence_omn20959.py tests/integration/ci/test_contract_topic_graph_corpus_omn20074.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -166,7 +166,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_no_occ_readers_omn20074.py tests/ci/test_release_evidence_omn20959.py -q
+        check_value: uv run pytest tests/ci/test_no_occ_readers_omn20074.py tests/ci/test_release_evidence_omn20959.py tests/integration/ci/test_contract_topic_graph_corpus_omn20074.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC10
