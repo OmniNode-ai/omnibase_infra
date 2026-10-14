@@ -1436,6 +1436,34 @@ jobs:
             echo "::endgroup::"
           done
 
+      # OMN-17427: the kernels' own verdicts, printed last so they sit inside
+      # the end of the job log. When the runtime never passes its healthcheck,
+      # `make up-local` waits out the 1800 s start_period and fails with no
+      # reason, and the log tails above fall outside the last 64 KB of the log
+      # that a job log read returns. Diagnostic only: it never fails the job.
+      - name: Kernel health verdicts (always, last before teardown)
+        if: always()
+        run: |
+          set +e
+          echo "runner: ${RUNNER_NAME:-unknown}"
+          docker info --format 'docker host {{.Name}}, server {{.ServerVersion}}, {{.NCPU}} cpus' | head -c 400
+          echo
+          docker ps -a --filter "name=${LOCAL_PROJECT}" --format 'table {{.Names}}\t{{.Status}}' | head -c 4000
+          echo
+          for svc in omninode-runtime runtime-effects; do
+            container="${LOCAL_PROJECT}-${svc}"
+            echo "--- ${svc}: state"
+            docker inspect --format 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restarts={{.RestartCount}} started={{.State.StartedAt}}' "$container" | head -c 400
+            echo
+            echo "--- ${svc}: last healthcheck outputs"
+            docker inspect --format '{{if .State.Health}}{{range .State.Health.Log}}{{.End}} exit={{.ExitCode}} {{.Output}}{{end}}{{end}}' "$container" | tail -c 4000
+            echo
+            echo "--- ${svc}: /health body"
+            docker exec "$container" curl -sS --max-time 10 http://localhost:8085/health | head -c 4000
+            echo
+          done
+          exit 0
+
       - name: Tear down the laptop profile and its volumes (always)
         if: always()
         run: |
