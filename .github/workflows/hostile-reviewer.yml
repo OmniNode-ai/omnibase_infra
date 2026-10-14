@@ -204,7 +204,7 @@ jobs:
             rm -rf ../omniintelligence
             if git clone --filter=blob:none --no-checkout \
               https://github.com/OmniNode-ai/omniintelligence.git ../omniintelligence \
-              && git -C ../omniintelligence checkout --quiet 64b950973a5686d33e0b439fb80749d66362d06d; then # .github/sibling-pins.yaml
+              && git -C ../omniintelligence checkout --quiet 3fcbf795087a79081c0ceeb676216bf64c5d49ae; then # .github/sibling-pins.yaml
               exit 0
             fi
             sleep $((attempt * 10))

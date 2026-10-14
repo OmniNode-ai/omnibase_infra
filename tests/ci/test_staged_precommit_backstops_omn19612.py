@@ -124,6 +124,13 @@ BACKSTOPS: dict[str, Backstop] = {
     ),
 }
 
+# OMN-17427: hooks whose whole-tree counterpart is a caller workflow rather than
+# a ci.yml step. The caller must run the exported hook's own reusable workflow
+# (pinned by the hook's revision) on every pull request, unconditionally.
+WORKFLOW_BACKSTOPS: dict[str, str] = {
+    "public-repo-hygiene": "public-repo-hygiene.yml",
+}
+
 VALIDATOR_RUNNER_LINE = (
     "PYTHONPATH=src uv run python scripts/ci/run_validators_in_process.py "
     "<<'VALIDATORS'"
@@ -406,7 +413,34 @@ def _job(job_id: str) -> dict[str, Any]:
 def test_every_new_staged_hook_has_a_declared_whole_tree_backstop() -> None:
     staged = _staged_scoped_hook_ids()
     assert staged >= PRE_EXISTING_STAGED_HOOKS
-    assert staged - PRE_EXISTING_STAGED_HOOKS == set(BACKSTOPS)
+    assert staged - PRE_EXISTING_STAGED_HOOKS == set(BACKSTOPS) | set(
+        WORKFLOW_BACKSTOPS
+    )
+
+
+@pytest.mark.parametrize("hook_id", WORKFLOW_BACKSTOPS)
+def test_workflow_backstop_runs_the_same_reusable_on_every_pull_request(
+    hook_id: str,
+) -> None:
+    workflow = _load_yaml(
+        REPO_ROOT / ".github" / "workflows" / WORKFLOW_BACKSTOPS[hook_id]
+    )
+    job = workflow["jobs"][hook_id]
+    assert "if" not in job, f"{hook_id} caller acquired a job-level condition"
+    assert not _is_true(job.get("continue-on-error", False))
+    triggers = workflow.get("on", workflow.get(True))
+    assert "pull_request" in triggers, f"{hook_id} caller does not run on pull_request"
+    config = _load_yaml(PRECOMMIT_CONFIG)
+    revs = {
+        repo["rev"]
+        for repo in config["repos"]
+        for hook in repo.get("hooks", [])
+        if hook.get("id") == hook_id
+    }
+    assert len(revs) == 1
+    assert str(job["uses"]).endswith(f"@{revs.pop()}"), (
+        f"{hook_id} caller and hook are not at one revision"
+    )
 
 
 @pytest.mark.parametrize("hook_id", BACKSTOPS)

@@ -1831,7 +1831,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 64b950973a5686d33e0b439fb80749d66362d06d # .github/sibling-pins.yaml
+          ref: 3fcbf795087a79081c0ceeb676216bf64c5d49ae # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -1920,7 +1920,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 64b950973a5686d33e0b439fb80749d66362d06d # .github/sibling-pins.yaml
+          ref: 3fcbf795087a79081c0ceeb676216bf64c5d49ae # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -4593,7 +4593,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: OmniNode-ai/omniintelligence
-          ref: 64b950973a5686d33e0b439fb80749d66362d06d # .github/sibling-pins.yaml
+          ref: 3fcbf795087a79081c0ceeb676216bf64c5d49ae # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.GITHUB_TOKEN }}
 

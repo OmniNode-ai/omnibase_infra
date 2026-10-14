@@ -48,9 +48,14 @@ import asyncio
 import importlib.metadata
 import json
 import sys
+import tomllib
 from collections import defaultdict
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
+
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 
 from omnibase_core.enums.enum_execution_shape import EnumMessageCategory as _CoreCat
 from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
@@ -78,14 +83,37 @@ from omnibase_infra.runtime.message_dispatch_engine import (
 # Fixture-header metadata: corpus completeness (design D6) and P0 outcomes (D5/D7).
 # ---------------------------------------------------------------------------
 
+
 #: Distributions that ship an ``onex.nodes`` entry-point group AND are inside the
 #: ``omnibase_infra`` dependency closure, so they MUST be present in the CI venv
 #: (``uv sync``). The parity test FAILS if any of these is missing — a missing
 #: required package silently shrinks the corpus and hides regressions (design D6).
-REQUIRED_ONEX_NODES_PACKAGES: tuple[str, ...] = (
-    "omnibase-core",
-    "omnibase-infra",
-    "onex-change-control",
+def required_onex_nodes_packages(pyproject: Path) -> tuple[str, ...]:
+    """Pin required packages from the declared closure, never the installed venv.
+
+    OCC retirement removes the development dependency under OMN-20074. While it
+    is declared it must still be installed; after retirement core and infra stay
+    mandatory. An absent wheel must never decide which oracle CI selects.
+    """
+    with pyproject.open("rb") as stream:
+        manifest = tomllib.load(stream)
+    dependencies = [
+        *manifest["project"]["dependencies"],
+        *manifest["dependency-groups"]["dev"],
+    ]
+    if any(not isinstance(dependency, str) for dependency in dependencies):
+        raise ValueError("Dispatch parity requires explicit dependency declarations")
+    declared = {
+        canonicalize_name(Requirement(dependency).name) for dependency in dependencies
+    }
+    required: tuple[str, ...] = ("omnibase-core", "omnibase-infra")
+    if "onex-change-control" in declared:
+        required += ("onex-change-control",)
+    return required
+
+
+REQUIRED_ONEX_NODES_PACKAGES = required_onex_nodes_packages(
+    Path(__file__).resolve().parents[3] / "pyproject.toml"
 )
 
 #: Distributions that ship ``onex.nodes`` entry points but are structurally OUTSIDE
@@ -100,6 +128,10 @@ EXPECTED_EXCLUDED_ONEX_NODES_PACKAGES: tuple[str, ...] = (
     "omniclaude",
     "omniintelligence",
     "omnimemory",
+) + (
+    ()
+    if "onex-change-control" in REQUIRED_ONEX_NODES_PACKAGES
+    else ("onex-change-control",)
 )
 
 #: Full set for header reporting.
@@ -244,7 +276,7 @@ def _derive_message_types(contract: Any, entry: Any) -> set[str] | None:
 
 def _derive_category(contract: Any, entry: Any) -> EnumMessageCategory:
     """Reproduce ``_prepare_handler_wiring``'s ``_early_category`` derivation."""
-    category_str = "event"
+    category_str: str | None = "event"
     if entry.message_category:
         category_str = entry.message_category.strip().lower()
     elif contract.event_bus and contract.event_bus.subscribe_topics:
@@ -778,6 +810,25 @@ VOLATILE_HEADER_FIELDS: tuple[str, ...] = (
     "generated_at_utc",
     "installed_package_versions",
 )
+
+
+def load_selection_oracle(
+    required_packages: tuple[str, ...] = REQUIRED_ONEX_NODES_PACKAGES,
+) -> dict[str, Any]:
+    """Load the committed oracle for the declared dependency closure.
+
+    The OCC-free inventory shares every dispatcher, route and probe with the
+    legacy oracle: OCC's four contracts register no executable dispatchers.
+    Only its independently captured inventory header differs. Both inventories
+    stay committed so a missing declared OCC install cannot be accepted.
+    """
+    fixture_dir = Path(__file__).resolve().parent
+    with (fixture_dir / "selection-oracle-v2.json").open() as stream:
+        snapshot: dict[str, Any] = json.load(stream)
+    if "onex-change-control" not in required_packages:
+        with (fixture_dir / "selection-oracle-no-occ-v2.header.json").open() as stream:
+            snapshot["header"].update(json.load(stream))
+    return snapshot
 
 
 def strip_volatile_header_fields(snapshot: dict[str, Any]) -> dict[str, Any]:

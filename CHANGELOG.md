@@ -1,3 +1,21 @@
+## v0.38.72 (2026-10-14)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.72 by the scheduled release train.
+- 9 release-relevant commit(s) merged since v0.38.71.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.71
+- feat: vendor claude_hook_events migration 0007, the guard, refusal_reason and token usage columns (#4933)
+- chore: advance omnimarket contract pin to e9055c04ef36 (#4929)
+- feat: remove the moved and dead GitHub source-control nodes from omnibase_infra (#4822)
+- chore: advance omnimarket contract pin to 464634262791 (#4923)
+- fix: the gateway forwarder provisions its contract-declared local topics before its consumers start (#4911)
+- fix: a reconcile command reaches update-plan-emitted over the bus (#4896)
+- chore: advance omnimarket contract pin to 35c3c7d1b372 (#4913)
+- feat: one onex node call hosts its orchestrator's execution-graph stages (#4918)
+- fix: stop advertising the two GitHub nodes omnimarket now owns (#4917)
+
 ## v0.38.71 (2026-10-12)
 
 ### Release

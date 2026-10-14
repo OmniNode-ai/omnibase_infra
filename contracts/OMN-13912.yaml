@@ -3,7 +3,7 @@
 schema_version: "1.0.0"
 ticket_id: "OMN-13912"
 title: "Release train bumps dev's project version after each publish"
-summary: "After v0.38.71 was published, dev's project version is bumped to 0.38.72 and uv.lock is re-locked, which disarms the release-identity gate. The runner image identity lock binds uv.lock, so it is regenerated in the same change."
+summary: "After v0.38.72 was published, dev's project version is bumped to 0.38.73 and uv.lock is re-locked, which disarms the release-identity gate. The runner image identity lock binds uv.lock, so it is regenerated in the same change."
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -13,17 +13,20 @@ requirements:
     acceptance:
       - id: "AC1"
         statement: |-
-          AC1: the recorded runner image identity and shared env digest match the recomputed values for the bumped uv.lock, and the bumped version is ahead of v0.38.71 -- falsifier: uv run pytest tests/ci/test_runner_image_identity.py tests/ci/test_dev_ahead_of_v0_38_71_omn13912.py -q
+          AC1: the recorded runner image identity and shared env digest match the recomputed values for the bumped uv.lock, its editable package version matches pyproject.toml, and the bumped version is ahead of v0.38.72 -- falsifier: uv run pytest tests/ci/test_runner_image_identity.py tests/ci/test_dev_ahead_of_v0_38_72_omn13912.py -q
       - id: "AC2"
         statement: |-
-          AC2: dev's project version is strictly ahead of the published v0.38.71, so the release identity gate is disarmed -- falsifier: uv run pytest tests/ci/test_dev_ahead_of_v0_38_71_omn13912.py -q
+          AC2: dev's project version is strictly ahead of the published v0.38.72, so the release train sees dev disarmed and the runtime release identity handler accepts packaged source changes -- falsifier: uv run pytest tests/ci/test_dev_ahead_of_v0_38_72_omn13912.py -q
 evidence_requirements:
   - kind: "tests"
     description: "AC1: runner image identity tests."
-    command: "uv run pytest tests/ci/test_runner_image_identity.py -q -p no:randomly"
+    command: "uv run pytest tests/ci/test_runner_image_identity.py tests/ci/test_dev_ahead_of_v0_38_72_omn13912.py -q -p no:randomly"
   - kind: "tests"
-    description: "AC2: dev is ahead of the published v0.38.71."
-    command: "uv run pytest tests/ci/test_dev_ahead_of_v0_38_71_omn13912.py -q -p no:randomly"
+    description: "AC2: dev is ahead of the published v0.38.72."
+    command: "uv run pytest tests/ci/test_dev_ahead_of_v0_38_72_omn13912.py -q -p no:randomly"
+  - kind: "manual"
+    description: "Deploy evidence: the runtime release identity handler reads the bumped project version and accepts packaged source changes against v0.38.72; this probe runs on the hosted runner without a deployed container."
+    command: "deploy: uv run pytest tests/ci/test_dev_ahead_of_v0_38_72_omn13912.py -k runtime_release_identity -q -p no:randomly"
 emergency_bypass:
   enabled: false
   justification: ""
@@ -35,13 +38,13 @@ dod_evidence:
     binds_ac: ["AC1"]
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest tests/ci/test_runner_image_identity.py tests/ci/test_dev_ahead_of_v0_38_71_omn13912.py -q -p no:randomly"
+        check_value: "uv run pytest tests/ci/test_runner_image_identity.py tests/ci/test_dev_ahead_of_v0_38_71_omn13912.py tests/ci/test_dev_ahead_of_v0_38_72_omn13912.py -q -p no:randomly"
         cwd: "${OMNI_HOME}/omnibase_infra"
   - id: "dod-omn13912-ac2-release-identity"
-    description: "AC2: the bumped version is strictly ahead of the published v0.38.71."
+    description: "AC2: the bumped version is strictly ahead of the published v0.38.72."
     source: "manual"
     binds_ac: ["AC2"]
     checks:
       - check_type: "test_passes"
-        check_value: "uv run pytest tests/ci/test_dev_ahead_of_v0_38_71_omn13912.py -q -p no:randomly"
+        check_value: "uv run pytest tests/ci/test_dev_ahead_of_v0_38_71_omn13912.py tests/ci/test_dev_ahead_of_v0_38_72_omn13912.py -q -p no:randomly"
         cwd: "${OMNI_HOME}/omnibase_infra"
