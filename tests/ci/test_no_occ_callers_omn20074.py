@@ -31,10 +31,11 @@ REQUIRED_CHECKS = REPO_ROOT / ".github" / "required-checks.yaml"
 _OCC_REUSABLE = re.compile(r"^(?:call-)?occ-[a-z0-9-]+\.ya?ml$")
 _PREFLIGHT_WAIT = re.compile(r"occ-preflight")
 
-# The pinned skip-token reusable is the squash commit of omniclaude#2540, which
-# removed the nested change-control preflight job from it.
+# The pinned skip-token reusable descends from the squash commit of
+# omniclaude#2540, which removed the nested change-control preflight job from
+# it; ed4300f8a keeps that removal and also retires the skip-receipt registry.
 _SKIP_TOKEN_REUSABLE = "reject-deploy-gate-skip.yml"
-_PREFLIGHT_FREE_SKIP_TOKEN_SHA = "4358450ccbba0cee11e390208dd0b8b1728e94ab"
+_PREFLIGHT_FREE_SKIP_TOKEN_SHA = "ed4300f8a427ead7f099daf69cedc012907cdbd3"
 
 # The deploy-gate reusable reads the caller's own contracts/OMN-<n>.yaml at the
 # pull request head when the caller passes contract-source: caller. The pin is
