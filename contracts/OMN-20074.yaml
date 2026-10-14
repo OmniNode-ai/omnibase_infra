@@ -45,6 +45,11 @@ requirements:
     acceptance:
       - id: AC9
         statement: 'AC9: the hook rejects a token with or without a receipt-id comment in a file and rejects a commit message with a receipt-id comment, while a comment alone remains inert -- falsifier: uv run pytest tests/unit/test_reject_skip_token_hook_no_escape_hatch.py -q fails at the merge base'
+  - id: req-dispatch-parity-declared-closure
+    statement: Dispatch parity must pin both the declared OCC development corpus and the retired OCC corpus without changing any executable selection oracle.
+    acceptance:
+      - id: AC11
+        statement: 'AC11: the manifest selects the committed 153-contract OCC inventory or the captured 149-contract retired inventory, both sharing all 1090 probes, 126 dispatchers and 110 routes; missing declared OCC, core or infra still fails, and inventory, route or selection drift still fails -- falsifier: uv run pytest tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py -q'
 evidence_requirements:
   - kind: tests
     description: No workflow calls an OCC reusable workflow, waits on occ-preflight or requires an OCC companion context.
@@ -153,3 +158,73 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC9
+  - id: dod-dispatch-parity-declared-closure-ac11
+    description: The focused parity guard tests refuse missing required packages and planted inventory, route and selection drift. The tracked-blob probe exercises the checked-out commit's dependency selection and both oracle inventories, independently of the verifier's test overlay at the merge base.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_dispatch_parity_dependency_closure_omn20074.py tests/ci/test_dispatch_parity_live_contact_omn20074.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: |
+          uv run python - <<'PY'
+          import ast
+          import json
+          import subprocess
+          import tempfile
+          import tomllib
+          from pathlib import Path
+          from typing import Any
+          from packaging.requirements import Requirement
+          from packaging.utils import canonicalize_name
+
+          def tracked(name):
+              return subprocess.check_output(
+                  ['git', 'show', 'HEAD:tests/fixtures/dispatch_parity/' + name], text=True
+              )
+
+          source = ast.parse(tracked('harness.py'))
+          names = {'required_onex_nodes_packages', 'load_selection_oracle'}
+          functions = [node for node in source.body if isinstance(node, ast.FunctionDef) and node.name in names]
+          assert {node.name for node in functions} == names, 'Tracked harness lacks declared-closure selection'
+          required = ('omnibase-core', 'omnibase-infra')
+          with tempfile.TemporaryDirectory() as directory:
+              root = Path(directory)
+              for name in ('selection-oracle-v2.json', 'selection-oracle-no-occ-v2.header.json'):
+                  (root / name).write_text(tracked(name))
+              namespace = dict(globals(), __file__=str(root / 'harness.py'), REQUIRED_ONEX_NODES_PACKAGES=required)
+              exec(compile(ast.Module(body=functions, type_ignores=[]), '<tracked-harness>', 'exec'), namespace)
+              select = namespace['required_onex_nodes_packages']
+              manifest = root / 'pyproject.toml'
+              manifest.write_text('[project]\ndependencies = []\n[dependency-groups]\ndev = []\n')
+              assert select(manifest) == required
+              for declaration in ('onex-change-control==0.5.1', 'onex_change_control>=0.5.1'):
+                  for group in ('project', 'dev'):
+                      project = [declaration] if group == 'project' else []
+                      dev = [declaration] if group == 'dev' else []
+                      manifest.write_text('[project]\ndependencies = ' + json.dumps(project) + '\n[dependency-groups]\ndev = ' + json.dumps(dev) + '\n')
+                      assert select(manifest) == required + ('onex-change-control',)
+              manifest.write_text('[project]\ndependencies = []\n[dependency-groups]\ndev = [{include-group = "corpus"}]\ncorpus = ["onex-change-control==0.5.1"]\n')
+              try:
+                  select(manifest)
+              except ValueError:
+                  pass
+              else:
+                  raise AssertionError('Indirect dependency group silently accepted')
+              legacy = namespace['load_selection_oracle'](required + ('onex-change-control',))
+              retired = namespace['load_selection_oracle'](required)
+              assert legacy['header']['corpus']['contracts_discovered'] == 153
+              assert retired['header']['corpus']['contracts_discovered'] == 149
+              assert retired['header']['required_onex_nodes_packages'] == list(required)
+              assert retired['header']['required_missing_packages'] == []
+              assert retired['header']['corpus']['contracts_by_package'] == {'omnibase_core': 21, 'omnibase_infra': 128}
+              for section in ('dispatchers', 'routes', 'probes', 'discovery_errors'):
+                  assert legacy[section] == retired[section], section
+              assert len(retired['dispatchers']) == 126
+              assert len(retired['routes']) == 110
+              assert len(retired['probes']) == 1090
+          print('Tracked dispatch parity closure and inventories passed')
+          PY
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC11
