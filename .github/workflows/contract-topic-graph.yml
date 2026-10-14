@@ -92,12 +92,6 @@ jobs:
           ref: 3fcbf795087a79081c0ceeb676216bf64c5d49ae # .github/sibling-pins.yaml
           path: omniintelligence
           token: ${{ secrets.CROSS_REPO_PAT }}
-      - uses: actions/checkout@v4
-        with:
-          repository: OmniNode-ai/onex_change_control
-          ref: 802b5f7101f4c49f8b30e8deda3d4c5d024c5710 # .github/sibling-pins.yaml
-          path: onex_change_control
-          token: ${{ secrets.CROSS_REPO_PAT }}
 
       - uses: astral-sh/setup-uv@v5
       - name: Install

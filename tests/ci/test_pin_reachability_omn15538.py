@@ -473,8 +473,10 @@ def test_extract_pins_dispatches_by_filename(tmp_path: Path) -> None:
 def test_real_tree_extraction_is_nonempty() -> None:
     """Guard the vacuous-green case: a glob typo makes the gate check nothing.
 
-    This repo is known to carry cross-repo workflow pins plus git-sourced
-    sibling deps; if extraction collapses, the live gate passes on everything.
+    This repo is known to carry cross-repo workflow pins; if extraction
+    collapses, the live gate passes on everything. (OMN-20074: the last
+    git-sourced dependency, onex-change-control, is gone, so pyproject and the
+    lock carry no pin to extract; the synthetic tests above cover those kinds.)
     """
     pins = extract_pins(
         [WORKFLOWS_DIR, REPO_ROOT / "pyproject.toml", REPO_ROOT / "uv.lock"]
@@ -483,7 +485,7 @@ def test_real_tree_extraction_is_nonempty() -> None:
         f"expected >=10 cross-repo pins in this tree, got {len(pins)} — "
         "the extractor is more likely broken than the tree is clean"
     )
-    assert {p.kind for p in pins} >= {"workflow-uses", "pyproject-source", "uv-lock"}
+    assert {p.kind for p in pins} >= {"workflow-uses"}
 
 
 @pytest.mark.unit

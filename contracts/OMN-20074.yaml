@@ -45,6 +45,11 @@ requirements:
     acceptance:
       - id: AC9
         statement: 'AC9: the hook rejects a token with or without a receipt-id comment in a file and rejects a commit message with a receipt-id comment, while a comment alone remains inert -- falsifier: uv run pytest tests/unit/test_reject_skip_token_hook_no_escape_hatch.py -q fails at the merge base'
+  - id: req-occ-readers-s6-infra
+    statement: omnibase_infra's contract-topic-graph, omni-standards-compliance, pr-ci-zombie-detector and release workflows must read no onex_change_control, and the unused onex-change-control dev dependency and sibling pin must be gone.
+    acceptance:
+      - id: AC10
+        statement: 'AC10: contract-topic-graph.yml, omni-standards-compliance.yml, pr-ci-zombie-detector.yml and release.yml name no onex_change_control outside comments, the handler-contract check runs omnibase_core''s handler at a PyPI release that ships it, the zombie detector scans only omnimarket, release evidence is the in-repo contract alone, and neither pyproject.toml, uv.lock nor .github/sibling-pins.yaml carries onex_change_control -- falsifier: uv run pytest tests/ci/test_no_occ_readers_omn20074.py tests/ci/test_release_evidence_omn20959.py -q fails at the merge base'
   - id: req-dispatch-parity-declared-closure
     statement: Dispatch parity must pin both the declared OCC development corpus and the retired OCC corpus without changing any executable selection oracle.
     acceptance:
@@ -72,6 +77,9 @@ evidence_requirements:
   - kind: tests
     description: The contract-validation step passes this repository's branch contract and refuses both planted binds_ac shapes and a malformed contract.
     command: uv run pytest tests/ci/test_contract_validation_core_validator_omn20074.py -q
+  - kind: tests
+    description: The four workflows read no onex_change_control, the release resolves evidence from the in-repo contract alone, and the dev dependency and sibling pin are gone.
+    command: uv run pytest tests/ci/test_no_occ_readers_omn20074.py tests/ci/test_release_evidence_omn20959.py tests/integration/ci/test_contract_topic_graph_corpus_omn20074.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -158,6 +166,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC9
+  - id: dod-occ-readers-s6-infra-ac10
+    description: The repository tests prove the four workflows read no onex_change_control, the release refuses a receipt-only release, and the pyproject dependency, uv.lock entry and sibling pin are gone.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_no_occ_readers_omn20074.py tests/ci/test_release_evidence_omn20959.py tests/integration/ci/test_contract_topic_graph_corpus_omn20074.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC10
   - id: dod-dispatch-parity-declared-closure-ac11
     description: The focused parity guard tests refuse missing required packages and planted inventory, route and selection drift. The tracked-blob probe exercises the checked-out commit's dependency selection and both oracle inventories, independently of the verifier's test overlay at the merge base.
     source: manual
