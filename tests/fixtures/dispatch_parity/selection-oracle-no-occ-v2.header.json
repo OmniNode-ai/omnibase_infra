@@ -1,0 +1,63 @@
+{
+  "corpus": {
+    "contracts_by_package": {
+      "omnibase_core": 21,
+      "omnibase_infra": 128
+    },
+    "contracts_discovered": 149,
+    "discovery_errors": 0,
+    "distinct_subscribe_topics": 94,
+    "probe_count": 1090,
+    "registered_dispatchers": 126,
+    "registered_routes": 110,
+    "type_scoped_dispatchers": 73
+  },
+  "exclusions": [
+    {
+      "installed": false,
+      "package": "omnimarket",
+      "reason": "outside omnibase_infra dependency closure (sibling/downstream); cannot co-install via infra `uv sync`. Contracts covered by a separate cross-repo corpus job, tracked under OMN-12525."
+    },
+    {
+      "installed": false,
+      "package": "omniclaude",
+      "reason": "outside omnibase_infra dependency closure (sibling/downstream); cannot co-install via infra `uv sync`. Contracts covered by a separate cross-repo corpus job, tracked under OMN-12525."
+    },
+    {
+      "installed": false,
+      "package": "omniintelligence",
+      "reason": "outside omnibase_infra dependency closure (sibling/downstream); cannot co-install via infra `uv sync`. Contracts covered by a separate cross-repo corpus job, tracked under OMN-12525."
+    },
+    {
+      "installed": false,
+      "package": "omnimemory",
+      "reason": "outside omnibase_infra dependency closure (sibling/downstream); cannot co-install via infra `uv sync`. Contracts covered by a separate cross-repo corpus job, tracked under OMN-12525."
+    },
+    {
+      "installed": false,
+      "package": "onex-change-control",
+      "reason": "outside omnibase_infra dependency closure (sibling/downstream); cannot co-install via infra `uv sync`. Contracts covered by a separate cross-repo corpus job, tracked under OMN-12525."
+    }
+  ],
+  "expected_excluded_onex_nodes_packages": [
+    "omnimarket",
+    "omniclaude",
+    "omniintelligence",
+    "omnimemory",
+    "onex-change-control"
+  ],
+  "generated_at_utc": "2026-10-14T15:02:20.574063+00:00",
+  "installed_package_versions": {
+    "omnibase-core": "0.47.39",
+    "omnibase-infra": "0.38.72",
+    "omniclaude": null,
+    "omniintelligence": null,
+    "omnimarket": null,
+    "omnimemory": null,
+    "onex-change-control": null
+  },
+  "required_onex_nodes_packages": [
+    "omnibase-core",
+    "omnibase-infra"
+  ]
+}
