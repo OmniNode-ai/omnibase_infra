@@ -49,10 +49,8 @@ from pathlib import Path
 from typing import NamedTuple
 from uuid import uuid4
 
-from aiokafka.admin import AIOKafkaAdminClient, NewTopic
-from aiokafka.errors import TopicAlreadyExistsError
+from aiokafka.admin import AIOKafkaAdminClient
 
-from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
 from omnibase_infra.event_bus.kafka_transport import KafkaTransport
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
@@ -73,10 +71,8 @@ from omnibase_infra.nodes.node_bus_forwarder_effect.services.service_gateway_top
     prefix_topic,
 )
 from omnibase_infra.runtime.gateway_forwarder import (
+    ensure_topics_exist,
     load_gateway_forwarder_runtime_config,
-)
-from omnibase_infra.topics.model_topic_provisioning_policy import (
-    ModelTopicProvisioningPolicy,
 )
 
 logger = logging.getLogger(__name__)
@@ -119,49 +115,16 @@ async def _ensure_topic_exists(
     provisioned, every real check failed with "not found in cluster
     metadata" -- a permanent false negative on an otherwise-healthy leg. The
     canary topic never carries real gateway traffic (it is scratch space
-    dedicated to this probe alone), so provisioning it here -- rather than
-    routing through the runtime's full contract-driven ``TopicProvisioner``
-    -- keeps this probe a standalone process that dials brokers directly,
-    matching the rest of this module's design.
+    dedicated to this probe alone), so it is provisioned here through the
+    forwarder's own ``ensure_topics_exist`` (OMN-15629) -- rather than the
+    runtime's full contract-driven ``TopicProvisioner`` -- which keeps this
+    probe a standalone process that dials brokers directly.
 
-    Provisioning failure is never fatal to the probe: if the topic genuinely
-    cannot be created (e.g. insufficient broker permissions, or a cloud
-    cluster's replication-factor policy rejects ``replication_factor=1``),
-    the caller's own produce/readback attempt fails right after this with a
-    clear connect/produce error -- that is the real, honest signal.
+    Provisioning failure is never fatal to the probe: the caller's own
+    produce/readback attempt fails right after this with a clear
+    connect/produce error -- that is the real, honest signal.
     """
-    admin = admin_factory(
-        bootstrap_servers=bus_config.bootstrap_servers,
-        **build_aiokafka_auth_kwargs(bus_config),
-    )
-    try:
-        await admin.start()
-        # OMN-15395: replication factor must resolve through the policy seam,
-        # never a hardcoded literal (the canary topic has no owning contract,
-        # so `declared=None` -- the policy still resolves it: RF2 on a managed
-        # MSK cluster, RF1 on an unmeasured self-hosted broker).
-        policy = ModelTopicProvisioningPolicy.from_kafka_config(bus_config)
-        replication_factor = policy.resolve_replication_factor(
-            topic=topic, declared=None
-        )
-        await admin.create_topics(
-            [
-                NewTopic(
-                    name=topic,
-                    num_partitions=1,
-                    replication_factor=replication_factor,
-                )
-            ],
-        )
-    except TopicAlreadyExistsError:
-        pass
-    except Exception:  # noqa: BLE001 -- best-effort; the leg check below is the real signal
-        logger.warning("canary probe: failed to ensure topic %s exists", topic)
-    finally:
-        try:
-            await admin.close()
-        except Exception:  # noqa: BLE001 -- cleanup must not mask the real result
-            logger.warning("canary probe: admin client close failed for %s", topic)
+    await ensure_topics_exist(bus_config, (topic,), admin_factory=admin_factory)
 
 
 async def check_canary_leg(

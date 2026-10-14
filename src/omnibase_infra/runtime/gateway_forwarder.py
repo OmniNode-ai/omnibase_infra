@@ -20,9 +20,11 @@ from typing import Literal
 
 import httpx
 import yaml
+from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 from aiokafka.errors import (
     ClusterAuthorizationFailedError,
     KafkaError,
+    TopicAlreadyExistsError,
     TopicAuthorizationFailedError,
 )
 
@@ -36,6 +38,7 @@ from omnibase_core.protocols.runtime.protocol_transport_producer import (
     ProtocolTransportProducer,
 )
 from omnibase_infra.errors import InfraUnavailableError
+from omnibase_infra.event_bus.kafka_auth import build_aiokafka_auth_kwargs
 from omnibase_infra.event_bus.kafka_transport import KafkaTransport
 from omnibase_infra.event_bus.models import ModelEventHeaders
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
@@ -76,6 +79,9 @@ from omnibase_infra.runtime.models.model_secret_resolver_config import (
 from omnibase_infra.runtime.secret_resolver import SecretResolver
 from omnibase_infra.secret_stores.adapter_env_secret_store import (
     AdapterEnvSecretStore,
+)
+from omnibase_infra.topics.model_topic_provisioning_policy import (
+    ModelTopicProvisioningPolicy,
 )
 from omnibase_infra.topics.topic_namespace import (
     apply_topic_namespace,
@@ -1228,6 +1234,74 @@ def build_gateway_transports(
     return resolved, transports
 
 
+async def ensure_topics_exist(
+    bus_config: ModelKafkaEventBusConfig,
+    topics: Sequence[str],
+    *,
+    admin_factory: Callable[..., AIOKafkaAdminClient] = AIOKafkaAdminClient,
+) -> None:
+    """Best-effort idempotent creation of ``topics`` on ``bus_config``'s broker.
+
+    OMN-15629: a lane broker with ``auto_create_topics_enabled=false`` never
+    creates a topic the forwarder's contract declares, and the forwarder runs
+    with ``ONEX_TOPIC_ENFORCEMENT_MODE=reject`` so it never created one either.
+    The first consumer ``start()`` then died on ``UnknownTopicOrPartitionError``
+    and the unit crash-looped on every cold or warm restart until an operator ran
+    ``rpk topic create`` by hand. The caller derives ``topics`` from the resolved
+    contract bindings, so a topic the contract gains is provisioned here with no
+    second list to edit.
+
+    Replication resolves through the policy seam (OMN-15395), never a literal.
+    A failure is never fatal: a broker that refuses ``CreateTopics`` to this
+    principal leaves the consumer's own start to report the real, honest error.
+    Only exception type names are logged, never a message that could carry a
+    connection string.
+    """
+    if not topics:
+        return
+    policy = ModelTopicProvisioningPolicy.from_kafka_config(bus_config)
+    admin = admin_factory(
+        bootstrap_servers=bus_config.bootstrap_servers,
+        **build_aiokafka_auth_kwargs(bus_config),
+    )
+    try:
+        await admin.start()
+        for topic in topics:
+            try:
+                await admin.create_topics(
+                    [
+                        NewTopic(
+                            name=topic,
+                            num_partitions=1,
+                            replication_factor=policy.resolve_replication_factor(
+                                topic=topic, declared=None
+                            ),
+                        )
+                    ],
+                )
+            except TopicAlreadyExistsError:
+                continue
+            except (KafkaError, OSError) as exc:
+                logger.warning(
+                    "failed to ensure topic %s exists: %s",
+                    topic,
+                    type(exc).__name__,
+                )
+    except (KafkaError, OSError) as exc:
+        logger.warning(
+            "failed to open admin client to ensure topics exist: %s",
+            type(exc).__name__,
+        )
+    finally:
+        try:
+            await admin.close()
+        except (KafkaError, OSError) as exc:
+            logger.warning(
+                "admin client close failed while ensuring topics: %s",
+                type(exc).__name__,
+            )
+
+
 async def run_gateway_forwarder(
     config: ModelGatewayForwarderRuntimeConfig,
     *,
@@ -1262,7 +1336,20 @@ async def run_gateway_forwarder(
     mirror_topics = config.forwarder.mirror_topics
     assert mirror_topics is not None
 
-    _bindings, transports = build_gateway_transports(config)
+    bindings, transports = build_gateway_transports(config)
+    # OMN-15629: every topic the contract binds on the local broker must exist
+    # before the first consumer starts, or that start() raises
+    # UnknownTopicOrPartitionError and the unit crash-loops on a cold broker.
+    await ensure_topics_exist(
+        config.local_bus,
+        sorted(
+            {
+                binding.physical_topic
+                for binding in bindings.bindings
+                if binding.broker == "local"
+            }
+        ),
+    )
     local_transport = transports["local"]
     cloud_transport = transports["cloud"]
     lane_mirror_config = config.forwarder.lane_mirror

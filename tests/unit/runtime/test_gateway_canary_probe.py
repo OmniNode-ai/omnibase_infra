@@ -21,6 +21,7 @@ from uuid import UUID
 
 import pytest
 import yaml
+from aiokafka.errors import KafkaConnectionError
 from pydantic import ValidationError
 
 from omnibase_infra.event_bus.models.config import ModelKafkaEventBusConfig
@@ -196,7 +197,7 @@ class _FailingAdminClient(_FakeAdminClient):
     """Simulates a broker that rejects topic creation -- must not block the leg check."""
 
     async def create_topics(self, new_topics: Sequence[object]) -> None:
-        raise RuntimeError("admin API unreachable")
+        raise KafkaConnectionError("admin API unreachable")
 
 
 @pytest.mark.asyncio
