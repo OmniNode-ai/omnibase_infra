@@ -898,15 +898,27 @@ def judge(
     # OMN-19566: changed_path_live. The probe prints one mention count per
     # LIVE_GREP name per runtime; a name no runtime mentions is a changed path
     # that never ran. A caller may name LIVE_GREP; otherwise the probe derives
-    # it from the diff, one name per changed node that exists at the head. With
-    # no name there is no line and no check: the profile makes the check
-    # mandatory only for a PR that changes a node, and for such a PR the
+    # it from the diff, one name per changed node that exists at the head and
+    # runs in a runtime. A node whose contract declares no topics and no runtime
+    # profile gets no name: the probe lists it on a not-applicable line instead
+    # (OMN-18893), and with no other name that line is the check's passing
+    # outcome, its evidence naming the node, never a pass for want of a line.
+    # With neither a name nor that line there is no check: the profile makes the
+    # check mandatory only for a PR that changes a node, and for such a PR the
     # receipt's verifier then names it as missing rather than this judge
     # inventing a pass.
     mentions: dict[str, int] = {}
     for _, name, count in re.findall(r"^\s+(\S+) mentions (\S+): (\d+)$", probe, re.M):
         name = name.removeprefix(LIVE_TERM_DOT).removesuffix(LIVE_TERM_DOT)
+        # a term that carries the directory and the contract name is reported
+        # under the directory, the name a reader finds in the diff
+        name = re.sub(r"^\(([^|()]+)\|[^|()]+\)$", r"\1", name)
         mentions[name] = mentions.get(name, 0) + int(count)
+    not_applicable = [
+        n
+        for line in re.findall(r"^live-grep not-applicable: ([^(\n]+?) \(", probe, re.M)
+        for n in line.split()
+    ]
     if mentions:
         dead = sorted(n for n, c in mentions.items() if c == 0)
         checks["changed_path_live"] = not dead
@@ -914,6 +926,13 @@ def judge(
             notes.append(
                 "changed path not live, no runtime log mentions: " + ", ".join(dead)
             )
+    elif not_applicable:
+        checks["changed_path_live"] = True
+    if not_applicable:
+        notes.append(
+            "changed path not applicable, runs in no runtime (no topics, no runtime "
+            "profile): " + ", ".join(not_applicable)
+        )
     rcs = re.findall(r"^(\S+) focused rc=(\d+)", tests, re.M)
     failed_ids = re.findall(r"^FAILED (\S+)", tests, re.M)
     # pytest rc 1 = tests failed; a dev control at rc 1 means the test fails at
@@ -1205,7 +1224,8 @@ def _check_map(
             "changed_path_live",
             _lines(
                 probe,
-                r"^(?:live-grep derived from the diff: .*|\s+\S+ mentions \S+: \d+)$",
+                r"^(?:live-grep (?:derived from the diff|not-applicable): .*"
+                r"|\s+\S+ mentions \S+: \d+)$",
             ),
         ),
     }
