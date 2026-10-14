@@ -95,12 +95,12 @@ jobs:
       # OMN-14288 — required-context parity ratchet, REPORT-ONLY.
       # Checks the MISSING direction (a claimed load-bearing gate absent from
       # required_status_checks) and needs:-closure coverage — the hole the
-      # audit above does not cover (it only checks the ORPHANED direction). Non-blocking:
-      # report-then-enforce rollout; the enforcing per-PR gate lands separately.
+      # audit above does not cover (it only checks the ORPHANED direction). Report-only:
+      # `report` exits 0 with findings (report-then-enforce rollout; the enforcing
+      # per-PR gate lands separately), so only a run that cannot complete fails it.
       # NEVER mutates branch protection.
-      - name: Required-context parity report (REPORT-ONLY, non-blocking)
+      - name: Required-context parity report (REPORT-ONLY)
         if: always()
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |

@@ -69,8 +69,8 @@ def test_no_audit_step_is_softened_into_a_report() -> None:
 
     `continue-on-error` on an audit step is the shape that turns a red gate green
     without the findings going away, which is the outcome OMN-18346 forbids. The
-    required-context parity ratchet (OMN-14288) is deliberately report-only and
-    is the single exception, named here rather than matched loosely.
+    required-context parity ratchet (OMN-14288) is report-only through its own
+    exit code (``report`` exits 0 with findings), so it needs no exception here.
     """
     workflow = yaml.safe_load(_WORKFLOW.read_text())
     steps = workflow["jobs"]["audit"]["steps"]
@@ -79,6 +79,4 @@ def test_no_audit_step_is_softened_into_a_report() -> None:
         for step in steps
         if step.get("continue-on-error") is True
     ]
-    assert softened == ["Required-context parity report (REPORT-ONLY, non-blocking)"], (
-        f"unexpected advisory audit step(s): {softened}"
-    )
+    assert softened == [], f"unexpected advisory audit step(s): {softened}"

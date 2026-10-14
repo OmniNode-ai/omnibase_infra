@@ -12,7 +12,9 @@ declares no deploy-scope DoD evidence).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -130,13 +132,29 @@ def test_runtime_path_ticket_without_deploy_evidence_fails(
     assert "OMN-1234" in decision.tickets
 
 
-def test_runtime_path_ticket_without_local_contract_fails(
-    validator, tmp_path: Path
-) -> None:
+class _RuntimeAndTicketStandIn(ModuleType):
+    """The canonical validator's runtime-path and ticket surface, nothing more."""
+
+    TICKET_PATTERN = re.compile(r"OMN-(\d+)")
+
+    def __init__(self) -> None:
+        super().__init__("_stand_in_deploy_gate_validator")
+
+    def find_runtime_paths(self, files: list[str]) -> list[str]:
+        return [f for f in files if f == _RUNTIME_FILE]
+
+    def parse_evidence_metadata(self, body: str) -> SimpleNamespace:
+        return SimpleNamespace(source="", ticket="")
+
+
+def test_runtime_path_ticket_without_local_contract_fails(tmp_path: Path) -> None:
     # The hosted gate reads contracts/<ticket>.yaml at the head and fails when it
-    # is absent, so the local mirror fails on the same gap.
+    # is absent, so the local mirror fails on the same gap. The missing-contract
+    # branch is decided before the evidence rule runs, so a stand-in for the
+    # canonical validator's runtime and ticket surface keeps this test running on
+    # a runner with no omniclaude clone (OMN-18776).
     decision = classify_deploy_scope(
-        validator=validator,
+        validator=_RuntimeAndTicketStandIn(),
         changed_files=[_RUNTIME_FILE],
         pr_body="Closes OMN-9999",
         contracts_dir=tmp_path,  # empty -> OMN-9999.yaml absent

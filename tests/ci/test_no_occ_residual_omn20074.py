@@ -22,9 +22,10 @@ Falsifier: restore any one read and the matching test names it.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -73,20 +74,41 @@ def test_deploy_scope_hook_code_reads_no_onex_change_control() -> None:
     assert not OCC_READ.search(source)
 
 
-@pytest.fixture(scope="module")
-def validator() -> ModuleType:
-    """The REAL canonical validator, imported exactly as the hook imports it."""
-    try:
-        return hook.load_canonical_validator(hook.resolve_omni_home(ROOT))
-    except hook.DeployScopeHookError as exc:
-        pytest.skip(f"canonical omniclaude validator unusable here: {exc}")
+class _RecordedValidator(ModuleType):
+    """Replay the canonical validator's recorded verdicts on the two contracts.
+
+    The hosted runner has no omniclaude clone, so the real validator cannot be
+    imported there and a test that needs it never executes (OMN-18648,
+    OMN-18776). The recording's provenance holds the canonical
+    ``has_deploy_evidence`` verdict on each contract; this stand-in returns that
+    verdict for the exact bytes the hook hands it and refuses any other file, so
+    the test still fails if the hook reads a contract from anywhere else.
+    """
+
+    TICKET_PATTERN = re.compile(r"OMN-(\d+)")
+
+    def __init__(self, recording: dict[str, Any]) -> None:
+        super().__init__("_recorded_deploy_gate_validator")
+        self._verdicts = {
+            recording["with_deploy_evidence"]["contract"]: True,
+            recording["without_deploy_evidence"]["contract"]: False,
+        }
+
+    def find_runtime_paths(self, files: list[str]) -> list[str]:
+        return [f for f in files if f.startswith("src/omnibase_infra/runtime/")]
+
+    def parse_evidence_metadata(self, body: str) -> SimpleNamespace:
+        return SimpleNamespace(source="", ticket="")
+
+    def has_deploy_evidence(self, path: Path) -> bool:
+        return self._verdicts[path.read_text()]
 
 
 @pytest.mark.live_contact(
     "tests/ci/fixtures/ci_live_contact/deploy_scope_hook_repo_contracts_omn20074.json"
 )
 def test_deploy_scope_hook_judges_recorded_repo_contracts(
-    recorded_response: dict[str, Any], validator: ModuleType, tmp_path: Path
+    recorded_response: dict[str, Any], tmp_path: Path
 ) -> None:
     """Replay two of this repository's own committed contracts through the hook.
 
@@ -96,6 +118,15 @@ def test_deploy_scope_hook_judges_recorded_repo_contracts(
     no file there fails, which is the gap the hosted gate refuses.
     """
     recording = recorded_response["response"]
+    texts = "".join(
+        recording[key]["contract"]
+        for key in ("with_deploy_evidence", "without_deploy_evidence")
+    )
+    assert (
+        hashlib.sha256(texts.encode("utf-8")).hexdigest()
+        == recorded_response["_provenance"]["source_sha256"]
+    )
+    validator = _RecordedValidator(recording)
     contracts = hook.contracts_dir_for(tmp_path)
     contracts.mkdir()
     for key in ("with_deploy_evidence", "without_deploy_evidence"):
