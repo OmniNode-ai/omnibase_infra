@@ -205,6 +205,18 @@ jobs:
                   handle.write(f'{key}={value}\n')
           "
 
+      # `onex delegate` stamps every request bound for a deployed lane with the
+      # tenant of the install it runs under and refuses to send one without it
+      # (OMN-17427, omnibase_infra#4503). The job's install had never minted an
+      # identity, so every scheduled run from 2026-10-05 to 2026-10-14 exited 1
+      # at the probe step with the CLI's own remediation, `onex local init`.
+      # The step runs that command, which is safe to re-run, from the composed
+      # venv; the identity is the runner install's own and is never invented
+      # by the probe.
+      - name: Mint the runner's install tenant identity
+        id: mint_tenant
+        run: .venv/bin/onex local init
+
       - name: Run the R1 front-door probe and grade it
         id: probe
         if: ${{ always() && !cancelled() }}
@@ -216,7 +228,8 @@ jobs:
              "install_dependencies": "${{ steps.install_dependencies.outcome }}",
              "checkout_provider": "${{ steps.checkout_provider.outcome }}",
              "coinstall_provider": "${{ steps.coinstall_provider.outcome }}",
-             "lane_transport": "${{ steps.lane_transport.outcome }}"}
+             "lane_transport": "${{ steps.lane_transport.outcome }}",
+             "mint_tenant": "${{ steps.mint_tenant.outcome }}"}
           # The workspace root the CLI reads `omnimarket/config/ci_bus_lanes.yaml`
           # under (the sanctioned wrapper binds the same variable on a lab host).
           OMNIBASE_PATH: ${{ github.workspace }}/.probe-workspace

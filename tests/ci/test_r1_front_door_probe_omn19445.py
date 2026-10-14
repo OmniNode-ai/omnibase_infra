@@ -223,6 +223,12 @@ def test_classify_runner_environment_uses_the_actual_error(stderr: str) -> None:
         ("Connection refused", "broker-route"),
         (FRONT_DOOR_STDERR, "front-door"),
         ("task-class contract", "runner-env"),
+        (
+            "Error: this install has never minted a tenant identity, so there is "
+            "no tenant to stamp on the request and a deployed lane could not "
+            "attribute its verdict. Run `onex local init` once on this machine.",
+            "runner-env",
+        ),
     ],
 )
 def test_classify_cli_failure_markers(stderr: str, leg: str) -> None:
@@ -231,6 +237,23 @@ def test_classify_cli_failure_markers(stderr: str, leg: str) -> None:
     )
     assert actual_leg == leg
     assert cause == stderr.removeprefix("Error: ")
+
+
+@pytest.mark.live_contact("tests/ci/fixtures/omn19445_missing_tenant_identity.json")
+def test_recorded_missing_tenant_refusal_is_a_runner_env_failure(
+    recorded_response: dict[str, Any],
+) -> None:
+    """Replay the CLI's own refusal recorded from a clean-HOME probe run.
+
+    Scheduled runs 2026-10-05 to 2026-10-14 ended on this stderr and were graded
+    `front-door`; the cause is the runner's install, not the front door.
+    """
+    leg, cause = classify_failure(
+        stderr=str(recorded_response["stderr"]), timeout_reason=None, spawn_error=False
+    )
+    assert leg == "runner-env"
+    assert cause.startswith("this install has never minted a tenant identity")
+    assert "onex local init" in cause
 
 
 @pytest.mark.parametrize(
@@ -488,6 +511,25 @@ def test_workflow_co_installs_omnimarket_before_the_probe_runs() -> None:
     assert "checkout -q -B dev" in script
 
 
+def test_workflow_mints_the_runner_install_tenant_before_the_probe_runs() -> None:
+    """OMN-19445 AC2: `onex delegate` refuses a deployed lane with no tenant.
+
+    Every scheduled run from 2026-10-05 to 2026-10-14 exited 1 with "this
+    install has never minted a tenant identity" because the job's install had
+    none. The CLI's own remediation is `onex local init`; the job runs it from
+    the composed venv, ahead of the probe, and its outcome is graded.
+    """
+    assert _index("Resolve the declared lane transport") < _index("Mint the runner")
+    assert _index("Mint the runner") < _index("Run the R1 front-door probe")
+    step = _step("Mint the runner")
+    assert step["id"] == "mint_tenant"
+    assert ".venv/bin/onex local init" in step["run"]
+    assert (
+        "steps.mint_tenant.outcome"
+        in (_step("Run the R1 front-door probe")["env"]["SETUP_OUTCOMES"])
+    )
+
+
 def test_workflow_probe_step_uses_the_composed_cli_and_publishes_the_terminal() -> None:
     step = _step("Run the R1 front-door probe")
     script = step["run"]
@@ -515,6 +557,7 @@ def test_workflow_record_and_upload_still_run_after_a_failing_probe() -> None:
         ("checkout_provider", "runner-env"),
         ("coinstall_provider", "runner-env"),
         ("lane_transport", "lane-declaration"),
+        ("mint_tenant", "runner-env"),
     ],
 )
 def test_workflow_setup_failure_publishes_a_named_terminal_without_a_venv(
