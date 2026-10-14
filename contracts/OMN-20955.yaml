@@ -12,14 +12,14 @@ requirements:
       - id: AC1
         statement: 'AC1: the workflow as executed (parsed YAML, comments excluded) names no onex_change_control, ONEX_CHANGE_CONTROL_REF or audit_branch_protection.sh, and the same test fails on the pre-change workflow -- falsifier: uv run pytest tests/ci/test_branch_protection_single_auditor.py -q -p no:randomly -k "fetches_and_runs_no_shared_auditor"'
       - id: AC2
-        statement: 'AC2: no file exists at scripts/audit_branch_protection.sh, and the replacement home of the shared auditor is recorded as a scheduled, hard-failing audit on the same cron as this workflow, both tests absent at the merge base -- falsifier: uv run pytest tests/ci/test_branch_protection_single_auditor.py -q -p no:randomly -k "recorded_replacement or diverged_local_copy_is_gone and audit_branch_protection.sh"'
+        statement: 'AC2: the audit job runs no script other than the two checks this repo keeps (orphaned required contexts and the parity report), which the pre-change job running audit_branch_protection.sh fails, and the replacement home of the shared auditor is recorded as a scheduled, hard-failing audit on the same cron as this workflow -- falsifier: uv run pytest tests/ci/test_branch_protection_single_auditor.py -q -p no:randomly -k "runs_only_the_checks_this_repo_keeps or recorded_replacement"'
 evidence_requirements:
   - kind: tests
     description: The workflow names no onex_change_control source and no shared auditor invocation.
     command: uv run pytest tests/ci/test_branch_protection_single_auditor.py -q -p no:randomly -k "fetches_and_runs_no_shared_auditor"
   - kind: tests
-    description: The retired auditor path stays empty and the replacement home is recorded as a scheduled hard-failing audit.
-    command: uv run pytest tests/ci/test_branch_protection_single_auditor.py -q -p no:randomly -k "recorded_replacement or diverged_local_copy_is_gone and audit_branch_protection.sh"
+    description: The audit job runs only the two checks this repo keeps and the replacement home is recorded as a scheduled hard-failing audit.
+    command: uv run pytest tests/ci/test_branch_protection_single_auditor.py -q -p no:randomly -k "runs_only_the_checks_this_repo_keeps or recorded_replacement"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -35,11 +35,11 @@ dod_evidence:
     binds_ac:
       - AC1
   - id: dod-omn-20955-ac2
-    description: The workflow tests prove the retired auditor path is empty and the recorded replacement runs on the same schedule as a hard failure.
+    description: The workflow tests prove the audit job runs only the two checks this repo keeps and the recorded replacement runs on the same schedule as a hard failure.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_branch_protection_single_auditor.py -q -p no:randomly -k "recorded_replacement or diverged_local_copy_is_gone and audit_branch_protection.sh"
+        check_value: uv run pytest tests/ci/test_branch_protection_single_auditor.py -q -p no:randomly -k "runs_only_the_checks_this_repo_keeps or recorded_replacement"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2

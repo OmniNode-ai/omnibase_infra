@@ -24,6 +24,7 @@ re-added copy fails them by name.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -90,8 +91,8 @@ def test_no_audit_step_is_softened_into_a_report() -> None:
 
     `continue-on-error` on an audit step is the shape that turns a red gate green
     without the findings going away, which is the outcome OMN-18346 forbids. The
-    required-context parity ratchet (OMN-14288) is deliberately report-only and
-    is the single exception, named here rather than matched loosely.
+    required-context parity ratchet (OMN-14288) is report-only through its CLI,
+    which exits 0 on findings, so it needs no continue-on-error either.
     """
     workflow = yaml.safe_load(_WORKFLOW.read_text())
     steps = workflow["jobs"]["audit"]["steps"]
@@ -100,8 +101,36 @@ def test_no_audit_step_is_softened_into_a_report() -> None:
         for step in steps
         if step.get("continue-on-error") is True
     ]
-    assert softened == ["Required-context parity report (REPORT-ONLY, non-blocking)"], (
-        f"unexpected advisory audit step(s): {softened}"
+    assert softened == [], f"unexpected advisory audit step(s): {softened}"
+
+
+# The only scripts the audit job may run: the two checks the shared auditor does
+# not carry. Anything else a step runs is a second auditor or a fetched one.
+_KEPT_CHECK_SCRIPTS = frozenset(
+    {
+        "scripts/audit_orphan_required_contexts.py",
+        "scripts/audit_required_context_parity_cli.py",
+    }
+)
+_SCRIPT_REF_RE = re.compile(r"[\w${}./-]+\.(?:sh|py)\b")
+
+
+def test_the_audit_job_runs_only_the_checks_this_repo_keeps() -> None:
+    """Every script a step runs is one of the two checks kept here (OMN-20955).
+
+    The pre-change job fetched onex_change_control and ran its
+    audit_branch_protection.sh; that invocation is a script outside this set.
+    """
+    workflow = yaml.safe_load(_WORKFLOW.read_text())
+    steps = workflow["jobs"]["audit"]["steps"]
+    invoked = {
+        ref
+        for step in steps
+        for ref in _SCRIPT_REF_RE.findall(str(step.get("run", "")))
+    }
+    assert invoked == _KEPT_CHECK_SCRIPTS, (
+        f"the audit job runs {sorted(invoked - _KEPT_CHECK_SCRIPTS)} beyond the two "
+        "checks this repo keeps; the shared auditor runs from the private tooling repository"
     )
 
 
