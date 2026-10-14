@@ -1,9 +1,9 @@
 {
   "_provenance": {
     "source": "omnibase_core scripts/ci/verify_flip_bundle.py run in the omnibase_infra worktree against base_ref ae5fca1228a3 for each flipped node (OMN-21053)",
-    "captured_utc": "2026-10-13T10:35:05Z",
+    "captured_utc": "2026-10-14T06:04:07Z",
     "source_file": "scripts/ci/canonical_handler_shape_baseline.py",
-    "source_sha256": "f5fb10ccefc1c02686be829a3bb92679157d09a1e9a62d0b062f245a60fe4a4f"
+    "source_sha256": "bd07eecd259d339ce28e4646286509913ce125600631e1710021bf6705df08ad"
   },
   "base_ref": "ae5fca1228a3",
   "runs": [

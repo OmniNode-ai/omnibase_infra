@@ -438,10 +438,12 @@ class TestPatternBRouteEntries:
         return claims
 
     def test_the_claim_set_is_not_empty(self) -> None:
-        # Positive control: the parser must find the seven OMN-17427 entries, so
-        # the route assertion below cannot pass by matching nothing.
+        # Positive control: the parser must find the six OMN-17427 entries that
+        # remain (the seventh was node_pr_state_write_effect's, deleted by
+        # OMN-20915), so the route assertion below cannot pass by matching
+        # nothing.
         claims = self._claims()
-        assert len(claims) >= 7, sorted(claims)
+        assert len(claims) >= 6, sorted(claims)
         assert "onex.cmd.omnibase-infra.llm-inference-request.v1" in claims
 
     def test_every_claimed_node_is_a_discovered_route_on_that_topic(self) -> None:

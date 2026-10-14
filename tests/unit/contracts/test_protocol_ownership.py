@@ -244,9 +244,6 @@ KNOWN_INFRA_PROTOCOLS: dict[str, str] = {
     # AdapterKafkaAdminLag can serve log-end offsets the pinned aiokafka 0.13.0
     # admin omits, without a hard aiokafka import at parse time.
     "ProtocolKafkaLagConsumer": "migration/protocols/protocol_kafka_lag_consumer.py",
-    # [NODE] OMN-11573 narrows the GitHubHttpClient surface used by the PR
-    # poller so handler tests can inject a deterministic triage adapter.
-    "ProtocolGitHubTriageClient": "nodes/node_github_pr_poller_effect/handlers/handler_github_api_poll.py",
     # [DI] OMN-11142 callable surface for OmniGate validator adapters — narrows the
     # entry-point-registered validator function shape so the registry can inject and
     # unit-test validators without binding to a concrete implementation.

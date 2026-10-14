@@ -1025,6 +1025,13 @@ def _build_runtime_handler_dependencies(
     return dependencies
 
 
+# The logical secret name the lane's rendered resolver config maps to the GitHub
+# App webhook HMAC secret. The handler that resolves it lives in omnimarket
+# (node_github_webhook_ingress_effect, WEBHOOK_SECRET_REF); this runtime builds
+# its SecretResolver only for a lane that maps the same name.
+GITHUB_WEBHOOK_SECRET_REF: str = "github.webhook.secret"
+
+
 def _github_webhook_ingress_dependencies(
     config_path: Path,
 ) -> dict[str, object] | None:
@@ -1035,9 +1042,6 @@ def _github_webhook_ingress_dependencies(
     name; raises ``ProtocolConfigurationError`` when the config itself cannot
     be read, the same posture as the gateway block.
     """
-    from omnibase_infra.nodes.node_github_webhook_ingress_effect.handlers.handler_github_webhook_ingress import (
-        WEBHOOK_SECRET_REF,
-    )
     from omnibase_infra.runtime.models.model_secret_resolver_config import (
         ModelSecretResolverConfig,
     )
@@ -1052,7 +1056,7 @@ def _github_webhook_ingress_dependencies(
             f"secret-resolver config at {config_path}"
         ) from exc
     mapped = {mapping.logical_name for mapping in resolver_config.mappings}
-    if WEBHOOK_SECRET_REF not in mapped:
+    if GITHUB_WEBHOOK_SECRET_REF not in mapped:
         logger.info(
             "GitHub webhook ingress: no secret-resolver mapping found for the "
             "configured webhook secret reference on this lane; the ingress "
@@ -3284,15 +3288,15 @@ async def bootstrap() -> int:
             )
 
         # DB DSN shared by every omnibase_infra durable-projection consumer
-        # (event_ledger, build_loop_runs, pr_state — all live in the same
+        # (event_ledger, build_loop_runs — all live in the same
         # omnibase_infra Postgres instance). Consumed by the audit/projection
         # result-applier DERIVATION below (which runs after the manifest is
         # loaded), NOT by a per-node hand-maintained block.
         build_loop_dsn = (os.getenv("OMNIBASE_INFRA_DB_URL") or "").strip()
 
         # NOTE (OMN-14516): the former per-node result-applier registrations for
-        # node_build_loop_projection_compute / node_pr_state_projection_compute /
-        # node_ledger_projection_compute lived HERE as a hand-maintained by-NAME
+        # node_build_loop_projection_compute / node_ledger_projection_compute (and
+        # the former PR-state projection) lived HERE as a hand-maintained by-NAME
         # allowlist. That allowlist is DELETED. Any audit/projection consumer that
         # declares an ``intent_consumption.intent_routing_table`` now has its
         # result applier DERIVED generically from the manifest (see the derivation
@@ -3813,7 +3817,7 @@ async def bootstrap() -> int:
                         # by this process's runtime_profile (main/effects/...),
                         # but an audit/projection consumer's intent_routing_table
                         # may legitimately name an effect node that lives in a
-                        # DIFFERENT profile (e.g. node_pr_state_write_effect
+                        # DIFFERENT profile (e.g. node_validation_ledger_write_effect
                         # declares runtime_profiles: [effects] so it also runs
                         # as its own standalone command consumer there). This
                         # derivation only needs the effect contract's STATIC

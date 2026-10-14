@@ -66,7 +66,7 @@ config:
         - "onex.evt.omnibase-infra.gateway-heartbeat.v1"
         # OMN-19593 / OMN-14375: signed GitHub webhook deliveries, published
         # by the onex-api door (POST /v1/github/webhook, OMN-19592) and
-        # consumed on the lab by node_github_webhook_ingress_effect.
+        # consumed on the lab by omnimarket's node_github_webhook_ingress_effect.
         - "onex.cmd.github.webhook-delivery.v1"
       outbound:
         - "onex.evt.omnibase-infra.inference-response.v1"

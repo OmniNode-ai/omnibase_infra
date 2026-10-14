@@ -23,17 +23,6 @@ import re
 import sys
 from pathlib import Path
 
-# These node directories still ship because other code imports their modules,
-# but another package owns their onex.nodes entry point. Advertising them here
-# too makes runtime discovery refuse the duplicate and degrade runtime health.
-# Delete an entry when its directory is deleted.
-ENTRY_POINTS_OWNED_ELSEWHERE: dict[str, dict[str, str]] = {
-    "omnibase_infra": {
-        "node_github_pr_poller_effect": "omnimarket",
-        "node_github_webhook_ingress_effect": "omnimarket",
-    },
-}
-
 # ---------------------------------------------------------------------------
 # Core helpers (imported by tests)
 # ---------------------------------------------------------------------------
@@ -49,7 +38,6 @@ def collect_node_dirs(
     Runtime entry points must only advertise packages that can be discovered as
     valid nodes. Some historical node_* packages only contain shared models and
     intentionally have no contract.yaml.
-    Nodes whose entry points are owned elsewhere are always excluded.
 
     Args:
         repo_root: Root directory of the repository.
@@ -63,9 +51,7 @@ def collect_node_dirs(
     if not nodes_dir.is_dir():
         return []
 
-    exclude_set = (exclude or set()) | set(
-        ENTRY_POINTS_OWNED_ELSEWHERE.get(package_name, {})
-    )
+    exclude_set = exclude or set()
     result = [
         p
         for p in nodes_dir.iterdir()

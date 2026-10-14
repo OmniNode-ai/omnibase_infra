@@ -912,72 +912,14 @@ Producer: PostMergeConsumer (OMN-6727)
 Consumer: omnidash (future)
 """
 
-SUFFIX_GITHUB_WEBHOOK_DELIVERY: str = "onex.cmd.github.webhook-delivery.v1"
-"""Topic suffix for signed GitHub webhook deliveries (OMN-19492, OMN-14375).
-
-Published by the onex-api webhook door on the dev-system cluster (OMN-19592)
-and carried to the .201 dev lane by the gateway forwarder's inbound leg
-(OMN-19593). Each command carries the raw request body (base64), the
-``X-GitHub-Event`` name, the ``X-GitHub-Delivery`` id and the
-``X-Hub-Signature-256`` header, so the consumer can re-verify the HMAC on the
-exact bytes GitHub signed.
-
-Producer: onex-api ``POST /v1/github/webhook``
-Consumer: NodeGitHubWebhookIngressEffect
-"""
-
-SUFFIX_GITHUB_WEBHOOK_DELIVERY_REFUSED: str = (
-    "onex.evt.github.webhook-delivery-refused.v1"
-)
-"""Topic suffix for refused GitHub webhook deliveries (OMN-19492).
-
-The failure terminal of NodeGitHubWebhookIngressEffect: the consume boundary
-publishes one record here for every delivery the ingress refuses (no secret
-configured, a signature that does not verify, a malformed body), alongside the
-dead-lettered command, so a refusal is visible without reading the DLQ.
-
-Producer: the consume boundary of NodeGitHubWebhookIngressEffect
-Consumer: none yet (operator-visible sink)
-"""
-
-SUFFIX_GITHUB_BRANCH_HEAD: str = "onex.evt.github.branch-head.v1"
-"""Topic suffix for watched GitHub branch observations (OMN-19932).
-
-Carries branch ref advances, summary CI verdicts for branch heads, and distinct
-merge-group verdicts for candidates in the watched branch's merge queue.
-
-Producer: NodeGitHubWebhookIngressEffect
-"""
-
-SUFFIX_GITHUB_CHECK_RUN: str = "onex.evt.github.check-run.v1"
-"""Topic suffix for completed, non-passing check runs on a pull request (OMN-20743).
-
-One record per (check run, pull request) whose conclusion is red, carrying the
-check's conclusion, workflow run id and completion time, so a red-CI consumer
-learns of the red when GitHub reports it instead of on a watcher's next poll.
-
-Producer: NodeGitHubWebhookIngressEffect
-Consumer: omnimarket node_pr_state_emit_effect (detect_ci_red_check_run)
-"""
-
-SUFFIX_GITHUB_WORKFLOW_RUN: str = "onex.evt.github.workflow-run.v1"
-"""Topic suffix for workflow runs as they start, run and complete (OMN-20743).
-
-A check-run delivery names its workflow run by id and never by name; this
-carries the name, so a consumer can state which workflow a failed check ran in.
-
-Producer: NodeGitHubWebhookIngressEffect
-Consumer: omnimarket node_pr_state_emit_effect (record_workflow_run)
-"""
-
 SUFFIX_GITHUB_PR_STATUS: str = "onex.evt.github.pr-status.v1"
 """Topic suffix for GitHub PR triage status events (OMN-2656).
 
-Published by NodeGitHubPRPollerEffect for each open pull request found during
+Published by omnimarket's NodeGitHubPRPollerEffect for each open pull request found during
 a poll cycle. Each event carries a ModelGitHubPRStatusEvent payload with
 triage state, CI status, review state, and staleness information.
 
-Producer: NodeGitHubPRPollerEffect / HandlerGitHubApiPoll
+Producer: omnimarket node_github_pr_poller_effect / HandlerGitHubApiPoll
 Consumer: omnidash PR triage dashboard (future)
 """
 
@@ -1162,50 +1104,6 @@ ALL_OMNIBASE_INFRA_TOPIC_SPECS: tuple[ModelTopicSpec, ...] = (
             "retention.ms": "604800000",
             "cleanup.policy": "delete",
         },  # 7 days
-    ),
-    # Refused GitHub webhook deliveries, the ingress failure terminal (OMN-19492)
-    ModelTopicSpec(
-        suffix=SUFFIX_GITHUB_WEBHOOK_DELIVERY_REFUSED,
-        partitions=1,
-        kafka_config={
-            "retention.ms": "604800000",
-            "cleanup.policy": "delete",
-        },  # 7 days
-    ),
-    # Watched branch ref advances and CI verdicts (OMN-19932)
-    ModelTopicSpec(
-        suffix=SUFFIX_GITHUB_BRANCH_HEAD,
-        partitions=1,
-        kafka_config={
-            "retention.ms": "604800000",
-            "cleanup.policy": "delete",
-        },  # 7 days
-    ),
-    # Red check runs and workflow runs folded from webhook deliveries (OMN-20743)
-    ModelTopicSpec(
-        suffix=SUFFIX_GITHUB_CHECK_RUN,
-        partitions=1,
-        kafka_config={
-            "retention.ms": "604800000",
-            "cleanup.policy": "delete",
-        },  # 7 days
-    ),
-    ModelTopicSpec(
-        suffix=SUFFIX_GITHUB_WORKFLOW_RUN,
-        partitions=1,
-        kafka_config={
-            "retention.ms": "604800000",
-            "cleanup.policy": "delete",
-        },  # 7 days
-    ),
-    # Signed GitHub webhook deliveries (1 partition — keeps per-PR delivery order, OMN-19492)
-    ModelTopicSpec(
-        suffix=SUFFIX_GITHUB_WEBHOOK_DELIVERY,
-        partitions=1,
-        kafka_config={
-            "retention.ms": "604800000",
-            "cleanup.policy": "delete",
-        },  # 7 days, beyond GitHub's 3-day redelivery window
     ),
     # GitHub PR triage status events (1 partition — low-throughput, OMN-2656)
     ModelTopicSpec(

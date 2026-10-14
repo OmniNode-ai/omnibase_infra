@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
 # SPDX-License-Identifier: MIT
-"""OMN-13852 — six guard-tripped orchestrators no longer silently drop events.
+"""OMN-13852 — the guard-tripped orchestrators no longer silently drop events.
 
 Deterministic proof for the fix independent of the parity oracle:
 
-* Routing (defect 1): every handler entry on the six formerly-guard-tripped
+* Routing (defect 1): every handler entry on the formerly-guard-tripped
   orchestrators now resolves to a non-empty subscribe-topic set, so a
   ``ModelDispatchRoute`` registers per handler. Before OMN-13852 the multi-handler
   ambiguity guard (``_topics_for_handler_entry`` -> ``()``) registered ZERO routes.
@@ -40,12 +40,12 @@ from tests.fixtures.dispatch_parity import harness
 
 pytestmark = pytest.mark.integration
 
-# The six multi-handler orchestrators OMN-13852 disambiguated. Value = the
+# The multi-handler orchestrators OMN-13852 disambiguated that remain in this
+# repository (node_merge_sweep_workflow_orchestrator, the sixth, moved out). Value = the
 # event_type domain whose derived DLQ topic each contract must declare.
-_SIX_ORCHESTRATORS: dict[str, str] = {
+_GUARD_TRIPPED_ORCHESTRATORS: dict[str, str] = {
     "node_rsd_orchestrator": "rsd",
     "node_routing_orchestrator": "router",
-    "node_merge_sweep_workflow_orchestrator": "skill",
     "node_chain_orchestrator": "omnibase-infra",
     "node_registration_orchestrator": "platform",
     "node_scope_workflow_orchestrator": "skill",
@@ -58,7 +58,7 @@ def contracts_by_name() -> dict[str, object]:
     return {c.name: c for c in manifest.contracts}
 
 
-@pytest.mark.parametrize("node_name", sorted(_SIX_ORCHESTRATORS))
+@pytest.mark.parametrize("node_name", sorted(_GUARD_TRIPPED_ORCHESTRATORS))
 def test_every_handler_registers_a_route(
     contracts_by_name: dict[str, object], node_name: str
 ) -> None:
@@ -77,14 +77,14 @@ def test_every_handler_registers_a_route(
     )
 
 
-@pytest.mark.parametrize("node_name", sorted(_SIX_ORCHESTRATORS))
+@pytest.mark.parametrize("node_name", sorted(_GUARD_TRIPPED_ORCHESTRATORS))
 def test_declares_matching_dlq_topic(
     contracts_by_name: dict[str, object], node_name: str
 ) -> None:
     """The declared DLQ topic matches the engine-derived NO_DISPATCHER target."""
     contract = contracts_by_name[node_name]
     declared = _read_dlq_topics(contract.contract_path)  # type: ignore[attr-defined]
-    domain = _SIX_ORCHESTRATORS[node_name]
+    domain = _GUARD_TRIPPED_ORCHESTRATORS[node_name]
     # Any inbound event_type in this contract's domain derives the same DLQ topic.
     expected = derive_dlq_topic_for_event_type(
         event_type=f"{domain}.example-event", original_topic=""
