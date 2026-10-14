@@ -51,7 +51,7 @@ import argparse
 import ast
 import re
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -148,6 +148,21 @@ def _topic_name_scopes(tree: ast.Module) -> list[tuple[ast.AST, dict[str, str]]]
     return scopes
 
 
+def _event_type_values(
+    nodes: Iterable[ast.AST], *, golden_chain: bool
+) -> Iterator[ast.expr]:
+    """Values at the wire-shape assertion sites this validator checks."""
+    for node in nodes:
+        if isinstance(node, ast.Call) and (golden_chain or _is_envelope_ctor(node)):
+            for kw in node.keywords:
+                if kw.arg == "event_type":
+                    yield kw.value
+        elif isinstance(node, ast.Dict) and golden_chain:
+            for key, value in zip(node.keys, node.values, strict=True):
+                if isinstance(key, ast.Constant) and key.value == "event_type":
+                    yield value
+
+
 def findings_for_module(path: Path, text: str) -> list[LiteralEventTypeFinding]:
     """Every refused ``event_type`` literal in one test module."""
     golden_chain = path.name.startswith("test_golden_chain_")
@@ -180,40 +195,31 @@ def findings_for_module(path: Path, text: str) -> list[LiteralEventTypeFinding]:
             )
         )
 
-    module_names = _scope_topic_names(list(tree.body))
-    # A site inside a function is reached twice — once walking the module scope,
-    # once walking the function's own — so findings are deduped by location.
+    # Parse every module and inspect every assertion site. Most modules have no
+    # such site, and literals need no binding resolution. Computing every scope's
+    # bindings and rewalking every function in those cases made the full-tree
+    # scan exceed CI's timeout (OMN-17292).
+    values = list(_event_type_values(ast.walk(tree), golden_chain=golden_chain))
+    needs_bindings = any(isinstance(value, ast.Name) for value in values)
+    module_names = _scope_topic_names(list(tree.body)) if needs_bindings else {}
+    scopes = _topic_name_scopes(tree) if needs_bindings else [(tree, {})]
+    # Keep the existing per-scope resolution for indirect values. A site inside
+    # a function is reached from the module and its function, then deduplicated.
     seen: set[str] = set()
-
-    def check_call(node: ast.Call, names: dict[str, str]) -> None:
-        for kw in node.keywords:
-            if kw.arg != "event_type":
-                continue
-            if isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
-                record(kw.value.lineno, kw.value.value)
-            elif isinstance(kw.value, ast.Name):
-                resolved = names.get(kw.value.id)
-                if resolved is not None:
-                    record(kw.value.lineno, resolved)
-
-    def check_dict(node: ast.Dict, names: dict[str, str]) -> None:
-        for key, value in zip(node.keys, node.values, strict=True):
-            if not (isinstance(key, ast.Constant) and key.value == "event_type"):
-                continue
+    for scope, local_names in scopes:
+        names = {**module_names, **local_names}
+        scope_values = (
+            values
+            if scope is tree
+            else _event_type_values(ast.walk(scope), golden_chain=golden_chain)
+        )
+        for value in scope_values:
             if isinstance(value, ast.Constant) and isinstance(value.value, str):
                 record(value.lineno, value.value)
             elif isinstance(value, ast.Name):
                 resolved = names.get(value.id)
                 if resolved is not None:
                     record(value.lineno, resolved)
-
-    for scope, local_names in _topic_name_scopes(tree):
-        names = {**module_names, **local_names}
-        for node in ast.walk(scope):
-            if isinstance(node, ast.Call) and (golden_chain or _is_envelope_ctor(node)):
-                check_call(node, names)
-            elif isinstance(node, ast.Dict) and golden_chain:
-                check_dict(node, names)
 
     deduped: list[LiteralEventTypeFinding] = []
     for finding in out:
