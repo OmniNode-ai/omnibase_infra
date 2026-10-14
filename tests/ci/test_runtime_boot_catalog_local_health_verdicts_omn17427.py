@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """A failed laptop boot names its cause at the end of its own log (OMN-17427).
 
-On 2026-10-13 eleven merge-group runs of ``boot-catalog-local`` failed on the
+On 2026-10-13 twelve merge-group runs of ``boot-catalog-local`` failed on the
 same step, ``Boot the laptop profile (make up-local)``, after 2115-2240 s: the
 ``omninode-runtime`` container never passed its healthcheck inside its 1800 s
 ``start_period``, so ``projection-api`` (``depends_on: omninode-runtime:
