@@ -1,0 +1,31 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20637
+title: A deploy-agent rebuild leaves no tracked modification in the canonical omnibase_infra clone
+summary: The deploy agent builds from the host's canonical omnibase_infra clone, and stage_workspace.sh and compute_workspace_provenance.py overwrite the two tracked placeholders workspace/sibling-pin-comparison.json and workspace/sibling-vcs-provenance.json there. The canonical clone refresh refuses any clone with tracked changes, so the h201 and h202 clones refused the omnibase_infra merge bded6a7 until a reconcile checkout reset them. The agent now restores exactly those two paths after its last image build while it still holds the reconcile-host lock, on a failed build too, and after the gateway deploy that stages the workspace again. Other tracked work in the clone is never restored.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-clone-clean-after-rebuild
+    statement: After a deploy-agent rebuild or gateway deploy, git status in the build-context clone reports no tracked modification caused by the build.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: a rebuild leaves the two tracked build placeholders restored, whether the build succeeds or fails -- falsifier: a rebuild whose build step rewrites both placeholders and then raises leaves ` M workspace/sibling-pin-comparison.json` in git status'
+evidence_requirements:
+  - kind: tests
+    description: Rebuild and gateway deploy leave the build-context clone with no tracked modification, restore only the two placeholder paths, and survive a build context that is not a git clone.
+    command: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_executor_restore_build_byproducts_omn20637.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-clone-clean-after-rebuild-ac1
+    description: The focused tests prove a rebuild, a failed build and a gateway deploy each leave the build-context clone with no tracked modification.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_executor_restore_build_byproducts_omn20637.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
