@@ -52,6 +52,13 @@ requirements:
     acceptance:
       - id: AC11
         statement: 'AC11: the laptop boot job prints the runner and, for each kernel, the Docker health state, the last healthcheck outputs and the /health body as the last step before teardown, always, and that step never fails the job -- falsifier: uv run pytest tests/ci/test_runtime_boot_catalog_local_health_verdicts_omn17427.py -q'
+  - id: req-omn17427-main-base-pr-refused
+    statement: A PR whose base is main fails main-target-guard unless the release workflow opened it, and a pre-push hook warns before the PR is opened.
+    acceptance:
+      - id: AC12
+        statement: 'AC12: main-target-guard passes a PR with base main only for head automation/release-<X.Y.Z>-omn-18595 authored by a Bot, and refuses a feature head, a dev head carrying a promotion receipt, a hotfix head carrying hotfix evidence, and the same release head authored by a User, while a PR with base dev is not judged -- falsifier: uv run pytest tests/ci/test_main_target_guard_omn17427.py -q -k "release or refused or promotion or hotfix or targeting_dev"'
+      - id: AC13
+        statement: 'AC13: the main-target-guard pre-push hook warns, and exits 0, when the push lands on main, the branch tracks main or gh recorded main as the PR base, and is silent for a branch aimed at dev; the CI context is asserted by CI Summary -- falsifier: uv run pytest tests/ci/test_main_target_guard_omn17427.py -q -k "hook or ci_summary"'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -86,6 +93,9 @@ evidence_requirements:
   - kind: tests
     description: The laptop boot prints both kernels' health verdicts last before teardown and never fails on them.
     command: uv run pytest tests/ci/test_runtime_boot_catalog_local_health_verdicts_omn17427.py -q
+  - kind: tests
+    description: main-target-guard refuses every PR based on main except the release workflow's release PR.
+    command: uv run pytest tests/ci/test_main_target_guard_omn17427.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -190,3 +200,21 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC11
+  - id: dod-omn-17427-ac12
+    description: The guard step passes the release workflow's release PR and refuses the feature, promotion, hotfix and person-authored release heads.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_main_target_guard_omn17427.py -q -k "release or refused or promotion or hotfix or targeting_dev"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC12
+  - id: dod-omn-17427-ac13
+    description: The pre-push hook warns without failing on a push or PR aimed at main, and CI Summary asserts the guard's context.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_main_target_guard_omn17427.py -q -k "hook or ci_summary"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC13

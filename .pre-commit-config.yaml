@@ -1484,6 +1484,31 @@ repos:
         types: [python]
         pass_filenames: false
         stages: [pre-push]
+      # OMN-17427: local twin of the main-target-guard CI job
+      # (.github/workflows/main-target-guard.yml). Dev is this repo's default
+      # branch and main is release-synced (operator RULING 2026-10-10T16:52:56Z),
+      # so a PR whose base is main is refused in CI unless the release workflow
+      # opened it. This hook only warns, and never fails the push: it names a
+      # push that lands on main and a branch that tracks main or whose PR base
+      # gh recorded as main, before the PR is opened.
+      - id: main-target-guard
+        name: Warn when a push or PR is aimed at main (OMN-17427)
+        entry: |
+          bash -c '
+          branch="${PRE_COMMIT_LOCAL_BRANCH:-$(git symbolic-ref -q HEAD || true)}"
+          branch="${branch#refs/heads/}"
+          remote_ref="${PRE_COMMIT_REMOTE_BRANCH:-}"
+          upstream="$(git config --get "branch.${branch}.merge" || true)"
+          pr_base="$(git config --get "branch.${branch}.gh-merge-base" || true)"
+          if [ "${remote_ref}" = refs/heads/main ] || [ "${upstream}" = refs/heads/main ] || [ "${pr_base}" = main ]; then
+            echo "WARNING: dev is the default branch and main is release-synced; a push or PR aimed at main is refused by main-target-guard. Retarget the branch to dev." >&2
+          fi
+          ' --
+        language: system
+        pass_filenames: false
+        always_run: true
+        verbose: true
+        stages: [pre-push]
       # Contract validation - YAML contracts
       - id: onex-validate-contracts
         name: ONEX Contract Validation

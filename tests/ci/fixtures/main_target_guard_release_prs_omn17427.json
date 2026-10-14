@@ -1,0 +1,57 @@
+{
+  "_provenance": {
+    "source": "PR watcher state facts (GraphQL author __typename) of the six open release PRs opened by release-train-nightly.yml, each titled 'chore: release <repo> <version> (OMN-18595)'",
+    "captured_utc": "2026-10-14T03:24:50Z",
+    "captured_by": "lane omn17427-dvdf on host h202, read from the PR watcher state copy, no GitHub read"
+  },
+  "pull_requests": [
+    {
+      "pr": "omnibase_core#1965",
+      "head_ref": "automation/release-0.47.43-omn-18595",
+      "base": "dev",
+      "author": "onexbot-occ-writer[bot]",
+      "author_is_bot": true,
+      "title": "chore: release omnibase_core 0.47.43 (OMN-18595)"
+    },
+    {
+      "pr": "omnibase_spi#353",
+      "head_ref": "automation/release-0.23.6-omn-18595",
+      "base": "dev",
+      "author": "onexbot-occ-writer[bot]",
+      "author_is_bot": true,
+      "title": "chore: release omnibase_spi 0.23.6 (OMN-18595)"
+    },
+    {
+      "pr": "omnimarket#3711",
+      "head_ref": "automation/release-0.4.310-omn-18595",
+      "base": "dev",
+      "author": "onexbot-occ-writer[bot]",
+      "author_is_bot": true,
+      "title": "chore: release omnimarket 0.4.310 (OMN-18595)"
+    },
+    {
+      "pr": "omnimarket#3761",
+      "head_ref": "automation/release-0.4.311-omn-18595",
+      "base": "dev",
+      "author": "onexbot-occ-writer[bot]",
+      "author_is_bot": true,
+      "title": "chore: release omnimarket 0.4.311 (OMN-18595)"
+    },
+    {
+      "pr": "omnimarket#3843",
+      "head_ref": "automation/release-0.4.313-omn-18595",
+      "base": "dev",
+      "author": "onexbot-occ-writer[bot]",
+      "author_is_bot": true,
+      "title": "chore: release omnimarket 0.4.313 (OMN-18595)"
+    },
+    {
+      "pr": "omnimemory#607",
+      "head_ref": "automation/release-0.18.5-omn-18595",
+      "base": "dev",
+      "author": "onexbot-occ-writer[bot]",
+      "author_is_bot": true,
+      "title": "chore: release omnimemory 0.18.5 (OMN-18595)"
+    }
+  ]
+}
