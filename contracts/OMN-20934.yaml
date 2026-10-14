@@ -59,6 +59,15 @@ dod_evidence:
       - check_type: command
         check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/lane_census_plan.py?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("def lane_census_dir")' | grep -qx true
         cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-20934-ac2-lab-pass-census-fetch
+    description: The dev lab-pass verify job in .github/workflows/runtime-rebuild-trigger.yml fetches the private lane census before its probe, under the probe's own condition, so the receipt's lane_sync census reads the private copy instead of exiting 3. The fetch step itself is on dev (OMN-20008); this test pins its placement before the probe and replays the lane_sync responses recorded in the receipt for 0ba1a61d3. The test file does not exist at the merge base, so the control fails there.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_lab_pass_census_overlay_omn20934.py -q -p no:randomly
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
   - id: dod-omn-20934-sibling-verifier-fetches-census
     description: The sibling lane verifier job in runtime-rebuild-trigger-reusable.yml fetches the private census overlay before the probe and keeps the probe and emitter always-running. The test does not exist at the merge base, so the control fails there.
     source: manual
