@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20955
+title: omnibase_infra's branch-protection-audit.yml stops fetching the auditor from onex_change_control
+summary: The shared branch-protection auditor moved out of onex_change_control into the private tooling repository, where it runs on its own schedule against the organisation. omnibase_infra's branch-protection-audit.yml no longer fetches it from onex_change_control at a pinned sha, no longer carries ONEX_CHANGE_CONTROL_REF, and runs only the two checks the shared auditor does not carry (orphaned required contexts, and the report-only required-context parity report). The ticket's AC1 (auditor and tests in omnibase_infra) is superseded by that placement; AC3 (the two guard workflows and the citation in the registry workspace) is a change in another repository and is not made here.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20955
+    statement: omnibase_infra's branch-protection-audit.yml fetches nothing from onex_change_control and runs no copy of the shared auditor, and no second copy of the shared auditor exists in the repository.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: the workflow as executed (parsed YAML, comments excluded) names no onex_change_control, ONEX_CHANGE_CONTROL_REF or audit_branch_protection.sh, and the same test fails on the pre-change workflow -- falsifier: uv run pytest tests/ci/test_branch_protection_single_auditor.py -q -p no:randomly -k "fetches_and_runs_no_shared_auditor"'
+      - id: AC2
+        statement: 'AC2: no file exists at any path a second branch-protection auditor previously occupied, scripts/audit_branch_protection.sh included, and the orphan check this repo keeps stays wired as a hard failure -- falsifier: uv run pytest tests/ci/test_branch_protection_single_auditor.py -q -p no:randomly -k "diverged_local_copy or orphan_check or softened"'
+evidence_requirements:
+  - kind: tests
+    description: The workflow names no onex_change_control source and no shared auditor invocation.
+    command: uv run pytest tests/ci/test_branch_protection_single_auditor.py -q -p no:randomly -k "fetches_and_runs_no_shared_auditor"
+  - kind: tests
+    description: No second auditor path exists, the orphan check stays wired, and no audit step is softened.
+    command: uv run pytest tests/ci/test_branch_protection_single_auditor.py -q -p no:randomly -k "diverged_local_copy or orphan_check or softened"
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn-20955-ac1
+    description: The workflow test proves the executed workflow names no onex_change_control source and no shared auditor invocation.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_branch_protection_single_auditor.py -q -p no:randomly -k "fetches_and_runs_no_shared_auditor"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn-20955-ac2
+    description: The workflow test proves no second auditor path exists, the orphan check stays wired and no audit step is softened.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_branch_protection_single_auditor.py -q -p no:randomly -k "diverged_local_copy or orphan_check or softened"
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

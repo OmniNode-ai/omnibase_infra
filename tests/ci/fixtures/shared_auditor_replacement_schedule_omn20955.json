@@ -1,0 +1,24 @@
+{
+  "_provenance": {
+    "source": "git show 93db7859abd2bc82a2dfb36405dc44d21dd25b35:.github/workflows/branch-protection-audit.yml in the private tooling repository clone, parsed with PyYAML",
+    "captured_utc": "2026-10-14T06:05:00Z",
+    "source_sha256": "39ebc7713f4bc07c97e759a564be34436196b1ed00c6e142e04e019c1f0441d0",
+    "note": "The merge commit 93db7859abd2 (committed 2026-10-11T13:17:59-04:00) is 'feat(OMN-20955): the branch-protection auditor runs here on a schedule against the org (#462)'. The sha256 is of the workflow file at that commit. The step run command is recorded by its script basename only."
+  },
+  "response": {
+    "commit": "93db7859abd2bc82a2dfb36405dc44d21dd25b35",
+    "schedule": [
+      {
+        "cron": "23 */4 * * *"
+      }
+    ],
+    "has_pull_request_trigger": false,
+    "audit_steps": [
+      {
+        "name": "Audit branch protection",
+        "runs_script": "handler_audit_branch_protection.sh",
+        "continue_on_error": null
+      }
+    ]
+  }
+}

@@ -10,9 +10,9 @@ state with no network and no yaml dependency.
 
 This file was ``audit_branch_protection_lib.py`` until OMN-18346. It also held a
 second, diverged copy of the branch-protection Check A / Check B logic, which
-duplicated ``onex_change_control/scripts/audit_branch_protection.sh`` without its
+duplicated the shared auditor (then ``onex_change_control/scripts/audit_branch_protection.sh``) without its
 review-gated carve-out and reported healthy repos as violations for seven days.
-That half is gone: the shared checks are the canonical auditor's, and the one
+That half is gone: the shared checks are the shared auditor's, and the one
 check it lacks (orphaned required contexts) is
 ``scripts/audit_orphan_required_contexts.py``. The parity ratchet below is a
 different audit with no canonical counterpart -- it checks the MISSING direction
