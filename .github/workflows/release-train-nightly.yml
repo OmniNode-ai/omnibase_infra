@@ -347,27 +347,22 @@ jobs:
           target.write_text(entry.rstrip("\n") + "\n\n" + existing)
           PY
 
+          staged=(CHANGELOG.md)
           if [ "${NEEDS_BUMP}" = "true" ]; then
-            python3 - <<'PY'
-          import os, pathlib, re
-          version = os.environ["VERSION"]
-          path = pathlib.Path("pyproject.toml")
-          body = path.read_text()
-          updated, count = re.subn(
-              r'(?m)^version = "[^"]+"$', f'version = "{version}"', body, count=1
-          )
-          if count != 1:
-              raise SystemExit(
-                  "refusing to cut: could not find exactly one [project].version "
-                  "line to move in pyproject.toml"
-              )
-          path.write_text(updated)
-          PY
+            # The manifest and the lockfile move together: uv.lock records the
+            # root package's own version, so a bump of pyproject.toml alone
+            # fails every `uv sync --locked` check on the release PR (OMN-18595, 0.4.314).
+            bumped=$(python3 "${GITHUB_WORKSPACE}/_train/scripts/ci/release_train.py" bump-version \
+              --policy "${GITHUB_WORKSPACE}/_train/config/release_train_policy.yaml" \
+              --clone . \
+              --version "${VERSION}")
+            read -r -d '' -a bumped_paths <<<"${bumped}" || true
+            staged+=("${bumped_paths[@]}")
           fi
 
           git config user.name "onexbot-occ-writer[bot]"
           git config user.email "307849072+onexbot-occ-writer[bot]@users.noreply.github.com"
-          git add CHANGELOG.md pyproject.toml
+          git add -- "${staged[@]}"
           git commit -m "chore: release ${TARGET_REPO} ${VERSION} (${TICKET})" \
             --trailer "Onex-Workflow: ${GITHUB_WORKFLOW}" \
             --trailer "Onex-Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
