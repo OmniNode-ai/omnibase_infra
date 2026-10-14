@@ -8,6 +8,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
+
+from tests.fixtures.dispatch_parity import harness
 
 ROOT = Path(__file__).resolve().parents[2]
 ORACLE = "tests/fixtures/dispatch_parity/selection-oracle-v2.json"
@@ -22,6 +25,14 @@ def test_workflow_oracle_path_exists_and_recorded_contexts_are_strings(
 ) -> None:
     assert ORACLE in WORKFLOW.read_text()
     assert (ROOT / ORACLE).is_file()
+    assert harness.committed_oracle_path().is_file()
+    workflow = yaml.safe_load(WORKFLOW.read_text())
+    staleness = next(
+        step["run"]
+        for step in workflow["jobs"]["dispatch-parity-gate"]["steps"]
+        if step.get("name") == "Verify committed fixture is not stale"
+    )
+    assert "json.load(open(committed_oracle_path()))" in staleness
     contexts = recorded_response["response"]["contexts"]
     assert contexts
     assert all(isinstance(c, str) for c in contexts)

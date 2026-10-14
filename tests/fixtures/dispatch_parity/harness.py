@@ -48,9 +48,13 @@ import asyncio
 import importlib.metadata
 import json
 import sys
+import tomllib
 from collections import defaultdict
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
+
+from packaging.requirements import Requirement
 
 from omnibase_core.enums.enum_execution_shape import EnumMessageCategory as _CoreCat
 from omnibase_core.models.dispatch.model_dispatch_route import ModelDispatchRoute
@@ -78,15 +82,48 @@ from omnibase_infra.runtime.message_dispatch_engine import (
 # Fixture-header metadata: corpus completeness (design D6) and P0 outcomes (D5/D7).
 # ---------------------------------------------------------------------------
 
+
 #: Distributions that ship an ``onex.nodes`` entry-point group AND are inside the
 #: ``omnibase_infra`` dependency closure, so they MUST be present in the CI venv
 #: (``uv sync``). The parity test FAILS if any of these is missing — a missing
 #: required package silently shrinks the corpus and hides regressions (design D6).
-REQUIRED_ONEX_NODES_PACKAGES: tuple[str, ...] = (
-    "omnibase-core",
-    "omnibase-infra",
-    "onex-change-control",
+def required_corpus_packages(pyproject_path: Path) -> tuple[str, ...]:
+    """Require OCC exactly while it remains in this repository's dependency closure.
+
+    Core and infra remain mandatory. Removing the retired OCC dependency selects
+    a separately committed oracle, never an optional-package skip or a truncated
+    live corpus. The manifest, rather than the installed venv, chooses the closure.
+    """
+    with pyproject_path.open("rb") as fh:
+        project = tomllib.load(fh)
+    dependencies = list(project.get("project", {}).get("dependencies", []))
+    for group in project.get("dependency-groups", {}).values():
+        dependencies.extend(item for item in group if isinstance(item, str))
+    for extra in project.get("project", {}).get("optional-dependencies", {}).values():
+        dependencies.extend(extra)
+    declared = {
+        Requirement(item).name.lower().replace("_", "-") for item in dependencies
+    }
+    required: tuple[str, ...] = ("omnibase-core", "omnibase-infra")
+    if "onex-change-control" in declared:
+        required += ("onex-change-control",)
+    return required
+
+
+REQUIRED_ONEX_NODES_PACKAGES = required_corpus_packages(
+    Path(__file__).resolve().parents[3] / "pyproject.toml"
 )
+
+
+def committed_oracle_path() -> Path:
+    """Choose the complete committed oracle for the declared dependency closure."""
+    name = (
+        "selection-oracle-v2.json"
+        if "onex-change-control" in REQUIRED_ONEX_NODES_PACKAGES
+        else "selection-oracle-without-occ-v2.json"
+    )
+    return Path(__file__).with_name(name)
+
 
 #: Distributions that ship ``onex.nodes`` entry points but are structurally OUTSIDE
 #: the ``omnibase_infra`` dependency closure (siblings/downstreams — omnimarket
@@ -100,6 +137,10 @@ EXPECTED_EXCLUDED_ONEX_NODES_PACKAGES: tuple[str, ...] = (
     "omniclaude",
     "omniintelligence",
     "omnimemory",
+) + (
+    ()
+    if "onex-change-control" in REQUIRED_ONEX_NODES_PACKAGES
+    else ("onex-change-control",)
 )
 
 #: Full set for header reporting.
@@ -108,14 +149,14 @@ EXPECTED_ONEX_NODES_PACKAGES: tuple[str, ...] = (
 )
 
 #: P0 live-trace outcomes folded into the fixture header (design D5/D7). These are
-#: RUNTIME FACTS captured on the .201 stability-test lane on 2026-07-02, not the
+#: RUNTIME FACTS captured in the runtime on 2026-07-02, not the
 #: harness's own inference. The static harness cannot observe the runtime DLQ
 #: fall-through; it records the outcome so the fixture is self-describing and the
 #: gate does not silently encode the (false) ticket-comment claim.
 P0_OUTCOMES: dict[str, Any] = {
     "P0-1_guard_tripped_orchestrators": {
         "verdict": "ROUTES_REGISTERED_OMN13852",
-        "confirmed_on": "stability-test lane (.201 via Tailscale 100.109.203.94)",
+        "confirmed_on": "recorded runtime readback",
         "date": "2026-07-02",
         "summary": (
             "FIXED under OMN-13852 (contract disambiguation). The six "
@@ -176,7 +217,7 @@ P0_OUTCOMES: dict[str, Any] = {
     },
     "P0-2_live_contract_source": {
         "verdict": "ENTRY_POINT_DISCOVERY",
-        "confirmed_on": "stability-test lane (.201 via Tailscale 100.109.203.94)",
+        "confirmed_on": "recorded runtime readback",
         "date": "2026-07-02",
         "summary": (
             "discover_contracts() -> wire_from_manifest() (entry-point scan) builds "
@@ -244,7 +285,7 @@ def _derive_message_types(contract: Any, entry: Any) -> set[str] | None:
 
 def _derive_category(contract: Any, entry: Any) -> EnumMessageCategory:
     """Reproduce ``_prepare_handler_wiring``'s ``_early_category`` derivation."""
-    category_str = "event"
+    category_str: str | None = "event"
     if entry.message_category:
         category_str = entry.message_category.strip().lower()
     elif contract.event_bus and contract.event_bus.subscribe_topics:

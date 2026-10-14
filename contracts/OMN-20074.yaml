@@ -45,6 +45,11 @@ requirements:
     acceptance:
       - id: AC9
         statement: 'AC9: the hook rejects a token with or without a receipt-id comment in a file and rejects a commit message with a receipt-id comment, while a comment alone remains inert -- falsifier: uv run pytest tests/unit/test_reject_skip_token_hook_no_escape_hatch.py -q fails at the merge base'
+  - id: req-dispatch-parity-declared-closure
+    statement: The dispatch parity check must require the packages declared by this repository and retain a complete oracle for each supported dependency closure.
+    acceptance:
+      - id: AC11
+        statement: 'AC11: OCC remains required when declared in project dependencies, extras or dependency groups; when retired, core and infra remain required and a separate complete committed oracle is selected, preserving all 1090 probe results -- falsifier: uv run pytest tests/unit/runtime/test_dispatch_parity_corpus_omn20074.py -q'
 evidence_requirements:
   - kind: tests
     description: No workflow calls an OCC reusable workflow, waits on occ-preflight or requires an OCC companion context.
@@ -153,3 +158,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC9
+  - id: dod-dispatch-parity-declared-closure-ac11
+    description: The corpus regression tests require OCC in each supported declaration location and select a complete committed oracle for both closures.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/runtime/test_dispatch_parity_corpus_omn20074.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/runtime/test_dispatch_selection_parity.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC11

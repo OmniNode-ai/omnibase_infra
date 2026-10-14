@@ -29,7 +29,8 @@ Equivalence tuple (design D2)::
     (status, [dispatcher_id...] IN ORDER, message_category, message_type, dlq_topic)
 
 Corpus (design D6): the fixture covers exactly the ``onex.nodes`` distributions
-inside the ``omnibase_infra`` dependency closure (core + infra + onex-change-control).
+inside the ``omnibase_infra`` dependency closure (core + infra, plus
+onex-change-control only while declared in the dependency manifest).
 Sibling packages (omnimarket, omniclaude, omniintelligence, omnimemory) are OUTSIDE
 that closure and are EXPECTED-EXCLUDED — recorded, never silent. The corpus-guard
 test FAILS if a required package is missing from the CI venv.
@@ -39,7 +40,6 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -49,12 +49,7 @@ from tests.fixtures.dispatch_parity import harness
 pytestmark = pytest.mark.integration
 
 # The committed Mode-A oracle lives beside the harness so CI reads it locally.
-_FIXTURE_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "fixtures"
-    / "dispatch_parity"
-    / "selection-oracle-v2.json"
-)
+_FIXTURE_PATH = harness.committed_oracle_path()
 
 
 @pytest.fixture(scope="module")

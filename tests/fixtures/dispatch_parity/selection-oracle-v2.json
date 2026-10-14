@@ -3662,7 +3662,7 @@
     },
     "p0_outcomes": {
       "P0-1_guard_tripped_orchestrators": {
-        "confirmed_on": "stability-test lane (.201 via Tailscale 100.109.203.94)",
+        "confirmed_on": "recorded runtime readback",
         "corpus_caveat": "This slice excludes omnimarket (outside infra's dependency closure); a full cross-repo corpus could add sibling handlers. The gate pins THIS slice's post-fix behavior; a cross-repo corpus job is tracked under OMN-12525.",
         "date": "2026-07-02",
         "declared_dlq_topics": {
@@ -3688,7 +3688,7 @@
         "verdict": "ROUTES_REGISTERED_OMN13852"
       },
       "P0-2_live_contract_source": {
-        "confirmed_on": "stability-test lane (.201 via Tailscale 100.109.203.94)",
+        "confirmed_on": "recorded runtime readback",
         "date": "2026-07-02",
         "summary": "discover_contracts() -> wire_from_manifest() (entry-point scan) builds the initial/bulk dispatch route table on BOTH the main and effects runtimes. KafkaContractSource is constructed on the effects runtime ONLY, ~2.5 min after its own discovery burst, and is strictly a post-freeze incremental listener for dynamically-registered contracts (node-registration events) \u2014 it does NOT build the initial table and is absent entirely from the main runtime. The fixture's entry-point corpus is therefore the correct oracle source (design D7).",
         "verdict": "ENTRY_POINT_DISCOVERY"
