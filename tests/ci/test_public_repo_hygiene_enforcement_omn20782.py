@@ -98,10 +98,18 @@ def test_precommit_runs_the_gate_hook_at_the_same_revision() -> None:
     assert isinstance(repo, dict) and isinstance(hook, dict)
     assert repo["repo"] == "https://github.com/OmniNode-ai/omniclaude"
     assert repo["rev"] == GATE_REV
-    # The exported hook already runs over the staged added lines (--diff-staged),
-    # always_run, in the pre-commit stage. An override here would narrow it.
-    narrowing = {"entry", "args", "files", "exclude", "stages", "always_run"}
-    assert not narrowing & set(hook), sorted(narrowing & set(hook))
+    # OMN-17427: the exported hook scans the whole tracked tree on every commit
+    # (~25 s). Under enforce_scope: added-lines the verdict is the findings on
+    # the lines the index adds, and every such line sits in a staged file, so the
+    # commit hands the same hook the staged paths (--staged). Nothing else may
+    # narrow it, and the config must keep enforcing added lines.
+    assert hook.get("args") == ["--staged"]
+    assert hook.get("pass_filenames") is True
+    assert hook.get("always_run") is False
+    assert hook.get("stages") == ["pre-commit"]
+    assert not {"entry", "files", "exclude"} & set(hook), sorted(set(hook))
+    config = yaml.safe_load(CONFIG.read_text())
+    assert config["enforce_scope"] == "added-lines"
 
 
 def test_hygiene_context_is_not_excluded_from_the_ci_summary_sweep() -> None:
