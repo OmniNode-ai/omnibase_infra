@@ -834,24 +834,19 @@ def test_omni_standards_uv_jobs_use_authenticated_composite_action() -> None:
             step.get("run") == "uv sync --no-cache --all-extras" for step in steps
         )
 
-    # The pinned onex_change_control git+https install must also authenticate.
-    occ_steps = workflow["jobs"]["handler-contract-compliance"]["steps"]
+    # The omnibase_core release install must retry (OMN-20074: it replaced the
+    # onex_change_control git+https install, so it needs no token).
+    core_steps = workflow["jobs"]["handler-contract-compliance"]["steps"]
     install_step = next(
         step
-        for step in occ_steps
-        if step.get("name") == "Install onex_change_control (pinned)"
+        for step in core_steps
+        if step.get("name") == "Install omnibase_core (pinned release)"
     )
-    # OMN-16373: CROSS_REPO_PAT retired in favor of a minted
-    # onexbot-occ-writer App installation token.
-    assert (
-        install_step["env"]["GIT_FETCH_TOKEN"]
-        == "${{ steps.app-token.outputs.token || github.token }}"
-    )
-    assert "export GIT_CONFIG_COUNT=1" in install_step["run"]
+    assert "env" not in install_step
     assert 'export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-600}"' in install_step["run"]
     assert "max_attempts=3" in install_step["run"]
-    assert "until uv pip install" in install_step["run"]
-    assert "uv pip install onex_change_control failed after" in install_step["run"]
+    assert "until uv pip install --no-config" in install_step["run"]
+    assert "uv pip install omnibase-core failed after" in install_step["run"]
 
 
 def test_webhook_workflows_use_ci_python_environment() -> None:
