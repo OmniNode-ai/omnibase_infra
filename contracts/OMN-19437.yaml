@@ -38,3 +38,12 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC2
+  - id: dod-omn19437-ac2-cli-runtime-integration
+    description: The real CLI and in-memory runtime deliver trace and span UUIDs to a typed handler and persist its echoed context, mint fresh ids per invocation, and omit both fields for a contract that does not declare them.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_delegate_trace_span_cli_omn19437.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
