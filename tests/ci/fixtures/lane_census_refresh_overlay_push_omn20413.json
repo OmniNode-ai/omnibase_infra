@@ -1,0 +1,27 @@
+{
+  "_provenance": {
+    "source": "lane-census-refresh.yml refresh job on a self-hosted verify runner container of the lab host: the moved overlay clone's .git/config as actions/checkout v7 (9c091bb2) left it at ../ci-overlay, read with docker exec cat after the 2026-10-15T12:54:46Z run; and the runner worker log step telemetry (_diag/Worker_*.log errorMessages) of the 2026-10-15T06:57:11Z and 2026-10-15T12:54:46Z runs; the overlay repository name in the remote url is redacted to <OMNI_CI_OVERLAY_REPO>, every other byte is as read",
+    "captured_utc": "2026-10-15T13:20:00Z",
+    "ticket": "OMN-20413"
+  },
+  "workspace": "/home/runner/actions-runner/_work/omnibase_infra/omnibase_infra",
+  "moved_to": "/home/runner/actions-runner/_work/omnibase_infra/ci-overlay",
+  "overlay_git_config": "[core]\n\trepositoryformatversion = 1\n\tfilemode = true\n\tbare = false\n\tlogallrefupdates = true\n\tsparseCheckout = true\n[remote \"origin\"]\n\turl = https://github.com/OmniNode-ai/<OMNI_CI_OVERLAY_REPO>\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n\tpromisor = true\n\tpartialclonefilter = blob:none\n[gc]\n\tauto = 0\n[includeIf \"gitdir:/home/runner/actions-runner/_work/omnibase_infra/omnibase_infra/.ci-overlay-checkout/.git\"]\n\tpath = /home/runner/actions-runner/_work/_temp/git-credentials-8961a728-a560-4fe1-8c98-64480b114c56.config\n[includeIf \"gitdir:/home/runner/actions-runner/_work/omnibase_infra/omnibase_infra/.ci-overlay-checkout/.git/worktrees/*\"]\n\tpath = /home/runner/actions-runner/_work/_temp/git-credentials-8961a728-a560-4fe1-8c98-64480b114c56.config\n[includeIf \"gitdir:/github/workspace/.ci-overlay-checkout/.git\"]\n\tpath = /github/runner_temp/git-credentials-8961a728-a560-4fe1-8c98-64480b114c56.config\n[includeIf \"gitdir:/github/workspace/.ci-overlay-checkout/.git/worktrees/*\"]\n\tpath = /github/runner_temp/git-credentials-8961a728-a560-4fe1-8c98-64480b114c56.config\n[branch \"main\"]\n\tremote = origin\n\tmerge = refs/heads/main\n",
+  "failed_steps": [
+    {
+      "run_started_utc": "2026-10-15T06:57:11Z",
+      "step": "Open the census bump PR in the CI overlay",
+      "errorMessages": [
+        "Process completed with exit code 128."
+      ]
+    },
+    {
+      "run_started_utc": "2026-10-15T12:54:46Z",
+      "step": "Collect the census from the lab docker daemon",
+      "errorMessages": [
+        "lane-census-check.sh exited 8; no census collected, no PR opened.",
+        "Process completed with exit code 1."
+      ]
+    }
+  ]
+}
