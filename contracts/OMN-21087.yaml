@@ -41,12 +41,14 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-deploy
-    description: The CLI source at the fix commit returns None for a host the lab hosts table does not list.
+    description: The CLI source at the evaluated checkout revision returns None for a host the lab hosts table does not list; the merge base lacks this branch.
     source: manual
     checks:
       - check_type: command
         # Consume the complete decoded file so pipefail does not report SIGPIPE
         # from base64 after an early successful match.
-        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_delegate.py?ref=f88b8960aebea9bdbccfc58657682ffdaf855c03' --jq .content | base64 -d | grep -F 'is not one, so there is no lab tenant to resolve' > /dev/null
+        # Resolve the revision in the evaluated tree, including the base control.
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_delegate.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'if not matches and not host:' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
