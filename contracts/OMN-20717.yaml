@@ -34,7 +34,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: "uv run --frozen python scripts/validation/validate_application_migration_manifest.py --require-complete && grep -qP '^nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable\\.sql\\t.*\\tc784d907eba59133e902c7f192a314035f56f8a2e66f9bd4e8806f71fefc8d95$' docker/migrations/forward/_ledger/application-migrations.tsv && grep -qP '^nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls\\.sql\\t.*\\t52ba6d0bb1111cc5b02c33b3ce6563399e042ebc4eb86d99cf99aa8f03b623f7$' docker/migrations/forward/_ledger/application-migrations.tsv && grep -qP '^nodes/node_projection_savings/096_delegation_savings_unpriced_calls\\.sql\\t.*\\t8364fb62069d8ecb2cc7f6bf4a6767e600f6300d61d285b2e7057962538dd60e$' docker/migrations/forward/_ledger/application-migrations.tsv"
+        check_value: "uv run --frozen python scripts/validation/validate_application_migration_manifest.py --require-complete && grep -qP '^nodes/node_projection_delegation/0061_delegation_events_cost_usd_nullable\\.sql\\t.*\\tc784d907eba59133e902c7f192a314035f56f8a2e66f9bd4e8806f71fefc8d95$' docker/migrations/forward/_ledger/application-migrations.tsv && grep -qP '^nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls\\.sql\\t.*\\t0512d4962588a0a03d32996ebf859d297c933bbe17a4f462877fa44e55ab1729$' docker/migrations/forward/_ledger/application-migrations.tsv && grep -qP '^nodes/node_projection_savings/096_delegation_savings_unpriced_calls\\.sql\\t.*\\t8364fb62069d8ecb2cc7f6bf4a6767e600f6300d61d285b2e7057962538dd60e$' docker/migrations/forward/_ledger/application-migrations.tsv"
     binds_ac:
       - AC2
   - id: dod-omn20717-infra-class

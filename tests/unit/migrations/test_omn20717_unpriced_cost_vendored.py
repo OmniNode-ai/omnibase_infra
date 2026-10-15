@@ -35,7 +35,7 @@ VENDORED = {
     ),
     "nodes/node_projection_delegation/0062_delegation_token_usage_unpriced_calls.sql": (
         "node:node_projection_delegation",
-        "52ba6d0bb1111cc5b02c33b3ce6563399e042ebc4eb86d99cf99aa8f03b623f7",
+        "0512d4962588a0a03d32996ebf859d297c933bbe17a4f462877fa44e55ab1729",
     ),
     "nodes/node_projection_savings/096_delegation_savings_unpriced_calls.sql": (
         "node:node_projection_savings",
