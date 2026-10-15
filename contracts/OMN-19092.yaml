@@ -74,6 +74,17 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC5
+  - id: dod-integration-caller-boundaries
+    description: Public EventBusKafka startup preserves wrapped authentication refusals through cleanup and typed translation while transient failures spend every configured attempt. Publish and the gateway preserve their own refusal types, accept a subsequent publish, and retain gateway delivery coordinates. Only the aiokafka clients are replaced.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/gateway/test_shared_kafka_permanent_verdict_omn19092.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+      - AC3
+      - AC4
   - id: dod-deploy-shared-declaration
     description: Deploy probe. The shared module at the checked-out commit defines the classifier this change adds; the probe reads it from GitHub at that commit and exits nonzero on a tree without it, so it fails at the merge base. The readout after the deploy agent rolls the image is the runtime importing omnibase_infra.handlers.kafka_permanent_failure.
     source: manual
