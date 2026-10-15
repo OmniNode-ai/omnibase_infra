@@ -32,6 +32,8 @@ from __future__ import annotations
 import ast
 import copy
 import json
+import subprocess
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -171,7 +173,7 @@ def _failed(rec: probe.Record) -> set[str]:
 def test_the_green_observation_passes_on_every_clause() -> None:
     rec = probe.grade(_green())
     assert rec.verdict == "pass", rec.failures
-    assert rec.exit_code == probe.EXIT_OK
+    assert rec.exit_code == 0
     assert {c.clause for c in rec.checks} == {"kinds", "negative", "cursor", "boot"}
     marker_check = next(
         c for c in rec.checks if c.name == "injected_marker_durably_on_the_dlq"
@@ -182,7 +184,7 @@ def test_the_green_observation_passes_on_every_clause() -> None:
 def test_an_empty_observation_cannot_pass() -> None:
     rec = probe.grade({})
     assert rec.verdict == "fail"
-    assert rec.exit_code == probe.EXIT_FINDINGS
+    assert rec.exit_code == 1
     assert all(not c.ok for c in rec.checks), [c.name for c in rec.checks if c.ok]
 
 
@@ -548,7 +550,7 @@ def test_a_lane_that_cannot_be_read_exits_2_with_a_record(tmp_path: Path) -> Non
         ["--record", str(rec_path), "--scratch", str(tmp_path), "--pytest-cmd", "true"],
         lane_factory=DeadLane,
     )
-    assert code == probe.EXIT_INPUT
+    assert code == 2
     body = json.loads(rec_path.read_text(encoding="utf-8"))
     assert body["verdict"] == "could_not_look"
 
@@ -557,10 +559,114 @@ def test_replay_of_the_green_observation_exits_0(tmp_path: Path) -> None:
     obs = tmp_path / "obs.json"
     obs.write_text(json.dumps(_green()), encoding="utf-8")
     rec_path = tmp_path / "rec.json"
-    assert (
-        probe.main(["--replay", str(obs), "--record", str(rec_path)]) == probe.EXIT_OK
-    )
+    assert probe.main(["--replay", str(obs), "--record", str(rec_path)]) == 0
     assert json.loads(rec_path.read_text(encoding="utf-8"))["verdict"] == "pass"
+
+
+# ---- the exit code is the verdict: 0 holds, 1 fails, 2 could not look --------
+#
+# These pin the literals, never probe.EXIT_*: the workflow step and the board
+# read the process exit code, so a constant moved off 0/1/2 must fail here.
+
+PROBE_SCRIPT = REPO_ROOT / "scripts" / "ci" / "c28_consumer_flow_probe.py"
+
+
+def _run_probe_process(args: list[str]) -> subprocess.CompletedProcess[str]:
+    """Run the probe as the workflow does, so the returncode is the process exit."""
+    return subprocess.run(
+        [sys.executable, str(PROBE_SCRIPT), *args],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+
+
+def _replay(tmp_path: Path, obs: dict[str, Any]) -> subprocess.CompletedProcess[str]:
+    obs_path = tmp_path / "obs.json"
+    obs_path.write_text(json.dumps(obs), encoding="utf-8")
+    return _run_probe_process(
+        ["--replay", str(obs_path), "--record", str(tmp_path / "rec.json")]
+    )
+
+
+def test_the_exit_constants_are_the_documented_literals() -> None:
+    assert (probe.EXIT_OK, probe.EXIT_FINDINGS, probe.EXIT_INPUT) == (0, 1, 2)
+
+
+def test_the_process_exits_0_when_every_clause_holds(tmp_path: Path) -> None:
+    done = _replay(tmp_path, _green())
+    assert done.returncode == 0, done.stderr
+    assert (
+        json.loads((tmp_path / "rec.json").read_text(encoding="utf-8"))["verdict"]
+        == "pass"
+    )
+
+
+def test_red_process_exits_1_when_a_named_kind_has_no_instrumented_row(
+    tmp_path: Path,
+) -> None:
+    obs = copy.deepcopy(_green())
+    _drop_kind(AUDIT)(obs)
+    done = _replay(tmp_path, obs)
+    assert done.returncode == 1, done.stderr
+    assert (
+        json.loads((tmp_path / "rec.json").read_text(encoding="utf-8"))["verdict"]
+        == "fail"
+    )
+
+
+def test_red_process_exits_1_when_a_live_group_is_unreachable(tmp_path: Path) -> None:
+    obs = copy.deepcopy(_green())
+    obs["cursor"]["walked_groups"] = obs["cursor"]["walked_groups"][50:]
+    done = _replay(tmp_path, obs)
+    assert done.returncode == 1, done.stderr
+    assert "every_live_group_reachable" in done.stderr
+
+
+def test_red_process_exits_1_on_an_empty_observation(tmp_path: Path) -> None:
+    assert _replay(tmp_path, {}).returncode == 1
+
+
+def test_red_main_returns_1_for_a_failed_grade(tmp_path: Path) -> None:
+    obs = copy.deepcopy(_green())
+    _drop_kind(REDUCER)(obs)
+    obs_path = tmp_path / "obs.json"
+    obs_path.write_text(json.dumps(obs), encoding="utf-8")
+    code = probe.main(
+        ["--replay", str(obs_path), "--record", str(tmp_path / "rec.json")]
+    )
+    assert code == 1
+
+
+def test_the_process_exits_2_when_the_replay_file_is_missing(tmp_path: Path) -> None:
+    rec_path = tmp_path / "rec.json"
+    done = _run_probe_process(
+        ["--replay", str(tmp_path / "absent.json"), "--record", str(rec_path)]
+    )
+    assert done.returncode == 2, done.stderr
+    assert json.loads(rec_path.read_text(encoding="utf-8"))["verdict"] == (
+        "could_not_look"
+    )
+
+
+def test_the_process_exits_2_when_the_replay_file_is_not_json(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text("not json", encoding="utf-8")
+    done = _run_probe_process(
+        ["--replay", str(bad), "--record", str(tmp_path / "rec.json")]
+    )
+    assert done.returncode == 2, done.stderr
+
+
+def test_the_process_exits_2_when_the_replay_is_not_an_object(tmp_path: Path) -> None:
+    arr = tmp_path / "arr.json"
+    arr.write_text("[]", encoding="utf-8")
+    done = _run_probe_process(
+        ["--replay", str(arr), "--record", str(tmp_path / "rec.json")]
+    )
+    assert done.returncode == 2, done.stderr
 
 
 # ---- the workflow ------------------------------------------------------------
