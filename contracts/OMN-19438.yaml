@@ -37,7 +37,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: python3 scripts/validation/validate_application_migration_manifest.py --require-complete
+        check_value: "python3 scripts/validation/validate_application_migration_manifest.py --require-complete && grep -qP '^nodes/node_projection_savings/095_savings_estimates_house_tenant_uuid_rebackfill\\.sql\\t.*\\t778e9b2a9aa566ebc4a2479079c096992d8c1de0be5949aab777bbf6aa921663$' docker/migrations/forward/_ledger/application-migrations.tsv"
     binds_ac:
       - AC1
   - id: dod-omn19438-infra-class
@@ -45,7 +45,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: python3 scripts/validation/check_migration_class.py
+        check_value: "python3 scripts/validation/check_migration_class.py && grep -qF 'forward/nodes/node_projection_savings/095_savings_estimates_house_tenant_uuid_rebackfill.sql: forward-only' config/migration_classes.yaml"
     binds_ac:
       - AC1
   - id: dod-omn19438-deploy-probe-vendored
