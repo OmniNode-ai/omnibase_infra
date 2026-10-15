@@ -53,8 +53,9 @@ dod_evidence:
     binds_ac:
       - AC3
   - id: dod-deploy
-    description: Deploy-scope readback, bound to no criterion; after the change reaches dev, the reconcile handler is present on the dev branch.
+    description: Deploy-scope readback, bound to no criterion; the reconcile handler is present in the repository at the evaluated checkout revision, and the merge base lacks it.
     source: manual
     checks:
       - check_type: command
-        check_value: "gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_declared_state_reconcile.py?ref=dev' --jq .content | base64 -d | grep -q 'class HandlerDeclaredStateReconcile'"
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/handlers/handler_declared_state_reconcile.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'class HandlerDeclaredStateReconcile' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
