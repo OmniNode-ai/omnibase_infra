@@ -1,0 +1,35 @@
+{
+  "_provenance": {
+    "source": "throwaway broker container (image redpandadata/redpanda:v24.2.7) on lab host h201, brought up with no published ports; the redpanda-local-sasl one-shot rendered from catalog bundle local at commit 9f2dd5ac4 run against it twice, then rpk called inside the broker container as the make check-sasl-local target calls it",
+    "captured_utc": "2026-10-15T12:44:00Z"
+  },
+  "response": {
+    "anonymous_cluster_info": {
+      "exit": 1,
+      "stderr": "unable to request metadata: broker closed the connection immediately after a request was issued, which happens when SASL is required but not provided: is SASL missing?"
+    },
+    "wrong_password_cluster_info": {
+      "exit": 1,
+      "stderr": "unable to request metadata: SASL authentication failed: security: Invalid credentials: SASL_AUTHENTICATION_FAILED: SASL Authentication failed."
+    },
+    "one_shot_first_run": [
+      "Created user \"onex-local\".",
+      "OMN-20820: SCRAM superuser created",
+      "Successfully updated configuration. New configuration version is 3.",
+      "Successfully updated configuration. New configuration version is 4.",
+      "OMN-20820: superuser grant confirmed",
+      "OMN-20820: enable_sasl confirmed true",
+      "OMN-20820: unauthenticated client refused",
+      "OMN-20820: authenticated client accepted - positive control"
+    ],
+    "one_shot_second_run": [
+      "OMN-20820: SCRAM superuser already present",
+      "Successfully updated configuration. New configuration version is 4.",
+      "Successfully updated configuration. New configuration version is 4.",
+      "OMN-20820: superuser grant confirmed",
+      "OMN-20820: enable_sasl confirmed true",
+      "OMN-20820: unauthenticated client refused",
+      "OMN-20820: authenticated client accepted - positive control"
+    ]
+  }
+}
