@@ -53,6 +53,23 @@ _ENDPOINT_URL: str = (
 # Explicitly selected live tests require a configured, reachable endpoint.
 # ---------------------------------------------------------------------------
 
+
+def _health_status(url: str) -> int | None:
+    """Return the health probe's HTTP status, or None when unconfigured or down."""
+    if not url:
+        return None
+    try:
+        return httpx.get(f"{url}/health", timeout=5.0).status_code
+    except httpx.HTTPError:
+        return None
+
+
+# Evaluated once at collection time; health is probed on the host root, not the
+# complete chat endpoint.
+_ENDPOINT_STATUS: int | None = _health_status(
+    _ENDPOINT_HOST.rstrip("/").removesuffix("/v1/chat/completions")
+)
+
 pytestmark = [pytest.mark.slow]
 
 
@@ -60,10 +77,8 @@ pytestmark = [pytest.mark.slow]
 def _require_endpoint() -> None:
     """Fail closed when this live suite is selected without its dependency."""
     assert _ENDPOINT_HOST, "Set LLM_DEEPSEEK_R1_URL to run the live adapter suite"
-    health_root = _ENDPOINT_HOST.rstrip("/").removesuffix("/v1/chat/completions")
-    response = httpx.get(f"{health_root}/health", timeout=5.0)
-    assert response.status_code < 500, (
-        f"Configured LLM endpoint health probe returned {response.status_code}"
+    assert _ENDPOINT_STATUS is not None and _ENDPOINT_STATUS < 500, (
+        f"Configured LLM endpoint health probe failed (status {_ENDPOINT_STATUS})"
     )
 
 
