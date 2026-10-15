@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-18866
 title: The chain canary emits its own sha-keyed verdict receipt
-summary: PR 4808 adds the emit-only chain receipt and lane-revision CLI path. The scheduled canary records its verdict after dispatch, keys it on the lane's reported code sha and uploads the artifact name computed by emit. This contract covers the chain receipt's evidence and verdict controls in AC2 through AC5. Wiring the delivery gate, the receiver, the omnimarket re-pin and AC6's live receipt readback remain pending; no full-ticket completion is claimed.
+summary: PR 4808 adds the emit-only chain receipt and lane-revision CLI path. The scheduled canary records its verdict after dispatch, keys it on the lane's reported code sha and uploads the artifact name computed by emit. This contract covers the chain receipt's evidence and verdict controls in AC2 through AC5. A live receipt has been read back by sha (recorded evidence below). Wiring the delivery gate, the receiver and the omnimarket re-pin remain pending; no full-ticket completion is claimed.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -17,6 +17,8 @@ requirements:
         statement: 'AC4: a positive control records a good canary terminal as a passing chain receipt -- falsifier: uv run pytest tests/ci/test_chain_lane_receipt_omn18866.py -q -k test_emit_writes_a_passing_chain_receipt_with_no_lane_flag'
       - id: AC5
         statement: 'AC5: a missing canary terminal leaves the receipt indeterminate and non-PASS -- falsifier: uv run pytest tests/ci/test_chain_lane_receipt_omn18866.py -q -k test_emit_records_a_canary_that_never_reported_as_not_a_pass'
+      - id: AC6
+        statement: 'AC6: the recorded live chain receipt reads back by its sha through the receipt reader, and a PASS receipt with a failing check is refused -- falsifier: uv run pytest tests/ci/test_chain_lane_receipt_omn18866.py -q -k live_chain_receipt'
 evidence_requirements:
   - kind: tests
     description: The CLI tests exercise passing, failing and missing terminals, lane pairing, sha resolution over a loopback socket using recorded agent bytes, artifact outputs and scheduled workflow wiring. They also assert the delivery workflow does not yet gate on the chain receipt.
@@ -34,3 +36,11 @@ dod_evidence:
         check_value: uv run pytest tests/ci/test_chain_lane_receipt_omn18866.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC2, AC3, AC4, AC5]
+  - id: dod-omn-18866-live-chain-receipt-readback
+    description: Live readback of the chain canary's own sha-keyed receipt. The scheduled Chain Canary run 38642628709 (run_number 621, dev, success, 2026-10-14T21:52:42Z) uploaded the chain-lane receipt artifact keyed on sha d42575c82038bd644675c11de02298ea4873d77e (artifact id 11931438076, zip digest sha256:4d279b554519287820893052dd84047f306fbff1e0afc56fe3f92b36aeac80a0). It was fetched back from lab host h201 with onex scm run-download and its receipt.json is recorded as tests/ci/fixtures/omn18866_live_chain_receipt.json, with result PASS and one passing delegation_golden_chain check. The test parses those recorded bytes through the gate's own reader and a negative control shows a PASS with a red check is refused. The delivery gate, receiver and re-pin are not part of this entry.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/ci/test_chain_lane_receipt_omn18866.py -q -k live_chain_receipt
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac: [AC6]
