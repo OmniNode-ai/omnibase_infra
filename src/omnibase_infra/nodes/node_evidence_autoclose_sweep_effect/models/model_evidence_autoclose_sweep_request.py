@@ -351,6 +351,36 @@ class ModelEvidenceAutocloseSweepRequest(BaseModel):
             "now only sets the cwd the verifier process inherits."
         ),
     )
+    clone_root: str = Field(
+        default="",
+        description=(
+            "OMN-21146. Directory holding the canonical clones, one per "
+            "repository name. --offer reads an offered ticket's merged "
+            "change-control companion from the change-control clone's default "
+            "branch here (git log --grep, with the commit's changed files), "
+            "and the product repository's contracts/<ticket>.yaml from the "
+            "other clones, so neither read touches GitHub. Empty means no "
+            "clone is read: the PR watcher's state (if named) and the gateway "
+            "node are then the only sources."
+        ),
+    )
+    pr_watcher_state_path: str = Field(
+        default="",
+        description=(
+            "OMN-21146. The PR watcher's state file, read for merged "
+            "change-control PRs. Empty means "
+            "<clone_root>/.claude_scratch/pr-watcher/state.json when clone_root "
+            "is set, else no watcher state is read."
+        ),
+    )
+    gateway_bus_lane: str = Field(
+        default="dev",
+        description=(
+            "OMN-21146. The declared bus lane the gateway node reads "
+            "(`onex scm ... --source bus --bus-lane <lane>`) when neither the "
+            "watcher state nor the clone holds the offered ticket's companion."
+        ),
+    )
     dod_verify_timeout_seconds: int = Field(
         default=300,
         ge=1,

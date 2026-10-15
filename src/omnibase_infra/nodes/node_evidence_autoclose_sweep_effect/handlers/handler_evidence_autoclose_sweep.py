@@ -222,6 +222,9 @@ from omnibase_infra.handlers.done_write_receipt_guard import (
 from omnibase_infra.handlers.done_write_receipt_guard import (
     run_dod_verify_command,
 )
+from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect import (
+    offer_companion_sources,
+)
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.cascade_supersession import (
     resolve_verified_supersession,
 )
@@ -2874,6 +2877,8 @@ class HandlerEvidenceAutocloseSweep:
         autoclose_disabled: bool | None = None,
         run_gh_command: TypeRunGhCommand | None = None,
         run_dod_verify_command: TypeRunDodVerifyCommand | None = None,
+        run_git_command: offer_companion_sources.TypeRunGit | None = None,
+        run_gateway_command: offer_companion_sources.TypeRunGateway | None = None,
     ) -> None:
         # ``autoclose_disabled`` mirrors GitHubTransport's env-fallback-in-
         # __init__ precedent: read at construction time, override injectable
@@ -2896,6 +2901,14 @@ class HandlerEvidenceAutocloseSweep:
             run_dod_verify_command or self._run_dod_verify_command_real
         )
         self._run_lab_pass_checks = self._run_lab_pass_checks_real
+        # OMN-21146. The offer path reads the companion from local state and the
+        # gateway node, never from GitHub search. Injectable like the runners
+        # above; the real ones read `git` in the canonical clones and call
+        # `onex scm`.
+        self._run_git = run_git_command or offer_companion_sources.run_git_real
+        self._run_gateway = (
+            run_gateway_command or offer_companion_sources.run_gateway_real
+        )
 
     @property
     def handler_type(self) -> EnumHandlerType:
@@ -3023,111 +3036,148 @@ class HandlerEvidenceAutocloseSweep:
         return merged, ""
 
     async def _fetch_offer_companion(
-        self, repo: str, ticket_id: str, gh_timeout_seconds: int
+        self,
+        repo: str,
+        ticket_id: str,
+        gh_timeout_seconds: int,
+        request: ModelEvidenceAutocloseSweepRequest,
     ) -> tuple[dict[str, object] | None, str]:
         """Newest MERGED companion for one nominated ticket, resolved directly.
 
-        OMN-16106 Item 1. This is the only reason the offer path can reach a
-        ticket the two window arms cannot: it asks GitHub for the companion by
-        ticket id instead of enumerating a time range and filtering it. A
-        companion merged 40 days ago, outside the 200-item pool and outside the
-        current five-wide slice, resolves here in one call.
+        OMN-16106 Item 1 made the offer path reach a ticket the two window arms
+        cannot, by asking for the companion by ticket id instead of enumerating
+        a time range. OMN-21146 moved that ask off GitHub search, which the
+        OMN-19852 guard refuses on every host, so every offer ended in
+        ERROR_GITHUB_API. The sources, in order:
+
+        1. the PR watcher's state and the canonical clone's default branch
+           (``git log --grep``), merged into one candidate per PR number;
+        2. ``node_github_repo_gateway_effect`` through ``onex scm``, when
+           neither of those holds a companion that binds the ticket;
+        3. the product repository's ``contracts/<ticket>.yaml``, when the
+           change-control copy is absent (OCC is being retired).
 
         Returns ``(pr, error)`` with the same fail-closed contract as
         ``_fetch_pr_files``: a non-empty ``error`` means the lookup FAILED and
         the caller must record ERROR_GITHUB_API, never "this ticket has no
-        companion". ``(None, "")`` is the one honest absence — the search
-        succeeded and returned no merged pull request.
+        companion". ``(None, "")`` is the one honest absence: every source that
+        could answer did, and none holds a merged companion or product contract.
 
-        Two shape details are load-bearing, both properties of the search
-        endpoint rather than of the pulls endpoint:
-
-        * ``merged_at`` lives under each item's ``pull_request`` sub-object,
-          not at the top level. Reading the top-level key would silently find
-          nothing on every real payload.
-        * ``sort=updated`` is NOT merge order. A stale companion touched
-          yesterday sorts above the one that actually merged last, so the
-          result is re-sorted on ``merged_at`` here and the first item is never
-          trusted.
+        ``merged_at`` is the PR watcher's when it holds the record, else the
+        squash commit's committer date. The result is sorted on it, never on
+        list order, so a ticket with several companions binds the newest.
         """
-        path = (
-            f"search/issues?q=repo:{repo}+is:pr+is:merged+{ticket_id}"
-            "&sort=updated&order=desc&per_page=100"
-        )
         wanted = ticket_id.strip().upper()
-        data, error = await self._run_gh_command(
-            ["gh", "api", path], gh_timeout_seconds
-        )
-        if data is None:
-            return None, (
-                error
-                or f"gh api returned no data resolving the companion for {ticket_id}"
-            )
-        if not isinstance(data, dict):
-            return None, (
-                f"gh api returned a non-mapping search payload resolving "
-                f"{ticket_id} — refusing to read it as 'no companion'"
-            )
-        items = data.get("items")
-        if not isinstance(items, list):
-            return None, (
-                f"gh api search payload for {ticket_id} carried no 'items' "
-                "list — refusing to read an uninterpretable payload as 'no "
-                "companion'"
-            )
-        merged: list[dict[str, object]] = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            pull_request = item.get("pull_request")
-            if not isinstance(pull_request, dict):
-                # An issue, not a pull request. `is:pr` should have excluded
-                # it; skipping rather than erroring keeps a widened query from
-                # becoming a refusal.
-                continue
-            merged_at = str(pull_request.get("merged_at") or "")
-            if not merged_at:
-                continue
-            # THE FILTER, and it is not optional. `search/issues` is a
-            # FULL-TEXT query, never an exact-id lookup: GitHub tokenises
-            # `OMN-99999` and returns loosely related pull requests. Measured
-            # live on the first real dispatch of this path (run 34157024050,
-            # 2026-09-07): an offer for a ticket with NO companion at all came
-            # back with OMN-16007's companion (OCC#6448), and the run went on
-            # to adjudicate OMN-16007 — a ticket nobody nominated — carrying
-            # `enumeration_arm: offer`. The second dispatch did the same with
-            # OMN-15669. Both were harmless only because the tickets were
-            # already completed and the run was a dry run.
-            #
-            # A restrictive selector that reaches outside its own nomination is
-            # unbounded in exactly the direction the design claims to bound, so
-            # the title must BIND the nominated ticket through the same
-            # `_extract_ticket_binding` the window arms use. Anything else is
-            # discarded here, which leaves the nominated ticket with the honest
-            # "no companion" outcome it should have had. This does not depend
-            # on search semantics, because search semantics are not ours to
-            # pin.
-            title_binding, _title_ambiguous = _extract_ticket_binding(
-                str(item.get("title") or ""), []
-            )
-            if title_binding is None or title_binding.strip().upper() != wanted:
-                continue
-            merged.append(
-                {
-                    "number": _as_int(item.get("number")),
-                    "html_url": str(item.get("html_url") or ""),
-                    "title": str(item.get("title") or ""),
-                    "merged_at": merged_at,
-                    "updated_at": str(item.get("updated_at") or merged_at),
-                }
-            )
+        merged = self._local_offer_candidates(repo, wanted, request)
         if not merged:
-            return None, ""
+            (
+                gateway_found,
+                gateway_error,
+            ) = await offer_companion_sources.read_gateway_candidates(
+                repo,
+                wanted,
+                self._run_gateway,
+                float(gh_timeout_seconds),
+                request.gateway_bus_lane,
+                request.clone_root,
+            )
+            if gateway_error:
+                return None, (
+                    f"no local companion for {ticket_id}, and the gateway node "
+                    f"could not answer: {gateway_error}"
+                )
+            merged = self._bind_offer_candidates(gateway_found, wanted)
+        if not merged:
+            return self._product_contract_companion(repo, wanted, request)
         merged.sort(
             key=lambda pr: (str(pr.get("merged_at") or ""), _as_int(pr.get("number"))),
             reverse=True,
         )
         return merged[0], ""
+
+    def _local_offer_candidates(
+        self, repo: str, wanted: str, request: ModelEvidenceAutocloseSweepRequest
+    ) -> list[dict[str, object]]:
+        """Bound candidates from the PR watcher's state and the canonical clone."""
+        root = Path(request.clone_root) if request.clone_root else None
+        watcher_found, _ = offer_companion_sources.read_watcher_candidates(
+            offer_companion_sources.watcher_state_path(
+                root, request.pr_watcher_state_path
+            ),
+            repo,
+            wanted,
+        )
+        clone = root / repo.split("/", 1)[1] if root is not None else None
+        clone_found, _ = offer_companion_sources.read_clone_candidates(
+            clone, repo, wanted, self._run_git
+        )
+        merged = offer_companion_sources.merge_candidates(watcher_found, clone_found)
+        return self._bind_offer_candidates(merged, wanted)
+
+    @staticmethod
+    def _bind_offer_candidates(
+        candidates: list[dict[str, object]], wanted: str
+    ) -> list[dict[str, object]]:
+        """THE FILTER, and it is not optional.
+
+        ``git log --grep`` and the watcher scan are substring matches, as
+        GitHub search was a full-text one: ``OMN-20113`` finds a commit that
+        binds ``OMN-20114`` and names it in passing, and one that binds
+        ``OMN-201130``. A selector that reaches outside its own nomination is
+        unbounded in exactly the direction the design claims to bound (measured
+        live on the first dispatch of this path, run 34157024050, 2026-09-07:
+        an offer with no companion adjudicated OMN-16007), so the title must
+        BIND the nominated ticket through the same ``_extract_ticket_binding``
+        the window arms use. Anything else is discarded, which leaves the
+        nominated ticket with the honest "no companion" outcome.
+        """
+        bound: list[dict[str, object]] = []
+        for candidate in candidates:
+            title_binding, _ambiguous = _extract_ticket_binding(
+                str(candidate.get("title") or ""), []
+            )
+            if title_binding is None or title_binding.strip().upper() != wanted:
+                continue
+            if not str(candidate.get("merged_at") or ""):
+                continue
+            bound.append(candidate)
+        return bound
+
+    def _product_contract_companion(
+        self, repo: str, wanted: str, request: ModelEvidenceAutocloseSweepRequest
+    ) -> tuple[dict[str, object] | None, str]:
+        """The product repository's merged contract, standing in for the OCC copy.
+
+        OMN-21146. The verifier reads ``contracts/<ticket>.yaml`` from the
+        product repository when the change-control repository holds none, so a
+        ticket whose evidence lives only there has no OCC companion to find.
+        The contract's last commit on that repository's default branch plays
+        the companion: its time is the evidence landing, its URL the citation.
+        The title carries no ``for <repo>#<n>`` product-PR reference, so the
+        product-PR fences that read one are not consulted for it.
+        """
+        owner, _, occ_name = repo.partition("/")
+        contract, error = offer_companion_sources.find_product_contract(
+            Path(request.clone_root) if request.clone_root else None,
+            owner,
+            occ_name,
+            wanted,
+            self._run_git,
+        )
+        if error:
+            return None, error
+        if contract is None:
+            return None, ""
+        return {
+            "number": 0,
+            "html_url": str(contract["url"]),
+            "title": (
+                f"evidence({wanted}): product-repo contract in {contract['repo']}"
+            ),
+            "merged_at": str(contract["merged_at"]),
+            "updated_at": str(contract["merged_at"]),
+            "files": [f"contracts/{wanted}.yaml"],
+        }, ""
 
     async def _fetch_pr_files(
         self, repo: str, number: int, gh_timeout_seconds: int
@@ -3316,7 +3366,10 @@ class HandlerEvidenceAutocloseSweep:
                     )
                     continue
                 companion, offer_error = await self._fetch_offer_companion(
-                    request.occ_repo, offered_ticket, request.gh_timeout_seconds
+                    request.occ_repo,
+                    offered_ticket,
+                    request.gh_timeout_seconds,
+                    request,
                 )
                 if offer_error:
                     seen_tickets.add(offered_ticket)
@@ -3513,9 +3566,16 @@ class HandlerEvidenceAutocloseSweep:
                         )
                         continue
 
-            files, files_error = await self._fetch_pr_files(
-                request.occ_repo, number, request.gh_timeout_seconds
-            )
+            # OMN-21146: an offer candidate read from the canonical clone already
+            # carries its commit's changed files; reading them again from GitHub
+            # would put a guarded call back on the offer path.
+            local_files = pr.get("files")
+            if isinstance(local_files, list):
+                files, files_error = [str(name) for name in local_files], ""
+            else:
+                files, files_error = await self._fetch_pr_files(
+                    request.occ_repo, number, request.gh_timeout_seconds
+                )
             if files_error:
                 outcomes.append(
                     ModelEvidenceAutocloseOutcome(
@@ -5393,7 +5453,11 @@ class HandlerEvidenceAutocloseSweep:
                 revert_at = _newest_revert_entry_created_at(history)
                 evidence_landings: tuple[tuple[str, str], ...] = (
                     (
-                        f"evidence companion {request.occ_repo}#{companion_pr_number}",
+                        (
+                            f"evidence companion {request.occ_repo}#{companion_pr_number}"
+                            if companion_pr_number
+                            else f"product-repo contract {companion_pr_url}"
+                        ),
                         companion_merged_at,
                     ),
                     *cited_pr_merge_times,
