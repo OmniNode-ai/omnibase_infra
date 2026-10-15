@@ -46,7 +46,7 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/render_bifrost_delegation_contract.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -qF 'def render_bifrost_delegation_contract_with_source'
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/runtime/render_bifrost_delegation_contract.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -cF 'def render_bifrost_delegation_contract_with_source'
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run --frozen pytest tests/integration/runtime/test_bifrost_lane_overlay_store_omn19214.py -q -p no:randomly --no-cov
