@@ -1,0 +1,45 @@
+schema_version: "1.0.0"
+ticket_id: OMN-19911
+title: The deploy agent's no-deps runtime recreate re-runs a control-plane one-shot whose config changed
+summary: On a lab dev lane on 2026-09-28 the tenant-registry writer looped on a missing control-plane topic because the redpanda-partition-cap one-shot, which OMN-19543 made the creator of that topic, had last run on 2026-09-25 under a config hash that differed from the rendered one. The deploy agent starts runtime services with up -d --no-deps, which never revisits a completed one-shot it was not asked to start. A runtime rebuild now compares each control-plane one-shot's running config hash with the one compose renders, forces a no-deps recreate of the ones that differ or never ran before it starts the runtime services, fails the phase when one does not exit 0, and records each re-run with its exit code on the job record and the terminal event.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn19911-rerun-changed-oneshot
+    statement: A runtime rebuild plans a recreate for every control-plane one-shot whose running config hash differs from the rendered one or that has no container, leaves one with an unchanged hash alone, and runs the planned recreate before the runtime services start.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: an agent rebuild whose rendered compose config changes the config hash of a completed one-shot re-runs that one-shot before it starts the services that depend on it -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_one_shot_rerun_omn19911.py -q -k one_shot'
+  - id: req-omn19911-rerun-job-record
+    statement: The job record served at /job/{correlation_id} and the terminal event list each one-shot the rebuild re-ran, with its exit code, and a one-shot that did not exit 0 still leaves its record and fails the phase.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: the agent job record lists each one-shot it re-ran, with its exit code -- falsifier: uv run pytest scripts/deploy-agent/tests/unit/test_one_shot_rerun_omn19911.py -q -k one_shot_job_record'
+evidence_requirements:
+  - kind: tests
+    description: The recreate plan, the forced no-deps re-run ahead of the runtime services, and the job record and terminal event fields.
+    command: uv run pytest scripts/deploy-agent/tests/unit/test_one_shot_rerun_omn19911.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn19911-ac1-rerun-changed-oneshot
+    description: The one-shot tests fail on the merge base, where the executor has no recreate plan for a control-plane one-shot, and pass at the pull request head.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_one_shot_rerun_omn19911.py -q -k one_shot
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn19911-ac2-rerun-job-record
+    description: The job record tests persist, serve and publish a re-run with its exit code, and keep the record of a one-shot that failed.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest scripts/deploy-agent/tests/unit/test_one_shot_rerun_omn19911.py -q -k one_shot_job_record
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2

@@ -69,6 +69,7 @@ class _FakeExecutorRealDeployAndVerify:
         # OMN-18640: the terminal event now also carries what verification
         # recreated, so a fake executor has to declare it.
         self.verify_recreate: list[object] = []
+        self.oneshot_reruns: list[object] = []
         # OMN-18640: the terminal event now also carries what the deps leg
         # found before it acted, and the argv of every compose call, so a
         # fake executor has to declare both.

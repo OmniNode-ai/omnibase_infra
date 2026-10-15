@@ -98,6 +98,7 @@ class TestRuntimeScopeComposeUp:
         with (
             patch("deploy_agent.executor._run", side_effect=fake_run),
             patch.object(executor, "_ensure_runtime_migrations_ready"),
+            patch.object(executor, "rerun_changed_oneshots"),
             patch(
                 "deploy_agent.executor.verify_containers_up",
                 return_value=(True, []),
@@ -160,6 +161,7 @@ class TestRuntimeScopeComposeUp:
         with (
             patch("deploy_agent.executor._run", side_effect=fake_run),
             patch.object(executor, "_ensure_runtime_migrations_ready"),
+            patch.object(executor, "rerun_changed_oneshots"),
             patch(
                 "deploy_agent.executor.verify_containers_up",
                 return_value=(True, []),
@@ -316,6 +318,14 @@ class TestCoreAndFullScopeComposeUp:
                 "deploy_agent.executor.verify_oneshots_completed",
                 side_effect=fake_completed,
             ),
+            # OMN-19911: the control-plane one-shot re-run is its own gate
+            # (test_one_shot_rerun_omn19911); here it is a marker in the
+            # command order, so the runtime family is proven to follow it.
+            patch.object(
+                executor,
+                "rerun_changed_oneshots",
+                side_effect=lambda **_: captured_cmds.append(["rerun-oneshots"]),
+            ),
         ):
             executor._compose_up(
                 Phase.RUNTIME,
@@ -323,6 +333,11 @@ class TestCoreAndFullScopeComposeUp:
                 [],
                 _noop_phase_update,
             )
+
+        marker = captured_cmds.index(["rerun-oneshots"])
+        assert captured_cmds[3][-1] == "cloud-migration"
+        assert 3 < marker < len(captured_cmds) - 1
+        captured_cmds.pop(marker)
 
         assert captured_cmds[0][-1] == "forward-migration"
         assert "--no-deps" in captured_cmds[0]

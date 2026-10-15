@@ -4,11 +4,14 @@
 """Real-trigger behaviour of the sanctioned orphan-branch deletion tool
 (OMN-18370, `scripts/delete_orphan_branch.py`).
 
-Every test drives the REAL tool against a throwaway registry whose clone has the
-canonical-clone guard installed exactly as a host installs it. None of them
-stubs the guard out: a tool that passes with the guard absent is precisely the
-tool this ticket exists to stop someone writing, because the guard is the thing
-it has to satisfy.
+Every test drives the REAL tool against a throwaway registry whose clone has a
+branch-deletion guard installed as its `reference-transaction` hook. The real
+guard is the canonical-clone guard node (OMN-20528); this repository keeps no
+copy of it, so the clone runs a stand-in that keeps the guard's deletion
+contract: a branch deletion is refused unless ONEX_BRANCH_DELETE_CONSENT cites
+an OPERATOR-CONSENT row and ONEX_BRANCH_DELETE_REFS names the exact ref. A tool
+that passes with the guard absent is precisely the tool this ticket exists to
+stop someone writing, because the guard is the thing it has to satisfy.
 
 `gh` is shimmed onto PATH rather than monkeypatched, so the open-pull-request
 clause is exercised through the same subprocess boundary the real run uses, and
@@ -34,7 +37,6 @@ from omnibase_core.validators.no_unguarded_git_subprocess import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TOOL = REPO_ROOT / "scripts" / "delete_orphan_branch.py"
-HOOKS_DIR = REPO_ROOT / "scripts" / "git-hooks" / "canonical-clone"
 
 CONSENT_ROW = (
     "2026-09-16T14:34:06Z | OPERATOR-CONSENT | lane=fixture | approved_by=operator "
@@ -84,6 +86,47 @@ def _base_env(registry: Path) -> dict[str, str]:
     ):
         env.pop(leaked, None)
     return env
+
+
+def _write_stand_in_branch_delete_guard(root: Path) -> Path:
+    """A `reference-transaction` hook that refuses a branch deletion unless the
+    OMN-18370 door is open for that exact ref. printf only, no here-document.
+
+    Returns the hooks directory to point `core.hooksPath` at.
+    """
+    hooks_dir = root / "stand-in-hooks"
+    hooks_dir.mkdir()
+    hook = hooks_dir / "reference-transaction"
+    hook.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -uo pipefail\n"
+        '[[ "${1:-}" == "prepared" ]] || exit 0\n'
+        "zero=0000000000000000000000000000000000000000\n"
+        "permits() {\n"
+        '  local ref="$1" citation="${ONEX_BRANCH_DELETE_CONSENT:-}" found=0 c\n'
+        '  [[ -n "$citation" && -n "${ONEX_BRANCH_DELETE_REFS:-}" ]] || return 1\n'
+        "  for c in $ONEX_BRANCH_DELETE_REFS; do\n"
+        '    [[ "$c" == "$ref" ]] && found=1\n'
+        "  done\n"
+        '  [[ "$found" == "1" ]] || return 1\n'
+        '  local path="${citation%:*}" line="${citation##*:}"\n'
+        '  [[ -n "$path" && "$path" != "$citation" ]] || return 1\n'
+        '  [[ "$line" =~ ^[1-9][0-9]*$ ]] || return 1\n'
+        '  [[ "$path" == /* ]] || path="${OMNI_HOME:-}/$path"\n'
+        '  [[ -f "$path" && -r "$path" ]] || return 1\n'
+        '  [[ "$(sed -n "${line}p" "$path")" == *"| OPERATOR-CONSENT |"* ]]\n'
+        "}\n"
+        "while read -r old new ref; do\n"
+        '  [[ "$ref" == refs/heads/* && "$new" == "$zero" ]] || continue\n'
+        '  permits "$ref" && continue\n'
+        "  printf 'ERROR: canonical-clone guard refused deleting a branch: %s\\n' \"$ref\" >&2\n"
+        "  exit 1\n"
+        "done\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+    return hooks_dir
 
 
 def _commit(repo: Path, env: dict[str, str], name: str) -> str:
@@ -163,8 +206,9 @@ def world(tmp_path: Path) -> dict[str, object]:
         _git("clone", "-q", str(upstream), str(clone), cwd=registry, env=env).returncode
         == 0
     )
+    hooks_dir = _write_stand_in_branch_delete_guard(tmp_path)
     assert (
-        _git("config", "core.hooksPath", str(HOOKS_DIR), cwd=clone, env=env).returncode
+        _git("config", "core.hooksPath", str(hooks_dir), cwd=clone, env=env).returncode
         == 0
     )
     # `merged` sits one commit behind the upstream default, so it is a genuine
@@ -286,8 +330,8 @@ def _branch_exists(world: dict[str, object], name: str) -> bool:
 def test_control_a_bare_delete_is_still_refused_by_the_guard(
     world: dict[str, object],
 ) -> None:
-    """The guard's blanket refusal is unchanged. Every permitted deletion below
-    is the declared door opening, not the refusal having quietly died."""
+    """The guard's blanket refusal holds. Every permitted deletion below is the
+    declared door opening, not the refusal having quietly died."""
     result = _git(
         "branch",
         "-D",
