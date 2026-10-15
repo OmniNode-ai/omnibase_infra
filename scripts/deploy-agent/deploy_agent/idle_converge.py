@@ -83,6 +83,28 @@ and adds two of its own: the lane must have been quiet for
 an hour, not one a minute. It ignores routing (a missing runtime is missing on
 every instance) and the probe windows, which protect a probe from a lane being
 rebuilt under it; a lane with no runtime fails the probe either way.
+
+A LAGGING LANE HAS A DECLARED BOUND, AND IS LOUD (OMN-21146)
+-----------------------------------------------------------
+The probe windows above cost more than they protect. C15 runs every two hours
+for a declared 65 minutes, so with the 40-minute lead each run excludes 105
+minutes of every 120, and a merge that lands in one waits for the 15 minutes
+between. On 2026-10-15 omnimarket#3964 merged at 17:07Z, inside the 17:41Z
+run's exclusion; the default instance's agent accepted its converge at 18:46:52Z, the
+exclusion's end, and dod-verify refused merged_pr fleet-wide on the old image
+until the lane was rebuilt, with nothing saying the lane was behind.
+
+So an instance may declare ``flags.max_dev_lag_minutes`` in the routing table
+(``ModelLaneFlags.max_dev_lag``). The agent records when it first saw the lane
+behind a followed repository's dev head (:func:`next_behind_since`); once that
+is as old as the bound the lane is OVERDUE, and :func:`decide` no longer
+refuses it for the idle period (``recently_active``), an unreadable probe
+schedule or a probe window. A probe graded against code older than the code
+being delivered is the failure FreshAtProbe names; past the declared bound, the
+lane's freshness wins. Every other bound holds: no job in flight, the FROZEN
+flag, the load gate, and one converge per head. And the lag is loud:
+:func:`dev_lane_drift` is the ``ModelDevLaneDrift`` the agent publishes and
+serves at ``GET /dev-lane-drift``. An instance with no bound is unchanged.
 """
 
 from __future__ import annotations
@@ -105,6 +127,7 @@ from pydantic import BaseModel, ConfigDict
 from deploy_agent.events import (
     BuildSource,
     EnumRuntimeLane,
+    ModelDevLaneDrift,
     ModelRebuildRequested,
     Scope,
 )
@@ -197,6 +220,19 @@ class ModelIdleConvergeInputs(BaseModel):
     attempted_heads: frozenset[str]
     #: The instance's FROZEN reason in force (``deploy_agent.routing`` lane flags), or ``None``.
     frozen_reason: str | None = None
+    #: OMN-21146: when the agent first saw the lane behind this repository's
+    #: dev head (:func:`next_behind_since`), or ``None``.
+    behind_since: datetime | None = None
+    #: OMN-21146: the instance's declared lag bound, or ``None`` for none.
+    max_lag: timedelta | None = None
+
+    def overdue(self) -> bool:
+        """Whether the lane has run behind the head for the declared bound."""
+        return (
+            self.max_lag is not None
+            and self.behind_since is not None
+            and self.now - self.behind_since >= self.max_lag
+        )
 
 
 class ModelIdleConvergeDecision(BaseModel):
@@ -225,16 +261,28 @@ def decide(inputs: ModelIdleConvergeInputs) -> ModelIdleConvergeDecision:
         )
     if inputs.job_active:
         return refuse(EnumIdleConvergeVerdict.JOB_ACTIVE, "a job is in flight")
+    # OMN-21146: past the declared bound the idle wait and the probe windows
+    # no longer hold the lane back; each overridden refusal is named.
+    overdue = inputs.overdue()
+    overridden: list[str] = []
     idle = inputs.now - inputs.last_activity
     if idle < IDLE_AFTER:
-        return refuse(
-            EnumIdleConvergeVerdict.RECENTLY_ACTIVE,
-            f"idle {int(idle.total_seconds())}s of {int(IDLE_AFTER.total_seconds())}s",
+        detail = (
+            f"idle {int(idle.total_seconds())}s of {int(IDLE_AFTER.total_seconds())}s"
         )
+        if not overdue:
+            return refuse(EnumIdleConvergeVerdict.RECENTLY_ACTIVE, detail)
+        overridden.append(detail)
     if inputs.windows_error is not None:
-        return refuse(EnumIdleConvergeVerdict.WINDOWS_UNREADABLE, inputs.windows_error)
+        if not overdue:
+            return refuse(
+                EnumIdleConvergeVerdict.WINDOWS_UNREADABLE, inputs.windows_error
+            )
+        overridden.append(inputs.windows_error)
     if inputs.probe_blocker is not None:
-        return refuse(EnumIdleConvergeVerdict.PROBE_WINDOW, inputs.probe_blocker)
+        if not overdue:
+            return refuse(EnumIdleConvergeVerdict.PROBE_WINDOW, inputs.probe_blocker)
+        overridden.append(inputs.probe_blocker)
     if inputs.head_ref is None:
         return refuse(
             EnumIdleConvergeVerdict.HEAD_UNREADABLE,
@@ -255,13 +303,83 @@ def decide(inputs: ModelIdleConvergeInputs) -> ModelIdleConvergeDecision:
             EnumIdleConvergeVerdict.ALREADY_ATTEMPTED,
             f"{repo} {inputs.head_ref[:12]} was already converged on once",
         )
+    detail = (
+        f"idle {int(idle.total_seconds())}s, {repo} "
+        f"{inputs.running_ref[:12]} -> dev head {inputs.head_ref[:12]}"
+    )
+    if overdue:
+        assert inputs.behind_since is not None and inputs.max_lag is not None
+        lag = inputs.now - inputs.behind_since
+        detail += (
+            f"; overdue: behind {int(lag.total_seconds())}s of a "
+            f"{int(inputs.max_lag.total_seconds())}s bound"
+        )
+        if overridden:
+            detail += f", overriding {'; '.join(overridden)}"
     return ModelIdleConvergeDecision(
         verdict=EnumIdleConvergeVerdict.CONVERGE,
-        detail=(
-            f"idle {int(idle.total_seconds())}s, {repo} "
-            f"{inputs.running_ref[:12]} -> dev head {inputs.head_ref[:12]}"
-        ),
+        detail=detail,
         head_ref=inputs.head_ref,
+    )
+
+
+def next_behind_since(
+    previous: datetime | None,
+    running_ref: str | None,
+    head_ref: str | None,
+    now: datetime,
+) -> datetime | None:
+    """When the lane started running behind the head, after one more read.
+
+    Starts at the first read that sees the lane behind, keeps the earliest while
+    the head moves on, and clears on a read that sees the lane on the head. A
+    read that left either ref unknown proves nothing, so it changes nothing.
+    """
+    if running_ref is None or head_ref is None:
+        return previous
+    if running_ref == head_ref:
+        return None
+    return previous if previous is not None else now
+
+
+def dev_lane_drift(
+    *,
+    instance: str,
+    repository: str,
+    runtime_container: str,
+    running_image: str,
+    running_ref: str | None,
+    head_ref: str | None,
+    behind_since: datetime | None,
+    max_lag: timedelta | None,
+    now: datetime,
+) -> ModelDevLaneDrift | None:
+    """The lane's drift behind ``repository``'s dev head, or ``None``.
+
+    ``None`` when the instance declares no bound, the lane is not behind, or a
+    ref is unread: there is nothing to say that the converge verdict does not
+    already log.
+    """
+    if (
+        max_lag is None
+        or behind_since is None
+        or running_ref is None
+        or head_ref is None
+    ):
+        return None
+    lag = now - behind_since
+    return ModelDevLaneDrift(
+        instance=instance,
+        repository=repository,
+        runtime_container=runtime_container,
+        running_image=running_image,
+        running_ref=running_ref,
+        head_ref=head_ref,
+        behind_since=behind_since,
+        observed_at=now,
+        lag_seconds=max(0, int(lag.total_seconds())),
+        max_lag_seconds=int(max_lag.total_seconds()),
+        overdue=lag >= max_lag,
     )
 
 
@@ -513,6 +631,30 @@ def read_runtime_presence(
     if state in DOWN_STATES:
         return EnumRuntimePresence.DOWN, f"{container} is {state}"
     return EnumRuntimePresence.RUNNING, f"{container} is {state}"
+
+
+def read_running_image(container: str, *, run: Runner = _default_run) -> str:
+    """``<image name>@<image id>`` of ``container``, or ``""`` when unread.
+
+    OMN-21146: the drift event names the image the lane runs, so a reader can
+    tell an old build from a build of the wrong ref.
+    """
+    try:
+        result = run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{.Config.Image}}@{{.Image}}",
+                container,
+            ],
+            timeout=READ_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
 
 
 def read_dev_head(clone: Path, *, run: Runner = _default_run) -> str | None:

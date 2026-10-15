@@ -14,6 +14,7 @@ from typing import Any
 from kafka import KafkaProducer
 
 from deploy_agent.events import (
+    TOPIC_DEV_LANE_DRIFT,
     TOPIC_REBUILD_COMPLETED,
     ModelComposeInvocation,
     ModelContainerResidue,
@@ -200,29 +201,55 @@ def build_completion_payload(
     return completed.model_dump(mode="json")
 
 
-def publish_result(
-    payload: dict[str, Any], kafka_config: ModelDeployAgentKafkaConfig
+def _produce(
+    topic: str,
+    key: str,
+    payload: dict[str, Any],
+    kafka_config: ModelDeployAgentKafkaConfig,
 ) -> bool:
-    """Publish completion event to the same control bus consumed by deploy-agent."""
+    """Produce one JSON record on the agent's control bus; False when it failed."""
     try:
         producer = KafkaProducer(
             **kafka_config.producer_kwargs(),
             value_serializer=lambda v: json.dumps(v, default=str).encode("utf-8"),
             key_serializer=lambda v: str(v).encode("utf-8"),
         )
-        correlation_id = payload.get("correlation_id", "")
-        producer.send(
-            apply_topic_namespace(TOPIC_REBUILD_COMPLETED),
-            key=f"deploy-result/{correlation_id}",
-            value=payload,
-        )
+        producer.send(apply_topic_namespace(topic), key=key, value=payload)
         producer.flush(timeout=30)
         producer.close()
-        logger.info("Published result for %s", correlation_id)
+        logger.info("Published %s", key)
         return True
     except Exception as e:  # noqa: BLE001
-        logger.warning("Publish failed: %s", e)
+        logger.warning("Publish of %s failed: %s", key, e)
         return False
+
+
+def publish_result(
+    payload: dict[str, Any], kafka_config: ModelDeployAgentKafkaConfig
+) -> bool:
+    """Publish completion event to the same control bus consumed by deploy-agent."""
+    correlation_id = payload.get("correlation_id", "")
+    return _produce(
+        TOPIC_REBUILD_COMPLETED,
+        f"deploy-result/{correlation_id}",
+        payload,
+        kafka_config,
+    )
+
+
+def publish_dev_lane_drift(
+    payload: dict[str, Any], kafka_config: ModelDeployAgentKafkaConfig
+) -> bool:
+    """Publish a dev-lane drift event (OMN-21146), keyed by instance and repository.
+
+    One attempt, no retry: the agent publishes the lane's drift again on its
+    next check while the lane stays overdue, so a lost event is replaced by a
+    newer one rather than replayed.
+    """
+    key = (
+        f"dev-lane-drift/{payload.get('instance', '')}/{payload.get('repository', '')}"
+    )
+    return _produce(TOPIC_DEV_LANE_DRIFT, key, payload, kafka_config)
 
 
 def publish_with_retry(
