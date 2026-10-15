@@ -48,7 +48,8 @@ dod_evidence:
     binds_ac:
       - AC3
   - id: dod-ac4-reconcile-host-bash32
-    description: The shared as_owner helper retained after reconcile-host.sh was retired executes the requested command with intact arguments under nounset when RUN_AS is empty. Runs with the runner's /bin/bash, including macOS Bash 3.2.
+    description: >-
+      The shared as_owner helper retained after reconcile-host.sh was retired executes commands with intact arguments under nounset when RUN_AS is empty. It also renders the laptop delegation command through make with a spaced prompt, requiring the runtime user and its HOME so that the rendered command cannot create root-owned runtime state. This composed probe runs without Docker on hosted runners and under macOS Bash 3.2 on the lab host.
     source: manual
     checks:
       - check_type: command
@@ -57,7 +58,10 @@ dod_evidence:
             source scripts/reconcile_privilege_lib.sh
             RUN_AS=()
             actual=$(as_owner printf "%s|" "two words" tail)
-            [[ "$actual" == "two words|tail|" ]]
+            [[ "$actual" == "two words|tail|" ]] || exit 1
+            rendered=$(as_owner make -s -n delegate-local "PROMPT=two words" LOCAL_PROJECT=landing-l7926-lab)
+            [[ "$rendered" == *"docker exec -u omniinfra -e HOME=/home/omniinfra landing-l7926-lab-runtime-effects onex delegate"* ]] || exit 1
+            [[ "$rendered" == *\"two\ words\"* ]] || exit 1
           '
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
