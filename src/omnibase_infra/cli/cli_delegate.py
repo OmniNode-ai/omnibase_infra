@@ -1431,26 +1431,6 @@ def _transport_refusal_from_receipt(
     )
 
 
-def refuse_named_tests_on_deployed_lane(
-    locus: EnumDelegateLocus, named_tests: Mapping[str, str] | None
-) -> None:
-    """Refuse, before anything is published, tests the deployed lane cannot carry.
-
-    OMN-17427: the deployed lane's dispatch port publishes the delegation
-    request to the orchestrator over the bus, and neither the request model nor
-    its quality gate has a field for named tests, so the port raises on them
-    (``RuntimeDelegationDispatchPort.dispatch``). Sending the run would end as a
-    failure inside the lane; stopping here names the way that works.
-    """
-    if named_tests and locus is EnumDelegateLocus.DEPLOYED_LANE:
-        raise click.ClickException(
-            "the deployed lane cannot carry named tests yet: its delegation "
-            "request has no field for them and its quality gate runs none, so "
-            "this run would fail inside the lane. Run it where the tests run: "
-            "--bus inmemory --locus in-process (OMN-17427)."
-        )
-
-
 def _resolve_transport_bound() -> tuple[int, float]:
     """Resolve the connect retry policy the delegate's own transport reads.
 
@@ -4473,8 +4453,6 @@ def run_delegate(
             raise click.ClickException(
                 f"{exc} (run {run_id}, correlation {correlation_id})"
             ) from exc
-
-        refuse_named_tests_on_deployed_lane(locus_decision.locus, named_tests)
 
         # OMN-18810: the five addressing facts the two written files record,
         # built from the decision that was just PROVEN viable rather than

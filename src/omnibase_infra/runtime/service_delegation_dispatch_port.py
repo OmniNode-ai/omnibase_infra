@@ -313,15 +313,11 @@ class RuntimeDelegationDispatchPort:
         """
         del attribution
 
-        # Match the consumer's runtime port: the named-test runner operates on
-        # the caller's workspace through the in-process path, not the bus lane.
-        # Refuse before publication rather than accepting and dropping the spec.
-        if named_tests is not None:
-            raise ValueError(
-                "named tests are not run by this dispatch port; a code answer is "
-                "tested against its named tests only on the in-process path, "
-                "by the named-test runner that port is given"
-            )
+        # Refuse a spec the lane cannot run before any route is resolved or
+        # anything is published.
+        named_tests_wire = (
+            None if named_tests is None else _named_tests_wire(named_tests)
+        )
 
         # OmniMarket's consumer-facing handler always supplies these optional
         # arguments. The deployed bus model does not expose the completion-shaping
@@ -442,6 +438,10 @@ class RuntimeDelegationDispatchPort:
         }
         if no_escalation:
             request_payload["no_escalation"] = True
+        if named_tests_wire is not None:
+            # OMN-17427: the tests ride the command, inline, so the consumer
+            # can run them in its sandbox against the answer it is about to gate.
+            request_payload["named_tests"] = named_tests_wire
 
         command = ModelDispatchBusCommand(
             command_name=selected.alias,
@@ -508,6 +508,36 @@ class RuntimeDelegationDispatchPort:
             payload=result.payload,
             error_message=result.error_message,
         )
+
+
+def _named_tests_wire(named_tests: BaseModel) -> dict[str, object]:
+    """Build the bus request's ``named_tests`` field from the consumer's spec.
+
+    The consumer owns the spec model (a higher layer), so it arrives as a
+    ``BaseModel``. The deployed lane cannot see the caller's workspace: a spec
+    that points at one, or that carries no test sources, would reach the lane
+    and end as a failure inside it, so it is refused here before anything is
+    published.
+    """
+    spec = named_tests.model_dump(mode="json")
+    if spec.get("workspace_root") is not None:
+        raise ValueError(
+            "the deployed lane cannot read the caller's workspace; carry the "
+            "tests inline with --test-file"
+        )
+    if not spec.get("test_files"):
+        raise ValueError(
+            "named tests reach the deployed lane only as inline sources; "
+            "name them with --test-file"
+        )
+    return {
+        "test_ids": list(spec["test_ids"]),
+        "answer_path": spec["answer_path"],
+        "test_files": [
+            {"path": test_file["path"], "content": test_file["content"]}
+            for test_file in spec["test_files"]
+        ],
+    }
 
 
 __all__ = [

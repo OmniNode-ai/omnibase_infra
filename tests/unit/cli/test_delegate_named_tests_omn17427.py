@@ -34,7 +34,6 @@ from omnibase_infra.cli.cli_delegate import (
     _request_payload,
     _write_payload,
     delegate_command,
-    refuse_named_tests_on_deployed_lane,
 )
 from omnibase_infra.cli.model_delegate_locus_decision import ModelDelegateLocusDecision
 from omnibase_infra.enums.enum_delegate_locus import EnumDelegateLocus
@@ -242,21 +241,6 @@ def test_the_answer_path_alone_is_a_usage_error(workspace: Path) -> None:
     assert "--answer-path names where an answer" in result.output
 
 
-def test_the_deployed_lane_is_refused_while_its_port_cannot_carry_tests() -> None:
-    with pytest.raises(click.ClickException) as refusal:
-        refuse_named_tests_on_deployed_lane(
-            EnumDelegateLocus.DEPLOYED_LANE, {"named_tests": "tests/t.py"}
-        )
-    assert "--locus in-process" in refusal.value.message
-
-
-def test_an_in_process_run_and_an_unnamed_run_are_not_refused() -> None:
-    refuse_named_tests_on_deployed_lane(
-        EnumDelegateLocus.IN_PROCESS, {"named_tests": "tests/t.py"}
-    )
-    refuse_named_tests_on_deployed_lane(EnumDelegateLocus.DEPLOYED_LANE, {})
-
-
 _COMMAND = "onex.cmd.synthetic.delegate-skill.v1"
 _BROKER = "broker.invalid:19092"
 
@@ -335,9 +319,10 @@ def test_golden_chain_in_process_the_run_is_handed_the_tests(
     assert call["payload"]["task_type"] == "code_generation"
 
 
-def test_golden_chain_deployed_lane_is_refused_before_anything_is_published(
+def test_golden_chain_deployed_lane_is_handed_the_tests_too(
     workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """OMN-17427: the deployed lane carries named tests, so the CLI no longer refuses them."""
     calls = _chain(monkeypatch, tmp_path, EnumDelegateLocus.DEPLOYED_LANE)
     result = CliRunner().invoke(
         delegate_command,
@@ -354,7 +339,9 @@ def test_golden_chain_deployed_lane_is_refused_before_anything_is_published(
             str(tmp_path / "state"),
         ],
     )
-    assert result.exit_code != 0
-    assert "the deployed lane cannot carry named tests yet" in result.output
-    assert "--locus in-process" in result.output
-    assert calls == []
+    assert result.exit_code == 0, result.output
+    (call,) = calls
+    metadata = call["payload"]["metadata"]
+    assert metadata["named_tests"] == "tests/test_add.py::test_add"
+    assert metadata["named_tests_answer_path"] == "solution.py"
+    assert json.loads(metadata["named_tests_files"]) == {"tests/test_add.py": _SOURCE}

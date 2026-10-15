@@ -82,12 +82,12 @@ requirements:
       - id: AC18
         statement: "AC18: the replayed 2026-10-14 fixture (25 pool runners busy, none wedged, doc checks queued up to 44.9 minutes, two second-host runners offline) yields queue_age_exceeded for the three repos that queued past 30 minutes, runner_offline for the two offline runners, and no runner_stuck; a job running past 360 minutes yields runner_stuck -- falsifier: uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_alerts_omn17427.py -q fails at the merge base, where the alert models do not exist"
   - id: req-omn17427-delegate-named-tests
-    statement: onex delegate names the tests a code delegation is graded by, carries them in the request metadata under the keys omnimarket's delegation port reads, and refuses a run that would reach the deployed lane, whose dispatch port cannot carry them.
+    statement: onex delegate names the tests a code delegation is graded by, carries them in the request metadata under the keys omnimarket's delegation port reads, and carries them inline on the deployed lane's bus command.
     acceptance:
       - id: AC19
         statement: 'AC19: --test-file, --named-test and --answer-path write named_tests, named_tests_answer_path and named_tests_files into the request payload the run is handed, and a partial or unsafe naming is a usage error -- falsifier: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k "not deployed"'
       - id: AC20
-        statement: 'AC20: a run that resolves to the deployed lane with named tests is refused before anything is published, naming --locus in-process -- falsifier: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k deployed'
+        statement: 'AC20: a run that resolves to the deployed lane is handed its named tests like an in-process run, and the deployed dispatch port publishes them inline on the bus command and refuses, before publication, a spec that points at a caller workspace or carries no test sources -- falsifier: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py tests/integration/runtime/test_delegation_dispatch_port_named_tests.py -q -k "deployed or ride_the_bus or cannot_carry"'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -147,8 +147,8 @@ evidence_requirements:
     description: The delegate flags write the named tests into the request payload and refuse a partial naming.
     command: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k "not deployed"
   - kind: tests
-    description: A named-test run that would reach the deployed lane is refused before anything is published.
-    command: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k deployed
+    description: A named-test run that reaches the deployed lane carries its tests inline on the bus command, and a spec the lane cannot run is refused before publication.
+    command: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py tests/integration/runtime/test_delegation_dispatch_port_named_tests.py -q -k "deployed or ride_the_bus or cannot_carry"
 emergency_bypass:
   enabled: false
   justification: ''
@@ -333,7 +333,7 @@ dod_evidence:
     execution_scope: local_done_gate
     checks:
       - check_type: command
-        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_verdict import ModelRunnerFleetHealthVerdict as V; from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot import ModelRunnerFleetSnapshot as S; assert 'alerts' in V.model_fields and 'jobs' in S.model_fields; print('deploy smoke ok')\""
+        check_value: "env docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_verdict import ModelRunnerFleetHealthVerdict as V; from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot import ModelRunnerFleetSnapshot as S; assert 'alerts' in V.model_fields and 'jobs' in S.model_fields; print('deploy smoke ok')\""
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn-17427-ac18-deploy-dispatch
     description: Hosted-runner runtime dispatch smoke -- job facts reach the published terminal event through five contract-routed hops and serialized envelopes; overdue queues and jobs alert, below-bound jobs do not. Only external gh/ssh probes are replaced; no deployed container or credentials are required.
@@ -355,16 +355,16 @@ dod_evidence:
     binds_ac:
       - AC19
   - id: dod-omn-17427-ac20
-    description: A named-test run that would reach the deployed lane is refused before anything is published.
+    description: A named-test run that reaches the deployed lane carries its tests inline on the bus command, and a spec the lane cannot run is refused before publication.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k deployed
+        check_value: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py tests/integration/runtime/test_delegation_dispatch_port_named_tests.py -q -k "deployed or ride_the_bus or cannot_carry"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC20
   - id: dod-omn-17427-named-tests-deploy-dispatch
-    description: Hosted-runner CLI dispatch smoke -- the real delegate command hands named-test metadata to the in-process runtime and refuses a deployed-lane request before publication. The runtime is a stand-in; no deployed container or credentials are required.
+    description: Hosted-runner CLI dispatch smoke -- the real delegate command hands named-test metadata to the in-process runtime and to the deployed lane. The runtime is a stand-in; no deployed container or credentials are required.
     source: manual
     checks:
       - check_type: command
