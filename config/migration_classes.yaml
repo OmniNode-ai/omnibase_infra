@@ -262,6 +262,7 @@ migrations:
   forward/nodes/node_projection_delegation/0056_delegation_budget_applied_events.sql: forward-only # EXECUTE; ADD CONSTRAINT (OMN-15376 shape reconciliation of a guarded CREATE TABLE)
   forward/nodes/node_projection_delegation/0057_delegation_budget_applied_events_rls.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP POLICY
   forward/nodes/node_projection_delegation/0058_delegation_events_requested_model_and_timing.sql: expand-only
+  forward/nodes/node_projection_delegation/0060_model_routing_tier_models.sql: forward-only # CREATE OR REPLACE (replaces an existing object); ALTER VIEW
   forward/nodes/node_projection_delegation_disposition/0000_create_delegation_dispositions.sql: forward-only # ALTER COLUMN; ADD CONSTRAINT; ROW LEVEL SECURITY; DROP
   forward/nodes/node_projection_delegation_disposition/0001_grant_tenant_projection_writer_delegation_dispositions.sql: expand-only
   forward/nodes/node_projection_delegation_disposition/0002_force_rls_delegation_dispositions.sql: forward-only # ENABLE/FORCE ROW LEVEL SECURITY; DROP
@@ -414,6 +415,7 @@ migrations:
   forward/nodes/node_projection_usage_by_model_day/0000_create_usage_by_model_day.sql: forward-only # UNIQUE INDEX on an existing table (public.usage_by_model_day)
   forward/nodes/node_projection_usage_by_model_day/0001_grant_usage_by_model_day.sql: forward-only # ALTER TABLE ENABLE ROW LEVEL; ALTER TABLE FORCE ROW LEVEL; DROP
   forward/nodes/node_projection_usage_by_model_day/0002_usage_by_model_day_measured_cost.sql: forward-only # ALTER TABLE ADD COLUMN on tables 0000 created (additive; declared forward-only per the checker's rule)
+  forward/nodes/node_projection_usage_by_model_day/0003_usage_by_model_day_tier_share.sql: forward-only # DROP; ALTER TABLE DROP CONSTRAINT and ADD CONSTRAINT usage_by_model_day_pkey (the key gains cost_tier_name)
   forward/nodes/node_projection_voice_sessions/0001_create_voice_sessions.sql: forward-only # EXECUTE; ALTER TABLE ADD CONSTRAINT VOICE_SESSIONS_PKEY; ALTER TABLE ADD CONSTRAINT VOICE_SESSIONS_TOTAL_TURNS
   forward/nodes/node_projection_voice_sessions/0002_grant_omninode_runtime_voice_sessions.sql: expand-only
   forward/nodes/node_projection_work_events/0001_create_work_events.sql: expand-only
