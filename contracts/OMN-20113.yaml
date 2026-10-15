@@ -48,10 +48,17 @@ dod_evidence:
     binds_ac:
       - AC3
   - id: dod-ac4-reconcile-host-bash32
-    description: Verified by lane omn17427-dc1 and recorded on its TERMINAL row of 2026-10-14T23:20:04Z in the rolling work ledger; this ticket's remaining work was AC3 only.
+    description: The shared as_owner helper retained after reconcile-host.sh was retired executes the requested command with intact arguments under nounset when RUN_AS is empty. Runs with the runner's /bin/bash, including macOS Bash 3.2.
     source: manual
     checks:
-      - check_type: behavior_proven
-        check_value: /bin/bash 3.2 -uc with an empty RUN_AS array expanded as in reconcile-host.sh does not exit with "unbound variable"
+      - check_type: command
+        check_value: |
+          /bin/bash -euc '
+            source scripts/reconcile_privilege_lib.sh
+            RUN_AS=()
+            actual=$(as_owner printf "%s|" "two words" tail)
+            [[ "$actual" == "two words|tail|" ]]
+          '
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
