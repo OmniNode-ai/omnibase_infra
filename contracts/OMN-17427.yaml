@@ -333,7 +333,7 @@ dod_evidence:
     execution_scope: local_done_gate
     checks:
       - check_type: command
-        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_verdict import ModelRunnerFleetHealthVerdict as V; from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot import ModelRunnerFleetSnapshot as S; assert 'alerts' in V.model_fields and 'jobs' in S.model_fields; print('deploy smoke ok')\""
+        check_value: "env docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.nodes.node_runner_fleet_health_compute.models.model_runner_fleet_health_verdict import ModelRunnerFleetHealthVerdict as V; from omnibase_infra.nodes.node_runner_health_snapshot_effect.models.model_runner_fleet_snapshot import ModelRunnerFleetSnapshot as S; assert 'alerts' in V.model_fields and 'jobs' in S.model_fields; print('deploy smoke ok')\""
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn-17427-ac18-deploy-dispatch
     description: Hosted-runner runtime dispatch smoke -- job facts reach the published terminal event through five contract-routed hops and serialized envelopes; overdue queues and jobs alert, below-bound jobs do not. Only external gh/ssh probes are replaced; no deployed container or credentials are required.
