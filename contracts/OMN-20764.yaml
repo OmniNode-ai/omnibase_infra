@@ -43,3 +43,14 @@ dod_evidence:
         check_value: uv run pytest tests/integration/cli/test_delegate_no_consumer_typed_terminal_omn20764.py -q
     binds_ac:
       - "AC1"
+  - id: dod-deploy
+    description: The delegate locus source at the evaluated checkout revision defines DelegateNoConsumerRefusedError; the merge base lacks it.
+    source: manual
+    checks:
+      - check_type: command
+        # Consume the complete decoded file so pipefail does not report SIGPIPE
+        # from base64 after an early successful match.
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/delegate_locus.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'class DelegateNoConsumerRefusedError' > /dev/null
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
