@@ -258,8 +258,10 @@ def _require_paired_source_ref(ref: str | None, pr_number: int, sha: str) -> str
         raise ValueError(
             f"node-migration source PR is not open: omnimarket#{pr_number}"
         )
-    if body.get("draft") is True:
-        raise ValueError(f"node-migration source PR is draft: omnimarket#{pr_number}")
+    # OMN-19155: draft state is deliberately not tested. A paired source is held
+    # as a draft by the draft-first proof rule, and the vendor PR cannot go green
+    # until this resolves; the tree is bound by the open state, the dev base, the
+    # head repo and the SHA checks below, none of which a draft changes.
     base = body.get("base")
     head = body.get("head")
     if not isinstance(base, dict) or base.get("ref") != "dev":

@@ -16,6 +16,10 @@
 # token in its title for anything else. A head carries exactly one such run:
 # when the onexbot App already posted one there (a rerun, a re-dispatch, a retry
 # after a post that landed), it is updated in place, never stacked (OMN-19566).
+# The same verdict is then published on the bus as the receipt event the
+# lab_proof_receipts projection folds, so a proof needs no operator flag to
+# reach the projection. The publish runs after the check run is posted, so a
+# broker that is down fails this workflow run, never the check run (OMN-19566).
 #
 # WHY IT IS NEVER A REQUIRED CONTEXT. A check run posted on the PR head sha
 # never appears on a merge_group build, so a required context of this name
@@ -184,3 +188,52 @@ jobs:
             cat "${RUNNER_TEMP}/posted.json"
             echo '```'
           } >>"${GITHUB_STEP_SUMMARY}"
+
+      # OMN-19566 slice 2. The same verdict, at the same live head, goes on the
+      # bus for the lab_proof_receipts projection. The pool driver publishes
+      # only when an operator hands it bus flags, so a proof run without them
+      # posted a check run and left the projection empty. The event is keyed by
+      # repo, PR, head, profile and version, so a pool publish and this one
+      # fold onto one row. The check run above is already posted with the
+      # verdict, so a broker that is down fails this workflow run and leaves
+      # the check run as it is.
+      - name: Fetch the bus overlay
+        if: ${{ !cancelled() && steps.live.outcome == 'success' }}
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: OmniNode-ai/omnimarket
+          ref: dev
+          path: omnimarket-bus-lanes
+          persist-credentials: false
+          sparse-checkout: |
+            config/ci_bus_lanes.yaml
+          sparse-checkout-cone-mode: false
+
+      - name: Build the bus event
+        if: ${{ !cancelled() && steps.live.outcome == 'success' }}
+        env:
+          HEAD_SHA: ${{ steps.live.outputs.head }}
+          DIGEST: ${{ steps.live.outputs.digest }}
+        run: |
+          set -euo pipefail
+          uv run python scripts/ci/lab_pass_receipt.py pr-head-event \
+            --receipt "${RUNNER_TEMP}/receipt.json" \
+            --head-sha "${HEAD_SHA}" \
+            --profile-pin "${RUNNER_TEMP}/pin.json" \
+            --current-pr-diff-digest "${DIGEST}" \
+            --out "${RUNNER_TEMP}/event.json"
+
+      - name: Publish the receipt event to the bus
+        if: ${{ !cancelled() && steps.live.outcome == 'success' }}
+        env:
+          # The dev control-bus lane declares its SASL transport in the overlay
+          # fetched above; the publisher reads that declaration and refuses to
+          # downgrade it. Credentials stay in the environment, never in argv.
+          KAFKA_SASL_USERNAME: ${{ secrets.KAFKA_SASL_USERNAME }}
+          KAFKA_SASL_PASSWORD: ${{ secrets.KAFKA_SASL_PASSWORD }}
+        run: |
+          set -uo pipefail
+          uv run python scripts/ci/publish_lab_fact_event.py \
+            --event "${RUNNER_TEMP}/event.json" \
+            --bus-lane "dev" \
+            --bus-overlay "omnimarket-bus-lanes/config/ci_bus_lanes.yaml"

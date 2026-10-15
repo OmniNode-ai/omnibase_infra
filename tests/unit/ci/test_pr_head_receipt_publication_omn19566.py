@@ -823,3 +823,70 @@ def test_pr_diff_digest_is_the_verifiers_digest(
     printed = capsys.readouterr().out.strip()
     assert printed == receipts.compute_pr_diff_digest_from_repo(tmp_path, base, head)
     assert printed.startswith("sha256:")
+
+
+WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lab-proof-receipt.yml"
+
+
+def _workflow_steps() -> list[dict[str, Any]]:
+    import yaml
+
+    doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps: list[dict[str, Any]] = doc["jobs"]["post"]["steps"]
+    return steps
+
+
+class TestTheWorkflowPublishesTheEventItJudged:
+    """The workflow puts the live-head verdict on the bus beside its check run.
+
+    The pool driver publishes only when an operator passes its bus flags, so a
+    receipt proved without them posted a check run and never reached the
+    ``lab_proof_receipts`` projection. The workflow already holds the pin, the
+    live head and the digest, so it builds the event from the same verdict.
+    """
+
+    def _step(self, name_part: str) -> dict[str, Any]:
+        (step,) = [s for s in _workflow_steps() if name_part in s.get("name", "")]
+        return step
+
+    def test_the_event_step_follows_the_check_run_post(self) -> None:
+        names = [s.get("name", "") for s in _workflow_steps()]
+        post = next(
+            i for i, n in enumerate(names) if n.startswith("Verify at the live head")
+        )
+        build = next(i for i, n in enumerate(names) if "Build the bus event" in n)
+        publish = next(
+            i for i, n in enumerate(names) if "Publish the receipt event" in n
+        )
+        assert post < build < publish
+
+    def test_the_event_is_built_from_the_same_pin_head_and_digest(self) -> None:
+        run = self._step("Build the bus event")["run"]
+        assert "lab_pass_receipt.py pr-head-event" in run
+        for arg in (
+            '--head-sha "${HEAD_SHA}"',
+            '--profile-pin "${RUNNER_TEMP}/pin.json"',
+            '--current-pr-diff-digest "${DIGEST}"',
+        ):
+            assert arg in run
+
+    def test_the_publish_reads_the_overlay_transport_and_keeps_secrets_in_env(
+        self,
+    ) -> None:
+        step = self._step("Publish the receipt event")
+        assert "publish_lab_fact_event.py" in step["run"]
+        assert '--event "${RUNNER_TEMP}/event.json"' in step["run"]
+        assert "omnimarket-bus-lanes/config/ci_bus_lanes.yaml" in step["run"]
+        assert "secrets." not in step["run"]
+        assert set(step["env"]) >= {"KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD"}
+
+    def test_a_broker_that_is_down_fails_the_run_not_the_check_run(self) -> None:
+        # The check run is posted before any bus step, so a failed publish
+        # cannot change it; the bus steps are not hidden behind
+        # continue-on-error, so a failed publish is visible as a red run.
+        for part in (
+            "Fetch the bus overlay",
+            "Build the bus event",
+            "Publish the receipt event",
+        ):
+            assert "continue-on-error" not in self._step(part), part

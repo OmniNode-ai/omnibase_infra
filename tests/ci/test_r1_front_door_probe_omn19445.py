@@ -27,7 +27,11 @@ from typing import Any
 import pytest
 import yaml
 
+from omnibase_infra.cli.cli_delegate import _HARD_TIMEOUT_GRACE_SECONDS
 from scripts.ci.r1_front_door_probe import (
+    CLI_HARD_TIMEOUT_GRACE_S,
+    CLI_TERMINAL_WAIT_S,
+    DEFAULT_TIMEOUT_S,
     PROBE_LANE,
     PROBE_PROMPT,
     ModelR1ProbeResult,
@@ -115,7 +119,22 @@ def test_run_probe_timeout_is_graded_not_ok_and_named() -> None:
     assert "exceeded" in (result.timeout_reason or "")
     assert result.exit_code == 2
     assert result.leg == "probe-timeout"
-    assert result.named_cause == "probe exceeded 90.0s"
+    assert result.named_cause == f"probe exceeded {DEFAULT_TIMEOUT_S}s"
+
+
+def test_probe_timeout_outlasts_the_cli_own_terminal_wait() -> None:
+    """OMN-19445 AC2: a slow lane is graded by the CLI, not killed by the probe.
+
+    The scheduled run of 2026-10-15T05:28Z exited 2 `probe-timeout` at 90.0 s
+    while the dev lane was working through a burst of delegations: `onex
+    delegate` declares it will wait for the lane's terminal for up to the
+    240 s task-class ceiling plus the 60 s delivery margin, and its SIGALRM
+    backstop adds a grace window. A probe that kills the CLI sooner reports "I
+    could not run the probe" for a lane that was merely queued, and the CLI
+    never gets to name its own terminal.
+    """
+    assert CLI_HARD_TIMEOUT_GRACE_S == _HARD_TIMEOUT_GRACE_SECONDS
+    assert DEFAULT_TIMEOUT_S > CLI_TERMINAL_WAIT_S + CLI_HARD_TIMEOUT_GRACE_S
 
 
 def test_record_result_writes_json_and_returns_the_probes_own_exit_code(
@@ -510,6 +529,13 @@ def test_workflow_co_installs_omnimarket_before_the_probe_runs() -> None:
     assert "--no-deps" in script
     # a sha checkout is detached, which the drift guard refuses: attach it
     assert "checkout -q -B dev" in script
+
+
+def test_workflow_job_timeout_outlasts_the_probe_timeout_with_setup_headroom() -> None:
+    workflow = yaml.safe_load(_WORKFLOW.read_text())
+    job_timeout_s = workflow["jobs"][_PROBE_JOB]["timeout-minutes"] * 60
+    setup_headroom_s = 300  # checkout, uv sync, omnimarket co-install: ~2 min measured
+    assert job_timeout_s >= DEFAULT_TIMEOUT_S + setup_headroom_s
 
 
 def test_workflow_probe_declares_the_lab_house_tenant_and_mints_nothing() -> None:

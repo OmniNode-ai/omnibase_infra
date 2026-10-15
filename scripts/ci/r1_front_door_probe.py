@@ -77,7 +77,16 @@ from pydantic import BaseModel, ConfigDict, Field
 # code alone -- this probe does not parse or score the response text.
 PROBE_PROMPT = "Reply with exactly the word: ok"
 PROBE_LANE = "dev"
-DEFAULT_TIMEOUT_S = 90.0
+# `onex delegate` waits for the lane's terminal for up to the 240 s task-class
+# ceiling plus the 60 s delivery margin, and its SIGALRM backstop adds a grace
+# window (cli_delegate._HARD_TIMEOUT_GRACE_SECONDS). The probe must outlast all
+# of it, so a lane that is only queued is graded by the CLI's own terminal and
+# not killed here as `probe-timeout` ("could not run the probe"). The scheduled
+# run of 2026-10-15T05:28Z was killed at 90 s by exactly that mismatch.
+CLI_TERMINAL_WAIT_S = 300.0
+CLI_HARD_TIMEOUT_GRACE_S = 10
+_TIMEOUT_MARGIN_S = 20.0
+DEFAULT_TIMEOUT_S = CLI_TERMINAL_WAIT_S + CLI_HARD_TIMEOUT_GRACE_S + _TIMEOUT_MARGIN_S
 _TAIL_CHARS = 2000
 LEG_PROBE_CANNOT_RUN = "probe-cannot-run"
 LEG_PROBE_TIMEOUT = "probe-timeout"

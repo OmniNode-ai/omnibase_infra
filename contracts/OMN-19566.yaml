@@ -26,6 +26,11 @@ requirements:
     acceptance:
       - id: AC4
         statement: 'AC4: a head with no lab-proof-receipt run gets one created, a second post for the same head updates that run (one run on the head afterwards, a PATCH that carries no head_sha), an existing duplicate updates the newest and names the rest, a run of another App or another name is never updated, a refused update is raised and never retried as a second post, and the workflow hands the posting App slug to the poster -- falsifier: uv run pytest tests/unit/ci/test_pr_head_receipt_publication_omn19566.py tests/ci/test_lab_proof_check_run_upsert_replay_omn19566.py -q'
+  - id: req-omn19566-workflow-publishes-event
+    statement: The lab-proof-receipt workflow publishes the live-head verdict as the pr-head receipt event the lab_proof_receipts projection folds, after its check run so a failed publish cannot change it, with the broker credentials in the environment only.
+    acceptance:
+      - id: AC5
+        statement: 'AC5: the workflow builds the pr-head-event from the same pin, live head and diff digest it posts the check run from, publishes it through publish_lab_fact_event.py against the omnimarket bus overlay after the check run, keeps the SASL credentials out of the command line, and cannot turn the check run red when the broker is down -- falsifier: uv run pytest tests/unit/ci/test_pr_head_receipt_publication_omn19566.py -q -k Workflow tests/ci/test_lab_proof_event_publish_replay_omn19566.py'
 evidence_requirements:
   - kind: tests
     description: The conditional-check, workflow-path and pool-driver tests.
@@ -77,3 +82,15 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC4
+  - id: dod-omn19566-workflow-publishes-event
+    description: The workflow puts the live-head verdict on the bus beside its check run.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/ci/test_pr_head_receipt_publication_omn19566.py -q -k Workflow tests/ci/test_lab_proof_event_publish_replay_omn19566.py
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: grep -q -- 'publish_lab_fact_event.py' .github/workflows/lab-proof-receipt.yml
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
