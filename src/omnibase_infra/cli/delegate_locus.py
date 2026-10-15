@@ -59,6 +59,7 @@ __all__ = [
     "DelegateLocusAclRefusedError",
     "DelegateLocusRefusedError",
     "DelegateLocusSaslRefusedError",
+    "DelegateNoConsumerRefusedError",
     "contract_command_topic",
     "contract_consumer_owner",
     "contract_downstream_chain",
@@ -136,6 +137,31 @@ class DelegateDownstreamChainRefusedError(DelegateLocusRefusedError):
     execution budget, reported to the caller as a hang. The class name is what
     the transport refusal records as ``transport_error_type``.
     """
+
+
+class DelegateNoConsumerRefusedError(DelegateLocusRefusedError):
+    """The broker answered and no consumer group is bound to the command topic.
+
+    OMN-20764. The refusal that used to carry the topic and the absent consumer
+    only in its prose. They are attributes now, so the written transport
+    refusal types both and a reader of the receipt (the hourly tick's held
+    classifier, a lane) names the missing consumer without parsing a sentence.
+    Its class name is what the written transport refusal records as
+    ``transport_error_type``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        command_topic: str,
+        consumer: str,
+        waited_seconds: float,
+    ) -> None:
+        super().__init__(message)
+        self.command_topic = command_topic
+        self.consumer = consumer
+        self.waited_seconds = waited_seconds
 
 
 class DelegateLocusAclRefusedError(DelegateLocusRefusedError):
@@ -713,7 +739,7 @@ def _assert_dispatch_viable(
                     "that hosts that consumer, or pass --bus inmemory --locus "
                     "in-process to run it here on purpose."
                 )
-            raise DelegateLocusRefusedError(
+            raise DelegateNoConsumerRefusedError(
                 f"no live consumer group is bound to '{command_topic}' for "
                 f"{owner.service}.{owner.node} — there "
                 "is no deployed orchestrator to make the accept/climb "
@@ -723,7 +749,10 @@ def _assert_dispatch_viable(
                 f"({_REBIND_WAIT_SECONDS:.0f} s, OMN-18843), so this is a lane "
                 "that is down, not one that is rebinding. Start the runtime "
                 "that consumes this topic, or pass --bus inmemory --locus in-process to run "
-                "it here on purpose."
+                "it here on purpose.",
+                command_topic=command_topic,
+                consumer=f"{owner.service}.{owner.node}",
+                waited_seconds=waited,
             )
         if groups and downstream is not None:
             logger.warning(
