@@ -24,5 +24,7 @@ def test_omn12816_llm_inference_contract_declares_extra_body() -> None:
     # exact equality on purpose -- it makes any contract movement on a
     # promoted node show up in a PR diff rather than drifting unnoticed --
     # so moving it here is the intended workflow, not a way around the test.
-    assert contract["contract_version"] == {"major": 1, "minor": 6, "patch": 0}
+    # OMN-17105 moved it to minor 7: the generic response left the delegation
+    # inference-response topic for its own llm-inference-response topic.
+    assert contract["contract_version"] == {"major": 1, "minor": 7, "patch": 0}
     assert "extra_body" in contract["input_model"]["description"]
