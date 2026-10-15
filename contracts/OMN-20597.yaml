@@ -10,13 +10,13 @@ requirements:
     statement: The runner host mirror list and the fleet config list the same repositories, and the host artifact freshness checker reads the real deploy script's SYNC_PATHS without error.
     acceptance:
       - id: AC1
-        statement: "AC1: The script MIRROR_REPOS list and config/runner_fleet.yaml git_mirror.repos hold the same repositories, and a test fails when the two lists differ -- falsifier: uv run pytest tests/unit/observability/runner_health/test_runner_fleet_config.py -k git_mirror -q"
+        statement: "AC1: The script MIRROR_REPOS list and config/runner_fleet.yaml git_mirror.repos hold the same repositories, and a test fails when the two lists differ -- falsifier: uv run pytest tests/unit/observability/runner_health/test_runner_fleet_config.py tests/ci/test_check_runner_host_artifact_freshness.py::test_live_deploy_script_sync_paths_all_exist_in_tree -k 'git_mirror or live_deploy_script_sync_paths_all_exist_in_tree' -q -p no:randomly"
       - id: AC4
         statement: "AC4: parse_sync_paths returns no entry taken from quoted text in a comment, and every entry it returns from the real scripts/deploy-runners.sh exists at HEAD -- falsifier: uv run pytest tests/ci/test_check_runner_host_artifact_freshness.py tests/scripts/test_deploy_runners_sync_paths.py -q -p no:randomly"
 evidence_requirements:
   - kind: tests
-    description: "The fleet config and the refresh script list the same mirrors."
-    command: "uv run pytest tests/unit/observability/runner_health/test_runner_fleet_config.py -k git_mirror -q"
+    description: "The fleet config and refresh script list the same mirrors, and the freshness checker resolves the real deploy list before comparing the mirror artifact."
+    command: "uv run pytest tests/unit/observability/runner_health/test_runner_fleet_config.py tests/ci/test_check_runner_host_artifact_freshness.py::test_live_deploy_script_sync_paths_all_exist_in_tree -k 'git_mirror or live_deploy_script_sync_paths_all_exist_in_tree' -q -p no:randomly"
   - kind: tests
     description: "parse_sync_paths ignores quoted comment text, and the live deploy script yields only paths present in the tree."
     command: "uv run pytest tests/ci/test_check_runner_host_artifact_freshness.py tests/scripts/test_deploy_runners_sync_paths.py -q -p no:randomly"
@@ -26,11 +26,11 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-20597-ac1
-    description: The mirror script list and the fleet config hold the same repositories, and a test holds the two equal.
+    description: The mirror script list and fleet config hold the same repositories, and the freshness checker resolves the real deploy list before comparing the mirror artifact. The parity assertions retain the already-merged AC1 behavior; the deployment-path assertion fails before the parser fix.
     source: manual
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/unit/observability/runner_health/test_runner_fleet_config.py -k git_mirror -q
+        check_value: uv run pytest tests/unit/observability/runner_health/test_runner_fleet_config.py tests/ci/test_check_runner_host_artifact_freshness.py::test_live_deploy_script_sync_paths_all_exist_in_tree -k 'git_mirror or live_deploy_script_sync_paths_all_exist_in_tree' -q -p no:randomly
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
