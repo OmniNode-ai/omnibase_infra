@@ -1,6 +1,6 @@
 schema_version: "1.0.0"
 ticket_id: OMN-17292
-title: "The omnimarket contract pin advances to 28219cf929b32bf51e0a83ac21d89caeed1a27d5"
+title: "The omnimarket contract pin advances to 7126c39946cc6ca31686bfb7e02abc5b5874b15e"
 summary: The automated refresh moves .github/omnimarket-contract-pin.yaml to a value the merge base does not carry.
 is_seam_ticket: false
 interface_change: false
@@ -10,17 +10,10 @@ requirements:
     statement: .github/omnimarket-contract-pin.yaml carries the value this refresh produced.
     acceptance:
       - id: AC1
-        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 28219cf929b32bf51e0a83ac21d89caeed1a27d5 -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
-  - id: req-omn17292-event-type-scan-cost
-    statement: The no-literal-event-type-in-tests validator avoids repeated binding walks when assertion values need no name resolution.
-    acceptance:
-      - id: AC2
-        statement: "AC2: a large test class without indirect event-type values takes at most two full AST traversals, while literal topics, escaped golden-chain dictionary keys, location deduplication and parse failures retain their verdicts -- falsifier: uv run --frozen pytest tests/ci/test_event_type_scan_cost_omn17292.py -q"
-      - id: AC3
-        statement: "AC3: filesystem discovery and the package CLI retain the scan work budget, accept aliases, refuse indirect topics, golden-chain topic dictionaries and parse errors, and reject an empty corpus -- falsifier: uv run --frozen pytest tests/integration/test_event_type_scan_cli_omn17292.py -q"
+        statement: "AC1: the omnimarket contract pin, the omnimarket sibling pin and every inline omnimarket checkout ref carry 7126c39946cc6ca31686bfb7e02abc5b5874b15e -- falsifier: env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
 evidence_requirements:
   - kind: tests
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 28219cf929b32bf51e0a83ac21d89caeed1a27d5.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 7126c39946cc6ca31686bfb7e02abc5b5874b15e.
     command: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
 emergency_bypass:
   enabled: false
@@ -28,34 +21,10 @@ emergency_bypass:
   follow_up_ticket_id: ''
 dod_evidence:
   - id: dod-omn-17292-ac1
-    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 28219cf929b32bf51e0a83ac21d89caeed1a27d5.
+    description: The contract pin, sibling pin and every inline omnimarket checkout ref carry 7126c39946cc6ca31686bfb7e02abc5b5874b15e.
     source: manual
     checks:
       - check_type: test_passes
         check_value: "env -u PYTHONPATH uv run --frozen pytest tests/ci/test_omnimarket_contract_pin_advance_omn17292.py -q"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac: [AC1]
-  - id: dod-omn-17292-ac2-scan-cost
-    description: The deterministic AST work budget fails against the merge-base validator and retains refusal controls.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/ci/test_event_type_scan_cost_omn17292.py -q"
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC2]
-  - id: dod-omn-17292-validator-deploy-probe
-    description: Package probe for the changed validator. Hosted runners exercise the checked-out module with the AST work budget and refusal controls; no live lane or service is required. The work-budget cases fail against the merge-base validator.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/ci/test_event_type_scan_cost_omn17292.py -q"
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC2]
-  - id: dod-omn-17292-ac3-cli-integration
-    description: Hosted-runner package CLI readback exercises discovery, the AST work budget and fail-closed verdicts without a live lane or external service.
-    source: manual
-    checks:
-      - check_type: test_passes
-        check_value: "uv run --frozen pytest tests/integration/test_event_type_scan_cli_omn17292.py -q"
-        cwd: ${OMNI_HOME}/omnibase_infra
-    binds_ac: [AC3]
