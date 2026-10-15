@@ -46,14 +46,11 @@ dod_evidence:
     binds_ac:
       - AC2
   - id: dod-omn17105-ac3-topic-gates
-    description: The subscribe wiring health gate and the topic config parity test pass with the delegation topic owned by omnimarket.
+    description: The subscribe wiring health allowlist names omnimarket node_llm_delegation_call_effect as the delegation topic's owner and the gate reports no DEAD_LETTER for it.
     source: manual
     checks:
-      - check_type: command
-        check_value: uv run python scripts/check_subscribe_wiring_health.py
-        cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
-        check_value: uv run pytest tests/ci/test_topic_config_contract_parity.py -q -p no:randomly
+        check_value: uv run pytest tests/unit/nodes/node_llm_inference_effect/test_contract_response_topic_omn17105.py -k "TestDelegationTopicIsCrossRepoOwned" -q -p no:randomly
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3

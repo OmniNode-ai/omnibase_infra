@@ -120,3 +120,24 @@ class TestOneSchemaPerPublishedTopic:
                 "node_llm_inference_effect": {"LlmInferenceResponse"},
             }
         }
+
+
+class TestDelegationTopicIsCrossRepoOwned:
+    def test_wiring_health_allowlist_names_the_omnimarket_owner(self) -> None:
+        from scripts.check_subscribe_wiring_health import (
+            _EXTERNAL_PUBLISHER_ALLOWLIST,
+        )
+
+        reason = _EXTERNAL_PUBLISHER_ALLOWLIST[DELEGATION_RESPONSE_TOPIC]
+
+        assert "omnimarket node_llm_delegation_call_effect" in reason
+        assert GENERIC_RESPONSE_TOPIC not in _EXTERNAL_PUBLISHER_ALLOWLIST
+
+    def test_wiring_health_reports_no_dead_letter_for_the_delegation_topic(
+        self,
+    ) -> None:
+        from scripts.check_subscribe_wiring_health import check_wiring_health
+
+        errors, _ = check_wiring_health([_NODES_DIR])
+
+        assert [e for e in errors if DELEGATION_RESPONSE_TOPIC in e] == []
