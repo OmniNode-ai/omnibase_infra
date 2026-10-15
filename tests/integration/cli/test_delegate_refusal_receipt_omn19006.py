@@ -179,6 +179,7 @@ class BranchCase:
 
 _KEY_VALUE_ERROR = "except ValueError"
 _KEY_JSON_HUMAN = "raise click.UsageError '--json and --human are mutually exclusiv'"
+_KEY_RESULT_ONLY = "raise click.UsageError '--result-only and --json/--human are mut'"
 _KEY_SYS_EXIT = "call sys.exit"
 _KEY_KAFKA_WITHOUT_BUS = "raise ValueError '--kafka-bootstrap is only valid with --b'"
 
@@ -187,6 +188,12 @@ BRANCH_CASES: dict[str, BranchCase] = {
         covers=_KEY_JSON_HUMAN,
         args=lambda tmp: [*_common(tmp), "--json", "--human"],
         reason="--json and --human are mutually exclusive",
+        expected_stage="refused_before_dispatch",
+    ),
+    "result-only-and-json": BranchCase(
+        covers=_KEY_RESULT_ONLY,
+        args=lambda tmp: [*_common(tmp), "--result-only", "--json"],
+        reason="--result-only and --json/--human are mutually exclusive",
         expected_stage="refused_before_dispatch",
     ),
     "malformed-ticket": BranchCase(
