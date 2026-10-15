@@ -35,3 +35,11 @@ dod_evidence:
     checks:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/cli/test_delegate_locus.py tests/unit/cli/test_delegate_locus_rebind_wait_omn18843.py tests/unit/cli/test_delegate_transport_terminal_omn18925.py -q
+  - id: dod-omn-20764-ac1-integration-cli-receipt
+    description: 'AC1 through the real onex delegate command. tests/integration/cli/test_delegate_no_consumer_typed_terminal_omn20764.py invokes delegate_command with no consumer group bound, loads the written receipt.json transport_refusal through ModelDelegateTransportRefusal and asserts command_topic, absent_consumer and transport_error_type, with an unanswerable-broker control that leaves absent_consumer empty. At the merge base both tests fail because the model has no absent_consumer field.'
+    source: generated
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_delegate_no_consumer_typed_terminal_omn20764.py -q
+    binds_ac:
+      - "AC1"
