@@ -53,7 +53,7 @@ dod_evidence:
     binds_ac:
       - AC3
   - id: dod-deploy
-    description: Deploy-scope readback, bound to no criterion; after the change reaches dev, the reconcile handler is present on the dev branch with its handle entrypoint.
+    description: Deploy-scope readback, bound to no criterion; after the change reaches dev, the reconcile handler is present on the dev branch.
     source: manual
     checks:
       - check_type: command
