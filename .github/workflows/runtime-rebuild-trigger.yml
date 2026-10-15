@@ -902,6 +902,29 @@ jobs:
             > "${LAB_PASS_CHECKS}"
           cat "${LAB_PASS_CHECKS}"
 
+      # OMN-20772: the identity the post-merge event binds the pass to. It is
+      # read from the lane AFTER the probes so the generation it records is the
+      # one the probes just ran against. An unreadable part writes NO file and
+      # the emit step then publishes binding_valid=false; this step never fails
+      # the job for it, because the finding is carried by the event.
+      - name: Read the dev lane identity
+        if: always() && steps.converge.outputs.probe_lane != 'false'
+        env:
+          DEV_LANE_CONTAINER: ${{ env.DEV_LANE_RUNTIME_CONTAINER }}
+          DEV_LANE_POSTGRES_CONTAINER: ${{ env.DEV_LANE_POSTGRES_CONTAINER }}
+          DEV_LANE_POSTGRES_DATABASE: omnibase_infra
+        run: |
+          set -uo pipefail
+          mkdir -p "${LAB_PASS_DIR}"
+          uv run python scripts/ci/lab_pass_receipt.py lane-identity \
+            --container "$DEV_LANE_CONTAINER" \
+            --image-container "$DEV_LANE_CONTAINER" \
+            --pyproject pyproject.toml \
+            --overlay-file docker/docker-compose.infra.yml \
+            --migration-container "$DEV_LANE_POSTGRES_CONTAINER" \
+            --migration-database "$DEV_LANE_POSTGRES_DATABASE" \
+            --out "${LAB_PASS_DIR}/identity.json"
+
       # if: always() on emit and upload for the same reason the boot gate does
       # it: a FAILED lab pass is the record the gate needs in order to tell
       # "it failed" apart from "nobody ran it". The emit step exits non-zero on
@@ -1028,7 +1051,9 @@ jobs:
             --checks-json "${LAB_PASS_CHECKS}" \
             --agent-command-id "${CORRELATION_ID}" \
             --out "${LAB_PASS_DIR}/receipt.json" \
-            --event-out "${LAB_PASS_DIR}/event.json"
+            --event-out "${LAB_PASS_DIR}/event.json" \
+            --identity-json "${LAB_PASS_DIR}/identity.json" \
+            --post-merge-event-out "${LAB_PASS_DIR}/post-merge-event.json"
 
       # OMN-18769: the verdict, on the bus, beside the artifact.
       #
@@ -1087,6 +1112,7 @@ jobs:
           fi
           uv run python scripts/ci/publish_lab_fact_event.py \
             --event "${LAB_PASS_DIR}/event.json" \
+            --event "${LAB_PASS_DIR}/post-merge-event.json" \
             --bus-lane "dev" \
             --bus-overlay ".ci-bus-overlay/config/ci_bus_lanes.yaml"
 

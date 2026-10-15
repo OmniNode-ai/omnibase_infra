@@ -1,0 +1,76 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20772
+title: Post-merge lab-pass receipts carry deployment identity, generation and per-check evidence
+summary: The dev-lane lab pass publishes one typed post-merge receipt event per PASS or FAIL, carrying the lane, the deployment generation and identity (pins, image ids, overlay digest, migration fingerprint), the receipt key, the verdict, each check's outcome with its error class, the binding validity and the failing dimensions. A receipt whose provenance is unreadable publishes a FAIL with binding validity false, a transport exception during a probe is recorded as transport-class, and a republish of the same receipt carries the same event id.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-omn20772-event-every-field
+    statement: Every PASS and FAIL of the post-merge lab pass publishes exactly one event with every field set, and unreadable provenance publishes a FAIL with binding validity false.
+    acceptance:
+      - id: AC1
+        statement: 'AC1: every PASS and FAIL publishes exactly one event with every field set, and a receipt whose provenance is unreadable publishes a FAIL with binding validity false -- falsifier: uv run pytest tests -q -k post_merge_receipt_event'
+  - id: req-omn20772-transport-class
+    statement: A probe that gets no answer is recorded with the transport error class and a probe that reads a wrong answer with the assertion class.
+    acceptance:
+      - id: AC2
+        statement: 'AC2: a transport exception during a probe is recorded as transport-class, never as an assertion failure -- falsifier: uv run pytest tests -q -k receipt_transport_error_class'
+  - id: req-omn20772-idempotent
+    statement: The event id is a pure function of the receipt.
+    acceptance:
+      - id: AC3
+        statement: 'AC3: a republish of the same receipt carries the same event id -- falsifier: uv run pytest tests -q -k receipt_event_idempotent'
+  - id: req-omn20772-lab-pass
+    statement: One real dev-lane pass on the lab host publishes its event to the CI bus.
+    acceptance:
+      - id: AC4
+        statement: 'AC4: one real dev-lane pass on the lab host lands its event on the CI bus -- falsifier: the event read back from the CI bus topic, its receipt key equal to the run''s receipt'
+evidence_requirements:
+  - kind: tests
+    description: The post-merge receipt event tests.
+    command: uv run pytest tests/unit/ci/test_post_merge_receipt_event_omn20772.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20772-event-every-field
+    description: Every PASS and FAIL builds one event the typed model accepts, and an unreadable identity builds a FAIL with binding validity false.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/ci/test_post_merge_receipt_event_omn20772.py -q -k post_merge_receipt_event
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC1
+  - id: dod-omn20772-transport-class
+    description: A refused connection is transport-class and a wrong answer is assertion-class.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/ci/test_post_merge_receipt_event_omn20772.py -q -k receipt_transport_error_class
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC2
+  - id: dod-omn20772-idempotent
+    description: The same receipt always builds the same event id.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/ci/test_post_merge_receipt_event_omn20772.py -q -k receipt_event_idempotent
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn20772-event-deploy-probe
+    description: Deploy probe. scripts/ci/lab_pass_receipt.py at the checked-out commit carries build_post_merge_event, and .github/workflows/runtime-rebuild-trigger.yml carries the post-merge publish step; the probe reads both files from GitHub at that commit and exits nonzero on a tree without them, so it fails at the merge base. The lab readout after the deploy agent rolls this commit is the event read back from the CI bus topic, its receipt key equal to the run's receipt (AC4).
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/scripts/ci/lab_pass_receipt.py?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("def build_post_merge_event")' | grep -qx true
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/.github/workflows/runtime-rebuild-trigger.yml?ref=$(git rev-parse HEAD)" --jq '.content | gsub("\n";"") | @base64d | contains("--post-merge-event-out")' | grep -qx true
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC4
