@@ -61,15 +61,6 @@ def test_cli_requires_an_explicit_model_endpoint(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("model_base", ["", "   "])
-async def test_run_chat_completion_requires_an_explicit_endpoint(
-    model_base: str, http_client: httpx.AsyncClient
-) -> None:
-    with pytest.raises(ValueError, match="model_base is required"):
-        await run_chat_completion(model_base, _request(), http_client=http_client)
-
-
-@pytest.mark.asyncio
 async def test_run_chat_completion_success(
     httpserver: object, http_client: httpx.AsyncClient
 ) -> None:

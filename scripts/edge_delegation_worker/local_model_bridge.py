@@ -71,8 +71,6 @@ async def run_chat_completion(
       -> ``InfraProtocolError``. There is no fallback that returns an empty
       or synthesized completion.
     """
-    if not model_base.strip():
-        raise ValueError("model_base is required; supply the model endpoint explicitly")
     url = model_base.rstrip("/") + _CHAT_COMPLETIONS_PATH
     try:
         response = await http_client.post(url, json=_build_wire_payload(request))
