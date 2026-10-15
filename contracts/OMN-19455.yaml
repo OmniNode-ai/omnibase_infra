@@ -24,12 +24,12 @@ emergency_bypass:
   justification: ''
   follow_up_ticket_id: ''
 dod_evidence:
-  - id: dod-omn-19455-ac1-boot-refuses-served-model-mismatch
-    description: 'AC1. test_boot_refuses_a_backend_whose_served_model_differs renders the delegation contract with endpoint verification on against a stub /v1/models server that serves a different id and asserts the boot refusal names the backend; test_boot_accepts_a_backend_serving_its_declared_model is the positive control where the served id equals the declared one and boot completes.'
+  - id: dod-omn-19455-ac1-served-model-mismatch
+    description: 'AC1. test_boot_refuses_a_backend_whose_served_model_differs renders the delegation contract with endpoint verification on against a stub /v1/models server that serves a different id and asserts the boot refusal names the backend; test_boot_accepts_a_backend_serving_its_declared_model is the positive control where the served id equals the declared one and boot completes. test_boot_checks_a_later_backend_after_a_matching_backend asserts that a matching first backend does not hide a later mismatch, and the refusal names that later backend and its served id without writing the target.'
     source: generated
     checks:
       - check_type: test_passes
-        check_value: uv run pytest tests/integration/runtime/test_bifrost_boot_served_model_check_omn19455.py -k "refuses_a_backend_whose_served_model_differs or accepts_a_backend_serving_its_declared_model" -q
+        check_value: uv run pytest tests/integration/runtime/test_bifrost_boot_served_model_check_omn19455.py -k "refuses_a_backend_whose_served_model_differs or accepts_a_backend_serving_its_declared_model or checks_a_later_backend_after_a_matching_backend" -q
     binds_ac:
       - AC1
   - id: dod-omn-19455-ac2-unreachable-backend-dark
