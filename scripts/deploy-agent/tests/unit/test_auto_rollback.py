@@ -277,9 +277,22 @@ def test_compose_restore_never_builds_or_pulls_including_migrations(
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         commands.append(argv)
+        if "--hash" in argv:
+            # OMN-19911: the control-plane one-shot's rendered hash; its
+            # container is absent, so a restore re-runs it like any other up.
+            return subprocess.CompletedProcess(
+                argv, 0, stdout="redpanda-partition-cap abc123\n", stderr=""
+            )
+        if argv[:2] == ["docker", "ps"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
         return subprocess.CompletedProcess(argv, 0, stdout="t", stderr="")
 
     monkeypatch.setattr(executor_mod, "_run", run)
+    monkeypatch.setattr(
+        executor_mod,
+        "_compose_service_states",
+        lambda lane=None: {"redpanda-partition-cap": ("exited", 0)},
+    )
     monkeypatch.setattr(
         executor_mod, "verify_containers_up", Mock(return_value=(True, []))
     )
@@ -324,6 +337,7 @@ def _agent(
         "container_residue",
         "recreate_supervision",
         "verify_recreate",
+        "oneshot_reruns",
         "deps_convergence",
         "compose_invocations",
         "health_checks",
@@ -452,6 +466,7 @@ def test_compose_restore_recovery_also_never_builds_or_pulls(
 ) -> None:
     executor = DeployExecutor()
     monkeypatch.setattr(executor, "_ensure_runtime_migrations_ready", Mock())
+    monkeypatch.setattr(executor, "rerun_changed_oneshots", Mock())
     monkeypatch.setattr(executor, "_record_container_residue", Mock())
     monkeypatch.setattr(
         executor_mod,

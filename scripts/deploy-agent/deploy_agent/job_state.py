@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, model_validator
 from deploy_agent.events import (
     DEPLOY_PHASE_ORDER,
     ModelLineageDecision,
+    ModelOneShotRerun,
     ModelOnexApiDelivery,
     ModelVerifyRecreate,
     Phase,
@@ -136,6 +137,10 @@ class JobState(BaseModel):
     #: host journal whether it was that or a different command displacing the
     #: lane (OMN-18990). Empty on a record written by an older agent.
     verify_recreate: list[ModelVerifyRecreate] = Field(default_factory=list)
+    #: OMN-19911. The control-plane one-shots this job re-ran before starting
+    #: the runtime services, each with its exit code. Empty on a job that
+    #: re-ran none and on a record written by an older agent.
+    oneshot_reruns: list[ModelOneShotRerun] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _supersession_fields_are_paired(self) -> JobState:
@@ -493,6 +498,7 @@ class JobStore:
         errors: list[str] | None = None,
         settling_stage: EnumJobSettlingStage | None = None,
         verify_recreate: list[ModelVerifyRecreate] | None = None,
+        oneshot_reruns: list[ModelOneShotRerun] | None = None,
     ) -> JobState:
         """Write the job's terminal verdict, and what it is still doing.
 
@@ -506,6 +512,7 @@ class JobStore:
         ``verify_recreate`` rides the same write for the same reason
         (OMN-19374): a reader that sees the terminal status must also see
         whether the job recreated a runtime container on its way there.
+        ``oneshot_reruns`` rides it for the same reason (OMN-19911).
         """
         job = self.load(correlation_id)
         if job is None:
@@ -516,6 +523,8 @@ class JobStore:
         job.settling_stage = settling_stage
         if verify_recreate:
             job.verify_recreate = list(verify_recreate)
+        if oneshot_reruns:
+            job.oneshot_reruns = list(oneshot_reruns)
         if errors:
             job.errors.extend(errors)
         self._save(job)

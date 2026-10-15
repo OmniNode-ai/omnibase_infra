@@ -347,6 +347,7 @@ class _TerminalFacts:
     deps_convergence: list[Any]
     compose_invocations: list[Any]
     verify_recreate: list[Any]
+    oneshot_reruns: list[Any]
     sibling_refs: dict[str, str]
     lane_mirror: ModelLaneMirrorReceipt | None = None
 
@@ -1519,6 +1520,7 @@ class DeployAgent:
                         else EnumJobSettlingStage.PUBLISH
                     ),
                     verify_recreate=self.executor.verify_recreate,
+                    oneshot_reruns=self.executor.oneshot_reruns,
                 )
 
                 if lab_sha is not None:
@@ -1596,6 +1598,7 @@ class DeployAgent:
                 errors=[str(e)],
                 settling_stage=EnumJobSettlingStage.PUBLISH,
                 verify_recreate=self.executor.verify_recreate,
+                oneshot_reruns=self.executor.oneshot_reruns,
             )
             # OMN-18545 -- THE REPAIR BUILD, AND WHY THE FAILING PATH NEEDED ONE
             # AT ALL.
@@ -1694,6 +1697,7 @@ class DeployAgent:
             # OMN-18640 AC7: the runtime containers verification found dead and
             # recreated, and whether that repaired them.
             verify_recreate=list(self.executor.verify_recreate),
+            oneshot_reruns=list(self.executor.oneshot_reruns),
             # OMN-17135: which sibling commits this build actually vendored. The
             # command's git_ref pins omnibase_infra alone.
             sibling_refs=dict(self.executor.sibling_source_refs),
@@ -1765,6 +1769,7 @@ class DeployAgent:
                 deps_convergence=facts.deps_convergence,
                 compose_invocations=facts.compose_invocations,
                 verify_recreate=facts.verify_recreate,
+                oneshot_reruns=facts.oneshot_reruns,
                 sibling_refs=facts.sibling_refs,
                 # OMN-18572: what the onex-api pin delivery did on this job's
                 # tail. It never affects `status` -- the compose verdict is
