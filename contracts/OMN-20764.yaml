@@ -1,0 +1,30 @@
+schema_version: "1.0.0"
+ticket_id: OMN-20764
+title: First-hop refusal coverage permits typed locus refusals and rejects downstream misclassification
+summary: The downstream-chain regression asserts a locus refusal, its topic and message, and no downstream probe. Its exact exception-class identity also rejects the typed missing-consumer subclass introduced by omnibase_infra pull request 4996. Assert that a first-hop refusal is not a downstream-chain refusal while retaining the other assertions.
+is_seam_ticket: false
+interface_change: false
+interfaces_touched: []
+requirements:
+  - id: req-first-hop-refusal-check
+    statement: The first-hop regression rejects a downstream-chain refusal while accepting a more specific locus refusal.
+    acceptance:
+      - id: AC3
+        statement: 'A missing first-hop consumer raises a locus refusal naming the topic and does not probe downstream or classify the failure as downstream -- falsifier: uv run pytest tests/unit/cli/test_delegate_downstream_chain_omn20209.py -q'
+evidence_requirements:
+  - kind: tests
+    description: Focused downstream-chain regression tests.
+    command: uv run pytest tests/unit/cli/test_delegate_downstream_chain_omn20209.py -q
+emergency_bypass:
+  enabled: false
+  justification: ''
+  follow_up_ticket_id: ''
+dod_evidence:
+  - id: dod-omn20764-first-hop-check-repair
+    description: The first-hop test keeps the locus exception, topic, message and no-downstream-probe assertions and explicitly rejects downstream misclassification.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_downstream_chain_omn20209.py -q
+    binds_ac:
+      - AC3

@@ -265,7 +265,9 @@ def test_first_hop_unbound_preserves_existing_refusal(
     asked = _probes(monkeypatch, [(_CHAIN_GROUP,)], first=())
     with pytest.raises(delegate_locus.DelegateLocusRefusedError) as caught:
         _resolve(contract)
-    assert type(caught.value) is delegate_locus.DelegateLocusRefusedError
+    assert not isinstance(
+        caught.value, delegate_locus.DelegateDownstreamChainRefusedError
+    )
     assert "no live consumer group" in str(caught.value)
     assert _COMMAND in str(caught.value)
     assert asked == []
