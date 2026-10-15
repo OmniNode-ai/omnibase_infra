@@ -50,3 +50,20 @@ dod_evidence:
     binds_ac:
       - AC1
       - AC2
+  - id: dod-deploy-overlay-bind-readback
+    description: 'Run three isolated, network-disabled Python containers with the overlay binds taken from the layered infra and prod compose render. Each reads the neutral overlay bytes at BIFROST_LANE_OVERLAY_PATH and refuses a writable bind. No production service is started; this checks the live mount, not full runtime boot.'
+    source: generated
+    checks:
+      - check_type: command
+        check_value: |
+          set -eu
+          probe_dir=$(mktemp -d)
+          probe_prefix="${COMPOSE_PROJECT_NAME:-prod-overlay-probe}-${probe_dir##*/}"
+          trap 'timeout 15 docker rm -f "$probe_prefix-omninode-runtime" "$probe_prefix-runtime-effects" "$probe_prefix-runtime-worker" >&2 || true; rm -rf "$probe_dir"' EXIT
+          uv run python tests/integration/infra/test_prod_lane_overlay_deploy.py --output "$probe_dir/compose.json"
+          for service in omninode-runtime runtime-effects runtime-worker; do
+            docker compose --project-name "${COMPOSE_PROJECT_NAME:-prod-overlay-probe}" --file "$probe_dir/compose.json" run --name "$probe_prefix-$service" --no-deps "$service"
+          done
+    binds_ac:
+      - AC1
+      - AC2
