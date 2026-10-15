@@ -21,6 +21,9 @@ import yaml
 from pydantic import ValidationError
 
 from omnibase_core.models.runtime.model_transport_message import ModelTransportMessage
+from omnibase_infra.handlers.handler_broker_grant_derive import (
+    HandlerBrokerGrantDerive,
+)
 from omnibase_infra.nodes.node_bus_forwarder_effect.models import (
     ModelGatewayForwarderRuntimeConfig,
     ModelGatewayLaneMirrorConfig,
@@ -33,6 +36,7 @@ from omnibase_infra.runtime.gateway_forwarder import (
     _materialize_contract_lane_mirror,
     _materialize_contract_mirror_topics,
     _materialize_lane_broker_credentials,
+    build_gateway_transports,
 )
 
 pytestmark = pytest.mark.unit
@@ -100,6 +104,41 @@ def test_developer_overlay_builds_with_delegation_topics(
     assert lane_mirror.source_lane == "dev-local"
     assert lane_mirror.mirror_lanes == ("dev",)
     assert lane_mirror.topics == tuple(_contract_block()["topic_sets"]["delegation"])
+
+
+def test_developer_overlay_grants_are_derived_per_lane_broker(
+    lane_credential_map: Path,
+) -> None:
+    config = ModelGatewayForwarderRuntimeConfig.model_validate(
+        _developer_runtime_raw(lane_credential_map)
+    )
+    resolved, _ = build_gateway_transports(config)
+    derivation = HandlerBrokerGrantDerive().handle(resolved)
+    grants = {
+        (g.broker, g.resource_type, g.resource, g.operation) for g in derivation.grants
+    }
+    source = "lane.dev-local.kafka.broker"
+    mirror = "lane.dev.kafka.broker"
+    slug = config.forwarder.tenant_identity.tenant_slug
+    assert derivation.principal == config.forwarder.tenant_identity.principal_id
+    assert (
+        source,
+        "GROUP",
+        f"tenant-{slug}-gateway-lane-mirror-source",
+        "READ",
+    ) in grants
+    for topic in _DELEGATION_TOPICS:
+        # The developer's own broker is only read, the lab lane is only written.
+        assert (source, "TOPIC", topic, "READ") in grants
+        assert (source, "TOPIC", topic, "DESCRIBE") in grants
+        assert (source, "TOPIC", topic, "WRITE") not in grants
+        assert (mirror, "TOPIC", topic, "WRITE") in grants
+        assert (mirror, "TOPIC", topic, "DESCRIBE") in grants
+        assert (mirror, "TOPIC", topic, "READ") not in grants
+    # No broker beyond the two named lanes and no hook topic is granted.
+    lane_grants = {g for g in grants if g[0].startswith("lane.")}
+    assert {g[0] for g in lane_grants} == {source, mirror}
+    assert {g[2] for g in lane_grants if g[1] == "TOPIC"} == set(_DELEGATION_TOPICS)
 
 
 def test_undeclared_overlay_mirror_lane_is_refused_at_model_construction(
