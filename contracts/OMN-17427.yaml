@@ -349,6 +349,9 @@ dod_evidence:
       - check_type: test_passes
         check_value: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k "not deployed"
         cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_delegate_named_tests_cli_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC19
   - id: dod-omn-17427-ac20
@@ -366,4 +369,11 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k golden_chain
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-named-tests-runtime-deploy-dispatch
+    description: Hosted-runner in-process runtime smoke -- named node ids and whole-file selections reach a typed metadata-echo handler through the real contract loader and in-memory bus, and its response reaches the persisted receipt artifacts. No model endpoint, deployed container or credentials are required; this does not execute the named tests.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/cli/test_delegate_named_tests_cli_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra
