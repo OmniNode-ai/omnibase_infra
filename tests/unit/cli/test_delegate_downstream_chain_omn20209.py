@@ -265,6 +265,9 @@ def test_first_hop_unbound_preserves_existing_refusal(
     asked = _probes(monkeypatch, [(_CHAIN_GROUP,)], first=())
     with pytest.raises(delegate_locus.DelegateLocusRefusedError) as caught:
         _resolve(contract)
+    # OMN-20764: the first-hop refusal is the typed no-consumer error, and is
+    # still not the downstream-chain refusal this module otherwise pins.
+    assert type(caught.value) is delegate_locus.DelegateNoConsumerRefusedError
     assert not isinstance(
         caught.value, delegate_locus.DelegateDownstreamChainRefusedError
     )

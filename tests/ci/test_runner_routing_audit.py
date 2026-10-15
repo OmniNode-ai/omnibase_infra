@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -1838,6 +1839,89 @@ def test_workflow_texts_batch_reads_45_repositories_in_three_queries(
     assert texts == {
         name: {".github/workflows/ci.yml": f"name: {name}\n"} for name in repo_names
     }
+
+
+def _batch_reader(
+    gateway_fails: Callable[[list[str]], bool],
+) -> tuple[list[list[str]], Callable[..., _GhResult]]:
+    """A fake ``gh api graphql`` that answers HTTP 504 when ``gateway_fails(names)``."""
+    calls: list[list[str]] = []
+
+    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
+        names = [arg.split("=", 1)[1] for arg in args if arg.startswith("n")]
+        calls.append(names)
+        if gateway_fails(names):
+            return _GhResult("", returncode=1, stderr="gh: HTTP 504")
+        data = {
+            f"r{index}": {"object": {"entries": [_blob("ci.yml", f"name: {name}\n")]}}
+            for index, name in enumerate(names)
+        }
+        return _GhResult(json.dumps({"data": data}))
+
+    return calls, fake_run_gh
+
+
+def test_workflow_texts_batch_gateway_timeout_splits_the_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-19998: a batch GitHub answers HTTP 504 is read again in halves.
+
+    CI run 38758500873 on dev 421694574 (job 116503220440) failed because one
+    seventeen-repository workflow read came back ``gh: HTTP 504`` and the pass
+    crashed without a verdict; the scheduled audit fifteen minutes later read
+    the same repositories clean. A gateway timeout on a large response is not
+    an unreadable repository: smaller reads of the same repositories succeed.
+    """
+    module = _load_script()
+    repo_names = [f"private-repo-{i}" for i in range(17)]
+    calls, fake_run_gh = _batch_reader(lambda names: len(names) > 4)
+    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
+
+    texts = module._default_branch_workflow_texts_batch(repo_names)
+
+    assert texts == {
+        name: {".github/workflows/ci.yml": f"name: {name}\n"} for name in repo_names
+    }
+    assert calls[0] == repo_names
+    read = [names for names in calls if len(names) <= 4]
+    assert sorted(name for names in read for name in names) == sorted(repo_names)
+
+
+def test_workflow_texts_batch_gateway_error_on_one_repository_still_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OMN-19998: splitting never turns an unread repository into a clean one."""
+    module = _load_script()
+    calls, fake_run_gh = _batch_reader(lambda names: "private-bad" in names)
+    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
+
+    with pytest.raises(RuntimeError, match=r"private-bad failed: gh: HTTP 504"):
+        module._default_branch_workflow_texts_batch(
+            ["private-one", "private-bad", "private-two"]
+        )
+    assert calls.count(["private-bad"]) == 1 + module.WORKFLOW_READ_GATEWAY_RETRIES
+
+
+@pytest.mark.parametrize(
+    "stderr", ["gh: HTTP 401: Bad credentials", "gh: HTTP 404: Not Found"]
+)
+def test_workflow_texts_batch_non_gateway_failure_is_not_split(
+    monkeypatch: pytest.MonkeyPatch,
+    stderr: str,
+) -> None:
+    """OMN-19998: only a gateway error is retried; other failures raise at once."""
+    module = _load_script()
+    calls: list[list[str]] = []
+
+    def fake_run_gh(args: list[str], timeout: int = 20) -> _GhResult:
+        calls.append(args)
+        return _GhResult("", returncode=1, stderr=stderr)
+
+    monkeypatch.setattr(module, "_run_gh", fake_run_gh)
+
+    with pytest.raises(RuntimeError, match="graphql workflow read"):
+        module._default_branch_workflow_texts_batch(["private-one", "private-two"])
+    assert len(calls) == 1
 
 
 def test_workflow_texts_batch_rate_limit_raises(
