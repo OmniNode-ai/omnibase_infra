@@ -19,12 +19,13 @@ snapshot was never committed) — stale documentation is the failure we are
 ratcheting against.
 
 Exit codes:
-  0 — snapshot present and fresh
-  1 — snapshot missing, stale, or malformed (hard failure — blocks CI)
+  0 — snapshot present and fresh, or stale with --stale-advisory
+  1 — snapshot missing, malformed, or stale without --stale-advisory
 
 Usage:
   python scripts/check_lane_census_age.py
   python scripts/check_lane_census_age.py --max-age-days 7 --snapshot <dir>/census-snapshot.json
+  python scripts/check_lane_census_age.py --stale-advisory  # report age on pull requests
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ def check_census_age(
     max_age_days: int,
     *,
     now: datetime | None = None,
+    stale_is_advisory: bool = False,
 ) -> int:
     """Check that the census snapshot exists and is fresh.
 
@@ -117,17 +119,25 @@ def check_census_age(
 
     if age > max_age:
         age_days = age.days
+        level = "warning" if stale_is_advisory else "error"
+        advisory = (
+            " The age is not a property of the pull request's diff, so on a "
+            "pull request it is reported, not enforced (push and "
+            "workflow_dispatch runs still enforce it)."
+            if stale_is_advisory
+            else ""
+        )
         print(
-            f"::error title=LANE-CENSUS-STALE::Census snapshot is {age_days} days "
+            f"::{level} title=LANE-CENSUS-STALE::Census snapshot is {age_days} days "
             f"old (emitted_at={emitted_raw!r}). Maximum allowed age is "
             f"{max_age_days} days. Run 'bash scripts/lane-census-check.sh "
             f"--snapshot {snapshot_path}' on the lab host and "
             f"commit the result (--snapshot, not --json — see OMN-18606). "
             f"Stale census = undocumented runtime topology "
-            f"(retro B-6 / OMN-13034).",
+            f"(retro B-6 / OMN-13034).{advisory}",
             file=sys.stderr,
         )
-        return 1
+        return 0 if stale_is_advisory else 1
 
     lanes_checked = snapshot.get("lanes_checked", [])
     age_hours = int(age.total_seconds() / 3600)
@@ -153,6 +163,11 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--stale-advisory",
+        action="store_true",
+        help="Report a stale snapshot as a warning without failing (for pull requests)",
+    )
+    parser.add_argument(
         "--max-age-days",
         type=int,
         default=_DEFAULT_MAX_AGE_DAYS,
@@ -170,7 +185,9 @@ def main(argv: list[str] | None = None) -> int:
         except LaneCensusConfigError as exc:
             print(f"::error title=LANE-CENSUS-STALE::{exc}", file=sys.stderr)
             return 1
-    return check_census_age(snapshot, args.max_age_days)
+    return check_census_age(
+        snapshot, args.max_age_days, stale_is_advisory=args.stale_advisory
+    )
 
 
 if __name__ == "__main__":
