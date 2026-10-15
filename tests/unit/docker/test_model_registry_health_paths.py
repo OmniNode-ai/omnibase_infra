@@ -22,10 +22,7 @@ _REGISTRY_PATH = _PROJECT_ROOT / "docker" / "catalog" / "model_registry.yaml"
 # http://192.168.86.201:8001/v1/models` -> exit 7 "Couldn't connect to server".
 # A health_path assertion on a model row that must not exist would force the
 # dead row to be kept purely to satisfy a test.
-_PHASE2_HEALTH_PATHS: dict[str, str] = {
-    "deepseek-r1-32b": "/health",
-    "qwen3-coder-30b": "/health",
-}
+_PHASE2_HEALTH_PATHS: dict[str, str] = {"qwen3-coder-30b": "/health"}
 
 # OMN-16442: model_keys whose endpoint no longer exists on the fleet. Asserted
 # ABSENT so a future edit cannot reintroduce a row pointing at dead hardware.
@@ -69,6 +66,24 @@ def test_phase2_model_has_health_path(
 
 
 @pytest.mark.unit
+def test_local_inference_models_have_health_paths(
+    registry: list[dict[str, object]],
+) -> None:
+    """Check every current inference row without requiring retired hardware."""
+    inference_models = [
+        entry
+        for entry in registry
+        if entry.get("provider") == "local"
+        and entry.get("capabilities") != ["embeddings"]
+    ]
+    assert inference_models, "The catalog must contain a local inference model"
+    for entry in inference_models:
+        assert entry.get("health_path") == "/health", (
+            f"{entry['model_key']!r} must declare health_path='/health'"
+        )
+
+
+@pytest.mark.unit
 def test_retired_model_keys_are_absent(registry: list[dict[str, object]]) -> None:
     """OMN-16442: no catalog row may name a decommissioned endpoint.
 
@@ -82,7 +97,7 @@ def test_retired_model_keys_are_absent(registry: list[dict[str, object]]) -> Non
     referencing one would also break
     tests/unit/contracts/test_topology_registry_consistency.py.
     """
-    present = {model["model_key"] for model in registry}
+    present = {str(model["model_key"]) for model in registry}
     assert not (present & _RETIRED_MODEL_KEYS), (
         "docker/catalog/model_registry.yaml names a retired model_key: "
         f"{sorted(present & _RETIRED_MODEL_KEYS)}"
