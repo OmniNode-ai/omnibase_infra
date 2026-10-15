@@ -375,6 +375,32 @@
         "Status": "Up 2 hours (healthy)"
       }
     ],
+    "github_runners": [
+      {
+        "labels": [
+          "self-hosted",
+          "linux"
+        ],
+        "name": "omninode-deploy-runner",
+        "status": "online"
+      },
+      {
+        "labels": [
+          "self-hosted",
+          "linux"
+        ],
+        "name": "omninode-runner-1",
+        "status": "online"
+      },
+      {
+        "labels": [
+          "self-hosted",
+          "linux"
+        ],
+        "name": "omninode-verify-runner-1",
+        "status": "online"
+      }
+    ],
     "host": "omninode-pc",
     "lane": "dev",
     "networks": [
@@ -396,5 +422,6 @@
   "provenance": "Runner rows are live. Row E2: omninode-deploy-runner ran from the stale 2026-07-21 compose directory /data/omninode/omnibase_infra/docker until lane 201-runner-recreate-4 moved it at 14:52Z; that working_dir is restored on this row. The fleet path is the live value.",
   "source": "knowledge-base-internal beta/plans/2026-09-24-lab-release-sync-plan.md section 1",
   "source_row": "E2",
+  "synthetic_fields": "github_runners (OMN-19414): every runner container registered online, so the runner_offline rule has the collector field it grades.",
   "ticket": "OMN-19411"
 }

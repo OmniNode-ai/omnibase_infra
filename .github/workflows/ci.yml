@@ -1046,6 +1046,12 @@ jobs:
           uv run --frozen pytest tests/unit/scripts/test_lane_census_inventory.py -q
           uv run --frozen pytest tests/ci/test_lab_alarm_omn18867.py -k "restart or shipped_config or manifest" -q
 
+      - name: Census desired-state drift kinds (OMN-19414)
+        run: |
+          uv run --frozen pytest tests/unit/scripts/test_lane_census_plan.py -k "lab_sync or unreadable" -q
+          uv run --frozen pytest tests/unit/scripts/test_lane_census_dry_run.py -q
+          uv run --frozen pytest tests/ci/test_lane_census_desired_state_omn19414.py -q
+
   infra-node-handler-ownership:
     name: Infra Node Handler Ownership
     # OMNI_RUNNER_SELECTOR_V1 — only public-fork PRs use hosted compute.

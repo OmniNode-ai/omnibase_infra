@@ -15,7 +15,9 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -674,8 +676,9 @@ def test_profile_gated_running_is_not_reported_unexpected() -> None:
 # OMN-19411 — lab release sync, wave 0 task T0.2 (seam L0.2: collector <->
 # planner <-> receipt check and lab alarm).
 #
-# The eleven lab-sync kinds are DECLARED in the planner's kind table and are not
-# evaluated yet. Each has one known-bad inventory fixture under
+# The eleven lab-sync kinds are DECLARED in the planner's kind table (T0.2) and
+# evaluated against the generated desired state (T1.2, OMN-19414). Each has one
+# known-bad inventory fixture under
 # tests/fixtures/lab_sync/, captured read-only from .201 on 2026-09-24 (or
 # reconstructed from a recorded incident row, or synthetic, as each fixture's
 # `capture` and `provenance` say), plus one clean fixture.
@@ -692,9 +695,8 @@ def test_profile_gated_running_is_not_reported_unexpected() -> None:
 #   envelope          the planner's stdin envelope, with the collector fields
 #                     each kind needs (LAB_SYNC_FINDING_KINDS envelope_fields)
 #
-# The evaluation tests below are strict xfails pinned to T1.2 (OMN-19414) and
-# T1.3 (OMN-19416). Strict means they block both ways: today they must fail,
-# and the change that makes one pass must delete its marker in the same PR.
+# `desired` is cut down to the fields the fixture exercises; the tests adapt it to
+# the lab-desired-state.v1 shapes the generator emits (`_desired_v1`).
 # ---------------------------------------------------------------------------
 
 _EVENT_PATH = _REPO / "scripts" / "lane_census_event.py"
@@ -757,30 +759,18 @@ def _fixture(path: Path) -> dict[str, Any]:
 
 def _bad_fixture_params() -> list[Any]:
     return [
-        pytest.param(
-            path,
-            id=path.stem.removeprefix("inventory_"),
-            marks=(
-                []
-                if path.stem == "inventory_container_unhealthy"
-                else [
-                    pytest.mark.xfail(
-                        strict=True,
-                        reason="remaining desired-state kinds await evaluation",
-                    )
-                ]
-            ),
-        )
+        pytest.param(path, id=path.stem.removeprefix("inventory_"))
         for path in _lab_sync_fixtures()
         if path.stem != "inventory_clean"
     ]
 
 
-def _plan_with_desired(fixture: dict[str, Any]) -> dict[str, Any]:
-    envelope = dict(fixture["envelope"])
-    envelope["desired_state"] = fixture["desired"]
-    # These historical captures contain runtime containers only; freeze that
-    # topology while still reading their existing services' current bounds.
+def _frozen_manifest() -> dict[str, Any]:
+    """The test manifest with the services the historical captures lack removed.
+
+    These captures contain runtime containers only; freeze that topology while
+    still reading their existing services' current bounds.
+    """
     manifest = copy.deepcopy(MANIFEST)
     manifest["lanes"]["dev"]["services"] = [
         svc
@@ -793,7 +783,113 @@ def _plan_with_desired(fixture: dict[str, Any]) -> dict[str, Any]:
             "omnimarket-projection-api",
         }
     ]
-    plan: dict[str, Any] = PLAN.build_plan(envelope, manifest)
+    return manifest
+
+
+_HOST = "host-a"
+_EXCERPT_PROJECTS = {"dev": "omnibase-infra"}
+
+
+def _desired_v1(fixture: dict[str, Any]) -> Any:
+    """A fixture's `desired` excerpt cut into the lab-desired-state.v1 shapes.
+
+    The excerpts T0.2 captured name containers, brokers and runners as maps. The
+    generator (OMN-19410, OMN-19413) emits arrays of named entries, a broker
+    profile by compose service and runner pools, and that is what the planner
+    reads, so the fixtures are adapted here and never compared in their own
+    shape. A container entry that declares only a restart bound is dropped: the
+    bound lives in the lane manifest (OMN-19416), not in the desired state.
+    Already-v1 input is returned as it is.
+    """
+    desired = fixture["desired"]
+    if desired is None or isinstance(desired, list):
+        return desired
+    if isinstance(desired.get("surface"), dict):
+        return desired
+    envelope = fixture["envelope"]
+    out: dict[str, Any] = {}
+    if "runners" in desired:
+        runners = desired["runners"]
+        host = runners["host"]
+        out["surface"] = {
+            "id": f"{host}/runners",
+            "kind": "runner_fleet",
+            "host": host,
+            "compose_project": "docker",
+            "mode": "reconcile",
+        }
+        pool: dict[str, Any] = {"name": "fleet", "workdir": runners["workdir"]}
+        if "expected_count" in runners:
+            pool["expected_count"] = runners["expected_count"]
+        entries = {
+            name: dict(fields) for name, fields in runners.get("containers", {}).items()
+        }
+        entries.update({name: {} for name in runners.get("names", [])})
+        out["runners"] = {
+            "pools": [pool],
+            "containers": [
+                {"name": name, "pool": "fleet", **fields}
+                for name, fields in sorted(entries.items())
+            ],
+        }
+        return out
+    if "allowed_undeclared" in desired:
+        out["surface"] = {
+            "id": f"{_HOST}/host",
+            "kind": "host",
+            "host": _HOST,
+            "compose_project": None,
+            "mode": "reconcile",
+        }
+        out["allowed_undeclared"] = [
+            {
+                "name": f"admit-{entry['compose_project']}",
+                "match": {"compose_project": entry["compose_project"]},
+                "owner": entry["owner"],
+                "reason": entry["reason"],
+            }
+            for entry in desired["allowed_undeclared"]
+        ]
+        return out
+    out["surface"] = {
+        "id": f"{_HOST}/{desired['surface']}",
+        "kind": "compose_lane",
+        "host": _HOST,
+        "mode": "reconcile",
+    }
+    project = _EXCERPT_PROJECTS.get(desired["surface"])
+    if project:
+        out["surface"]["compose_project"] = project
+    containers = []
+    for name, fields in sorted(desired.get("containers", {}).items()):
+        fields = {k: v for k, v in fields.items() if k != "restart_bound"}
+        if fields:
+            containers.append({"name": name, **fields})
+    out["containers"] = containers
+    if "brokers" in desired:
+        ((container, config),) = desired["brokers"].items()
+        service = next(
+            r["Labels"]["com.docker.compose.service"]
+            for r in envelope["containers"]
+            if r["Names"] == container
+        )
+        out["broker"] = {
+            "service": service,
+            "cluster_config": {k: str(v) for k, v in sorted(config.items())},
+        }
+    return out
+
+
+def _fixture_v1(path: Path) -> dict[str, Any]:
+    fixture = _fixture(path)
+    fixture["desired"] = _desired_v1(fixture)
+    return fixture
+
+
+def _plan_with_desired(fixture: dict[str, Any]) -> dict[str, Any]:
+    envelope = dict(fixture["envelope"])
+    envelope["desired_state"] = _desired_v1(fixture)
+    plan: dict[str, Any] = PLAN.build_plan(envelope, _frozen_manifest())
     return plan
 
 
@@ -815,14 +911,12 @@ def test_lab_sync_kinds_are_new_and_every_kind_has_one_severity() -> None:
     assert set(PLAN.FINDING_KIND_SEVERITY) == set(legacy + lab_sync)
 
 
-def test_remaining_lab_sync_kinds_are_not_evaluated() -> None:
-    """This change evaluates only health and declared restart bounds."""
-    source = (_REPO / "scripts" / "lane_census_plan.py").read_text(encoding="utf-8")
-    body = source.split("FINDING_KIND_SEVERITY: dict[str, str] = {", 1)[1]
-    for kind in _PLAN_LAB_SYNC_KINDS:
-        if kind in {"container_unhealthy", "container_restart_loop"}:
-            continue
-        assert f'"{kind}"' not in body, f"{kind} is evaluated before T1.2"
+def test_every_lab_sync_kind_is_produced_by_a_fixture() -> None:
+    """Each declared kind is evaluated: its own fixture produces it."""
+    produced = set()
+    for path in _lab_sync_fixtures():
+        produced |= {f["kind"] for f in _plan_with_desired(_fixture(path))["findings"]}
+    assert set(_PLAN_LAB_SYNC_KINDS) <= produced, set(_PLAN_LAB_SYNC_KINDS) - produced
 
 
 def test_finding_severity_comes_from_the_kind_table() -> None:
@@ -900,7 +994,7 @@ def test_lab_sync_fixture_raises_no_census_kind_today(path: Path) -> None:
 
 @pytest.mark.parametrize("path", _bad_fixture_params())
 def test_lab_sync_fixture_produces_its_named_kind(path: Path) -> None:
-    """RED until T1.2: every known-bad fixture produces exactly its named finding."""
+    """AC1: every known-bad fixture produces its named finding and no other lab-sync kind."""
     fixture = _fixture(path)
     plan = _plan_with_desired(fixture)
     got = {(f["kind"], f["container"]) for f in plan["findings"]}
@@ -1087,3 +1181,374 @@ def test_schema_version_validator_refuses_a_broken_event(
     mutate(event)
     errors = events.validate_event(event, kind_severity=PLAN.FINDING_KIND_SEVERITY)
     assert any(needle in e for e in errors), errors
+
+
+# ---------------------------------------------------------------------------
+# OMN-19414 — lab release sync, wave 1 task T1.2: the planner evaluates the
+# desired-state kinds. AC1 is the fixture tests above (-k lab_sync) and the
+# exact-set and mutation tests below; AC2 is the `unreadable` tests.
+# ---------------------------------------------------------------------------
+
+_LAB_SYNC_KIND_SET = frozenset(_PLAN_LAB_SYNC_KINDS)
+_CLEAN = _FIXTURES / "inventory_clean.json"
+
+
+def _lab_sync_pairs(plan: dict[str, Any]) -> set[tuple[str, str]]:
+    return {
+        (f["kind"], f["container"])
+        for f in plan["findings"]
+        if f["kind"] in _LAB_SYNC_KIND_SET
+    }
+
+
+def _row(fixture: dict[str, Any], name: str) -> dict[str, Any]:
+    row: dict[str, Any] = next(
+        r for r in fixture["envelope"]["containers"] if r["Names"] == name
+    )
+    return row
+
+
+@pytest.mark.parametrize("path", _bad_fixture_params())
+def test_lab_sync_fixture_produces_exactly_its_findings(path: Path) -> None:
+    """AC1: the findings are the fixture's, no more and no fewer."""
+    fixture = _fixture(path)
+    expected = {(f["kind"], f["container"]) for f in fixture["expected_findings"]}
+    assert _lab_sync_pairs(_plan_with_desired(fixture)) == expected
+
+
+def test_lab_sync_clean_fixture_with_one_revision_changed_names_that_container() -> (
+    None
+):
+    """Positive control for the clean fixture: its silence is the rule, not a blind spot."""
+    fixture = _fixture_v1(_CLEAN)
+    fixture["desired"]["containers"][0]["revision"] = "f" * 40
+    name = fixture["desired"]["containers"][0]["name"]
+    plan = _plan_with_desired(fixture)
+    assert _lab_sync_pairs(plan) == {("revision_mismatch", name)}
+    assert plan["has_drift"] is True
+
+
+@pytest.mark.parametrize(("label_length", "drifted"), [(12, False), (11, True)])
+def test_lab_sync_revision_label_may_be_a_twelve_character_prefix(
+    label_length: int, drifted: bool
+) -> None:
+    fixture = _fixture_v1(_CLEAN)
+    want = fixture["desired"]["containers"][0]
+    _row(fixture, want["name"])["Labels"]["org.opencontainers.image.revision"] = want[
+        "revision"
+    ][:label_length]
+    flagged = bool(_lab_sync_pairs(_plan_with_desired(fixture)))
+    assert flagged is drifted
+
+
+def test_lab_sync_config_hash_compares_a_lane_container() -> None:
+    fixture = _fixture_v1(_CLEAN)
+    want = fixture["desired"]["containers"][0]
+    want["config_hash"] = "0" * 64
+    plan = _plan_with_desired(fixture)
+    assert _lab_sync_pairs(plan) == {("config_hash_mismatch", want["name"])}
+    want["config_hash"] = _row(fixture, want["name"])["Labels"][
+        "com.docker.compose.config-hash"
+    ]
+    assert not _lab_sync_pairs(_plan_with_desired(fixture))
+
+
+def test_lab_sync_package_names_are_compared_in_normalized_form() -> None:
+    fixture = _fixture(_FIXTURES / "inventory_package_version_mismatch.json")
+    name = fixture["expected_findings"][0]["container"]
+    row = _row(fixture, name)
+    row["Packages"] = {"omnibase_core": "0.47.20", "OmniBase.Infra": "0.38.56"}
+    assert not _lab_sync_pairs(_plan_with_desired(fixture))
+    del row["Packages"]["omnibase_core"]
+    plan = _plan_with_desired(fixture)
+    assert _lab_sync_pairs(plan) == {("package_version_mismatch", name)}
+    assert "(not installed)" in plan["findings"][0]["detail"]
+
+
+def test_lab_sync_broker_config_reads_numbers_as_rpk_prints_them() -> None:
+    fixture = _fixture(_FIXTURES / "inventory_broker_config_mismatch.json")
+    fixture["envelope"]["broker_config"]["omnibase-infra-redpanda"] = {
+        "retention_bytes": 1073741824,
+        "segment_fallocation_step": "1048576",
+    }
+    assert not _lab_sync_pairs(_plan_with_desired(fixture))
+
+
+@pytest.mark.parametrize(
+    ("drop", "needle"),
+    [
+        pytest.param("Packages", "Packages", id="packages"),
+        pytest.param("broker_config", "broker_config", id="broker"),
+        pytest.param("github_runners", "github_runners", id="runners"),
+    ],
+)
+def test_lab_sync_declared_facet_the_collector_did_not_supply_is_never_clean(
+    drop: str, needle: str
+) -> None:
+    fixture_name = {
+        "Packages": "inventory_package_version_mismatch.json",
+        "broker_config": "inventory_broker_config_mismatch.json",
+        "github_runners": "inventory_runner_offline.json",
+    }[drop]
+    fixture = _fixture(_FIXTURES / fixture_name)
+    if drop == "Packages":
+        del _row(fixture, fixture["expected_findings"][0]["container"])["Packages"]
+    else:
+        del fixture["envelope"][drop]
+    with pytest.raises(ValueError, match=needle):
+        _plan_with_desired(fixture)
+
+
+def test_lab_sync_runner_workdir_matching_the_fleet_path_is_clean() -> None:
+    fixture = _fixture(_FIXTURES / "inventory_runner_workdir_mismatch.json")
+    workdir = fixture["desired"]["runners"]["workdir"]
+    _row(fixture, "omninode-deploy-runner")["Labels"][
+        "com.docker.compose.project.working_dir"
+    ] = workdir
+    assert not _lab_sync_pairs(_plan_with_desired(fixture))
+
+
+def test_lab_sync_runner_count_names_the_host() -> None:
+    fixture = _fixture(_FIXTURES / "inventory_runner_count_mismatch.json")
+    plan = _plan_with_desired(fixture)
+    (finding,) = [f for f in plan["findings"] if f["kind"] == "runner_count_mismatch"]
+    assert finding["container"] == fixture["desired"]["runners"]["host"]
+    assert "runs 3 runner container(s)" in finding["detail"]
+    assert "declares 4" in finding["detail"]
+
+
+def test_lab_sync_runner_offline_needs_a_running_container() -> None:
+    """A runner whose container is gone is the count's finding, not a second one."""
+    fixture = _fixture(_FIXTURES / "inventory_runner_offline.json")
+    fixture["envelope"]["containers"] = [
+        r
+        for r in fixture["envelope"]["containers"]
+        if r["Names"] != "omninode-runner-1"
+    ]
+    kinds = {kind for kind, _ in _lab_sync_pairs(_plan_with_desired(fixture))}
+    assert kinds == {"runner_count_mismatch"}
+
+
+def test_lab_sync_allowed_undeclared_admits_its_class() -> None:
+    fixture = _fixture_v1(_FIXTURES / "inventory_undeclared_container.json")
+    fixture["desired"]["allowed_undeclared"] = [
+        {
+            "name": "dockerhub-mirror",
+            "match": {"compose_project": "dockerhub-mirror"},
+            "owner": "lab-operator",
+            "reason": "pull-through registry mirror",
+        }
+    ]
+    assert not _lab_sync_pairs(_plan_with_desired(fixture))
+
+
+def test_lab_sync_allowed_undeclared_age_bound_needs_an_age_the_collector_read() -> (
+    None
+):
+    fixture = _fixture_v1(_FIXTURES / "inventory_undeclared_container.json")
+    fixture["desired"]["allowed_undeclared"] = [
+        {
+            "name": "dockerhub-mirror",
+            "match": {"compose_project": "dockerhub-mirror", "max_age_seconds": 60},
+            "owner": "lab-operator",
+            "reason": "pull-through registry mirror",
+        }
+    ]
+    expected = {("undeclared_container", "dockerhub-mirror")}
+    assert _lab_sync_pairs(_plan_with_desired(fixture)) == expected
+    _row(fixture, "dockerhub-mirror")["AgeSeconds"] = 30
+    assert not _lab_sync_pairs(_plan_with_desired(fixture))
+    _row(fixture, "dockerhub-mirror")["AgeSeconds"] = 61
+    assert _lab_sync_pairs(_plan_with_desired(fixture)) == expected
+
+
+def test_lab_sync_undeclared_is_graded_only_when_a_host_surface_owns_the_list() -> None:
+    fixture = _fixture_v1(_FIXTURES / "inventory_undeclared_container.json")
+    fixture["desired"]["surface"] = {
+        "id": f"{_HOST}/omnibase-infra",
+        "kind": "compose_lane",
+        "host": _HOST,
+        "compose_project": "omnibase-infra",
+        "mode": "reconcile",
+    }
+    fixture["desired"]["allowed_undeclared"] = []
+    assert not _lab_sync_pairs(_plan_with_desired(fixture))
+
+
+def test_lab_sync_admitted_container_restarting_past_the_bound_is_a_loop() -> None:
+    fixture = _fixture(_FIXTURES / "inventory_container_restart_loop.json")
+    row = _row(fixture, "omnimarket-projection-registration")
+    row["RestartCount"] = PLAN.DEFAULT_ALLOWED_UNDECLARED_RESTART_BOUND
+    assert not _lab_sync_pairs(_plan_with_desired(fixture))
+    row["RestartCount"] += 1
+    assert _lab_sync_pairs(_plan_with_desired(fixture)) == {
+        ("container_restart_loop", "omnimarket-projection-registration")
+    }
+
+
+def test_lab_sync_list_of_documents_is_graded_as_one_state() -> None:
+    fixture = _fixture_v1(_FIXTURES / "inventory_undeclared_container.json")
+    clean = _fixture_v1(_CLEAN)
+    fixture["desired"] = [clean["desired"], fixture["desired"]]
+    fixture["envelope"]["containers"] = [
+        *clean["envelope"]["containers"],
+        _row(
+            _fixture(_FIXTURES / "inventory_undeclared_container.json"),
+            "dockerhub-mirror",
+        ),
+    ]
+    assert _lab_sync_pairs(_plan_with_desired(fixture)) == {
+        ("undeclared_container", "dockerhub-mirror")
+    }
+
+
+# --- AC2: an unreadable desired state is a finding, never zero findings -------
+
+
+def test_unreadable_null_desired_state_is_critical_drift_not_clean() -> None:
+    plan = _plan_with_desired(
+        _fixture(_FIXTURES / "inventory_desired_state_unreadable.json")
+    )
+    (finding,) = [
+        f for f in plan["findings"] if f["kind"] == "desired_state_unreadable"
+    ]
+    assert finding["severity"] == "critical"
+    assert finding["container"] == "desired_state"
+    assert plan["has_drift"] is True
+    assert plan["lab_sync_evaluated"] is True
+
+
+@pytest.mark.parametrize("desired", [None, [], {}, "x", 5, [1], [{}, 3]], ids=repr)
+def test_unreadable_malformed_desired_states(desired: Any) -> None:
+    envelope = dict(_fixture(_CLEAN)["envelope"])
+    envelope["desired_state"] = desired
+    plan = PLAN.build_plan(envelope, _frozen_manifest())
+    kinds = [f["kind"] for f in plan["findings"]]
+    if desired == {}:
+        # An empty document is a document: nothing declared, nothing to compare.
+        assert kinds == []
+    else:
+        assert kinds == ["desired_state_unreadable"], plan["findings"]
+
+
+def test_unreadable_reason_rides_in_the_detail() -> None:
+    envelope = dict(_fixture(_CLEAN)["envelope"])
+    envelope["desired_state"] = None
+    envelope["desired_state_error"] = "containers[2].config_hash: not a sha256"
+    plan = PLAN.build_plan(envelope, _frozen_manifest())
+    assert "containers[2].config_hash: not a sha256" in plan["findings"][0]["detail"]
+
+
+def test_unreadable_envelope_without_a_desired_state_key_is_not_evaluated() -> None:
+    """Before the driver supplies a state, the plan says the kinds were not graded."""
+    envelope = dict(_fixture(_CLEAN)["envelope"])
+    plan = PLAN.build_plan(envelope, _frozen_manifest())
+    assert plan["lab_sync_evaluated"] is False
+    assert not _lab_sync_pairs(plan)
+
+
+def _run_planner(
+    tmp_path: Path, envelope: dict[str, Any], desired_state: str | None
+) -> subprocess.CompletedProcess[str]:
+    import yaml
+
+    manifest = tmp_path / "manifest.yaml"
+    manifest.write_text(yaml.safe_dump(_frozen_manifest()), encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k != "LANE_CENSUS_DESIRED_STATE"}
+    env["LANE_MANIFEST"] = str(manifest)
+    if desired_state is not None:
+        env["LANE_CENSUS_DESIRED_STATE"] = desired_state
+    return subprocess.run(
+        [sys.executable, str(_PLAN_PATH)],
+        input=json.dumps(envelope),
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+
+def test_unreadable_run_with_the_desired_state_file_removed_exits_nonzero(
+    tmp_path: Path,
+) -> None:
+    """AC2: the file is gone; the run fails and names desired_state_unreadable."""
+    envelope = dict(_fixture(_CLEAN)["envelope"])
+    result = _run_planner(tmp_path, envelope, str(tmp_path / "removed.json"))
+    assert result.returncode == PLAN.EXIT_DESIRED_STATE_UNREADABLE != 0
+    plan = json.loads(result.stdout)
+    assert [f["kind"] for f in plan["findings"]] == ["desired_state_unreadable"]
+    assert "removed.json" in plan["findings"][0]["detail"]
+    assert plan["has_drift"] is True
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        pytest.param("{", id="truncated"),
+        pytest.param("[]", id="not-an-object"),
+        pytest.param(
+            (_FIXTURES / "desired_state_missing_field.json").read_text(),
+            id="missing-field",
+        ),
+        pytest.param(
+            (_FIXTURES / "desired_state_extra_field.json").read_text(),
+            id="extra-field",
+        ),
+    ],
+)
+def test_unreadable_run_with_a_refused_document_exits_nonzero(
+    tmp_path: Path, document: str
+) -> None:
+    path = tmp_path / "desired.json"
+    path.write_text(document, encoding="utf-8")
+    result = _run_planner(tmp_path, dict(_fixture(_CLEAN)["envelope"]), str(path))
+    assert result.returncode == PLAN.EXIT_DESIRED_STATE_UNREADABLE
+    plan = json.loads(result.stdout)
+    assert [f["kind"] for f in plan["findings"]] == ["desired_state_unreadable"]
+
+
+def test_unreadable_run_with_an_empty_directory_exits_nonzero(tmp_path: Path) -> None:
+    empty = tmp_path / "desired"
+    empty.mkdir()
+    result = _run_planner(tmp_path, dict(_fixture(_CLEAN)["envelope"]), str(empty))
+    assert result.returncode == PLAN.EXIT_DESIRED_STATE_UNREADABLE
+
+
+def test_unreadable_positive_control_a_valid_document_exits_zero(
+    tmp_path: Path,
+) -> None:
+    """The same run with a readable state exits 0 and grades the kinds."""
+    path = tmp_path / "desired.json"
+    path.write_text(
+        (_FIXTURES / "desired_state_valid_host.json").read_text(), encoding="utf-8"
+    )
+    result = _run_planner(tmp_path, dict(_fixture(_CLEAN)["envelope"]), str(path))
+    assert result.returncode == 0, result.stderr
+    plan = json.loads(result.stdout)
+    assert plan["lab_sync_evaluated"] is True
+    assert plan["findings"] == []
+
+
+def test_unreadable_run_with_no_desired_state_named_keeps_the_old_exit(
+    tmp_path: Path,
+) -> None:
+    result = _run_planner(tmp_path, dict(_fixture(_CLEAN)["envelope"]), None)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["lab_sync_evaluated"] is False
+
+
+def test_unreadable_run_reads_a_directory_of_documents(tmp_path: Path) -> None:
+    directory = tmp_path / "desired"
+    directory.mkdir()
+    for name in (
+        "desired_state_valid_host.json",
+        "desired_state_valid_runner_fleet.json",
+    ):
+        (directory / name).write_text((_FIXTURES / name).read_text(), encoding="utf-8")
+    envelope = dict(_fixture(_CLEAN)["envelope"])
+    result = _run_planner(tmp_path, envelope, str(directory))
+    assert result.returncode == 0, result.stderr
+    kinds = {f["kind"] for f in json.loads(result.stdout)["findings"]}
+    # The fleet document declares runners the clean inventory does not run.
+    assert "runner_count_mismatch" in kinds
+    assert "desired_state_unreadable" not in kinds
