@@ -12,10 +12,18 @@ requirements:
     acceptance:
       - id: AC1
         statement: 'AC1: an onex delegate call whose request topic has no live consumer ends within its budget with a typed terminal naming the topic and the absent consumer, not a bare timeout -- falsifier: uv run pytest tests -k delegate_no_consumer_typed_terminal'
+  - id: req-first-hop-refusal-check
+    statement: The first-hop regression rejects a downstream-chain refusal while accepting a more specific locus refusal.
+    acceptance:
+      - id: AC3
+        statement: 'A missing first-hop consumer raises a locus refusal naming the topic and does not probe downstream or classify the failure as downstream -- falsifier: uv run pytest tests/unit/cli/test_delegate_downstream_chain_omn20209.py -q'
 evidence_requirements:
   - kind: tests
     description: The typed-terminal suite passes.
     command: uv run pytest tests/unit/cli/test_delegate_no_consumer_typed_terminal_omn20764.py -q
+  - kind: tests
+    description: Focused downstream-chain regression tests.
+    command: uv run pytest tests/unit/cli/test_delegate_downstream_chain_omn20209.py -q
 emergency_bypass:
   enabled: false
   justification: ''
@@ -54,3 +62,11 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC1
+  - id: dod-omn20764-first-hop-check-repair
+    description: The first-hop test keeps the locus exception, topic, message and no-downstream-probe assertions and explicitly rejects downstream misclassification.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_downstream_chain_omn20209.py -q
+    binds_ac:
+      - AC3
