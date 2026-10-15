@@ -1,0 +1,45 @@
+# SPDX-FileCopyrightText: 2025 OmniNode.ai Inc.
+# SPDX-License-Identifier: MIT
+name: node_declared_state_reconcile_orchestrator
+contract_name: node_declared_state_reconcile_orchestrator
+node_name: node_declared_state_reconcile_orchestrator
+contract_version: {major: 1, minor: 0, patch: 0}
+node_version: {major: 1, minor: 0, patch: 0}
+node_type: ORCHESTRATOR_GENERIC
+description: >
+  Run one reconcile round for one declared-state surface: observe, diff against the declaration, and in apply mode apply what the overlay policy allows. Every round observes first and plans from what it observed, so a hand edit made after a successful apply is repaired by the next round. No topic is declared yet; the bring-up, boot and schedule triggers that publish the reconcile command are plan task C7.
+
+input_model:
+  name: ModelDeclaredStateReconcileRequest
+  module: omnibase_infra.models.declared_state.model_declared_state_reconcile_request
+  description: The declaration of one surface, the mode, the apply policy and the round id.
+output_model:
+  name: ModelDeclaredStateReconcileResult
+  module: omnibase_infra.models.declared_state.model_declared_state_reconcile_result
+  description: The planned operation count and, when the round tried, the apply outcome.
+capabilities:
+  - name: declared_state.reconcile
+    description: Observe, diff and apply one surface.
+handler_routing:
+  routing_strategy: payload_type_match
+  handlers:
+    - event_model:
+        name: ModelDeclaredStateReconcileRequest
+        module: omnibase_infra.models.declared_state.model_declared_state_reconcile_request
+      handler:
+        name: HandlerDeclaredStateReconcile
+        module: omnibase_infra.handlers.handler_declared_state_reconcile
+      output_events:
+        - ModelDeclaredStateReconcileResult
+dependencies:
+  - name: protocol_declared_state_observer
+    type: protocol
+    class_name: ProtocolDeclaredStateObserver
+    module: omnibase_infra.protocols.protocol_declared_state_observer
+    description: The observe effect (plan task C3) reads each surface kind.
+metadata:
+  description: Reconcile one declared-state surface by observing, diffing and applying within policy.
+  author: OmniNode Team
+  license: MIT
+  tags: [orchestrator, declared-state, reconcile]
+  related_tickets: [OMN-19944, OMN-17427]
