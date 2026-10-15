@@ -17,15 +17,20 @@ requirements:
         statement: "AC3: when the change-control copy is absent, the product repository's merged contracts/<ticket>.yaml is accepted as the evidence source, and a contract on two product repositories is refused rather than chosen between -- falsifier: the product-contract tests fail against the merge-base handler"
       - id: AC4
         statement: "AC4: a ticket with no merged companion and no product contract still refuses with SKIPPED_NO_OFFER_COMPANION, and a commit that only names the ticket in passing is not its companion -- falsifier: the negative-control tests fail when the title binding filter is removed"
+  - id: req-omn21146-dispatch-core-floor
+    statement: The frozen dispatch environment must satisfy the core floor required by the current omnimarket provider, including its session and tier context factors.
+    acceptance:
+      - id: AC5
+        statement: "AC5: the frozen runtime installs omnibase-core 0.47.44 and dependency-injector 4.49.1 and accepts conversation_tail, lane_rules and tail_summary context factors -- falsifier: the same runtime probe fails against the merge base lock, which installs core 0.47.39"
   - id: req-omn21146-dev-lane-lag-bound
     statement: A merged runtime change reaches the dev lane within a bound declared in the routing table, and a lane that lags past it says so on the bus and on the deploy agent's HTTP surface.
     acceptance:
-      - id: AC5
-        statement: "AC5: a lane behind a followed repository's dev head for its instance's declared flags.max_dev_lag_minutes converges without waiting out the idle period or the C15/C16 probe windows, and still never beside a job, under a freeze, or twice on one head -- falsifier: the overdue decision tests fail against the merge-base idle_converge.decide, which refuses PROBE_WINDOW"
       - id: AC6
-        statement: "AC6: an overdue lane publishes ModelDevLaneDrift on onex.evt.deploy.dev-lane-drift.v1 naming the running image, the running ref, the dev head and the lag, again every 15 minutes while overdue and once cleared, and GET /dev-lane-drift serves the latest -- falsifier: the agent drift tests fail against the merge-base agent"
+        statement: "AC6: a lane behind a followed repository's dev head for its instance's declared flags.max_dev_lag_minutes converges without waiting out the idle period or the C15/C16 probe windows, and still never beside a job, under a freeze, or twice on one head -- falsifier: the overdue decision tests fail against the merge-base idle_converge.decide, which refuses PROBE_WINDOW"
       - id: AC7
-        statement: "AC7: the committed routing table declares max_dev_lag_minutes for the default instance and every instance a route names, and a non-positive bound refuses the table -- falsifier: the contract-data tests fail against the merge-base table"
+        statement: "AC7: an overdue lane publishes ModelDevLaneDrift on onex.evt.deploy.dev-lane-drift.v1 naming the running image, the running ref, the dev head and the lag, again every 15 minutes while overdue and once cleared, and GET /dev-lane-drift serves the latest -- falsifier: the agent drift tests fail against the merge-base agent"
+      - id: AC8
+        statement: "AC8: the committed routing table declares max_dev_lag_minutes for the default instance and every instance a route names, and a non-positive bound refuses the table -- falsifier: the contract-data tests fail against the merge-base table"
 evidence_requirements:
   - kind: tests
     description: The offer-path unit tests run real git repositories for the clone, the watcher state file and a gateway double shaped like onex scm's answers.
@@ -94,7 +99,17 @@ dod_evidence:
       - AC1
       - AC3
       - AC4
-  - id: dod-omn21146-ac5-overdue-converge
+  - id: dod-omn21146-deploy-dispatch-core-floor
+    description: A hosted runner installs the frozen runtime and reads back the installed core and injector versions, then constructs the session and tier factors consumed by omnimarket. The merge-base runtime lacks these factors and carries the older versions.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: >-
+          uv run --frozen python -c 'from importlib.metadata import version; from omnibase_core.enums.enum_context_factor import EnumContextFactor; factors = ("conversation_tail", "lane_rules", "tail_summary"); assert tuple(EnumContextFactor(value).value for value in factors) == factors; assert version("omnibase-core") == "0.47.44", version("omnibase-core"); assert version("dependency-injector") == "4.49.1", version("dependency-injector"); print("dispatch runtime readback:", version("omnibase-core"), version("dependency-injector"), factors)'
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC5
+  - id: dod-omn21146-ac6-overdue-converge
     description: An overdue lane converges inside a probe window and keeps every other bound.
     source: manual
     checks:
@@ -102,8 +117,8 @@ dod_evidence:
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_lag_bound_omn21146.py -q -k "TestTheIncident or TestOverdueKeepsEveryOtherBound or TestBehindSince"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC5
-  - id: dod-omn21146-ac6-drift-event
+      - AC6
+  - id: dod-omn21146-ac7-drift-event
     description: The drift event and the HTTP surface carry the image, the refs and the lag.
     source: manual
     checks:
@@ -111,8 +126,8 @@ dod_evidence:
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_lag_bound_omn21146.py -q -k "TestDrift or TestInTheAgent or health_surface"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC6
-  - id: dod-omn21146-ac7-bound-is-data
+      - AC7
+  - id: dod-omn21146-ac8-bound-is-data
     description: The routing table declares the bound per instance and refuses a bad one.
     source: manual
     checks:
@@ -120,7 +135,7 @@ dod_evidence:
         check_value: uv run --project scripts/deploy-agent --extra dev pytest scripts/deploy-agent/tests/unit/test_dev_lane_lag_bound_omn21146.py -q -k TestTheBoundIsContractData
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC7
+      - AC8
   - id: dod-omn21146-deploy-lag-bound-shipped
     description: The routing table at the merged head declares the dev lanes' lag bound the deploy agent reads at its idle self-update.
     source: manual
@@ -129,4 +144,4 @@ dod_evidence:
         check_value: "git show HEAD:config/deploy_lane_routing.yaml | grep -cE '^ +max_dev_lag_minutes: [1-9][0-9]*$'"
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
-      - AC7
+      - AC8

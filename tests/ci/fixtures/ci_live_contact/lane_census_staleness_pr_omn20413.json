@@ -1,0 +1,18 @@
+{
+  "_provenance": {
+    "source": "https://github.com/OmniNode-ai/omnibase_infra/actions/runs/38752612021/job/116514864923",
+    "captured_utc": "2026-10-15T20:12:41Z",
+    "note": "Failing step 'Check census snapshot staleness' of check 'Lane Census Staleness + E-5 Env Drift (OMN-13034)', attempt 2, on pull request omnibase_infra#4988 at head b45c0d36da05a376ba21f73c798cc2829bee2dab; read by the landing controller host (OMN-20911)."
+  },
+  "response": {
+    "event_name": "pull_request",
+    "pull_request": 4988,
+    "head_sha": "b45c0d36da05a376ba21f73c798cc2829bee2dab",
+    "check": "Lane Census Staleness + E-5 Env Drift (OMN-13034)",
+    "conclusion": "failure",
+    "completed_at": "2026-10-15T15:37:10Z",
+    "max_age_days": 7,
+    "census_emitted_at": "2026-10-07T18:52:47.150843+00:00",
+    "error_line": "##[error]Census snapshot is 7 days old (emitted_at='2026-10-07T18:52:47.150843+00:00'). Maximum allowed age is 7 days."
+  }
+}

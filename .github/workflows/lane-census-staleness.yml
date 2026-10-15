@@ -21,9 +21,10 @@
 #
 # What this checks:
 #   1. STALENESS: the committed census-snapshot.json must be present and
-#      have an emitted_at timestamp within MAX_AGE_DAYS (7) of the PR merge date.
-#      A census older than 7 days means the .201 timer stopped or the snapshot
-#      was never committed — either is a documentation failure.
+#      valid. On pull_request, age beyond MAX_AGE_DAYS (7) is reported as a
+#      warning because the census lives in the private overlay and no PR here
+#      can move it. Push to dev/main and workflow_dispatch still fail on a
+#      stale census.
 #
 #   2. CENSUS DRIFT (OMN-18949): the committed snapshot must report ZERO
 #      drift (AC-1), and the committed snapshot and manifest must describe the
@@ -129,13 +130,18 @@ jobs:
       - name: Check census snapshot staleness
         env:
           MAX_AGE_DAYS: ${{ inputs.max_age_days || '7' }}
+          STALE_ADVISORY: ${{ github.event_name == 'pull_request' }}
         run: |
           echo "================================================================"
           echo "Lane Census Staleness Gate — OMN-13034 (retro B-6)"
-          echo "A census > ${MAX_AGE_DAYS} days old fails this gate."
+          echo "A census > ${MAX_AGE_DAYS} days old warns on pull requests and fails otherwise."
           echo "================================================================"
+          args=()
+          if [[ "${STALE_ADVISORY}" == "true" ]]; then
+            args+=(--stale-advisory)
+          fi
           uv run python scripts/check_lane_census_age.py \
-            --max-age-days "${MAX_AGE_DAYS}"
+            --max-age-days "${MAX_AGE_DAYS}" "${args[@]}"
 
       - name: Check census-vs-manifest drift (OMN-18949)
         run: |
