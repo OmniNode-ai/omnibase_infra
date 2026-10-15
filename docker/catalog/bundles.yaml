@@ -69,6 +69,8 @@ local:
     - postgres
     - redpanda
     - redpanda-partition-cap
+    # OMN-20820: the broker requires authentication; see the manifest.
+    - redpanda-local-sasl
     - valkey
     - forward-migration
     - migration-gate
@@ -105,6 +107,25 @@ local:
   extra_depends_on:
     projection-api:
       omninode-runtime: service_healthy
+      redpanda-local-sasl: service_completed_successfully
+    # OMN-20820: every broker client of this bundle (each runtime-layer entry,
+    # which is what `inject_env` below reaches) starts only after the one-shot
+    # has created the superuser and turned SASL on, so none of them opens an
+    # anonymous session against a broker that is about to refuse it.
+    omninode-runtime:
+      redpanda-local-sasl: service_completed_successfully
+    runtime-effects:
+      redpanda-local-sasl: service_completed_successfully
+    omnimarket-projection-delegation:
+      redpanda-local-sasl: service_completed_successfully
+    omnimarket-projection-tenant-credentials:
+      redpanda-local-sasl: service_completed_successfully
+    omnimarket-projection-llm-cost:
+      redpanda-local-sasl: service_completed_successfully
+    consumer-health-projection:
+      redpanda-local-sasl: service_completed_successfully
+    tenant-projection-writer:
+      redpanda-local-sasl: service_completed_successfully
   includes: []
   inject_env:
     ONEX_ENVIRONMENT: local
@@ -117,6 +138,13 @@ local:
     # registered non-lab lane: the lab-scoped nodes are excluded without error.
     ONEX_RUNTIME_LANE: dogfood
     ONEX_TOPIC_PROVISIONER_MAX_PARTITIONS: "1"
+    # OMN-20820: the broker requires SASL/SCRAM; every client authenticates as
+    # the superuser redpanda-local-sasl creates. The password is the operator's,
+    # in the env file, and is referenced here, never inlined.
+    KAFKA_SECURITY_PROTOCOL: SASL_PLAINTEXT
+    KAFKA_SASL_MECHANISM: SCRAM-SHA-256
+    KAFKA_SASL_USERNAME: onex-local
+    KAFKA_SASL_PASSWORD: "${REDPANDA_SUPERUSER_PASSWORD:?REDPANDA_SUPERUSER_PASSWORD required}"
     ONEX_RUNTIME_CONTRACTS_DIR: /app/contracts/runtime
     # Wiring strictness is the dev lane's: unset, so a handler the resolver
     # cannot construct is quarantined and reported, not fatal. Measured on the
@@ -175,6 +203,7 @@ local:
     - ONEX_LOCAL_BIFROST_OVERLAY
     - OMNINODE_RUNTIME_PASSWORD
     - TENANT_PROJECTION_WRITER_PASSWORD
+    - REDPANDA_SUPERUSER_PASSWORD
 runtime-integrations:
   description: "Runtime external-integration services — Linear, CI, Slack webhooks (OMN-9332)"
   services:

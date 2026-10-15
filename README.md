@@ -126,14 +126,14 @@ The `local` catalog bundle runs postgres, redpanda, valkey, the migrations and
 your own ONEX runtime (main and effects, with omnimarket installed) in
 containers, under the compose project `omnibase-infra-local`. It needs Docker
 with Compose v2, `uv`, `make`, `openssl` and `git`, and no credentials beyond
-two passwords it generates. It publishes host ports 5436, 19092, 16379, 8085
+five passwords it generates. It publishes host ports 5436, 19092, 16379, 8085
 and 8086.
 
 ```bash
 git clone https://github.com/OmniNode-ai/omnibase_infra.git
 cd omnibase_infra
 
-# Writes ~/.omnibase/local.env (two generated passwords) and
+# Writes ~/.omnibase/local.env (five generated passwords) and
 # ~/.omnibase/local.bifrost.yaml (the model your runtime delegates to).
 make local-env
 # Edit the ONE line marked model_endpoint in ~/.omnibase/local.bifrost.yaml:
@@ -145,6 +145,7 @@ make local-env
 make tenant-local
 make up-local        # builds the runtime image and boots everything
 make status-local    # migration gate, both runtime /health bodies, delegate consumer
+make check-sasl-local  # the broker refuses anonymous clients and accepts onex-local
 make delegate-local PROMPT="Reply with exactly one word: hello"
 make down-local      # stop (keeps data); make down-local-volumes deletes it
 ```
@@ -154,6 +155,12 @@ A cold boot provisions the broker's topics before the main runtime reports
 and the path of the run's `receipt.json` inside the effects container
 (`docker exec omnibase-infra-local-runtime-effects cat <path>`). The delegation
 is projected to `delegation_events` in the local `omnidash_analytics` database.
+The local broker requires SASL/SCRAM: `redpanda-local-sasl` creates one
+superuser, `onex-local`, with the `REDPANDA_SUPERUSER_PASSWORD` that
+`make local-env` wrote, and every client of the stack authenticates as it. From
+the host, `rpk` needs that user and password; an anonymous client is refused.
+An env file from before this change gets the new password added (one line, file
+mode set to 0600) the next time `make local-env` or `make up-local` runs.
 Every service connects as the postgres superuser, so row-level security is not
 exercised by this profile.
 

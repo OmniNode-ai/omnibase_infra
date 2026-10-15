@@ -10,6 +10,8 @@ lab dependency, a shared Docker object name, or a second env source.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -39,14 +41,15 @@ _OVERLAY_TEMPLATE = _REPO / "docker" / "lane-overlays" / "local.bifrost.example.
 _PROJECT = "omnibase-infra-local"
 _OVERLAY_PIN = "/app/config/delegation/local.bifrost.yaml"
 
-#: Every name the laptop profile may ask its operator for. Four local passwords
-#: (make local-env generates all four) and the path of the model overlay;
-#: nothing else.
+#: Every name the laptop profile may ask its operator for. Five local passwords
+#: (make local-env generates all five; the fifth is the broker superuser's,
+#: OMN-20820) and the path of the model overlay; nothing else.
 _LAPTOP_REQUIRED_ENV = {
     "POSTGRES_PASSWORD",
     "VALKEY_PASSWORD",
     "OMNINODE_RUNTIME_PASSWORD",
     "TENANT_PROJECTION_WRITER_PASSWORD",
+    "REDPANDA_SUPERUSER_PASSWORD",
     "ONEX_LOCAL_BIFROST_OVERLAY",
 }
 
@@ -68,7 +71,7 @@ _FORBIDDEN_FRAGMENTS = (
 )
 
 
-def test_laptop_required_env_is_four_passwords_and_the_overlay_path() -> None:
+def test_laptop_required_env_is_five_passwords_and_the_overlay_path() -> None:
     resolved = CatalogResolver(catalog_dir=_CATALOG_DIR).resolve(["local"])
     assert resolved.required_env == _LAPTOP_REQUIRED_ENV
 
@@ -1079,3 +1082,469 @@ def test_unknown_dependency_condition_is_refused(tmp_path: Path) -> None:
     # first and this test passed with the condition check removed).
     with pytest.raises(ValueError, match="'service_happy' is not a valid"):
         resolver.resolve(["probe"])
+
+
+# --- OMN-20820: SASL on the laptop broker (bus-mint plan T1) -------------------
+#
+# The laptop broker used to accept any client, so a developer's stack proved
+# nothing about the authenticated path every staging and production client
+# takes. `redpanda-local-sasl` creates one SCRAM superuser, enables SASL and
+# proves the refusal; every Kafka client of the bundle authenticates as that
+# user and waits for the one-shot to finish.
+
+_SASL_SERVICE = "redpanda-local-sasl"
+_SASL_USER = "onex-local"
+_SASL_ENV_NAMES = (
+    "KAFKA_SECURITY_PROTOCOL",
+    "KAFKA_SASL_MECHANISM",
+    "KAFKA_SASL_USERNAME",
+    "KAFKA_SASL_PASSWORD",
+)
+_SASL_COMPLETED = {"condition": "service_completed_successfully"}
+
+
+def _sasl_clients(compose: dict[str, object]) -> list[str]:
+    """Every service of the render whose environment names the broker."""
+    clients = []
+    for name, svc in _services(compose).items():
+        env = svc.get("environment", {})
+        assert isinstance(env, dict)
+        if any("redpanda:9092" in str(value) for value in env.values()):
+            clients.append(name)
+    return sorted(clients)
+
+
+def test_local_render_has_the_redpanda_local_sasl_one_shot_sasl() -> None:
+    svc = _services(_render("local"))[_SASL_SERVICE]
+    assert svc["restart"] == "no"
+    assert svc["container_name"] == f"{_PROJECT}-{_SASL_SERVICE}"
+    assert svc["entrypoint"] == ["/bin/sh", "-c"]
+    assert "healthcheck" not in svc
+    depends_on = svc["depends_on"]
+    assert isinstance(depends_on, dict)
+    assert depends_on["redpanda"] == {"condition": "service_healthy"}
+    env = svc["environment"]
+    assert isinstance(env, dict)
+    assert env["KAFKA_SASL_USERNAME"] == _SASL_USER
+    assert str(env["KAFKA_SASL_PASSWORD"]).startswith("${REDPANDA_SUPERUSER_PASSWORD:?")
+
+
+def test_local_kafka_clients_carry_the_four_sasl_variables_and_wait_sasl() -> None:
+    compose = _render("local")
+    services = _services(compose)
+    clients = _sasl_clients(compose)
+    runtime_layer = sorted(
+        name
+        for name, m in CatalogResolver(catalog_dir=_CATALOG_DIR)
+        .resolve(["local"])
+        .manifests.items()
+        if m.layer == EnumInfraLayer.RUNTIME
+    )
+    # Every runtime-layer service of the bundle is a broker client.
+    assert clients == runtime_layer
+    assert len(clients) >= 7
+    for name in clients:
+        env = services[name]["environment"]
+        assert isinstance(env, dict)
+        assert env["KAFKA_SECURITY_PROTOCOL"] == "SASL_PLAINTEXT", name
+        assert env["KAFKA_SASL_MECHANISM"] == "SCRAM-SHA-256", name
+        assert env["KAFKA_SASL_USERNAME"] == _SASL_USER, name
+        assert str(env["KAFKA_SASL_PASSWORD"]).startswith(
+            "${REDPANDA_SUPERUSER_PASSWORD:?"
+        ), name
+        depends_on = services[name]["depends_on"]
+        assert isinstance(depends_on, dict)
+        assert depends_on[_SASL_SERVICE] == _SASL_COMPLETED, name
+        # The broker wait the service already had is kept.
+        assert depends_on["redpanda"] == {"condition": "service_healthy"}, name
+
+
+def test_local_sasl_variables_stay_off_everything_that_is_not_a_client_sasl() -> None:
+    """Positive control: the check above can fail, and infrastructure is untouched."""
+    services = _services(_render("local"))
+    for name in ("postgres", "redpanda", "valkey", "forward-migration"):
+        env = services[name].get("environment", {})
+        assert isinstance(env, dict)
+        assert not [k for k in env if k in _SASL_ENV_NAMES], name
+    assert _SASL_SERVICE not in services["redpanda"].get("depends_on", {})
+
+
+def test_local_sasl_password_is_never_rendered_inline_sasl() -> None:
+    rendered = yaml.safe_dump(_render("local"))
+    assert "REDPANDA_SUPERUSER_PASSWORD" in rendered
+    for match in re.finditer(r"KAFKA_SASL_PASSWORD: (.*)", rendered):
+        assert match.group(1).strip().startswith("${REDPANDA_SUPERUSER_PASSWORD:?")
+
+
+def _sasl_script() -> str:
+    svc = _services(_render("local"))[_SASL_SERVICE]
+    command = svc["command"]
+    assert isinstance(command, list) and len(command) == 1
+    return str(command[0]).replace("$$", "$")
+
+
+_STUB_RPK = """#!/bin/sh
+# Stateful stub of rpk for the one-shot: state lives in $STUB_DIR.
+echo "$*" >> "$STUB_DIR/calls"
+args="$*"
+case "$args" in
+  "security user list"*)
+    [ -f "$STUB_DIR/users" ] && sed 's/$/  SCRAM-SHA-256/' "$STUB_DIR/users"
+    echo "USERNAME  MECHANISM"
+    exit 0 ;;
+  "security user create"*)
+    echo "$4" >> "$STUB_DIR/users"; exit 0 ;;
+  "cluster config set superusers"*)
+    echo "$args" > "$STUB_DIR/superusers"; exit 0 ;;
+  "cluster config set enable_sasl true"*)
+    # The flip is only safe after the superuser grant (OMN-18012).
+    [ -f "$STUB_DIR/superusers" ] || { echo "enable_sasl before superusers" >> "$STUB_DIR/order-violation"; }
+    touch "$STUB_DIR/sasl-on"; exit 0 ;;
+  "cluster config get superusers"*)
+    cat "$STUB_DIR/superusers"; exit 0 ;;
+  "cluster config get enable_sasl"*)
+    [ -f "$STUB_DIR/sasl-on" ] && echo true || echo false; exit 0 ;;
+  "topic list"*)
+    if [ -n "${RPK_USER:-}" ] && [ -n "${RPK_PASS:-}" ]; then
+      [ "$RPK_PASS" = "$STUB_PASSWORD" ] || { echo "SASL authentication failed" >&2; exit 1; }
+      exit 0
+    fi
+    if [ -f "$STUB_DIR/sasl-on" ] && [ -z "${STUB_BROKEN_SASL:-}" ]; then
+      echo "SASL is required but not provided" >&2; exit 1
+    fi
+    exit 0 ;;
+esac
+echo "stub rpk: unexpected $args" >&2; exit 2
+"""
+
+
+def _run_sasl_script(
+    tmp_path: Path, *, broken_sasl: bool = False, rounds: int = 1, supplied: str = "pw"
+) -> tuple[subprocess.CompletedProcess[str], Path]:
+    stub_dir = tmp_path / "stub"
+    stub_dir.mkdir(exist_ok=True)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    # The script names rpk by absolute path, as the container image has it.
+    script = _sasl_script()
+    rpk = bin_dir / "rpk"
+    rpk.write_text(_STUB_RPK, encoding="utf-8")
+    rpk.chmod(0o755)
+    script = script.replace("/usr/bin/rpk", str(rpk))
+    env = {
+        **os.environ,
+        "STUB_DIR": str(stub_dir),
+        "STUB_PASSWORD": "pw",
+        "KAFKA_SASL_USERNAME": _SASL_USER,
+        "KAFKA_SASL_PASSWORD": supplied,
+    }
+    if broken_sasl:
+        env["STUB_BROKEN_SASL"] = "1"
+    result = subprocess.run(
+        ["sh", "-c", script], env=env, capture_output=True, text=True, check=False
+    )
+    for _ in range(rounds - 1):
+        result = subprocess.run(
+            ["sh", "-c", script], env=env, capture_output=True, text=True, check=False
+        )
+    return result, stub_dir
+
+
+def test_local_sasl_one_shot_creates_the_user_then_flips_sasl_and_proves_refusal_sasl(
+    tmp_path: Path,
+) -> None:
+    result, stub_dir = _run_sasl_script(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (stub_dir / "users").read_text().split() == [_SASL_USER]
+    assert (stub_dir / "sasl-on").exists()
+    assert not (stub_dir / "order-violation").exists()
+    assert _SASL_USER in (stub_dir / "superusers").read_text()
+
+
+def test_local_sasl_one_shot_is_idempotent_on_the_second_boot_sasl(
+    tmp_path: Path,
+) -> None:
+    result, stub_dir = _run_sasl_script(tmp_path, rounds=2)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (stub_dir / "users").read_text().split() == [_SASL_USER], "created once"
+
+
+def test_local_sasl_one_shot_fails_when_an_anonymous_client_is_accepted_sasl(
+    tmp_path: Path,
+) -> None:
+    """Positive control: a broker that stays open must turn the one-shot red."""
+    result, _ = _run_sasl_script(tmp_path, broken_sasl=True)
+    assert result.returncode != 0
+    assert "UNAUTHENTICATED client reached" in result.stderr
+
+
+def test_local_sasl_one_shot_fails_when_the_superuser_password_is_wrong_sasl(
+    tmp_path: Path,
+) -> None:
+    """A dead or mismatched principal must not read as a secured broker."""
+    result, _ = _run_sasl_script(tmp_path, supplied="not-the-value")
+    assert result.returncode != 0
+
+
+_OTHER_BUNDLE_DIGESTS = {
+    "auth": "1bf4de388a77a7d94e7a44cf785c7caba8a051c8aaf5501cc0b082cb5a25d28d",
+    "canary": "caa5d10df59f3f5a596bb4f565fd2a466612a46a156d67a398b51ef8134cb53f",
+    "core": "7c8f0182db15b6af0a70c6d05d6ffa7883db4725af31143b50fbdc83157a196b",
+    "fault-injection": "79c02d5711737a44a78bc6212d5a6625a119a5232bfd670a42ff6e547996e371",
+    "memgraph": "d55629512c84083550a018a068c3e394f352e06414192eff5a4f9f0967bd8bc3",
+    "observability": "78d05c2b98b885da7867967c2189cc412cb2f1d408ac665a27170ec65fb1d936",
+    "omnidash": "60e9cefe84b508bf5dc65281e7da56f1f338535d7501329161083bf76c1dbc36",
+    "omnimarket-projections": "56e85c3eb64c72283ba5f7c98747520dadc79e95475272717ce5d6f2a0ac24ee",
+    "omnimemory": "deff725fc3a399734a9052e09823d6f7e2b1c65e4935dd2b9e16d9b275294671",
+    "runtime": "b9ecfd08f3d38127d16a98e603938c7e53c3b190ca1002cb493fa5d44be13926",
+    "runtime-core": "450f161ad18bc1f73ad0e30eed2931207d544985f5579f6444d476a5636c809d",
+    "runtime-infrastructure": "a2a0d96b0230f3fcb932f5f490c680c1bca16d6f7ebfeed8550585e2f45933ff",
+    "runtime-integrations": "1b498251ede09da9d3eeb9481777b10831100d4d71b7e6092e201dea0a25e6fe",
+    "runtime-observability-projections": "abdf89e68dfe87d77d24582604a514f9e90e186e264f64d0ebb78d1585a6a52e",
+    "secrets": "7c8f0182db15b6af0a70c6d05d6ffa7883db4725af31143b50fbdc83157a196b",
+    "tenant-path": "078b216879af2ccdedc8cc65c3ed4d6ee7a32e8f796b78dd8b2c6f63bf1232f0",
+    "tracing": "78d05c2b98b885da7867967c2189cc412cb2f1d408ac665a27170ec65fb1d936",
+}
+
+
+def _digest(bundle: str) -> str:
+    rendered = json.dumps(_render(bundle), sort_keys=True, default=str)
+    return hashlib.sha256(rendered.encode()).hexdigest()
+
+
+def test_every_bundle_but_local_renders_byte_identically_to_its_pre_sasl_digest_sasl() -> (
+    None
+):
+    """OMN-20820 AC2. The digests were taken on dev 59e8bcb1e, before the change.
+
+    A bundle whose render changes for a reason of its own updates its line here
+    in the same change; the failure names the bundle.
+    """
+    bundles = yaml.safe_load((Path(_CATALOG_DIR) / "bundles.yaml").read_text())
+    assert sorted(set(bundles) - {"local"}) == sorted(_OTHER_BUNDLE_DIGESTS)
+    drifted = sorted(
+        name
+        for name, pinned in _OTHER_BUNDLE_DIGESTS.items()
+        if _digest(name) != pinned
+    )
+    assert drifted == []
+
+
+def test_the_sasl_one_shot_is_in_no_other_bundle_sasl() -> None:
+    """Positive control for the digest test: the local render does change."""
+    assert _SASL_SERVICE in _services(_render("local"))
+    for name in _OTHER_BUNDLE_DIGESTS:
+        assert _SASL_SERVICE not in _services(_render(name)), name
+
+
+def _run_make_local_env(
+    home: Path, *, env_file: Path, overlay: Path
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["make", "local-env"],
+        cwd=_REPO,
+        env={**os.environ, "HOME": str(home)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+_PRE_SASL_ENV = (
+    "# kept comment\n"
+    "POSTGRES_PASSWORD=pg-kept\n"
+    "VALKEY_PASSWORD=vk-kept\n"
+    "OMNINODE_RUNTIME_PASSWORD=rt-kept\n"
+    "TENANT_PROJECTION_WRITER_PASSWORD=tp-kept\n"
+    "ONEX_TENANT_ID=\n"
+    "ONEX_LOCAL_BIFROST_OVERLAY=/somewhere/overlay.yaml\n"
+)
+
+
+def test_local_env_adds_only_the_superuser_password_to_an_existing_0644_file_sasl(
+    tmp_path: Path,
+) -> None:
+    """OMN-20820 AC3, in a temporary HOME so the default path is the one exercised."""
+    home = tmp_path / "home"
+    env_file = home / ".omnibase" / "local.env"
+    env_file.parent.mkdir(parents=True)
+    env_file.write_text(_PRE_SASL_ENV, encoding="utf-8")
+    env_file.chmod(0o644)
+    before = env_file.read_text().splitlines()
+
+    result = _run_make_local_env(
+        home, env_file=env_file, overlay=home / ".omnibase" / "local.bifrost.yaml"
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    after = env_file.read_text().splitlines()
+    assert after[: len(before)] == before, "no existing line changed or moved"
+    added = after[len(before) :]
+    assert len(added) == 1, added
+    name, _, value = added[0].partition("=")
+    assert name == "REDPANDA_SUPERUSER_PASSWORD"
+    assert re.fullmatch(r"[0-9a-f]{64}", value)
+    assert env_file.stat().st_mode & 0o777 == 0o600
+    assert value not in result.stdout + result.stderr, "the value is never printed"
+
+    # Second run: nothing further to add, mode stays 0600.
+    again = _run_make_local_env(
+        home, env_file=env_file, overlay=home / ".omnibase" / "local.bifrost.yaml"
+    )
+    assert again.returncode == 0, again.stdout + again.stderr
+    assert env_file.read_text().splitlines() == after
+
+
+def test_local_env_fresh_file_carries_the_superuser_password_at_0600_sasl(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    result = _run_make_local_env(
+        home,
+        env_file=home / ".omnibase" / "local.env",
+        overlay=home / ".omnibase" / "local.bifrost.yaml",
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    env_file = home / ".omnibase" / "local.env"
+    assert env_file.stat().st_mode & 0o777 == 0o600
+    lines = [
+        line
+        for line in env_file.read_text().splitlines()
+        if line.startswith("REDPANDA_SUPERUSER")
+    ]
+    assert len(lines) == 1
+    assert re.fullmatch(r"REDPANDA_SUPERUSER_PASSWORD=[0-9a-f]{64}", lines[0])
+
+
+_STUB_DOCKER = """#!/bin/sh
+# Stub of `docker` for the laptop Makefile targets. STUB_MODE is secured|open.
+[ "$1" = "info" ] && exit 0
+[ "$1" = "inspect" ] && { echo healthy; exit 0; }
+[ "$1" = "exec" ] || { echo "stub docker: unexpected $*" >&2; exit 2; }
+shift
+while [ "$1" = "-e" ]; do
+  case "$2" in
+    *=*) export "$2" ;;
+    *) export "$2=$(printenv "$2")" ;;
+  esac
+  shift 2
+done
+shift  # the container name
+echo "$* user=${RPK_USER:-}" >> "$STUB_CALLS"
+case "$*" in
+  "rpk cluster info"*|"rpk group list"*) ;;
+  *) echo "stub docker: unexpected rpk $*" >&2; exit 2 ;;
+esac
+if [ "$STUB_MODE" = "open" ]; then
+  echo "0  local.omnimarket.node_delegate_skill_orchestrator.consume  Stable"
+  exit 0
+fi
+if [ -n "${RPK_USER:-}" ] && [ "${RPK_PASS:-}" = "$STUB_PASSWORD" ]; then
+  echo "BROKER  GROUP  STATE"
+  echo "0  local.omnimarket.node_delegate_skill_orchestrator.consume  Stable"
+  exit 0
+fi
+echo "unable to request metadata: SASL is required but not provided" >&2
+exit 1
+"""
+
+
+def _run_make_with_stub_docker(
+    tmp_path: Path, target: str, *, mode: str, env_text: str | None
+) -> tuple[subprocess.CompletedProcess[str], str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    docker = bin_dir / "docker"
+    docker.write_text(_STUB_DOCKER, encoding="utf-8")
+    docker.chmod(0o755)
+    # status-local also reads the kernels' /health on host ports; no host port
+    # is assumed to be free or open here.
+    curl = bin_dir / "curl"
+    curl.write_text('#!/bin/sh\necho \'{"status": "healthy"}\'\n', encoding="utf-8")
+    curl.chmod(0o755)
+    env_file = tmp_path / "local.env"
+    if env_text is not None:
+        env_file.write_text(env_text, encoding="utf-8")
+    calls = tmp_path / "calls"
+    calls.write_text("", encoding="utf-8")
+    result = subprocess.run(
+        ["make", target, f"LOCAL_ENV_FILE={env_file}"],
+        cwd=_REPO,
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+            "STUB_MODE": mode,
+            "STUB_PASSWORD": "stub-secret",
+            "STUB_CALLS": str(calls),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result, calls.read_text(encoding="utf-8")
+
+
+_SECURED_ENV = "REDPANDA_SUPERUSER_PASSWORD=stub-secret\n"
+
+
+def test_check_sasl_local_passes_on_a_secured_broker_sasl(tmp_path: Path) -> None:
+    result, calls = _run_make_with_stub_docker(
+        tmp_path, "check-sasl-local", mode="secured", env_text=_SECURED_ENV
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "stub-secret" not in result.stdout + result.stderr + calls
+    # One anonymous probe and one authenticated probe, in that order.
+    assert calls.splitlines() == [
+        "rpk cluster info -X brokers=localhost:19092 user=",
+        "rpk cluster info -X brokers=localhost:19092 user=onex-local",
+    ]
+
+
+def test_check_sasl_local_fails_on_a_broker_that_accepts_anonymous_clients_sasl(
+    tmp_path: Path,
+) -> None:
+    """The pre-change stack: an open broker must turn the target red."""
+    result, _ = _run_make_with_stub_docker(
+        tmp_path, "check-sasl-local", mode="open", env_text=_SECURED_ENV
+    )
+    assert result.returncode != 0
+    assert "anonymous client was accepted" in result.stderr
+
+
+def test_check_sasl_local_fails_when_the_superuser_is_refused_sasl(
+    tmp_path: Path,
+) -> None:
+    result, _ = _run_make_with_stub_docker(
+        tmp_path,
+        "check-sasl-local",
+        mode="secured",
+        env_text="REDPANDA_SUPERUSER_PASSWORD=some-other-value\n",
+    )
+    assert result.returncode != 0
+    assert "was refused" in result.stderr
+
+
+@pytest.mark.parametrize("env_text", [None, "POSTGRES_PASSWORD=x\n"])
+def test_check_sasl_local_fails_without_the_superuser_password_sasl(
+    tmp_path: Path, env_text: str | None
+) -> None:
+    result, calls = _run_make_with_stub_docker(
+        tmp_path, "check-sasl-local", mode="secured", env_text=env_text
+    )
+    assert result.returncode != 0
+    assert calls == ""
+
+
+def test_status_local_group_listing_authenticates_as_the_local_superuser_sasl(
+    tmp_path: Path,
+) -> None:
+    """The group listing is the part of status-local the SASL broker would refuse."""
+    result, calls = _run_make_with_stub_docker(
+        tmp_path, "status-local", mode="secured", env_text=_SECURED_ENV
+    )
+    # The migration-gate inspect and the /health curls are not under test; the
+    # listing is, and it must carry the credentials and print the delegate group.
+    assert "rpk group list user=onex-local" in calls
+    assert "node_delegate_skill_orchestrator" in result.stdout
+    assert "stub-secret" not in result.stdout + result.stderr + calls
