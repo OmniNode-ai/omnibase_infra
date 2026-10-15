@@ -52,7 +52,7 @@ dod_evidence:
         check_value: uv run --frozen pytest tests/unit/nodes/node_evidence_autoclose_sweep_effect/test_omn_18489_in_progress_demotion.py -q --no-cov -k "two_windows or window_has_no_default or comment_window_sent"
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-demotion-deploy-probe
-    description: Hosted-runner deploy probe reads the sweep node on the landing branch through the GitHub contents API and requires the demotion leg class and the contract-declared window input to be present there. It fails on a branch without the leg and needs no private lane or credentials.
+    description: Hosted-runner deploy probe reads the demotion leg and declared window from GitHub at the checked-out commit, rather than dev. The accompanying integration probe executes the real sweep handler, Linear client and shared HTTP adapter against a simulated HTTP service and requires Backlog readback and comment, the 168-hour window on the wire, and refusal of partial enumeration and unconfirmed readback. Neither probe needs a private lane; both fail on a checkout without the leg.
     source: manual
     binds_ac:
       - AC4
@@ -60,8 +60,11 @@ dod_evidence:
       - check_type: command
         check_value: |-
           set -eu;
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/in_progress_demotion.py?ref=dev" --jq .content | base64 -d | grep -q 'class InProgressDemotionLeg';
-          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/contract.yaml?ref=dev" --jq .content | base64 -d | grep -q 'demotion_window_hours'
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/in_progress_demotion.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q 'class InProgressDemotionLeg';
+          gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/nodes/node_evidence_autoclose_sweep_effect/contract.yaml?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -q 'demotion_window_hours'
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run --frozen pytest tests/integration/nodes/test_evidence_autoclose_demotion_omn18489.py -q --no-cov -k sweep_deploy
         cwd: ${OMNI_HOME}/omnibase_infra
 requirements:
   - id: req-in-progress-demotion

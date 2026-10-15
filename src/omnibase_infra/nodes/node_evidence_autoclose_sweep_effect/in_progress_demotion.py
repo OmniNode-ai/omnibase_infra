@@ -42,7 +42,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import TYPE_CHECKING
 
 from omnibase_infra.enums import EnumHandlerType, EnumHandlerTypeCategory
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.enum_in_progress_demotion_decision import (
@@ -57,6 +57,11 @@ from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_in_p
 from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.models.model_in_progress_demotion_result import (
     ModelInProgressDemotionResult,
 )
+
+if TYPE_CHECKING:
+    from omnibase_infra.nodes.node_evidence_autoclose_sweep_effect.handlers.handler_evidence_autoclose_sweep import (
+        _LinearClient,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -84,22 +89,6 @@ _PR_SEARCH_PAGE_SIZE = 100
 _PR_SEARCH_MAX_PAGES = 10
 
 TypeRunGhCommand = Callable[[list[str], float], Awaitable[tuple[object | None, str]]]
-
-
-class ProtocolInProgressDemotionLinear(Protocol):
-    """The Linear reads and writes the demotion leg performs."""
-
-    async def fetch_in_progress_issues(
-        self, since_iso: str
-    ) -> tuple[list[dict[str, object]] | None, str]: ...
-
-    async def fetch_backlog_state_id(self, team_id: str) -> str | None: ...
-
-    async def update_issue_state(self, issue_id: str, state_id: str) -> bool: ...
-
-    async def fetch_issue(self, ticket_id: str) -> dict[str, object] | None: ...
-
-    async def create_comment(self, issue_id: str, body: str) -> bool: ...
 
 
 def _parse_utc(value: object) -> datetime | None:
@@ -147,7 +136,7 @@ class InProgressDemotionLeg:
 
     def __init__(
         self,
-        linear_client: ProtocolInProgressDemotionLinear,
+        linear_client: _LinearClient,
         run_gh_command: TypeRunGhCommand,
     ) -> None:
         self._linear = linear_client
@@ -455,5 +444,4 @@ class OpenPullRequestIndex:
 __all__ = [
     "DEMOTION_COMMENT_MARKER",
     "InProgressDemotionLeg",
-    "ProtocolInProgressDemotionLinear",
 ]
