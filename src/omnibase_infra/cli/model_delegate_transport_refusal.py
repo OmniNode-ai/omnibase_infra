@@ -132,7 +132,20 @@ class ModelDelegateTransportRefusal(BaseModel):
         default="",
         description=(
             "The topic the command would have been published to. Empty on an "
-            "in-process run, which publishes to no shared topic at all."
+            "in-process run, which publishes to no shared topic at all, and on "
+            "a refusal that did not establish it (OMN-20764: a missing "
+            "consumer names it)."
+        ),
+    )
+    absent_consumer: str = Field(
+        default="",
+        description=(
+            "OMN-20764. The consumer the probe established was NOT bound to "
+            "``command_topic``, as ``<service>.<node>`` from the orchestrator "
+            "contract, when the refusal is a missing consumer; empty for every "
+            "other refusal. Set only from a probe that got an answer and found "
+            "no group, never from a probe that could not be answered: an "
+            "unanswerable broker says nothing about whether a consumer exists."
         ),
     )
     attempts_permitted: int = Field(
