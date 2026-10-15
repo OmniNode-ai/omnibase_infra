@@ -1,3 +1,27 @@
+## v0.38.73 (2026-10-15)
+
+### Release
+- Cut omnibase-infra from dev at 0.38.73 by the scheduled release train.
+- 15 release-relevant commit(s) merged since v0.38.72.
+- Opened by the release train, which cuts only when the repo's declared lab-evidence premise holds for the exact candidate commit.
+
+### Included Since v0.38.72
+- feat: carry named tests on the deployed delegation bus command (#4974)
+- feat: add --result-only flag to onex delegate (#4972)
+- build(deps-dev): update ruff requirement from <0.17.0,>=0.14.7 to >=0.14.7,<0.18.0 (#4947)
+- feat: name the tests a code delegation is graded by in onex delegate (#4973)
+- fix: allow undeclared hosts without lab run row (#4971)
+- : Repair Kafka consumer position readiness and add regression (#4963)
+- feat: runner-fleet job reader and stuck, offline and queue-age alerts (#4969)
+- fix: C28 probe gives a booting dev runtime a bounded boot grace (#4967)
+- fix: probe every local chat backend in the overlay (#4958)
+- build(deps): update asyncpg requirement from <0.32.0,>=0.29.0 to >=0.29.0,<0.33.0 (#4946)
+- fix: raise a failure terminal's own failure_reason in request-response wiring (#4959)
+- fix: fix event-type scan check timing out on unchanged tests (#4957)
+- build(deps): update fastapi requirement from <0.143.0,>=0.120.1 to >=0.120.1,<0.144.0 (#4945)
+- ci: omnibase_infra stops reading onex_change_control in four workflows (#4940)
+- feat: grant work_ledger_ro SELECT on work_ledger_state (#4953)
+
 ## v0.38.72 (2026-10-14)
 
 ### Release
