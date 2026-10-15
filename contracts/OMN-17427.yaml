@@ -305,7 +305,7 @@ dod_evidence:
     execution_scope: local_done_gate
     checks:
       - check_type: command
-        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.runtime.request_response_wiring import RequestResponseWiring as W; assert W._failure_reason({'payload': {'failure_reason': 'model timeout'}}) == 'model timeout'; assert W._failure_reason({}) == 'failure terminal carried no failure_reason'; print('deploy smoke ok')\""
+        check_value: "env docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.runtime.request_response_wiring import RequestResponseWiring as W; assert W._failure_reason({'payload': {'failure_reason': 'model timeout'}}) == 'model timeout'; assert W._failure_reason({}) == 'failure terminal carried no failure_reason'; print('deploy smoke ok')\""
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn-17427-ac18
     description: The delegate flags write the named tests into the request payload and refuse a partial naming.
