@@ -81,6 +81,13 @@ requirements:
     acceptance:
       - id: AC18
         statement: "AC18: the replayed 2026-10-14 fixture (25 pool runners busy, none wedged, doc checks queued up to 44.9 minutes, two second-host runners offline) yields queue_age_exceeded for the three repos that queued past 30 minutes, runner_offline for the two offline runners, and no runner_stuck; a job running past 360 minutes yields runner_stuck -- falsifier: uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_alerts_omn17427.py -q fails at the merge base, where the alert models do not exist"
+  - id: req-omn17427-delegate-named-tests
+    statement: onex delegate names the tests a code delegation is graded by, carries them in the request metadata under the keys omnimarket's delegation port reads, and refuses a run that would reach the deployed lane, whose dispatch port cannot carry them.
+    acceptance:
+      - id: AC19
+        statement: 'AC19: --test-file, --named-test and --answer-path write named_tests, named_tests_answer_path and named_tests_files into the request payload the run is handed, and a partial or unsafe naming is a usage error -- falsifier: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k "not deployed"'
+      - id: AC20
+        statement: 'AC20: a run that resolves to the deployed lane with named tests is refused before anything is published, naming --locus in-process -- falsifier: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k deployed'
 evidence_requirements:
   - kind: tests
     description: The node collector reads the marker on the seam DLQ.
@@ -136,6 +143,12 @@ evidence_requirements:
   - kind: tests
     description: The job reader and the stuck, offline and queue-age alerts, including the replayed 2026-10-14 fixture.
     command: uv run pytest tests/unit/nodes/node_runner_fleet_maintain/test_runner_fleet_alerts_omn17427.py -q
+  - kind: tests
+    description: The delegate flags write the named tests into the request payload and refuse a partial naming.
+    command: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k "not deployed"
+  - kind: tests
+    description: A named-test run that would reach the deployed lane is refused before anything is published.
+    command: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k deployed
 emergency_bypass:
   enabled: false
   justification: ''
@@ -300,7 +313,7 @@ dod_evidence:
     execution_scope: local_done_gate
     checks:
       - check_type: command
-        check_value: "docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.runtime.request_response_wiring import RequestResponseWiring as W; assert W._failure_reason({'payload': {'failure_reason': 'model timeout'}}) == 'model timeout'; assert W._failure_reason({}) == 'failure terminal carried no failure_reason'; print('deploy smoke ok')\""
+        check_value: "env docker exec ${RUNTIME_CONTAINER:-omninode-runtime} python -c \"from omnibase_infra.runtime.request_response_wiring import RequestResponseWiring as W; assert W._failure_reason({'payload': {'failure_reason': 'model timeout'}}) == 'model timeout'; assert W._failure_reason({}) == 'failure terminal carried no failure_reason'; print('deploy smoke ok')\""
         cwd: ${OMNI_HOME}/omnibase_infra
   - id: dod-omn-17427-ac18
     description: The job reader and the runner-fleet alerts; the replayed 2026-10-14 fixture fires the queue-age and offline alerts and no stuck alert.
@@ -328,4 +341,39 @@ dod_evidence:
     checks:
       - check_type: command
         check_value: uv run pytest tests/integration/test_runner_fleet_alert_dispatch_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-ac19
+    description: The delegate flags write the named tests into the request payload and refuse a partial naming.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k "not deployed"
+        cwd: ${OMNI_HOME}/omnibase_infra
+      - check_type: test_passes
+        check_value: uv run pytest tests/integration/cli/test_delegate_named_tests_cli_omn17427.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC19
+  - id: dod-omn-17427-ac20
+    description: A named-test run that would reach the deployed lane is refused before anything is published.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k deployed
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC20
+  - id: dod-omn-17427-named-tests-deploy-dispatch
+    description: Hosted-runner CLI dispatch smoke -- the real delegate command hands named-test metadata to the in-process runtime and refuses a deployed-lane request before publication. The runtime is a stand-in; no deployed container or credentials are required.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/unit/cli/test_delegate_named_tests_omn17427.py -q -k golden_chain
+        cwd: ${OMNI_HOME}/omnibase_infra
+  - id: dod-omn-17427-named-tests-runtime-deploy-dispatch
+    description: Hosted-runner in-process runtime smoke -- named node ids and whole-file selections reach a typed metadata-echo handler through the real contract loader and in-memory bus, and its response reaches the persisted receipt artifacts. No model endpoint, deployed container or credentials are required; this does not execute the named tests.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: uv run pytest tests/integration/cli/test_delegate_named_tests_cli_omn17427.py -q
         cwd: ${OMNI_HOME}/omnibase_infra

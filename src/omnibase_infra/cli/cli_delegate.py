@@ -253,6 +253,11 @@ from omnibase_infra.models.delegation.model_delegate_lineage import (
     LINEAGE_KINDS,
     ModelDelegateLineage,
 )
+from omnibase_infra.models.delegation.model_delegate_named_tests import (
+    NAMED_TESTS_ANSWER_PATH_METADATA_KEY,
+    NAMED_TESTS_METADATA_KEY,
+    ModelDelegateNamedTests,
+)
 from omnibase_infra.models.delegation.model_delegate_phase_durations import (
     ModelDelegatePhaseDurations,
 )
@@ -1423,6 +1428,26 @@ def _transport_refusal_from_receipt(
     )
 
 
+def refuse_named_tests_on_deployed_lane(
+    locus: EnumDelegateLocus, named_tests: Mapping[str, str] | None
+) -> None:
+    """Refuse, before anything is published, tests the deployed lane cannot carry.
+
+    OMN-17427: the deployed lane's dispatch port publishes the delegation
+    request to the orchestrator over the bus, and neither the request model nor
+    its quality gate has a field for named tests, so the port raises on them
+    (``RuntimeDelegationDispatchPort.dispatch``). Sending the run would end as a
+    failure inside the lane; stopping here names the way that works.
+    """
+    if named_tests and locus is EnumDelegateLocus.DEPLOYED_LANE:
+        raise click.ClickException(
+            "the deployed lane cannot carry named tests yet: its delegation "
+            "request has no field for them and its quality gate runs none, so "
+            "this run would fail inside the lane. Run it where the tests run: "
+            "--bus inmemory --locus in-process (OMN-17427)."
+        )
+
+
 def _resolve_transport_bound() -> tuple[int, float]:
     """Resolve the connect retry policy the delegate's own transport reads.
 
@@ -2402,6 +2427,7 @@ def _request_payload(
     caller: ModelDelegateCaller | None = None,
     tenant_id: str | None = None,
     lineage: Mapping[str, str] | None = None,
+    named_tests: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     """Build the delegate request, setting only the fields the caller supplied."""
     payload: dict[str, object] = {
@@ -2450,6 +2476,10 @@ def _request_payload(
     # validated by resolve_delegate_lineage. Omitted entirely when unnamed.
     if lineage:
         metadata.update(lineage)
+    # OMN-17427: the tests a code answer is graded by, under the metadata keys
+    # omnimarket's delegation port reads. Omitted entirely when none are named.
+    if named_tests:
+        metadata.update(named_tests)
     if metadata:
         payload["metadata"] = metadata
     if caller is not None and caller.session_id is not None:
@@ -2483,6 +2513,7 @@ def _write_payload(
     caller: ModelDelegateCaller | None = None,
     tenant_id: str | None = None,
     lineage: Mapping[str, str] | None = None,
+    named_tests: Mapping[str, str] | None = None,
 ) -> Path:
     """Write the delegation input payload to run_id-suffixed scratch.
 
@@ -2540,6 +2571,7 @@ def _write_payload(
         caller=caller,
         tenant_id=tenant_id,
         lineage=lineage,
+        named_tests=named_tests,
     )
     payload_path.write_text(
         json.dumps(payload),
@@ -3405,6 +3437,39 @@ class DelegateCommand(click.Command):
     ),
 )
 @click.option(
+    "--named-test",
+    "named_tests",
+    multiple=True,
+    help=(
+        "A pytest node id (tests/test_x.py::test_name) the answer to a code "
+        "task is graded by (OMN-17427). Repeatable; it must point into a "
+        "--test-file. With only --test-file, every test in the file is named. "
+        "The gate accepts a code answer on its executed tests, so a code "
+        "delegation that names none is UNTESTED."
+    ),
+)
+@click.option(
+    "--test-file",
+    "test_files",
+    multiple=True,
+    help=(
+        "A test file the request carries, read here and sent inline so the "
+        "runner needs no workspace (OMN-17427). Repeatable. A relative path is "
+        "written at that path in the runner's sandbox; an absolute path at its "
+        "file name. Needs --answer-path."
+    ),
+)
+@click.option(
+    "--answer-path",
+    "answer_path",
+    default=None,
+    help=(
+        "The workspace-relative file the answer's code is written to before the "
+        "named tests run (OMN-17427), such as solution.py. The tests import the "
+        "answer from it."
+    ),
+)
+@click.option(
     "--omnibase-path",
     "omnibase_path",
     type=click.Path(path_type=Path),
@@ -3483,6 +3548,9 @@ def delegate_command(
     parent_correlation_id: str | None = None,
     lineage_kind: str | None = None,
     parent_failure_cause: str | None = None,
+    named_tests: tuple[str, ...] = (),
+    test_files: tuple[str, ...] = (),
+    answer_path: str | None = None,
 ) -> None:
     """Delegate PROMPT to a local LLM and print the result.
 
@@ -3557,6 +3625,12 @@ def delegate_command(
             own_correlation_id=correlation_id,
         )
         lineage = resolved_lineage.as_metadata() if resolved_lineage else None
+        resolved_named_tests = ModelDelegateNamedTests.from_flags(
+            named_tests, test_files, answer_path
+        )
+        named_test_metadata = (
+            resolved_named_tests.as_metadata() if resolved_named_tests else None
+        )
         acceptance_criteria = tuple(criteria)
         declared_contract = _load_response_contract(response_contract)
         _validate_replace_mode_authority(
@@ -3590,6 +3664,7 @@ def delegate_command(
             run_id=run_id,
             correlation_id=correlation_id,
             lineage=lineage,
+            named_tests=named_test_metadata,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -3625,6 +3700,7 @@ def run_delegate(
     run_id: uuid.UUID | None = None,
     correlation_id: uuid.UUID | None = None,
     lineage: Mapping[str, str] | None = None,
+    named_tests: Mapping[str, str] | None = None,
 ) -> int:
     """Build the payload, resolve the contract, and dispatch in receipt mode.
 
@@ -3950,6 +4026,7 @@ def run_delegate(
             caller=caller,
             tenant_id=tenant_id,
             lineage=lineage,
+            named_tests=named_tests,
         )
         # OMN-19514: say which ticket the run carries and how it was chosen,
         # beside the task-class line, so a derived ticket is never silent.
@@ -3961,6 +4038,14 @@ def run_delegate(
             click.echo(
                 "lineage: "
                 + " ".join(f"{key}={value}" for key, value in sorted(lineage.items())),
+                err=True,
+            )
+        # OMN-17427: and the tests that grade it, when it names any.
+        if named_tests:
+            click.echo(
+                "named tests: "
+                f"{named_tests[NAMED_TESTS_METADATA_KEY]} "
+                f"(answer written to {named_tests[NAMED_TESTS_ANSWER_PATH_METADATA_KEY]})",
                 err=True,
             )
         contract_path = _resolve_packaged_contract(DELEGATE_NODE_NAME)
@@ -4070,6 +4155,8 @@ def run_delegate(
             raise click.ClickException(
                 f"{exc} (run {run_id}, correlation {correlation_id})"
             ) from exc
+
+        refuse_named_tests_on_deployed_lane(locus_decision.locus, named_tests)
 
         # OMN-18810: the five addressing facts the two written files record,
         # built from the decision that was just PROVEN viable rather than
