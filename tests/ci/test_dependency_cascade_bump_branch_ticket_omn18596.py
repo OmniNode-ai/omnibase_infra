@@ -235,6 +235,14 @@ class TestEveryInterpolatedFieldIsValidatedFirst:
         assert code == 1
         assert "inputs.evidence_source" in stdout
 
+    def test_a_change_control_citation_refuses(self) -> None:
+        """OMN-20959: the cascade takes the release commit, never OCC#<n>."""
+        code, stdout, _ = _run_builder(
+            "omnibase_infra", "0.38.31", evidence_source="OCC#6695"
+        )
+        assert code == 1
+        assert "inputs.evidence_source" in stdout
+
     def test_release_commit_evidence_source_shapes_are_accepted(self) -> None:
         """Release commit SHAs remain valid after the OCC citation retirement."""
         for ok in (
