@@ -152,7 +152,10 @@ from omnibase_infra.cli.delegate_env_config_overrides import (
     env_config_overrides,
     format_override_line,
 )
-from omnibase_infra.cli.delegate_human_output import render_delegate_outcome
+from omnibase_infra.cli.delegate_human_output import (
+    one_line,
+    render_delegate_outcome,
+)
 from omnibase_infra.cli.delegate_lane import (
     DelegateLaneSelectionError,
     resolve_lane_target,
@@ -1440,13 +1443,20 @@ def _resolve_transport_bound() -> tuple[int, float]:
 
 
 def _render_receipt_for_person(
-    receipt: object, *, state_root: Path, json_output: bool = False
+    receipt: object,
+    *,
+    state_root: Path,
+    json_output: bool = False,
+    result_only: bool = False,
 ) -> bool:
     """Print the default, human form of one receipt and say whether it succeeded (OMN-20124).
 
     The answer goes to stdout, the one-line summary or failure line to stderr.
     JSON mode still prints a plain failure before the full receipt.
     A receipt that is not a delegation is printed as JSON rather than dropped.
+    ``result_only`` (OMN-21088) prints no answer here: the command prints it from
+    ``result.txt`` once the run's diagnostics are closed, so only the success
+    verdict is taken from this renderer.
     """
     dump = getattr(receipt, "model_dump", None)
     dump_json = getattr(receipt, "model_dump_json", None)
@@ -1459,11 +1469,14 @@ def _render_receipt_for_person(
         else None
     )
     if outcome is None:
-        click.echo(dump_json())
+        if not result_only:
+            click.echo(dump_json())
         return True
     if not json_output or not outcome.succeeded:
         for line in outcome.stderr:
             click.echo(line, err=True)
+    if result_only:
+        return outcome.succeeded
     if json_output:
         click.echo(dump_json())
     elif outcome.stdout:
@@ -2792,6 +2805,10 @@ _RUN_ID_META_KEY = "omnibase_infra.delegate.run_id"
 _CORRELATION_ID_META_KEY = "omnibase_infra.delegate.correlation_id"
 
 _STATE_ROOT_FLAG = "--state-root"
+_RESULT_ONLY_FLAG = "--result-only"
+_DIAGNOSTICS_LOG_NAME = "diagnostics.log"
+#: Receipt classes the CLI writes when no terminal arrived. They name no cause.
+_GENERIC_RECEIPT_CLASSES = frozenset({"in_flight", "failed"})
 
 _USAGE_REMEDY = (
     "Nothing was dispatched, so nothing ran and nothing was spent. Correct the "
@@ -2862,6 +2879,7 @@ def _write_refusal_run_files(
     state_root: Path,
     prompt: str,
     task_type: str,
+    quiet: bool = False,
 ) -> Path:
     """Persist the three run files for a delegation that was never dispatched.
 
@@ -2872,6 +2890,9 @@ def _write_refusal_run_files(
     reason the transport refusal states: the failure enum is provider-side and a
     command that never ran says nothing about a provider. The cause is in
     ``failure_reason`` and ``refusal``.
+
+    ``quiet`` (``--result-only``, OMN-21088) files the artifacts line in the run's
+    ``diagnostics.log`` instead of on stderr.
 
     Returns the run directory.
     """
@@ -2921,34 +2942,41 @@ def _write_refusal_run_files(
             sort_keys=True,
         ),
     )
-    click.echo(
+    artifacts_line = (
         f"delegate artifacts (REFUSED -- {refusal.stage.value}, nothing dispatched): "
         + " ".join(
             str(run_dir / name) for name in ("result.txt", "receipt.json", "run.json")
-        ),
-        err=True,
+        )
     )
+    if quiet:
+        with (run_dir / _DIAGNOSTICS_LOG_NAME).open("a", encoding="utf-8") as log:
+            log.write(artifacts_line + "\n")
+    else:
+        click.echo(artifacts_line, err=True)
     return run_dir
 
 
-def _funnel_state_root(explicit: Path | None) -> Path | None:
+def _funnel_state_root(explicit: Path | None, *, quiet: bool = False) -> Path | None:
     """The root a refusal receipt is filed under: the command's own rule.
 
     The flag is the operator's own choice and is used as given; without it the
     root resolves exactly as the command body resolves it (OMN-19232), never
     against the working directory. ``None`` when no root can be resolved (a
     relative ``ONEX_STATE_DIR``, a root under ``~/.claude``): there is then no
-    place the receipt belongs, and the cause goes to stderr instead.
+    place the receipt belongs, and the cause goes to stderr instead. ``quiet``
+    (``--result-only``) leaves stderr alone: the command body refuses on the same
+    unresolvable root and that refusal is the one line the caller reads.
     """
     if explicit is not None:
         return explicit
     try:
         return resolve_state_root(None)
     except ProtocolConfigurationError as exc:
-        click.echo(
-            f"onex delegate: no refusal receipt was written: {exc.message}",
-            err=True,
-        )
+        if not quiet:
+            click.echo(
+                f"onex delegate: no refusal receipt was written: {exc.message}",
+                err=True,
+            )
         return None
 
 
@@ -2966,6 +2994,184 @@ def _state_root_from_arguments(arguments: Sequence[str]) -> Path | None:
     return None
 
 
+def _result_only_requested(arguments: Sequence[str]) -> bool:
+    """Whether raw arguments that may not have parsed ask for ``--result-only``."""
+    for argument in arguments:
+        if argument == "--":
+            return False
+        if argument == _RESULT_ONLY_FLAG:
+            return True
+    return False
+
+
+@contextmanager
+def _capture_diagnostics(log_path: Path | None) -> Iterator[None]:
+    """Send everything this process writes to stdout and stderr to ``log_path``.
+
+    ``--result-only`` (OMN-21088) must leave the caller exactly one thing on
+    each stream, and the lines it suppresses come from everywhere: ``click.echo``,
+    ``logging``'s last-resort handler, ``warnings``, a library writing to
+    ``sys.stderr`` and a native library writing to file descriptor 2. So both
+    layers are redirected: the Python streams and the descriptors under them.
+    Both are restored on the way out, before the caller's own line is written.
+    ``None`` discards the output (no run directory could be made for it).
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except (OSError, ValueError):
+            pass
+    with open(
+        log_path if log_path is not None else os.devnull,
+        "a",
+        encoding="utf-8",
+        errors="replace",
+        buffering=1,
+    ) as sink:
+        saved_streams = (sys.stdout, sys.stderr)
+        saved_descriptors: list[tuple[int, int]] = []
+        try:
+            for descriptor in (1, 2):
+                try:
+                    saved_descriptors.append((descriptor, os.dup(descriptor)))
+                except OSError:
+                    continue
+            for descriptor, _saved in saved_descriptors:
+                os.dup2(sink.fileno(), descriptor)
+            sys.stdout = sys.stderr = sink
+            yield
+        finally:
+            try:
+                sink.flush()
+            except (OSError, ValueError):
+                pass
+            sys.stdout, sys.stderr = saved_streams
+            for descriptor, saved in saved_descriptors:
+                os.dup2(saved, descriptor)
+                os.close(saved)
+
+
+def _last_diagnostic_failure(log_path: Path | None) -> str:
+    """The last failure sentence the suppressed diagnostics hold, or ``""``."""
+    if log_path is None or not log_path.is_file():
+        return ""
+    prefixes = ("onex delegate failed:", "receipt mode:", "onex delegate:")
+    for line in reversed(log_path.read_text(encoding="utf-8").splitlines()):
+        for prefix in prefixes:
+            if line.startswith(prefix):
+                return line[len(prefix) :].strip()
+    return ""
+
+
+def _result_only_failure(
+    run_dir: Path | None,
+    *,
+    exit_code: int,
+    detail: str,
+    default_cause: str = "delegate_failed",
+) -> str:
+    """The one stderr line for a run that did not answer (OMN-21088).
+
+    ``Error: <terminal cause>: <error_message> (receipt: <abs path>)``. The cause
+    and message come from the run's ``receipt.json``, which every ending of this
+    command writes; ``detail`` is what the failure itself said and stands in for
+    a receipt field that is empty. Everything is folded to one line and has its
+    credentials removed.
+    """
+    receipt_path = run_dir / "receipt.json" if run_dir is not None else None
+    receipt: dict[str, object] = {}
+    if receipt_path is not None and receipt_path.is_file():
+        try:
+            loaded = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            loaded = None
+        if isinstance(loaded, dict):
+            receipt = loaded
+    refusal = receipt.get("refusal")
+    stage = refusal.get("stage") if isinstance(refusal, dict) else None
+    causes = [
+        receipt.get("terminal_failure_cause"),
+        stage,
+        receipt.get("terminal_class"),
+    ]
+    messages = [
+        # A refusal's failure_reason is its message plus the remedy; the line
+        # carries the message, and the remedy stays in the receipt.
+        refusal.get("message") if isinstance(refusal, dict) else None,
+        receipt.get("failure_reason"),
+        receipt.get("terminal_failure_reason"),
+        detail,
+    ]
+    if receipt.get("terminal_class") in _GENERIC_RECEIPT_CLASSES:
+        # A provisional or settled-by-the-CLI receipt says only that no terminal
+        # arrived; what the failure itself said is the better line.
+        causes.insert(0, default_cause if default_cause != "delegate_failed" else None)
+        messages.insert(0, detail)
+    cause = next(
+        (str(c).strip() for c in causes if isinstance(c, str) and c.strip()),
+        default_cause,
+    )
+    message = next(
+        (one_line(m) for m in messages if isinstance(m, str) and one_line(m)),
+        f"onex delegate exited with {exit_code}",
+    )
+    where = (
+        f"(receipt: {receipt_path.resolve()})"
+        if receipt_path is not None and receipt_path.is_file()
+        else "(receipt: none written)"
+    )
+    return f"Error: {cause}: {_redact_refusal_text(message)} {where}"
+
+
+def _emit_result_only(
+    run_dir: Path | None,
+    *,
+    exit_code: int,
+    detail: str,
+    default_cause: str = "delegate_failed",
+) -> int:
+    """Write the caller's one output and return the exit code (OMN-21088).
+
+    Success is ``result.txt`` (``result.response``) on stdout and nothing on
+    stderr; anything else is one ``Error:`` line on stderr and nothing on stdout.
+    The streams are the restored, real ones: this runs after the capture closes.
+    """
+    if exit_code == 0:
+        result_path = run_dir / "result.txt" if run_dir is not None else None
+        response = (
+            result_path.read_bytes().decode("utf-8")
+            if result_path is not None and result_path.is_file()
+            else ""
+        )
+        if response:
+            buffer = getattr(sys.stdout, "buffer", None)
+            if buffer is not None:
+                sys.stdout.flush()
+                buffer.write(response.encode("utf-8"))
+                buffer.flush()
+            else:
+                sys.stdout.write(response)
+                sys.stdout.flush()
+            return 0
+        failure = _result_only_failure(
+            run_dir,
+            exit_code=exit_code,
+            detail="the run produced no answer",
+            default_cause="empty_response",
+        )
+        exit_code = 1
+    else:
+        failure = _result_only_failure(
+            run_dir, exit_code=exit_code, detail=detail, default_cause=default_cause
+        )
+    click.echo(failure, err=True)
+    return exit_code
+
+
+class DelegateUnhandledError(Exception):
+    """An error no check names, carried out of the ``--result-only`` capture."""
+
+
 class DelegateCommand(click.Command):
     """``onex delegate``, with a receipt for every way it can end (OMN-19006)."""
 
@@ -2975,6 +3181,7 @@ class DelegateCommand(click.Command):
         *,
         refusal: ModelDelegateRefusal,
         state_root: Path | None,
+        quiet: bool = False,
     ) -> None:
         """Write the refusal receipt; a failure to write never hides the cause."""
         if state_root is None:
@@ -2991,6 +3198,7 @@ class DelegateCommand(click.Command):
                 task_type=str(
                     params.get("task_type") or params.get("task_class_alias") or ""
                 ),
+                quiet=quiet,
             )
         except OSError as exc:
             click.echo(
@@ -3014,6 +3222,10 @@ class DelegateCommand(click.Command):
         try:
             return super().parse_args(ctx, args)
         except click.ClickException as exc:
+            quiet = _result_only_requested(given)
+            state_root = _funnel_state_root(
+                _state_root_from_arguments(given), quiet=quiet
+            )
             self._file_refusal(
                 ctx,
                 refusal=ModelDelegateRefusal(
@@ -3023,14 +3235,94 @@ class DelegateCommand(click.Command):
                     remedy=_USAGE_REMEDY,
                     exit_code=exc.exit_code,
                 ),
-                state_root=_funnel_state_root(_state_root_from_arguments(given)),
+                state_root=state_root,
+                quiet=quiet,
             )
+            if quiet:
+                # OMN-21088: Click would print its usage block and an Error line.
+                run_dir = self._run_dir(ctx, state_root)
+                raise click.exceptions.Exit(
+                    _emit_result_only(
+                        run_dir,
+                        exit_code=exc.exit_code,
+                        detail=_redact_refusal_text(exc.format_message()),
+                    )
+                ) from exc
             raise
 
+    def _run_dir(self, ctx: click.Context, state_root: Path | None) -> Path | None:
+        """This invocation's ``runs/<run_id>/`` directory, or ``None`` without a root."""
+        if state_root is None:
+            return None
+        run_id, _ = _invocation_identity(ctx)
+        return (state_root / "runs" / str(run_id)).resolve()
+
     def invoke(self, ctx: click.Context) -> object:
+        if ctx.params.get("result_only"):
+            return self._invoke_result_only(ctx)
+        return self._invoke_filed(ctx, quiet=False)
+
+    def _invoke_result_only(self, ctx: click.Context) -> object:
+        """Run the command with its output held back, then say only the result.
+
+        Everything the run prints goes to ``runs/<run_id>/diagnostics.log``. What
+        the caller sees is decided afterwards, from the files the run wrote:
+        the answer on success, one ``Error:`` line on any failure (OMN-21088).
+        """
         explicit = ctx.params.get("state_root")
         state_root = _funnel_state_root(
-            Path(explicit) if explicit is not None else None
+            Path(explicit) if explicit is not None else None, quiet=True
+        )
+        run_dir = self._run_dir(ctx, state_root)
+        log_path: Path | None = None
+        if run_dir is not None:
+            try:
+                run_dir.mkdir(parents=True, exist_ok=True)
+                log_path = run_dir / _DIAGNOSTICS_LOG_NAME
+            except OSError:
+                run_dir = None
+        exit_code = 0
+        detail = ""
+        cause = "delegate_failed"
+        try:
+            with _capture_diagnostics(log_path):
+                try:
+                    self._invoke_filed(ctx, quiet=True)
+                except click.exceptions.Exit as exc:
+                    exit_code = exc.exit_code
+                except SystemExit as exc:
+                    code = exc.code
+                    exit_code = (
+                        code if isinstance(code, int) else (0 if code is None else 1)
+                    )
+                    detail = code if isinstance(code, str) else ""
+                except click.ClickException as exc:
+                    exit_code = exc.exit_code
+                    detail = _redact_refusal_text(exc.format_message())
+                except (click.exceptions.Abort, KeyboardInterrupt):
+                    exit_code = 130
+                    detail = "interrupted"
+                    cause = "interrupted"
+                except Exception as exc:
+                    # Re-raised so the capture closes before the line is written.
+                    raise DelegateUnhandledError(
+                        _redact_refusal_text(str(exc) or type(exc).__name__)
+                    ) from exc
+        except DelegateUnhandledError as failure:
+            exit_code = 1
+            cause = "unhandled_error"
+            detail = str(failure)
+        if exit_code != 0 and not detail:
+            detail = _last_diagnostic_failure(log_path)
+        final_code = _emit_result_only(
+            run_dir, exit_code=exit_code, detail=detail, default_cause=cause
+        )
+        raise click.exceptions.Exit(final_code)
+
+    def _invoke_filed(self, ctx: click.Context, *, quiet: bool) -> object:
+        explicit = ctx.params.get("state_root")
+        state_root = _funnel_state_root(
+            Path(explicit) if explicit is not None else None, quiet=quiet
         )
         try:
             return super().invoke(ctx)
@@ -3052,6 +3344,7 @@ class DelegateCommand(click.Command):
                         exit_code=exc.exit_code,
                     ),
                     state_root=state_root,
+                    quiet=quiet,
                 )
             raise
         except (SystemExit, KeyboardInterrupt) as exc:
@@ -3069,6 +3362,7 @@ class DelegateCommand(click.Command):
                         exit_code=code if isinstance(code, int) else 1,
                     ),
                     state_root=state_root,
+                    quiet=quiet,
                 )
             raise
         except Exception as exc:
@@ -3083,6 +3377,7 @@ class DelegateCommand(click.Command):
                         exit_code=1,
                     ),
                     state_root=state_root,
+                    quiet=quiet,
                 )
             raise
 
@@ -3431,6 +3726,21 @@ class DelegateCommand(click.Command):
     ),
 )
 @click.option(
+    "--result-only",
+    "result_only",
+    is_flag=True,
+    default=False,
+    help=(
+        "Print only the answer (OMN-21088). Success: stdout is the response "
+        "exactly and stderr is empty. Failure: stdout is empty and stderr is "
+        "one line, 'Error: <cause>: <message> (receipt: <path to receipt.json>)', "
+        "for every way the command can end, refusals before dispatch included. "
+        "Everything else the run prints goes to runs/<run_id>/diagnostics.log; "
+        "receipt.json, result.txt and run.json are still written. Mutually "
+        "exclusive with --json and --human."
+    ),
+)
+@click.option(
     "--allow-omnimarket-drift",
     "allow_omnimarket_drift",
     is_flag=True,
@@ -3468,6 +3778,7 @@ def delegate_command(
     omnibase_path: Path | None,
     force_json: bool,
     force_human: bool,
+    result_only: bool,
     allow_omnimarket_drift: bool,
     ticket: str | None,
     caller_lane: str | None,
@@ -3510,6 +3821,7 @@ def delegate_command(
     \b
     Examples:
         onex delegate "explain what a calendar app needs"
+        onex delegate "what is 2+2" --result-only  # the answer, or one Error: line
         onex delegate "say hello in one word" --json  # force JSON on a terminal
         onex delegate --prompt-file task.md --task-type code_generation
         cat task.md | onex delegate - --task-type code_generation
@@ -3526,6 +3838,10 @@ def delegate_command(
     """
     if force_json and force_human:
         raise click.UsageError("--json and --human are mutually exclusive.")
+    if result_only and (force_json or force_human):
+        raise click.UsageError(
+            "--result-only and --json/--human are mutually exclusive."
+        )
     json_output = force_json
     # OMN-19006: the command class minted this run's identity when argument
     # parsing began, and files the receipt for any refusal under it, so the
@@ -3578,6 +3894,7 @@ def delegate_command(
             ticket_resolution=ticket_resolution,
             caller=caller,
             json_output=json_output,
+            result_only=result_only,
             run_id=run_id,
             correlation_id=correlation_id,
             lineage=lineage,
@@ -3613,6 +3930,7 @@ def run_delegate(
     ticket_resolution: str = "none",
     caller: ModelDelegateCaller | None = None,
     json_output: bool = True,
+    result_only: bool = False,
     run_id: uuid.UUID | None = None,
     correlation_id: uuid.UUID | None = None,
     lineage: Mapping[str, str] | None = None,
@@ -4150,6 +4468,7 @@ def run_delegate(
                         _render_receipt_for_person,
                         state_root=state_root,
                         json_output=json_output,
+                        result_only=result_only,
                     ),
                     # OMN-17295 / OMN-14872: the receipt layer cannot select by an
                     # identity it was never told. Handing it the id this CLI just
