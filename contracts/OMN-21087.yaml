@@ -45,6 +45,8 @@ dod_evidence:
     source: manual
     checks:
       - check_type: command
-        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_delegate.py?ref=f88b8960aebea9bdbccfc58657682ffdaf855c03' --jq .content | base64 -d | grep -qF 'is not one, so there is no lab tenant to resolve'
+        # Consume the complete decoded file so pipefail does not report SIGPIPE
+        # from base64 after an early successful match.
+        check_value: gh api 'repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/cli/cli_delegate.py?ref=f88b8960aebea9bdbccfc58657682ffdaf855c03' --jq .content | base64 -d | grep -F 'is not one, so there is no lab tenant to resolve' > /dev/null
     binds_ac:
       - AC1
