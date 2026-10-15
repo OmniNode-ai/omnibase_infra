@@ -24,7 +24,7 @@ import os
 import uuid
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -278,6 +278,64 @@ class TestKafkaEventBusE2E:
 
         # Cleanup
         await unsubscribe()
+
+    @pytest.mark.asyncio
+    async def test_immediate_publish_survives_delayed_initial_offset_reset(
+        self,
+        started_kafka_bus: EventBusKafka,
+        created_unique_topic: str,
+        unique_group: ModelNodeIdentity,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Subscribe resolves latest before a caller can publish its first record.
+
+        Delay only the real client's offset request. The broker, assignment,
+        offset reset, producer, poller and handler all run normally; no readiness
+        helper or caller sleep may conceal the startup race (OMN-19558).
+        """
+        from aiokafka.consumer.fetcher import Fetcher
+
+        original_request = Fetcher._proc_offset_request
+        reset_started = asyncio.Event()
+        reset_finished = asyncio.Event()
+
+        async def delayed_offset_request(
+            fetcher: Fetcher, node_id: int, topic_data: Any
+        ) -> Any:
+            reset_started.set()
+            await asyncio.sleep(0.5)
+            result = await original_request(fetcher, node_id, topic_data)
+            reset_finished.set()
+            return result
+
+        monkeypatch.setattr(Fetcher, "_proc_offset_request", delayed_offset_request)
+        received: list[ModelEventMessage] = []
+        delivered = asyncio.Event()
+
+        async def handler(message: ModelEventMessage) -> None:
+            received.append(message)
+            delivered.set()
+
+        unsubscribe = await started_kafka_bus.subscribe(
+            created_unique_topic,
+            unique_group,
+            handler,
+            auto_offset_reset="latest",
+        )
+        try:
+            # Deliberately publish immediately: a caller relies on subscribe's
+            # readiness boundary rather than waiting for a background reset.
+            await started_kafka_bus.publish(
+                created_unique_topic, b"readiness-key", b"first-record"
+            )
+            await asyncio.wait_for(delivered.wait(), timeout=5)
+            assert reset_started.is_set(), "the delayed reset was not exercised"
+            assert reset_finished.is_set()
+            assert [(message.key, message.value) for message in received] == [
+                (b"readiness-key", b"first-record")
+            ]
+        finally:
+            await unsubscribe()
 
     @pytest.mark.asyncio
     async def test_multiple_subscribers_receive_messages(

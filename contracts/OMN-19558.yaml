@@ -1,7 +1,7 @@
 schema_version: "1.0.0"
 ticket_id: OMN-19558
 title: A delegate-skill command whose terminal never arrives is not dead-lettered and replayed as a new command
-summary: The delegation dispatch port supplies the typed timeout cause when the Pattern B broker reports a timeout without one, so the consumer converts it into one typed timeout terminal instead of a provider_error. Supplied causes and other statuses are unchanged. AC1 and AC2 shipped in omnibase_infra#4289 and are not claimed here; this change carries the in-process part of AC3, and AC3's live held-model exercise is pending.
+summary: The delegation dispatch port supplies the typed timeout cause when the Pattern B broker reports a timeout without one, so the consumer converts it into one typed timeout terminal instead of a provider_error. Supplied causes and other statuses are unchanged. AC1 and AC2 shipped in omnibase_infra#4289 and are not claimed here; the in-process part of AC3 shipped in omnibase_infra#4789. This change records the live dev-lane readback of AC3 (one delegate-skill-failed record and one delegation-request record for a command that outran its budget); the endpoint was not held, and the record says so.
 is_seam_ticket: false
 interface_change: false
 interfaces_touched: []
@@ -29,6 +29,36 @@ dod_evidence:
         cwd: ${OMNI_HOME}/omnibase_infra
       - check_type: test_passes
         check_value: uv run pytest tests/unit/runtime/test_service_delegation_dispatch_port.py -q -k timeout_without_recorded_cause_is_typed
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-19558-ac3-live-readback
+    description: >-
+      Live readback for AC3, lab dev lane, 2026-10-14, lane rem-19558, counted with rpk topic consume over the delegation topics for one correlation. Command: onex delegate with a long essay prompt, --task-type reasoning, --timeout 1, --bus kafka --lane dev --locus deployed-lane; run b5a8b3c6-634a-4f98-813b-7ade374de0f9, correlation c2ad6729-d2b6-4d5d-b71f-d2e5de023453, CLI exit 1 with cause timeout. Record: delegate_skill_command_records=1 delegation_request_records=1 delegate_skill_failed_records=1 delegate_skill_completed_records=0 terminal_failure_cause=timeout; the three request-side counts stayed at 1 across three reads in the 3 minutes after the run, and none of the first 20 DLQ topics held the correlation. Control: a short prompt on the same lane (run 3ac66bec-024b-47cd-ac67-aa51c33f9d8a) completed with 1 command, 1 delegation-request, 0 delegate-skill-failed and 1 delegate-skill-completed record. Limits: the model endpoint was not held open, because a pre-PR slot was not brought up (lab Docker host load 43.31 over 32 cores against a floor of 1.0 per core); the failed terminal came from the consumer's handler-budget cancel (OMN-15504), not from the dispatch port supplying the cause, which stays covered by the in-process test above.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: |-
+          grep -q 'Record: delegate_skill_command_records=[1] delegation_request_records=[1] delegate_skill_failed_records=[1] delegate_skill_completed_records=[0] terminal_failure_cause=timeout' contracts/OMN-19558.yaml &&
+          uv run pytest tests/unit/infra/test_omn19558_consume_deadline_covers_delegate_skill_budget.py tests/integration/event_bus/test_omn19558_dlq_replay_identity_roundtrip.py tests/unit/event_bus/test_kafka_subscribe_fetch_position_ready.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-19558-kafka-subscription-readiness
+    description: Merge-queue repair for the AC3 carrier. Kafka subscription waits for the initial fetch positions so an immediate publication cannot be skipped by a late latest-offset reset. Focused regressions cover all assigned positions and timeout or cancellation cleanup. The registration E2E timeout reproduced with a half-second initial-offset delay on an isolated broker and passed with the product fix under the same delay.
+    source: manual
+    checks:
+      - check_type: test_passes
+        check_value: uv run pytest tests/unit/event_bus/test_kafka_subscribe_fetch_position_ready.py -q
+        cwd: ${OMNI_HOME}/omnibase_infra
+    binds_ac:
+      - AC3
+  - id: dod-omn-19558-deploy-subscription-readiness
+    description: Hosted-runner deploy source probe reads the product module at the pushed head and refuses a version missing the initial fetch-position wait. It does not claim a runtime rollout or the held-model AC3 exercise.
+    source: manual
+    checks:
+      - check_type: command
+        check_value: gh api "repos/OmniNode-ai/omnibase_infra/contents/src/omnibase_infra/event_bus/event_bus_kafka.py?ref=$(git rev-parse HEAD)" --jq .content | base64 -d | grep -F 'await consumer.position(partition)'
         cwd: ${OMNI_HOME}/omnibase_infra
     binds_ac:
       - AC3
