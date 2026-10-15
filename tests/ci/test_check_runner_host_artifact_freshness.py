@@ -61,6 +61,27 @@ def test_parse_sync_paths_extracts_literal_quoted_entries() -> None:
     ]
 
 
+def test_parse_sync_paths_ignores_quoted_text_in_comments() -> None:
+    """A quoted string inside a comment line is prose, not a sync path.
+
+    deploy-runners.sh carries a comment quoting the Docker COPY failure
+    (``"/omni-curl": not found``); reading it as a path made ``report`` mode
+    die on a path that does not exist at the ref (OMN-20597).
+    """
+    module = _load_freshness_module()
+    fixture = (
+        "SYNC_PATHS=(\n"
+        '    "pyproject.toml"\n'
+        '    # fails with "/omni-curl": not found at the COPY layer.\n'
+        '    "docker/runners/omni-curl"  # trailing "note" text\n'
+        ")\n"
+    )
+    assert module.parse_sync_paths(fixture) == [
+        "pyproject.toml",
+        "docker/runners/omni-curl",
+    ]
+
+
 def test_parse_sync_paths_raises_when_array_missing() -> None:
     module = _load_freshness_module()
     with pytest.raises(ValueError, match="SYNC_PATHS"):
@@ -177,3 +198,36 @@ def test_live_deploy_script_sync_paths_excludes_the_checker_itself() -> None:
     deploy_script = REPO_ROOT / "scripts" / "deploy-runners.sh"
     paths = module.parse_sync_paths(deploy_script.read_text(encoding="utf-8"))
     assert "scripts/ci/check_runner_host_artifact_freshness.py" not in paths
+
+
+def test_live_deploy_script_sync_paths_all_exist_in_tree() -> None:
+    """Every path parsed from the real deploy script is a file in the repo.
+
+    A comment quoting "/omni-curl" was once returned as a path, and report
+    mode died on it before comparing a single host artifact (OMN-20597).
+    """
+    module = _load_freshness_module()
+    deploy_script = REPO_ROOT / "scripts" / "deploy-runners.sh"
+    paths = module.parse_sync_paths(deploy_script.read_text(encoding="utf-8"))
+    missing = [path for path in paths if not (REPO_ROOT / path).is_file()]
+    assert missing == []
+
+
+@pytest.mark.live_contact(
+    "tests/ci/fixtures/ci_live_contact/deploy_runners_sync_paths_omn20597.json"
+)
+def test_recorded_deploy_script_sync_paths_block_yields_no_comment_entry(
+    recorded_response,
+) -> None:
+    """Replay the real SYNC_PATHS block whose comment quotes "/omni-curl".
+
+    The recording is the array exactly as the deploy script carried it when
+    ``report`` mode raised RefResolutionError on that comment text.
+    """
+    module = _load_freshness_module()
+    block = recorded_response["response"]["sync_paths_block"]
+    assert '"/omni-curl": not found' in block
+    paths = module.parse_sync_paths(block)
+    assert "/omni-curl" not in paths
+    assert "docker/runners/omni-curl" in paths
+    assert all(not path.startswith("/") for path in paths)
